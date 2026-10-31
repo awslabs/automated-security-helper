@@ -48,7 +48,9 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
+from multiprocessing.connection import Connection
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -550,6 +552,124 @@ def test_a_budget_keeps_one_balance_per_scan_timeout():
 
     assert budget.remaining(10.0) == pytest.approx(9.75)
     assert budget.remaining(3.0) == 3.0
+
+
+def test_a_search_killed_at_the_deadline_leaves_the_balance_at_zero_not_below():
+    """The kill set the balance to the whole timeout, and the same call then
+    added the killed search's seconds on top, so ``remaining`` read a negative
+    number after the first timeout. It is charged once now."""
+    budget = EvaluationBudget()
+    budget._worker = _FakeWorker(0.6)
+
+    assert budget.evaluate(1.0, "first", "k1", _five) == 5
+    with pytest.raises(ScannerError):
+        budget.evaluate(1.0, "second", "k2", _five)
+
+    assert budget.remaining(1.0) == 0.0
+
+
+@pytest.mark.skipif(
+    os.name != "posix", reason="the stand-in child duplicates a pipe descriptor"
+)
+def test_a_workers_start_up_is_not_charged_to_its_first_search(monkeypatch):
+    """The timer opened when the child was started, not when it was running,
+    so the first search of each worker paid for the child importing the package
+    (seconds under ``spawn`` on a loaded host), and a small ``scan_timeout``
+    failed the scan on a pattern that finishes at once. Here the child is a
+    thread that takes a moment to come up and moves the test clock five seconds
+    when it does, standing for its import; the child reports ready after that,
+    ``_started`` waits for the report, and the search is timed from there."""
+    clock = {"now": 100.0}
+    monkeypatch.setattr(
+        exclusions_module, "time", SimpleNamespace(monotonic=lambda: clock["now"])
+    )
+    real = multiprocessing.get_context()
+
+    class _ChildThread:
+        pid = 4242
+
+        def __init__(self, target, args, name, daemon):
+            self._target, self._args = target, args
+            self._thread = None
+
+        def start(self) -> None:
+            own = Connection(os.dup(self._args[0].fileno()))
+
+            def run() -> None:
+                time.sleep(0.2)
+                clock["now"] += 5.0
+                self._target(own)
+
+            self._thread = threading.Thread(target=run, daemon=True)
+            self._thread.start()
+
+        def is_alive(self) -> bool:
+            return self._thread is not None and self._thread.is_alive()
+
+        def join(self, timeout=None) -> None:
+            self._thread.join(timeout)
+
+        def kill(self) -> None:
+            pass
+
+    class _Context:
+        Pipe = staticmethod(real.Pipe)
+        Process = _ChildThread
+
+        @staticmethod
+        def get_start_method() -> str:
+            return "spawn"
+
+    monkeypatch.setattr(exclusions_module, "_process_context", lambda: _Context)
+    budget = EvaluationBudget()
+    try:
+        assert budget.evaluate(1.0, "first", "k1", _five) == 5
+        assert budget.timed_out == ()
+        assert budget.remaining(1.0) == pytest.approx(1.0)
+    finally:
+        budget.close()
+
+
+def test_a_worker_that_never_reports_ready_fails_its_start(monkeypatch):
+    """The wait for the child's ready report has a bound of its own, so a child
+    that never comes up fails the start with its own message instead of being
+    read as a search that ran out the scanner's timeout."""
+    monkeypatch.setattr(exclusions_module, "_WORKER_START_BOUND", 0.2)
+    real = multiprocessing.get_context()
+
+    class _SilentChild:
+        pid = None
+
+        def __init__(self, target, args, name, daemon):
+            self.alive = True
+
+        def start(self) -> None:
+            pass
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+        def join(self, timeout=None) -> None:
+            pass
+
+        def kill(self) -> None:
+            self.alive = False
+
+    class _Context:
+        Pipe = staticmethod(real.Pipe)
+        Process = _SilentChild
+
+        @staticmethod
+        def get_start_method() -> str:
+            return "spawn"
+
+    monkeypatch.setattr(exclusions_module, "_process_context", lambda: _Context)
+    worker = exclusions_module._EvaluationWorker()
+
+    with pytest.raises(ScannerError, match="did not start"):
+        worker.evaluate(1.0, 1.0, "s", _five, ())
+
+    assert worker.pid is None
 
 
 def test_a_budget_with_no_bound_runs_in_the_worker():

@@ -573,18 +573,20 @@ class EvaluationBudget:
                 f"earlier regular expressions of this pass before one from {source} "
                 "could be searched. The scan fails rather than run past it."
             )
+        ran_out = False
         try:
             return self._worker.evaluate(remaining, timeout, source, function, args)
         except EvaluationTimedOut:
             self._timed_out[key] = source
-            # Ran to the end of what was left: nothing is left whatever the
-            # clock read when the kill landed.
-            self._spent[timeout] = timeout
+            ran_out = True
             raise
         finally:
-            self._spent[timeout] = (
-                self._spent.get(timeout, 0.0) + self._worker.last_search_seconds
-            )
+            # Charged once, here. A search that ran to the end of what was left
+            # leaves nothing, whatever the clock read when the kill landed; the
+            # balance was set to the timeout in the handler and then charged the
+            # killed search's seconds again, which left it below zero.
+            spent = self._spent.get(timeout, 0.0) + self._worker.last_search_seconds
+            self._spent[timeout] = timeout if ran_out else min(spent, timeout)
 
 
 class _EvaluationWorker:
@@ -646,6 +648,12 @@ class _EvaluationWorker:
         began = time.monotonic()
         try:
             connection.send((function, args))
+            # The search is timed from here: ``_started`` has waited for a
+            # worker that is running (its package import is behind it), and the
+            # request is pickled and written. Neither is regular-expression
+            # time, and a first search charged them failed a small
+            # scan_timeout on a pattern that finishes at once.
+            began = time.monotonic()
             if not connection.poll(wait):
                 raise EvaluationTimedOut(
                     f"A regular expression from {source} did not finish matching "
@@ -714,13 +722,42 @@ class _EvaluationWorker:
         process.start()
         child_end.close()
         self._process, self._connection = process, parent_end
+        # The child reports once it is running: where it is a fresh interpreter
+        # (``spawn``) it first imports this package, which takes seconds on a
+        # loaded host, and the first search of the worker was charged those
+        # seconds. The wait for it has a bound of its own, and a child that
+        # never reports fails the start, not a search.
+        try:
+            ready = (
+                parent_end.poll(_WORKER_START_BOUND)
+                and parent_end.recv() == _WORKER_READY
+            )
+        except (EOFError, OSError):
+            ready = False
+        if not ready:
+            self.close(graceful=False)
+            raise ScannerError(
+                "The process that evaluates a delivered regular expression did not "
+                f"start within {_WORKER_START_BOUND:g} seconds, so the scan fails "
+                "rather than guess at a match it did not see."
+            )
         return parent_end
 
 
-def _serve_evaluations(connection: Any, inherited_parent_end: Any = None) -> None:
-    """In the worker: answer each ``(function, args)`` job until None or the pipe ends.
+#: What the worker sends first, once it is running and its package is imported.
+_WORKER_READY = "ash-pattern-evaluation-ready"
 
-    ``inherited_parent_end`` is the parent's end of this pipe as a forked child
+#: Seconds a started worker has to send ``_WORKER_READY``. Generous: a fresh
+#: interpreter importing this package on a busy host is the slow case.
+_WORKER_START_BOUND = 120.0
+
+
+def _serve_evaluations(connection: Any, inherited_parent_end: Any = None) -> None:
+    """In the worker: report ready, then answer each ``(function, args)`` job until None or the pipe ends.
+
+    The first thing sent is ``_WORKER_READY``, which ``_EvaluationWorker._started``
+    waits for, so the time a fresh interpreter takes to import this package is
+    not the first search's. ``inherited_parent_end`` is the parent's end of this pipe as a forked child
     inherited it; it is closed first, so the pipe's only open parent end is the
     parent's own and its closing (a ``close()``, or the parent's death) reaches
     this loop as end-of-file. A result or an error that cannot be pickled is
@@ -730,6 +767,10 @@ def _serve_evaluations(connection: Any, inherited_parent_end: Any = None) -> Non
     if inherited_parent_end is not None:
         inherited_parent_end.close()
     try:
+        try:
+            connection.send(_WORKER_READY)
+        except (OSError, ValueError):
+            return
         while True:
             try:
                 job = connection.recv()
