@@ -189,6 +189,21 @@ RESHAPING_ANY_TYPED_SERIALIZERS: frozenset[str] = frozenset()
 #: names), not because it says nothing.
 TYPED_SHAPE_KEEPING_SERIALIZERS = frozenset({"AshConfig._output_format_values"})
 
+#: The serializer pydantic itself attaches to every ``Path`` field. It has no
+#: return schema, so it looks untyped to the recorder below, but it is not the
+#: product's to classify: the generator falls back to the field's own schema for
+#: it, which is the string the dump writes. Its presence proves the recorder's
+#: package filter excludes something real.
+PYDANTIC_PATH_SERIALIZER = "GenerateSchema._path_schema.<locals>.ser_path"
+
+
+def _serializer_module(schema) -> str:
+    """The module that defines a function serializer's function, or ``""``."""
+    function = schema.get("function")
+    if isinstance(function, dict):
+        function = function.get("function")
+    return getattr(function, "__module__", "") or ""
+
 
 def test_every_any_typed_serializer_in_the_results_tree_is_classified():
     """The generator describes a field by its own schema only for the serializers
@@ -197,9 +212,11 @@ def test_every_any_typed_serializer_in_the_results_tree_is_classified():
     scanner's options, a base class whose qualname differs from the model's)
     must be listed there when it keeps the field's shape, or that part of the
     schema reads as "anything"; one that reshapes its field is listed in
-    RESHAPING_ANY_TYPED_SERIALIZERS instead. Every such serializer met during
-    the whole generation is classified on purpose, and every listed name was met,
-    so the lists cannot fall out of date."""
+    RESHAPING_ANY_TYPED_SERIALIZERS instead. Every such serializer the PRODUCT
+    defines and that is met during the whole generation is classified on
+    purpose, and every listed name was met, so the lists cannot fall out of
+    date. Serializers pydantic attaches on its own (the ``Path`` one) are
+    pydantic's, not the product's: they are counted apart and never classified."""
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.schemas.generate_schemas import (
         SHAPE_KEEPING_SERIALIZERS,
@@ -209,11 +226,17 @@ def test_every_any_typed_serializer_in_the_results_tree_is_classified():
 
     any_typed: set[str] = set()
     seen: set[str] = set()
+    pydantics_own: set[str] = set()
 
     class Recording(StoredResultsJsonSchema):
         def ser_schema(self, schema):
             if schema.get("type") in ("function-plain", "function-wrap"):
                 name = _serializer_name(schema)
+                if not _serializer_module(schema).startswith(
+                    "automated_security_helper"
+                ):
+                    pydantics_own.add(name)
+                    return super().ser_schema(schema)
                 seen.add(name)
                 return_schema = schema.get("return_schema")
                 if return_schema is None or return_schema.get("type") == "any":
@@ -224,6 +247,10 @@ def test_every_any_typed_serializer_in_the_results_tree_is_classified():
         schema_generator=Recording, mode="serialization"
     )
     assert any_typed, "no serializer was met: the recorder read nothing"
+    assert PYDANTIC_PATH_SERIALIZER in pydantics_own, (
+        "the package filter excluded nothing: the results tree has Path fields, "
+        "so pydantic's own Path serializer must have been met and set apart"
+    )
     unclassified = (
         any_typed - set(SHAPE_KEEPING_SERIALIZERS) - RESHAPING_ANY_TYPED_SERIALIZERS
     )
