@@ -1123,11 +1123,20 @@ def _config_pre_check(
         # path runs it in, and the start answered an internal error with a
         # traceback instead of the read refusal below, which is what the same
         # path gets when the file itself cannot be read.
-        settings = scan_repository_settings(
-            scanned_trees(source_dir),
-            every_file=client_named
-            and client_named_config_is_untrusted(path, session_id=session_id),
+        every_file = client_named and client_named_config_is_untrusted(
+            path, session_id=session_id
         )
+        try:
+            settings = scan_repository_settings(
+                scanned_trees(source_dir), every_file=every_file
+            )
+        except OSError:
+            # A failed walk of the SOURCE tree (a link loop, a directory the
+            # server cannot read above it) says nothing about the named file,
+            # and reporting it as that file's read failure would blame the
+            # config for the tree. The scan walks the same tree and reports
+            # its own failure.
+            return _ConfigPreCheck(None, None, ())
         resolved = resolve_config_document(
             path,
             confine_to=default_confinement_root(path, source_dir),
