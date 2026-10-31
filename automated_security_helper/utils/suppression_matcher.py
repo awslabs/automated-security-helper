@@ -65,6 +65,20 @@ _SLASH_NEXT_LINE_PATTERN = re.compile(
 _INLINE_PATTERNS = [_HASH_INLINE_PATTERN, _SLASH_INLINE_PATTERN]
 _NEXT_LINE_PATTERNS = [_HASH_NEXT_LINE_PATTERN, _SLASH_NEXT_LINE_PATTERN]
 
+# The part of each pattern up to the rule id: where a directive can begin. The
+# patterns end in ``(.*)?$``, so one match attempt reads to the end of the line,
+# and an attempt per marker inside a string cost the line's length each. A
+# marker is found with these, and the full pattern is tried only at a marker
+# that lies outside every string (``_search_comment``).
+_MARKER_OF = {
+    _HASH_INLINE_PATTERN: re.compile(r"#[ \t]*ash-ignore:", re.IGNORECASE),
+    _HASH_NEXT_LINE_PATTERN: re.compile(r"#[ \t]*ash-ignore-next-line:", re.IGNORECASE),
+    _SLASH_INLINE_PATTERN: re.compile(r"//[ \t]*ash-ignore:", re.IGNORECASE),
+    _SLASH_NEXT_LINE_PATTERN: re.compile(
+        r"//[ \t]*ash-ignore-next-line:", re.IGNORECASE
+    ),
+}
+
 # The characters that open and close a quoted string on one line: double, single
 # or backtick quotes, a backslash escaping the next character. A quote that never
 # closes on its line (an apostrophe in prose, say) is no string, so it hides
@@ -162,29 +176,34 @@ def _search_comment(pattern: "re.Pattern[str]", line: str) -> Optional["re.Match
     Every pattern starts with the comment marker (``#`` or ``//``), so a match
     inside a string literal is text that looks like a directive, not a comment:
     ``x = "# ash-ignore: B101"`` suppresses nothing. A marker inside a string
-    never ends the search: the next match, if there is one, is looked at in turn.
-    The spans are found once per line (``_quoted_spans``) and each candidate is
-    placed among them by bisection; a line of many markers inside many strings
-    still pays the pattern's own match once per candidate, and the span lookup
-    adds a logarithm to each.
+    never ends the search: the next one, if there is one, is looked at in turn.
+    The spans are found once per line (``_quoted_spans``) and each marker is
+    placed among them by bisection. Markers are found with the pattern's marker
+    alone (``_MARKER_OF``), which stops where the marker does, and the full
+    pattern, which reads to the end of the line, is tried only at a marker
+    outside every string: a line of many markers inside many strings costs the
+    line's length once, not once per marker.
     """
+    marker = _MARKER_OF.get(pattern, pattern)
     starts: Optional[List[int]] = None
     ends: List[int] = []
     position = 0
     while True:
-        match = pattern.search(line, position)
-        if match is None:
+        candidate = marker.search(line, position)
+        if candidate is None:
             return None
         if starts is None:
             spans = _quoted_spans(line)
             starts = [begin for begin, _ in spans]
             ends = [end for _, end in spans]
-        start = match.start()
+        start = candidate.start()
         # The spans are in order and do not overlap, so the only span that can
         # hold ``start`` is the last one that begins at or before it.
         within = bisect.bisect_right(starts, start) - 1
         if within < 0 or start >= ends[within]:
-            return match
+            match = pattern.match(line, start)
+            if match is not None:
+                return match
         position = start + 1
 
 
