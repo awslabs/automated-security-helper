@@ -59,7 +59,7 @@ from tests.unit.cli.merge_shard_support import (
 
 pytestmark = pytest.mark.unit
 
-# The ``capture`` fixture comes from this directory's conftest.
+# The ``capture`` fixture comes from tests/unit/conftest.py.
 
 
 def _result_named(model, rule_id: str):

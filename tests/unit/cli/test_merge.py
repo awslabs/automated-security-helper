@@ -99,8 +99,8 @@ pytestmark = pytest.mark.unit
 #: The logger the merge's disclosures are written to.
 ASH_LOGGER_NAME = "ash"
 
-# The ``capture`` fixture (ASH's logger routed into caplog) lives in this
-# directory's conftest, so every merge test module gets it by name.
+# The ``capture`` fixture (ASH's logger routed into caplog) lives in
+# tests/unit/conftest.py, so every module under tests/unit gets it by name.
 
 
 def build_unsharded(suppressions=None) -> AshAggregatedResults:

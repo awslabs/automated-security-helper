@@ -15,10 +15,6 @@ such shards would merge with that scanner's findings counted twice.
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
-
 import pytest
 
 from automated_security_helper.core.sharding import (
@@ -34,36 +30,9 @@ pytestmark = pytest.mark.unit
 SCANNERS = ["semgrep", "bandit", "grype", "checkov"]
 
 
-class _Records(logging.Handler):
-    """Keeps every record the logger emits, as the sinks receive it."""
-
-    def __init__(self) -> None:
-        super().__init__(level=logging.DEBUG)
-        self.records: list[logging.LogRecord] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.records.append(record)
-
-
-@contextmanager
-def _recording() -> Iterator[_Records]:
-    """ASH's logger at WARNING with a recording handler on it, for the block.
-
-    The logger's own level is set for the duration: a merge that ran earlier in
-    the process may have left it higher, and then nothing would reach the
-    handler and an empty list would read as "nothing logged".
-    """
-    from automated_security_helper.core import sharding
-
-    records = _Records()
-    saved_level = sharding.ASH_LOGGER.level
-    sharding.ASH_LOGGER.addHandler(records)
-    sharding.ASH_LOGGER.setLevel(logging.WARNING)
-    try:
-        yield records
-    finally:
-        sharding.ASH_LOGGER.removeHandler(records)
-        sharding.ASH_LOGGER.setLevel(saved_level)
+# The ``capture`` fixture (ASH's logger at WARNING routed into caplog, with the
+# logger's own level set) comes from tests/unit/conftest.py. Its records are the
+# LogRecords the sinks receive, which is what the tests below read.
 
 
 class TestAnUnknownProvenanceFieldIsDropped:
@@ -107,7 +76,7 @@ class TestAnUnknownProvenanceFieldIsDropped:
         assert "field_from_a_newer_ash" in text
         assert "shard 1" in text
 
-    def test_the_dropped_names_are_shown_once_at_the_sinks(self):
+    def test_the_dropped_names_are_shown_once_at_the_sinks(self, capture):
         """A dropped key's text comes from a results file any shard wrote. It was
         shown (ESC as the text ``\\x1b``) before the message was built, and the
         console and ash.log sinks then showed the plain message again, so the
@@ -121,19 +90,18 @@ class TestAnUnknownProvenanceFieldIsDropped:
         from automated_security_helper.utils.terminal_text import ShownText
 
         sharding._WARNED_PROVENANCE_KEYS.clear()
-        with _recording() as records:
-            ShardAssignment.model_validate(
-                {
-                    "shard_index": 1,
-                    "shard_count": 2,
-                    "assigned_scanners": ["bandit"],
-                    "k\x1b[31m": True,
-                    "##group[x": True,
-                    "C:\\x64": True,
-                }
-            )
+        ShardAssignment.model_validate(
+            {
+                "shard_index": 1,
+                "shard_count": 2,
+                "assigned_scanners": ["bandit"],
+                "k\x1b[31m": True,
+                "##group[x": True,
+                "C:\\x64": True,
+            }
+        )
 
-        [record] = [r for r in records.records if "does not know" in r.getMessage()]
+        [record] = [r for r in capture.records if "does not know" in r.getMessage()]
         assert isinstance(record.msg, ShownText), type(record.msg)
         assert getattr(record, "markup", True) is False
         for printed in (
@@ -149,7 +117,7 @@ class TestAnUnknownProvenanceFieldIsDropped:
             assert "\\\\\\\\" not in printed, printed
             assert "\x1b" not in printed and "\n" not in printed, repr(printed)
 
-    def test_a_shard_index_that_is_not_an_int_is_shown_once_too(self):
+    def test_a_shard_index_that_is_not_an_int_is_shown_once_too(self, capture):
         """The index is read from the same file as the keys and goes into the
         message the same way; a text index carrying ESC is shown once."""
         from pydantic import ValidationError
@@ -158,7 +126,7 @@ class TestAnUnknownProvenanceFieldIsDropped:
         from automated_security_helper.utils.log import console_text
 
         sharding._WARNED_PROVENANCE_KEYS.clear()
-        with _recording() as records, pytest.raises(ValidationError):
+        with pytest.raises(ValidationError):
             ShardAssignment.model_validate(
                 {
                     "shard_index": "one\x1b[0m",
@@ -168,7 +136,7 @@ class TestAnUnknownProvenanceFieldIsDropped:
                 }
             )
 
-        [record] = [r for r in records.records if "does not know" in r.getMessage()]
+        [record] = [r for r in capture.records if "does not know" in r.getMessage()]
         printed = console_text(record, record.getMessage())
         assert "shard one\\x1b[0m" in printed, printed
         assert "\\\\x1b" not in printed and "\x1b" not in printed, repr(printed)
@@ -205,7 +173,9 @@ class TestAnUnknownProvenanceFieldIsDropped:
         assert "x" * 200 not in text, text
         assert len(text) < 1500, len(text)
 
-    def test_a_shard_index_that_is_a_list_does_not_make_the_line_its_size(self):
+    def test_a_shard_index_that_is_a_list_does_not_make_the_line_its_size(
+        self, capture
+    ):
         """The index is read from the same file and is put in the line; a list of
         100,000 numbers made a line of 500,000 characters. A value that is neither
         text nor a number is not quoted: the line says "a shard"."""
@@ -214,7 +184,7 @@ class TestAnUnknownProvenanceFieldIsDropped:
         from automated_security_helper.core import sharding
 
         sharding._WARNED_PROVENANCE_KEYS.clear()
-        with _recording() as records, pytest.raises(ValidationError):
+        with pytest.raises(ValidationError):
             ShardAssignment.model_validate(
                 {
                     "shard_index": list(range(100_000)),
@@ -224,7 +194,7 @@ class TestAnUnknownProvenanceFieldIsDropped:
                 }
             )
 
-        [record] = [r for r in records.records if "does not know" in r.getMessage()]
+        [record] = [r for r in capture.records if "does not know" in r.getMessage()]
         text = record.getMessage()
         assert "The provenance of a shard carries 1 field(s)" in text, text
         assert len(text) < 500, len(text)
