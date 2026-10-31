@@ -350,30 +350,17 @@ def _has_a_drive(path: str) -> bool:
     return len(path) >= 2 and path[1] == ":" and path[0].isalpha()
 
 
-def _names_no_root(relative: str) -> bool:
-    """Whether a finding's ``relative`` path names no file of the scanned tree.
+def _placed_in_tree(relative: str) -> Optional[str]:
+    """The path ``relative`` names from the scan root, collapsed; None when it names no file of the tree.
 
     The SARIF step leaves a path it could not make relative to the source
     directory as it was, absolute or climbing out of the tree, and such a
     finding names no file the scanner read its exclusion over, so no path
     pattern hides it. One reading for every entry kind: a leading ``/`` (how
     the SARIF step spells a POSIX root), a drive letter (``C:/``), or a first
-    component of ``..``. ``Path.is_absolute`` was the reading for the glob,
-    checkov and trivy kinds: it is true for a leading ``/`` on POSIX alone and
-    for a drive on Windows alone, and false for ``..`` everywhere, so each
-    platform matched the other's spelling, and a ``../`` path, as a run of
-    directories above the scan root.
-
-    The path is collapsed first (``posixpath.normpath``), so one that climbs out
-    partway, ``x/../../vendor/a.py``, reads as the ``../vendor/a.py`` it is; only
-    a leading ``..`` was looked for before, and an unanchored entry hid such a
-    finding as a file inside the tree.
-    """
-    return _placed_in_tree(relative) is None
-
-
-def _placed_in_tree(relative: str) -> Optional[str]:
-    """The path ``relative`` names from the scan root, collapsed; None when it names no file of the tree.
+    component of ``..`` after the collapse below. ``Path.is_absolute`` was the
+    reading before: it is true for a leading ``/`` on POSIX alone and for a
+    drive on Windows alone, and false for ``..`` everywhere.
 
     Every leading ``./`` is taken off before the root and drive checks, so
     ``.//etc/x`` and ``./C:/x`` read as the absolute paths they are, not as

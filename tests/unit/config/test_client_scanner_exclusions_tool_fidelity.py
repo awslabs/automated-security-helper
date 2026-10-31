@@ -349,7 +349,7 @@ def test_every_spelling_of_a_path_outside_the_tree_hides_nothing(
     alone, and a leading ``..`` nowhere, so the glob, checkov and trivy kinds
     read the other platform's spelling, and a path climbing out of the tree, as
     directories above the scan root and matched an unanchored entry against
-    them. One reading (``_names_no_root``) now serves every kind, bandit's
+    them. One reading (``_placed_in_tree``) now serves every kind, bandit's
     included, whatever the host. A path that climbs out partway
     (``x/../../vendor/a.py``) is the same path as ``../vendor/a.py``.
 
