@@ -39,6 +39,7 @@
 import json
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -382,6 +383,53 @@ class TestNonFindingKinds:
         )
 
         assert payload == []
+
+    def test_the_rates_are_over_the_findings_and_each_result_line_over_all(
+        self, reporter, monkeypatch
+    ):
+        """A result that states no problem is not a success or a failure of the
+        conversion. The total stays the number of results through the loop, so
+        each per-result line counts up to it, and the rates are taken over the
+        findings once the loop is done: here three results, one of which is no
+        finding, and of the two findings one cannot be built."""
+        original = OcsfReporter._create_vulnerability_finding
+
+        def flaky(self, result, *args, **kwargs):
+            if result.ruleId == "BROKEN":
+                raise RuntimeError("cannot build")
+            return original(self, result, *args, **kwargs)
+
+        monkeypatch.setattr(OcsfReporter, "_create_vulnerability_finding", flaky)
+        logger = MagicMock()
+        monkeypatch.setattr(ocsf_module, "ASH_LOGGER", logger)
+
+        reporter.report(
+            _model(
+                Result(
+                    ruleId="CDK-1",
+                    kind=Kind.pass_,
+                    level=Level.none,
+                    message=Message(text="x"),
+                ),
+                Result(ruleId="BROKEN", level=Level.error, message=Message(text="y")),
+                Result(ruleId="FINE", level=Level.error, message=Message(text="z")),
+            )
+        )
+
+        debug = [call.args[0] for call in logger.debug.call_args_list]
+        per_result = [line for line in debug if line.startswith("Processing SARIF")]
+        assert per_result == [
+            "Processing SARIF result 1/3: CDK-1",
+            "Processing SARIF result 2/3: BROKEN",
+            "Processing SARIF result 3/3: FINE",
+        ]
+        info = [call.args[0] for call in logger.info.call_args_list]
+        assert (
+            "OCSF report processing complete: 1/2 findings created whole, "
+            "0 degraded, 1 failed (50.0% success rate)"
+        ) in info
+        warned = [call.args[0] for call in logger.warning.call_args_list]
+        assert any("(50.0% failure rate)" in line for line in warned)
 
 
 class TestOneBadLocation:
