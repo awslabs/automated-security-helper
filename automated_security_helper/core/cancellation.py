@@ -122,7 +122,8 @@ import os
 import signal
 import threading
 import time
-from typing import Iterator, Optional, Tuple
+from types import FrameType
+from typing import Iterator, Optional, Tuple, cast
 
 
 class ScanCancelled(BaseException):
@@ -213,9 +214,11 @@ class _ChainedPrompt(threading.Event):
             if not isinstance(prompt, _ChainedPrompt):
                 # Not a CancelEvent: its own answer ends the climb.
                 return bool(getattr(parent, "stop_promptly", False))
-            if threading.Event.is_set(prompt) or parent._signalled:
+            # A parent whose prompt is a chained prompt is a CancelEvent.
+            chained = cast("CancelEvent", parent)
+            if threading.Event.is_set(prompt) or chained._signalled:
                 return True
-            parent = parent._parent
+            parent = chained._parent
         return False
 
     def wait(self, timeout: Optional[float] = None) -> bool:
@@ -806,7 +809,7 @@ def _handle_sigterm(signum: int, frame: object) -> None:
         previous(signum, frame)
 
 
-def _handle_sigint(signum: int, frame: object) -> None:
+def _handle_sigint(signum: int, frame: FrameType | None) -> None:
     """Latch the registered scans on the first Ctrl-C; die now on the second.
 
     The same no-lock rules as :func:`_handle_sigterm`: the latch is one plain

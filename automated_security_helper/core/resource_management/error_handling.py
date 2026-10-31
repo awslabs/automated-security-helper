@@ -18,7 +18,7 @@ import sys
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any, Tuple, Union, cast
 
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
@@ -944,7 +944,7 @@ def create_error_response(
     }
 
 
-def _strings_shown(value: Any, _on_path: Optional[set] = None) -> Any:
+def _strings_shown(value: Any, _on_path: Optional[set[int]] = None) -> Any:
     """*value* with each string in it, in nested dicts, lists, tuples, sets and
     frozensets too, written for a client that may display it: on one line, each
     control as its escape (utils/terminal_text.py's raw_controls_on_one_line).
@@ -988,7 +988,7 @@ def _strings_shown(value: Any, _on_path: Optional[set] = None) -> Any:
             except TypeError:
                 return items
         if hasattr(type(value), "_make"):
-            return type(value)._make(items)
+            return cast(Any, type(value))._make(items)
         try:
             return type(value)(items)
         except TypeError:

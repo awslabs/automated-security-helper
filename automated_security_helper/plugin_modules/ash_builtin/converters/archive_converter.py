@@ -947,7 +947,7 @@ def _is_tar_header(block: bytes, *, empty_is_tar: bool) -> bool:
         block_of = getattr(info, "_block", None)
         if block_of is not None and _tarfile_sizes(info):
             block_of(info.size)
-    except tarfile.EOFHeaderError:
+    except tarfile.EOFHeaderError:  # type: ignore[attr-defined]  # missing from the typeshed stub
         return empty_is_tar
     except tarfile.HeaderError:
         return False

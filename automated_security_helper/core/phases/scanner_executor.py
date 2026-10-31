@@ -8,7 +8,18 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    cast,
+)
 
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.scanner_plugin import (
@@ -852,6 +863,25 @@ class ResultsProcessingFailed(Exception):
         super().__init__(
             f"could not process its results on {target_type}: {error_text(error)}"
         )
+
+
+def _listed_errors(raw_results: Dict[str, Any]) -> List[Any]:
+    """The ``errors`` a plugin's result dict lists, or none when it holds no list."""
+    errors = raw_results.get("errors")
+    return errors if isinstance(errors, list) else []
+
+
+def _refiled_row(error: BaseException) -> Optional[ScanResultsContainer]:
+    """The target's own row a results-processing failure carries, else None.
+
+    By type, so a plugin's own exception that happens to have a ``container``
+    attribute is not read as one.
+    """
+    if isinstance(error, ResultsProcessingFailed) and isinstance(
+        error.container, ScanResultsContainer
+    ):
+        return error.container
+    return None
 
 
 class ScannerExecutor:
@@ -2033,11 +2063,7 @@ class ScannerExecutor:
                                     )
                                 elif not container.errors and not any(
                                     isinstance(error, str) and error
-                                    for error in (
-                                        raw_results.get("errors")
-                                        if isinstance(raw_results.get("errors"), list)
-                                        else []
-                                    )
+                                    for error in _listed_errors(raw_results)
                                 ):
                                     # A failed dict with no error anywhere: the row
                                     # was ERROR with nothing to say why.
@@ -2315,7 +2341,10 @@ class ScannerExecutor:
                         # the reader's own environment could grade a report
                         # differently from the scan, silently.
                         if threshold in _GRADED_LEVELS:
-                            container.scanner_severity_threshold = str(threshold)
+                            container.scanner_severity_threshold = cast(
+                                Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
+                                str(threshold),
+                            )
                         container.status = container.determine_status(threshold)
                         # A clean result from a database the policy rejects is not a
                         # clean result: under content_db_staleness: fail the scan fails
@@ -2802,10 +2831,9 @@ class ScannerExecutor:
                 ASH_LOGGER.error(
                     f"Scanner failed: {scanner_name} - {described}", extra=NO_MARKUP
                 )
-                refiled = isinstance(e, ResultsProcessingFailed) and isinstance(
-                    e.container, ScanResultsContainer
-                )
-                if refiled:
+                refiled_row = _refiled_row(e)
+                refiled = refiled_row is not None
+                if refiled_row is not None:
                     # A results-processing failure carries the target's own row:
                     # it is filed again with the failure added, so the report
                     # keeps what the scan recorded (its errors, its counts, its
@@ -2817,7 +2845,7 @@ class ScannerExecutor:
                     # one per target, but a substituted runner (a test's fake, a
                     # plugin stand-in) can hand the processor anything, and that
                     # item is filed below as a fresh failure row instead.
-                    failure_container = e.container
+                    failure_container = refiled_row
                     failure_container.add_error(
                         f"Scanner {scanner_name} failed: {described}"
                     )
@@ -3165,15 +3193,14 @@ class ScannerExecutor:
                         f"Scanner execution failed in thread pool: {scanner_name} - {described}",
                         extra=NO_MARKUP,
                     )
-                    refiled = isinstance(e, ResultsProcessingFailed) and isinstance(
-                        e.container, ScanResultsContainer
-                    )
-                    if refiled:
+                    refiled_row = _refiled_row(e)
+                    refiled = refiled_row is not None
+                    if refiled_row is not None:
                         # See run_sequential: a results-processing failure
                         # carries the target's own row, filed again with the
                         # failure added; matched by type, not by attribute, and
                         # only a row is refiled (anything else gets a fresh one).
-                        failure_container = e.container
+                        failure_container = refiled_row
                         failure_container.add_error(
                             f"Scanner {scanner_name} failed in thread pool: {described}"
                         )

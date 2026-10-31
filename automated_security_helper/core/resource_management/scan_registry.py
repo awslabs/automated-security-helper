@@ -593,7 +593,7 @@ def _windows_process_is_running(pid: int) -> bool:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
         handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
         if not handle:
-            return ctypes.get_last_error() == error_access_denied
+            return ctypes.get_last_error() == error_access_denied  # type: ignore[attr-defined]
         try:
             code = ctypes.c_ulong()
             if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):

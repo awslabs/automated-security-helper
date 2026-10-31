@@ -298,6 +298,8 @@ def refuse_unknown_plugin_options(
     checked = set()
     for plugin_type, segment_name in _SEGMENTS.items():
         segment = getattr(config, segment_name, None)
+        if segment is None:
+            continue
         sections = dict(getattr(segment, "model_extra", None) or {})
         if not sections:
             continue

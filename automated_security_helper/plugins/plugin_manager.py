@@ -1140,9 +1140,13 @@ class AshPluginManager(BaseModel):
         resolved_from = self._resolution_key(registered)
         cached = self._resolved_plugins.get(cache_key)
         now = _monotonic()
-        retry_failed = bool(cached is not None and cached.failed) and (
-            any(path in sys.modules for path in cached.failed)
-            or now - cached.failed_at >= FAILED_IMPORT_RETRY_SECONDS
+        retry_failed = (
+            cached is not None
+            and bool(cached.failed)
+            and (
+                any(path in sys.modules for path in cached.failed)
+                or now - cached.failed_at >= FAILED_IMPORT_RETRY_SECONDS
+            )
         )
         if (
             cached is not None

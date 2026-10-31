@@ -16,7 +16,7 @@ import stat
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, Set
+from typing import Dict, List, Optional, Any, Tuple, Set, cast
 
 from automated_security_helper.core.resource_management.error_handling import (
     _NotARegularFile,
@@ -1586,7 +1586,7 @@ def create_scan_progress_from_files(
             return scan_progress
 
         try:
-            results = parse_aggregated_results(output_dir)
+            results = cast(Dict[str, Any], parse_aggregated_results(output_dir))
         except MCPResourceError as e:
             # safe_read_json_file's message already names the file and the parse
             # error, e.g. "Invalid JSON format in file <path>: Expecting value: ...".

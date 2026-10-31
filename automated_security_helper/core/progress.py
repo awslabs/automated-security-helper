@@ -1,7 +1,7 @@
 import logging
 import sys
 import time
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.utils.console import ash_console
@@ -35,7 +35,17 @@ from rich.progress import (
 ExecutionPhaseType = Literal["convert", "scan", "report", "inspect"]
 
 
-class _ConsoleSink(ShownHandlerErrors, logging.StreamHandler):
+if TYPE_CHECKING:
+    # The stub declares StreamHandler generic on every Python version, but the
+    # class only accepts a subscript at run time from 3.11 on. A subscripted base
+    # in the class statement below would raise TypeError at import on 3.10, so
+    # the checker sees the generic and the interpreter sees the plain class.
+    _StreamHandlerBase = logging.StreamHandler[Any]
+else:
+    _StreamHandlerBase = logging.StreamHandler
+
+
+class _ConsoleSink(ShownHandlerErrors, _StreamHandlerBase):
     """The standard-error sink the display falls back to without a panel.
 
     A record it cannot write is reported shown (:class:`ShownHandlerErrors`),
@@ -306,7 +316,8 @@ class LiveProgressDisplay:
             ASH_LOGGER.removeHandler(handler)
 
         if shown:
-            self.live.__exit__(None, None, None)
+            if self.live is not None:
+                self.live.__exit__(None, None, None)
             self.live = None
             # Kept, so a display that starts again takes it off (start()), and
             # the end of a second shown display replaces it where it used to add
