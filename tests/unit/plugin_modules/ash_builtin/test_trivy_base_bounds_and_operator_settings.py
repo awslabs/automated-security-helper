@@ -842,6 +842,7 @@ def test_control_offline_with_a_default_cache_present_nothing_is_said(
     present = tmp_path / "cache" / "trivy"
     (present / "db").mkdir(parents=True)
     (present / "db" / "trivy.db").write_bytes(b"")
+    (present / "db" / "metadata.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(TrivyRepoScanner, "_trivy_cache_dir", lambda self: present)
     messages, logging_patch = _logged(scanner)
 
@@ -849,6 +850,29 @@ def test_control_offline_with_a_default_cache_present_nothing_is_said(
         scanner._check_offline_cache()
 
     assert messages == []
+
+
+def test_offline_a_default_cache_with_the_database_but_no_metadata_is_warned_about(
+    tmp_path, monkeypatch
+):
+    """trivy reads ``db/metadata.json`` beside ``db/trivy.db`` and refuses
+    ``--skip-db-update`` when either is missing (``NeedsUpdate``, trivy's db
+    package at v0.69.3), so a cache holding only the database file is no cache an
+    offline scan can read. The control above holds both files."""
+    scanner = _repo_scanner(tmp_path, offline=True)
+    partial = tmp_path / "cache" / "trivy"
+    (partial / "db").mkdir(parents=True)
+    (partial / "db" / "trivy.db").write_bytes(b"")
+    monkeypatch.setattr(TrivyRepoScanner, "_trivy_cache_dir", lambda self: partial)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        scanner._check_offline_cache()
+
+    (warning,) = messages
+    assert partial.as_posix() in warning
+    assert "db/metadata.json" in warning
+    assert "db/trivy.db" not in warning
 
 
 def test_offline_a_default_cache_without_a_database_is_warned_about(

@@ -1749,10 +1749,11 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         XDG or platform directory) holds a current database. The validator runs
         only when the variable is set, where it reads the right directory; otherwise
         the resolved default cache is checked here, with the directory named, for
-        its existence and for the database file trivy reads from it
-        (``db/trivy.db``): a cache directory that exists but holds no database (a
-        fresh XDG directory, a cache another tool made) gave trivy nothing to read
-        and was passed in silence. The authoritative checks stay the dependency
+        its existence and for the two files trivy needs from it
+        (``db/trivy.db`` and ``db/metadata.json``; trivy refuses an offline scan
+        when either is missing): a cache directory that exists but holds no
+        database (a fresh XDG directory, a cache another tool made) gave trivy
+        nothing to read and was passed in silence. The authoritative checks stay the dependency
         probe (``validate_plugin_dependencies``) and the post-scan staleness check.
 
         Nothing is said for a scan whose scanners never open the vulnerability
@@ -1780,12 +1781,20 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 "holds one.",
                 level=logging.WARNING,
             )
-        elif not (cache / "db" / "trivy.db").is_file():
+        elif missing := [
+            name
+            for name in ("trivy.db", "metadata.json")
+            if not (cache / "db" / name).is_file()
+        ]:
+            # Both files: trivy refuses --skip-db-update when either is missing
+            # ("We can't use the DB if either `trivy.db` or `metadata.json` is
+            # missing", NeedsUpdate in trivy's db package at v0.69.3).
             self._plugin_log(
                 f"Trivy offline mode: the cache directory {cache.as_posix()} holds "
-                "no vulnerability database (db/trivy.db), so trivy has none to read. "
-                "Download one with network access, or set TRIVY_CACHE_DIR to a cache "
-                "that holds one.",
+                "no usable vulnerability database (missing "
+                f"{', '.join('db/' + name for name in missing)}), so trivy has none "
+                "to read. Download one with network access, or set TRIVY_CACHE_DIR "
+                "to a cache that holds one.",
                 level=logging.WARNING,
             )
 
