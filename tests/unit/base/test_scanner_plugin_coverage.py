@@ -13,87 +13,36 @@ that does not exist, which is the defect this repo has already shipped once.
 import json
 import logging
 from pathlib import Path
-from typing import ClassVar, Literal, Optional
+from typing import ClassVar, Optional
 from unittest.mock import create_autospec, patch
 
 import pytest
 
-from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
     _STDERR_EXCERPT_LIMIT,
     ScannerPluginBase,
-    ScannerPluginConfigBase,
 )
-from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
+from tests.unit.base.scanner_support import (
+    MINIMAL_SARIF,
+    StubConfig,
+    build_scanner,
+    execute_writing,
+    populated_target,
+)
 
 pytestmark = pytest.mark.unit
 
 
-class StubConfig(ScannerPluginConfigBase):
-    name: Literal["stub"] = "stub"
-
-
-@pytest.fixture
-def plugin_context(tmp_path):
-    source_dir = tmp_path / "source"
-    source_dir.mkdir()
-    output_dir = tmp_path / "output"
-    output_dir.mkdir()
-    work_dir = output_dir / ASH_WORK_DIR_NAME
-    work_dir.mkdir()
-    return PluginContext(
-        source_dir=source_dir,
-        output_dir=output_dir,
-        work_dir=work_dir,
-        config=AshConfig(project_name="test"),
-    )
-
-
-def _scanner(plugin_context, execute_scan=None, deps_ok=True, **fields):
-    """Build a concrete ScannerPluginBase subclass over the real init path."""
-
-    class StubScanner(ScannerPluginBase):
-        offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
-
-        def model_post_init(self, context):
-            self.command = "stub-tool"
-            self.tool_type = ScannerToolType.SAST
-            super().model_post_init(context)
-
-        def validate_plugin_dependencies(self) -> bool:
-            return deps_ok
-
-        def _execute_scan(self, target, target_type, global_ignore_paths):
-            if execute_scan is None:
-                raise NotImplementedError
-            return execute_scan(self, target, target_type, global_ignore_paths)
-
-    return StubScanner(config=StubConfig(), context=plugin_context, **fields)
-
-
-def _populated_target(tmp_path, name="target") -> Path:
-    target = tmp_path / name
-    target.mkdir()
-    (target / "app.py").write_text("x = 1\n")
-    return target
-
-
-MINIMAL_SARIF = {
-    "version": "2.1.0",
-    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-    "runs": [
-        {
-            "tool": {"driver": {"name": "stub-tool", "version": "1.0.0"}},
-            "results": [],
-        }
-    ],
-}
+# The helpers moved to scanner_support; the old names stay here for the test
+# modules that still import them from this one.
+_scanner = build_scanner
+_populated_target = populated_target
+_execute_writing = execute_writing
 
 
 # ---------------------------------------------------------------------------
@@ -364,19 +313,6 @@ def test_an_uncoercible_scan_timeout_means_unbounded(plugin_context, raw):
 # ---------------------------------------------------------------------------
 # scan(): timeout, empty results, unparsable SARIF
 # ---------------------------------------------------------------------------
-
-
-def _execute_writing(content=None):
-    """Return an _execute_scan impl that writes ``content`` to the results file."""
-
-    def _impl(scanner, target, target_type, global_ignore_paths):
-        results = scanner.results_dir / "results.json"
-        results.parent.mkdir(parents=True, exist_ok=True)
-        if content is not None:
-            results.write_text(content)
-        return ["stub-tool", "--scan"], results, None
-
-    return _impl
 
 
 def test_a_timed_out_tool_is_reported_as_a_timeout_not_a_missing_file(

@@ -17,30 +17,11 @@ from __future__ import annotations
 
 import pytest
 
-from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
-from tests.unit.base.test_scanner_plugin_coverage import _scanner
+from tests.unit.base.scanner_support import build_scanner as _scanner
 
 pytestmark = pytest.mark.unit
 
 PLANTED = "hunter2-planted-password"
-
-
-@pytest.fixture
-def plugin_context(tmp_path):
-    source_dir = tmp_path / "source"
-    source_dir.mkdir()
-    output_dir = tmp_path / "output"
-    output_dir.mkdir()
-    work_dir = output_dir / ASH_WORK_DIR_NAME
-    work_dir.mkdir()
-    return PluginContext(
-        source_dir=source_dir,
-        output_dir=output_dir,
-        work_dir=work_dir,
-        config=AshConfig(project_name="test"),
-    )
 
 
 def test_an_override_shapes_both_recorded_streams(plugin_context, monkeypatch):

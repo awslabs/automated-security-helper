@@ -21,33 +21,14 @@ from unittest.mock import patch
 
 import pytest
 
-from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.utils.subprocess_utils import SPAWN_FAILURE_RETURNCODE
-from tests.unit.base.test_scanner_plugin_coverage import _scanner
+from tests.unit.base.scanner_support import build_scanner as _scanner
 
 pytestmark = pytest.mark.unit
 
 _RUNNER = (
     "automated_security_helper.utils.subprocess_utils.run_command_with_output_handling"
 )
-
-
-@pytest.fixture
-def plugin_context(tmp_path):
-    source_dir = tmp_path / "source"
-    source_dir.mkdir()
-    output_dir = tmp_path / "output"
-    output_dir.mkdir()
-    work_dir = output_dir / ASH_WORK_DIR_NAME
-    work_dir.mkdir()
-    return PluginContext(
-        source_dir=source_dir,
-        output_dir=output_dir,
-        work_dir=work_dir,
-        config=AshConfig(project_name="test"),
-    )
 
 
 def test_an_unusable_hook_answer_refuses_the_run(plugin_context, tmp_path, monkeypatch):
