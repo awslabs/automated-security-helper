@@ -1042,23 +1042,35 @@ def _session_config_refusal(error: Exception, operation: str) -> Dict[str, Any]:
     either: the file is gone and not written again under that removal, so it is
     answered as the other tools answer the hold, under the error's own
     ``error_type`` and with exit 1, for the client to send the request again.
+    The hold reaches here as the chained cause of a
+    ``BoundProfileUnavailableError``: the bound profile's rewrite wraps every
+    ``RuntimeError`` of the writer in one that reads as an unwritable workspace,
+    so the cause is looked at first.
     """
-    if getattr(error, "workspace_unwritable", False):
-        from automated_security_helper.cli.mcp_tools import _bound_profile_unavailable
-
-        return _bound_profile_unavailable(error, operation)
     from automated_security_helper.cli.mcp.sessions import SessionWorkspaceBusyError
 
-    if isinstance(error, SessionWorkspaceBusyError):
+    hold = next(
+        (
+            candidate
+            for candidate in (error, getattr(error, "__cause__", None))
+            if isinstance(candidate, SessionWorkspaceBusyError)
+        ),
+        None,
+    )
+    if hold is not None:
         from automated_security_helper.cli.mcp_tools import (
             REFUSED_INTERNAL_EXIT_CODE,
         )
 
         response = _error_response(
-            error, operation, exit_code=REFUSED_INTERNAL_EXIT_CODE
+            hold, operation, exit_code=REFUSED_INTERNAL_EXIT_CODE
         )
-        response["error_type"] = error.error_type
+        response["error_type"] = hold.error_type
         return response
+    if getattr(error, "workspace_unwritable", False):
+        from automated_security_helper.cli.mcp_tools import _bound_profile_unavailable
+
+        return _bound_profile_unavailable(error, operation)
     return _error_response(
         error,
         operation,
