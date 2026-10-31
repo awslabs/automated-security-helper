@@ -250,13 +250,21 @@ def _finding_severity_level(severity: Any) -> str:
     own vocabulary is a claim the gate cannot rank, kept at the lowest level
     rather than promoted above a finding that said nothing.
 
-    A number is a CVSS score and is read by its qualitative band: 9.0 and above
+    A float is a CVSS score and is read by its qualitative band: 9.0 and above
     is critical, 7.0 high, 4.0 medium, anything above zero low, and zero info.
     Read as stating nothing, a score of 9.8 counted MEDIUM and passed a HIGH or
     CRITICAL threshold. A number outside 0 to 10, or not a number, states
     nothing. A score written as text (``"9.8"``, which a tool that prints its
     findings as strings writes) is the number it spells and reads the same way;
     text that is not a finite number is a name, as before.
+
+    A whole number is not read that way (``_whole_number_level``): an integer is
+    as likely a plugin's own rank (1 low, 2 medium, 3 high) as a rounded score,
+    and read by the bands a rank of 3 counted LOW and passed a MEDIUM gate,
+    where every number counted MEDIUM before. A whole number is never read below
+    MEDIUM; one that is a high or critical band still counts there. The type
+    tells the two apart, an ``int`` and a text of digits alone against a ``float``
+    and a text with a decimal point.
     """
     if isinstance(severity, str):
         word = severity.strip()
@@ -264,9 +272,15 @@ def _finding_severity_level(severity: Any) -> str:
             return "medium"
         score = _score_in_text(word)
         if score is not None:
+            if word.lstrip("+-").isdigit():
+                return _whole_number_level(score)
             return _score_level(score)
         return _severity_level(word) or "info"
-    if isinstance(severity, (int, float)) and not isinstance(severity, bool):
+    if isinstance(severity, bool):
+        return "medium"
+    if isinstance(severity, int):
+        return _whole_number_level(severity)
+    if isinstance(severity, float):
         return _score_level(severity)
     return "medium"
 
@@ -278,6 +292,16 @@ def _score_in_text(word: str) -> float | None:
     except ValueError:
         return None
     return score if math.isfinite(score) else None
+
+
+def _whole_number_level(number: float) -> str:
+    """The ScannerSeverityCount field a whole-number severity counts under.
+
+    Its CVSS band, but never below MEDIUM: a whole number may be a plugin's own
+    rank, and a rank of 3 on a three-step scale is not a low finding.
+    """
+    level = _score_level(number)
+    return "medium" if level in ("info", "low") else level
 
 
 def _score_level(score: float) -> str:

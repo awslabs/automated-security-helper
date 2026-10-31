@@ -233,17 +233,65 @@ class TestAResultThatCannotBeReadIsThisRowsError:
             (4.0, "medium"),
             (3.9, "low"),
             (0.1, "low"),
-            (0, "info"),
+            (0.0, "info"),
         ],
     )
     def test_a_number_is_read_by_its_cvss_band(self, plugin_context, score, level):
         """Red at the base for every score but 4.0 to 6.9: all were counted MEDIUM,
-        so a 9.8 passed a HIGH threshold and a 3.9 failed a MEDIUM one."""
+        so a 9.8 passed a HIGH threshold and a 3.9 failed a MEDIUM one. A whole
+        number (``10`` and ``5`` here) reads by its band only from MEDIUM up; the
+        next test is the whole numbers below that."""
         row = _row(plugin_context, {"findings": [{"severity": score}]})
 
         assert getattr(row.severity_counts, level) == 1, row.severity_counts
         assert row.severity_counts.total == 1
         assert row.finding_count == 1
+
+    @pytest.mark.parametrize(
+        "value,level",
+        [
+            (0, "medium"),
+            (1, "medium"),
+            (2, "medium"),
+            (3, "medium"),
+            ("3", "medium"),
+            (" 0 ", "medium"),
+            (7, "high"),
+            (9, "critical"),
+            ("9", "critical"),
+        ],
+    )
+    def test_a_whole_number_is_never_read_below_medium(
+        self, plugin_context, value, level
+    ):
+        """A plugin's own rank (1 low, 2 medium, 3 high) is as likely an integer
+        as a rounded score. Read by the CVSS bands, ``3`` counted LOW and a MEDIUM
+        gate passed a finding the plugin ranks highest, where every number counted
+        MEDIUM before. Red at the base of this fix: ``3`` counted low. A whole
+        number that is a high or critical band keeps that count."""
+        row = _row(plugin_context, {"findings": [{"severity": value}]})
+
+        assert getattr(row.severity_counts, level) == 1, row.severity_counts
+        assert row.severity_counts.low == 0 and row.severity_counts.info == 0
+        assert row.severity_counts.total == 1
+        assert row.finding_count == 1
+
+    def test_an_integer_rank_fails_a_medium_gate_and_a_low_score_passes_it(
+        self, plugin_context
+    ):
+        """The same fact at the gate: the integer ``3`` and the float ``3.0`` under
+        a MEDIUM threshold. The integer may be the plugin's highest rank, so it
+        counts MEDIUM and fails the gate, as every number did before. The float is
+        a CVSS score of 3.0, which is LOW and passes. The two readings of the
+        severity change (one: stricter for scores such as 9.8, the other: looser
+        for a rank such as 3) are both true, for different inputs, and this is
+        the test that holds each to its input."""
+        rank = _row(plugin_context, {"findings": [{"severity": 3}]})
+        score = _row(plugin_context, {"findings": [{"severity": 3.0}]})
+
+        assert rank.status == ScannerStatus.FAILED
+        assert score.status == ScannerStatus.PASSED
+        assert score.severity_counts.low == 1
 
     @pytest.mark.parametrize(
         "text,level",
@@ -252,7 +300,7 @@ class TestAResultThatCannotBeReadIsThisRowsError:
             (" 7.5 ", "high"),
             ("4", "medium"),
             ("0.1", "low"),
-            ("0", "info"),
+            ("0.0", "info"),
             ("11", "medium"),
             ("-1", "medium"),
         ],
