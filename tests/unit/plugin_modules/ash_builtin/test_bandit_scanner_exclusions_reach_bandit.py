@@ -396,6 +396,29 @@ def test_the_operators_bandit_ini_exclude_reaches_bandit(tmp_path):
     assert all(entry.startswith(source.as_posix()) for entry in entries), entries
 
 
+def test_a_bandit_ini_inside_the_target_with_no_config_file_is_not_read(tmp_path):
+    """Every other ini test names the file with ``config_file``. A ``.bandit`` the
+    repository carries at its root, with no ``config_file`` set, is the usual
+    setup, and it is not the operator's: the scan passes an empty ini ASH wrote
+    outside the tree (which ends bandit's own search of the target for a
+    ``.bandit``), so the repository's ``exclude`` neither reaches bandit nor
+    skips ``tests/``, and nothing of it is anchored."""
+    source = _tree(tmp_path, ["app.py", "tests/test_app.py"])
+    (source / ".bandit").write_text("[bandit]\nexclude = tests\n", encoding="utf-8")
+    scanner = _scanner(source, tmp_path)
+
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    tokens = [str(arg) for arg in argv]
+    ini = [tokens[index + 1] for index, token in enumerate(tokens) if token == "--ini"]
+    assert len(ini) == 1, tokens
+    passed = Path(ini[0]).resolve()
+    assert passed != (source / ".bandit").resolve(), passed
+    assert source.resolve() not in passed.parents, passed
+    root = source.as_posix()
+    assert not _covers(_entries(argv), f"{root}/tests/test_app.py"), argv
+
+
 def test_an_ini_entry_naming_the_targets_own_path_skips_only_below_it(tmp_path, caplog):
     """``exclude = tests`` with the tree itself under a directory named ``tests``:
     bandit alone would skip every file; anchored, the entry skips a ``tests``
