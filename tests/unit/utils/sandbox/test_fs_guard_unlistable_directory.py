@@ -19,6 +19,7 @@ These run in-process on tmp_path only; the directory modes they set are POSIX,
 and root lists every directory, so they skip where neither holds.
 """
 
+import errno
 import logging
 import os
 import sys
@@ -172,33 +173,51 @@ def test_a_root_the_sweep_cannot_open_is_refused_through_the_same_path(
     assert os.path.lexists(root / "escape"), "the link behind the mode is left"
 
 
-def test_a_refusal_does_not_end_the_sweep_of_siblings_or_other_roots(tmp_path, caplog):
+def test_a_refusal_does_not_end_the_sweep_of_siblings_or_other_roots(
+    tmp_path, caplog, monkeypatch
+):
     """One unlistable directory used to end the whole walk and the loop over the
     policy's writable roots, so every link after it survived and the count of
-    removals was lost. The sweep now continues and raises once at the end."""
+    removals was lost. The sweep now continues and raises once at the end.
+
+    The directory that is refused is whichever subdirectory the walk opens first
+    (the failure is injected on that open, not set as a mode on a named
+    directory), so the test does not depend on the order the filesystem lists
+    entries in: the sibling that comes after the refused one is always there."""
     first = tmp_path / "results"
-    locked = first / "a-locked"
-    locked.mkdir(parents=True)
-    (locked / "hidden").symlink_to(tmp_path)
-    (first / "b").mkdir()
-    (first / "b" / "escape").symlink_to(tmp_path)
+    for name in ("one", "two"):
+        (first / name).mkdir(parents=True)
+        (first / name / "escape").symlink_to(tmp_path)
     (first / "z-escape").symlink_to(tmp_path)
     second = tmp_path / "other-results"
     second.mkdir()
     (second / "escape").symlink_to(tmp_path)
-    locked.chmod(0o000)
-    try:
-        with caplog.at_level(logging.WARNING, logger="ash"):
-            with pytest.raises(PermissionError) as refused:
-                fs_guard.sweep_writable([first, second], ("SWEEPSECRET-4478",))
-    finally:
-        locked.chmod(0o700)
+    real_open = os.open
+    refused_names = []
 
-    assert not os.path.lexists(first / "b" / "escape"), "a sibling's link is swept"
-    assert not os.path.lexists(first / "z-escape"), "a later entry is swept"
+    def refuse_the_first_subdirectory(path, flags, *args, **kwargs):
+        if (
+            kwargs.get("dir_fd") is not None
+            and flags & os.O_DIRECTORY
+            and not refused_names
+        ):
+            refused_names.append(os.fspath(path))
+            raise PermissionError(errno.EACCES, "Permission denied", os.fspath(path))
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", refuse_the_first_subdirectory)
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        with pytest.raises(PermissionError) as refused:
+            fs_guard.sweep_writable([first, second], ("SWEEPSECRET-4478",))
+
+    (refused_name,) = refused_names
+    sibling = "two" if refused_name == "one" else "one"
+    assert os.path.lexists(first / refused_name / "escape"), "the refused one is left"
+    assert not os.path.lexists(first / sibling / "escape"), "a sibling's link is swept"
+    assert not os.path.lexists(first / "z-escape"), "an entry beside them is swept"
     assert not os.path.lexists(second / "escape"), "the next root is swept"
-    assert os.path.lexists(locked / "hidden"), "the refused directory is left"
-    assert "a-locked" in str(refused.value)
+    assert refused_name in str(refused.value)
     summaries = _warnings(caplog, "Scanner sandbox: removed")
     assert summaries and "removed 3 " in summaries[0], summaries
 
@@ -308,16 +327,22 @@ def test_the_os_walk_fallback_records_a_failed_removal_sweeps_on_and_refuses(
     entry (the os.walk fallback once let the OSError abort the whole sweep, so a
     link after the failed one survived), and the sweep raises once at the end,
     since the link it could not remove is still there for a reader to follow.
-    Measured by taking fwalk away and failing the first removal."""
+    Measured by taking fwalk away and failing the first removal, whichever entry
+    that is: both names carry the value, so the redaction check holds for the one
+    that fails, and the test does not depend on the order the entries are listed
+    in."""
     value = "SWEEPSECRET-4476"
     root = tmp_path / "results"
     root.mkdir()
-    (root / f"aaa-{value}").symlink_to(tmp_path)
-    (root / "zzz-link").symlink_to(tmp_path)
+    names = (f"aaa-{value}", f"zzz-{value}")
+    for name in names:
+        (root / name).symlink_to(tmp_path)
     real_unlink = os.unlink
+    failed = []
 
     def failing_unlink(path, *args, **kwargs):
-        if value in os.fspath(path):
+        if not failed:
+            failed.append(os.path.basename(os.fspath(path)))
             raise OSError(1, "the first removal fails", os.fspath(path))
         return real_unlink(path, *args, **kwargs)
 
@@ -328,8 +353,10 @@ def test_the_os_walk_fallback_records_a_failed_removal_sweeps_on_and_refuses(
         with pytest.raises(PermissionError) as refused:
             fs_guard.sweep_writable([root], (value,))
 
-    assert not os.path.lexists(root / "zzz-link"), "the sweep must continue past it"
-    assert os.path.lexists(root / f"aaa-{value}"), "the failed one is left as found"
+    (failed_name,) = failed
+    other_name = names[1] if failed_name == names[0] else names[0]
+    assert not os.path.lexists(root / other_name), "the sweep must continue past it"
+    assert os.path.lexists(root / failed_name), "the failed one is left as found"
     lines = _warnings(caplog, "Could not remove")
     assert lines, [record.getMessage() for record in caplog.records]
     assert not any("SWEEPSECRET-4476" in line for line in lines), lines
