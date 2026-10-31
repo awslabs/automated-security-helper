@@ -98,6 +98,12 @@ def test_a_row_the_flatten_counts_higher_than_the_metrics_is_not_lowered():
     assert model.scanner_results[SCANNER].suppressed_finding_count == 1
     assert model.scanner_results[SCANNER].severity_counts.suppressed == 1
     assert model.scanner_results[TAGGED_SCANNER].suppressed_finding_count == 2
+    # The documented default: the tagged result is counted in the tagged scanner's
+    # row (by the metrics) and in the run tool's row (by the flatten), so the rows
+    # add up to one more than the summary. A later change to the rule turns this
+    # red instead of passing unseen.
+    assert model.metadata.summary_stats.suppressed == 2
+    assert row_total(model) == 3
 
 
 def test_a_row_both_readings_count_alike_is_unchanged():
