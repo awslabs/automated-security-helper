@@ -41,7 +41,9 @@ import contextlib
 import gzip
 import io
 import struct
+import sys
 import tarfile
+import types
 import zipfile
 from pathlib import Path
 
@@ -727,6 +729,156 @@ def test_a_duplicate_whose_numbered_placement_fits_the_host_limit_is_still_renam
     assert kept == [first, second]
     assert converter.refused_inputs == []
     assert second.name == "vendor/m~2/m.js"
+
+
+def test_a_member_refused_for_its_path_length_is_also_a_failed_input_the_gate_counts(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """The completeness gate reads failed inputs and ignores a refusal that names
+    no limit, so an archive that gave a scannable file a path past the host's
+    limit hid it from the scan, and the scan reported full coverage; before the
+    length check such an archive failed as a gating tool error. The archive is
+    recorded once as a failed input of kind input, which the gate counts and an
+    ash-unconverted-input suppression may accept, with the members counted and
+    none named; each member's own refusal stays."""
+    converter = _converter(test_plugin_context)
+    archive_file = str(Path(test_plugin_context.source_dir) / "a.zip")
+    monkeypatch.setattr(
+        archive_converter, "_PATH_LENGTH_LIMIT", len(str(tmp_path)) + 1 + 10
+    )
+    short = zipfile.ZipInfo("ok.js")
+    long = zipfile.ZipInfo("a_much_longer_name.js")
+    longer = zipfile.ZipInfo("another_long_name.js")
+
+    kept = converter.inspect_members(
+        [short, long, longer],
+        target_path=tmp_path,
+        archive="a.zip",
+        archive_file=archive_file,
+    )
+
+    assert kept == [short]
+    (failed,) = converter.failed_inputs
+    assert (failed.path, failed.kind, failed.accepted) == ("a.zip", "input", False)
+    assert failed.reason.startswith("2 members not extracted")
+    assert "a_much_longer_name" not in failed.reason
+    assert [r.member for r in converter.refused_inputs] == [
+        "a_much_longer_name.js",
+        "another_long_name.js",
+    ]
+
+
+def test_a_host_without_a_path_length_limit_records_no_failed_input_for_a_long_name(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """The control: with no limit the same members are admitted and the archive
+    is recorded as no failed input."""
+    converter = _converter(test_plugin_context)
+    monkeypatch.setattr(archive_converter, "_PATH_LENGTH_LIMIT", None)
+    members = [zipfile.ZipInfo("ok.js"), zipfile.ZipInfo("a_much_longer_name.js")]
+
+    kept = converter.inspect_members(
+        members, target_path=tmp_path, archive="a.zip", archive_file="a.zip"
+    )
+
+    assert kept == members
+    assert converter.failed_inputs == []
+
+
+def test_a_plain_gzip_whose_file_name_passes_the_host_limit_is_a_failed_input(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """A ``.gz`` of one file is inspected as its one decompressed name, and the
+    archive is dropped when that name is refused; the refusal alone left it out
+    of the completeness gate."""
+    converter = _converter(test_plugin_context)
+    monkeypatch.setattr(
+        archive_converter, "_PATH_LENGTH_LIMIT", len(str(tmp_path)) + 1 + 3
+    )
+
+    kept = converter.inspect_members(
+        ["data.json"],
+        target_path=tmp_path,
+        archive="data.json.gz",
+        archive_file=str(Path(test_plugin_context.source_dir) / "data.json.gz"),
+    )
+
+    assert kept == []
+    (failed,) = converter.failed_inputs
+    assert (failed.path, failed.kind) == ("data.json.gz", "input")
+
+
+def test_an_archive_with_a_member_past_the_host_limit_is_not_recorded_whole(
+    test_plugin_context, monkeypatch
+):
+    """End to end: the other member is extracted, the archive is a failed input of
+    kind input, and it is left out of the archives recorded as extracted whole.
+    The length arithmetic is the neighbors' subject, so the check is stood in for
+    by a name."""
+    monkeypatch.setattr(
+        archive_converter,
+        "_written_path_over_limit",
+        lambda name, kind, target: (
+            "9 characters with the extraction directory, limit 1"
+            if name.startswith("toolong")
+            else None
+        ),
+    )
+    raw = zip_bytes({"ok.js": "ok = 1\n", "toolong.js": "x = 1\n"})
+
+    converter, results = _convert_one(test_plugin_context, monkeypatch, "a.zip", raw)
+
+    (extracted,) = results
+    assert sorted(p.name for p in extracted.rglob("*") if p.is_file()) == ["ok.js"]
+    (failed,) = converter.failed_inputs
+    assert (failed.path, failed.kind) == ("a.zip", "input")
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
+
+
+def _fake_registry(monkeypatch, value=None, error=None):
+    """A ``winreg`` for the host the test runs on: ``LongPathsEnabled`` reads
+    ``value``, or the open of the key raises ``error``."""
+
+    def open_key(root, path):
+        if error is not None:
+            raise error
+        return contextlib.nullcontext()
+
+    fake = types.SimpleNamespace(
+        HKEY_LOCAL_MACHINE=0,
+        OpenKey=open_key,
+        QueryValueEx=lambda key, name: (value, 4),
+    )
+    monkeypatch.setitem(sys.modules, "winreg", fake)
+    monkeypatch.setattr(archive_converter, "_on_windows", lambda: True)
+
+
+@pytest.mark.parametrize(
+    ("value", "error", "expected"),
+    [
+        pytest.param(1, None, 32767, id="long-paths-enabled"),
+        pytest.param(0, None, 260, id="long-paths-off"),
+        pytest.param(None, None, 260, id="value-is-not-1"),
+        pytest.param(None, FileNotFoundError("no key"), 260, id="key-absent"),
+    ],
+)
+def test_a_windows_host_has_the_path_limit_its_long_path_setting_gives(
+    monkeypatch, value, error, expected
+):
+    """MAX_PATH is the limit only where long paths are off: a host with
+    ``LongPathsEnabled`` takes a path past it, and refusing a member there for 260
+    lost a file the host could have written. A setting that cannot be read leaves
+    MAX_PATH, the side that refuses a member by name."""
+    _fake_registry(monkeypatch, value=value, error=error)
+
+    assert archive_converter._host_path_length_limit() == expected
+
+
+def test_a_host_that_is_not_windows_has_no_path_limit(monkeypatch):
+    """The control: the registry is not asked off Windows."""
+    monkeypatch.setattr(archive_converter, "_on_windows", lambda: False)
+
+    assert archive_converter._host_path_length_limit() is None
 
 
 def test_a_later_name_bound_for_a_taken_path_is_refused_when_members_are_names(

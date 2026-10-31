@@ -1835,17 +1835,48 @@ def _on_windows() -> bool:
     return os.name == "nt"
 
 
-#: The longest path, in characters, the extractor can write on this host, or None
-#: where the extractor meets no fixed limit. On Windows it is MAX_PATH (260,
-#: counting the terminating NUL, so 259 characters of path): zipfile and tarfile
-#: open each member through the ordinary Win32 calls, which keep that limit (no
-#: ``\\?\`` prefix), and the open of a longer path fails with ENOENT, a number
-#: _failure_kind reads as the run's fault (a missing directory is the run's). So
-#: an archive whose member name was too long for the host failed as a whole, as a
-#: TOOL error no suppression could accept. inspect_members refuses such a member
-#: by name instead (_written_path_over_limit), before anything is written, and
-#: the rest of the archive is extracted. Read at call time, so a test can set it.
-_PATH_LENGTH_LIMIT: Optional[int] = 260 if os.name == "nt" else None
+def _windows_long_paths_enabled() -> bool:
+    """Whether this Windows host has long paths switched on (the machine-wide
+    ``LongPathsEnabled`` registry value, 1), so the ordinary Win32 calls take a
+    path past MAX_PATH. False where it is off, absent or unreadable: the limit
+    then stays at MAX_PATH, the side that refuses a member by name instead of
+    failing the archive."""
+    try:
+        # By name, so a checker on another platform meets no winreg stub.
+        winreg = importlib.import_module("winreg")
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\FileSystem",
+        ) as key:
+            value, _kind = winreg.QueryValueEx(key, "LongPathsEnabled")
+    except (ImportError, OSError, AttributeError):
+        return False
+    return value == 1
+
+
+def _host_path_length_limit() -> Optional[int]:
+    """The longest path, in UTF-16 code units, the extractor can write on this
+    host: None off Windows, MAX_PATH there, and the extended-length ceiling
+    (32,767) where long paths are enabled (_windows_long_paths_enabled)."""
+    if not _on_windows():
+        return None
+    return 32767 if _windows_long_paths_enabled() else 260
+
+
+#: The longest path, in UTF-16 code units (the unit MAX_PATH counts), the extractor
+#: can write on this host, or None where the extractor meets no fixed limit. On
+#: Windows without long paths it is MAX_PATH (260, counting the terminating NUL, so
+#: 259 units of path): zipfile and tarfile open each member through the ordinary
+#: Win32 calls, which keep that limit (no ``\\?\`` prefix), and the open of a
+#: longer path fails with ENOENT, a number _failure_kind reads as the run's fault
+#: (a missing directory is the run's). So an archive whose member name was too
+#: long for the host failed as a whole, as a TOOL error no suppression could
+#: accept. inspect_members refuses such a member by name instead
+#: (_written_path_over_limit), before anything is written, and the rest of the
+#: archive is extracted. Where the host has long paths enabled the limit is the
+#: extended-length one, so a path under MAX_PATH is not refused for a limit the
+#: host does not have. Read at call time, so a test can set it.
+_PATH_LENGTH_LIMIT: Optional[int] = _host_path_length_limit()
 
 
 def _written_path_over_limit(
@@ -2272,6 +2303,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         archive: Optional[str] = None,
         ignore_paths: Optional[List[IgnorePathWithReason]] = None,
         unscannable: Optional[List[str]] = None,
+        archive_file: Optional[str] = None,
     ):
         """The members worth extracting: scannable, regular files that stay inside.
 
@@ -2307,6 +2339,15 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         name a scanner finds a manifest or a Dockerfile by; past
         MEMBER_REFUSALS_LISTED such members one line counts the rest.
 
+        A member refused for the length of the path it would be written to
+        (_MEMBER_PATH_TOO_LONG) is a file a scanner would have read, so the
+        archive is also recorded once as a FAILED input, of kind "input": the
+        completeness gate reads failed inputs and ignores a refusal that names no
+        limit, so a refusal alone let an archive hide a file from the scan by
+        giving it a long path, and the scan reported full coverage. A reviewed
+        ``ash-unconverted-input`` suppression on the archive's path may accept
+        it.
+
         Args:
             members: The archive's members.
             target_path: The extraction directory. The escape check needs it, so it
@@ -2317,8 +2358,15 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             ignore_paths: The active global ignore paths.
             unscannable: Where to add the name of each member left out only because
                 no scanner reads its extension.
+            archive_file: The archive as the scan set gave it. A failed input is
+                recorded by that path (record_failed_input relativizes it against
+                the tree), where ``archive`` is already relative and would resolve
+                against the working directory instead; ``archive`` stands in when
+                this is None.
         """
         ASH_LOGGER.verbose(f"Inspecting {len(members)} members from archive")
+        # Members refused for the length of their written path, listed or not.
+        too_long = 0
         filtered_members = []
         # Refusals by reason: how many were listed, and how many more were not.
         listed: Dict[str, int] = {}
@@ -2513,6 +2561,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     written[destination] = member_name
                     directories.update(prefixes)
             if problem is not None:
+                if problem == _MEMBER_PATH_TOO_LONG:
+                    too_long += 1
                 if listed.get(problem, 0) < MEMBER_REFUSALS_LISTED:
                     listed[problem] = listed.get(problem, 0) + 1
                     self._refuse_member(archive, member_name, problem, detail)
@@ -2540,6 +2590,15 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         count=renamed_count - MEMBER_REFUSALS_LISTED
                     )
                 )
+            )
+        if too_long and archive is not None:
+            noun = "member" if too_long == 1 else "members"
+            self.record_failed_input(
+                archive if archive_file is None else archive_file,
+                f"{too_long} {noun} not extracted: each would be written to a "
+                "path past this host's path length limit, so no scanner reads "
+                f"{'it' if too_long == 1 else 'them'}",
+                kind="input",
             )
         return filtered_members
 
@@ -2709,6 +2768,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             target_path=target_path,
                             archive=archive_display,
                             ignore_paths=ignore_paths,
+                            archive_file=archive_file,
                         ):
                             continue
                         target_path.mkdir()
@@ -2748,6 +2808,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                     archive=archive_display,
                                     ignore_paths=ignore_paths,
                                     unscannable=unscannable,
+                                    archive_file=archive_file,
                                 ),
                             )
                     # Extract Tarball to target path after inspecting members. The
@@ -2813,6 +2874,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                 archive=archive_display,
                                 ignore_paths=ignore_paths,
                                 unscannable=unscannable,
+                                archive_file=archive_file,
                             )
                             if _TAR_HAS_DATA_FILTER:
                                 tar_ref.extractall(  # nosec B202
