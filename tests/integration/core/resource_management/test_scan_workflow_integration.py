@@ -419,11 +419,14 @@ class TestScanWorkflowIntegration:
     async def test_error_handling_invalid_output_directory(
         self, test_directory, tmp_path
     ):
-        """Test error handling when the output directory disappears mid-scan.
+        """Test the poll of a scan whose output directory disappears.
 
-        register_scan validates the output directory up front, so the directory
-        has to exist to register and is removed afterwards. Registering against a
-        path that never existed only ever tested register_scan's own validation.
+        The directory exists when the scan registers and is removed afterwards.
+        A directory that is not there, whether never created or removed since,
+        is not an error of the poll: the entry's own status is the answer, with
+        nothing read from files, so a scan that failed after its directory went
+        stays readable by polling. A directory that cannot be a scan's at all is
+        refused at registration instead.
         """
         registry = get_scan_registry()
 
@@ -438,10 +441,12 @@ class TestScanWorkflowIntegration:
         output_dir.rmdir()
 
         result = await check_scan_progress(scan_id)
-        assert result["success"] is False
-        assert "Directory not found" in result["error"]
-        assert result["error_category"] == "file_not_found"
-        assert result["context"]["scan_id"] == scan_id
+        assert result["success"] is True
+        assert result["scan_id"] == scan_id
+        assert result["status"] == MCScanStatus.PENDING.value
+        assert result["is_complete"] is False
+        assert result["scanners"] == {}
+        assert result["total_scanners"] == 0
 
         # Clean up the scan
         await cleanup_scan_resources(scan_id)
