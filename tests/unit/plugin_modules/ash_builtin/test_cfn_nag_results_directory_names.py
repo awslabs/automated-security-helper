@@ -107,9 +107,7 @@ def test_two_templates_that_differ_in_case_alone_get_directories_that_do_not(
     assert len({name.lower() for name in names}) == 2, names
 
 
-def test_a_deeply_nested_template_still_gets_a_results_directory(
-    scanner, results_dirs
-):
+def test_a_deeply_nested_template_still_gets_a_results_directory(scanner, results_dirs):
     deep = _deep_directory(scanner.context.work_dir)
     (deep / "stack.yaml").write_text(CFN_TEMPLATE)
     names = [path.name for path in results_dirs()]
