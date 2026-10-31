@@ -20,6 +20,11 @@ tool's own refusal:
 * the workspace tools catch ``RuntimeError`` for a bound profile whose
   registered copy is missing (``_resolve_session_config``), so the error is a
   ``RuntimeError`` as well as a ``ProfileRegistryError``.
+
+Two of the tests here run a call that waits on a lock if the lock is wrong (a
+``select_profile`` from inside the rewrite, a scan runner beside a held
+session). A wrong lock does not fail such a test, it holds the run, so both
+run through ``finishes_within`` and fail with a message after a bound.
 """
 
 from __future__ import annotations
@@ -47,10 +52,13 @@ from automated_security_helper.cli.mcp.profile_registry import (
     set_profile_registry,
 )
 from automated_security_helper.cli.mcp_tools import mcp_select_profile
+from tests.utils.bounded_wait import finishes_within
 
 pytestmark = pytest.mark.unit
 
 SESSION = "bound-then-orphaned"
+#: How long a call that could wait on a lock is given before the test fails.
+WAIT_SECONDS = 30.0
 
 
 @pytest.fixture(autouse=True)
@@ -327,7 +335,12 @@ def test_the_new_paths_land_on_the_binding_that_was_read_not_on_a_rebind(
         profile_registry, "materialize_session_binding", write_then_rebind
     )
 
-    rewritten = resolve_session_config_path(SESSION)
+    # The rebind runs on this thread, inside the rewrite's hold of the binding
+    # lock, which is taken twice by the thread that holds it: bounded, because
+    # a lock that waited on itself would hold the run instead of failing.
+    rewritten = finishes_within(
+        WAIT_SECONDS, lambda: resolve_session_config_path(SESSION)
+    )
 
     assert rebound.get("success") is True, rebound
     recorded = profile_registry.resolve_session_config_path(SESSION)
@@ -380,20 +393,26 @@ def test_the_scan_runner_records_the_hold_instead_of_leaving_the_entry_pending(
         raise RuntimeError("the scan must not start")
 
     monkeypatch.setattr(ras, "run_ash_scan", never_runs)
-    with (
-        _Held(SESSION),
-        patch.object(mcp_tools, "get_scan_registry", return_value=registry),
-    ):
-        asyncio.run(
-            mcp_tools._run_scan_async(
-                scan_id=scan_id,
-                directory_path=str(source),
-                output_dir=str(output),
-                severity_threshold="MEDIUM",
-                config_path=None,
-                session_id=SESSION,
+
+    def run_beside_the_hold() -> None:
+        with (
+            _Held(SESSION),
+            patch.object(mcp_tools, "get_scan_registry", return_value=registry),
+        ):
+            asyncio.run(
+                mcp_tools._run_scan_async(
+                    scan_id=scan_id,
+                    directory_path=str(source),
+                    output_dir=str(output),
+                    severity_threshold="MEDIUM",
+                    config_path=None,
+                    session_id=SESSION,
+                )
             )
-        )
+
+    # A runner that reached the session's lock before the profile lookup would
+    # wait for the hold this test keeps: bounded, so that reads as a failure.
+    finishes_within(WAIT_SECONDS, run_beside_the_hold)
 
     entry = registry.get_scan(scan_id)
     assert entry is not None

@@ -514,7 +514,12 @@ _session_state: Dict[str, SessionState] = {}
 #: ``select_profile`` could land its files after it: both files then existed,
 #: so nothing repaired them, and the session's config held one profile while its
 #: state and rules said another. Taken inside the write hold, never around it.
-_binding_write_locks: Dict[str, threading.Lock] = {}
+#:
+#: Re-entrant, so the thread that holds it can take it again. The rewrite calls a
+#: writer, and a ``select_profile`` that runs on that thread meets the lock its own
+#: thread holds: a lock that cannot be taken twice waits on itself, and the call
+#: never returns. Another thread still waits for the holder.
+_binding_write_locks: Dict[str, "contextlib.AbstractContextManager[bool]"] = {}
 
 
 @contextlib.contextmanager
@@ -527,7 +532,7 @@ def binding_writes(session_id: Optional[str]) -> Iterator[None]:
     """
     sid = DEFAULT_SESSION_ID if session_id is None else session_id
     with _session_lock:
-        lock = _binding_write_locks.setdefault(sid, threading.Lock())
+        lock = _binding_write_locks.setdefault(sid, threading.RLock())
     with lock:
         yield
 
