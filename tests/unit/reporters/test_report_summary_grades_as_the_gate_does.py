@@ -794,9 +794,24 @@ class TestASnippetIsTextOrNothing:
         monkeypatch.setattr(
             AshAggregatedResults, "to_flat_vulnerabilities", lambda self: [vuln]
         )
+        # The title also appears in the summary tables, so its presence does not
+        # show the detailed block was rendered: the extractor's answers do.
+        extracted = []
+        real_extract = ReportContentEmitter._extract_code_snippet
+
+        def recording_extract(self, found):
+            snippet_text = real_extract(self, found)
+            extracted.append(snippet_text)
+            return snippet_text
+
+        monkeypatch.setattr(
+            ReportContentEmitter, "_extract_code_snippet", recording_extract
+        )
 
         document = MarkdownReporter(context=test_plugin_context).report(
             AshAggregatedResults()
         )
 
+        assert extracted, "the detailed block was not built for the finding"
+        assert all(text is None for text in extracted), extracted
         assert "a finding" in document, document[:2000]

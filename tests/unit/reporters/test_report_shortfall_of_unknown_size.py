@@ -59,10 +59,15 @@ PARTIAL = {
 }
 
 
+#: How the renderer's sentence for an unknown size ends (coverage_shortfall_text).
+SENTENCE_END = "is not known"
+
+
 class TestTheSharedRenderer:
     def test_unknown_counters_say_so(self):
         text = coverage_shortfall_text(None, None)
         assert "coverage unknown" in text
+        assert text.endswith(SENTENCE_END)
         assert "None" not in text
 
     def test_real_counters_keep_their_numbers(self):
@@ -80,12 +85,18 @@ def test_a_shortfall_of_unknown_size_does_not_lose_the_report(
 
     assert "cdk-nag" in document
     assert "coverage unknown" in document
-    # Around every place the phrase is written, not after the first mention of
-    # the scanner: that is its row in the scanner table, which comes before the
-    # shortfall, so a window there would miss a "None" printed lower down.
+    # The scanner's own row, which comes before the shortfall: the first
+    # mention of the scanner is that row.
+    assert "None" not in document.split("cdk-nag", 1)[1][:200]
+    # Around every place the phrase is written, through the end of the sentence
+    # it starts: a window that ends inside the sentence misses a "None" printed
+    # after it, and one after the first mention of the scanner misses the
+    # shortfall, which comes lower down.
     start = 0
     while (index := document.find("coverage unknown", start)) != -1:
-        around = document[max(index - 60, 0) : index + 60]
+        sentence_end = document.find(SENTENCE_END, index)
+        assert sentence_end != -1, document[index : index + 200]
+        around = document[max(index - 60, 0) : sentence_end + len(SENTENCE_END) + 60]
         assert "None" not in around, around
         start = index + 1
 

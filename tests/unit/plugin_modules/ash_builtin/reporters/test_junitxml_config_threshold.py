@@ -52,8 +52,8 @@ from tests.unit.plugin_modules.ash_builtin.reporters.test_junitxml_reporter impo
     _make_result,
     _make_run,
     _outcome,
-    _without_scanner_thresholds,
 )
+from tests.utils.scanner_thresholds import without_scanner_thresholds
 
 pytestmark = pytest.mark.unit
 
@@ -80,7 +80,7 @@ def _render_from_config(tmp_path, level, threshold, issue_severity=None):
     if issue_severity is not None:
         result.properties.__pydantic_extra__["issue_severity"] = issue_severity
 
-    model = _without_scanner_thresholds(_make_model(runs=[_make_run(results=[result])]))
+    model = without_scanner_thresholds(_make_model(runs=[_make_run(results=[result])]))
     model.ash_config.global_settings.severity_threshold = threshold
 
     output = _get_reporter(tmp_path).report(model)
@@ -91,7 +91,7 @@ def _render_kind(tmp_path, level, threshold, kind):
     """Report one finding at an explicit SARIF ``kind`` and return its testcase."""
     result = _make_result(level=level, scanner_name="cdk-nag")
     result.kind = kind
-    model = _without_scanner_thresholds(_make_model(runs=[_make_run(results=[result])]))
+    model = without_scanner_thresholds(_make_model(runs=[_make_run(results=[result])]))
     model.ash_config.global_settings.severity_threshold = threshold
     output = _get_reporter(tmp_path).report(model)
     return ET.fromstring(output).find(".//testcase")  # nosec B314
@@ -335,7 +335,7 @@ class TestConfiguredSeverityThresholdHelper:
         result = _make_result(
             level="note", scanner_name="bandit", severity_threshold="INFO"
         )
-        model = _without_scanner_thresholds(
+        model = without_scanner_thresholds(
             _make_model(runs=[_make_run(results=[result])])
         )
         model.ash_config.global_settings.severity_threshold = "ALL"
@@ -359,7 +359,7 @@ class TestScannerThresholdIsRead:
     @staticmethod
     def _render(tmp_path, scanner_name, level, scanner_threshold):
         result = _make_result(level=level, scanner_name=scanner_name)
-        model = _without_scanner_thresholds(
+        model = without_scanner_thresholds(
             _make_model(runs=[_make_run(results=[result])])
         )
         model.ash_config.global_settings.severity_threshold = "MEDIUM"
@@ -387,7 +387,7 @@ class TestScannerThresholdIsRead:
         """A finding of the hyphenated scanner ``cdk-nag``, whose configuration
         section is the underscored ``cdk_nag``."""
         result = _make_result(level=level, scanner_name="cdk-nag")
-        model = _without_scanner_thresholds(
+        model = without_scanner_thresholds(
             _make_model(runs=[_make_run(results=[result])])
         )
         model.ash_config.global_settings.severity_threshold = "MEDIUM"
@@ -501,7 +501,7 @@ class TestActionableSubErrorFindingsAreNotSilentlyPassed:
         )
         result = _make_result(level=level, scanner_name="cdk-nag")
         result.kind = "notApplicable"
-        model = _without_scanner_thresholds(
+        model = without_scanner_thresholds(
             _make_model(runs=[_make_run(results=[result])])
         )
         model.ash_config.global_settings.severity_threshold = "MEDIUM"
@@ -526,7 +526,7 @@ class TestActionableSubErrorFindingsAreNotSilentlyPassed:
             suppressions=[Suppression(kind="inSource", justification="accepted")],
         )
         result.kind = "notApplicable"
-        model = _without_scanner_thresholds(
+        model = without_scanner_thresholds(
             _make_model(runs=[_make_run(results=[result])])
         )
         model.ash_config.global_settings.severity_threshold = "MEDIUM"

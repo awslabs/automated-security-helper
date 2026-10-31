@@ -34,9 +34,7 @@ from automated_security_helper.utils.content_db_staleness import (
     STALE_NOTIFICATION_ID,
     ContentDbAgeRecord,
 )
-from tests.unit.plugin_modules.ash_builtin.reporters.test_junitxml_reporter import (
-    _without_scanner_thresholds,
-)
+from tests.utils.scanner_thresholds import without_scanner_thresholds
 
 pytestmark = pytest.mark.unit
 
@@ -166,7 +164,7 @@ class TestTheShowingNoteCountsActionableFindings:
         model = AshAggregatedResults(ash_config=get_default_config())
         # ``get_default_config`` honours ASH_CONFIG: a bandit threshold it set
         # would grade these findings by itself and not by the MEDIUM below.
-        _without_scanner_thresholds(model)
+        without_scanner_thresholds(model)
         model.ash_config.global_settings.severity_threshold = "MEDIUM"
         model.sarif = SarifReport.model_validate(
             {

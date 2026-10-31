@@ -55,9 +55,7 @@ from automated_security_helper.utils.severity_ladder import (
     result_severity,
     severity_fails_threshold,
 )
-from tests.unit.plugin_modules.ash_builtin.reporters.test_junitxml_reporter import (
-    _without_scanner_thresholds,
-)
+from tests.utils.scanner_thresholds import without_scanner_thresholds
 
 pytestmark = pytest.mark.unit
 
@@ -474,7 +472,7 @@ class TestFindingsAnAdditionalReportListsAreCounted:
             }
         )
         model.ash_config = get_default_config()
-        _without_scanner_thresholds(model)
+        without_scanner_thresholds(model)
         model.ash_config.global_settings.severity_threshold = "HIGH"
         emitter = ReportContentEmitter(model)
 
@@ -722,7 +720,7 @@ class TestACoverageGapBesideFindingsIsADanger:
         model = AshAggregatedResults(ash_config=get_default_config())
         # ``get_default_config`` honours ASH_CONFIG: a threshold it set for bandit
         # would grade the finding by itself and not by the gate named below.
-        _without_scanner_thresholds(model)
+        without_scanner_thresholds(model)
         # The same gate in both variants, so the two differ in the finding alone.
         model.ash_config.global_settings.severity_threshold = "CRITICAL"
         if with_finding:

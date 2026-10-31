@@ -16,6 +16,7 @@ read ``properties.__pydantic_extra__`` for the scanner's name, which lost the
 whole artefact; it now gets its test case under the default suite.
 """
 
+import re
 import xml.etree.ElementTree as ET  # nosec B405
 
 import pytest
@@ -113,6 +114,7 @@ class TestForbiddenCharactersAreWrittenAsEscapes:
             (chr(0x1F), "\\x1f"),
             (chr(0xD800), "\\" + "ud800"),
             (chr(0xDCFF), "\\" + "udcff"),
+            (chr(0xDFFF), "\\" + "udfff"),
             (chr(0xFFFE), "\\" + "ufffe"),
             (chr(0xFFFF), "\\" + "uffff"),
         ],
@@ -148,8 +150,42 @@ class TestForbiddenCharactersAreWrittenAsEscapes:
 
         output = _render(tmp_path, [result])
 
-        ET.fromstring(output)  # nosec B314
+        root = ET.fromstring(output)  # nosec B314
         assert f"\\x{ord(character):02x}" not in output
+        # The note reached the output: without this the two checks above pass
+        # for a reporter that drops the note, whatever it does with a character.
+        system_out = root.find(".//system-out").text
+        assert re.search(r"a[\t\n\r]b", system_out), system_out
+
+    @pytest.mark.parametrize(
+        "character",
+        [
+            chr(0x20),
+            chr(0xD7FF),
+            chr(0xE000),
+            chr(0xFFFD),
+            chr(0x10000),
+            chr(0x1F600),
+        ],
+        ids=lambda value: f"U+{ord(value):04X}",
+    )
+    def test_the_characters_beside_the_forbidden_ranges_are_kept(
+        self, tmp_path, character
+    ):
+        """The neighbours of the forbidden ranges are legal XML text: the space
+        below the controls, the last character before the surrogates, the first
+        after them, the replacement character beside U+FFFE and U+FFFF, and an
+        astral character. A range written one character too wide would escape
+        one of them, and the single-character cases above would not notice."""
+        result = _make_result(level="error")
+        result.message.root.__dict__["text"] = f"ok{character}name"
+
+        output = _render(tmp_path, [result])
+
+        root = ET.fromstring(output)  # nosec B314
+        case = root.find(".//testcase")
+        assert f"ok{character}name" in case.get("name")
+        assert f"\\u{ord(character):04x}" not in output
 
 
 class TestAResultWithoutPropertiesKeepsItsCase:

@@ -124,3 +124,18 @@ class TestTheSeverityChipsAreEscapedWhereTheyBecomeMarkup:
             '<span class="severity-r&amp;d"><strong>1</strong> R&amp;D</span>' in chips
         )
         assert "r&d" not in chips
+
+    def test_a_quote_and_an_angle_bracket_cannot_leave_the_class_attribute(self):
+        """A name with a double quote ends the class attribute and adds one of
+        its own; an angle bracket opens a tag. The ``&`` case above passes with
+        quote escaping off, so this one has the characters that break out.
+
+        The quote and the bracket must come out as entities in the class and in
+        the text (the text is the name title-cased, as the other chips are).
+        """
+        chips = HtmlReporter._format_severity_counts({'x" onmouseover="y<': 1})
+
+        assert chips == (
+            '<span class="severity-x&quot; onmouseover=&quot;y&lt;">'
+            "<strong>1</strong> X&quot; Onmouseover=&quot;Y&lt;</span>"
+        )

@@ -89,32 +89,6 @@ def _make_model(runs: list[Run] | None = None) -> AshAggregatedResults:
     return model
 
 
-def _without_scanner_thresholds(model):
-    """Clear every scanner's own ``options.severity_threshold`` in *model*.
-
-    The reporters grade a finding by its scanner's own threshold ahead of the
-    global one, and ``get_default_config`` honours the ``ASH_CONFIG``
-    environment variable, so a configuration that sets one for bandit or
-    cdk-nag would silently override every entry of a matrix that names the
-    global threshold, and the tests would no longer measure it. A test that
-    wants one scanner's threshold sets it after this.
-
-    It fails when bandit's threshold was not cleared: the helper walks the
-    scanners model's fields, and a change to that model's shape would
-    otherwise leave it clearing nothing and every test above it graded by
-    whatever the environment set.
-    """
-    scanners = model.ash_config.scanners
-    for name in type(scanners).model_fields:
-        options = getattr(getattr(scanners, name, None), "options", None)
-        if options is not None and hasattr(options, "severity_threshold"):
-            options.severity_threshold = None
-    assert scanners.bandit.options.severity_threshold is None, (
-        "bandit's own threshold is still set; the scanners model changed shape"
-    )
-    return model
-
-
 def _plugin_context(tmp_path):
     """Build a lightweight PluginContext."""
     from automated_security_helper.base.plugin_context import PluginContext
