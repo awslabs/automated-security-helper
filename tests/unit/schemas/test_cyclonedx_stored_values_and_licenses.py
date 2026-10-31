@@ -519,6 +519,21 @@ def test_a_nested_component_license_list_is_written_conforming_too():
     assert inner["licenses"] == [{"expression": "MIT"}]
 
 
+def test_an_empty_or_blank_bare_license_is_left_out_not_written_as_an_expression():
+    """An empty string is a string to CycloneDX 1.6 but no SPDX expression, so the
+    written SBOM leaves it out and counts it with the other entries left out; the
+    id beside it is still written as an expression."""
+    with patch(LOGGER):
+        report = _bom_with_licenses(["", "  ", "MIT"])
+    with patch(LOGGER) as logger:
+        emitted = _as_the_reporter_emits(report)
+    assert emitted["components"][0]["licenses"] == [{"expression": "MIT"}]
+    assert logger.warning.call_count == 1
+    message = logger.warning.call_args.args[0]
+    assert "1 bare license id(s) were written as SPDX expressions" in message
+    assert "2 other entry(ies) were left out" in message
+
+
 def test_control_a_conforming_license_list_is_written_as_stored_without_a_warning():
     entries = [
         {"license": {"id": "MIT"}},

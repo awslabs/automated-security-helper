@@ -30,8 +30,9 @@ def _conforming_licenses(value: Any, counts: Dict[str, int]) -> Any:
     any other entry as written when it loads a stored BOM, so that one entry
     does not refuse the component that carries it; a document written for
     other tools must not repeat it. A bare id is written as an expression
-    (``"MIT"`` is an SPDX expression), and any other entry is left out. Both
-    are counted in ``counts``.
+    (``"MIT"`` is an SPDX expression), and any other entry, an empty or blank
+    string included (it is no expression), is left out. Both are counted in
+    ``counts``.
 
     Models and lists are copied only where something changed, so the BOM given
     in is left as it was.
@@ -41,7 +42,7 @@ def _conforming_licenses(value: Any, counts: Dict[str, int]) -> Any:
         for entry in value.root:
             if isinstance(entry, (LicenseEntry, LicenseExpression)):
                 kept.append(entry)
-            elif isinstance(entry, str):
+            elif isinstance(entry, str) and entry.strip():
                 kept.append(LicenseExpression(expression=entry))
                 counts["expressions"] += 1
             else:
