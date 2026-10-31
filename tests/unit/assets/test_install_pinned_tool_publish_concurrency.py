@@ -228,6 +228,29 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
             [kept.name, "other"]
         )
 
+    def test_a_second_failing_publish_keeps_the_first_kept_directory(self, tmp_path):
+        """A publish removes kept directories only when it finishes, not when it starts."""
+        # Nothing showed this: a publish that cleared the tool's kept directories at its
+        # start would lose the only complete old entry when the retry fails as well.
+        third_party, first = self._fail_one_publish(tmp_path)
+
+        with pytest.MonkeyPatch.context() as patch:
+            self._keep_the_old_entry(patch, third_party / "demo")
+            with pytest.raises(OSError) as raised:
+                installer.publish_third_party(
+                    _staged(tmp_path / "second", b"newer\n"), third_party
+                )
+
+        assert raised.value.errno == errno.ENOSPC
+        assert (first / "old" / "LICENSE").read_bytes() == b"old\n"
+        marker = first / installer._PUBLISH_KEPT_MARKER
+        assert marker.read_text(encoding="utf-8").strip() == "demo"
+        assert [
+            p
+            for p in third_party.iterdir()
+            if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
+        ] == [first]
+
     def test_a_work_directory_without_the_marker_is_left_alone(self, tmp_path):
         """Control: another publish's work directory that is still in use."""
         third_party = tmp_path / "third-party"
@@ -343,15 +366,20 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
             return real_replace(src, dst, *args, **kwargs)
 
         real_exists, real_is_symlink = Path.exists, Path.is_symlink
+        # The check raises EIO, not the EACCES the failed restore raised, and each
+        # call is counted, so the test can tell the check ran and what it raised.
+        asked: list[str] = []
 
         def exists(self, *args, **kwargs):
             if armed["on"] and self == final:
-                raise PermissionError(errno.EACCES, "Permission denied")
+                asked.append("exists")
+                raise OSError(errno.EIO, "Input/output error")
             return real_exists(self, *args, **kwargs)
 
         def is_symlink(self):
             if armed["on"] and self == final:
-                raise PermissionError(errno.EACCES, "Permission denied")
+                asked.append("is_symlink")
+                raise OSError(errno.EIO, "Input/output error")
             return real_is_symlink(self)
 
         monkeypatch.setattr(os, "replace", replace)
@@ -360,6 +388,8 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
 
         with pytest.raises(PermissionError):
             installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+
+        assert asked, "the check for an entry at the name never ran"
 
         kept = [
             p

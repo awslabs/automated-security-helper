@@ -22,6 +22,7 @@ Nothing here reaches the network. The one test that starts a child process says 
 
 from __future__ import annotations
 
+import errno
 import importlib.util
 import json
 import os
@@ -196,16 +197,59 @@ class TestVerifyThirdParty:
         Without this the image ships stale license files there, and the check passes
         because the directory is skipped as scratch space.
         """
+        # The layout is the one publish_third_party writes: the earlier entry as a
+        # directory ``old``, and the kept marker as a FILE holding the tool's name.
         verify = _Verify(monkeypatch, tmp_path)
-        work = verify.third_party / ".ash-third-party-kept"
-        (work / leftover).mkdir(parents=True)
-        (work / leftover / "LICENSE").write_text("stale\n", encoding="utf-8")
+        work = verify.third_party / f"{installer._PUBLISH_WORK_PREFIX}kept"
+        work.mkdir()
+        if leftover == "old":
+            (work / "old").mkdir()
+            (work / "old" / "LICENSE").write_text("stale\n", encoding="utf-8")
+        else:
+            (work / installer._PUBLISH_KEPT_MARKER).write_text(
+                "demo\n", encoding="utf-8"
+            )
 
         problems = verify.run()
 
-        assert any(
-            ".ash-third-party-kept" in p and "did not finish" in p for p in problems
-        ), problems
+        assert any(work.name in p and "did not finish" in p for p in problems), problems
+        assert not (verify.third_party / "index.json").exists()
+
+    def test_the_directory_a_failed_publish_keeps_is_the_one_verify_reports(
+        self, monkeypatch, tmp_path
+    ):
+        """End to end: publish keeps the old entry, and verify finds what it kept."""
+        verify = _Verify(monkeypatch, tmp_path)
+        staged = tmp_path / "staging" / "demo"
+        staged.mkdir(parents=True)
+        (staged / "LICENSE").write_text("new\n", encoding="utf-8")
+        real = os.replace
+
+        def replace(src, dst, *args, **kwargs):
+            if Path(dst) == verify.directory and Path(src).name == "incoming":
+                raise OSError(errno.ENOSPC, "No space left on device")
+            if Path(dst) == verify.directory and Path(src).name == "old":
+                raise OSError(errno.EACCES, "Permission denied")
+            return real(src, dst, *args, **kwargs)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(os, "replace", replace)
+            with pytest.raises(PermissionError):
+                installer.publish_third_party(staged, verify.third_party)
+
+        kept = [
+            p
+            for p in verify.third_party.iterdir()
+            if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
+        ]
+        assert len(kept) == 1, "the work directory holding the old entry was deleted"
+        assert (kept[0] / installer._PUBLISH_KEPT_MARKER).is_file()
+
+        problems = verify.run()
+
+        assert any(kept[0].name in p and "did not finish" in p for p in problems), (
+            problems
+        )
         assert not (verify.third_party / "index.json").exists()
 
     def test_a_work_directory_holding_only_the_new_copy_is_not_a_problem(
