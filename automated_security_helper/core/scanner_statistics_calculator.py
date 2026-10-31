@@ -572,9 +572,18 @@ class ScannerStatisticsCalculator:
         "2.1.0", "runs": [...]}``) beside the executor's ``severity_counts``. Its
         findings are in the merged SARIF, so counting its counts as a dict
         result's would count each one twice.
+
+        A SARIF document is a dict whose ``runs`` is a list and which names its
+        ``version`` or ``$schema``. A scanner's own dict that merely has a ``runs``
+        key (a count, a list of its own entries) is not one, and its counts stay.
         """
         raw_results = report.get("raw_results")
-        return isinstance(raw_results, dict) and "runs" not in raw_results
+        if not isinstance(raw_results, dict):
+            return False
+        looks_like_sarif = isinstance(raw_results.get("runs"), list) and (
+            "version" in raw_results or "$schema" in raw_results
+        )
+        return not looks_like_sarif
 
     @staticmethod
     def _dict_result_counts(

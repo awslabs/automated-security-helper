@@ -345,6 +345,48 @@ class TestTheSarifCompareTakesTheDictCountsBackOut:
         assert stats["bandit"]["total"] == 2
         assert ScannerStatisticsCalculator.verify_sarif_finding_counts(model) is True
 
+    def test_a_scanners_own_dict_with_a_runs_key_keeps_its_counts(self):
+        """A dict result that merely has a ``runs`` key (here a count) is not a
+        SARIF document, so its recorded counts stay in the row: the two SARIF
+        results plus the two counted findings make four."""
+        model = _model(
+            {
+                "bandit": {
+                    "source": _report(
+                        "bandit",
+                        raw_results={"runs": 4, "findings": [{"rule": "R0"}]},
+                        severity_counts={"critical": 1, "medium": 1},
+                    )
+                }
+            }
+        )
+        model.sarif = _sarif("bandit", ["error", "warning"])
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        assert stats["bandit"]["total"] == 4
+        assert ScannerStatisticsCalculator.verify_sarif_finding_counts(model) is True
+
+    def test_a_schema_named_sarif_document_is_still_not_counted_twice(self):
+        """Control: a dict that names its ``$schema`` and holds a ``runs`` list is
+        a SARIF document, so the same counts add nothing."""
+        model = _model(
+            {
+                "bandit": {
+                    "source": _report(
+                        "bandit",
+                        raw_results={"$schema": "sarif-schema", "runs": []},
+                        severity_counts={"critical": 1, "medium": 1},
+                    )
+                }
+            }
+        )
+        model.sarif = _sarif("bandit", ["error", "warning"])
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        assert stats["bandit"]["total"] == 2
+
     def test_a_sarif_result_no_row_accounts_for_is_still_a_mismatch(self):
         """Control: the compare still fails on a real disagreement. A result that
         names no scanner is counted in no row, so the SARIF holds one finding the
