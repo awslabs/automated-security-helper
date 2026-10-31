@@ -567,7 +567,7 @@ def _repository_written_scanner_naming(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(module, "_module_importable", lambda name: True)
     context = _context(tmp_path)
-    (tmp_path / "secret").mkdir()
+    (tmp_path / "secret").mkdir(exist_ok=True)
     (tmp_path / "secret" / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
     (context.source_dir / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
     if config_file:
