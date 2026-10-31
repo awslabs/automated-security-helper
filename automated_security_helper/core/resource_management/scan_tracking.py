@@ -1879,7 +1879,7 @@ def get_scan_progress_info(
                 "scanners_completed": scanners_completed,
                 "total_scanners": len(scanners_completed),
                 "findings_count": _completed_findings_count(
-                    summary_stats, findings, findings_summary
+                    summary_stats, findings_summary
                 ),
                 "findings": findings,
                 "findings_summary": findings_summary,
@@ -1936,7 +1936,6 @@ def _completed_findings_summary(
 
 def _completed_findings_count(
     summary_stats: Dict[str, Any],
-    findings: List[Dict[str, Any]],
     findings_summary: Dict[str, int],
 ) -> int:
     """The non-suppressed findings of a completed scan: SummaryStats' ``total``.
