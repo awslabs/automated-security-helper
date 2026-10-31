@@ -69,6 +69,21 @@ def test_error_text_in_place_of_a_json_document_is_the_error_not_the_report(
     assert "'sarif'" in result.stderr
 
 
+@pytest.mark.parametrize("returned", ["", " \n\t "], ids=["empty", "white-space"])
+def test_a_reporter_that_returns_no_text_is_named_in_the_error(results_dir, returned):
+    """Empty or blank output has no reason to quote; the error ended in a colon
+    with nothing after it."""
+    with patch(SARIF_REPORT, return_value=returned):
+        result = _report(results_dir)
+
+    assert result.exit_code == 1, result.output
+    assert result.stdout == ""
+    assert (
+        "did not produce a JSON document: the reporter returned no text"
+        in result.stderr
+    )
+
+
 PLANTED_SNIPPET = "finding-snippet-planted-for-this-test"
 
 

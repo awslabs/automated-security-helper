@@ -142,10 +142,34 @@ def _is_json_document(content: str) -> bool:
 
 # The JSON formats whose reporter also writes a text document by design
 # (unused-suppressions under output_format markdown): for these a report that is
-# not JSON is the report, not the reporter's error text, so the JSON check the
-# command makes before writing (report_command) is made only when the content
-# reads as a JSON document and then fails to parse.
+# not JSON is the report, not the reporter's error text, when the reporter's
+# configuration asks for the text document, so the JSON check the command makes
+# before writing (report_command) is skipped then (_report_is_json). Under any
+# other setting the report is a JSON document and is checked as one.
 TEXT_OR_JSON_FORMATS = frozenset({"unused-suppressions"})
+
+
+def _report_is_json(report_format: str, reporter_plugin: object) -> bool:
+    """Whether the reporter's report is a JSON document, by what it was built to write.
+
+    A JSON format is, unless its reporter also writes a text document by design
+    (TEXT_OR_JSON_FORMATS) and its configuration asks for that: unused-suppressions
+    under ``output_format: markdown``. The content's first character does not
+    decide it. Markdown can begin with ``[``, a link reference, and was refused as
+    a JSON document that did not parse; JSON-mode error text does not begin with
+    ``{`` and was written as the report, with exit 0.
+    """
+    name = report_format.lower()
+    if name not in JSON_STDOUT_FORMATS:
+        return False
+    if name in TEXT_OR_JSON_FORMATS:
+        options = getattr(getattr(reporter_plugin, "config", None), "options", None)
+        return getattr(options, "output_format", "both") != "markdown"
+    return True
+
+
+# What _write_report is given when its caller has not parsed the report.
+_NOT_PARSED = object()
 
 
 # The longest content of a JSON format that failed the JSON check the error
@@ -166,9 +190,13 @@ def _non_json_report_text(content: str, error: ValueError) -> str:
     and is returned as it is. Everything else is described: a reporter's error
     text never starts with ``{`` or ``[``, so content that does is a document
     that failed to parse, and quoting its first 200 characters would quote the
-    findings in them.
+    findings in them. A reporter that returned nothing, or only white space, has
+    no reason to quote; the text says so, where the error would end in a colon
+    with nothing after it.
     """
     reason = content.strip()
+    if not reason:
+        return "the reporter returned no text"
     if (
         len(reason) <= _QUOTED_REASON_CHARS
         and "\n" not in reason
@@ -439,9 +467,20 @@ def _write_report_checked(content: str, stream: TextIO) -> None:
 
 
 def _write_report(
-    content: str, report_format: str, *, pretty: bool, stream: Optional[TextIO] = None
+    content: str,
+    report_format: str,
+    *,
+    pretty: bool,
+    stream: Optional[TextIO] = None,
+    is_json: Optional[bool] = None,
+    parsed: object = _NOT_PARSED,
 ) -> None:
     """Write a rendered report to *stream* (stdout by default).
+
+    ``is_json`` says whether the report is a JSON document, where the caller
+    knows (``_report_is_json``); left None, the content's first character
+    decides. ``parsed`` is the document the caller already parsed from *content*,
+    so the terminal's indenting does not parse a large report again.
 
     To a regular file (``ash report --format sarif > ash.sarif``) the report is
     the reporter's output, with the bytes the report phase writes to reports/
@@ -488,7 +527,8 @@ def _write_report(
     # not a terminal is never pretty.
     terminal = bool(getattr(stream, "isatty", lambda: False)())
     pretty = pretty and terminal
-    is_json = fmt in JSON_STDOUT_FORMATS and _is_json_document(content)
+    if is_json is None:
+        is_json = fmt in JSON_STDOUT_FORMATS and _is_json_document(content)
     # Through the console's CI-command check, unless the stream checks already.
     report_console = ash_console(
         file=stream, check_commands=not isinstance(stream, CommandSafeStream)
@@ -501,7 +541,9 @@ def _write_report(
         # written as the reporter wrote it, below, as it is to a pipe: the
         # pretty printing is a rendering, never a check a terminal alone fails.
         try:
-            document = json.dumps(json.loads(content), indent=2, ensure_ascii=False)
+            if parsed is _NOT_PARSED:
+                parsed = json.loads(content)
+            document = json.dumps(parsed, indent=2, ensure_ascii=False)
         except ValueError:
             document = None
         if document is not None:
@@ -1068,10 +1110,9 @@ def report_command(
                 report_format,
             )
             raise typer.Exit(1)
-        if report_format.lower() in JSON_STDOUT_FORMATS and (
-            report_format.lower() not in TEXT_OR_JSON_FORMATS
-            or _is_json_document(report_content)
-        ):
+        report_is_json = _report_is_json(report_format, reporter_plugin)
+        parsed_report: object = _NOT_PARSED
+        if report_is_json:
             # A reporter whose report is a JSON document may return its error
             # text in its place when it could not produce one (the cloudwatch-logs
             # reporter did, after a publish that failed its retries), and the
@@ -1082,9 +1123,10 @@ def report_command(
             # error, and the exit says the report was not produced. Content that
             # is long, on more than one line, or shaped like a JSON document is a
             # report, not a reason, and is described, not quoted
-            # (_non_json_report_text).
+            # (_non_json_report_text). The document is parsed here once and handed
+            # to _write_report, which indents it on a terminal.
             try:
-                json.loads(report_content)
+                parsed_report = json.loads(report_content)
             except ValueError as exc:
                 _print_error(
                     "[red]Error: reporter '{}' did not produce a JSON document: "
@@ -1098,6 +1140,8 @@ def report_command(
                 report_content,
                 report_format,
                 pretty=(color and not os.environ.get("NO_COLOR")),
+                is_json=report_is_json,
+                parsed=parsed_report,
             )
         except BrokenPipeError:
             # The reader closed stdout (`ash report | head`): the report was
