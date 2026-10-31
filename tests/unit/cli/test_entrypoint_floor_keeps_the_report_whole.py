@@ -573,13 +573,25 @@ def test_a_front_in_the_middle_of_a_line_is_kept_after_an_earlier_flush():
     assert "##vso[" not in real.getvalue()
 
 
-@pytest.mark.parametrize("piece", ["build #12", "see ## ", "ok #1a", "x#vso"])
+@pytest.mark.parametrize(
+    "piece",
+    [
+        "build #12",
+        "see ## ",
+        "ok #1a",
+        "x#vso",
+        "done #vso",
+        "done ##" + chr(0xE9),
+    ],
+)
 def test_a_flushed_piece_that_is_no_front_of_a_name_is_still_written(piece):
     """The control: a last word that is not hash marks and letters, a piece
-    that ends in a blank, and one mark followed by letters glued to a word
-    ("x#vso" cannot become a `##name[` form) are written at once. A lone "#"
-    ending a piece is a front (the next write may be "#vso["), so it is kept
-    and is not in this list."""
+    that ends in a blank, and one mark followed by letters, glued to a word or
+    after a blank ("x#vso" and "done #vso" cannot become a `##name[` form), are
+    written at once, and so are two marks followed by a letter the reader's
+    pattern does not read (it reads ASCII letters only: "done ##" and e with an
+    acute accent). A lone "#" ending a piece is a front (the next write may be
+    "#vso["), so it is kept and is not in this list."""
     real = io.StringIO()
     shown = entrypoint._ShownLines(real)
 

@@ -578,13 +578,16 @@ class _ShownLines:
         starts with ``:`` or ``#`` and holds no blank: a command's name has none
         (``::warning``, ``##vso``, ``##teamcity``), and the bracket that
         completes the Azure and TeamCity forms can arrive in the next write.
-        Anywhere in a line, a piece whose last word is hash marks followed only
-        by letters (``done ##vso``): Azure and TeamCity read those forms in the
-        middle of a line too. The same when the marks are glued to the text
-        before them (``done x##vso``, ``path/##teamcity``, ``x#`` before
-        ``#vso[``): the reader's pattern has no word boundary, so the front
-        does not have to start a word. A prompt such as ``# Send the report?
-        [y/N] `` ends in a blank and is written."""
+        Anywhere in a line, a piece that ends in two hash marks or more followed
+        only by ASCII letters (``done ##vso``), or in a single mark (the second
+        may be the next write's first): Azure and TeamCity read those forms in
+        the middle of a line too, whether the marks follow a blank or are glued
+        to the text before them (``done x##vso``, ``path/##teamcity``, ``x#``
+        before ``#vso[``): the reader's pattern has no word boundary, so the
+        front does not have to start a word, and it reads ASCII letters only.
+        One mark followed by letters (``done #vso``, ``x#vso``) cannot be
+        finished into a form by what is written next, and a prompt such as ``#
+        Send the report? [y/N] `` ends in a blank: both are written."""
         piece = self._held.lstrip()
         if not piece:
             return False
@@ -593,10 +596,6 @@ class _ShownLines:
             and piece[:1] in (":", "#")
             and not any(character.isspace() for character in piece)
         ):
-            return True
-        last_word = "" if piece[-1].isspace() else piece.split()[-1]
-        name = last_word.lstrip("#")
-        if last_word[:1] == "#" and (not name or name.isalpha()):
             return True
         # The piece's tail, read from the end: letters, then hash marks. Two
         # marks or more with letters after them, or a single mark that ends the
