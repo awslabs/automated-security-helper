@@ -1140,7 +1140,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         timeout = self._effective_scan_timeout()
         deadline = None if timeout is None else _monotonic() + timeout
         try:
-            batches, copied, skipped = self._copy_for_rescan(
+            batches, copied, skipped, named = self._copy_for_rescan(
                 target, relatives, copies_dir, rescan_dir, final_args, deadline
             )
             self._rescan_skipped += skipped
@@ -1173,7 +1173,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             # secrets.
             shutil.rmtree(copies_dir, ignore_errors=True)
         self._plugin_log(
-            f"The scanned tree's {IGNORE_FILE_NAME} names {len(relatives)} file(s), "
+            f"The scanned tree's {IGNORE_FILE_NAME} names {named} file(s), "
             f"{copied} of them read by the directory scan. gitleaks applies it at "
             "the scan root whatever ASH passes, so ASH re-scanned those files and "
             f"reports the {added} finding(s) it dropped. Tune findings with ASH "
@@ -1213,12 +1213,14 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         reports_dir: Path,
         final_args: List[str],
         deadline: Optional[float] = None,
-    ) -> Tuple[List[Tuple[Path, str, Path]], int, int]:
+    ) -> Tuple[List[Tuple[Path, str, Path]], int, int, int]:
         """Copy the named files the directory scan reads; return the runs to make.
 
-        Returns the runs, the number of files copied, and the number of names
-        not checked because ``MAX_RESCAN_FILES`` files, or ``MAX_RESCAN_BYTES``
-        bytes, were copied first. ``deadline`` is the re-scan's shared deadline
+        Returns the runs, the number of files copied, the number of files not
+        checked because ``MAX_RESCAN_FILES`` files, or ``MAX_RESCAN_BYTES``
+        bytes, were copied first, and the number of files the ignore file names
+        (the candidates that reach a file; a name made by a colon split that
+        reaches none is counted nowhere). ``deadline`` is the re-scan's shared deadline
         on ``_monotonic``'s clock; a copy that would start past it raises the
         re-scan's timeout error.
 
@@ -1274,10 +1276,26 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         copied_bytes = 0
         listings: Dict[Path, Set[str]] = {}
         spellings_seen: Set[str] = set()
+
+        def unreached(rest: List[str]) -> int:
+            """How many of the names in ``rest`` reach a file not yet seen.
+
+            A candidate that names no file (``app/x.py:my`` from the colon
+            splits of ``app/x.py:my:rule:4``) is not a file the re-scan missed,
+            so it is not counted.
+            """
+            reached: Set[str] = set()
+            for name in rest:
+                spelled = self._on_disk_spelling(target_abs, name, listings)
+                if (
+                    spelled is not None
+                    and spelled not in spellings_seen
+                    and spelled not in skipped_names
+                ):
+                    reached.add(spelled)
+            return len(reached)
+
         for index, relative in enumerate(relatives):
-            if in_tree + len(itself_names) >= MAX_RESCAN_FILES:
-                not_checked = len(relatives) - index
-                break
             if deadline is not None and _monotonic() >= deadline:
                 raise self._rescan_timeout_error(self._effective_scan_timeout())
             # Only a name the directories list exactly (_on_disk_spelling): the
@@ -1304,6 +1322,13 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             # be read as the ignore file again.
             is_ignore_file = self._is_the_ignore_file(target_abs, relative)
             destination = (self_dir if is_ignore_file else tree_dir) / relative
+            # The limit is tested for a name that reaches a file the re-scan
+            # would copy, after the lookup: a made-up name sorted after the
+            # last real file is not a file left behind, and a tree that names
+            # exactly MAX_RESCAN_FILES real files was re-scanned in full.
+            if in_tree + len(itself_names) >= MAX_RESCAN_FILES:
+                not_checked = 1 + unreached(relatives[index + 1 :])
+                break
             try:
                 handle = open_in_scanned_tree(
                     target_abs / relative, target_abs, allow_hardlinks=True
@@ -1328,7 +1353,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 if copied_bytes + size > MAX_RESCAN_BYTES:
                     # This file and every name after it: the budget is spent,
                     # and the names are reported as not evaluated.
-                    not_checked = len(relatives) - index
+                    not_checked = 1 + unreached(relatives[index + 1 :])
                     break
                 copied_bytes += size
                 try:
@@ -1367,7 +1392,11 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         for number, name in enumerate(itself_names):
             report = "self.sarif" if number == 0 else f"self-{number}.sarif"
             batches.append((self_dir, name, reports_dir / report))
-        return batches, in_tree + len(itself_names), not_checked
+        # The files the ignore file names: the ones the directories list, whether
+        # or not they were copied, and the one the limit stopped at with those
+        # after it (not_checked counts it, and spellings_seen holds it).
+        named = len(spellings_seen) + max(not_checked - 1, 0)
+        return batches, in_tree + len(itself_names), not_checked, named
 
     @staticmethod
     def _on_disk_spelling(

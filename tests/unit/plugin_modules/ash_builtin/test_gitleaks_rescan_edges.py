@@ -201,6 +201,51 @@ def test_names_the_limit_left_unread_fail_the_scan_as_incomplete(
     )
 
 
+def _with_split_only_names(tmp_path, monkeypatch, real: int, limit: int):
+    """A tree of ``real`` files, each named once with a rule id that holds a
+    colon, so the colon splits make a second name per file (``app/f0.py:zz``)
+    that reaches no file and sorts after the real one."""
+    monkeypatch.setattr(module, "MAX_RESCAN_FILES", limit)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
+    source = Path(scanner.context.source_dir)
+    for index in range(real):
+        _write(source, f"app/f{index}.py")
+    (source / ".gitleaksignore").write_text(
+        "".join(f"app/f{index}.py:zz:rule:3\n" for index in range(real))
+    )
+    return scanner, calls, source
+
+
+def test_names_that_reach_no_file_do_not_make_a_complete_scan_incomplete(
+    tmp_path, monkeypatch, caplog
+):
+    """A tree that names exactly the limit of real files was re-scanned in full.
+    The split-only names sorted after them were counted as files left behind, and
+    the scan exited 1 as incomplete."""
+    scanner, calls, source = _with_split_only_names(
+        tmp_path, monkeypatch, real=2, limit=2
+    )
+    with caplog.at_level("INFO"):
+        _add_back(scanner, source, _report(), tmp_path)
+    assert [call["files"] for call in calls] == [["app/f0.py", "app/f1.py"]]
+    assert scanner._rescan_skipped == 0
+    assert "names 2 file(s), 2 of them read by the directory scan" in caplog.text
+
+
+def test_only_real_files_are_counted_as_left_behind(tmp_path, monkeypatch, caplog):
+    scanner, calls, source = _with_split_only_names(
+        tmp_path, monkeypatch, real=3, limit=2
+    )
+    with caplog.at_level("INFO"):
+        _add_back(scanner, source, _report(), tmp_path)
+    assert [call["files"] for call in calls] == [["app/f0.py", "app/f1.py"]]
+    assert scanner._rescan_skipped == 1
+    assert "1 file(s) the scanned tree's .gitleaksignore names were not" in (
+        caplog.text
+    )
+    assert "names 3 file(s), 2 of them read by the directory scan" in caplog.text
+
+
 def test_a_colon_rule_id_entry_is_re_scanned(tmp_path, monkeypatch):
     hidden = _result("app/x.py", "my:rule", 4, column=3)
     scanner, calls = _rescan_harness(tmp_path, monkeypatch, {"app/x.py": [hidden]})
