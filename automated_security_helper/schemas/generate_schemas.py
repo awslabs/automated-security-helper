@@ -63,6 +63,29 @@ def _with_env_reference(json_schema: Any) -> Any:
     return {"anyOf": [json_schema, dict(CONFIG_FILE_REFERENCE_JSON_SCHEMA)]}
 
 
+def _keep_property_names(
+    generator: GenerateJsonSchema, schema: Any, json_schema: Any
+) -> Any:
+    """``json_schema`` of a dict, with its key constraint kept when it is wrapped.
+
+    pydantic describes a dict's keys with ``propertyNames`` only when the key
+    schema is a plain string with constraints or a reference to a definition.
+    Once a generator wraps a fixed-choice or constrained key beside the
+    environment reference (``{"anyOf": [...]}``), the key schema is neither,
+    and pydantic drops it: a dict keyed by platform (opengrep's ``sha256``) then
+    accepts any key in an editor. The wrapped schema is the same hint with the
+    reference admitted, so it goes under ``propertyNames`` as it stands.
+    """
+    keys = schema.get("keys_schema")
+    if keys is None or "propertyNames" in json_schema:
+        return json_schema
+    keys_json = dict(generator.generate_inner(keys))
+    if "anyOf" in keys_json:
+        keys_json.pop("title", None)
+        json_schema["propertyNames"] = keys_json
+    return json_schema
+
+
 class ConfigFileJsonSchema(GenerateJsonSchema):
     """The configuration file's schema, which admits what the loader resolves.
 
@@ -110,6 +133,9 @@ class ConfigFileJsonSchema(GenerateJsonSchema):
 
     def decimal_schema(self, schema: Any) -> Any:
         return _with_env_reference(super().decimal_schema(schema))
+
+    def dict_schema(self, schema: Any) -> Any:
+        return _keep_property_names(self, schema, super().dict_schema(schema))
 
 
 #: The package whose models are the stored configuration, with its subpackages.
@@ -441,6 +467,9 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
 
     def literal_schema(self, schema: Any) -> Any:
         return self._beside_reference(super().literal_schema(schema))
+
+    def dict_schema(self, schema: Any) -> Any:
+        return _keep_property_names(self, schema, super().dict_schema(schema))
 
 
 def _write_if_changed(path: Path, content: str) -> bool:
