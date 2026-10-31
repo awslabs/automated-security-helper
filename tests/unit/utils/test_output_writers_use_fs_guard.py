@@ -1011,6 +1011,48 @@ def test_control_a_name_no_function_declares_global_stays_a_read():
     assert _opens(source) == []
 
 
+def test_an_o_attribute_of_anything_but_os_cannot_be_read():
+    """Only ``os.O_X`` names a flag outright. ``flagset.O_RDONLY`` is whatever
+    ``flagset`` holds, and so is ``getattr(flagset, "O_RDONLY", 0)``; the reader took
+    both for the flag of that name, and the calls passed as reads."""
+    source = (
+        "import os\n"
+        "def emit(path, flagset):\n"
+        "    os.open(path, flagset.O_RDONLY)\n"
+        "    os.open(path, os.O_RDONLY)\n"
+        "    os.open(path, getattr(flagset, 'O_RDONLY', 0))\n"
+        "    os.open(path, getattr(os, 'O_RDONLY', 0))\n"
+    )
+
+    assert _opens(source) == ["os.open", "os.open"]
+
+
+@pytest.mark.parametrize("name", ["O_RDONLY", "O_WRONLY"])
+def test_an_o_name_bound_nowhere_cannot_be_read(name):
+    """A bare ``O_`` name that nothing in the file binds comes from somewhere the
+    reader cannot see (a star import, an injected builtin); it is not the flag of
+    that spelling."""
+    source = f"import os\ndef emit(path):\n    os.open(path, {name})\n"
+
+    assert _opens(source) == ["os.open"]
+
+
+def test_control_an_o_name_is_followed_to_what_binds_it():
+    """``O_CREATE`` is a module alias for a write and ``O_LOOK`` for a read: each is
+    read through its binding, not as a flag of that spelling."""
+    source = (
+        "import os\n"
+        "O_CREATE = os.O_WRONLY | os.O_CREAT\n"
+        "O_LOOK = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)\n"
+        "def emit(path):\n"
+        "    os.open(path, O_CREATE)\n"
+        "def look(path):\n"
+        "    os.open(path, O_LOOK)\n"
+    )
+
+    assert write_sites(source, "probe.py") == [("probe.py", "emit", "os.open")]
+
+
 def test_every_write_in_the_package_is_guarded_or_listed():
     found = _package_sites()
     listed = Counter()
