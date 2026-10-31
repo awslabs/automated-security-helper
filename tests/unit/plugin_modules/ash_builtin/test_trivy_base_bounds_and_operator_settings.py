@@ -742,6 +742,35 @@ def test_a_filtering_variable_set_to_false_is_not_a_filter(tmp_path, spelling):
     assert not [m for m in messages if "restrict" in m], messages
 
 
+@pytest.mark.parametrize("spelling", ["no", "NO", "off", "n", "yes", "on", "2", "tRuE"])
+def test_a_spelling_trivy_does_not_read_as_true_is_not_a_filter(tmp_path, spelling):
+    """trivy reads a boolean setting through a conversion that accepts only the
+    spellings ``strconv.ParseBool`` does as true and reads every other value as
+    false: ``TRIVY_IGNORE_UNFIXED=no`` filters nothing, so the warning that the
+    report is restricted would be false. ``yes`` and ``on`` are false too."""
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_IGNORE_UNFIXED": spelling}
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        scanner._process_config_options()
+
+    assert not [m for m in messages if "restrict" in m], messages
+
+
+@pytest.mark.parametrize("spelling", ["1", "t", "T", "TRUE", "true", "True"])
+def test_every_spelling_trivy_reads_as_true_is_a_filter(tmp_path, spelling):
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_IGNORE_UNFIXED": spelling}
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        scanner._process_config_options()
+
+    (warning,) = [m for m in messages if "restrict" in m]
+    assert "TRIVY_IGNORE_UNFIXED is set" in warning
+
+
 def test_control_a_filtering_variable_set_to_true_or_a_value_is_a_filter(tmp_path):
     scanner = _repo_scanner(tmp_path)
     scanner.extra_env = {"TRIVY_IGNORE_UNFIXED": "true", "TRIVY_PKG_TYPES": "os"}

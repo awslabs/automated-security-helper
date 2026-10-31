@@ -306,10 +306,11 @@ OUTPUT_RESTRICTING_TRIVY_ENV = (
     "TRIVY_IGNORED_LICENSES",
 )
 
-#: The spellings Go's strconv.ParseBool reads as false, lowercased. A boolean
-#: filtering variable set to one of them turns its filter off and restricts
-#: nothing.
-_FALSE_SPELLINGS = frozenset({"0", "f", "false"})
+#: The spellings the conversion trivy applies to a boolean setting reads as true:
+#: the ones strconv.ParseBool accepts. Every other value, ``no`` and ``on``
+#: included, is read as false. A boolean filtering variable set to anything else
+#: turns its filter off and restricts nothing.
+_TRUE_SPELLINGS = frozenset({"1", "t", "T", "TRUE", "true", "True"})
 
 #: The filtering variables trivy reads as booleans, the only ones a spelling of
 #: false turns off. The others are lists and paths, which trivy reads literally:
@@ -320,9 +321,11 @@ _BOOLEAN_FILTER_VARIABLES = frozenset({"TRIVY_IGNORE_UNFIXED"})
 def _restricting_value(name: str, value: Optional[str]) -> bool:
     """Whether ``value``, the filtering TRIVY_ variable ``name``'s, turns its filter on.
 
-    Set and not blank; for a boolean variable, also not a spelling of false:
-    ``TRIVY_IGNORE_UNFIXED=false`` is the default written out, and warning about
-    it would train a reader to ignore the warning, as grype's config-key warning
+    Set and not blank; for a boolean variable, also a spelling trivy reads as
+    true (``_TRUE_SPELLINGS``). ``TRIVY_IGNORE_UNFIXED=false`` is the default
+    written out, and ``=no`` or ``=off`` is read as false the same way, since
+    only the spellings strconv.ParseBool accepts are true. Warning about either
+    would train a reader to ignore the warning, as grype's config-key warning
     reads a falsy key. A list or path variable has no false spelling: ``0`` and
     ``false`` are values trivy matches literally.
     """
@@ -332,7 +335,7 @@ def _restricting_value(name: str, value: Optional[str]) -> bool:
     if not text:
         return False
     if name in _BOOLEAN_FILTER_VARIABLES:
-        return text.lower() not in _FALSE_SPELLINGS
+        return text in _TRUE_SPELLINGS
     return True
 
 
