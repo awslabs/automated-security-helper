@@ -129,6 +129,26 @@ class TestSeverityCountKeysAreMatchedByName:
         assert row.severity_counts.low == 2
         assert row.finding_count == 3
 
+    def test_two_spellings_of_one_level_are_summed(self):
+        """Normalizing the key then assigning would keep the last spelling and drop
+        the other's count: a finding gone, and a row that could grade PASSED."""
+        counts = _severity_counts_from_dict({"HIGH": 1, "high": 2, " High ": 4})
+
+        assert counts.high == 7
+        assert counts.total == 7
+
+    def test_the_total_key_is_dropped_whatever_its_case(self):
+        """``total`` is the model's own sum. Compared before the key is lowercased
+        and stripped, ``Total`` would be counted as a level it does not name (info)
+        and inflate finding_count by the tool's own total."""
+        counts = _severity_counts_from_dict(
+            {"Total": 9, "TOTAL": 9, " total ": 9, "high": 1}
+        )
+
+        assert counts.high == 1
+        assert counts.info == 0
+        assert counts.total == 1
+
     def test_a_key_that_names_no_severity_counts_as_info(self):
         """A tool's own vocabulary (grype's ``negligible``) is counted at the lowest
         level, as a findings-list entry with an unknown severity is, so
