@@ -1089,9 +1089,25 @@ def _bound_config_paths(
         if state is None or state.config_path is None:
             return None, None
         config_path, trusted = state.config_path, state.trusted_config_path
-    if Path(config_path).is_file() and (trusted is None or Path(trusted).is_file()):
+    if _both_present(config_path, trusted):
         return config_path, trusted
     return _rematerialize_binding(sid)
+
+
+def _both_present(config_path: str, trusted_config_path: Optional[str]) -> bool:
+    """Whether a binding's recorded files are on disk (the trusted one, if any)."""
+    return Path(config_path).is_file() and (
+        trusted_config_path is None or Path(trusted_config_path).is_file()
+    )
+
+
+def _profile_no_longer_registered(profile_name: str) -> "BoundProfileUnavailableError":
+    """The refusal for a bound profile whose registration and file are both gone."""
+    return BoundProfileUnavailableError(
+        f"this session's bound profile {profile_name!r} is no longer "
+        "registered, and its materialized config is gone, so the scan cannot "
+        "run under it. Bind a registered profile with select_profile."
+    )
 
 
 def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
@@ -1105,7 +1121,8 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
     and is refused with ``SessionWorkspaceBusyError`` while one holds the
     session. The new paths are recorded on the binding that was read, by
     identity: a rebind meanwhile, to the same profile with another patch
-    included, keeps its own paths.
+    included, keeps its own paths; when its files are gone as well, it is
+    written again from its own profile.
     """
     from automated_security_helper.cli.mcp.sessions import writing_session_state
 
@@ -1117,11 +1134,7 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
         patched = state.bound_config if state.client_changed else None
     entry = get_profile_registry().get(profile_name)
     if entry is None:
-        raise BoundProfileUnavailableError(
-            f"this session's bound profile {profile_name!r} is no longer "
-            "registered, and its materialized config is gone, so the scan cannot "
-            "run under it. Bind a registered profile with select_profile."
-        )
+        raise _profile_no_longer_registered(profile_name)
     # The hold is taken outside the try: its own refusal is a RuntimeError too,
     # and inside it would be reported as a profile that cannot be written.
     with writing_session_state(sid), binding_writes(sid):
@@ -1130,13 +1143,30 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
         # here has written its own files and recorded its own paths, and
         # writing the binding read above would put that older profile's files
         # under the newer binding (both files present, so no later read
-        # repairs them). The newer binding's paths are the answer then.
+        # repairs them). The newer binding is the answer then, and not
+        # unchecked: its files can be gone too (a clear_source between its
+        # select_profile and here), and a path to a file that is not there
+        # read as "config not found". It is rewritten from itself, under the
+        # lock no other bind can take meanwhile.
+        adopted = False
         with _session_lock:
             current = _session_state.get(sid)
             if current is not state:
                 if current is None or current.config_path is None:
                     return None, None
-                return current.config_path, current.trusted_config_path
+                if _both_present(current.config_path, current.trusted_config_path):
+                    return current.config_path, current.trusted_config_path
+                if current.profile_name is None or current.bound_config is None:
+                    # Not a profile binding: nothing to write it again from.
+                    return current.config_path, current.trusted_config_path
+                state = current
+                profile_name = current.profile_name
+                patched = current.bound_config if current.client_changed else None
+                adopted = True
+        if adopted:
+            entry = get_profile_registry().get(profile_name)
+            if entry is None:
+                raise _profile_no_longer_registered(profile_name)
         try:
             config_path, trusted = materialize_session_binding(
                 sid, entry.config, patched
