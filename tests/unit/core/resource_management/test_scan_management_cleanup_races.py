@@ -56,8 +56,9 @@ def registry():
     registry = MagicMock(spec=ScanRegistry)
     registry.cleanup_scan.return_value = True
     registry.cancel_scan.return_value = True
-    # The real method runs the remover under the registry lock unless another
-    # scan holds the directory; the double admits by default and runs it.
+    # The real method decides under the registry lock and runs the remover off
+    # it, unless another scan holds the directory; the double admits by default
+    # and runs it.
     registry.remove_output_of_scan.side_effect = lambda entry, remover: (
         None,
         remover(),
@@ -208,10 +209,8 @@ class TestOutputSharedWithAnotherScanIsKept:
         output = _output_of(entry)
         registry.get_scan.return_value = entry
         registry.remove_output_of_scan.side_effect = lambda entry, remover: (
-            (
-                "another scan of the same directory is running or stopping and "
-                "shares this output directory"
-            ),
+            # The reason the real remove_output_of_scan gives for this case.
+            ("another scan is running or stopping and shares this output directory"),
             False,
         )
 
@@ -221,7 +220,7 @@ class TestOutputSharedWithAnotherScanIsKept:
         assert result["success"] is True
         assert result["removed_from_registry"] is True
         assert result["removed_output"] is False
-        assert "another scan of the same directory" in result["output_dir_error"]
+        assert "shares this output directory" in result["output_dir_error"]
         assert output.exists()
         registry.remove_output_of_scan.assert_called_once()
         assert registry.remove_output_of_scan.call_args.args[0] is entry
@@ -241,8 +240,9 @@ class TestOutputSharedWithAnotherScanIsKept:
 
     def test_the_delete_runs_inside_the_registrys_decision(self, registry, tmp_path):
         """The check and the delete are one call on the registry, so a scan
-        registered between them waits on the registry lock instead of losing
-        its output; the remover is what the registry runs, not the caller."""
+        registered between them waits on the entry's removal mark instead of
+        losing its output; the remover is what the registry runs, not the
+        caller."""
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
         output = _output_of(entry)
         registry.get_scan.return_value = entry
