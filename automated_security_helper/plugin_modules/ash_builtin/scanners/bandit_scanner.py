@@ -1945,6 +1945,21 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             return
         if scanned:
             self.targets_attempted = scanned
+            if skipped_all:
+                # A target of which bandit could parse nothing is an error
+                # below; one where it parsed some passed with no word about the
+                # rest, so the two cases were told differently. The notices
+                # reach the SARIF only, and nothing else names the files.
+                example = sorted(skipped_all)[0]
+                ASH_LOGGER.warning(
+                    f"bandit could not parse {len(skipped_all)} Python file"
+                    f"{'' if len(skipped_all) == 1 else 's'} under "
+                    f"{Path(target).as_posix()} (for example {example!r}) and did "
+                    f"not scan {'it' if len(skipped_all) == 1 else 'them'}; "
+                    f"{scanned} other file{'' if scanned == 1 else 's'} "
+                    f"{'was' if scanned == 1 else 'were'} scanned.",
+                    extra=NO_MARKUP,
+                )
             return
         prefix = "--exclude="
         entries = [

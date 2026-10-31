@@ -677,6 +677,42 @@ def test_a_file_bandit_could_not_parse_is_not_counted_as_scanned(tmp_path):
     assert scanner.targets_attempted == 1
 
 
+def test_a_target_with_some_unparseable_files_says_how_many(tmp_path, caplog):
+    """A target of which bandit parsed nothing is an error; one where it parsed a
+    file and could not parse the rest passed with no word anywhere but the
+    SARIF, so the two cases were reported differently."""
+    source = _tree(tmp_path, ["a.py", "b.py", "c.py"])
+    scanner = _scanner(source, tmp_path)
+
+    with caplog.at_level(logging.WARNING):
+        scanner._record_scanned_files(
+            _report(source, ["c.py"], ["a.py", "b.py"]), [], source
+        )
+
+    assert scanner.targets_attempted == 1
+    told = [
+        record.getMessage()
+        for record in caplog.records
+        if "could not parse 2 Python files" in record.getMessage()
+    ]
+    assert len(told) == 1, [record.getMessage() for record in caplog.records]
+    assert "1 other file was scanned" in told[0]
+    assert f"{source.as_posix()}/a.py" in told[0]
+
+
+def test_a_target_whose_files_all_parsed_draws_no_such_warning(tmp_path, caplog):
+    source = _tree(tmp_path, ["a.py", "b.py"])
+    scanner = _scanner(source, tmp_path)
+
+    with caplog.at_level(logging.WARNING):
+        scanner._record_scanned_files(_report(source, ["a.py", "b.py"], []), [], source)
+
+    assert scanner.targets_attempted == 2
+    assert not any(
+        "could not parse" in record.getMessage() for record in caplog.records
+    )
+
+
 def test_a_target_whose_every_file_failed_to_parse_is_not_passed(tmp_path):
     """The error names the cause: the files bandit could not parse, with an
     example. It said only that they were "not excluded", which sent the
