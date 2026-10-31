@@ -79,12 +79,15 @@ _FALLBACK_VULNERABILITY_DESC = "Error processing vulnerability details"
 CONVERSION_SHORTFALL_LABEL = "ash_row_type:conversion_shortfall"
 
 #: The fixed part of the shortfall record's identity. Its ``finding_info.uid``
-#: is derived (:func:`_finding_uid`) from this and the scanned project's name,
-#: so a SIEM deduplicates the record across runs of one project and keeps two
-#: projects' records apart. The uid was this string itself for every scan and
-#: repository, so a SIEM that deduplicates on the uid merged unrelated
-#: repositories' shortfall records into one, which a later clean run of any of
-#: them could never close.
+#: is derived (:func:`_finding_uid`) from this and the scanned project's
+#: configured name, so a SIEM deduplicates the record across runs of one named
+#: project and keeps differently named projects' records apart. The uid was
+#: this string itself for every scan, so a SIEM that deduplicates on the uid
+#: merged unrelated scans' shortfall records into one, which a later clean run
+#: of any of them could never close. The name is the only identity the report
+#: model carries: scans that keep the default project name share one record,
+#: so set ``project_name`` in each repository's configuration to keep their
+#: records apart.
 CONVERSION_SHORTFALL_UID = "ash-ocsf-conversion-shortfall"
 
 #: Splits a location uri on either separator: a Windows scanner can write a
@@ -225,9 +228,13 @@ def _identity_part(value: Any) -> str:
 
 
 def _scan_identity(model: Any) -> str:
-    """The name of the scanned project: the report metadata's, else the
-    configuration's, else "". Every read is guarded; a model this cannot read
-    still gets a shortfall record, one shared by every such scan."""
+    """The configured name of the scanned project: the report metadata's, else
+    the configuration's, else "". Every read is guarded; a model this cannot
+    read still gets a shortfall record, one shared by every such scan.
+
+    The name is all the report model records of what was scanned (it holds no
+    source directory or repository address), and its default is the same for
+    every repository, so scans that keep the default share this identity."""
     for holder in (
         getattr(model, "metadata", None),
         getattr(model, "ash_config", None),
@@ -1101,9 +1108,11 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         *missing* results were converted by neither the builder nor its fallback,
         or failed to serialize, and are absent; *degraded* records are present
         but built by the fallback (:data:`DEGRADED_FINDING_LABEL`).
-        *scan_identity* names the scanned project (:func:`_scan_identity`), and
-        the record's uid is derived from it, so one project's record is the
-        same across its runs and distinct from another's. Without this
+        *scan_identity* is the scanned project's configured name
+        (:func:`_scan_identity`), and the record's uid is derived from it, so
+        a project's record is the same across its runs and distinct from that
+        of a project with another name; scans that keep the default name share
+        one record. Without this
         record the array was shorter than the scan's findings and nothing in the
         file said so; the log named each one, and nothing downstream reads the
         log. Shaped like a skipped-project record: ``status_id`` 99 with

@@ -24,8 +24,9 @@
   array is incomplete" for an array that held every finding and only carried
   degraded records; it names the counts that are not zero.
 * The shortfall record's uid was one fixed string for every scan and
-  repository, so a SIEM deduplicating on it merged unrelated projects' records;
-  it is derived from the scanned project's name.
+  repository, so a SIEM deduplicating on it merged unrelated scans' records;
+  it is derived from the scanned project's configured name, so scans that keep
+  the default name still share one record.
 * The error response's failed count left out the results the builder dropped
   when every record failed to serialize, and the catch-all response counted
   records that never reached the file as processed.
@@ -423,7 +424,9 @@ class TestShortfalls:
         assert "1 record(s) were built by the fallback" in shortfall["status_detail"]
 
     @staticmethod
-    def _shortfall_uid_for(reporter, monkeypatch, project_name: str) -> str:
+    def _shortfall_uid_for(
+        reporter, monkeypatch, project_name: str, description: str = ""
+    ) -> str:
         original = OcsfReporter._create_vulnerability_finding
 
         def flaky(self, result, metadata, current_time_ms, shared_id=None, **kw):
@@ -437,14 +440,18 @@ class TestShortfalls:
             Result(ruleId="FINE", level=Level.error, message=Message(text="y")),
         )
         model.metadata.project_name = project_name
+        if description:
+            model.description = description
         payload = json.loads(reporter.report(model))
         shortfall = payload[-1]
         assert CONVERSION_SHORTFALL_LABEL in shortfall["metadata"]["labels"]
         return shortfall["finding_info"]["uid"]
 
     def test_the_shortfall_uid_is_one_per_project(self, reporter, monkeypatch):
-        """A fixed uid for every scan merged unrelated projects' records in a
-        SIEM that deduplicates on it, and a clean run of one never closed it."""
+        """A fixed uid for every scan merged unrelated scans' records in a SIEM
+        that deduplicates on it, and a clean run of one never closed it. The uid
+        follows the configured project name, so differently named projects keep
+        their records apart."""
         alpha = self._shortfall_uid_for(reporter, monkeypatch, "alpha")
         alpha_again = self._shortfall_uid_for(reporter, monkeypatch, "alpha")
         beta = self._shortfall_uid_for(reporter, monkeypatch, "beta")
@@ -453,6 +460,23 @@ class TestShortfalls:
         assert alpha != beta
         uuid.UUID(alpha)
         uuid.UUID(beta)
+
+    def test_scans_that_keep_the_default_project_name_share_one_record(
+        self, reporter, monkeypatch
+    ):
+        """The project name is the only identity the report model carries, and
+        its default is the same for every repository. Two scans that keep it get
+        the same uid whatever else differs; a repository that needs its own
+        record sets ``project_name``. This pins the limit the module comment
+        states, so a change to it is made on purpose."""
+        first = self._shortfall_uid_for(
+            reporter, monkeypatch, "ash-scan", description="first repository"
+        )
+        second = self._shortfall_uid_for(
+            reporter, monkeypatch, "ash-scan", description="second repository"
+        )
+
+        assert first == second
 
     def test_a_shortfall_with_both_counts_names_both(self, reporter, metadata):
         record = reporter._create_shortfall_finding(2, 1, metadata, _now_ms())
