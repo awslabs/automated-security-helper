@@ -18192,7 +18192,7 @@ _REPORT_LOOKS_IN = (
 #: read-results.md on ``ash report`` with no results file to read.
 _REPORT_NO_RESULTS = (
     "A missing results file prints `No scan results found:` with the paths it checked, "
-    "and exits 5."
+    "and exits 1."
 )
 
 #: read-results.md on which paths that message names.
@@ -18342,11 +18342,18 @@ _REPORT_REFUSES_A_FILE_OR_A_NUL = (
     "and a path the system cannot look up, such as one holding a NUL character, "
     "`Output directory is not a valid path:`. None of these refusals creates anything."
 )
+#: exit-codes.md (ash report), the code 1 row: no results is a state problem, the
+#: code ``--use-existing`` gives a scan for the same reason, not a usage error.
+_REPORT_NO_RESULTS_CODE_1_ROW = (
+    "| 1 | No results to report on (no `ash_aggregated_results.json` in any of the "
+    "places an output directory is searched, and an output directory under a "
+    "directory ASH cannot search counts as one with none; nothing is created, and "
+    "the same code `--use-existing` gives a scan for the same reason);"
+)
 _REPORT_NO_RESULTS_ROWS = [
     (
-        "| 5 | No results to report on, or a results file in more than one of the places "
-        "an output directory is searched (nothing is created, and an output directory "
-        "under a directory ASH cannot search counts as one with no results);"
+        "| 5 | A results file in more than one of the places "
+        "an output directory is searched (nothing is created);"
     ),
     (
         "an output directory that exists but cannot be entered (`Output directory "
@@ -18397,7 +18404,7 @@ def _without_search_permission(directory: Path) -> Iterator[None]:
     ],
 )
 @pytest.mark.integration
-def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_5(
+def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_1(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
 ) -> None:
     """read-results.md (Print a report in the terminal with ``ash report``), and
@@ -18407,7 +18414,10 @@ def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_5(
     output directory named, with ``--output-dir`` naming an empty directory, one that
     does not exist, or (where the search bit holds) one under a directory without
     search permission, and with ``ASH_OUTPUT_DIR`` naming one that does not exist.
-    Each exits 5. With no output directory named it prints ``No scan results found:``,
+    Each exits 1, the code the page gives for no results to report on (a state
+    problem, the same code ``--use-existing`` gives a scan), not the usage error 5
+    the page gives a results file found in more than one place. With no output
+    directory named it prints ``No scan results found:``,
     ``.ash/ash_output/ash_aggregated_results.json`` under the working directory in
     full, and ``does not exist``, and names neither of the other two files an output
     directory is searched for. Otherwise it prints ``none of`` the three files the
@@ -18418,7 +18428,7 @@ def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_5(
     assert_on_page(READ_RESULTS, _REPORT_NO_RESULTS_NAMES)
     assert_on_page(READ_RESULTS, _REPORT_LOOKS_IN)
     assert_on_page(READ_RESULTS, _REPORT_CREATES_NOTHING)
-    assert_on_page(EXIT_CODES, _REPORT_NO_RESULTS_ROWS[0])
+    assert_on_page(EXIT_CODES, _REPORT_NO_RESULTS_CODE_1_ROW)
     monkeypatch.delenv("ASH_OUTPUT_DIR", raising=False)
     cwd = tmp_path / "work"
     cwd.mkdir()
@@ -18450,7 +18460,7 @@ def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_5(
 
     shown = result.stdout + result.stderr
     after = _tree_entries(tmp_path)
-    assert result.returncode == 5, _output_tail(result)
+    assert result.returncode == 1, _output_tail(result)
     assert set(after) == set(before), set(after) ^ set(before)
     searched = _results_files_looked_for(output_dir)
     if where == "working-directory":
@@ -18482,7 +18492,7 @@ def test_ash_report_refuses_an_output_directory_it_cannot_enter_with_exit_5(
     permission, given relative to the working directory or as an absolute path, where
     the search bit holds. It must exit 5 and print ``Output directory cannot be
     entered:`` with the path as given, and create nothing. The control is the same
-    directory with search permission: it is no refusal, and the run exits 5 for its
+    directory with search permission: it is no refusal, and the run exits 1 for its
     missing results, saying so.
     """
     assert_on_page(READ_RESULTS, _REPORT_REFUSES_AN_UNENTERABLE_DIR)
@@ -18504,8 +18514,11 @@ def test_ash_report_refuses_an_output_directory_it_cannot_enter_with_exit_5(
     shown = result.stdout + result.stderr
     after = _tree_entries(tmp_path)
     assert set(after) == set(before), set(after) ^ set(before)
-    assert result.returncode == 5, _output_tail(result)
-    if given == "control-an-enterable-directory":
+    control = given == "control-an-enterable-directory"
+    # The control is no refusal: its missing results exit 1, the code the page gives
+    # for no results to report on.
+    assert result.returncode == (1 if control else 5), _output_tail(result)
+    if control:
         assert "No scan results found: none of " in shown, _output_tail(result)
         assert "cannot be entered" not in shown, _output_tail(result)
         return
@@ -18528,7 +18541,7 @@ def test_ash_report_refuses_a_file_or_a_nul_as_output_directory_with_exit_5(
     since no command line can carry one. Each must exit 5, print its refusal with the
     path as given (the NUL shown as ``\\x00``, never written raw), print no
     ``No scan results found``, and create nothing. The control names a directory: it is
-    no refusal, and the run exits 5 for its missing results, saying so.
+    no refusal, and the run exits 1 for its missing results, saying so.
     """
     assert_on_page(READ_RESULTS, _REPORT_REFUSES_A_FILE_OR_A_NUL)
     assert_on_page(EXIT_CODES, _REPORT_NO_RESULTS_ROWS[2])
@@ -18557,9 +18570,12 @@ def test_ash_report_refuses_a_file_or_a_nul_as_output_directory_with_exit_5(
     shown = result.stdout + result.stderr
     after = _tree_entries(tmp_path)
     assert set(after) == set(before), set(after) ^ set(before)
-    assert result.returncode == 5, _output_tail(result)
+    control = given == "control-a-directory"
+    # The control is no refusal: its missing results exit 1, the code the page gives
+    # for no results to report on.
+    assert result.returncode == (1 if control else 5), _output_tail(result)
     assert "\x00" not in shown, _output_tail(result)
-    if given == "control-a-directory":
+    if control:
         assert "No scan results found: none of " in shown, _output_tail(result)
         assert "Output directory is not" not in shown, _output_tail(result)
         return
