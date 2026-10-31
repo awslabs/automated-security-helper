@@ -75,6 +75,17 @@ LAYOUT_HELPERS = [HELPERS[0], HELPERS[-1]]
 NESTING_HELPERS = HELPERS[1:-1]
 
 
+@pytest.fixture(autouse=True)
+def _fresh_core_worktree_reads(monkeypatch):
+    """Start each test with no ``core.worktree`` answer remembered.
+
+    The read is kept per git directory for the run, so a test that exports a git
+    directory another test already asked about would not start the git it is
+    written to observe. A fresh table per test keeps the argv assertions here
+    independent of the order the tests run in."""
+    monkeypatch.setattr(gss, "_core_worktrees", {})
+
+
 @pytest.fixture
 def recorded(monkeypatch):
     """Record each ``subprocess.run`` call instead of starting git."""
