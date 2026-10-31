@@ -25,7 +25,7 @@ import os
 import signal
 import subprocess
 import threading
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import pytest
 
@@ -81,6 +81,10 @@ class _Stops:
 
     def __init__(self) -> None:
         self.stopped: List[Tuple[str, object]] = []
+        #: The group registry as it stood each time the child was to be ended:
+        #: after the reap it reads empty whether the group was recorded and
+        #: forgotten or never recorded, so only this read tells the two apart.
+        self.registered: List[Dict[int, object]] = []
 
 
 @pytest.fixture
@@ -93,13 +97,12 @@ def stops(monkeypatch):
     recorded = _Stops()
     monkeypatch.setattr(subprocess_utils, "_RUNNING_GROUPS", {})
     monkeypatch.setattr(subprocess_utils, "_SPAWNS_STARTING", 0)
-    monkeypatch.setattr(
-        subprocess_utils,
-        "_stop_child",
-        lambda args, process, stop, grace, prompt: recorded.stopped.append(
-            (stop.__name__, process)
-        ),
-    )
+
+    def record_the_ending(args, process, how, grace, prompt) -> None:
+        recorded.stopped.append((how.__name__, process))
+        recorded.registered.append(dict(subprocess_utils._RUNNING_GROUPS))
+
+    monkeypatch.setattr(subprocess_utils, "_stop_child", record_the_ending)
     # The stand-in child has no process, so the real question (os.getpgid on its
     # pid) could only fail, and a failure reads as "end the group as well"; the
     # path without a group of its own is pinned on a child that leads none.
@@ -157,6 +160,7 @@ def test_run_cancellable_stops_a_child_whose_start_a_ctrl_c_interrupted(
     # The whole group, by the tree stop; the record the child was given before
     # the release is dropped by the reap.
     assert stops.stopped == [("_stop_tree", child)]
+    assert stops.registered == [{child.pid: child}], "the group was not recorded"
     assert "communicate" not in child.calls, "the Ctrl-C was raised after the wait"
     assert subprocess_utils._RUNNING_GROUPS == {}
     assert subprocess_utils._SPAWNS_STARTING == starting, "the start count was kept"
