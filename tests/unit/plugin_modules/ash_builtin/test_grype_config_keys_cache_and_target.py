@@ -221,6 +221,32 @@ def test_a_config_named_with_windows_separators_is_redacted(monkeypatch):
     assert "zz-grype" not in text_without_values(named, needles)
 
 
+@pytest.mark.parametrize(
+    ("configured", "printed"),
+    [
+        ("cfg\\.\\zz-grype.yaml", "cfg\\zz-grype.yaml"),
+        ("cfg\\\\zz-grype.yaml", "cfg\\zz-grype.yaml"),
+        (".\\zz-grype.yaml", "zz-grype.yaml"),
+    ],
+)
+def test_a_config_spelled_with_backslashes_is_respelled_for_redaction(
+    monkeypatch, configured, printed
+):
+    """On Windows a value written with backslashes is also collapsed by Path()
+    (a "." segment, a doubled separator), and the warnings print that spelling,
+    so it has to be a needle although the value holds no forward slash."""
+    from automated_security_helper.utils.error_text import text_without_values
+
+    monkeypatch.setattr(grype_scanner, "Path", PureWindowsPath)
+
+    needles = grype_scanner._with_path_spellings([configured])
+    named = f"The grype config at {PureWindowsPath(configured)} sets only-fixed."
+
+    assert printed in needles
+    assert "zz-grype" in named
+    assert "zz-grype" not in text_without_values(named, needles)
+
+
 def _symlinked_source_context(root: Path) -> tuple[PluginContext, Path]:
     """A context whose source directory is a link to the real repository, as a
     macOS ``/var`` temporary directory or a symlinked CI workspace is."""
