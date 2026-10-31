@@ -238,12 +238,21 @@ class TestTheHtmlReportShowsIt:
     def test_a_report_without_one_has_no_such_tile_or_status(
         self, tmp_path, test_plugin_context
     ):
-        """The control: the page is what it was when no finding is left out."""
+        """The control: the page is what it was when no finding is left out.
+
+        The masthead tile (``_format_policy_not_gating_tile``) and the card
+        label are rendered only for a finding the outcome left out, so neither
+        appears here. The scope menu's "Not gating" choice is static in the
+        template (it is listed whether or not such a finding exists), so the
+        bare words are not the contract: the tile, the card label and the
+        card status are.
+        """
         model = _model(tmp_path, [_low_ordinary_finding()], policy_scanners_gate=False)
 
         document = HtmlReporter(context=test_plugin_context).report(model)
 
-        assert "Not gating" not in document
+        assert "<dt>Not gating</dt>" not in document
+        assert "Not gating (workspace policy)" not in document
         assert 'data-status="policy-not-gating"' not in document
         assert _card_statuses(document) == {"PLAIN-LOW": "below-threshold"}
 
@@ -253,7 +262,10 @@ class TestTheHtmlReportShowsIt:
         document = HtmlReporter(context=test_plugin_context).report(gating_model)
 
         assert _card_statuses(document)["POLICY-CRIT"] == "actionable"
-        assert "Not gating" not in document
+        # No tile and no card label: the finding gates, so it is not left out.
+        # (The scope menu's static "Not gating" choice is not part of this.)
+        assert "<dt>Not gating</dt>" not in document
+        assert "Not gating (workspace policy)" not in document
 
 
 class TestTheTextAndMarkdownSummariesCountItApart:
