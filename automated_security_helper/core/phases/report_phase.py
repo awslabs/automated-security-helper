@@ -441,7 +441,10 @@ class ReportPhase(EnginePhase):
 
     @staticmethod
     def _warn_if_an_earlier_report_remains(
-        report_dir: Path, plugin_instance: object, display_name: str
+        report_dir: Path,
+        plugin_instance: object,
+        display_name: str,
+        written: Collection[str] = (),
     ) -> None:
         """Say so when a reporter wrote nothing and an earlier run's file is there.
 
@@ -450,11 +453,17 @@ class ReportPhase(EnginePhase):
         wrote (a report over existing results keeps the directory). That file is
         not this run's report, and nothing else said so. It is left in place: it
         may be the only copy. Never raises.
+
+        *written* names the report files this run has written. A reporter that
+        raised after its own file was written (in the progress update that follows
+        the write, say) left this run's file there, and it is not from an earlier
+        run.
         """
         try:
-            earlier = confined_report_path(
-                report_dir, reporter_file_name(plugin_instance)
-            )
+            file_name = reporter_file_name(plugin_instance)
+            if file_name in written:
+                return
+            earlier = confined_report_path(report_dir, file_name)
             if earlier is not None and os.path.lexists(earlier):
                 ASH_LOGGER.warning(
                     f"Reporter {display_name} wrote no report this run; "
@@ -1083,7 +1092,10 @@ class ReportPhase(EnginePhase):
                         f"{traceback_text(values=environment_values)}"
                     )
                     self._warn_if_an_earlier_report_remains(
-                        report_dir, plugin_instance, display_name
+                        report_dir,
+                        plugin_instance,
+                        display_name,
+                        [name for name, _format in written_files],
                     )
 
                     # The same ERROR event the None-returning arm sends: a reporter
