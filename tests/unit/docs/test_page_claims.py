@@ -10275,10 +10275,11 @@ def test_a_sessions_profile_copy_holds_the_reference_and_its_scan_the_value(
 _BUSY_WHILE_THE_SWEEP_REMOVES = (
     "`set_source_zip_chunk` and `select_profile` are refused with `error_type` "
     "`session_workspace_busy` while an HTTP server removes the workspace of a session for "
-    "being unused longer than `--session-workspace-ttl`. The upload and the bound profile "
-    "are removed with the workspace, so the client selects the profile again and sends "
-    "the upload again from chunk 0. A session whose SSE event stream is open is kept "
-    "until it ends; see [Clean up](#clean-up)."
+    "being unused longer than `--session-workspace-ttl`, a stateless one or a stateful one "
+    "the MCP SDK dropped without telling the server. The upload and the bound profile are "
+    "removed with the workspace, so the client selects the profile again and sends the "
+    "upload again from chunk 0. A session whose SSE event stream is still open is kept "
+    "whatever its age; see [Clean up](#clean-up)."
 )
 _SWEEP_LOCK_WAIT_IS_BOUNDED = (
     "Servers that share one workspace root take a lock under the root before a sweep "
