@@ -594,9 +594,13 @@ def _common_dir_named(git_dir: Path) -> Optional[Path]:
     """The common dir of the repository whose git dir is *git_dir*, read as git
     reads it (setup.c, ``get_common_dir_noenv``): *git_dir* itself when no
     ``commondir`` file is there; otherwise the file's text with trailing carriage
-    returns and newlines dropped, joined under *git_dir* unless absolute. None
-    when something is at the name that is not a record ``_read_gitdir_record``
-    can read: what git would open there cannot be told.
+    returns and newlines dropped, joined under *git_dir* unless absolute and
+    followed link by link, as git opens it: a ``..`` after a link goes to the
+    parent of what the link names, where collapsing the text would go to the
+    parent of the link, and a different ``config`` would be checked from the one
+    git waits on. None when something is at the name that is not a record
+    ``_read_gitdir_record`` can read, or the record cannot be followed (a NUL in
+    it): what git would open there cannot be told.
     """
     path = git_dir / "commondir"
     try:
@@ -608,7 +612,13 @@ def _common_dir_named(git_dir: Path) -> Optional[Path]:
     record = _read_gitdir_record(path)
     if record is None:
         return None
-    return Path(os.path.normpath(os.path.join(git_dir, record.rstrip("\r\n"))))
+    named = record.rstrip("\r\n")
+    if "\x00" in named:
+        return None
+    try:
+        return Path(os.path.realpath(os.path.join(git_dir, named)))
+    except (OSError, ValueError):
+        return None
 
 
 def _admin_dirs_are_plain(common: Path) -> bool:
