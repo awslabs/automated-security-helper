@@ -142,6 +142,31 @@ def test_an_operator_filter_file_under_a_derived_directory_stays_the_operators(
     assert kept[0].endswith("/filters/mine.py::allow"), kept
 
 
+def test_a_baseline_filter_file_is_refused_beside_the_operators_filters(
+    tmp_path, monkeypatch
+):
+    """The counterpart of the test above: the same ``file://`` filter under the
+    scan's output directory, named by the tree's own baseline rather than by the
+    operator. It is the repository's, so it is not loaded, while the operator's
+    own filter beside it is kept. Authorship by entry has to cut both ways: a
+    reading that kept every ``file://`` entry once an operator filter was
+    present would hand the worker a file the repository chose."""
+    monkeypatch.chdir(tmp_path)
+    filter_file = tmp_path / "out" / "filters" / "theirs.py"
+    context = _context_with_baseline(
+        tmp_path, [{"path": f"file://{filter_file.as_posix()}::allow"}]
+    )
+    filter_file.parent.mkdir(parents=True)
+    filter_file.write_text("def allow(secret):\n    return False\n", encoding="utf-8")
+    operator = DetectSecretsScanSettingsFiltersUsed(path=HEURISTIC)
+
+    scanner = _scanner(context, [operator])
+
+    paths = [item.path for item in scanner.config.options.scan_settings.filters_used]
+    assert HEURISTIC in paths
+    assert not any(p.startswith("file://") for p in paths), paths
+
+
 def test_without_operator_filters_the_baselines_are_the_scans(tmp_path, monkeypatch):
     """Control: the baseline's filters still load when the operator set none."""
     monkeypatch.chdir(tmp_path)

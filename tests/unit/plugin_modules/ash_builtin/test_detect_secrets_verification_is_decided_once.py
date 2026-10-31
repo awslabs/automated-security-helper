@@ -69,13 +69,31 @@ def test_entries_of_no_known_shape_enable_nothing():
     assert DetectSecretsScanner._verifies([MODULE_SPELLING]) is False
 
 
-def test_sandbox_requirements_and_the_worker_decision_agree(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        ("operator_filter", True),
+        ("no_filter", False),
+        ("offline", False),
+        ("operator_baseline", True),
+        ("repository_baseline", False),
+    ],
+)
+def test_sandbox_requirements_and_the_worker_decision_agree(
+    tmp_path, monkeypatch, case, expected
+):
     """The real ``scan`` writes the worker's request; its ``verify`` flag and
     the filters it dumps agree with ``sandbox_requirements.network``. The
     request is read from the file the scanner hands the process runner, so the
-    test cannot drift from how ``scan`` builds it. Offline mode is pinned off:
-    it drops the verification filter whatever its source, and the test is about
-    the three readings of one filter, not about offline mode."""
+    test cannot drift from how ``scan`` builds it.
+
+    The filter reaches the settings from five places, and the three readings
+    must agree for each: the operator's own settings name it (network and
+    verify on); nothing names it (both off); offline mode, which drops it
+    whatever its source (both off); a baseline the operator names outside the
+    tree, which the operator's trust admits (both on); and the tree's own
+    committed baseline, which the repository wrote and trust refuses (both
+    off)."""
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.config.default_config import get_default_config
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
@@ -86,7 +104,9 @@ def test_sandbox_requirements_and_the_worker_decision_agree(tmp_path, monkeypatc
     from automated_security_helper.utils import subprocess_utils
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(DetectSecretsScanner, "_scanner_offline", lambda self: False)
+    monkeypatch.setattr(
+        DetectSecretsScanner, "_scanner_offline", lambda self: case == "offline"
+    )
     context = PluginContext(
         source_dir=tmp_path / "src",
         output_dir=tmp_path / "out",
@@ -96,19 +116,35 @@ def test_sandbox_requirements_and_the_worker_decision_agree(tmp_path, monkeypatc
     context.source_dir.mkdir(parents=True)
     context.output_dir.mkdir(parents=True)
     (context.source_dir / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
-    scanner = DetectSecretsScanner(
-        context=context,
-        config=DetectSecretsScannerConfig(
-            options=DetectSecretsScannerConfigOptions(
-                scan_settings=DetectSecretsScanSettings(
-                    plugins_used=[{"name": "AWSKeyDetector"}],
-                    filters_used=[{"path": MODULE_SPELLING, "min_level": 2}],
-                )
+    baseline = {
+        "version": "1.5.0",
+        "plugins_used": [{"name": "AWSKeyDetector"}],
+        "filters_used": [{"path": MODULE_SPELLING, "min_level": 2}],
+        "results": {},
+        "generated_at": "2026-01-01T00:00:00Z",
+    }
+    if case in ("operator_filter", "offline", "no_filter"):
+        path = HEURISTIC if case == "no_filter" else MODULE_SPELLING
+        options = DetectSecretsScannerConfigOptions(
+            scan_settings=DetectSecretsScanSettings(
+                plugins_used=[{"name": "AWSKeyDetector"}],
+                filters_used=[{"path": path, "min_level": 2}],
             )
-        ),
+        )
+    elif case == "operator_baseline":
+        named = tmp_path / "operator.baseline"
+        named.write_text(json.dumps(baseline), encoding="utf-8")
+        options = DetectSecretsScannerConfigOptions(baseline_file=str(named))
+    else:
+        (context.source_dir / ".secrets.baseline").write_text(
+            json.dumps(baseline), encoding="utf-8"
+        )
+        options = DetectSecretsScannerConfigOptions()
+    scanner = DetectSecretsScanner(
+        context=context, config=DetectSecretsScannerConfig(options=options)
     )
-    assert scanner._verification_permitted is True, (
-        "precondition: the operator's own filter turns verification on"
+    assert scanner._verification_permitted is expected, (
+        "precondition: the settings' source decides whether verification is on"
     )
     requests: list[dict] = []
 
@@ -124,7 +160,7 @@ def test_sandbox_requirements_and_the_worker_decision_agree(tmp_path, monkeypatc
     assert len(requests) == 1, requests
     request = requests[0]
     filters = request["settings"].get("filters_used", [])
-    assert scanner.sandbox_requirements.network is True
-    assert request["verify"] is True
-    assert DetectSecretsScanner._verifies(filters) is True
+    assert scanner.sandbox_requirements.network is expected
+    assert request["verify"] is expected
+    assert DetectSecretsScanner._verifies(filters) is expected
     assert scanner.sandbox_requirements.network is request["verify"]
