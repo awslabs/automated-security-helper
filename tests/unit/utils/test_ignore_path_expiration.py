@@ -1637,6 +1637,62 @@ class TestEveryReaderFiltersExpiredEntries:
         assert checked, "no filtered-at-read field was checked"
         assert offenders == [], "\n".join(offenders)
 
+    def test_a_field_classified_filtered_at_read_is_filtered_where_it_is_read(self):
+        """``filtered-at-read`` is a claim about the code: every read of the field
+        is either inside an ``active_ignore_paths(...)`` call, or is an argument
+        of a call to a function of the same module that calls it. Without this the
+        classification in ENTRY_FIELDS is a comment, and a new read that applies
+        the stored list as it is would pass."""
+        claimed = [
+            (rel, name)
+            for (rel, name), how in sorted(self.ENTRY_FIELDS.items())
+            if how == "filtered-at-read"
+        ]
+        # The control: the table holds a claim to check, and each field is read.
+        assert claimed
+        offenders = []
+        for rel, name in claimed:
+            tree = ast.parse((self.PACKAGE / rel).read_text(encoding="utf-8"))
+            parents = {
+                child: parent
+                for parent in ast.walk(tree)
+                for child in ast.iter_child_nodes(parent)
+            }
+            functions = {
+                node.name: node
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            reads = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Attribute)
+                and node.attr == name
+                and isinstance(node.ctx, ast.Load)
+            ]
+            assert reads, f"{rel} never reads {name}"
+            for node in reads:
+                filtered = False
+                ancestor = parents.get(node)
+                while ancestor is not None and not filtered:
+                    if isinstance(ancestor, ast.Call):
+                        called = self._called_name(ancestor)
+                        filtered = called == "active_ignore_paths" or (
+                            called in functions
+                            and any(
+                                isinstance(inner, ast.Call)
+                                and self._called_name(inner) == "active_ignore_paths"
+                                for inner in ast.walk(functions[called])
+                            )
+                        )
+                    ancestor = parents.get(ancestor)
+                if not filtered:
+                    offenders.append(f"{rel}:{node.lineno} ({name})")
+        assert offenders == [], (
+            "these reads of a field classified filtered-at-read do not reach "
+            "active_ignore_paths():\n" + "\n".join(offenders)
+        )
+
     def test_scanner_option_lists_are_read_through_active_ignore_paths(self):
         offenders = []
         for (rel, field_name), kind in sorted(self.ENTRY_FIELDS.items()):
