@@ -903,17 +903,24 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     def _environment_list(self, name: str) -> List[str]:
         """``name`` in the scan's environment as trivy reads a list flag from it.
 
-        trivy reads the variable through viper, which turns a string into a list
-        by splitting it on whitespace, and then splits each field on commas, so
-        ``"terraform dockerfile"`` and ``"terraform,dockerfile"`` are two names
-        alike. Read on commas alone, the first was one name, ``"terraform
-        dockerfile"``, which trivy does not know. Blank entries are dropped; empty
-        when unset.
+        This copies trivy's own rule (``Flag.cast`` for a ``[]string`` flag,
+        ``pkg/flag/options.go``, the same at v0.69.3 and v0.75.0): a value that
+        holds a comma is split on commas alone, and the entries are not trimmed,
+        so ``"vendor,build dir"`` is ``vendor`` and ``build dir`` and
+        ``"vendor, build"`` is ``vendor`` and `` build``; a value with no comma is
+        split on whitespace, so ``"terraform dockerfile"`` is two names. The two
+        splits are never combined. ASH passes these lists back as explicit flags
+        (``_operator_skip_args``), which replace the variable, so a looser reading
+        here would skip paths the operator's own trivy would not. The one
+        departure is an entry with no characters at all (``"a,,b"``, a trailing
+        comma), which names no path or scanner and is dropped. Empty when unset or
+        blank.
         """
         value = self._scan_environment().get(name)
         if not value or not value.strip():
             return []
-        return [entry for entry in re.split(r"[\s,]+", value) if entry]
+        entries = value.split(",") if "," in value else value.split()
+        return [entry for entry in entries if entry]
 
     def _attach_trivy_severity(self, sarif_report: SarifReport) -> SarifReport:
         """Give each result trivy's own severity as its ASH severity.

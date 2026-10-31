@@ -479,7 +479,7 @@ def test_the_operators_skip_variables_are_given_back_beside_ashs_skip_flags(tmp_
     TRIVY_SKIP_DIRS rather than add to it."""
     scanner = _repo_scanner(tmp_path)
     scanner.extra_env = {
-        "TRIVY_SKIP_DIRS": "vendor, build",
+        "TRIVY_SKIP_DIRS": "vendor,build",
         "TRIVY_SKIP_FILES": "k.pem",
     }
 
@@ -488,17 +488,52 @@ def test_the_operators_skip_variables_are_given_back_beside_ashs_skip_flags(tmp_
     assert tokens == ["--skip-dirs=vendor", "--skip-dirs=build", "--skip-files=k.pem"]
 
 
-def test_a_blank_operator_skip_entry_is_nothing(tmp_path):
-    """viper splits a list variable on whitespace and commas, so a blank entry
-    between two commas is no path; an entry with edge whitespace of its own is
-    kept and quoted (the CSV tests below), which is the trim's one exception."""
+def test_an_empty_operator_skip_entry_is_nothing(tmp_path):
+    """An entry with no characters between two commas, or after the last one, is
+    no path. Whitespace is not empty: see the comma-list tests below."""
     scanner = _repo_scanner(tmp_path)
-    scanner.extra_env = {"TRIVY_SKIP_DIRS": "vendor, ,build,\t"}
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "vendor,,build,"}
 
     assert scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"]) == [
         "--skip-dirs=vendor",
         "--skip-dirs=build",
     ]
+
+
+def test_a_list_variable_holding_a_comma_is_split_on_commas_alone(tmp_path):
+    """trivy's ``Flag.cast`` splits a value that holds a comma on commas and never
+    on whitespace, so a directory with a space in its name is one entry. Split on
+    both, ``build dir`` was read as ``build`` and ``dir``: a ``build`` directory
+    skipped that the operator's own trivy would not skip."""
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "vendor,build dir"}
+
+    assert scanner._environment_list("TRIVY_SKIP_DIRS") == ["vendor", "build dir"]
+    assert scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"]) == [
+        "--skip-dirs=vendor",
+        "--skip-dirs=build dir",
+    ]
+
+
+def test_a_comma_list_keeps_the_edge_whitespace_of_its_entries(tmp_path):
+    """trivy does not trim the entries of a comma-separated value, so ``" build"``
+    is a different path from ``"build"``; it is passed as written, CSV-quoted."""
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "vendor, build,\t"}
+
+    assert scanner._environment_list("TRIVY_SKIP_DIRS") == ["vendor", " build", "\t"]
+    assert scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"]) == [
+        "--skip-dirs=vendor",
+        '--skip-dirs=" build"',
+        '--skip-dirs="\t"',
+    ]
+
+
+def test_control_a_list_variable_without_a_comma_is_split_on_whitespace(tmp_path):
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_FILES": " a.txt \t b.txt\n"}
+
+    assert scanner._environment_list("TRIVY_SKIP_FILES") == ["a.txt", "b.txt"]
 
 
 def test_the_operators_config_file_skip_lists_are_given_back_too(tmp_path):
@@ -1175,7 +1210,7 @@ def test_control_a_known_name_repeated_in_two_spellings_is_passed_once(
     scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
     scanner.extra_env = {
         "TRIVY_SCANNERS": "misconfig",
-        "TRIVY_MISCONFIG_SCANNERS": "dockerfile,DOCKERFILE kubernetes",
+        "TRIVY_MISCONFIG_SCANNERS": "dockerfile,DOCKERFILE,kubernetes",
     }
     _knows(monkeypatch)
 
