@@ -766,7 +766,11 @@ class TestCheckScanProgress:
             result = asyncio.run(check_scan_progress("scan-1"))
 
         assert result == progress
-        registry.check_scan_progress.assert_called_once_with("scan-1")
+        # The transport's word travels with the read (its default names the
+        # process ids); the progress itself comes back untouched.
+        registry.check_scan_progress.assert_called_once_with(
+            "scan-1", name_process_ids=True
+        )
 
     def test_resource_error_becomes_an_error_response(self, registry):
         registry.check_scan_progress.side_effect = MCPResourceError(

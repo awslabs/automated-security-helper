@@ -35,6 +35,7 @@ from unittest.mock import patch
 import pytest
 
 from automated_security_helper.core.resource_management import scan_registry
+from automated_security_helper.utils.subprocess_utils import could_not_stop_sentence
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
@@ -1172,7 +1173,7 @@ class TestAFinishedScanWhoseOutputIsGoneHasNoResults:
         assert progress["total_findings"] == 0
         assert progress["error_message"]
         assert str(output) in progress["error_message"]
-        assert "missing" in progress["error_message"]
+        assert "does not exist" in progress["error_message"]
         # The recorded gap lists still describe the run.
         assert progress["incomplete_scanners"] == []
 
@@ -1216,11 +1217,10 @@ class TestAStoppedScansCoverageNamesTheToolsThatSurvived:
         progress = registry.check_scan_progress(scan_id)
 
         assert progress["status"] == "cancelled"
+        # The reason is the one sentence every such text uses (subprocess_utils),
+        # with the tool's basename as its referent.
         assert progress["could_not_stop"] == [
-            {
-                "scanner": "bandit",
-                "reason": "bandit's tool was still running after the cancel",
-            }
+            {"scanner": "bandit", "reason": could_not_stop_sentence("bandit")}
         ]
         assert "4242" not in json.dumps(progress["could_not_stop"])
         assert "/opt/tools" not in json.dumps(progress["could_not_stop"])
