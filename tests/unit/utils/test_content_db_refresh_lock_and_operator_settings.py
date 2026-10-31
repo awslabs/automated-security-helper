@@ -268,8 +268,14 @@ def test_the_grype_variable_decides_before_the_grype_config(
     config = tmp_path / "grype.yaml"
     config.write_text("db:\n  auto-update: true\n")
     monkeypatch.setenv("GRYPE_DB_AUTO_UPDATE", "false")
-    _prepare("grype", tmp_path / "grype-db-1", tmp_path, config_file=config)
+    with caplog.at_level(logging.INFO):
+        _prepare("grype", tmp_path / "grype-db-1", tmp_path, config_file=config)
     assert captured == []
+    # The skip is warned about, and that record stays in the capture for the rest
+    # of the test: the second half asserts that it says nothing, so it starts from
+    # an empty capture rather than from the first half's warning.
+    assert len(_auto_update_lines(caplog)) == 1
+    caplog.clear()
     config.write_text("db:\n  auto-update: false\n")
     monkeypatch.setenv("GRYPE_DB_AUTO_UPDATE", "true")
     with caplog.at_level(logging.INFO):
