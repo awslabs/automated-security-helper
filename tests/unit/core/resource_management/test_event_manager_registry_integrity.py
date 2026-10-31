@@ -260,13 +260,20 @@ class TestTimesAreTimezoneAware:
         created_at = datetime.fromisoformat(
             manager.get_subscription_info("sub")["created_at"]
         )
+        # Read while the subscription is registered: the ages are taken from
+        # its zone-aware created_at against the zone-aware clock, so a naive
+        # created_at would raise here and a skewed one would be negative.
+        usage = await manager.get_resource_usage()
         await manager.unregister_subscription("sub")
         recorded = datetime.fromisoformat(manager.get_cleanup_errors()[0]["timestamp"])
 
         assert created_at.tzinfo is not None
         assert recorded.tzinfo is not None
-        usage = await manager.get_resource_usage()
-        assert usage["subscription_ages"]["count"] == 0
+        ages = usage["subscription_ages"]
+        assert ages["count"] == 1
+        assert ages["min_seconds"] >= 0
+        assert ages["max_seconds"] >= ages["min_seconds"]
+        assert ages["max_seconds"] < 60
 
 
 class TestBulkCleanupRunsInRegistrationOrder:
