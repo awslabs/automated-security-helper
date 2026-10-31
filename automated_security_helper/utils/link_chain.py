@@ -88,8 +88,10 @@ _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 #: Windows error codes for a spelling no entry can have: 123 is
 #: ERROR_INVALID_NAME (a name with ``*`` or ``?``, say), 161 is
-#: ERROR_BAD_PATHNAME. ``os.lstat`` raises a plain ``OSError`` for them, not
-#: ``FileNotFoundError``, and ``os.path.realpath`` reads them as not there.
+#: ERROR_BAD_PATHNAME. ``os.lstat`` raises a plain ``OSError`` for 123, not
+#: ``FileNotFoundError``; CPython's error map turns 161 into ENOENT, so for it
+#: the walk's first arm already reads the name as not there, and 161 is listed
+#: for a runtime whose map differs. ``os.path.realpath`` reads both as not there.
 _INVALID_SPELLING_WINERRORS = frozenset({123, 161})
 
 
