@@ -36,6 +36,12 @@ def _conforming_licenses(value: Any, counts: Dict[str, int]) -> Any:
 
     Models and lists are copied only where something changed, so the BOM given
     in is left as it was.
+
+    The walk follows a ``LicenseChoice``, a model over its set fields and a
+    ``list``, and nothing else. A license list held inside a dict, tuple or set
+    would be written as stored; no field of the CycloneDX module is typed that
+    way, and the test ``test_cyclonedx_license_walk_reaches_every_field`` (in
+    ``tests/unit/reporters``) fails if a regeneration of the module adds one.
     """
     if isinstance(value, LicenseChoice):
         kept = []
