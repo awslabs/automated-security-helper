@@ -141,6 +141,15 @@ def test_a_prefix_with_no_trailing_slash_is_warned_about_once_per_run(
     assert len(messages) == 1, messages
 
 
+def test_the_warning_names_the_whole_object_name_shape(tmp_path, ash_log):
+    """The object name has a workspace project segment between the prefix and the
+    file name, so the shape the warning gives names it too."""
+    _upload_keys(tmp_path, "scans/repo-")
+
+    (message,) = _prefix_warnings(ash_log)
+    assert "<key_prefix>[<project>/]ash-report-<time>.<extension>" in message, message
+
+
 def test_the_warning_does_not_quote_the_prefix(tmp_path, ash_log):
     """A configured option can come from the environment, and the warning goes
     to the console and ash.log."""

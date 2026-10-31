@@ -345,7 +345,8 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                 "reporters.s3.options.key_prefix",
                 key_prefix,
                 "The s3 reporter's key_prefix does not end in '/', so the object "
-                "name runs on from it: <key_prefix>ash-report-<time>.<extension>. "
+                "name runs on from it: "
+                "<key_prefix>[<project>/]ash-report-<time>.<extension>. "
                 "End the prefix with '/' to place the report in a directory.",
             )
         s3_key = f"{key_prefix}{project_segment}ash-report-{timestamp}.{file_extension}"
