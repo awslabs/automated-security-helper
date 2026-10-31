@@ -88,9 +88,7 @@ class TestAnEmitterGradesAScannerByItsRecordedGate:
         assert not emitter.is_finding_actionable(_finding("semgrep", "LOW"))
         assert emitter.is_finding_actionable(_finding("semgrep", "HIGH"))
 
-    def test_a_relaxed_recorded_scanner_gate_wins_over_the_project_gate(
-        self, tmp_path
-    ):
+    def test_a_relaxed_recorded_scanner_gate_wins_over_the_project_gate(self, tmp_path):
         """RED at the base: bandit was recorded at CRITICAL, so its HIGH finding
         was not part of the project's count, yet the emitter graded it by the
         project's HIGH gate and called it actionable."""
