@@ -519,6 +519,31 @@ class TestAnUnbuildableReporterFailsOnlyWhatItOwed:
         assert outcome.failed is False
         assert "fake-merged" in outcome.workspace_artifacts
 
+    def test_a_class_whose_declarations_cannot_be_read_does_not_take_the_step_down(
+        self, workspace, monkeypatch
+    ):
+        """The skip reason is read inside the handler of the constructor's own
+        failure, so a class whose config model cannot be read raised from there
+        and no manifest was written."""
+        _, output_dir, _ = workspace
+        real = reporting.declared_config_model
+
+        def unreadable(reporter_class, base):
+            if reporter_class is FakeUnconstructibleReporter:
+                raise RuntimeError("no model can be read")
+            return real(reporter_class, base)
+
+        monkeypatch.setattr(reporting, "declared_config_model", unreadable)
+
+        outcome = _emit(workspace, FakeUnconstructibleReporter, FakeMergedReporter)
+
+        assert outcome.manifest_path is not None
+        entry = _manifest(output_dir)["reporters"]["fake-unconstructible"]
+        assert "cannot be built" in entry["error"]
+        assert "skipped" not in entry
+        assert "fake-unconstructible" in outcome.failed_reporters
+        assert "fake-merged" in outcome.workspace_artifacts
+
     def test_a_requested_reporter_that_cannot_be_built_still_fails(self, workspace):
         """The control: asked for by name, the missing report is the step's."""
         _, output_dir, _ = workspace

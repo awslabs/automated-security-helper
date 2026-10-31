@@ -565,6 +565,54 @@ def _declared_file_name(reporter_class: type) -> str:
     return f"ash.{extension}" if isinstance(extension, str) and extension else "ash.txt"
 
 
+def _construction_failure(
+    reporter_class: type,
+    key: str,
+    config: Any,
+    output_formats: Sequence[str],
+    described: str,
+) -> _ConstructionFailure:
+    """The record of a reporter that could not be built, from what its class declares.
+
+    Each declaration is read on its own and none can take the step down: this runs
+    inside the handler of the constructor's own failure, so an exception from a
+    broken class's config model, behaviour or off-host flag would otherwise escape
+    from there with no manifest written. What cannot be read falls to the safe
+    side: with no skip reason the failure is counted, as for a reporter the step
+    would have run, and the entry's behaviour and file name are the unknown ones.
+    """
+    skipped: Optional[str] = None
+    behaviour: Optional[ReporterWorkspaceBehaviour] = None
+    file_name = "ash.txt"
+    try:
+        skipped = _construction_skip_reason(reporter_class, key, config, output_formats)
+    except Exception as exc:  # noqa: BLE001 -- a broken class must not take the step down
+        ASH_LOGGER.warning(
+            f"Could not tell whether reporter {key} would have run at workspace "
+            f"level, so its construction failure is counted: {error_text(exc)}"
+        )
+    try:
+        behaviour = _declared_behaviour(reporter_class, key)
+    except Exception as exc:  # noqa: BLE001 -- as above
+        ASH_LOGGER.warning(
+            f"Could not read the workspace behaviour reporter {key} declares: "
+            f"{error_text(exc)}"
+        )
+    try:
+        file_name = _declared_file_name(reporter_class)
+    except Exception as exc:  # noqa: BLE001 -- as above
+        ASH_LOGGER.warning(
+            f"Could not read the report file name reporter {key} declares: "
+            f"{error_text(exc)}"
+        )
+    return _ConstructionFailure(
+        error=f"the reporter could not be constructed: {described}",
+        skipped=skipped,
+        behaviour=behaviour,
+        file_name=file_name,
+    )
+
+
 def _build_instance(
     reporter_class: type,
     context,
@@ -600,13 +648,8 @@ def _build_instance(
             f"reporting: {described}"
         )
         if construction_failures is not None:
-            construction_failures[key] = _ConstructionFailure(
-                error=f"the reporter could not be constructed: {described}",
-                skipped=_construction_skip_reason(
-                    reporter_class, key, config, output_formats
-                ),
-                behaviour=_declared_behaviour(reporter_class, key),
-                file_name=_declared_file_name(reporter_class),
+            construction_failures[key] = _construction_failure(
+                reporter_class, key, config, output_formats, described
             )
         return None
 
