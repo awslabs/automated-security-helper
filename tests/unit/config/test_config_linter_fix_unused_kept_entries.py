@@ -51,7 +51,7 @@ HALF_COMMENTED = (
 def test_a_half_commented_entry_that_rewrites_a_kept_one_is_refused():
     """Red at the base: the function took no original text, and its count check
     alone passes this text (one entry remains, as expected)."""
-    with pytest.raises(UnusedSuppressionsNotEditable):
+    with pytest.raises(UnusedSuppressionsNotEditable, match="change an entry"):
         ConfigLinter._refuse_an_edit_that_misreads_the_list(
             HALF_COMMENTED, 1, original=ORIGINAL, commented={1}
         )

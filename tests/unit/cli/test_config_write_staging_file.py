@@ -46,6 +46,11 @@ class _WatchedHandle:
             self._modes.append(stat.S_IMODE(status.st_mode))
         return self._handle.write(data)
 
+    def __getattr__(self, name: str) -> Any:
+        """Everything else is the real handle's, so a writer that asks for
+        ``flush``, ``close`` or ``name`` meets the file and not an AttributeError."""
+        return getattr(self._handle, name)
+
 
 @pytest.mark.skipif(os.name == "nt", reason="file modes are POSIX modes")
 @pytest.mark.skipif(not hasattr(os, "link"), reason="the platform has no hard links")
