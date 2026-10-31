@@ -978,9 +978,16 @@ class ScannerExecutor:
         at all. The fallback is the fresh container the handler filed before
         rows were refiled, carrying the target type so its file lands under the
         target's key, the could-not-stop record run_ash_scan's gate reads off
-        the target's report, and the same failure record. A raise on the fresh
-        row is logged, as before; a fresh row (*refiled* False) gets no second
-        offer, since nothing of the scan's is on it to raise on.
+        the target's report, the same failure record, and the ERRORS the
+        refiled row carried: text only, so nothing of what made the row raise
+        comes along, but what the scan recorded before the merge failed does. A
+        fresh row built from the head alone replaced the refiled row's record
+        in additional_reports (the processor stores a row there before it
+        writes the row's file), so a refused sandbox's own error text, the one
+        the probing-scanner contract reads off that report, was gone whenever
+        the write itself was what raised. A raise on the fresh row is logged,
+        as before; a fresh row (*refiled* False) gets no second offer, since
+        nothing of the scan's is on it to raise on.
         """
         try:
             return self._process_results_fn(failure_container, aggregated_results)
@@ -994,9 +1001,11 @@ class ScannerExecutor:
             )
             if not refiled:
                 return aggregated_results
+        # The refiled row's errors end in *head* (the handler added it before
+        # the offer); an empty list falls back to the head alone.
         fresh = ScanResultsContainer.for_failure(
             scanner_name,
-            errors=[head],
+            errors=list(failure_container.errors) or [head],
             exception=exception,
             values=environment_values,
         )

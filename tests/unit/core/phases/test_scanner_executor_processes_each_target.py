@@ -25,8 +25,13 @@ scanner whose bookkeeping raised.
 
 A refiled row that the processor raises on AGAIN (whatever on the row caused the
 first raise is still on it) is followed by a fresh failure row for the same target,
-carrying its target type and its could-not-stop record, so the target still has a
-row in the results; offered once and logged, it had none.
+carrying its target type, its could-not-stop record and the errors the scan
+recorded on the row, so the target still has a row in the results; offered once
+and logged, it had none. The errors matter because the processor stores a row in
+``additional_reports`` BEFORE it writes the row's file: when the write is what
+raises (the refused sandbox's planted symlink), the fresh row's record is the one
+left on the report, and built from the handler's head alone it lost the refusal
+text the probing-scanner contract reads there.
 """
 
 from __future__ import annotations
@@ -393,6 +398,44 @@ class TestARefiledRowReachesTheReport:
         assert fresh.target_type == "converted"
         assert fresh.status == ScannerStatus.ERROR
         assert fresh.raw_results["status"] == "failed"
+
+    @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+    def test_the_fresh_row_carries_the_errors_the_scan_recorded(
+        self, plugin_context, tmp_path, parallel
+    ):
+        """What the scan wrote on the row before the merge failed (a refused
+        sandbox's own text, say) is on the fresh row too, after the failure's
+        head. The processor records a row on the report before it writes the
+        row's file, so when the write is what raises, the fresh row's record is
+        the one the report keeps; built from the head alone it lost that text."""
+        recorded = "the planted link refused the probe"
+
+        def the_scan_recorded(container):
+            # On the row's first offer only: the refiled row and the fresh row
+            # already carry the handler's head, so neither gets the text here,
+            # and the fresh row shows what it was built from.
+            if "the report could not be read" not in " ".join(container.errors):
+                container.add_error(recorded)
+
+        seen, _ = _run(
+            plugin_context,
+            tmp_path,
+            failing_target="converted",
+            parallel=parallel,
+            before_raise=the_scan_recorded,
+        )
+
+        fresh = seen[-1]
+        assert fresh is not seen[1], "the refiled row raised again: a fresh row follows"
+        assert recorded in seen[1].errors, seen[1].errors
+        assert recorded in fresh.errors, fresh.errors
+        heads = [
+            index
+            for index, error in enumerate(fresh.errors)
+            if "the report could not be read" in error
+        ]
+        assert heads, fresh.errors
+        assert fresh.errors.index(recorded) < max(heads), fresh.errors
 
     def test_control_a_fresh_failure_row_gets_no_second_offer(
         self, plugin_context, tmp_path
