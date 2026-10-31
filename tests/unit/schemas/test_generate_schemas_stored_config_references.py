@@ -156,6 +156,96 @@ def test_an_enum_field_with_a_default_admits_a_reference_in_a_stored_model():
     assert "anyOf" not in schema["$defs"]["_Level"]
 
 
+def _models_sharing_an_enum() -> type:
+    """A model whose Enum fields sit on a model that is itself a shared
+    definition: ``_Outer`` uses ``_Inner`` twice, and ``_Inner`` uses ``_Level``
+    in a defaulted field, a list and an optional field. Both ``_Inner`` and
+    ``_Level`` are shared definitions of the core schema, and pydantic may
+    generate ``_Inner`` before ``_Level``."""
+    from enum import Enum
+    from typing import List, Optional
+
+    from automated_security_helper.base.options import PluginOptionsBase
+
+    class _Level(str, Enum):
+        low = "low"
+        high = "high"
+
+    class _Inner(PluginOptionsBase):
+        level: _Level = _Level.low
+        levels: List[_Level] = [_Level.low]
+        maybe: Optional[_Level] = None
+
+    class _Outer(PluginOptionsBase):
+        first: _Inner
+        second: _Inner
+
+    return _Outer
+
+
+def _enums_last_generator() -> type:
+    """The results generator, made to generate the Enum definitions after every
+    other shared definition, the order in which a field that uses an Enum is
+    reached before the Enum's own definition exists."""
+    from automated_security_helper.schemas.generate_schemas import (
+        StoredResultsJsonSchema,
+    )
+
+    class _EnumsLast(StoredResultsJsonSchema):
+        def definitions_schema(self, schema):
+            ordered = sorted(
+                schema["definitions"],
+                key=lambda definition: definition["type"] == "enum",
+            )
+            return super().definitions_schema({**schema, "definitions": ordered})
+
+    return _EnumsLast
+
+
+@pytest.mark.parametrize("enums_last", [False, True], ids=["natural", "enums-last"])
+def test_an_enum_on_a_shared_model_admits_a_reference_in_any_definition_order(
+    enums_last,
+):
+    """The reference is admitted beside an Enum whichever shared definition
+    pydantic generates first, in a defaulted field, in a list and in an optional
+    field that defaults to ``None``.
+
+    Following the generated ``$ref`` finds the Enum only when its definition was
+    generated before the field that uses it; in the ``enums-last`` order the
+    field is generated first and used to be left without the reference, so a
+    stored configuration the load reads was refused by the schema. The
+    ``natural`` order is the control: it is whichever order pydantic chooses."""
+    from automated_security_helper.schemas.generate_schemas import (
+        StoredResultsJsonSchema,
+    )
+
+    generator = _enums_last_generator() if enums_last else StoredResultsJsonSchema
+    schema = _models_sharing_an_enum().model_json_schema(
+        schema_generator=generator, mode="serialization"
+    )
+    validator = jsonschema.Draft202012Validator(schema)
+    reference = "${ASH_LEVEL}"
+    admitted = [
+        {},
+        {"level": "high"},
+        {"level": reference},
+        {"levels": ["low", reference]},
+        {"maybe": reference},
+        {"maybe": None},
+    ]
+    for inner in admitted:
+        assert validator.is_valid({"first": inner, "second": {}}), inner
+    refused = [
+        {"level": "medium"},
+        {"level": "$ASH_LEVEL"},
+        {"levels": ["medium"]},
+        {"maybe": "medium"},
+    ]
+    for inner in refused:
+        assert not validator.is_valid({"first": inner, "second": {}}), inner
+    assert "anyOf" not in schema["$defs"]["_Level"]
+
+
 def test_control_a_true_false_field_keeps_refusing_a_reference(results_schema):
     """The record never writes a reference in a true/false field
     (config_validator.typed_from is never true for a bool, so the typed value is

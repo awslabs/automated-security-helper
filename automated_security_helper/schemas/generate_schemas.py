@@ -195,12 +195,30 @@ _WRAPPING_CORE_TYPES = frozenset(
 )
 
 
-def _is_enum_core(core_schema: Any) -> bool:
-    """Whether ``core_schema`` is an ``Enum``, under any validator or default."""
+def _is_enum_core(core_schema: Any, definitions: Any = None) -> bool:
+    """Whether ``core_schema`` is an ``Enum``, under any validator or default.
+
+    An Enum used as a field's type is a shared definition, so at the field its
+    core schema is a ``definition-ref`` to the enum, not the ``enum`` schema
+    itself. ``definitions`` maps each core definition's ``ref`` to the
+    definition (``StoredResultsJsonSchema.definitions_schema`` collects them
+    from the core schema before any definition is generated), and the
+    reference is followed through it. That reads the core schema alone, so the
+    answer does not depend on the order pydantic generates the definitions in.
+    """
+    followed: set = set()
     while isinstance(core_schema, dict):
-        if core_schema.get("type") == "enum":
+        kind = core_schema.get("type")
+        if kind == "enum":
             return True
-        if core_schema.get("type") not in _WRAPPING_CORE_TYPES:
+        if kind == "definition-ref" and definitions:
+            ref = core_schema.get("schema_ref")
+            if ref in followed or ref not in definitions:
+                return False
+            followed.add(ref)
+            core_schema = definitions[ref]
+            continue
+        if kind not in _WRAPPING_CORE_TYPES:
             return False
         core_schema = core_schema.get("schema")
     return False
@@ -337,6 +355,21 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
         #: default (its core schema is wrapped in a ``default`` schema). Reset on
         #: entering a nested model, whose own fields decide for themselves.
         self._under_default: List[bool] = []
+        #: The core schema's shared definitions by ref, filled by
+        #: :meth:`definitions_schema` before any of them is generated.
+        self._core_definitions: dict = {}
+
+    def definitions_schema(self, schema: Any) -> Any:
+        # pydantic generates the shared definitions one after another in the
+        # order it met them, and a model's fields are generated with the model,
+        # so an Enum definition may not exist yet when a field that uses it is
+        # reached. Recording the core definitions first lets that field be
+        # recognized as an Enum whatever the order.
+        for definition in schema.get("definitions", []):
+            ref = definition.get("ref")
+            if ref is not None:
+                self._core_definitions[ref] = definition
+        return super().definitions_schema(schema)
 
     def model_schema(self, schema: Any) -> Any:
         cls = schema.get("cls")
@@ -404,11 +437,10 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
     def _resolves_to_enum(self, json_schema: Any) -> bool:
         """Whether the JSON schema already generated for a value is an Enum's.
 
-        An Enum used as a field's type is a shared definition, so at the field
-        its core schema is a reference to that definition, not the ``enum``
-        schema itself, and ``_is_enum_core`` cannot see through it. The
-        definitions are generated before the fields that use them, so the
-        reference is followed in the generated JSON instead."""
+        The second check after ``_is_enum_core``, which follows a reference
+        through the core definitions and is the order-independent one: this one
+        follows the generated ``$ref`` and can only answer for a definition
+        that was generated already, so it is not relied on alone."""
         for _ in range(8):
             if not isinstance(json_schema, dict):
                 return False
@@ -443,9 +475,9 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
             value_schema = {
                 key: value for key, value in json_schema.items() if key != "default"
             }
-            if _is_enum_core(schema.get("schema")) or self._resolves_to_enum(
-                value_schema
-            ):
+            if _is_enum_core(
+                schema.get("schema"), self._core_definitions
+            ) or self._resolves_to_enum(value_schema):
                 with_reference = self._beside_reference(value_schema)
                 if "default" in json_schema:
                     with_reference = {
@@ -459,9 +491,9 @@ class StoredResultsJsonSchema(GenerateJsonSchema):
 
     def list_schema(self, schema: Any) -> Any:
         json_schema = super().list_schema(schema)
-        if _is_enum_core(schema.get("items_schema")) or self._resolves_to_enum(
-            json_schema.get("items")
-        ):
+        if _is_enum_core(
+            schema.get("items_schema"), self._core_definitions
+        ) or self._resolves_to_enum(json_schema.get("items")):
             json_schema["items"] = self._beside_reference(json_schema["items"])
         return json_schema
 
