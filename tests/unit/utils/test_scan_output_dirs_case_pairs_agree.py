@@ -24,9 +24,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.scan_output_dirs import (
     _parts_below,
     _reached_through_a_link,
+    _repository_root_of,
     _spelled_under,
     classified_output_dirs,
     entries_at_results_paths,
@@ -37,9 +39,38 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def folding(monkeypatch):
-    """A platform whose filesystem compares names without case."""
+def folding(tmp_path, monkeypatch):
+    """A platform whose filesystem compares names without case, with no git.
+
+    ``sys.platform`` is patched for the whole process, so anything that starts a
+    program while a test runs sees a macOS platform, and a test that reached git
+    ran the real one against whatever repository sits above the temporary
+    directory (the developer's checkout, under ``--basetemp`` inside it). The
+    test directory is therefore a ceiling for the search for a repository, and a
+    spawn is recorded and refused: the code under test turns a refused spawn into
+    "git could not be run", so the record is what fails the test. A test that
+    needs git answers sets its own stand-in over this one."""
     monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", os.path.realpath(tmp_path))
+    started: list = []
+
+    def refused(argv, **_kwargs):
+        started.append(list(argv))
+        raise AssertionError(f"git was started: {argv}")
+
+    monkeypatch.setattr(subprocess_utils, "spawn_run", refused)
+    yield
+    assert started == []
+
+
+def test_the_folding_platform_searches_for_no_repository_above_the_test_directory(
+    folding, tmp_path
+):
+    tree = Path(os.path.realpath(tmp_path))
+    (tree / ".git").mkdir()
+    (tree / "src").mkdir()
+
+    assert _repository_root_of(tree / "src") is None
 
 
 def test_parts_below_agrees_with_the_name_key_comparison(folding):
@@ -95,8 +126,6 @@ def test_two_spellings_of_one_named_directory_leave_one_named(
     on disk are one directory. Each read as "below" the other by name key, so the
     reduction to the outermost directories dropped both and no output directory
     was named: nothing was excluded and ASH's own output was scanned."""
-    from automated_security_helper.utils import subprocess_utils
-
     root = Path(os.path.realpath(tmp_path)) / "repo"
     (root / ".git").mkdir(parents=True)
     (root / ".ash" / "ash_output").mkdir(parents=True)
