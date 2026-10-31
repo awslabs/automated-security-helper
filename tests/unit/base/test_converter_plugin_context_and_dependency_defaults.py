@@ -283,6 +283,32 @@ def test_configuring_an_unavailable_fallback_converter_makes_it_ready(
     assert converter.validate_plugin_dependencies() is True
 
 
+def test_configuring_an_unavailable_fallback_converter_with_the_generic_config_keeps_it_unavailable(
+    test_plugin_context,
+):
+    """Only the config the declared model builds clears the record. A generic
+    ``ConverterPluginConfigBase`` is truthy too, and the field is not validated on
+    assignment, so it was taken for the section the converter needs: the converter
+    read as ready while its required section was still missing, the state the
+    record exists to prevent. The record stands through it, and the declared
+    model's config given afterwards still clears it (the neighbors' control)."""
+    converter = SectionNeedingConverter(context=test_plugin_context)
+    reason = converter.dependency_unavailable_reason
+    assert converter.dependencies_satisfied is False
+
+    converter.configure(ConverterPluginConfigBase(name="needy"))
+
+    assert converter.dependencies_satisfied is False
+    assert converter.dependency_unavailable_reason == reason
+    assert converter.validate_plugin_dependencies() is False
+
+    converter.configure(SectionNeedingConfig(section="s"))
+
+    assert converter.dependencies_satisfied is True
+    assert converter.dependency_unavailable_reason is None
+    assert converter.validate_plugin_dependencies() is True
+
+
 def test_configuring_a_converter_keeps_its_own_dependency_record(
     test_plugin_context,
 ):

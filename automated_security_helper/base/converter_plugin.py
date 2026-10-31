@@ -246,18 +246,27 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         """Configure the converter with provided configuration.
 
         A converter built without a config is recorded as unavailable until it is
-        configured (_default_config); given a config here, that record is cleared,
-        unless the converter's own dependency check has since recorded another
-        reason, which stands. The work directory keeps the name it was given at
+        configured (_default_config); given the config its declared model builds
+        here, that record is cleared, unless the converter's own dependency check
+        has since recorded another reason, which stands. A config of any other
+        class, the generic base included, does not clear it: the section the
+        converter needs is still missing, and reading it as ready would run the
+        converter on a config its model never gave it, the state the record
+        exists to prevent. The work directory keeps the name it was given at
         construction.
         """
         if config:
             self.config = config
             if self._config_fallback_reason is not None:
-                if self.dependency_unavailable_reason == self._config_fallback_reason:
-                    self.dependencies_satisfied = True
-                    self.dependency_unavailable_reason = None
-                self._config_fallback_reason = None
+                declared = self._declared_config_model()
+                if declared is not None and isinstance(self.config, declared):
+                    if (
+                        self.dependency_unavailable_reason
+                        == self._config_fallback_reason
+                    ):
+                        self.dependencies_satisfied = True
+                        self.dependency_unavailable_reason = None
+                    self._config_fallback_reason = None
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate converter configuration and requirements.
