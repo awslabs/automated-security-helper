@@ -164,6 +164,43 @@ def test_same_finding_only_offers_a_result_with_the_same_message():
     )
 
 
+def _unlocated(text):
+    return {
+        "ruleId": "B101",
+        "message": {"text": text},
+        "analysisTarget": {"uri": "a.py"},
+    }
+
+
+def test_two_findings_with_no_location_on_one_target_keep_their_own_copies():
+    """Results with no location meet by message, then by ``analysisTarget``. The
+    target is shared by every finding of the file, so as the same-finding tier it
+    gave the first original the only copy there was, whoever's it was, and the
+    second original, whose copy it was, read as lost."""
+    first, second = _unlocated("first"), _unlocated("second")
+    # Aggregation kept only the copy of the second.
+    aggregated = _report(copy.deepcopy(second))
+
+    results = validate_sarif_aggregation({"bandit": _report(first, second)}, aggregated)
+
+    assert results["match_statistics"]["bandit"]["matched_results"] == 1
+    unmatched = results["unmatched_results"]["bandit"]
+    assert [entry["message"] for entry in unmatched] == ["first"]
+
+
+def test_the_target_is_offered_to_the_same_finding_tier_only_when_messages_agree():
+    first, second = _unlocated("first"), _unlocated("second")
+    kept = copy.deepcopy(second)
+    unstated = {"ruleId": "B101", "analysisTarget": {"uri": "a.py"}}
+
+    assert find_matching_result(first, [kept], same_finding_only=True) is None
+    # The control: the other tiers still offer the target's result.
+    assert find_matching_result(first, [kept], exact_only=True) is kept
+    assert find_matching_result(first, [kept]) is kept
+    # A result that states no message does not disagree with one.
+    assert find_matching_result(unstated, [kept], same_finding_only=True) is kept
+
+
 def test_exact_only_offers_no_overlapping_result():
     aggregated = [copy.deepcopy(LONG)]
 

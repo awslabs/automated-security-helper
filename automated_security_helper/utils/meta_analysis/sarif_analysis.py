@@ -399,7 +399,10 @@ def find_matching_result(
         same_finding_only: Offer only a result at the original's own file and
             lines that also carries its message text and, when both state one,
             its start column. Implies *exact_only*: of two findings of one rule
-            on the same lines this finds the copy that is each one's own.
+            on the same lines this finds the copy that is each one's own. For
+            results with no location the same holds: a result with an equal
+            ``analysisTarget`` is offered only when the messages agree, so of two
+            such findings of one rule on one target each finds its own copy.
 
     Returns:
         Matching result or None
@@ -465,10 +468,16 @@ def find_matching_result(
         ):
             return agg_result
 
-        # Then to analysisTarget, when both name one
+        # Then to analysisTarget, when both name one. Two findings of one rule
+        # can share a target, so a target alone is not the same finding: of the
+        # same-finding tier, the target is offered only when the messages agree.
         original_target = (original_result.get("analysisTarget") or {}).get("uri")
         agg_target = (agg_result.get("analysisTarget") or {}).get("uri")
-        if original_target and original_target == agg_target:
+        if (
+            original_target
+            and original_target == agg_target
+            and (not same_finding_only or _same_finding(original_result, agg_result))
+        ):
             return agg_result
 
     return None if exact_only else overlapping_match
