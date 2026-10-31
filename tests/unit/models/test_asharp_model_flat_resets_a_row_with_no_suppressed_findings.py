@@ -31,12 +31,12 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
-from tests.unit.models.test_asharp_model_flat_keeps_the_dict_results_suppressed_share import (
+from tests.unit.models._suppressed_count_helpers import (
     OTHER,
     SCANNER,
-    _model,
-    _row_total,
-    _suppressed_result,
+    build_model,
+    row_total,
+    suppressed_result,
 )
 
 pytestmark = pytest.mark.unit
@@ -56,10 +56,10 @@ def _sarif_of(*results) -> SarifReport:
 
 
 def _two_scanners_one_suppressed_finding_each():
-    model = _model(
+    model = build_model(
         sarif_results=[
-            _suppressed_result(SCANNER, "R1"),
-            _suppressed_result(OTHER, "R2"),
+            suppressed_result(SCANNER, "R1"),
+            suppressed_result(OTHER, "R2"),
         ]
     )
     populate_metrics_from_unified_source(model)
@@ -70,7 +70,7 @@ def _two_scanners_one_suppressed_finding_each():
 
 def test_a_row_whose_findings_left_the_sarif_reads_zero():
     model = _two_scanners_one_suppressed_finding_each()
-    model.sarif = _sarif_of(_suppressed_result(SCANNER, "R1"))
+    model.sarif = _sarif_of(suppressed_result(SCANNER, "R1"))
 
     model.to_flat_vulnerabilities()
 
@@ -78,7 +78,7 @@ def test_a_row_whose_findings_left_the_sarif_reads_zero():
     assert model.scanner_results[SCANNER].suppressed_finding_count == 1
     assert model.scanner_results[OTHER].suppressed_finding_count == 0
     assert model.scanner_results[OTHER].severity_counts.suppressed == 0
-    assert model.metadata.summary_stats.suppressed == _row_total(model)
+    assert model.metadata.summary_stats.suppressed == row_total(model)
 
 
 def test_every_row_reads_zero_when_no_finding_is_suppressed_any_more():
@@ -88,12 +88,12 @@ def test_every_row_reads_zero_when_no_finding_is_suppressed_any_more():
     model.to_flat_vulnerabilities()
 
     assert model.metadata.summary_stats.suppressed == 0
-    assert _row_total(model) == 0
+    assert row_total(model) == 0
 
 
 def test_a_row_that_reads_zero_is_left_as_the_object_it_was():
     model = _two_scanners_one_suppressed_finding_each()
-    model.sarif = _sarif_of(_suppressed_result(SCANNER, "R1"))
+    model.sarif = _sarif_of(suppressed_result(SCANNER, "R1"))
     model.to_flat_vulnerabilities()
     reset = model.scanner_results[OTHER]
 
@@ -102,6 +102,26 @@ def test_a_row_that_reads_zero_is_left_as_the_object_it_was():
 
     assert model.scanner_results[OTHER] is reset
     assert reset.suppressed_finding_count == 0
+
+
+def test_a_row_that_reads_zero_has_no_field_set_by_the_flatten():
+    """The guard is what leaves a zero row alone: an assignment of zero to it would
+    mark ``suppressed_finding_count`` as set, and a dump of the set fields would then
+    carry a key the row never had."""
+    model = _two_scanners_one_suppressed_finding_each()
+    model.sarif = _sarif_of(suppressed_result(SCANNER, "R1"))
+    # Item assignment: a row that holds nothing and has had nothing set.
+    model.scanner_results[OTHER] = ScannerTargetStatusInfo()
+    row = model.scanner_results[OTHER]
+    row_fields = set(row.model_fields_set)
+    count_fields = set(row.severity_counts.model_fields_set)
+
+    model.to_flat_vulnerabilities()
+
+    assert model.scanner_results[OTHER] is row
+    assert row.model_fields_set == row_fields
+    assert row.severity_counts.model_fields_set == count_fields
+    assert "suppressed_finding_count" not in row.model_fields_set
 
 
 def test_a_row_with_suppressed_findings_keeps_them():
@@ -117,7 +137,7 @@ def test_a_row_with_suppressed_findings_keeps_them():
 
 
 def test_a_row_held_as_a_dict_is_not_replaced():
-    model = _model(sarif_results=[_suppressed_result(SCANNER, "R1")])
+    model = build_model(sarif_results=[suppressed_result(SCANNER, "R1")])
     stored = {"status": "PASSED", "suppressed_finding_count": 4}
     # Item assignment: pydantic does not validate a dict the field already holds.
     model.scanner_results[SCANNER] = ScannerTargetStatusInfo()

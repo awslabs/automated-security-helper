@@ -28,10 +28,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Result,
 )
-from tests.unit.models.test_asharp_model_flat_keeps_the_dict_results_suppressed_share import (
+from tests.unit.models._suppressed_count_helpers import (
     SCANNER,
-    _model,
-    _suppressed_result,
+    build_model,
+    suppressed_result,
 )
 
 pytestmark = pytest.mark.unit
@@ -50,8 +50,8 @@ def _open_result(rule: str) -> Result:
 
 
 def _model_with_two_findings() -> AshAggregatedResults:
-    model = _model(
-        sarif_results=[_open_result("R1"), _suppressed_result(SCANNER, "R2")]
+    model = build_model(
+        sarif_results=[_open_result("R1"), suppressed_result(SCANNER, "R2")]
     )
     model.ash_config = get_default_config()
     return model

@@ -22,92 +22,23 @@ from __future__ import annotations
 
 import pytest
 
-from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
 )
-from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.schemas.sarif_schema_model import (
-    Message,
-    PropertyBag,
-    Result,
-    Run,
-    SarifReport,
-    Suppression,
-    Tool,
-    ToolComponent,
+from tests.unit.models._suppressed_count_helpers import (
+    OTHER,
+    SCANNER,
+    build_model,
+    dict_report,
+    row_total,
+    suppressed_result,
 )
 
 pytestmark = pytest.mark.unit
 
-AshConfig.model_rebuild()
-AshAggregatedResults.model_rebuild()
-
-SCANNER = "shape-tool"
-OTHER = "other-tool"
-
-
-def _dict_report(suppressed: int, scanner: str = SCANNER) -> dict:
-    """The per-target report the processor writes for a graded dict result."""
-    counts = {
-        "suppressed": suppressed,
-        "critical": 0,
-        "high": 0,
-        "medium": 0,
-        "low": 0,
-        "info": 0,
-    }
-    return {
-        "scanner_name": scanner,
-        "target_type": "source",
-        "status": "PASSED",
-        "finding_count": suppressed,
-        "severity_counts": counts,
-        "raw_results": {"severity_counts": counts},
-    }
-
-
-def _suppressed_result(scanner: str, rule: str) -> Result:
-    return Result(
-        ruleId=rule,
-        level="error",
-        message=Message(text=f"{rule} found"),
-        properties=PropertyBag(scanner_name=scanner),
-        suppressions=[Suppression(kind="external", justification="reviewed")],
-    )
-
-
-def _model(
-    reports: dict[str, dict] | None = None,
-    sarif_results: list[Result] | None = None,
-) -> AshAggregatedResults:
-    model = AshAggregatedResults()
-    model.ash_config = get_default_config()
-    if reports:
-        model.additional_reports = {
-            scanner: {"source": report} for scanner, report in reports.items()
-        }
-    if sarif_results:
-        model.sarif = SarifReport(
-            version="2.1.0",
-            runs=[
-                Run(
-                    tool=Tool(driver=ToolComponent(name=SCANNER, version="1.0.0")),
-                    results=sarif_results,
-                    properties=PropertyBag(),
-                )
-            ],
-        )
-    return model
-
-
-def _row_total(model: AshAggregatedResults) -> int:
-    return sum(row.suppressed_finding_count for row in model.scanner_results.values())
-
 
 def test_a_dict_only_scanners_suppressed_findings_survive_the_flatten():
-    model = _model(reports={SCANNER: _dict_report(3)})
+    model = build_model(reports={SCANNER: dict_report(3)})
     populate_metrics_from_unified_source(model)
     assert model.metadata.summary_stats.suppressed == 3, "the pass counts the dict"
     assert model.scanner_results[SCANNER].suppressed_finding_count == 3
@@ -117,13 +48,13 @@ def test_a_dict_only_scanners_suppressed_findings_survive_the_flatten():
     assert model.metadata.summary_stats.suppressed == 3
     assert model.scanner_results[SCANNER].suppressed_finding_count == 3
     assert model.scanner_results[SCANNER].severity_counts.suppressed == 3
-    assert model.metadata.summary_stats.suppressed == _row_total(model)
+    assert model.metadata.summary_stats.suppressed == row_total(model)
 
 
 def test_a_scanner_with_sarif_and_dict_findings_keeps_both_counts():
-    model = _model(
-        reports={SCANNER: _dict_report(2)},
-        sarif_results=[_suppressed_result(SCANNER, "R1")],
+    model = build_model(
+        reports={SCANNER: dict_report(2)},
+        sarif_results=[suppressed_result(SCANNER, "R1")],
     )
     populate_metrics_from_unified_source(model)
     assert model.scanner_results[SCANNER].suppressed_finding_count == 3
@@ -133,13 +64,13 @@ def test_a_scanner_with_sarif_and_dict_findings_keeps_both_counts():
     assert model.scanner_results[SCANNER].suppressed_finding_count == 3
     assert model.scanner_results[SCANNER].severity_counts.suppressed == 3
     assert model.metadata.summary_stats.suppressed == 3
-    assert model.metadata.summary_stats.suppressed == _row_total(model)
+    assert model.metadata.summary_stats.suppressed == row_total(model)
 
 
 def test_flattening_again_sets_the_same_counts():
-    model = _model(
-        reports={SCANNER: _dict_report(2)},
-        sarif_results=[_suppressed_result(SCANNER, "R1")],
+    model = build_model(
+        reports={SCANNER: dict_report(2)},
+        sarif_results=[suppressed_result(SCANNER, "R1")],
     )
     populate_metrics_from_unified_source(model)
     model.to_flat_vulnerabilities()
@@ -152,10 +83,10 @@ def test_flattening_again_sets_the_same_counts():
 
 
 def test_a_scanner_with_sarif_alone_is_counted_from_the_sarif_alone():
-    model = _model(
+    model = build_model(
         sarif_results=[
-            _suppressed_result(SCANNER, "R1"),
-            _suppressed_result(SCANNER, "R2"),
+            suppressed_result(SCANNER, "R1"),
+            suppressed_result(SCANNER, "R2"),
         ]
     )
     populate_metrics_from_unified_source(model)
@@ -167,9 +98,9 @@ def test_a_scanner_with_sarif_alone_is_counted_from_the_sarif_alone():
 
 
 def test_another_scanners_report_adds_nothing():
-    model = _model(
-        reports={OTHER: _dict_report(5, scanner=OTHER)},
-        sarif_results=[_suppressed_result(SCANNER, "R1")],
+    model = build_model(
+        reports={OTHER: dict_report(5, scanner=OTHER)},
+        sarif_results=[suppressed_result(SCANNER, "R1")],
     )
     populate_metrics_from_unified_source(model)
 

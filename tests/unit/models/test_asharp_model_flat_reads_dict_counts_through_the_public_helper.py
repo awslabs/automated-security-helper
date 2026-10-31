@@ -18,53 +18,23 @@ from __future__ import annotations
 
 import pytest
 
-from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
 )
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.unit.models._suppressed_count_helpers import (
+    SCANNER,
+    build_model,
+    dict_report,
+)
 
 pytestmark = pytest.mark.unit
 
-AshConfig.model_rebuild()
-AshAggregatedResults.model_rebuild()
-
-SCANNER = "dict-tool"
-
-
-def _dict_report(suppressed: int) -> dict:
-    """The per-target report the processor writes for a graded dict result."""
-    counts = {
-        "suppressed": suppressed,
-        "critical": 0,
-        "high": 0,
-        "medium": 0,
-        "low": 0,
-        "info": 0,
-    }
-    return {
-        "scanner_name": SCANNER,
-        "target_type": "source",
-        "status": "PASSED",
-        "finding_count": suppressed,
-        "severity_counts": counts,
-        "raw_results": {"severity_counts": counts},
-    }
-
-
-def _model(suppressed: int) -> AshAggregatedResults:
-    model = AshAggregatedResults()
-    model.ash_config = get_default_config()
-    model.additional_reports = {SCANNER: {"source": _dict_report(suppressed)}}
-    return model
-
 
 def test_the_flatten_reads_the_counts_through_the_public_helper(monkeypatch):
-    model = _model(3)
+    model = build_model(reports={SCANNER: dict_report(3)})
     seen = []
     real = ScannerStatisticsCalculator.dict_result_counts
 
@@ -82,7 +52,7 @@ def test_the_flatten_reads_the_counts_through_the_public_helper(monkeypatch):
 
 
 def test_the_public_helper_answers_what_the_private_helper_answers():
-    model = _model(3)
+    model = build_model(reports={SCANNER: dict_report(3)})
 
     public = ScannerStatisticsCalculator.dict_result_counts(model, SCANNER)
     private = ScannerStatisticsCalculator._dict_result_counts(model, SCANNER)
@@ -92,7 +62,7 @@ def test_the_public_helper_answers_what_the_private_helper_answers():
 
 
 def test_the_summary_and_the_row_keep_the_dict_results_suppressed_findings():
-    model = _model(3)
+    model = build_model(reports={SCANNER: dict_report(3)})
     populate_metrics_from_unified_source(model)
 
     model.to_flat_vulnerabilities()
