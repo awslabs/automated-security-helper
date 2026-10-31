@@ -226,3 +226,49 @@ def test_the_masthead_unavailable_figure_is_the_summarys_count(
     document = _render(test_plugin_context, [_result()])
 
     assert "7 unavailable" in document
+
+
+def _snippet_result(text: str) -> Result:
+    return _result(
+        locations=[
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "src/app.py"},
+                    "region": {"startLine": 3, "snippet": {"text": text}},
+                }
+            }
+        ]
+    )
+
+
+def test_a_block_printed_as_written_carries_no_note(test_plugin_context):
+    document = _render(test_plugin_context, [_snippet_result('path = "C:\\x64\\app"')])
+
+    assert 'class="shown-note"' not in document
+
+
+def test_a_block_that_is_shown_says_so(test_plugin_context):
+    """A block with a control in it is shown, not printed as written: its
+    backslashes are doubled throughout, so the reader is told, once, beside it.
+
+    RED at the base: nothing in the page said so.
+    """
+    document = _render(
+        test_plugin_context, [_snippet_result('a = "\\x41"\nb = 1\x1b[31m')]
+    )
+
+    assert document.count('class="shown-note"') == 1, document.count("shown-note")
+    assert "Shown, not as written" in document
+
+
+def test_one_predicate_takes_the_allowed_layout_as_a_parameter():
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
+        _is_plain,
+    )
+
+    assert _is_plain("one line")
+    assert not _is_plain("a\tb")
+    assert _is_plain("a\tb", "\t")
+    assert _is_plain("a\r\nb", "\n")
+    assert not _is_plain("a\rb", "\n")
+    assert not _is_plain("::error::x")
