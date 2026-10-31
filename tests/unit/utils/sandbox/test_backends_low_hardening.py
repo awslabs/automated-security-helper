@@ -1415,6 +1415,29 @@ def test_an_entry_that_is_not_a_variable_is_refused(entry):
         policy_module.parse_environment([entry])
 
 
+@POSIX
+@pytest.mark.parametrize("entry", ["TMPDIR", "TMPDIR=/somewhere"])
+@pytest.mark.parametrize("kind", _BACKEND_KINDS)
+def test_a_listed_tmpdir_is_refused_so_no_backend_passes_it(
+    layout, monkeypatch, kind, entry
+):
+    """Landlock and sandbox-exec replace TMPDIR with a private directory after the
+    list is applied; bwrap and firejail do not, so a listed TMPDIR would have
+    reached the scanner under those two. It is refused at the one validator, which
+    every backend's policy goes through, and the caller's own TMPDIR is not passed
+    by any of the four."""
+    with pytest.raises(ValueError, match="TMPDIR"):
+        policy_module.parse_environment(["MY_VAR", entry])
+    with pytest.raises(SandboxUnavailable, match="TMPDIR"):
+        _policy(layout, environment=("MY_VAR", entry))
+
+    plan = _plan_of(kind, layout, monkeypatch, _policy(layout), {"TMPDIR": "/caller"})
+    try:
+        assert plan.env.get("TMPDIR") != "/caller"
+    finally:
+        plan.run_cleanup()
+
+
 def test_the_refusal_of_a_malformed_entry_shows_no_value():
     """An entry with no ``=`` may be a value written without its name, so it is
     named by its place in the list; with one, only the part before it is shown."""

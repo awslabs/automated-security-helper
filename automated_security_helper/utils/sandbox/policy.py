@@ -253,14 +253,18 @@ def parse_environment(
     A name that marks a credential (``CREDENTIAL_MARKERS``) and a name the sandbox
     always drops (``DROPPED_ENV_NAMES``) are refused even when listed, so the
     list cannot open the channel that a scanner's own ``env_names`` grant is for.
+    ``TMPDIR`` is refused too: the Landlock and sandbox-exec backends replace it with
+    a private directory after this list is applied, and the bwrap and firejail
+    backends do not, so a listed value would reach the scanner under two of the
+    four.
     The error names the variable and never shows a value, which may be a secret:
     an entry with no ``=`` that is not a variable name is named by its position,
     because the whole entry may be a value written without its name.
 
     Raises:
         ValueError: The list is a string or a mapping, or an entry is not text,
-            names no variable, names a credential or a dropped variable, or
-            carries a NUL in its value.
+            names no variable, names a credential, a dropped variable or
+            ``TMPDIR``, or carries a NUL in its value.
     """
     names: Dict[str, None] = {}
     values: Dict[str, str] = {}
@@ -279,6 +283,12 @@ def parse_environment(
         if name in DROPPED_ENV_NAMES:
             raise ValueError(
                 f"environment entry {name!r} is refused: the sandbox never passes it"
+            )
+        if name == "TMPDIR":
+            raise ValueError(
+                f"environment entry {name!r} is refused: every scanner gets a "
+                "private TMPDIR of the sandbox's own, which a listed value cannot "
+                "replace"
             )
         marker = next((m for m in CREDENTIAL_MARKERS if m in name.upper()), None)
         if marker is not None:
