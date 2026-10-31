@@ -48,6 +48,12 @@ VALID = json.dumps({"read_only": ["/usr"], "writable": [], "network": False})
 #: scanner's signal and dump its core. ``getpgid`` acts on nothing, but unstubbed
 #: it reads whatever process happens to carry the made-up pid on the host, so the
 #: stop's group lookup is stubbed by every test that reaches it too.
+#:
+#: The pinned kill is in the set as well (``pidfd_open`` and
+#: ``signal.pidfd_send_signal`` would pin and kill the host process under the
+#: made-up pid), and so are the other ways a process ends or replaces itself or
+#: signals a thread (``os._exit``, ``pthread_kill``, ``posix_spawn``, ``forkpty``):
+#: ``os._exit`` reached from ``main()`` ends the pytest worker with no report.
 _PROCESS_CONTROL = (
     (os, "execv"),
     (os, "execve"),
@@ -62,7 +68,14 @@ _PROCESS_CONTROL = (
     (os, "killpg"),
     (os, "getpgid"),
     (os, "abort"),
+    (os, "_exit"),
+    (os, "pidfd_open"),
+    (os, "posix_spawn"),
+    (os, "posix_spawnp"),
+    (os, "forkpty"),
     (signal, "raise_signal"),
+    (signal, "pidfd_send_signal"),
+    (signal, "pthread_kill"),
 )
 
 
@@ -75,14 +88,36 @@ def no_process_control(monkeypatch):
     call's name instead of acting on the pytest process.
     """
 
-    def refuse(name):
+    def refuse(module, name):
         def refused(*args, **kwargs):
-            pytest.fail(f"os.{name} reached the test process; stub it in the test")
+            pytest.fail(
+                f"{module.__name__}.{name} reached the test process; stub it in the test"
+            )
 
         return refused
 
     for module, name in _PROCESS_CONTROL:
-        monkeypatch.setattr(module, name, refuse(name), raising=False)
+        monkeypatch.setattr(module, name, refuse(module, name), raising=False)
+
+
+@pytest.mark.parametrize(
+    "module, name",
+    [
+        (os, "_exit"),
+        (os, "pidfd_open"),
+        (os, "posix_spawn"),
+        (os, "posix_spawnp"),
+        (os, "forkpty"),
+        (signal, "raise_signal"),
+        (signal, "pidfd_send_signal"),
+        (signal, "pthread_kill"),
+    ],
+)
+def test_the_fixture_refuses_each_call_that_ends_or_signals_a_process(module, name):
+    """Called with more arguments than the real function takes, so that a call the
+    fixture failed to replace raises TypeError and acts on nothing."""
+    with pytest.raises(pytest.fail.Exception, match=f"{module.__name__}.{name} "):
+        getattr(module, name)(1, 2, 3, 4, 5, 6, 7)
 
 
 class _Exit(BaseException):
