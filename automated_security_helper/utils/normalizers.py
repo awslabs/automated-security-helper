@@ -23,10 +23,15 @@ def _escape(character: str, fold_case: bool = False) -> str:
     fixed = _FIXED_ESCAPES.get(character)
     if fixed is not None:
         return fixed
-    # With fold_case a letter that has a lower-case form is escaped, so every
-    # character left as it is already is lower-case and no two names differ in
-    # case alone.
-    keeps_its_case = not (fold_case and character.lower() != character)
+    # With fold_case a character is left as it is only when it is its own case
+    # folding and folding its upper-case form gives it back, so no two names
+    # that are left as they are fold to one. Lower-casing was not enough: the
+    # final sigma, the long s, the micro sign and the dotless i are lower-case
+    # already and still share a folding or an upper-case form with the sigma, s,
+    # mu and i, which a case-insensitive filesystem reads as one name.
+    keeps_its_case = not fold_case or (
+        character == character.casefold() and character.upper().casefold() == character
+    )
     if character == "-" or (_WORD_CHARACTER.fullmatch(character) and keeps_its_case):
         return character
     code_point = ord(character)
@@ -86,10 +91,12 @@ def get_normalized_filename(
     NTFS by default) ``A.yaml`` and ``a.yaml`` are still one directory, since
     letters pass through as they are. A caller that names a file or directory on
     such a filesystem from the result passes ``fold_case=True``: every letter
-    that has a lower-case form is then escaped as its code point (``A`` is
-    ``_x41``), so two names that differ in case alone are no longer the same once
-    case is ignored. The names are different from the default ones, so a caller
-    turns it on from the start rather than for a name it has already written.
+    that is not its own case folding, or whose upper-case form does not fold back
+    to it, is then escaped as its code point (``A`` is ``_x41``, the final sigma
+    is ``_u03c2``), so two names that differ in case alone, or whose letters fold
+    to one, are no longer the same once case is ignored. The names are different
+    from the default ones, so a caller turns it on from the start rather than for
+    a name it has already written.
 
     The escapes make a name longer than the input: ``_`` and ``.`` take two
     characters, a space or other ASCII punctuation four, another non-word
