@@ -1017,9 +1017,16 @@ def test_excluded_files_are_never_handed_to_detect_secrets(scanner, monkeypatch)
 
     source_with_planted_key(scanner.context.work_dir, name="skipme_settings.py")
     source_with_planted_key(scanner.context.work_dir, name="keepme_settings.py")
+    # A second pattern that can match only the absolute path: the name of the
+    # directory pytest made for this test, which holds the scan root. Matched
+    # against the absolute path it would exclude every file; the docstring's
+    # claim is that it excludes none.
+    tmp_component = scanner.context.work_dir.parent.name
+    assert tmp_component and tmp_component not in "keepme_settings.py"
     scanner.config.options.scan_settings.filters_used = [
         DetectSecretsScanSettingsFiltersUsed(
-            path=EXCLUDE_FILTER_PATH, pattern=[r"skipme_settings\.py$"]
+            path=EXCLUDE_FILTER_PATH,
+            pattern=[r"skipme_settings\.py$", re.escape(tmp_component)],
         )
     ]
 
