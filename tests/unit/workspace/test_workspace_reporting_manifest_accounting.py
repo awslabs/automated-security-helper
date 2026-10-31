@@ -849,10 +849,10 @@ class TestACancelIsHonored:
         _, output_dir, _ = workspace
         event = CancelEvent()
 
-        class FakeCancellingReporter(FakeTwinA):
+        class FakeCancellingReporter(FakeMergedReporter):
             def report(self, model) -> str:
                 event.set()
-                return "a"
+                return "written before the cancel is read"
 
         with cancel_scope(event):
             with pytest.raises(ScanCancelled):
@@ -861,3 +861,10 @@ class TestACancelIsHonored:
         reports = output_dir / REPORTS_DIR_NAME
         assert not (reports / "ash.twin-b.txt").exists()
         assert not (reports / MANIFEST_FILENAME).exists()
+        # What the reporter that cancelled had already produced stays, as the
+        # results file does (the module docstring): the cancel is read before
+        # the next reporter, not between a reporter's report and its write.
+        written = reports / "ash.merged.txt"
+        assert written.read_text(encoding="utf-8") == (
+            "written before the cancel is read"
+        )
