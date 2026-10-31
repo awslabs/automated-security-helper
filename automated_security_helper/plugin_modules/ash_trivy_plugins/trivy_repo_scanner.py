@@ -410,7 +410,11 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             ]
             # The operator's own skip lists, which ASH's skip flags would
             # otherwise replace (TrivyScannerBase._operator_skip_args).
-            inserted.extend(self._operator_skip_args(inserted, operator_skips))
+            inserted.extend(
+                self._operator_skip_args(
+                    inserted, operator_skips, target_type=target_type
+                )
+            )
             final_args[insert_at:insert_at] = inserted
             if self._offline():
                 final_args = self._offline_misconfig_args(final_args)

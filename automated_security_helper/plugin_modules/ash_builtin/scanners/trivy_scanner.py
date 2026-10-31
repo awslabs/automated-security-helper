@@ -512,7 +512,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         )
         # The operator's own skip lists, which ASH's skip flags would otherwise
         # replace (TrivyScannerBase._operator_skip_args).
-        extra.extend(self._operator_skip_args(extra, operator_skips))
+        extra.extend(
+            self._operator_skip_args(extra, operator_skips, target_type=target_type)
+        )
         # Before the target, which _resolve_arguments places LAST (after the
         # options): the last token equal to the target's spelling, not the first,
         # so a relative target spelled like an earlier value ("sarif", "vuln",

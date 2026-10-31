@@ -1238,7 +1238,11 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         return None
 
     def _operator_skip_args(
-        self, final_args: List[str], skips: Optional[_OperatorSkips] = None
+        self,
+        final_args: List[str],
+        skips: Optional[_OperatorSkips] = None,
+        *,
+        target_type: Optional[str] = None,
     ) -> List[str]:
         """The operator's own ``--skip-dirs`` and ``--skip-files`` entries, as tokens.
 
@@ -1276,6 +1280,12 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         scan. A list that does not fit when ASH has no skip flag of its own is not
         cut at all: the reservation keeps the links from adding one, so this
         returns nothing and trivy reads the whole list itself.
+
+        ``target_type`` (source or converted) is the scan the overflow warning is
+        about: the source scan carries output-directory flags the converted copy
+        usually does not, so the two counts differ. It names the scan in the
+        message and the log record and is part of the key the warning is said
+        once under.
         """
         if not _carries_skip_flag(final_args):
             return []
@@ -1295,10 +1305,13 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         over_budget = skips.over_budget
         if over_budget and skips.first_dropped is not None:
             source, position = skips.first_dropped
-            # Keyed on where the overflow starts and how large it is, so a second
-            # target (the converted copy after the source) or a changed list that
-            # overflows differently is reported, and a repeat of the same one is not.
-            refusal = f"operator-skip:budget:{source}:{position}:{over_budget}"
+            # Keyed on the scan, where the overflow starts and how large it is, so
+            # each target (the converted copy after the source) and a changed list
+            # that overflows differently is reported, and a repeat of the same one
+            # is not.
+            refusal = (
+                f"operator-skip:budget:{target_type}:{source}:{position}:{over_budget}"
+            )
             if refusal not in self._warned_inputs:
                 self._warned_inputs.add(refusal)
                 one = over_budget == 1
@@ -1306,13 +1319,15 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 verb = "is" if one else "are"
                 pronoun = "it" if one else "they"
                 subject = "That entry does" if one else "Those entries do"
+                scan = f"the {target_type} scan" if target_type else "this scan"
                 self._plugin_log(
                     f"{over_budget} {noun} of the operator's skip-dirs and "
                     f"skip-files settings, from entry {position} of {source} on, "
                     f"{verb} not given to trivy as --skip-dirs or --skip-files: "
                     f"with ASH's own tokens {pronoun} would exceed the size the OS "
-                    f"starts a program with. {subject} not apply to this scan.",
+                    f"starts a program with. {subject} not apply to {scan}.",
                     level=logging.WARNING,
+                    target_type=target_type,
                 )
         # The plan was made before the links were built, so a link token can now
         # equal an entry of the operator's; one of them is enough.

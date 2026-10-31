@@ -2120,6 +2120,101 @@ def test_control_a_list_that_fits_beside_the_short_entry_alone_is_still_given(
     assert not _operator_warnings(messages), messages
 
 
+def test_the_operator_overflow_warning_names_the_scan_it_is_about(
+    tmp_path, monkeypatch
+):
+    """One scanner object scans the source and then the converted copy. The warning
+    named neither, and was said under a key without the scan, so the second scan's
+    overflow, usually a different count because only the source carries the
+    output-directory flag, was left unsaid or read as the first one's."""
+    scanner = _builtin_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "aaaa,bbbb,cccc,dddd"}
+    ashs_own = "--skip-dirs=out"
+    one_entry = len("--skip-dirs=aaaa") + 1
+    monkeypatch.setattr(trivy_base, "trivy_skip_files", lambda *a, **k: [])
+    monkeypatch.setattr(trivy_base, "trivy_skip_dirs", lambda *a, **k: [])
+    monkeypatch.setattr(
+        trivy_base,
+        "skip_args_budget",
+        lambda environment: len(ashs_own) + 1 + 2 * one_entry + 3,
+    )
+    records: list[tuple[str, dict]] = []
+
+    with (
+        patch.object(
+            scanner,
+            "_plugin_log",
+            side_effect=lambda m, **k: records.append((str(m), k)),
+        ),
+        patch.object(
+            TrivyScannerBase, "_output_dir_skip_args", return_value=[ashs_own]
+        ),
+    ):
+        for target_type in ("source", "converted"):
+            scanner._execute_scan(Path(scanner.context.source_dir), target_type, [])
+
+    warned = [(m, k) for m, k in records if "operator's skip" in m]
+    assert len(warned) == 2, warned
+    (first, first_kwargs), (second, second_kwargs) = warned
+    assert first.startswith("2 entries"), first
+    assert "not apply to the source scan" in first, first
+    assert first_kwargs["target_type"] == "source", first_kwargs
+    assert second.startswith("2 entries"), second
+    assert "not apply to the converted scan" in second, second
+    assert second_kwargs["target_type"] == "converted", second_kwargs
+
+
+def test_trivy_repo_names_the_scan_in_the_operator_overflow_warning(
+    tmp_path, monkeypatch
+):
+    for module in (scanner_plugin, trivy_repo_scanner):
+        if hasattr(module, "find_executable"):
+            monkeypatch.setattr(module, "find_executable", lambda name: f"/bin/{name}")
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "aaaa,bbbb,cccc,dddd"}
+    scanner.dependencies_satisfied = True
+    ashs_own = "--skip-dirs=out"
+    one_entry = len("--skip-dirs=aaaa") + 1
+    monkeypatch.setattr(trivy_base, "trivy_skip_files", lambda *a, **k: [])
+    monkeypatch.setattr(trivy_base, "trivy_skip_dirs", lambda *a, **k: [])
+    monkeypatch.setattr(
+        trivy_base,
+        "skip_args_budget",
+        lambda environment: len(ashs_own) + 1 + 2 * one_entry + 3,
+    )
+    report = {
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": {"name": "Trivy", "rules": []}}, "results": []}],
+    }
+    records: list[tuple[str, dict]] = []
+
+    def _run(self, command, **kwargs):
+        destination = Path(command[command.index("--output") + 1])
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(report), encoding="utf-8")
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(TrivyRepoScanner, "_run_subprocess", autospec=True) as double,
+        patch.object(
+            scanner,
+            "_plugin_log",
+            side_effect=lambda m, **k: records.append((str(m), k)),
+        ),
+        patch.object(
+            TrivyScannerBase, "_output_dir_skip_args", return_value=[ashs_own]
+        ),
+    ):
+        double.side_effect = _run
+        scanner.scan(target=Path(scanner.context.source_dir), target_type="converted")
+
+    ((warning, kwargs),) = [(m, k) for m, k in records if "operator's skip" in m]
+    assert "not apply to the converted scan" in warning, warning
+    assert kwargs["target_type"] == "converted", kwargs
+
+
 # --- the operator's entries are sized once for a scan target -----------------------
 
 
