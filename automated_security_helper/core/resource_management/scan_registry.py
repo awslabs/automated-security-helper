@@ -803,23 +803,36 @@ class ScanRegistry:
         left nothing in the tree and is not recorded. Only entries registered
         now are touched: a scan registered after this one left meets the files
         as any scan meets what an output directory already holds.
+
+        ``removed`` may hold records of its own, of nested scans that left
+        before it did. They are files in a tree it no longer stands for, so
+        each record moves to the remaining entries whose tree contains the
+        recorded directory, whatever ``removed`` itself left behind: a second
+        scan of the same tree reads the project's files only from there, and
+        a holder that left with its records (a refused removal still leaves
+        the registry) let the other scan's removal delete them.
         """
+        for scan_id, directory in removed.removed_nested_scan_directories.items():
+            self._record_on_enclosing_entries(scan_id, directory)
         if (
             not removed.claimed_output_tree
             or removed.output_holds_previous_results
             or removed.output_removed
         ):
             return
+        self._record_on_enclosing_entries(
+            removed.scan_id, removed.canonical_output_directory
+        )
+
+    def _record_on_enclosing_entries(self, scan_id: str, directory: Path) -> None:
+        """Record the nested scan ``scan_id`` on the entries whose tree holds
+        ``directory`` strictly inside it (the caller holds the lock)."""
         for other in self._registry.values():
-            if other.canonical_output_directory not in (
-                removed.canonical_output_directory.parents
-            ):
+            if other.canonical_output_directory not in directory.parents:
                 continue
-            if removed.scan_id not in other.removed_nested_scan_ids:
-                other.removed_nested_scan_ids.append(removed.scan_id)
-            other.removed_nested_scan_directories[removed.scan_id] = (
-                removed.canonical_output_directory
-            )
+            if scan_id not in other.removed_nested_scan_ids:
+                other.removed_nested_scan_ids.append(scan_id)
+            other.removed_nested_scan_directories[scan_id] = directory
 
     def _forget_removed_tree(self, tree: Path) -> None:
         """Drop the removed nested scans whose files ``tree``'s deletion took.
