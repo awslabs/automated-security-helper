@@ -173,10 +173,17 @@ def test_on_the_substring_line_a_prefix_link_still_refuses_the_run(
 
 
 def test_the_configured_patterns_are_restored_when_resolving_raises(
-    mock_plugin_context,
+    mock_plugin_context, tmp_path
 ):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
     root = mock_plugin_context.source_dir
     (root / "real.txt").write_text("in the tree\n", encoding="utf-8")
+    # A link to a directory leaving the tree gives the run a pattern of its own
+    # (the link and its children). Without one, the run's list equals the
+    # configured list, and "the swap was made" cannot be told from "it never was".
+    link = root / "shared"
+    link.symlink_to(outside, target_is_directory=True)
     scanner = _scanner(mock_plugin_context, exclude_patterns=["*.log"])
     held_while_resolving: list[list[str]] = []
 
@@ -197,7 +204,7 @@ def test_the_configured_patterns_are_restored_when_resolving_raises(
 
     # Without this the assertion below passes just as well when the swap is
     # conditional or happens after the raise, and the restore never did anything.
-    assert held_while_resolving and held_while_resolving[0] != ["*.log"], (
+    assert held_while_resolving and os.fspath(link) in held_while_resolving[0], (
         held_while_resolving
     )
     assert scanner.config.options.exclude_patterns == ["*.log"]
