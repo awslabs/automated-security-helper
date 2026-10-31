@@ -1668,8 +1668,8 @@ def _written_key(
     member_name: str, kind: Optional[Literal["zip", "tar"]], fold: bool = True
 ) -> str:
     """The key two members are compared by to tell whether they are written to one
-    file: the written path (_member_written_path), as the host compares names
-    (os.path.normcase), and case-folded when ``fold`` is set, for an output
+    file: the written path (_member_written_path), case-folded and read as the
+    host compares names (os.path.normcase) when ``fold`` is set, for an output
     directory on a case-insensitive filesystem (APFS, NTFS), where ``X.js`` and
     ``x.js`` are one file. inspect_members measures the output filesystem once
     (_filesystem_folds_case) and passes the answer: on a case-sensitive one the
@@ -1678,9 +1678,14 @@ def _written_key(
     refused for a collision the host never has. With nothing to measure the fold
     is on, the side that loses nothing: it renames a member that would have been
     a second file, where the other answer could let one member overwrite another.
+
+    With the fold off the written path is the key as it is, ``/`` separators and
+    all: ``os.path.normcase`` lower-cases on Windows, so applying it there would
+    fold case whatever the filesystem was measured to do, and a case-sensitive
+    NTFS directory would never get the behavior the fold being off exists for.
     """
-    key = os.path.normcase(_member_written_path(member_name, kind))
-    return key.casefold() if fold else key
+    path = _member_written_path(member_name, kind)
+    return os.path.normcase(path).casefold() if fold else path
 
 
 def _written_prefix_keys(

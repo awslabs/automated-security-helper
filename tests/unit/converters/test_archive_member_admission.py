@@ -538,6 +538,28 @@ def test_a_member_under_a_directory_spelled_like_a_file_is_refused_where_case_fo
     assert refused.reason == archive_converter._MEMBER_UNDER_A_FILE
 
 
+def test_the_written_key_keeps_case_with_the_fold_off_on_a_host_that_lower_cases_names(
+    monkeypatch,
+):
+    """``os.path.normcase`` lower-cases on Windows (ntpath), so a key that applied
+    it before reading the fold switch folded case whatever the output filesystem
+    was measured to do: a case-sensitive NTFS directory never got the behavior,
+    and the test of ``Foo.js`` beside ``foo.js/bar.js`` failed on the Windows leg.
+    The host's normcase is stood in for here (``str.lower``), so the test reads
+    the same on every host: with the fold off the key keeps the case, with it on
+    the key folds (the control)."""
+    monkeypatch.setattr(os.path, "normcase", str.lower)
+
+    assert archive_converter._written_key("Foo.js", "zip", fold=False) == "Foo.js"
+    assert archive_converter._written_prefix_keys(
+        "Lib/Sub/Foo.js", "zip", fold=False
+    ) == ["Lib", "Lib/Sub"]
+    assert archive_converter._written_key("Foo.js", "zip", fold=True) == "foo.js"
+    assert archive_converter._written_prefix_keys(
+        "Lib/Sub/Foo.js", "zip", fold=True
+    ) == ["lib", "lib/sub"]
+
+
 def test_a_zip_with_a_file_and_a_directory_differing_in_case_extracts_both_where_case_counts(
     test_plugin_context, monkeypatch
 ):
