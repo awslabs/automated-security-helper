@@ -632,7 +632,9 @@ class ConsoleHandler(ShownHandlerErrors, RichHandler):
             # message is read as markup and the rest is appended as text.
             own = record.getMessage()
             if message.startswith(own) and len(message) > len(own):
-                rendered = super().render_message(record, console_text(record, own))
+                rendered: Any = super().render_message(
+                    record, console_text(record, own)
+                )
                 rendered.append(str(shown_not_obeyed(message[len(own) :])))
                 return rendered
         return super().render_message(record, console_text(record, message))

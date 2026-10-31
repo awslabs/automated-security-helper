@@ -11,6 +11,7 @@ from typing import (
     List,
     Literal,
     TypeVar,
+    cast,
 )
 from typing_extensions import Self
 
@@ -145,7 +146,10 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         Read from the class itself: a class taken from a value (``type(self)``)
         handed to a call is what the shown-text guard refuses in the package.
         """
-        return declared_config_model(cls, ConverterPluginConfigBase)
+        return cast(
+            "type[ConverterPluginConfigBase] | None",
+            declared_config_model(cls, ConverterPluginConfigBase),
+        )
 
     def _default_config(self) -> ConverterPluginConfigBase:
         """The config a converter runs with when it is given none.

@@ -60,7 +60,7 @@ def _constructor_failure_name(plugin_class: Any) -> str:
         declared = declared_plugin_name(plugin_class)
     except Exception:  # noqa: BLE001 -- a plugin class can be anything
         declared = None
-    return declared or getattr(plugin_class, "__name__", "Unknown")
+    return declared or str(getattr(plugin_class, "__name__", "Unknown"))
 
 
 def _unused_key(preferred: str, taken: Any, qualifier: str) -> str:
@@ -116,7 +116,7 @@ def _row_keys(converter_instances: List[Any], taken: set) -> Dict[int, str]:
     return keys
 
 
-def _redaction_values(plugin_instance: Any, run_config: Any) -> tuple:
+def _redaction_values(plugin_instance: Any, run_config: Any) -> tuple[Any, ...]:
     """The values a converter's error text is redacted with: the run's
     configuration's environment values and the converter's own, as the
     dependency reason's are (``_dependency_unavailable_reason``)."""

@@ -127,7 +127,9 @@ def stat_named_path(
         # own text: a logon failure or a deleted network name read as
         # "EINVAL ... Invalid argument" pointed away from the cause.
         return StatProblem(UNREADABLE, f"WinError {winerror}", number, strerror)
-    if number in (errno.ENOENT, errno.ENOTDIR) or number in _CANNOT_TAKE:
+    if isinstance(number, int) and (
+        number in (errno.ENOENT, errno.ENOTDIR) or number in _CANNOT_TAKE
+    ):
         return StatProblem(MISSING, errno.errorcode[number], number)
     if number == errno.ELOOP:
         return StatProblem(LOOP, errno.errorcode[number], number)

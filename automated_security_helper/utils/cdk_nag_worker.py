@@ -615,7 +615,7 @@ def _read_response(
     return True, answers, cut
 
 
-def _failure_signature(response: Dict[str, Any], reason: str) -> tuple:
+def _failure_signature(response: Dict[str, Any], reason: str) -> tuple[Any, ...]:
     """What two answerless children must share for their failure to be one failure.
 
     The exit code as the runner reported it, and the reason text with paths and numbers
@@ -960,7 +960,7 @@ class _Batch:
         )
 
         answerless_in_a_row = 0
-        last_signature: Optional[tuple] = None
+        last_signature: Optional[tuple[Any, ...]] = None
         deadline = None if self.timeout is None else time.monotonic() + self.timeout
         first_child = True
         # Whether the child about to start is the retry after one that wrote no header.
@@ -976,7 +976,7 @@ class _Batch:
                     )
 
                     limit = timeout_limit_token(self.timeout, ())
-                    error = (
+                    out_of_time = (
                         f"the cdk-nag worker's time ran out after {limit}: earlier "
                         "worker children spent the scan's limit, or left too little "
                         "of it for another to start, so these templates were not "
@@ -984,7 +984,7 @@ class _Batch:
                         "these templates legitimately need longer."
                     )
                     for template in pending:
-                        self.errors[template] = error
+                        self.errors[template] = out_of_time
                     return
                 child_timeout = remaining
             first_child = False

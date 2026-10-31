@@ -1797,7 +1797,7 @@ class AshAggregatedResults(RecordModel):
         if key not in self.scanner_results:
             # The rows are keyed by the scanner's recorded name, in the case the
             # configuration spells it; the caller lowercased the finding's.
-            key = next(
+            recorded_name = next(
                 (
                     name
                     for name in self.scanner_results
@@ -1805,8 +1805,9 @@ class AshAggregatedResults(RecordModel):
                 ),
                 None,
             )
-            if key is None:
+            if recorded_name is None:
                 return
+            key = recorded_name
 
         target_info = self.scanner_results[key]
         if target_info is None:

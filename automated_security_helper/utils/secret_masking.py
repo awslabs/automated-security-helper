@@ -1522,7 +1522,7 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                 continue
             region = getattr(physical, "region", None)
             start = getattr(region, "startLine", None)
-            end = getattr(region, "endLine", None)
+            end: Any = getattr(region, "endLine", None)
             if isinstance(start, int):
                 end = _region_last_line(region, start)
             if isinstance(start, int) and is_primary:

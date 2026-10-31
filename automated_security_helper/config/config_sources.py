@@ -4105,7 +4105,7 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
             # character equal to the value read would keep the reference.
             return False
         try:
-            node = node[segment]
+            node = typing.cast(Any, node)[segment]
         except (TypeError, KeyError, IndexError):
             # The merge folds a section spelled with "-" into one spelled
             # with "_" and the other way around, so the reference's spelling

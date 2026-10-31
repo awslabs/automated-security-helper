@@ -74,7 +74,7 @@ from enum import Enum
 import json
 import posixpath
 from pathlib import Path, PurePath, PurePosixPath
-from typing import Dict, List, Literal, Optional, Sequence, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence, Union
 from urllib.parse import unquote
 
 from pydantic import AnyUrl, ConfigDict, Field, RootModel
@@ -3028,7 +3028,7 @@ def _detach_run_scoped_references(
 
     aggregate_bases = aggregate.originalUriBaseIds or {}
 
-    def field_defaults(row: object) -> Dict[str, object]:
+    def field_defaults(row: Any) -> Dict[str, object]:
         """Each optional field's default on the row's model, by field name."""
         defaults: Dict[str, object] = {}
         for name, info in type(row).model_fields.items():
