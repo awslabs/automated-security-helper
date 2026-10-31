@@ -558,25 +558,40 @@ class ScannerStatisticsCalculator:
         )
 
     @staticmethod
+    def _holds_a_dict_result(report: Dict[str, Any]) -> bool:
+        """True when one target report still carries a scanner's own dict result.
+
+        ``raw_results`` is a dict and not a SARIF document. The processor drops
+        ``raw_results`` from a SARIF report, so a live run never has one; a merged
+        or hand-written results file can keep a SARIF-shaped one (``{"version":
+        "2.1.0", "runs": [...]}``) beside the executor's ``severity_counts``. Its
+        findings are in the merged SARIF, so counting its counts as a dict
+        result's would count each one twice.
+        """
+        raw_results = report.get("raw_results")
+        return isinstance(raw_results, dict) and "runs" not in raw_results
+
+    @staticmethod
     def _dict_result_counts(
         asharp_model: AshAggregatedResults, scanner_name: str
     ) -> ScannerSeverityCount:
         """The severity counts recorded on *scanner_name*'s non-SARIF target reports.
 
         Summed over every per-target report of the scanner (``_recorded_report``'s
-        shape) whose ``raw_results`` is a dict: the executor read the counts from
-        that dict and the processor left both on the report. A report whose counts
-        do not validate, or whose result was SARIF (``raw_results`` dropped), adds
-        nothing. All zero when the scanner has no such report. The reports are this
+        shape) whose ``raw_results`` is a dict that is not a SARIF document: the
+        executor read the counts from that dict and the processor left both on the
+        report. A report whose counts do not validate, or whose result was SARIF
+        (``raw_results`` dropped, or kept as a SARIF-shaped dict by a merged or
+        hand-written file: ``_holds_a_dict_result``), adds nothing. All zero when the scanner has no such report. The reports are this
         scanner's own (``_own_reports``): one naming another scanner adds nothing,
         one naming none is counted for the key it is filed under.
         """
         total = ScannerSeverityCount()
         reports = ScannerStatisticsCalculator._own_reports(asharp_model, scanner_name)
         for report in reports.values():
-            if not isinstance(report.get("raw_results"), dict) or not isinstance(
-                report.get("severity_counts"), dict
-            ):
+            if not ScannerStatisticsCalculator._holds_a_dict_result(
+                report
+            ) or not isinstance(report.get("severity_counts"), dict):
                 continue
             try:
                 counts = ScannerSeverityCount.model_validate(report["severity_counts"])
@@ -605,7 +620,7 @@ class ScannerStatisticsCalculator:
         """
         reports = ScannerStatisticsCalculator._own_reports(asharp_model, scanner_name)
         for report in reports.values():
-            if not isinstance(report.get("raw_results"), dict):
+            if not ScannerStatisticsCalculator._holds_a_dict_result(report):
                 continue
             counts = report.get("severity_counts")
             if not isinstance(counts, dict):

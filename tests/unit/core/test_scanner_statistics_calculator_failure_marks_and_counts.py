@@ -288,6 +288,29 @@ class TestTheSarifCompareTakesTheDictCountsBackOut:
         stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
         assert stats["bandit"]["total"] == 2
 
+    def test_a_sarif_shaped_raw_results_beside_counts_is_not_counted_twice(self):
+        """A merged or hand-written results file can keep the SARIF document as
+        ``raw_results`` beside the executor's counts. Its findings are in the merged
+        SARIF, so the counts are not a dict result's and add nothing: the row's
+        total is the two SARIF results, not four."""
+        model = _model(
+            {
+                "bandit": {
+                    "source": _report(
+                        "bandit",
+                        raw_results={"version": "2.1.0", "runs": []},
+                        severity_counts={"critical": 1, "medium": 1},
+                    )
+                }
+            }
+        )
+        model.sarif = _sarif("bandit", ["error", "warning"])
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        assert stats["bandit"]["total"] == 2
+        assert ScannerStatisticsCalculator.verify_sarif_finding_counts(model) is True
+
     def test_a_sarif_result_no_row_accounts_for_is_still_a_mismatch(self):
         """Control: the compare still fails on a real disagreement. A result that
         names no scanner is counted in no row, so the SARIF holds one finding the
