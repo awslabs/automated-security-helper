@@ -2233,7 +2233,9 @@ class ScanRegistry:
                 status_summary = (
                     {"scanner_statuses": {}, "skipped_scanners": []}
                     if foreign_output
-                    else summarize_scanner_statuses(output_dir)
+                    else summarize_scanner_statuses(
+                        output_dir, environment_values=entry.environment_values
+                    )
                 )
 
                 # The gap lists: the runner's coverage when it recorded one,

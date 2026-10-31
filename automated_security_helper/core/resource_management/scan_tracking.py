@@ -32,11 +32,13 @@ from automated_security_helper.models.asharp_model import (
 from automated_security_helper.utils.error_text import (
     error_text,
     log_unexpected_error,
+    text_without_values,
     validation_errors_in,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.scanner_tool_types import result_scanner_name
 from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
 # Configure module logger
 _logger = ASH_LOGGER
@@ -1030,7 +1032,9 @@ def parse_scanner_result_file(
         return []
 
 
-def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
+def summarize_scanner_statuses(
+    output_dir: Path, environment_values: Any = ()
+) -> Dict[str, Any]:
     """Read the authoritative per-scanner statuses for a scan.
 
     A scanner skipped for missing dependencies used to be indistinguishable from
@@ -1062,7 +1066,12 @@ def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
     reason other than a missing tool (its filtering raised, or it could not be
     built). Its ``reason`` is the generic ``skipped``, so the reason the row
     recorded (``missing_reason``, or ``skipped_reason``) is carried as ``detail``
-    on every skipped entry that has one.
+    on every skipped entry that has one. The reason can hold the text of an
+    exception, so it is shown as the registry shows an error message: the
+    values in ``environment_values`` (the ones the run's configuration read from
+    the environment) are redacted from it, and control characters are written as
+    escapes. Neither was done, and the reason reached a client as the writer
+    recorded it.
     """
     empty: Dict[str, Any] = {"scanner_statuses": {}, "skipped_scanners": []}
 
@@ -1142,7 +1151,9 @@ def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
         }
         detail = info.get("missing_reason") or info.get("skipped_reason")
         if isinstance(detail, str) and detail:
-            entry["detail"] = detail
+            if environment_values:
+                detail = text_without_values(detail, environment_values)
+            entry["detail"] = raw_controls_on_one_line(detail)
         skipped.append(entry)
 
     return {"scanner_statuses": statuses, "skipped_scanners": skipped}
