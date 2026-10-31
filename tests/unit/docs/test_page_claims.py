@@ -6990,6 +6990,39 @@ def test_an_offline_scan_logs_a_warning_for_a_scanner_whose_cache_is_not_set_up(
     )
 
 
+@pytest.mark.unit
+def test_the_offline_trivy_row_says_how_the_version_check_is_turned_off() -> None:
+    """run-offline.md (What each scanner does offline).
+
+    The row said every trivy scan gets ``--skip-version-check``. An offline command
+    never carries it (a trivy too old to know the flag refuses the command over it),
+    and the check is turned off by ``TRIVY_SKIP_VERSION_CHECK`` in the child's
+    environment instead. The row names both, and the code is read for each: the
+    flag is the online set's, and the variable is in the offline environment.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
+        ONLINE_FLAGS,
+        SCAN_FLAGS,
+    )
+    from automated_security_helper.utils.offline_tool_env import (
+        offline_tool_environment,
+    )
+
+    assert_on_page(
+        _OFFLINE_PAGE,
+        "Every trivy scan gets `trivy --offline-scan`, so trivy contacts no package "
+        "registry. trivy does not check for a newer release either: an online scan "
+        "gets `--skip-version-check`, and an offline one gets "
+        "`TRIVY_SKIP_VERSION_CHECK=true` in trivy's environment instead, since a "
+        "trivy too old to know the flag refuses the command over it.",
+    )
+    assert "--offline-scan" in SCAN_FLAGS
+    assert "--skip-version-check" in ONLINE_FLAGS
+    assert "--skip-version-check" not in SCAN_FLAGS
+    assert offline_tool_environment(True)["TRIVY_SKIP_VERSION_CHECK"] == "true"
+    assert "TRIVY_SKIP_VERSION_CHECK" not in offline_tool_environment(False)
+
+
 # --------------------------------------------------------------------------- #
 # Content database bounds
 # --------------------------------------------------------------------------- #
