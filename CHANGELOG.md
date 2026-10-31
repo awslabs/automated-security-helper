@@ -8196,7 +8196,8 @@
   `ash-ocsf-conversion-shortfall`, and a SIEM rule that matches that string
   finds nothing. Its `status_detail` says how many findings
   are absent and how many were built by the fallback path, and those fallback
-  records carry the label `ash_row_type:degraded_finding`. A reader that takes
+  records carry the label `ash_row_type:degraded_finding`. A record written with
+  a minimal finding info is one of the fallback records and is counted there. A reader that takes
   `vulnerabilities[0]` from every record skips the shortfall record by its label.
 
 - **The GitLab SAST report's `scan.status` reads `failure` whenever the scan was
