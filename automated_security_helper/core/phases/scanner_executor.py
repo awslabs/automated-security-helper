@@ -1251,6 +1251,9 @@ class ScannerExecutor:
                 # ERROR from this, not from scan_timed_out_after, which the run
                 # recorder can fail to set while the flag is kept.
                 kept_timeout: Optional[Tuple[str, str]] = None
+                # The record-step failure of that same run, kept beside it for
+                # the row instead of raised over the report it keeps.
+                kept_post_run_error: Optional[str] = None
                 heartbeat = _ScannerHeartbeat(
                     scanner_config_name,
                     target_type,
@@ -1481,7 +1484,18 @@ class ScannerExecutor:
                                     # both states describe, the record failure is the
                                     # detail, not the reason.
                                     post_run_error = _post_run_error(scanner_plugin)
-                                    if post_run_error is not None:
+                                    if post_run_error is not None and (
+                                        kept_timeout is not None
+                                    ):
+                                        # The timed-out target was recorded by the
+                                        # scanner itself and its report is kept
+                                        # above; a killed tool commonly fails its
+                                        # record step too, and raising for that
+                                        # here replaced the report anyway. The
+                                        # row is ERROR for the timeout, and the
+                                        # record failure is added to it below.
+                                        kept_post_run_error = post_run_error
+                                    elif post_run_error is not None:
                                         raise ScannerError(
                                             f"{scanner_config_name} ran on {target_type}, "
                                             "but ASH could not record the scanner's "
@@ -2352,6 +2366,20 @@ class ScannerExecutor:
                         )
                         if container.status != ScannerStatus.MISSING:
                             container.status = ScannerStatus.ERROR
+                    if kept_post_run_error is not None:
+                        # The run that timed out could not record its output
+                        # either; the report stayed, and this is the detail.
+                        environment_values = self._plugin_environment_values(
+                            scanner_plugin
+                        )
+                        container.add_error(
+                            text_without_values(
+                                f"{scanner_config_name} ran on {target_type}, but "
+                                "ASH could not record the scanner's output: "
+                                f"{kept_post_run_error}",
+                                environment_values,
+                            )
+                        )
                     if container.status == ScannerStatus.SKIPPED and not disabled:
                         # determine_status reaches SKIPPED only for a scanner that
                         # tracks targets and attempted none. The scanner's own

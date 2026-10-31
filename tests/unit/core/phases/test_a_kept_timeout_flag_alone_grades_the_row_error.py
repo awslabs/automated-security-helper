@@ -81,6 +81,7 @@ class PerTargetScanner(ScannerPluginBase):
         self.targets_failed = 1 if self.kept else 0
         self._scan_kept_flag = self.kept
         self._scan_timed_out_after = self.limit
+        self._scan_post_run_error = self.record_error
         self.start_time = datetime(2026, 1, 1, 10, 0, 0)
         self.end_time = datetime(2026, 1, 1, 10, 0, 7)
         self.exit_code = 0
@@ -102,10 +103,11 @@ def plugin_context(tmp_path):
     )
 
 
-def _row(plugin_context, kept, limit):
+def _row(plugin_context, kept, limit, record_error=None):
     scanner = PerTargetScanner(config=_Config(), context=plugin_context)
     scanner.kept = kept
     scanner.limit = limit
+    scanner.record_error = record_error
     executor = ScannerExecutor(
         plugin_context=plugin_context, progress_display=MagicMock(), scanner_tasks=[]
     )
@@ -135,6 +137,42 @@ class TestAKeptTimeoutFlagAloneGradesTheRowError:
         assert row.status == ScannerStatus.ERROR
         assert "timed out after" in _reasons(row), row.errors
         assert _reasons(row).count("timed out") == 1, row.errors
+
+    def test_a_record_failure_of_the_timed_out_run_keeps_the_report(
+        self, plugin_context
+    ):
+        """A killed tool commonly fails its record step too. The record failure
+        was raised over the report the skip kept, so one failure record replaced
+        the other targets' results. Red at the base: raw_results was the failure
+        record, with its exception, and no timeout line led the row."""
+        row = _row(
+            plugin_context,
+            kept=("timed_out", REASON),
+            limit=30.0,
+            record_error="the stream log could not be written",
+        )
+
+        assert row.status == ScannerStatus.ERROR
+        assert "exception" not in row.raw_results, row.raw_results
+        assert row.raw_results.get("findings") == []
+        assert "timed out after" in _reasons(row), row.errors
+        assert "could not record the scanner's output" in _reasons(row), row.errors
+        assert "the stream log could not be written" in _reasons(row), row.errors
+
+    def test_control_a_record_failure_with_no_kept_flag_still_raises(
+        self, plugin_context
+    ):
+        """The skip is for the timed-out target alone: a run that kept no flag and
+        failed its record step is still this row's failure."""
+        row = _row(
+            plugin_context,
+            kept=None,
+            limit=None,
+            record_error="the stream log could not be written",
+        )
+
+        assert row.status == ScannerStatus.ERROR
+        assert "could not record the scanner's output" in _reasons(row), row.errors
 
     def test_control_no_kept_flag_grades_on_the_findings(self, plugin_context):
         row = _row(plugin_context, kept=None, limit=None)
