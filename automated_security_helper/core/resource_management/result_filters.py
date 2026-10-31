@@ -9,7 +9,7 @@ mcp_get_scan_results into smaller, purpose-specific views.
 """
 
 import copy
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypeGuard
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
     result_severity,
@@ -99,7 +99,7 @@ def _outcome_counter(data: Dict[str, Any]) -> Optional[str]:
     return _OUTCOME_COUNTERS.get(status.upper())
 
 
-def _records_a_breakdown(severity_counts: Any) -> bool:
+def _records_a_breakdown(severity_counts: Any) -> TypeGuard[Dict[Any, Any]]:
     """Whether *severity_counts* names at least one bucket with a usable count.
 
     An object that is empty, or holds only keys the summary has no bucket for
