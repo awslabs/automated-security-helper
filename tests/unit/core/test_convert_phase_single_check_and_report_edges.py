@@ -403,24 +403,27 @@ class TestATurnedOffConverterThatCouldNotBeBuiltIsNotUnfinished:
 
 class TestAConvertThatReturnsAnotherSequence:
     @pytest.mark.parametrize(
-        ("result", "expected"),
+        ("make", "expected"),
         [
-            (("a.py", "b.py"), ["a.py", "b.py"]),
-            ({"b.py", "a.py"}, ["a.py", "b.py"]),
-            (frozenset({"a.py"}), ["a.py"]),
-            ((p for p in [Path("a.py"), "b.py"]), ["a.py", "b.py"]),
-            (["a.py", Path("sub") / "b.py"], ["a.py", "sub/b.py"]),
-            ("a.py", ["a.py"]),
-            (Path("a.py"), ["a.py"]),
-            (None, []),
-            ("", []),
-            (["a.py", ""], ["a.py"]),
-            ([], []),
+            (lambda: ("a.py", "b.py"), ["a.py", "b.py"]),
+            # A tuple keeps the order it was given; only a set is sorted.
+            (lambda: ("b.py", "a.py"), ["b.py", "a.py"]),
+            (lambda: {"b.py", "a.py"}, ["a.py", "b.py"]),
+            (lambda: frozenset({"a.py"}), ["a.py"]),
+            # A factory, so a rerun gets a fresh generator, not an exhausted one.
+            (lambda: (p for p in [Path("a.py"), "b.py"]), ["a.py", "b.py"]),
+            (lambda: ["a.py", Path("sub") / "b.py"], ["a.py", "sub/b.py"]),
+            (lambda: "a.py", ["a.py"]),
+            (lambda: Path("a.py"), ["a.py"]),
+            (lambda: None, []),
+            (lambda: "", []),
+            (lambda: ["a.py", ""], ["a.py"]),
+            (list, []),
         ],
     )
-    def test_the_paths_are_read(self, result, expected):
+    def test_the_paths_are_read(self, make, expected):
         # Red at the base for the tuple, set and generator: Path(<collection>).
-        assert _converted_path_list(result) == expected
+        assert _converted_path_list(make()) == expected
 
     def test_a_mapping_is_still_a_failure(self):
         with pytest.raises(TypeError):
