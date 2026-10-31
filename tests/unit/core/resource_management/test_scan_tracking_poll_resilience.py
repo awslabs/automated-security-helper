@@ -33,6 +33,7 @@ Each group is pinned against the behavior it replaced:
 
 import errno
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -469,6 +470,9 @@ class TestTheSkippedScannerSummaryReadsTheDocumentAsTheModelDoes:
         assert reads == ["ash_aggregated_results.json"]
         assert [row["scanner"] for row in summary["skipped_scanners"]] == ["semgrep"]
 
+    @pytest.mark.skipif(
+        not hasattr(os, "O_NOFOLLOW"), reason="the platform has no O_NOFOLLOW"
+    )
     def test_a_link_swapped_in_after_the_look_is_not_followed(
         self, tmp_path, monkeypatch
     ):
