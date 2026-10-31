@@ -93,6 +93,9 @@ def test_an_in_tree_baseline_that_links_out_of_the_tree_is_not_read(
     tmp_path, monkeypatch, caplog
 ):
     monkeypatch.chdir(tmp_path)
+    # Offline mode drops the verification filter whatever its source, which
+    # would make the "filter absent" assertions below pass vacuously.
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
     context = _context(tmp_path)
     _link_in_tree_to_outside(tmp_path, context)
 
@@ -148,6 +151,7 @@ def test_an_outside_name_that_links_into_the_tree_is_judged_by_its_target(
     filter it carries is not loaded. Judged by the name alone, the baseline
     read as the operator's and the filter stayed."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
     context = _context(tmp_path)
     in_tree = context.source_dir / ".secrets.baseline"
     in_tree.write_text(_baseline_text(), encoding="utf-8")
@@ -230,6 +234,7 @@ def test_an_in_tree_link_elsewhere_in_the_checkout_is_read(
     repository's. Tested against the scanned directory alone, the link was
     refused as pointing outside."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
     checkout = tmp_path / "repo"
     _git_shaped_checkout(checkout)
     shared = checkout / ".secrets.baseline"
@@ -260,7 +265,7 @@ def test_an_in_tree_link_elsewhere_in_the_checkout_is_read(
         "a link to a file outside" in record.message for record in caplog.records
     ), [record.message for record in caplog.records]
     reason = scanner._untrusted_baseline_reason(None)
-    assert reason is not None, reason
+    assert reason is not None and "inside the" in reason, reason
     # The repository's settings: the link's verification filter is not loaded.
     assert not any(
         item.path == VERIFICATION_FILTER
@@ -320,6 +325,7 @@ def test_an_in_tree_link_into_an_outer_checkout_is_refused(
     the scan runs without a baseline. Admitting every enclosing checkout read
     the operator's file under the repository's own settings."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
     home = _git_shaped_checkout(tmp_path / "home")
     outer = home / "operator.baseline"
     outer.write_text(_baseline_text(), encoding="utf-8")
