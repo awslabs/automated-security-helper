@@ -4,6 +4,7 @@ import errno
 import hashlib
 import http.client
 import json
+import ntpath
 import os
 import platform
 import re
@@ -235,12 +236,24 @@ def _url_basename(url: str) -> str:
     was. A URL whose path ends in ``/`` names no file: refused here, where the
     URL is named, rather than after the download as an untyped OSError from a
     rename onto the destination directory.
+
+    The decoded name is a single file name or it is refused: a decoded separator
+    (``%2F``, ``%5C``), a NUL (``%00``) or a drive prefix (``C:name``, which joined
+    to the destination names a path on that drive, not under it) would otherwise
+    reach the filesystem calls as a path of the URL's choosing, or as an untyped
+    ValueError from them after the download. All are refused here, before any
+    byte is taken.
     """
     name = urllib.parse.unquote(urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1])
     if not name or name in (".", "..") or "/" in name or "\\" in name:
         raise ValueError(
             f"{url} names no file to install: its path ends in a directory, so "
             "pass rename_to"
+        )
+    if "\x00" in name or ntpath.splitdrive(name)[0]:
+        raise ValueError(
+            f"{url} names no file to install: its name decodes to a NUL or a "
+            "drive prefix, so pass rename_to"
         )
     return name
 

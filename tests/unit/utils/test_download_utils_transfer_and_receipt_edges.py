@@ -433,6 +433,30 @@ def test_a_directory_swapped_in_after_the_rename_is_a_typed_refusal(
     assert target.is_dir()
 
 
+@pytest.mark.parametrize(
+    "tail",
+    ["a%2Fb", "a%5Cb", "a%00b", "C%3Aevil", "%2E%2E%2Fescape"],
+    ids=["slash", "backslash", "nul", "drive prefix", "dot-dot slash"],
+)
+def test_a_name_that_decodes_to_a_path_is_refused_before_any_request(
+    monkeypatch, tmp_path, tail
+):
+    """The installed name is the URL's last segment, decoded. A decoded separator
+    was refused; a NUL and a drive prefix were not, and reached the filesystem
+    calls after the download. None reaches a request: urlopen fails the test."""
+
+    def no_request(*args, **kwargs):
+        pytest.fail("a request was made for a name that cannot be installed")
+
+    monkeypatch.setattr(download_utils.urllib.request, "urlopen", no_request)
+    destination = tmp_path / "bin"
+    with pytest.raises(ValueError, match="names no file"):
+        download_utils.download_file(
+            f"https://example.invalid/dir/{tail}", destination, expected_sha256=_DIGEST
+        )
+    assert not destination.exists()
+
+
 def test_a_call_without_a_mode_is_refused(tmp_path):
     staging = tmp_path / ".tool.ash-partial"
     staging.write_bytes(_BODY)
