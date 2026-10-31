@@ -681,6 +681,54 @@ def test_a_host_without_a_path_length_limit_admits_a_long_member_name(
     assert converter.refused_inputs == []
 
 
+def test_a_duplicate_whose_numbered_placement_passes_the_host_limit_is_refused_alone(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """The length check reads the name as the archive holds it; a second member
+    bound for a taken path is written in a numbered directory (``vendor/m~2/m.js``),
+    four characters longer. A duplicate within those characters of the limit passed
+    the check, and the extractor's open of its longer placement failed the whole
+    archive. The placement is checked too: the duplicate is refused alone, by the
+    same reason, and left under the name it was read with; the first is kept."""
+    converter = _converter(test_plugin_context)
+    monkeypatch.setattr(
+        archive_converter, "_PATH_LENGTH_LIMIT", len(str(tmp_path)) + 14
+    )
+    first = tarfile.TarInfo("vendor/m.js")
+    second = tarfile.TarInfo("vendor/m.js")
+
+    kept = converter.inspect_members(
+        [first, second], target_path=tmp_path, archive="a.tar"
+    )
+
+    assert kept == [first]
+    (refused,) = converter.refused_inputs
+    assert refused.member == "vendor/m.js"
+    assert "path length limit" in refused.reason
+    assert second.name == "vendor/m.js"
+
+
+def test_a_duplicate_whose_numbered_placement_fits_the_host_limit_is_still_renamed(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """The control: with the limit one character past the placement's length the
+    same pair is admitted, the second renamed, and nothing is refused."""
+    converter = _converter(test_plugin_context)
+    monkeypatch.setattr(
+        archive_converter, "_PATH_LENGTH_LIMIT", len(str(tmp_path)) + 17
+    )
+    first = tarfile.TarInfo("vendor/m.js")
+    second = tarfile.TarInfo("vendor/m.js")
+
+    kept = converter.inspect_members(
+        [first, second], target_path=tmp_path, archive="a.tar"
+    )
+
+    assert kept == [first, second]
+    assert converter.refused_inputs == []
+    assert second.name == "vendor/m~2/m.js"
+
+
 def test_a_later_name_bound_for_a_taken_path_is_refused_when_members_are_names(
     test_plugin_context, tmp_path
 ):

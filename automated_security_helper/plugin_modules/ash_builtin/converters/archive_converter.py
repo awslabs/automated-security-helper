@@ -1850,8 +1850,9 @@ def _written_path_over_limit(
     path the member is written to (``target_path``, a separator, its written path
     below it; _member_written_path) is at or past _PATH_LENGTH_LIMIT; None when it
     is under the limit or the host has none. The length counts characters, as the
-    limit does; a member later placed in a numbered directory beside an earlier
-    one (_renamed_member_name) is a few characters longer than read here."""
+    limit does. A member placed in a numbered directory beside an earlier one
+    (_renamed_member_name) is a few characters longer than its name as read, so
+    inspect_members asks again with the placed name."""
     limit = _PATH_LENGTH_LIMIT
     if limit is None:
         return None
@@ -2465,25 +2466,44 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         rename_counters,
                         fold,
                     )
-                    renamed_count += 1
-                    if renamed_count <= MEMBER_REFUSALS_LISTED:
-                        ASH_LOGGER.warning(
-                            shown_on_one_line(
-                                f"Archive member '{member_name}'"
-                                + (f" of '{archive}'" if archive is not None else "")
-                                + ": "
-                                + _MEMBER_RENAMED.format(renamed=renamed)
-                            )
-                        )
-                    if isinstance(member, tarfile.TarInfo):
-                        member.name = renamed
+                    # The placement is a few characters longer than the name as
+                    # read, so the length check above did not see it: a member
+                    # at the limit would pass it and then fail the whole archive
+                    # at the open (ENOENT). It is refused alone here, with the
+                    # member left as read.
+                    over = (
+                        _written_path_over_limit(renamed, kind, target_path)
+                        if target_path is not None
+                        else None
+                    )
+                    if over is not None:
+                        problem = _MEMBER_PATH_TOO_LONG
+                        detail = over
                     else:
-                        member.filename = renamed
-                    member_name = renamed
-                    destination = _written_key(renamed, kind, fold=fold)
-                    # The placement adds a directory the name as read did not
-                    # have, so the renamed member's own prefixes are recorded.
-                    prefixes = _written_prefix_keys(renamed, kind, fold=fold)
+                        renamed_count += 1
+                        if renamed_count <= MEMBER_REFUSALS_LISTED:
+                            ASH_LOGGER.warning(
+                                shown_on_one_line(
+                                    f"Archive member '{member_name}'"
+                                    + (
+                                        f" of '{archive}'"
+                                        if archive is not None
+                                        else ""
+                                    )
+                                    + ": "
+                                    + _MEMBER_RENAMED.format(renamed=renamed)
+                                )
+                            )
+                        if isinstance(member, tarfile.TarInfo):
+                            member.name = renamed
+                        else:
+                            member.filename = renamed
+                        member_name = renamed
+                        destination = _written_key(renamed, kind, fold=fold)
+                        # The placement adds a directory the name as read did
+                        # not have, so the renamed member's own prefixes are
+                        # recorded.
+                        prefixes = _written_prefix_keys(renamed, kind, fold=fold)
                 if problem is None:
                     written[destination] = member_name
                     directories.update(prefixes)
