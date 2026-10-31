@@ -5927,25 +5927,9 @@ UNREAD_RESPONSE_EXPLAINED = (
         "the summary view is built from the reshaped results.",
     ),
     # The coverage keys (_COVERAGE_KEYS: coverage_complete and the gap lists)
-    # are copied from the loaded results document onto the filtered view, one
-    # subscript store or comprehension keyed by the loop's name, which the
-    # reader cannot read; none of those names is an error_type.
-    (
-        "get_scan_results",
-        "automated_security_helper/cli/mcp_server.py",
-        "_with_coverage",
-        "filtered[key] = results[key]",
-        "2026-12-31",
-        "the coverage keys copied from the loaded results file onto the view.",
-    ),
-    (
-        "get_scan_summary",
-        "automated_security_helper/cli/mcp_server.py",
-        "_with_coverage",
-        "filtered[key] = results[key]",
-        "2026-12-31",
-        "the coverage keys copied from the loaded results file onto the view.",
-    ),
+    # are copied from the loaded results document onto the filtered view by a
+    # comprehension keyed by the loop's name, which the reader cannot read;
+    # none of those names is an error_type.
     (
         "get_scan_results",
         "automated_security_helper/core/resource_management/result_filters.py",

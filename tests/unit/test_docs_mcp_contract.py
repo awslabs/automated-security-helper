@@ -2954,3 +2954,35 @@ def test_example_keys_read_json_and_sketches():
         "severity_counts": {"critical": None},
         "scanners": {"<scanner_name>": {"<target_type>": {}}},
     }
+
+
+@pytest.mark.unit
+def test_no_explanation_entry_names_a_function_the_mcp_server_lacks():
+    """Each UNREAD_RESPONSE_EXPLAINED entry that points into the MCP server module
+    names a function that module defines. get_scan_results now returns the
+    filtered views directly, so the entries that named the removed
+    ``_with_coverage`` copy explain no site: the freshness check lists them as
+    entries that explained nothing, and reports them once their stale-after date
+    passes. The coverage keys are still spliced on in ``_coverage_fields`` in
+    result_filters.py, and those entries stay."""
+    server = REPO_ROOT / "automated_security_helper" / "cli" / "mcp_server.py"
+    tree = ast.parse(server.read_text(encoding="utf-8"))
+    defined = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert "get_scan_results" in defined
+    names = [
+        func.rsplit(".", 1)[-1]
+        for _tool, file, func, _fragment, _stale_after, _reason in (
+            dc.UNREAD_RESPONSE_EXPLAINED
+        )
+        if file.endswith("cli/mcp_server.py")
+    ]
+    assert "get_scan_results" in names
+    assert [name for name in names if name not in defined] == []
+    assert "_with_coverage" not in defined
+    assert not [
+        entry for entry in dc.UNREAD_RESPONSE_EXPLAINED if entry[2] == "_with_coverage"
+    ]
