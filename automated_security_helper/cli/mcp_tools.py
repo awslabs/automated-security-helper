@@ -3155,9 +3155,16 @@ async def _run_scan(
         mcp_scan_directory is put back, and whether the directory holds them is
         recorded on the entry. The thread never started, so this runner marks
         its own end.
+
+        The reason is written as every other reason this runner records or logs
+        is (error_text with the scan's environment values): a refusal raised
+        here can quote a path or a value the session's configuration read, and
+        written raw it reached the entry's error_message, which
+        get_scan_progress hands to the client, and the log.
         """
-        registry.finish_scan(scan_id, MCScanStatus.FAILED, str(exc))
-        _logger.error(f"Scan {scan_id} refused: {exc}")
+        reason = error_text(exc, environment_values)
+        registry.finish_scan(scan_id, MCScanStatus.FAILED, reason)
+        _logger.error(f"Scan {scan_id} refused: {reason}")
         _settle_previous_results(exc)
         entry.runner_done.set()
 
