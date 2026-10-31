@@ -595,8 +595,8 @@ def _common_dir_named(git_dir: Path) -> Optional[Path]:
     reads it (setup.c, ``get_common_dir_noenv``): *git_dir* itself when no
     ``commondir`` file is there; otherwise the file's text with trailing carriage
     returns and newlines dropped, joined under *git_dir* unless absolute and
-    followed link by link, as git opens it: a ``..`` after a link goes to the
-    parent of what the link names, where collapsing the text would go to the
+    followed link by link, as git opens it: a ``..`` after a link steps to the
+    parent of what the link names, where collapsing the text would step to the
     parent of the link, and a different ``config`` would be checked from the one
     git waits on. None when something is at the name that is not a record
     ``_read_gitdir_record`` can read, or the record cannot be followed (a NUL in
