@@ -224,14 +224,10 @@ def suite_python(tmp_path: Path) -> Path:
     dependencies, and the three tests below failed with an import error. The script
     names /bin/sh, not /bin/bash: the module's skip guard looks bash up on PATH, so a
     script that named its own bash would fail where the guard passed."""
-    bin_dir = tmp_path / "suite-python"
-    bin_dir.mkdir()
-    python = bin_dir / "python"
-    python.write_text(
-        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n', encoding="utf-8"
-    )
-    python.chmod(0o755)
-    return bin_dir
+    return _executable(
+        tmp_path / "suite-python" / "python",
+        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n',
+    ).parent
 
 
 def test_the_suite_python_keeps_the_suites_own_environment(suite_python):
