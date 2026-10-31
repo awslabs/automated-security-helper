@@ -1492,16 +1492,18 @@ def open_for_atomic_write(
     Outside every root the rename replaces whatever entry is at the name, a link
     included, without following it.
 
-    A regular file already at the name that this process's user owns keeps its
-    read, write and execute bits: the staging file is given them before the
-    rename, where a fresh file would otherwise have replaced a 0o600 file with a
-    0o644 one. Its setuid, setgid and sticky bits are not carried over. A file
-    owned by another user lends nothing, since the new file is this process's
-    and a 0o600 mode copied onto it would lock that user out; nor does a platform
-    without an effective user id (Windows), and a filesystem that refuses the
-    mode change keeps the write. Outside every root, where no hard-link
-    refusal runs, a file another name refers to is replaced and lends nothing:
-    the new file keeps its umask-derived mode.
+    A regular file already at the name keeps its read, write and execute bits,
+    whoever owns it: the staging file is given them before the rename, where a
+    fresh file would otherwise have replaced a 0o600 file with a 0o644 one. That
+    includes a file another user owns, such as a host user's results that a
+    root or container run rewrites; the new file never ends wider than the one it
+    replaces. Its setuid, setgid and sticky bits are not carried over, and its
+    owner is not changed: the new file belongs to this process. A platform
+    without an effective user id (Windows) lends nothing, and a filesystem that
+    refuses the mode change keeps the write. Outside every root, where no
+    hard-link refusal runs, a file another name refers to is replaced and lends
+    nothing: the new file keeps its umask-derived mode. A name with no file at
+    it gets the umask-derived mode.
 
     On a platform without directory descriptors (Windows) the components below a
     root are checked by name before the staging file is created and again before
@@ -1587,7 +1589,6 @@ def open_for_atomic_write(
                     and existing.st_nlink == 1
                     and hasattr(os, "fchmod")
                     and hasattr(os, "geteuid")
-                    and existing.st_uid == os.geteuid()
                 ):
                     # The read, write and execute bits of the file being
                     # replaced, and only those: a setuid, setgid or sticky bit
@@ -1595,13 +1596,15 @@ def open_for_atomic_write(
                     # the results file. Below a root a file another name refers
                     # to was refused above; outside every root it is replaced
                     # and lends nothing: the new file keeps the umask-derived
-                    # mode it was created with. The same holds for a file owned
-                    # by another user: the new file is this process's, and a
-                    # 0o600 copied onto it would keep that user from reading the
-                    # results they could read before. Where the
-                    # platform has no effective user id (Windows) nothing is
-                    # copied: fchmod there only sets or clears read-only, which
-                    # would make the staging file impossible to rename over.
+                    # mode it was created with. The owner of the file being
+                    # replaced does not matter: a root or container run that
+                    # rewrites a host user's 0o600 results file must not leave a
+                    # 0o644 one in its place, so the bits are copied whoever
+                    # owns it, and the ownership is left as it is (the new file
+                    # is this process's). Where the platform has no effective
+                    # user id (Windows) nothing is copied: fchmod there only
+                    # sets or clears read-only, which would make the staging
+                    # file impossible to rename over.
                     # Best effort: a filesystem that refuses a mode change
                     # (FUSE, SMB) keeps the write.
                     try:

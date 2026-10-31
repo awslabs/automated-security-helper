@@ -20,13 +20,16 @@ tell the mask from its absence. The sticky bit survives a write, so it is what
 these tests measure on an unprivileged venue; the setuid assertion still holds on
 a root one.
 
-The mode is copied only from a file the calling user owns, and only as a best
-effort. A file owned by another user (a root or container run rewriting a host
-user's results) would otherwise hand the new file, which belongs to this process, a
-0o600 mode that stops its former owner reading it. A filesystem that refuses a mode
-change (FUSE, SMB) keeps the write. A staging file that cannot be removed after a
-failed write leaves the error that ended the write as the one raised. The tests that
-need the owner to differ patch ``os.geteuid`` rather than rely on a second account.
+The mode is copied whoever owns the file at the name, and only as a best effort. A
+root or container run that rewrites a host user's 0o600 results file must not leave
+a 0o644 one in its place, so the permission bits follow the file being replaced and
+the ownership is left alone (the new file is the process's own). A name with no file
+at it still gets the umask-derived mode. A filesystem that refuses a mode change
+(FUSE, SMB) keeps the write. A staging file that cannot be removed after a failed
+write leaves the error that ended the write as the one raised. The tests that need
+the owner to differ patch ``os.geteuid`` rather than rely on a second account; they
+set the umask to 0o022 themselves, because the mode a fresh file gets is what the
+bug showed.
 """
 
 import errno
@@ -148,13 +151,26 @@ def test_the_mode_of_a_file_the_caller_owns_is_copied(where):
     assert _mode(target) == 0o755, oct(_mode(target))
 
 
-def test_a_file_owned_by_another_user_lends_the_new_file_no_mode(where, monkeypatch):
-    """A root or container run rewriting a host user's results file must not give
-    the new file, which is the process's own, the user's 0o755 or 0o600. The
-    file's owner is made to differ from the process's by patching ``geteuid``."""
+@pytest.fixture
+def umask_022():
+    """The umask a host user's shell and most containers run with."""
+    previous = os.umask(0o022)
+    try:
+        yield
+    finally:
+        os.umask(previous)
+
+
+def test_a_file_owned_by_another_user_keeps_its_mode_on_the_new_file(
+    where, monkeypatch
+):
+    """Re-pinned from test_a_file_owned_by_another_user_lends_the_new_file_no_mode,
+    which asserted the opposite (the new file took the umask default). A root or
+    container run rewriting a host user's results file keeps the file's bits: the
+    new file never ends wider than the one it replaced. The file's owner is made to
+    differ from the process's by patching ``geteuid``."""
     target = where / "report.json"
     _plant(target, 0o755)
-    expected = _default_mode(where)
     owner = os.lstat(target).st_uid
     monkeypatch.setattr(fs_guard.os, "geteuid", lambda: owner + 1)
 
@@ -162,7 +178,76 @@ def test_a_file_owned_by_another_user_lends_the_new_file_no_mode(where, monkeypa
         handle.write("written\n")
 
     assert target.read_text() == "written\n"
-    assert _mode(target) == expected, (oct(_mode(target)), oct(expected))
+    assert _mode(target) == 0o755, oct(_mode(target))
+
+
+def test_a_private_file_of_another_user_stays_private_under_umask_022(
+    where, monkeypatch, umask_022
+):
+    """The reported case: a 0o600 results file, rewritten by a process that is not
+    its owner (root, a container) under umask 022, came back 0o644 and readable by
+    everyone. It stays 0o600. Control: the same write with the owner unchanged
+    (the test below) and a name with no file (the one after it)."""
+    target = where / "report.json"
+    _plant(target, 0o600)
+    owner = os.lstat(target).st_uid
+    monkeypatch.setattr(fs_guard.os, "geteuid", lambda: owner + 1)
+
+    with fs_guard.open_for_atomic_write(target) as handle:
+        handle.write("written\n")
+
+    assert target.read_text() == "written\n"
+    assert _mode(target) == 0o600, oct(_mode(target))
+
+
+def test_a_private_file_of_the_caller_stays_private_under_umask_022(where, umask_022):
+    """The control for the test above: the owner unchanged."""
+    target = where / "report.json"
+    _plant(target, 0o600)
+
+    with fs_guard.open_for_atomic_write(target) as handle:
+        handle.write("written\n")
+
+    assert target.read_text() == "written\n"
+    assert _mode(target) == 0o600, oct(_mode(target))
+
+
+def test_a_name_with_no_file_gets_the_umask_default_whoever_the_process_is(
+    where, monkeypatch, umask_022
+):
+    """A new file keeps today's default: nothing is borrowed when there is no file
+    to borrow from, so the mode is 0o644 under umask 022 (0o666 less the mask)."""
+    target = where / "report.json"
+    monkeypatch.setattr(fs_guard.os, "geteuid", lambda: os.getuid() + 1)
+
+    with fs_guard.open_for_atomic_write(target) as handle:
+        handle.write("written\n")
+
+    assert target.read_text() == "written\n"
+    assert _mode(target) == 0o644, oct(_mode(target))
+
+
+def test_the_ownership_of_the_file_replaced_is_not_changed_to_follow(
+    where, monkeypatch
+):
+    """Only the permission bits follow the old file: the writer makes no ownership
+    call (the new file is the process's own), so a rewrite is not a chown."""
+    target = where / "report.json"
+    _plant(target, 0o600)
+    owner = os.lstat(target).st_uid
+    monkeypatch.setattr(fs_guard.os, "geteuid", lambda: owner + 1)
+    chowned = []
+    for name in ("fchown", "chown", "lchown"):
+        if hasattr(os, name):
+            monkeypatch.setattr(
+                fs_guard.os, name, lambda *args, **kwargs: chowned.append(args)
+            )
+
+    with fs_guard.open_for_atomic_write(target) as handle:
+        handle.write("written\n")
+
+    assert chowned == []
+    assert os.lstat(target).st_uid == owner
 
 
 def test_a_filesystem_that_refuses_the_mode_change_keeps_the_write(where, monkeypatch):

@@ -49,9 +49,10 @@ def write_text_atomically(
     than with ``tempfile.mkstemp`` so it gets the same umask-derived mode a plain
     write of a new file would: ``mkstemp`` creates 0600, which would stop a host
     user reading results a container wrote. A regular file already at ``path``
-    that the calling user owns keeps its read, write and execute bits (never a
-    setuid, setgid or sticky bit): the staging file is given them before the
-    rename. Below a registered
+    keeps its read, write and execute bits, whoever owns it (never a setuid,
+    setgid or sticky bit, and its owner is not changed): the staging file is
+    given them before the rename, so a 0o600 results file a root or container
+    run rewrites does not become 0o644. Below a registered
     output directory a file at ``path`` that another name refers to is refused
     (``OutputHardLinkRefused``), as fs_guard's in-place writer refuses it.
 
