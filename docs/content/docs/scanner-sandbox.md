@@ -437,8 +437,10 @@ sandbox:
 #### Pass other variables {#environment}
 
 `sandbox.environment` lists the variables every sandboxed scanner is passed besides
-its fixed baseline (`PATH`, the locale and terminal settings, and the `ASH_`, `UV_`,
-`LC_` and `PYTHON` families). It is written as a docker-compose `environment` list:
+its fixed baseline (`PATH`, the locale and terminal settings, a few tool homes such as
+`JAVA_HOME` and `VIRTUAL_ENV`, and the `ASH_`, `UV_`, `LC_` and `PYTHON` families;
+the [scanner reference](../reference/scanners.md) names them all). It is written as a
+docker-compose `environment` list:
 `NAME` passes the value ASH has, `NAME=value` sets one, and a name listed twice takes
 its last entry.
 
