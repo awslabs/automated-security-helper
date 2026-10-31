@@ -32,6 +32,9 @@ from automated_security_helper.core.phases import scan_result_processor
 from automated_security_helper.core.phases.scan_result_processor import (
     ScanResultProcessor,
 )
+from automated_security_helper.core.scanner_statistics_calculator import (
+    ScannerStatisticsCalculator,
+)
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerTargetStatusInfo,
@@ -122,7 +125,16 @@ class TestWhereAContainersFileGoes:
         assert source_file.get("raw_results") == {"status": "passed", "findings": []}
         assert source_file.get("exception") is None, source_file
         scanner_level = _read(scanners / "None" / "ASH.ScanResults.json")
+        # ScanResultsContainer.for_failure writes FAILED on the file (the scanner
+        # did not finish), and its readers do not take that string as "found
+        # issues": a failure container reads as an ERROR scanner whatever status
+        # it carries. Assert both halves, so a reader that trusts the raw string
+        # is caught here too.
         assert scanner_level["status"] == "FAILED", scanner_level
+        _excluded, _deps_missing, read_as_error = (
+            ScannerStatisticsCalculator._status_info_from_report(scanner_level)
+        )
+        assert read_as_error is True, scanner_level
         assert "None" in model.additional_reports["tool"]
         assert "source" in model.additional_reports["tool"]
 

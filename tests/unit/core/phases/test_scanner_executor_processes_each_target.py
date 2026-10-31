@@ -231,6 +231,11 @@ def test_a_failure_on_an_item_that_is_no_row_is_filed_as_a_fresh_failure_row(
     assert seen[-1].scanner_name == "shape-tool"
     # ScanResultsContainer.for_failure files the row as FAILED (the scanner did not
     # finish); ERROR is the status a processor failure writes onto an existing row.
+    # The two spellings are one kind of event for the readers: the statistics
+    # calculator grades a failure container ERROR whatever status it carries
+    # (ScannerStatisticsCalculator._is_failure_report), which
+    # test_scan_result_processor_files_invocations_and_checks.py asserts on the
+    # file this container is written to.
     assert seen[-1].status == ScannerStatus.FAILED
     assert executor.completed_scanners == []
 
