@@ -134,10 +134,11 @@ def test_a_kept_listing_whose_superproject_question_fails_is_unanswered(
     assert found.committed == []
     assert found.answer is failed
     # The failure is remembered under the enclosing repository, the key every
-    # later directory in that repository is answered from; known_for(output)
-    # itself still returns the kept listing, which is read before the failures.
+    # later directory in that repository is answered from. It also stands in the
+    # kept listing's place for the directory asked about, so a later check of that
+    # directory reads the failure and does not ask the repository above again.
     assert failures._answers[output.parent] is failed
-    assert failures.known_for(output).names == ["reports/x.sarif"]
+    assert failures.known_for(output) is failed
 
 
 @pytest.mark.parametrize(
