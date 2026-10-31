@@ -34,6 +34,7 @@ from automated_security_helper.config.config_linter import (
     LintSeverity,
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
+from tests.utils.wizard_script import script_wizard
 
 pytestmark = pytest.mark.unit
 
@@ -198,7 +199,7 @@ def test_the_wizard_refuses_a_deleted_working_directory_before_any_prompt(
     """Red at the base: without --source-dir the wizard searched "." and asked
     every question, then failed in the write's os.getcwd with "Error writing
     config file". No prompt is answered here, so a prompt would raise."""
-    _scripted_wizard(monkeypatch, [])
+    script_wizard(monkeypatch, [])
 
     result = _invoke_in_a_deleted_directory(tmp_path, ["wizard"])
 
@@ -700,22 +701,13 @@ def test_lint_fix_reports_a_write_failure_on_one_line(tmp_path, monkeypatch):
 # --- wizard ---
 
 
-def _scripted_wizard(monkeypatch, answers):
-    """Answer the wizard's prompts: project name, then module names, blank to end;
-    every yes/no question is answered no; the toggle tables are skipped."""
-    replies = iter(answers)
-    monkeypatch.setattr(config_cli, "prompt", lambda *_a, **_k: next(replies))
-    monkeypatch.setattr(config_cli, "confirm", lambda *_a, **_k: False)
-    monkeypatch.setattr(config_cli, "_prompt_toggle_items", lambda *_a, **_k: {})
-
-
 def test_the_wizard_does_not_write_a_plugin_module_a_scan_refuses(
     tmp_path, monkeypatch
 ):
     """A module a scan refuses is refused when it is typed and asked about
     again (the blank answer ends the list), and is not in the file written."""
     monkeypatch.chdir(tmp_path)
-    _scripted_wizard(monkeypatch, ["demo", "no_such_plugin_module_zz", ""])
+    script_wizard(monkeypatch, ["demo", "no_such_plugin_module_zz", ""])
     target = tmp_path / "new.yaml"
 
     result = _invoke(["wizard", "--config", str(target)])
@@ -734,7 +726,7 @@ def test_the_wizard_refuses_an_environment_module_before_the_first_prompt(
     answers away. No prompt is answered here, so a prompt would raise."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ASH_PLUGIN_MODULES", "no_such_plugin_module_zz")
-    _scripted_wizard(monkeypatch, [])
+    script_wizard(monkeypatch, [])
     target = tmp_path / "new.yaml"
 
     result = _invoke(["wizard", "--config", str(target)])
@@ -747,7 +739,7 @@ def test_the_wizard_refuses_an_environment_module_before_the_first_prompt(
 
 def test_the_wizard_reports_an_unwritable_target_on_one_line(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    _scripted_wizard(monkeypatch, ["demo", ""])
+    script_wizard(monkeypatch, ["demo", ""])
     (tmp_path / "parent").write_text("a file\n", encoding="utf-8")
 
     result = _invoke(["wizard", "--config", str(tmp_path / "parent" / "x.yaml")])
@@ -766,7 +758,7 @@ def test_the_wizard_finds_the_config_where_ash_source_dir_points(tmp_path, monke
     cwd.mkdir()
     monkeypatch.chdir(cwd)
     monkeypatch.setenv("ASH_SOURCE_DIR", str(elsewhere))
-    _scripted_wizard(monkeypatch, ["moved", ""])
+    script_wizard(monkeypatch, ["moved", ""])
 
     result = _invoke(["wizard"])
 

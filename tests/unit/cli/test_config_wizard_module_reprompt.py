@@ -17,17 +17,10 @@ from __future__ import annotations
 import pytest
 from typer.testing import CliRunner
 
-from automated_security_helper.cli import config as config_cli
 from automated_security_helper.cli.config import _typed_module_refusal, config_app
+from tests.utils.wizard_script import script_wizard
 
 pytestmark = pytest.mark.unit
-
-
-def _scripted(monkeypatch, answers):
-    replies = iter(answers)
-    monkeypatch.setattr(config_cli, "prompt", lambda *_a, **_k: next(replies))
-    monkeypatch.setattr(config_cli, "confirm", lambda *_a, **_k: False)
-    monkeypatch.setattr(config_cli, "_prompt_toggle_items", lambda *_a, **_k: {})
 
 
 def test_a_refused_module_in_the_middle_does_not_end_the_session(tmp_path, monkeypatch):
@@ -35,7 +28,7 @@ def test_a_refused_module_in_the_middle_does_not_end_the_session(tmp_path, monke
     file. The answers after it were typed for nothing."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ASH_PLUGIN_MODULES", raising=False)
-    _scripted(
+    script_wizard(
         monkeypatch,
         ["demo", "no_such_plugin_module_zz", "automated_security_helper.fake_ok", ""],
     )

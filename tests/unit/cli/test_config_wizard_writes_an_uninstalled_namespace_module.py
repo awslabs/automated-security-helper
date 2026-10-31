@@ -11,8 +11,8 @@ purpose: an operator names a module there to install it next, the snapshot
 wizard tests write ``my_org_ash_plugins`` with nothing installed, and ``get``
 and ``validate`` already say so when they read the file before the install. The
 wizard now writes such a module; a module outside the namespace, which no
-install can admit, is refused as before (the control here, and
-tests/unit/cli/test_config_commands_refuse_before_tracebacks.py).
+install can admit, is refused when it is typed and asked about again, not added
+(the control here, and tests/unit/cli/test_config_wizard_module_reprompt.py).
 """
 
 from __future__ import annotations
@@ -21,17 +21,9 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli import config as config_cli
+from tests.utils.wizard_script import script_wizard
 
 pytestmark = pytest.mark.unit
-
-
-def _scripted_wizard(monkeypatch, answers):
-    """Answer the wizard's prompts: project name, then module names, blank to end;
-    every yes/no question is answered no; the toggle tables are skipped."""
-    replies = iter(answers)
-    monkeypatch.setattr(config_cli, "prompt", lambda *_a, **_k: next(replies))
-    monkeypatch.setattr(config_cli, "confirm", lambda *_a, **_k: False)
-    monkeypatch.setattr(config_cli, "_prompt_toggle_items", lambda *_a, **_k: {})
 
 
 def _wizard(target):
@@ -45,7 +37,7 @@ def _wizard(target):
 def test_a_namespace_module_no_package_provides_is_written(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ASH_PLUGIN_MODULES", raising=False)
-    _scripted_wizard(monkeypatch, ["demo", "not_installed_yet_ash_plugins", ""])
+    script_wizard(monkeypatch, ["demo", "not_installed_yet_ash_plugins", ""])
     target = tmp_path / "new.yaml"
 
     result = _wizard(target)
@@ -55,14 +47,25 @@ def test_a_namespace_module_no_package_provides_is_written(tmp_path, monkeypatch
     assert "- not_installed_yet_ash_plugins" in target.read_text(encoding="utf-8")
 
 
-def test_control_a_module_outside_the_namespace_is_still_refused(tmp_path, monkeypatch):
+def test_control_a_module_outside_the_namespace_is_asked_about_again(
+    tmp_path, monkeypatch
+):
+    """Red at the base of the wizard change this file's first test follows: the
+    module was kept until the end and the command exited 3 with no file. Now it
+    is named and not added when typed, the prompt comes again, and the file is
+    written with the module inside the namespace and without the other."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ASH_PLUGIN_MODULES", raising=False)
-    _scripted_wizard(monkeypatch, ["demo", "no_such_plugin_module_zz", ""])
+    script_wizard(
+        monkeypatch,
+        ["demo", "no_such_plugin_module_zz", "not_installed_yet_ash_plugins", ""],
+    )
     target = tmp_path / "new.yaml"
 
     result = _wizard(target)
 
-    assert result.exit_code == config_cli.INVALID_CONFIG_EXIT_CODE, result.output
-    assert "Not writing" in result.output, result.output
-    assert not target.exists()
+    assert result.exit_code == 0, result.output
+    assert "The module is not added" in result.output, result.output
+    text = target.read_text(encoding="utf-8")
+    assert "no_such_plugin_module_zz" not in text
+    assert "- not_installed_yet_ash_plugins" in text
