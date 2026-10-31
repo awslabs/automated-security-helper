@@ -242,7 +242,8 @@ def _url_basename(url: str) -> str:
     to the destination names a path on that drive, not under it) would otherwise
     reach the filesystem calls as a path of the URL's choosing, or as an untyped
     ValueError from them after the download. All are refused here, before any
-    byte is taken.
+    byte is taken. On Windows a name Windows would not keep as written is refused
+    too (``_windows_misreads_name``).
     """
     name = urllib.parse.unquote(urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1])
     if not name or name in (".", "..") or "/" in name or "\\" in name:
@@ -255,7 +256,36 @@ def _url_basename(url: str) -> str:
             f"{url} names no file to install: its name decodes to a NUL or a "
             "drive prefix, so pass rename_to"
         )
+    if os.name == "nt" and _windows_misreads_name(name):
+        raise ValueError(
+            f"{url} names no file to install: Windows would read its name as an "
+            "alternate data stream or a device, or rewrite it, so pass rename_to"
+        )
     return name
+
+
+#: The names Windows opens as a device whatever extension follows them (``NUL``,
+#: ``con.txt``). ``COM`` and ``LPT`` count only with a single digit (``COM10`` is
+#: an ordinary file name).
+_WINDOWS_DEVICE_NAME = re.compile(
+    r"(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\..*)?", re.IGNORECASE
+)
+
+
+def _windows_misreads_name(name: str) -> bool:
+    """Whether Windows would not treat ``name`` as the one ordinary file it says.
+
+    A colon past a drive prefix opens an NTFS alternate data stream
+    (``tool.exe:payload``), a device name opens the device, and a trailing dot or
+    space is dropped by the Win32 layer, so the file lands under another name than
+    the one checked. The drive prefix is refused on every platform above; these
+    only on Windows, where a POSIX file name may hold a colon.
+    """
+    return (
+        ":" in name
+        or name.endswith((".", " "))
+        or _WINDOWS_DEVICE_NAME.fullmatch(name) is not None
+    )
 
 
 def _copy_whole_body(response, sink, url: str) -> int:

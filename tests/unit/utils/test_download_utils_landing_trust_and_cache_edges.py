@@ -259,6 +259,49 @@ def test_a_url_naming_a_directory_is_refused_where_the_url_is_named(
     assert not (tmp_path / "dest").exists()
 
 
+_WINDOWS_MISREAD_NAMES = [
+    "tool.exe:payload",
+    "tool.exe%3Apayload",
+    "NUL",
+    "con.txt",
+    "Aux.tar.gz",
+    "COM1",
+    "lpt9.log",
+    "name.",
+    "name%20",
+]
+
+
+@pytest.mark.parametrize("name", _WINDOWS_MISREAD_NAMES)
+def test_a_name_windows_misreads_is_refused_where_the_url_is_named(
+    name, patch_module_os
+):
+    """On Windows ``tool.exe:payload`` writes an alternate data stream of
+    ``tool.exe``, ``NUL`` and ``con.txt`` open devices, and a trailing dot or space
+    is dropped, so the installed file is not the one that was checked. All refused
+    with the ``rename_to`` remedy."""
+    patch_module_os(du, name="nt")
+    with pytest.raises(ValueError, match="rename_to"):
+        du._url_basename(f"https://x.example/releases/{name}")
+
+
+@pytest.mark.parametrize(
+    "name", ["tool-1.0.tar.gz", "tool.exe", "console.txt", "COM10", "nulled", "a.b"]
+)
+def test_control_an_ordinary_name_is_kept_on_windows(name, patch_module_os):
+    patch_module_os(du, name="nt")
+    assert du._url_basename(f"https://x.example/releases/{name}") == name
+
+
+@pytest.mark.parametrize("name", ["NUL", "con.txt", "name."])
+def test_control_the_windows_only_refusals_leave_a_posix_name_alone(
+    name, patch_module_os
+):
+    """The same names are ordinary file names where the platform keeps them."""
+    patch_module_os(du, name="posix")
+    assert du._url_basename(f"https://x.example/releases/{name}") == name
+
+
 # --- the temporary file ---------------------------------------------------------
 
 
