@@ -248,6 +248,24 @@ class TestTrivyRepoScannerDependencies:
         mock_find_executable.assert_called_once_with("trivy")
 
     @patch("automated_security_helper.base.scanner_plugin.find_executable")
+    def test_validate_dependencies_reads_only_none_as_not_found(
+        self, mock_find_executable, mock_plugin_context
+    ):
+        """The lookup answers a path or None, never an empty string
+        (utils/subprocess_utils.find_executable), and the shared check reads only
+        None as a missing command. The copy of the check this scanner used to carry
+        also read an empty string as missing; it went with the override, and its
+        test went with it. This pins what the shared check does with the one
+        answer a double can still give, so a change to it is a decision."""
+        mock_find_executable.return_value = ""
+
+        scanner = TrivyRepoScanner(context=mock_plugin_context)
+        result = scanner.validate_plugin_dependencies()
+
+        assert result is True
+        mock_find_executable.assert_called_once_with("trivy")
+
+    @patch("automated_security_helper.base.scanner_plugin.find_executable")
     def test_dependencies_satisfied_flag(
         self, mock_find_executable, mock_plugin_context
     ):
