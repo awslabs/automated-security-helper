@@ -86,6 +86,8 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     UNEXPECTED_LISTING_ERROR,
     ListingsOnce,
     candidate_spellings,
+    check_is_legacy,
+    check_is_spelling_specific,
     check_is_transient,
     check_listing_client_side,
     check_listing_failure,
@@ -517,6 +519,8 @@ def _exhaustion_text(
     not_checked: Optional[List[str]] = None,
     listing_refused: Optional[Dict[str, List[str]]] = None,
     listing_client_side: Optional[Iterable[str]] = None,
+    profile_listing_refused: Optional[Dict[str, List[str]]] = None,
+    profile_listing_client_side: Optional[Iterable[str]] = None,
 ) -> str:
     """The fallback walk's "nothing answered" text: the configured model, the
     models called (and failed) apart from the ones not available to call and
@@ -533,8 +537,13 @@ def _exhaustion_text(
     ``listing_client_side`` names the keys of ``listing_refused`` that are class
     names of errors botocore raised before any service answered: nothing
     refused those listings, so their groups say the listing failed, as they do
-    for ``UNEXPECTED_LISTING_ERROR``."""
-    client_side = set(listing_client_side or ())
+    for ``UNEXPECTED_LISTING_ERROR``.
+
+    ``profile_listing_refused`` and ``profile_listing_client_side`` are the same
+    for the models left unchecked by a failed inference profile listing alone
+    (the foundation-model listing answered): their groups say "profile
+    listing", so a refused ``ListInferenceProfiles`` is not read as a refused
+    ``ListFoundationModels``."""
     groups = []
     if called:
         groups.append("called: " + ", ".join(called))
@@ -542,10 +551,17 @@ def _exhaustion_text(
         groups.append("unavailable: " + ", ".join(unavailable))
     if not_checked:
         groups.append("not checked: " + ", ".join(not_checked))
-    for failure, models in (listing_refused or {}).items():
-        unanswered = failure == UNEXPECTED_LISTING_ERROR or failure in client_side
-        what = "failed" if unanswered else "refused"
-        groups.append(f"not checked, listing {what} ({failure}): " + ", ".join(models))
+    for kind, refused, client_side_keys in (
+        ("", listing_refused, listing_client_side),
+        ("profile ", profile_listing_refused, profile_listing_client_side),
+    ):
+        client_side = set(client_side_keys or ())
+        for failure, models in (refused or {}).items():
+            unanswered = failure == UNEXPECTED_LISTING_ERROR or failure in client_side
+            what = "failed" if unanswered else "refused"
+            groups.append(
+                f"not checked, {kind}listing {what} ({failure}): " + ", ".join(models)
+            )
     text = (
         f"*Error: No suitable fallback model found for {primary} ({'; '.join(groups)})"
     )
@@ -1307,7 +1323,24 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                         check, spelling = self._check_candidate(
                             bedrock_client, fallback_model, values
                         )
-                        if check[0]:
+                        if check[0] and check_is_legacy(check):
+                            # Listed, but marked LEGACY: Bedrock may refuse it
+                            # to an account that has not used it recently, so
+                            # it does not make the dependency check pass. The
+                            # run still tries it, after the models before it.
+                            self._plugin_log(
+                                text_without_values(
+                                    f"Fallback model '{spelling}' is listed as "
+                                    "Legacy, which Bedrock may refuse to an "
+                                    "account that has not used it recently; it "
+                                    "is not counted as available",
+                                    values,
+                                ),
+                                level=logging.INFO,
+                                target_type="source",
+                                append_to_stream="stderr",
+                            )
+                        elif check[0]:
                             self._plugin_log(
                                 text_without_values(
                                     f"Fallback model '{spelling}' is available; "
@@ -2318,24 +2351,27 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         the calling region may list (``candidate_spellings``: the chain's own
         area, the region's geography, ``us.``), in that order, and answer the
         first check that is True or that the listing itself decided (a
-        throttled or refused listing answers the same for every spelling).
-        Returns the check and the spelling it is about, so a candidate the
-        listing names under another spelling is called by that one. Every
-        spelling is read from the one cached listing (``ListingsOnce``), so
-        the extra spellings cost no control-plane call. A reporter built
-        without ``__init__`` and without a region checks the chain's own
-        spelling and ``us.`` only."""
+        throttled or refused listing of the models answers the same for every
+        spelling). A failed inference profile listing does not: it may have
+        been read in part, so a spelling that is not on the pages that were
+        read says nothing about the next one (``check_is_spelling_specific``),
+        and the remaining spellings are tried. Returns the check and the
+        spelling it is about, so a candidate the listing names under another
+        spelling is called by that one. Every spelling is read from the one
+        cached listing (``ListingsOnce``), so the extra spellings cost no
+        control-plane call. A reporter built without ``__init__`` and without
+        a region checks the chain's own spelling and ``us.`` only."""
         region = getattr(getattr(self, "config", None), "options", None)
         region = getattr(region, "aws_region", None)
         check: Any = None
         spelling = model
         for spelling in candidate_spellings(model, region):
             check = validate_bedrock_model(bedrock_client, spelling, values=values)
-            if (
-                check[0]
-                or check_is_transient(check)
-                or check_listing_failure(check) is not None
-            ):
+            if check[0]:
+                break
+            if check_is_spelling_specific(check):
+                continue
+            if check_is_transient(check) or check_listing_failure(check) is not None:
                 break
         return check, spelling
 
@@ -2403,6 +2439,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         not_checked: List[str] = []
         listing_refused: Dict[str, List[str]] = {}
         listing_client_side: set[str] = set()
+        profile_refused: Dict[str, List[str]] = {}
+        profile_client_side: set[str] = set()
 
         def leave_unchecked(model: str, check: Any) -> None:
             """Sort a model whose check was False into its exhaustion group."""
@@ -2419,10 +2457,17 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 # The control plane refused the listing, so the model was not
                 # checked either: it is not "unavailable", which sends the
                 # operator to model availability when the fault is access.
-                # The code names the group.
-                listing_refused.setdefault(refused_with, []).append(model)
-                if check_listing_client_side(check):
-                    listing_client_side.add(refused_with)
+                # The code names the group; a failure of the inference profile
+                # listing alone is a group of its own, so it is not read as a
+                # refusal of the foundation-model listing.
+                if check_is_spelling_specific(check):
+                    profile_refused.setdefault(refused_with, []).append(model)
+                    if check_listing_client_side(check):
+                        profile_client_side.add(refused_with)
+                else:
+                    listing_refused.setdefault(refused_with, []).append(model)
+                    if check_listing_client_side(check):
+                        listing_client_side.add(refused_with)
 
         if not primary_called:
             if primary_check is None:
@@ -2499,6 +2544,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     not_checked=not_checked,
                     listing_refused=listing_refused,
                     listing_client_side=listing_client_side,
+                    profile_listing_refused=profile_refused,
+                    profile_listing_client_side=profile_client_side,
                 ),
                 values,
             ),

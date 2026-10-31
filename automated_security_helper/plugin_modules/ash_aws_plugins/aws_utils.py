@@ -9,6 +9,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    FrozenSet,
     Iterable,
     List,
     Optional,
@@ -383,6 +384,12 @@ class AvailableModels(List[Dict[str, Any]]):
     #: check that names the failure again for one candidate logs it at debug,
     #: so one failed profile listing is one warning, not one per candidate.
     profile_listing_reported: bool = False
+    #: The ``modelId`` of every foundation model the foundation-model listing
+    #: names as reachable through an inference profile. When the profile listing
+    #: failed, a model id with no area prefix is a candidate for a profile only
+    #: if it is one of these; any other such id can only be an on-demand model,
+    #: and the on-demand list already says whether it is there.
+    profile_routed_model_ids: FrozenSet[str] = frozenset()
 
     def __init__(
         self,
@@ -396,6 +403,7 @@ class AvailableModels(List[Dict[str, Any]]):
         profile_listing_transient: bool = False,
         profile_listing_client_side: bool = False,
         profile_listing_reported: bool = False,
+        profile_routed_model_ids: Iterable[str] = (),
     ):
         super().__init__(models)
         self.failed = failed
@@ -411,6 +419,7 @@ class AvailableModels(List[Dict[str, Any]]):
         self.profile_listing_transient = profile_listing_transient
         self.profile_listing_client_side = profile_listing_client_side
         self.profile_listing_reported = profile_listing_reported
+        self.profile_routed_model_ids = frozenset(profile_routed_model_ids)
 
 
 def failure_is_transient(
@@ -587,13 +596,20 @@ def _inference_profile_summaries(
 
     ``ListInferenceProfiles`` pages its answer and hands back ``nextToken`` while
     more remain; the first call carries no token, so a client double that takes
-    no arguments answers it as before. A page that repeats the token it was
-    asked with ends the walk, so a control plane that answers the same page
-    twice cannot make this loop without end.
+    no arguments answers it as before. A page that hands back a token the walk
+    was already given stops it with an error, so a control plane that answers
+    the same page twice cannot make this loop without end, and the caller
+    records the listing as failed: the pages never read may hold profiles.
 
     The summaries are appended to ``summaries`` as each page is read, so a
     caller that hands in its own list keeps the pages read before a later page
     raised (a throttle on page three loses page three, not pages one and two).
+
+    The call carries no ``typeEquals``. The API reference does not say which
+    profile types an unfiltered listing returns, so an application inference
+    profile ARN (a profile a user created) may not be listed, and a model
+    configured by that ARN is then reported as not found although Converse
+    takes it. That case is outside what this check can establish.
     """
     if summaries is None:
         summaries = []
@@ -601,9 +617,15 @@ def _inference_profile_summaries(
     seen_tokens: Set[str] = set()
     while True:
         page = bedrock_client.list_inference_profiles(**kwargs)
-        summaries.extend(page.get("inferenceProfileSummaries", []) or [])
         token = page.get("nextToken")
-        if not token or token in seen_tokens:
+        if token and token in seen_tokens:
+            # Before the page is kept: it is the page already read, again.
+            raise RuntimeError(
+                "ListInferenceProfiles handed back a page token it had already "
+                "given; the listing was stopped"
+            )
+        summaries.extend(page.get("inferenceProfileSummaries", []) or [])
+        if not token:
             return summaries
         seen_tokens.add(token)
         kwargs = {"nextToken": token}
@@ -701,7 +723,18 @@ def get_available_models(
             and "TEXT" in item.get("outputModalities", [])
         ]
         ASH_LOGGER.debug(f"Found {len(active_models)} served foundation models")
+        profile_routed_model_ids: Set[str] = set()
         for model in active_models:
+            # A LEGACY model answers while it is being retired, but Bedrock may
+            # refuse it to an account that has not used it recently
+            # (https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle.html),
+            # so its entries say so: the dependency check does not count a
+            # Legacy fallback as available.
+            legacy = (
+                {"legacy": True}
+                if model.get("modelLifecycle", {}).get("status") == "LEGACY"
+                else {}
+            )
             if "ON_DEMAND" in model.get("inferenceTypesSupported", []):
                 final_model_list.append(
                     {
@@ -710,9 +743,11 @@ def get_available_models(
                         "modelArn": model.get("modelArn", "unknown"),
                         "providerName": model.get("providerName", "unknown"),
                         "inferenceType": "ON_DEMAND",
+                        **legacy,
                     }
                 )
             if "INFERENCE_PROFILE" in model.get("inferenceTypesSupported", []):
+                profile_routed_model_ids.add(model.get("modelId", "unknown"))
                 # One entry per profile that routes the model: a model under a
                 # geographic profile and a global one is reachable by either
                 # ID, so neither is reported as not found.
@@ -727,6 +762,7 @@ def get_available_models(
                             "inferenceProfileArn": profile.get("inferenceProfileArn"),
                             "providerName": model.get("providerName", "unknown"),
                             "inferenceType": "INFERENCE_PROFILE",
+                            **legacy,
                         }
                     )
 
@@ -782,6 +818,7 @@ def get_available_models(
             # walk's wrapper already reported): a check that names it for one
             # candidate logs it quietly.
             profile_listing_reported=True,
+            profile_routed_model_ids=profile_routed_model_ids,
         )
     except KeptListingFailure as kept:
         # The failure was reported when it first came; this call only reads it.
@@ -1016,12 +1053,16 @@ class _ModelCheckType(type):
         listing_failure: Optional[str] = None,
         listing_client_side: bool = False,
         model_id: Optional[str] = None,
+        spelling_specific: bool = False,
+        legacy: bool = False,
     ) -> Any:
         check = super().__call__((is_valid, reason))
         check.transient = transient
         check.listing_failure = listing_failure
         check.listing_client_side = listing_client_side
         check.model_id = model_id
+        check.spelling_specific = spelling_specific
+        check.legacy = legacy
         return check
 
 
@@ -1057,12 +1098,26 @@ class ModelCheck(Tuple[bool, Optional[str]], metaclass=_ModelCheckType):  # noqa
     when the check matched it case-insensitively; the check used to answer
     True then and the caller kept calling with its own spelling, which the
     service does not know. It is None on a False.
+
+    ``spelling_specific`` is set on a False that is about the spelling that was
+    checked and no other: the inference profile listing failed (it may have
+    been read in part), so a profile id the check did not find may still be
+    listed under another spelling of the same model. A caller that tries more
+    than one spelling goes on to the next one after it; every other False
+    holds for all of them.
+
+    ``legacy`` is set on a True for a model the foundation-model listing marks
+    LEGACY: Bedrock still serves it, but may refuse it to an account that has
+    not used it recently, so a caller that is choosing a model it has not
+    called does not count it as available.
     """
 
     transient: bool
     listing_failure: Optional[str]
     listing_client_side: bool
     model_id: Optional[str]
+    spelling_specific: bool
+    legacy: bool
 
     if TYPE_CHECKING:
         # The call shape, for a type checker only. At run time the metaclass's
@@ -1084,6 +1139,8 @@ class ModelCheck(Tuple[bool, Optional[str]], metaclass=_ModelCheckType):  # noqa
             listing_failure: Optional[str] = None,
             listing_client_side: bool = False,
             model_id: Optional[str] = None,
+            spelling_specific: bool = False,
+            legacy: bool = False,
         ) -> Self: ...
 
 
@@ -1119,6 +1176,46 @@ def check_model_id(check: Any) -> Optional[str]:
     return model_id if isinstance(model_id, str) and model_id else None
 
 
+def check_is_spelling_specific(check: Any) -> bool:
+    """Whether a ``validate_bedrock_model`` answer is a False about the spelling
+    checked alone: the profile listing failed, so another spelling of the same
+    model may be listed on a page that was read. False for any other answer,
+    and for a pair a caller built."""
+    return bool(getattr(check, "spelling_specific", False))
+
+
+def check_is_legacy(check: Any) -> bool:
+    """Whether a True ``validate_bedrock_model`` answer names a model the
+    listing marks LEGACY. False for any other answer, and for a pair a caller
+    built."""
+    return bool(getattr(check, "legacy", False))
+
+
+def _may_be_routed_by_a_profile(model_id: str, available_models: Any) -> bool:
+    """Whether a profile could carry ``model_id``, so that a failed profile
+    listing leaves it unchecked. A cross-region profile id has an area prefix
+    (``eu.anthropic...``) and an ARN may name a profile. An id with neither is
+    reachable through a profile only when the foundation-model listing names
+    it as profile-routed; any other such id is an on-demand model, and the
+    on-demand list already said it is not there."""
+    if model_id.startswith("arn:") or _profile_area(model_id) is not None:
+        return True
+    return model_id in getattr(available_models, "profile_routed_model_ids", ())
+
+
+def _listed_as_legacy(available_models: Any, identifier: str) -> bool:
+    """Whether a listed entry that ``identifier`` names is marked LEGACY."""
+    lowered = identifier.lower()
+    return any(
+        model.get("legacy")
+        and (
+            str(model.get("modelId", "")).lower() == lowered
+            or identifier in (model.get("modelArn"), model.get("inferenceProfileArn"))
+        )
+        for model in available_models
+    )
+
+
 def _profile_listing_failed(
     available_models: Any, shown: str, values: Sequence[str]
 ) -> ModelCheck:
@@ -1150,6 +1247,9 @@ def _profile_listing_failed(
         listing_client_side=bool(
             getattr(available_models, "profile_listing_client_side", False)
         ),
+        # The listing may have been read in part: this spelling is not on the
+        # pages that were read, and another spelling of the model may be.
+        spelling_specific=True,
     )
 
 
@@ -1253,7 +1353,11 @@ def validate_bedrock_model(
         # Check if the requested model is in the available models
         if model_id in available_model_ids or model_id in listed_arns:
             ASH_LOGGER.debug(text_without_values(f"Model {shown} is available", values))
-            return ModelCheck(True, model_id=model_id)
+            return ModelCheck(
+                True,
+                model_id=model_id,
+                legacy=_listed_as_legacy(available_models, model_id),
+            )
 
         # If model not found directly, try to find a matching model ID (case
         # insensitive). The answer names the listed spelling: Converse knows
@@ -1267,7 +1371,11 @@ def validate_bedrock_model(
                         values,
                     )
                 )
-                return ModelCheck(True, model_id=available_id)
+                return ModelCheck(
+                    True,
+                    model_id=available_id,
+                    legacy=_listed_as_legacy(available_models, available_id),
+                )
 
         # If still not found, check if it's an inference profile model
         for model in available_models:
@@ -1281,12 +1389,21 @@ def validate_bedrock_model(
                         values,
                     )
                 )
-                return ModelCheck(True, model_id=model_id)
+                return ModelCheck(
+                    True,
+                    model_id=model_id,
+                    legacy=_listed_as_legacy(available_models, model_id),
+                )
 
-        if getattr(available_models, "profile_listing_failure", None):
+        if getattr(
+            available_models, "profile_listing_failure", None
+        ) and _may_be_routed_by_a_profile(model_id, available_models):
             # The on-demand models were listed and this is not one of them; the
             # profile listing failed, so whether a profile routes it is unknown.
-            # That is a listing failure about the check, not "not found".
+            # That is a listing failure about the check, not "not found". An id
+            # no profile could carry (an on-demand id the foundation listing
+            # does not name as profile-routed) is not in the list the listing
+            # made, and falls through to "not found".
             return _profile_listing_failed(available_models, shown, values)
 
         # Model not found in available models

@@ -83,8 +83,10 @@ class ControlPlane:
         throttle_first=0,
         error=None,
         profile_error=None,
+        profile_only=(),
     ):
         self.listed = list(listed)
+        self.profile_only = list(profile_only)
         self.throttled = throttled
         self.listing_error = listing_error
         self.throttle_first = throttle_first
@@ -132,6 +134,22 @@ class ControlPlane:
                     "inferenceTypesSupported": ["ON_DEMAND"],
                 }
                 for model in self.listed
+            ]
+            # A model only an inference profile routes: the foundation-model
+            # listing names it, and no profile listing is needed to know a
+            # profile could carry it.
+            + [
+                {
+                    "modelId": model,
+                    "modelName": "placeholder",
+                    "modelArn": f"placeholder-arn-{model}",
+                    "providerName": "placeholder",
+                    "modelLifecycle": {"status": "ACTIVE"},
+                    "inputModalities": ["TEXT"],
+                    "outputModalities": ["TEXT"],
+                    "inferenceTypesSupported": ["INFERENCE_PROFILE"],
+                }
+                for model in self.profile_only
             ]
         }
 
@@ -705,7 +723,11 @@ def test_a_walk_with_only_the_profile_listing_refused_still_calls_on_demand_mode
     fallback the on-demand list names is checked and called, and a fallback
     only a profile could route is "not checked, listing refused (code)", never
     "unavailable", because nobody could list the profiles that would name it."""
-    control = ControlPlane([FALLBACK_TWO], profile_error="AccessDeniedException")
+    control = ControlPlane(
+        [FALLBACK_TWO],
+        profile_error="AccessDeniedException",
+        profile_only=[FALLBACK_ONE],
+    )
     reporter = _walk_setup(
         context,
         monkeypatch,
@@ -721,7 +743,11 @@ def test_a_walk_with_only_the_profile_listing_refused_still_calls_on_demand_mode
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
-    group = _listing_group("listing refused (AccessDeniedException)", FALLBACK_ONE)
+    # The group names the call that was refused: it is the inference profile
+    # listing, not the foundation-model listing, that the principal may not make.
+    group = _listing_group(
+        "profile listing refused (AccessDeniedException)", FALLBACK_ONE
+    )
     assert out.startswith(
         f"*Error: No suitable fallback model found for {PRIMARY_MODEL} "
         f"(called: {PRIMARY_MODEL}, {FALLBACK_TWO}; {group})"
