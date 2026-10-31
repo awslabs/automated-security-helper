@@ -403,6 +403,58 @@ class TestTheAggregatedDocumentIsReadAsLeniblyAsItsModel:
         assert progress.total_findings == 3
         assert sum(progress.severity_counts.values()) == 3
 
+    def test_an_empty_breakdown_object_leaves_the_results_to_grade_the_scanner(
+        self, tmp_path
+    ):
+        """An empty ``severity_counts`` object records no breakdown, as it does
+        in the per-target file. Read as a recorded breakdown it set every bucket
+        to zero and the count to zero beside the SARIF result that names the
+        scanner."""
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "sarif": {
+                    "runs": [
+                        {
+                            "tool": {"driver": {"name": "ASH"}},
+                            "results": [
+                                {
+                                    "ruleId": "B105",
+                                    "level": "error",
+                                    "properties": {"scanner_name": "bandit"},
+                                }
+                            ],
+                        }
+                    ]
+                },
+                "scanner_results": {
+                    "bandit": {"status": "FAILED", "severity_counts": {}}
+                },
+            },
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        source = progress.scanners["bandit"]["source"]
+        assert source.finding_count == 1
+        assert source.severity_counts["critical"] == 1
+
+    def test_a_count_beside_an_empty_breakdown_object_is_graded_unknown(self, tmp_path):
+        """Three findings recorded and no usable bucket: the count stays and the
+        three land under ``unknown``, where the per-target file puts them."""
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out, self._bandit(status="FAILED", finding_count=3, severity_counts={})
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        source = progress.scanners["bandit"]["source"]
+        assert source.finding_count == 3
+        assert source.severity_counts["unknown"] == 3
+        assert sum(progress.severity_counts.values()) == 3
+
     def test_a_scanner_carries_the_duration_the_document_recorded(self, tmp_path):
         out = tmp_path / "ash_output"
         _write_aggregated(

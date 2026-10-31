@@ -1406,6 +1406,12 @@ def _add_aggregated_scanner_progress(
         # a bucket holding a string reached update_totals, whose TypeError
         # failed the whole document.
         recorded_count, recorded_counts = _counts_of_document(scanner_info)
+        if not recorded_counts:
+            # An object that names no usable bucket ({} or only unusable
+            # values) records nothing, as it does for the per-target file
+            # (_progress_counts_of_document): the SARIF results, or the
+            # recorded count under unknown, speak instead of all-zero buckets.
+            recorded_counts = None
 
         # Create scanner progress for source target, carrying the status the
         # document recorded rather than assuming success. The results model reads a
