@@ -564,6 +564,13 @@ _REAP = subprocess_utils._REAP_SECONDS
 
 
 @pytest.mark.unit
+def test_the_wait_after_a_kill_is_a_number_not_unbounded():
+    """The expectations above read ``_REAP`` from the product, so a product that
+    went back to waiting without end (None) would still satisfy all of them."""
+    assert isinstance(_REAP, (int, float)) and 0 < _REAP <= 30, _REAP
+
+
+@pytest.mark.unit
 class TestRunCmdDirectInterruptionOnWindows:
     """On Windows the runtime shares ASH's console, so a Ctrl-C there reached it too.
 
@@ -1576,21 +1583,33 @@ class TestExecuteContainer:
         self, monkeypatch, capfd
     ):
         """The caller inspects returncode; raising here would lose the stderr."""
-        failure = CalledProcessError(
-            2, ["docker", "run"], output="out", stderr="scan failed"
-        )
+        command = [
+            "docker",
+            "run",
+            "img",
+            "ash",
+            "--config-overrides",
+            "project_name=hunter2",
+        ]
+        failure = CalledProcessError(2, command, output="out", stderr="scan failed")
 
         def explode(cmd, debug=False, env=None):
             raise failure
 
         monkeypatch.setattr(rac, "run_cmd_direct", explode)
 
-        result = _execute_container(["docker", "run"], debug=True)
+        result = _execute_container(command, debug=True)
 
         assert result is failure
+        out = capfd.readouterr().out
         # The line names the status and the command in its shown form, each
         # override value as its key, never the raw argv.
-        assert "Container execution failed with code 2" in capfd.readouterr().out
+        assert "hunter2" not in out, out
+        (failure_line,) = [
+            line for line in out.splitlines() if "Container execution failed" in line
+        ]
+        assert "code 2" in failure_line, failure_line
+        assert "project_name" in failure_line, failure_line
 
     def test_without_debug_nothing_extra_is_printed(self, monkeypatch, capfd):
         expected = create_completed_process(args=["docker"], returncode=0)

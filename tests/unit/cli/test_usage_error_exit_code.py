@@ -358,12 +358,17 @@ class TestTheCodeIsPublished:
             ),
             # The page names the two selections in its opening paragraph, not in
             # a table row of their own.
+            # One pattern from the code through both selections, over the page with
+            # its whitespace normalized as the CHANGELOG's is, so a re-wrapped
+            # paragraph still reads and a phrase elsewhere on the page does not.
             "the exit-codes reference's dependencies install sentence": (
-                f"Two `ash dependencies install` selections exit {BAD_SELECTION_EXIT} "
-                "instead: a `--tool` name"
-                in reference
-                and "a `--plugin-type` other than `converter`, `scanner`, or `reporter`"
-                in reference
+                re.search(
+                    rf"Two `ash dependencies install` selections exit "
+                    rf"{BAD_SELECTION_EXIT} instead: a `--tool` name[^.|]*, and a "
+                    r"`--plugin-type` other than `converter`, `scanner`, or `reporter`",
+                    " ".join(reference.split()),
+                )
+                is not None
             ),
             "ASH_EXIT_BAD_SELECTION": ASH_EXIT_BAD_SELECTION == BAD_SELECTION_EXIT
             and "a --plugin-type that is none of" in ASH_EXIT_BAD_SELECTION_MEANING,
