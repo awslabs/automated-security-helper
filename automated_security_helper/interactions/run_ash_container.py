@@ -5397,16 +5397,16 @@ def run_ash_container(
         os.environ.get("ASH_IMAGE_NAME")
         or f"automated-security-helper:{resolved_build_target}"
     )
-    if (
-        not build
-        and custom_containerfile is not None
-        and not os.environ.get("ASH_IMAGE_NAME")
-    ):
+    if not build and custom_containerfile is not None:
         # A build with --custom-containerfile tags its result as the custom
         # image (_build_custom_image) and runs that. With --no-build the same
         # option names the image a build produced, so the run uses it too: the
         # stock ci image it ran instead is the custom image's base, as root and
-        # without the custom tooling.
+        # without the custom tooling. ASH_IMAGE_NAME names the BASE the custom
+        # file is layered on, in a build and in a run alike: the build tags the
+        # base with it and the custom image with the fixed tag, so a run that
+        # took the variable as the image to run (as this branch did when the
+        # variable was set) ran the base again, with the same two gaps.
         ash_base_image_name = "automated-security-helper:custom"
     # Held to the characters ./ash and Invoke-ASH take, with their message and code,
     # before anything is built or run: a name that starts with '-' reaches the runner

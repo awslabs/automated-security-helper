@@ -489,9 +489,14 @@ def test_no_build_without_a_custom_containerfile_runs_the_stock_image(commands):
     assert run[run.index("ash") - 1] == "automated-security-helper:non-root"
 
 
-def test_an_image_named_by_the_environment_wins_over_the_custom_default(
+def test_an_image_named_by_the_environment_is_the_custom_images_base_not_the_run(
     commands, monkeypatch, tmp_path
 ):
+    """A build layers the custom file on the image ASH_IMAGE_NAME names and
+    tags the result as the custom image, which the run uses (the build tags the
+    base alone with the variable's name). A run with --no-build that took the
+    variable as the image to run started the base: as root, without the custom
+    tooling, the two gaps the custom-image rule closes."""
     monkeypatch.setenv("ASH_IMAGE_NAME", "registry.example/ash:pinned")
     containerfile = tmp_path / "Containerfile.custom"
     containerfile.write_text("FROM scratch\n", encoding="utf-8")
@@ -502,6 +507,20 @@ def test_an_image_named_by_the_environment_wins_over_the_custom_default(
         run=True,
         custom_containerfile=str(containerfile),
     )
+
+    assert result.returncode == 0, result.stderr
+    run = _run_command(commands)
+    assert run[run.index("ash") - 1] == "automated-security-helper:custom"
+    assert "registry.example/ash:pinned" not in run
+
+
+def test_an_image_named_by_the_environment_still_runs_without_a_custom_file(
+    commands, monkeypatch
+):
+    """Control: with no custom file the variable names the image to run."""
+    monkeypatch.setenv("ASH_IMAGE_NAME", "registry.example/ash:pinned")
+
+    result = rac.run_ash_container(source_dir="src", build=False, run=True)
 
     assert result.returncode == 0, result.stderr
     run = _run_command(commands)
