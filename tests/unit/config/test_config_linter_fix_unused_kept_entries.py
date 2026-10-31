@@ -57,6 +57,48 @@ def test_a_half_commented_entry_that_rewrites_a_kept_one_is_refused():
         )
 
 
+ORIGINAL_WITH_ENV_TAG = ORIGINAL.replace("path: a.py", "path: !ENV ${SRC}/a.py")
+HALF_COMMENTED_WITH_ENV_TAG = HALF_COMMENTED.replace(
+    "path: a.py", "path: !ENV ${SRC}/a.py"
+)
+
+
+def test_a_half_commented_entry_is_refused_when_a_kept_entry_uses_the_env_tag():
+    """Red at the base: the comparison loaded both texts with the plain safe
+    loader, which has no constructor for ``!ENV`` and raised, so the comparison
+    was skipped and the text that rewrites the kept entry's reason was let
+    through. Green at the tip: the tagged scalar loads as its plain text."""
+    with pytest.raises(UnusedSuppressionsNotEditable, match="change an entry"):
+        ConfigLinter._refuse_an_edit_that_misreads_the_list(
+            HALF_COMMENTED_WITH_ENV_TAG,
+            1,
+            original=ORIGINAL_WITH_ENV_TAG,
+            commented={1},
+        )
+
+
+def test_the_env_tag_alone_does_not_make_the_comparison_refuse():
+    """The positive control: the edit the fixer makes for the same tagged
+    entry is not refused."""
+    fixed, commented = ConfigLinter._comment_out_suppressions(
+        ORIGINAL_WITH_ENV_TAG, {1}, "2026-01-01"
+    )
+
+    assert commented == {1}
+    ConfigLinter._refuse_an_edit_that_misreads_the_list(
+        fixed, 1, original=ORIGINAL_WITH_ENV_TAG, commented=commented
+    )
+    assert "path: !ENV ${SRC}/a.py" in fixed
+
+
+def test_the_tag_blind_load_reads_a_tagged_scalar_as_its_text():
+    entries = ConfigLinter._suppression_entries_as_loaded(ORIGINAL_WITH_ENV_TAG)
+
+    assert entries is not None
+    assert entries[0]["path"] == "${SRC}/a.py"
+    assert entries[1]["path"] == "b.py"
+
+
 def test_an_edit_that_leaves_the_kept_entry_alone_is_not_refused():
     """The positive control: the edit the fixer makes for the same entry."""
     fixed, commented = ConfigLinter._comment_out_suppressions(

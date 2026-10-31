@@ -1145,9 +1145,31 @@ class ConfigLinter:
     def _suppression_entries_as_loaded(text: str) -> Optional[List[Any]]:
         """``global_settings.suppressions`` of the YAML ``text`` as a plain load
         reads it (a repeated key keeps its last value), or None when the text
-        does not load or holds no such list."""
+        does not load or holds no such list.
+
+        A tag the safe loader has no constructor for (``!ENV``, which a scan
+        reads, is the one a config holds) loads as the plain scalar, sequence
+        or mapping it tags. Only the entries are compared, so what the tag
+        would resolve to does not matter; a load that raised on the tag would
+        leave the comparison unmade for exactly the files a scan accepts."""
+
+        class _TagBlindLoader(yaml.SafeLoader):
+            pass
+
+        def _construct_untagged(
+            loader: yaml.SafeLoader, tag_suffix: str, node: yaml.Node
+        ) -> Any:
+            if isinstance(node, yaml.MappingNode):
+                return loader.construct_mapping(node, deep=True)
+            if isinstance(node, yaml.SequenceNode):
+                return loader.construct_sequence(node, deep=True)
+            return loader.construct_scalar(node)
+
+        # The empty prefix matches every tag. The loader's own constructors are
+        # tried first, so only a tag it does not know reaches this one.
+        _TagBlindLoader.add_multi_constructor("", _construct_untagged)
         try:
-            loaded = yaml.safe_load(text)
+            loaded = yaml.load(text, Loader=_TagBlindLoader)  # nosec B506 - a SafeLoader
         except (yaml.YAMLError, ValueError, RecursionError):
             return None
         settings = loaded.get("global_settings") if isinstance(loaded, dict) else None
