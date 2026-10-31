@@ -165,7 +165,7 @@ entry neither counts as examined nor is set aside, so a run of only such entries
 exits 4. A test written as "any entry whose reason is not ERROR" read that entry
 as examined and exited 0.
 
-History: before 2026-10-29 22:51Z the branch read ``entries and all(skip_reason is
+History: from 2026-10-29 22:51Z the branch read ``entries and all(skip_reason is
 NO_CHANGES)``, so one unchanged project beside a tolerated missing one exited 4
 ("nothing was scanned at all"); that rule was in force until the change that
 introduced the set-aside, and is recorded for review.
