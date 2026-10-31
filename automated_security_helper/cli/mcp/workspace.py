@@ -2471,17 +2471,24 @@ async def mcp_resolve_workspace(
         )
 
     try:
-        plan = _resolve(
-            workspace_file,
-            workspace_config,
-            allow_missing_projects,
-            config_overrides,
-            default_config=session_config,
-            client_config_rules=rules,
-            trusted_config=trusted_config,
-            remote_client=caller_is_remote(session_id),
-            permit_base=config_base_gate(session_id),
-            session_id=session_id,
+        # Off the event loop: resolution reads the workspace file, the policy
+        # file and every project's config, which on the loop stalled every other
+        # MCP session. The arguments are read here, on the loop, as they were.
+        plan = await _off_the_loop(
+            None,
+            functools.partial(
+                _resolve,
+                workspace_file,
+                workspace_config,
+                allow_missing_projects,
+                config_overrides,
+                default_config=session_config,
+                client_config_rules=rules,
+                trusted_config=trusted_config,
+                remote_client=caller_is_remote(session_id),
+                permit_base=config_base_gate(session_id),
+                session_id=session_id,
+            ),
         )
     except ProjectsOutsideTheRootsError as exc:
         return _error_response(
@@ -2624,19 +2631,25 @@ async def _scan_workspace(
         )
 
     try:
-        plan = _resolve(
-            workspace_file,
-            workspace_config,
-            allow_missing_projects,
-            config_overrides,
-            # Same value the settings builder gets below. They must agree; see
-            # ``_resolve`` and ``ProjectScanSettings.default_config_path``.
-            default_config=session_config,
-            client_config_rules=rules,
-            trusted_config=trusted_config,
-            remote_client=caller_is_remote(session_id),
-            permit_base=config_base_gate(session_id),
-            session_id=session_id,
+        # Off the event loop, holding the session's claim until the thread
+        # returns (_off_the_loop), as the settings resolution below does.
+        plan = await _off_the_loop(
+            claim,
+            functools.partial(
+                _resolve,
+                workspace_file,
+                workspace_config,
+                allow_missing_projects,
+                config_overrides,
+                # Same value the settings builder gets below. They must agree;
+                # see ``_resolve`` and ``ProjectScanSettings.default_config_path``.
+                default_config=session_config,
+                client_config_rules=rules,
+                trusted_config=trusted_config,
+                remote_client=caller_is_remote(session_id),
+                permit_base=config_base_gate(session_id),
+                session_id=session_id,
+            ),
         )
     except ProjectsOutsideTheRootsError as exc:
         return _error_response(

@@ -1179,6 +1179,12 @@ class TestAnUnreadableServerConfigIsARefusal:
 
     @pytest.mark.asyncio
     async def test_scan_workspace_answers_exit_3(self, tmp_path, monkeypatch):
+        """Exit 3 from the config read itself, not from an earlier exit-3 gate.
+
+        ``_refuse_config_inputs_outside_the_permitted_roots`` also answers 3, so
+        the exit code alone could come from it; the patched reader must be
+        reached and its message must be the one answered.
+        """
         monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
         plan = _plan(tmp_path)
 
@@ -1186,13 +1192,15 @@ class TestAnUnreadableServerConfigIsARefusal:
             workspace_module,
             "_resolve_session_config",
             side_effect=ASHConfigSourceError("ASH_CONFIG cannot be read"),
-        ):
+        ) as reader:
             response = await workspace_module.mcp_scan_workspace(
                 workspace_file=plan.workspace_file
             )
 
+        reader.assert_called()
         assert response["success"] is False
         assert response.get("exit_code") == 3
+        assert "ASH_CONFIG cannot be read" in str(response)
 
 
 class TestResolutionRunsOffTheEventLoop:
@@ -1222,6 +1230,75 @@ class TestResolutionRunsOffTheEventLoop:
             response = await workspace_module.mcp_scan_workspace(
                 workspace_file=plan.workspace_file,
                 output_dir=str(tmp_path / "out"),
+            )
+
+        assert threads, response
+        assert threads[0] != threading.get_ident()
+
+    @pytest.mark.asyncio
+    async def test_the_plans_resolution_and_the_settings_run_on_another_thread(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the base: ``_resolve`` ran on the loop's thread in the scan tool.
+
+        The committed-output check above is one of three reads that stalled the
+        loop. The plan's resolution (the workspace file, the policy file and every
+        project's config) and the settings builder are the other two; each is
+        recorded here by wrapping the real function.
+        """
+        monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp"))
+        plan = _plan(tmp_path)
+        threads: dict = {}
+        real_resolve = workspace_module._resolve
+        real_settings = workspace_module.build_project_scan_settings
+
+        def resolving(*args, **kwargs):
+            threads.setdefault("resolve", threading.get_ident())
+            return real_resolve(*args, **kwargs)
+
+        def building(*args, **kwargs):
+            threads.setdefault("settings", threading.get_ident())
+            return real_settings(*args, **kwargs)
+
+        with (
+            patch.object(workspace_module, "_resolve", side_effect=resolving),
+            patch.object(
+                workspace_module, "build_project_scan_settings", side_effect=building
+            ),
+            patch.object(
+                workspace_module,
+                "execute_workspace",
+                side_effect=lambda p, s, **k: _result(p, s),
+            ),
+        ):
+            response = await workspace_module.mcp_scan_workspace(
+                workspace_file=plan.workspace_file,
+                output_dir=str(tmp_path / "out"),
+            )
+
+        assert set(threads) == {"resolve", "settings"}, (threads, response)
+        assert threads["resolve"] != threading.get_ident()
+        assert threads["settings"] != threading.get_ident()
+
+    @pytest.mark.asyncio
+    async def test_the_resolve_tool_resolves_on_another_thread(
+        self, tmp_path, monkeypatch
+    ):
+        """The dry-run tool resolves the same plan and reads the same configs."""
+        monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp"))
+        plan = _plan(tmp_path)
+        threads: List[int] = []
+        real_resolve = workspace_module._resolve
+
+        def resolving(*args, **kwargs):
+            threads.append(threading.get_ident())
+            return real_resolve(*args, **kwargs)
+
+        with patch.object(workspace_module, "_resolve", side_effect=resolving):
+            response = await workspace_module.mcp_resolve_workspace(
+                workspace_file=plan.workspace_file
             )
 
         assert threads, response
