@@ -293,6 +293,10 @@ class UVToolMixin:
         # None. Typed here only: a real class-level annotation would be read by
         # pydantic as a required field of every plugin model that mixes this in.
         dependency_unavailable_reason: Optional[str]
+        # PluginBase declares both; typed here for the methods below, which
+        # assign them. exit_code is None until the plugin starts a tool.
+        exit_code: Optional[int]
+        uv_tool_install_commands: List[str]
 
     # ------------------------------------------------------------------
     # Version detection
