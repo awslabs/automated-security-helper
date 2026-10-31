@@ -13,11 +13,12 @@ so the operator's.
 
 Now the chosen baseline keeps the path as named (anchored to the source
 directory, no link resolved) beside the resolved path the file is read through.
-A baseline found in the tree whose target is outside the scanned directory is
-not read at all; a baseline the operator names is read and judged by the name
-the operator gave AND by the file it resolves to: a name outside the tree that
-is a link into it reads the repository's file, so its settings are the
-repository's too.
+A baseline found in the tree whose target is outside both the scanned directory
+and the git checkout that holds it is not read at all (a target elsewhere in
+that checkout is read, as the repository's); a baseline the operator names is
+read and judged by the name the operator gave AND by the file it resolves to: a
+name outside the tree that is a link into it reads the repository's file, so
+its settings are the repository's too.
 """
 
 from __future__ import annotations
@@ -76,9 +77,19 @@ def _context(tmp_path: Path) -> PluginContext:
     return context
 
 
-def _git_shaped_checkout(root: Path) -> Path:
+#: The two shapes of a checkout's ``.git``: the directory a clone has, and the
+#: gitfile a linked worktree or a submodule has. The trust rules count both.
+GIT_SHAPES = ["directory", "gitfile"]
+
+
+def _git_shaped_checkout(root: Path, shape: str = "directory") -> Path:
     """``root`` as a git checkout the trust rules recognize: a ``.git``
-    directory holding ``HEAD`` (an empty ``.git`` is a stray mkdir to them)."""
+    directory holding ``HEAD`` (an empty ``.git`` is a stray mkdir to them), or,
+    for ``shape="gitfile"``, a ``.git`` file naming a git directory elsewhere."""
+    if shape == "gitfile":
+        root.mkdir(parents=True, exist_ok=True)
+        (root / ".git").write_text("gitdir: ../.git-elsewhere\n", encoding="utf-8")
+        return root
     (root / ".git").mkdir(parents=True)
     (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     return root
@@ -232,8 +243,9 @@ def test_a_regular_in_tree_baseline_is_named_where_it_sits(tmp_path, monkeypatch
     assert reason is not None and "inside the scanned directory" in reason, reason
 
 
+@pytest.mark.parametrize("git_shape", GIT_SHAPES)
 def test_an_in_tree_link_elsewhere_in_the_checkout_is_read(
-    tmp_path, monkeypatch, caplog
+    tmp_path, monkeypatch, caplog, git_shape
 ):
     """A monorepo: the scanned directory is ``repo/service``, and its
     ``.secrets.baseline`` is a link to the checkout's own ``repo/.secrets.baseline``.
@@ -244,7 +256,7 @@ def test_an_in_tree_link_elsewhere_in_the_checkout_is_read(
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     checkout = tmp_path / "repo"
-    _git_shaped_checkout(checkout)
+    _git_shaped_checkout(checkout, git_shape)
     shared = checkout / ".secrets.baseline"
     shared.write_text(_baseline_text(), encoding="utf-8")
     context = PluginContext(
@@ -322,8 +334,9 @@ def test_a_source_directory_reached_through_a_link_keeps_its_own_baseline(
     ), [record.message for record in caplog.records]
 
 
+@pytest.mark.parametrize("git_shape", GIT_SHAPES)
 def test_an_in_tree_link_into_an_outer_checkout_is_refused(
-    tmp_path, monkeypatch, caplog
+    tmp_path, monkeypatch, caplog, git_shape
 ):
     """The scanned repository ``home/project`` is its own checkout, and the
     directory above it, ``home``, is a checkout too (a home directory kept in
@@ -334,10 +347,10 @@ def test_an_in_tree_link_into_an_outer_checkout_is_refused(
     the operator's file under the repository's own settings."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    home = _git_shaped_checkout(tmp_path / "home")
+    home = _git_shaped_checkout(tmp_path / "home", git_shape)
     outer = home / "operator.baseline"
     outer.write_text(_baseline_text(), encoding="utf-8")
-    project = _git_shaped_checkout(home / "project")
+    project = _git_shaped_checkout(home / "project", git_shape)
     context = PluginContext(
         source_dir=project,
         output_dir=tmp_path / "out",
