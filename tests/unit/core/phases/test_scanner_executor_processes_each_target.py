@@ -301,8 +301,15 @@ def test_the_refiled_row_keeps_its_could_not_stop_record(
     report with one carrying no such record, so the gate lost the case it exists
     for. The refiled row is the scan's own, so the record is still on it."""
 
+    marked: list = []
+
     def mark_unstoppable(container):
-        if container.could_not_stop is None:
+        # The first container the processor raises on only. ``before_raise`` runs
+        # before EVERY raise, the fresh fallback row's included: marking each
+        # would set the record on the fresh row here, and the assertion below
+        # would hold whether or not the handler copies it from the refiled row.
+        if not marked:
+            marked.append(container)
             container.could_not_stop = (
                 "shape-tool (pid 4242), which may still be running"
             )
@@ -324,6 +331,10 @@ def test_the_refiled_row_keeps_its_could_not_stop_record(
     )
     # The fresh row the handler falls back to when the refiled row raises again
     # carries the record too: it is what the gate reads off the target's report.
+    # Only the first row was marked above, so the fresh row has it only because
+    # the handler copied it.
+    assert seen[3] is not seen[1]
+    assert marked == [seen[1]]
     assert seen[3].could_not_stop == (
         "shape-tool (pid 4242), which may still be running"
     )
