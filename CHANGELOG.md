@@ -1374,6 +1374,7 @@
   reached through a link the repository commits) gives the reason and names
   `--output-dir`, or `-OutputDir`, as the way to write elsewhere; a refusal of an
   output directory the operator gave does not.
+
 - **The Bedrock summary reporter's `top_p` must be from 0 to 1.** The option now has the
   range Bedrock's Converse API documents, as `temperature` does. A configuration that set
   `top_p` above 1, below 0 or to a value that is not a finite number used to load, and the
@@ -8463,6 +8464,36 @@
   one line have two ids. Ids recorded from an earlier release, such as a saved
   `diff_scan_results` baseline, no longer match; take a new baseline. An
   `additional_reports` entry that carries its own `id` keeps it.
+
+- **A finding from a scanner only the workspace policy added is reported as "Not
+  gating" when its project's `policy_scanners_gate` is off, not as "Below
+  threshold".** Such a finding is left out of the project's outcome whatever its
+  severity, and the reports filed it with the low-severity findings the threshold
+  sets aside, so a CRITICAL one was hidden by the HTML report's default view. It
+  now has its own status in the HTML report, its own "Not gating" figure in the
+  masthead and in the Markdown and text summary lines, and a "Not gating"
+  choice in the HTML scope menu; the default view shows it. The Markdown report
+  lists it in a "Not gating (workspace policy)" table, and the text report does
+  when it lists detailed findings. The scan summary carries the count as
+  `policy_not_gating`, and `below_threshold` no longer includes these findings, so
+  it is no longer `active` minus `actionable` when any are present. When no
+  finding counts toward the outcome and some were left out, the headline sentence
+  says so instead of saying that no finding reached its threshold. A report with
+  no such finding differs only by the extra choice in the HTML scope menu.
+- **A workspace project that completed with a skip reason, and also exceeds its
+  threshold or has an incomplete scan, reads `FAILED` in the project table.** It
+  read `SKIPPED (<reason>)` while the run's exit code failed for it. The row now
+  reads `FAILED`, or `FAILED (incomplete)`, as the exit code does, and shows the
+  project's finding counts instead of `n/a`. A project that completed with a skip
+  reason and neither condition still reads `SKIPPED (<reason>)`.
+- **The HTML report prints a scan text block as written when nothing in it needs
+  changing, and says what it changed when something does.** A snippet or
+  description that holds no control character and no CI command form is printed
+  as it is, where a code sample's `\x41` used to print as `\\x41`. A block that is
+  shown instead carries a note naming what showing it changed: control characters
+  written as escapes, CI command forms broken, and a backslash run doubled before
+  text that reads as an escape. A backslash before text that reads as no escape
+  is left as it is and is not mentioned.
 
 ### Configuration sources
 
