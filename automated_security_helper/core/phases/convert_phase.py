@@ -703,7 +703,7 @@ class ConvertPhase(EnginePhase):
                     )
             except Exception as exc:
                 ASH_LOGGER.debug(
-                    f"Candidate-input count for converter {display_name} raised "
+                    f"Candidate-input count for converter {row_key} raised "
                     f"{exc!r}; recording no count so the completeness gate stays strict"
                 )
                 candidate_inputs = None
@@ -818,6 +818,11 @@ class ConvertPhase(EnginePhase):
                     converted_paths=[],
                 )
 
+        # One key per converter, computed before any row or log line below, so two
+        # converters sharing a display name do not write one row over the other
+        # and are told apart in every line this phase logs about them.
+        row_keys = _row_keys(all_converter_instances, keys_in_use)
+
         # Assigned before filtering, and on the instance rather than in a local,
         # because filter_enabled_plugins returns only the survivors: a converter
         # dropped for unsatisfied dependencies never reaches the loop below, which
@@ -873,9 +878,10 @@ class ConvertPhase(EnginePhase):
                     )
                     filter_failures[id(plugin_instance)] = described
                     ASH_LOGGER.warning(
-                        f"Excluding {type(plugin_instance).__name__} from the "
-                        f"{self.phase_name} phase: its enabled/dependency check "
-                        f"raised {described}"
+                        "Excluding converter "
+                        f"{row_keys.get(id(plugin_instance), '?')}: its "
+                        "is_python_only() check raised "
+                        f"{described}"
                     )
 
         dependency_answers: Dict[int, bool] = {}
@@ -900,7 +906,7 @@ class ConvertPhase(EnginePhase):
                 # debug line is not seen on a default run.
                 values = _redaction_values_or(plugin_instance, run_config, run_values)
                 ASH_LOGGER.warning(
-                    f"Excluding converter {_converter_display_name(plugin_instance)}: "
+                    f"Excluding converter {row_keys.get(id(plugin_instance), '?')}: "
                     f"its dependency check raised {_failure_text(e, values)}"
                 )
                 answer = False
@@ -912,7 +918,7 @@ class ConvertPhase(EnginePhase):
                 plugin_instance.dependencies_satisfied = answer
             except Exception as e:  # noqa: BLE001 -- plugin code
                 ASH_LOGGER.debug(
-                    f"Converter {_converter_display_name(plugin_instance)} did not "
+                    f"Converter {row_keys.get(id(plugin_instance), '?')} did not "
                     f"take its dependency answer: {type(e).__name__}"
                 )
 
@@ -940,10 +946,6 @@ class ConvertPhase(EnginePhase):
                 continue
             if admitted and dependency_answers.get(id(plugin_instance)) is True:
                 filtered_instances.extend(admitted)
-
-        # One key per converter, computed before any row below is written, so two
-        # converters sharing a display name do not write one row over the other.
-        row_keys = _row_keys(all_converter_instances, keys_in_use)
 
         # A row for every converter the filter dropped, so a converter that did not
         # run is present in the machine-readable output instead of being absent from
@@ -1045,7 +1047,7 @@ class ConvertPhase(EnginePhase):
                 )
 
                 # Call convert method directly - converters should handle finding their own targets
-                ASH_LOGGER.debug(f"Calling convert() on {display_name}")
+                ASH_LOGGER.debug(f"Calling convert() on {row_key}")
 
                 # Notify converter start
                 try:
@@ -1088,7 +1090,7 @@ class ConvertPhase(EnginePhase):
 
                 if len(convert_result) > 0:
                     ASH_LOGGER.debug(
-                        f"Converter {display_name} returned {len(convert_result)} paths"
+                        f"Converter {row_key} returned {len(convert_result)} paths"
                     )
                     plugin_converted_paths.extend(convert_result)
                     converted_paths.extend(convert_result)
@@ -1165,7 +1167,7 @@ class ConvertPhase(EnginePhase):
                         )
                 else:
                     ASH_LOGGER.debug(
-                        f"Converter {display_name} returned None or empty result"
+                        f"Converter {row_key} returned None or empty result"
                     )
                     not_converted = _could_not_convert(plugin_instance)
                     refused = _refused_over_limit(plugin_instance)

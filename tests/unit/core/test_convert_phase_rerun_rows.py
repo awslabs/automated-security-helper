@@ -91,9 +91,7 @@ def _phase(plugin_context: PluginContext, plugins, agg) -> ConvertPhase:
 
 
 class TestASecondRunFilesItsConvertersUnderTheSameKeys:
-    def test_the_keys_of_the_second_run_are_the_keys_of_the_first(
-        self, plugin_context
-    ):
+    def test_the_keys_of_the_second_run_are_the_keys_of_the_first(self, plugin_context):
         agg = AshAggregatedResults(
             name="test", description="test", ash_config=plugin_context.config
         )
