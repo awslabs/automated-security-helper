@@ -577,8 +577,8 @@ def _declared_file_name(reporter_class: type) -> str:
     not known without an instance.
     """
     declared = declared_config_model(reporter_class, ReporterPluginConfigBase)
-    field = (getattr(declared, "model_fields", None) or {}).get("extension")
-    extension = getattr(field, "default", None)
+    extension_field = (getattr(declared, "model_fields", None) or {}).get("extension")
+    extension = getattr(extension_field, "default", None)
     return f"ash.{extension}" if isinstance(extension, str) and extension else "ash.txt"
 
 
