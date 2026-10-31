@@ -256,6 +256,63 @@ def test_an_in_tree_copy_on_the_childs_path_is_a_refusal_not_a_miss(
     assert args[0] == "ash-u26-in-tree-tool"
 
 
+def _executable_tool(directory, name):
+    """A `#!/bin/sh` file made executable by its mode, in ``directory``."""
+    directory.mkdir(parents=True, exist_ok=True)
+    tool = directory / name
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    tool.chmod(0o755)
+    return tool
+
+
+@POSIX_ONLY
+def test_a_copy_in_the_trees_node_modules_bin_on_the_childs_path_is_refused(
+    monkeypatch, tmp_path
+):
+    """The case the in-tree refusal exists for: a repository ships
+    ``node_modules/.bin/<tool>`` and the child's PATH names that directory. The
+    copy is refused by its exact path, and the program the caller gave is not
+    rewritten to it."""
+    repo = tmp_path / "repo"
+    tool = _executable_tool(repo / "node_modules" / ".bin", "ash-u26-in-tree-tool")
+    monkeypatch.setattr(spu, "find_executable", lambda name: None)
+    monkeypatch.delenv(spu.ALLOW_IN_TREE_TOOLS_ENV, raising=False)
+    args = ["ash-u26-in-tree-tool", "--version"]
+    with spu.scanning_tree(str(repo)):
+        refusal = spu._resolve_for_spawn(args, None, {"PATH": str(tool.parent)})
+    assert isinstance(refusal, FileNotFoundError)
+    assert f"resolves on the child's PATH to {tool}, inside the scanned tree" in str(
+        refusal
+    )
+    assert args == ["ash-u26-in-tree-tool", "--version"]
+
+
+@POSIX_ONLY
+@pytest.mark.parametrize(
+    "in_tree_first", [True, False], ids=["in-tree-first", "outside-first"]
+)
+def test_a_mixed_child_path_runs_the_copy_outside_the_tree(
+    in_tree_first, monkeypatch, tmp_path
+):
+    """The child's PATH names both an in-tree directory and one outside it, each
+    with the tool: whichever comes first, the program is the copy outside the
+    tree, and the in-tree copy is never the one it is pointed at."""
+    repo = tmp_path / "repo"
+    in_tree = _executable_tool(repo / "node_modules" / ".bin", "ash-u26-in-tree-tool")
+    outside = _executable_tool(tmp_path / "system", "ash-u26-in-tree-tool")
+    directories = [in_tree.parent, outside.parent]
+    if not in_tree_first:
+        directories.reverse()
+    monkeypatch.setattr(spu, "find_executable", lambda name: None)
+    monkeypatch.delenv(spu.ALLOW_IN_TREE_TOOLS_ENV, raising=False)
+    args = ["ash-u26-in-tree-tool", "--version"]
+    path = os.pathsep.join(str(directory) for directory in directories)
+    with spu.scanning_tree(str(repo)):
+        refusal = spu._resolve_for_spawn(args, None, {"PATH": path})
+    assert refusal is None
+    assert args == [str(outside), "--version"]
+
+
 @POSIX_ONLY
 def test_the_childs_own_path_is_searched_when_the_caller_gave_one(
     monkeypatch, tmp_path
