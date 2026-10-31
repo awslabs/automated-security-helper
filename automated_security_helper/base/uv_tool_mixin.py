@@ -1935,8 +1935,9 @@ class UVToolMixin:
             # (UVToolRunner.install_tool_with_version): unchecked here, a URL,
             # a path or a marker reached `ash dependencies install`. Whitespace
             # inside one (PEP 508 allows "jupyter >= 1.0") is not refused here:
-            # the command builder below stores every requirement in the
-            # canonical spelling, which carries none, exactly as it does for
+            # the command builder below respells a requirement that holds
+            # whitespace as packaging prints it, which carries none (one
+            # without whitespace is stored as given), exactly as it does for
             # the tool spec's own constraint, and the torn check after it
             # refuses whatever still holds whitespace. A refusal at this point
             # cleared the command for a dependency the builder would have
@@ -1974,14 +1975,16 @@ class UVToolMixin:
         # the scan's. The ONE read above serves the checks, the spec builder
         # and this loop: the hook is overridable, and a second read could
         # answer differently from the one that was checked. Each is stored
-        # in its canonical spelling, as the tool spec below is.
+        # as given, or respelled by packaging when it holds whitespace
+        # (_without_whitespace), as the tool spec below is.
         for dependency in with_dependencies:
             install_cmd_parts.extend(["--with", _without_whitespace(dependency)])
         # The stored command is ONE string that get_installation_commands
         # splits on whitespace, so every requirement in it is spelled without
         # any: a plugin-built constraint such as ">= 1.0" parses (the check
-        # above accepts it) but was torn into two uv arguments. The canonical
-        # spelling packaging prints carries none; a part that still holds
+        # above accepts it) but was torn into two uv arguments. One that holds
+        # whitespace is respelled as packaging prints it, which carries none,
+        # and one that holds none is stored as given; a part that still holds
         # whitespace after that cannot be stored safely and refuses the
         # command, as the refused spec above does.
         install_cmd_parts.append(_without_whitespace(tool_spec))
