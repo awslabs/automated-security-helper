@@ -58,6 +58,16 @@ class _GitStandIn:
         return SimpleNamespace(returncode=0, stdout=self.stdout, stderr=b"")
 
 
+@pytest.fixture(autouse=True)
+def nothing_above_the_test_directory_is_searched(tmp_path, monkeypatch):
+    """These tests expect no repository above their directory. With ``--basetemp``
+    inside a checkout, or a temporary directory under a work tree, the upward
+    search for ``.git`` found the developer's checkout, the stand-in answered for
+    it and ``assert named == []`` failed. The test directory is a ceiling; a test
+    that sets its own overrides this."""
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", os.path.realpath(tmp_path))
+
+
 def _repository(tmp_path) -> Path:
     repo = Path(os.path.realpath(tmp_path)) / "repo"
     (repo / ".git").mkdir(parents=True)

@@ -32,7 +32,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from automated_security_helper.utils import scan_output_dirs
+from automated_security_helper.utils import scan_output_dirs, subprocess_utils
 from automated_security_helper.utils.scan_output_dirs import (
     PatternSyntax,
     _repository_root_of,
@@ -54,6 +54,78 @@ pytestmark = pytest.mark.unit
 needs_symlinks = pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
+
+
+@pytest.fixture(autouse=True)
+def no_git_runs_and_none_is_searched_for_above_the_test_directory(
+    tmp_path, monkeypatch
+):
+    """None of these tests starts git, and none may find a repository above its
+    own directory. With ``--basetemp`` inside a checkout, or a temporary directory
+    under a work tree, the upward search for ``.git`` found the developer's
+    checkout, and the tests that stub no git ran the real one against it. The
+    test directory is a ceiling (a test that sets its own overrides this), and a
+    spawn is recorded and refused: the code under test turns a refused spawn into
+    "git could not be run", so the record is what fails the test."""
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", os.path.realpath(tmp_path))
+    started: list = []
+
+    def refused(argv, **_kwargs):
+        started.append(list(argv))
+        raise AssertionError(f"git was started: {argv}")
+
+    monkeypatch.setattr(subprocess_utils, "spawn_run", refused)
+    yield
+    assert started == []
+
+
+def test_a_repository_above_the_test_directory_is_not_searched_for(tmp_path):
+    tree = Path(os.path.realpath(tmp_path))
+    (tree / ".git").mkdir()
+    source = tree / "src"
+    source.mkdir()
+
+    assert _repository_root_of(source) is None
+
+
+def test_control_a_repository_in_the_test_directory_is_still_found(tmp_path):
+    source = Path(os.path.realpath(tmp_path)) / "src"
+    (source / ".git").mkdir(parents=True)
+
+    assert _repository_root_of(source / "deeper") == source
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        pytest.param("{empty}{ceiling}", id="leading-empty-entry"),
+        pytest.param("{ceiling}{empty}", id="trailing-empty-entry"),
+        pytest.param("{empty}{empty}{ceiling}", id="two-leading-empty-entries"),
+    ],
+)
+def test_empty_entries_of_the_ceiling_list_are_skipped_and_the_rest_honored(
+    tmp_path, monkeypatch, spelling
+):
+    tree = Path(os.path.realpath(tmp_path))
+    inner = tree / "real" / "outer" / "inner"
+    inner.mkdir(parents=True)
+    (tree / "real" / "outer" / ".git").mkdir()
+    monkeypatch.setenv(
+        "GIT_CEILING_DIRECTORIES",
+        spelling.format(empty=os.pathsep, ceiling=str(tree / "real" / "outer")),
+    )
+
+    assert _repository_root_of(inner) is None
+
+
+def test_control_a_ceiling_list_of_empty_entries_stops_nothing(tmp_path, monkeypatch):
+    tree = Path(os.path.realpath(tmp_path))
+    inner = tree / "real" / "outer" / "inner"
+    inner.mkdir(parents=True)
+    (tree / "real" / "outer" / ".git").mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", os.pathsep * 2)
+
+    assert _repository_root_of(inner) == tree / "real" / "outer"
 
 
 def test_a_trailing_space_is_escaped_for_the_gitignore_style_glob():
@@ -338,7 +410,13 @@ def test_the_drop_keeps_a_committed_file_reported_in_another_case_on_macos(
     )
 
     assert removed == 1
-    assert len(report.runs[0].results) == 1
+    # The committed file is the one that stays; the other, in the same output
+    # directory but not committed, is the one dropped.
+    (kept,) = report.runs[0].results
+    assert (
+        kept.locations[0].physicalLocation.root.artifactLocation.uri
+        == "out/reports/x.md"
+    )
 
 
 def test_the_workspace_output_directorys_own_directories_are_excluded(
