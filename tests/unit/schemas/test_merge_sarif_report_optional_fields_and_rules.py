@@ -101,8 +101,9 @@ class TestNullOptionalFieldsMerge:
         self, aggregate_side, incoming_side, expected
     ):
         """The merged value is asserted, not only the results: a guard that
-        skipped the field whenever the incoming side was empty would pass the
-        both-null case and still lose an incoming list over an aggregate None."""
+        skipped the field whenever the aggregate side was None would pass the
+        incoming-null and both-null cases and still lose an incoming list over
+        an aggregate None, which is what the aggregate-null case catches."""
 
         def report(driver, results, side):
             return SarifReport.model_validate(
@@ -418,9 +419,10 @@ class TestResultsKeepTheirRuleById:
         # component reads as the driver's (SARIF 3.52.7), which after the merge is
         # the aggregate's own, so dropping it whole re-attributed the rule.
         assert reference["toolComponent"] == {"name": "pack"}
-        # The copy is a full dump, so None-valued keys (guid, properties) may
-        # ride along in the kept reference; whether they are dropped is pinned
-        # by the test of the kept reference's value filter, not here.
+        # The match is exact on purpose: the nested reference holds its name and
+        # nothing else, so a guid or index carried over as None would fail it.
+        # The dump is of the fields the rebuilt reference was given, and the
+        # merge hands it only the keys that held a value.
 
     def test_an_index_only_component_reference_takes_the_components_name(self):
         """A component reference with an index alone pointed into the incoming
