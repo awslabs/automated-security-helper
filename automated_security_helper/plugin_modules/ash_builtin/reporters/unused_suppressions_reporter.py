@@ -210,6 +210,17 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             self.config = self.config.model_copy(
                 update={"extension": self.MARKDOWN_EXTENSION}
             )
+        elif output_format == "markdown" and self.config.extension.lower().endswith(
+            ".json"
+        ):
+            # Kept, as the operator's choice, but said: the text written under it
+            # is markdown, and `ash config lint --fix-unused` reads a file of
+            # this name as JSON.
+            ASH_LOGGER.warning(
+                "The unused-suppressions reporter writes markdown "
+                "(output_format: markdown) under a file name that ends in .json; "
+                "tools that read the report by its name will read markdown as JSON."
+            )
 
     def companion_file_names(self) -> Tuple[str, ...]:
         """The markdown copy, when ``output_format`` is ``both`` (the default)."""

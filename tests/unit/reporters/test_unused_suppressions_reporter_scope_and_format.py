@@ -222,6 +222,83 @@ def test_a_config_file_read_through_get_plugin_config_names_the_markdown_file(
     assert reporter.companion_file_names() == ()
 
 
+@pytest.mark.parametrize("spelling", ["markdown", "Markdown", "MARKDOWN", " markdown "])
+def test_every_spelling_of_markdown_names_the_markdown_file(tmp_path, spelling):
+    """The validator folds the case before the file is named, so a spelling that
+    is not lower case does not leave markdown in ``...json``."""
+    context = _context(tmp_path)
+    config = UnusedSuppressionsReporterConfig(options={"output_format": spelling})
+    reporter = UnusedSuppressionsReporter(context=context, config=config)
+
+    assert reporter.config.options.output_format == "markdown"
+    assert reporter.config.extension == "unused-suppressions.md"
+    assert reporter.companion_file_names() == ()
+
+
+def test_a_json_extension_the_operator_kept_under_markdown_is_warned_about(tmp_path):
+    """Red at the base: the markdown went into a ``.json`` file with no word.
+    The extension stays, as the operator's choice."""
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    records: list = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect(level=logging.WARNING)
+    ASH_LOGGER.addHandler(handler)
+    try:
+        reporter = UnusedSuppressionsReporter(
+            context=_context(tmp_path),
+            config=UnusedSuppressionsReporterConfig(
+                extension="unused.custom.json", options={"output_format": "markdown"}
+            ),
+        )
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+
+    assert reporter.config.extension == "unused.custom.json"
+    messages = [record.getMessage() for record in records]
+    assert any("markdown" in m and ".json" in m for m in messages), messages
+
+
+def test_no_warning_for_a_name_that_is_not_json_or_a_json_format(tmp_path):
+    """The controls: markdown under its own name, and a json report under a
+    json name, draw no warning."""
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    records: list = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect(level=logging.WARNING)
+    ASH_LOGGER.addHandler(handler)
+    try:
+        UnusedSuppressionsReporter(
+            context=_context(tmp_path),
+            config=UnusedSuppressionsReporterConfig(
+                options={"output_format": "markdown"}
+            ),
+        )
+        UnusedSuppressionsReporter(
+            context=_context(tmp_path),
+            config=UnusedSuppressionsReporterConfig(
+                extension="unused.custom.json", options={"output_format": "json"}
+            ),
+        )
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+
+    assert records == []
+
+
 def test_the_callers_config_object_is_not_changed(tmp_path):
     """The rename lands on a copy; the object handed in keeps its extension."""
     context = _context(tmp_path)
