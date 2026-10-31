@@ -8,6 +8,7 @@ scanner would get, so a grant that survives anywhere between the file and the
 policy fails here. See config/sandbox_grants.py.
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from automated_security_helper.config.resolve_config import (
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.sandbox.policy import (
+    DEFAULT_ENVIRONMENT,
     SandboxRequirements,
     build_scanner_policy,
 )
@@ -140,6 +142,103 @@ def test_grants_from_command_line_overrides_are_kept(tmp_path):
     assert sandbox.network_scanners == ["grype"]
     assert sandbox.extra_read_paths == ["/opt/ca"]
     assert _network(sandbox, "grype", False, tmp_path) is True
+
+
+#: A repository config that tries to set variables in every sandboxed scanner. The
+#: values are markers: the entries are read, never run.
+ENVIRONMENT_CONFIG = """project_name: scanned
+sandbox:
+  mode: bwrap
+  environment:
+    - LD_PRELOAD=MARKER-not-a-real-library
+    - NODE_OPTIONS=MARKER-not-a-real-option
+"""
+
+
+def _passed(sandbox, tmp_path: Path, caller=None) -> dict:
+    """The environment a networked scanner would get under *sandbox*: the policy the
+    settings build, applied to the *caller*'s variables."""
+    results = tmp_path / "results"
+    results.mkdir(exist_ok=True)
+    policy = build_scanner_policy(
+        "checkov",
+        SandboxRequirements(network=True),
+        argv0="/bin/true",
+        source_dir=tmp_path,
+        output_dir=tmp_path,
+        results_dir=results,
+        scan_target=None,
+        cwd=None,
+        offline=False,
+        network_scanners=sandbox.network_scanners,
+        extra_read_paths=sandbox.extra_read_paths,
+        network_limit=sandbox.network_limit,
+        environment=sandbox.environment,
+    )
+    return policy.filter_env(caller or {})
+
+
+def test_an_environment_list_from_a_discovered_config_in_the_tree_is_ignored(
+    tmp_path, caplog
+):
+    """``LD_PRELOAD`` and ``NODE_OPTIONS`` in a scanner's environment run code in it,
+    so a config the scanned repository wrote must not set them."""
+    with caplog.at_level(logging.WARNING):
+        sandbox = resolve_config(source_dir=_repo(tmp_path, ENVIRONMENT_CONFIG)).sandbox
+
+    assert sandbox.environment == list(DEFAULT_ENVIRONMENT)
+    passed = _passed(sandbox, tmp_path, {"HTTP_PROXY": "http://proxy:3128"})
+    assert "LD_PRELOAD" not in passed
+    assert "NODE_OPTIONS" not in passed
+    # The default list still flows: the refusal drops the entries, not the setting.
+    assert passed["HTTP_PROXY"] == "http://proxy:3128"
+    named = set().union(*(_ignored_keys(r.getMessage()) for r in caplog.records))
+    assert "sandbox.environment" in named, caplog.text
+    # The warning names the setting, not what the repository wrote in it.
+    assert "MARKER" not in caplog.text
+
+
+def test_an_environment_list_from_an_explicit_config_in_the_tree_is_ignored(tmp_path):
+    source = tmp_path / "repo"
+    source.mkdir()
+    config = source / "ash.yaml"
+    config.write_text(ENVIRONMENT_CONFIG)
+
+    sandbox = resolve_config(config_path=config, source_dir=source).sandbox
+
+    assert sandbox.environment == list(DEFAULT_ENVIRONMENT)
+    assert "LD_PRELOAD" not in _passed(sandbox, tmp_path)
+
+
+def test_control_an_environment_list_from_a_config_outside_the_tree_is_kept(tmp_path):
+    """The same file outside every checkout is the operator's, and its entries reach
+    the scanner, so the refusals above are the confinement and not a dead path."""
+    source = tmp_path / "repo"
+    source.mkdir()
+    config = tmp_path / "trusted.yaml"
+    config.write_text(ENVIRONMENT_CONFIG)
+
+    sandbox = resolve_config(config_path=config, source_dir=source).sandbox
+
+    assert sandbox.environment == [
+        "LD_PRELOAD=MARKER-not-a-real-library",
+        "NODE_OPTIONS=MARKER-not-a-real-option",
+    ]
+    passed = _passed(sandbox, tmp_path)
+    assert passed["LD_PRELOAD"] == "MARKER-not-a-real-library"
+    assert passed["NODE_OPTIONS"] == "MARKER-not-a-real-option"
+
+
+def test_control_an_environment_list_from_command_line_overrides_is_kept(tmp_path):
+    sandbox = resolve_config(
+        source_dir=_repo(tmp_path, ENVIRONMENT_CONFIG),
+        config_overrides=["sandbox.environment=[MY_VAR]"],
+    ).sandbox
+
+    assert sandbox.environment == ["MY_VAR"]
+    passed = _passed(sandbox, tmp_path, {"MY_VAR": "mine", "LD_PRELOAD": "caller"})
+    assert passed["MY_VAR"] == "mine"
+    assert "LD_PRELOAD" not in passed
 
 
 def test_an_append_override_does_not_keep_the_repositorys_entries(tmp_path):

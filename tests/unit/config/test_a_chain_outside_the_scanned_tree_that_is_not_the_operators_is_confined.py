@@ -16,7 +16,7 @@ Every cell here runs the real client-policy step (``apply_client_config_rules``
 is not replaced): the delivered-file cells use the two lists that step does not
 compare (``read_path_scanners`` and ``env_scanners``), so they reach the
 confinement the way a command-line resolve does. The trusted-base cells use all
-four grants, since that step never sees the trusted file. Each refusal has a
+five grants, since that step never sees the trusted file. Each refusal has a
 positive control: the same file outside every checkout and the MCP root grants.
 """
 
@@ -48,13 +48,15 @@ SCANNER_GRANTS: Dict[str, Any] = {
     }
 }
 
-#: All four grants, each different from the default.
+#: All five grants, each different from the default. The environment entry sets a
+#: variable in every sandboxed scanner (a marker label, never a real library).
 GRANTS: Dict[str, Any] = {
     "sandbox": {
         "network_scanners": ["checkov"],
         "extra_read_paths": ["/data"],
         "read_path_scanners": ["semgrep"],
         "env_scanners": ["semgrep"],
+        "environment": ["LD_PRELOAD=MARKER-not-a-real-library"],
     }
 }
 
@@ -63,6 +65,7 @@ GRANT_KEYS = (
     "extra_read_paths",
     "read_path_scanners",
     "env_scanners",
+    "environment",
 )
 
 #: The sentence a warning explains the drop of a file outside the trees with.
