@@ -73,8 +73,21 @@ _DEFAULTED_BY_ASH = {
 }
 
 
+#: Tests in this module that only read text and never start pwsh. The pwsh gate below
+#: is not for them: under CI=1 on a runner with no pwsh it would fail a test that
+#: needs none.
+_WITHOUT_PWSH = frozenset(
+    {
+        "test_the_help_gives_the_wrapped_form",
+        "test_the_tests_that_need_no_pwsh_are_in_this_module",
+    }
+)
+
+
 @pytest.fixture(autouse=True)
-def _require_pwsh(in_ci: bool):
+def _require_pwsh(in_ci: bool, request: pytest.FixtureRequest):
+    if request.node.name in _WITHOUT_PWSH:
+        return
     if PWSH is None:
         if in_ci:
             pytest.fail("pwsh is not on PATH; CI runners must run these tests")
@@ -2287,6 +2300,16 @@ def test_the_help_gives_the_wrapped_form():
     description = help_text.split(".DESCRIPTION")[1].split(".PARAMETER")[0]
     form = "try { Invoke-ASH ... } catch { " + "; ".join(_WRAPPED_CATCH) + " }"
     assert _unwrapped(form) in _unwrapped(description), description
+
+
+@pytest.mark.unit
+def test_the_tests_that_need_no_pwsh_are_in_this_module():
+    """The names the pwsh gate lets through are tests that exist here, so a rename
+    cannot quietly put a text-only test back behind a gate it does not need."""
+    missing = sorted(
+        name for name in _WITHOUT_PWSH if not callable(globals().get(name))
+    )
+    assert missing == [], missing
 
 
 @pytest.mark.integration
