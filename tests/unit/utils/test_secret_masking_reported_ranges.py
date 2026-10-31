@@ -490,7 +490,7 @@ class TestAResourceLevelCredentialFinding:
         assert _context(model, 1) == "".join(masked_lines[:3]) + RESOURCE_LINES[3]
 
     @pytest.mark.parametrize(
-        "snippet_break", ["\f", "\v", "\x85", chr(0x2028), chr(0x2029)]
+        "snippet_break", ["\f", "\v", "\x85", "\r", chr(0x2028), chr(0x2029)]
     )
     def test_a_snippet_with_an_uncounted_break_does_not_bound_the_range(
         self, snippet_break
@@ -498,7 +498,13 @@ class TestAResourceLevelCredentialFinding:
         """A region snippet holding a break only some scanners count cannot be
         placed line by line. Counting its lines as the file's lines ended the
         range at the second line and left the properties after it unmasked; the
-        range runs to the end of the file as it does with no snippet at all."""
+        range runs to the end of the file as it does with no snippet at all.
+
+        A lone carriage return is counted as a line break when the snippet's
+        lines are counted, yet some scanners do not count it, so it is listed
+        with the uncounted breaks: a snippet that holds one also runs to the end
+        of the file (every later line is masked, the side that cannot expose
+        a value)."""
         finding = self._credential_finding(end=3)
         region = finding["locations"][0]["physicalLocation"]["region"]
         region["snippet"] = {"text": "Database:" + snippet_break + "Type"}
