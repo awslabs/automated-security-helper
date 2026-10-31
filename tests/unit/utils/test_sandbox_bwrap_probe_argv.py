@@ -31,16 +31,20 @@ FAKE_PROGRAMS = {
 }
 
 
-def _probe_argvs(monkeypatch, tmp_path) -> List[List[str]]:
-    """Run BwrapBackend._probe with a bwrap that always succeeds; return every argv."""
+def _probe_argvs(monkeypatch, tmp_path, programs=None) -> List[List[str]]:
+    """Run BwrapBackend._probe with a bwrap that always succeeds; return every argv.
+
+    ``programs`` is what the fake host's lookup finds (FAKE_PROGRAMS by default); a
+    name it does not hold is not found."""
     recorded: List[List[str]] = []
+    found = FAKE_PROGRAMS if programs is None else programs
 
     def fake_probe_run(argv: Sequence[str], env=None) -> Optional[str]:
         recorded.append(list(argv))
         return None
 
     monkeypatch.setattr(backends, "_probe_run", fake_probe_run)
-    monkeypatch.setattr(backends, "_sandbox_program", lambda name: FAKE_PROGRAMS[name])
+    monkeypatch.setattr(backends, "_sandbox_program", lambda name: found.get(name))
     # The overlay probe makes a throwaway directory; keep it under tmp_path.
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
 
@@ -64,6 +68,19 @@ def test_no_probe_argv_carries_a_bare_true(monkeypatch, tmp_path):
 def test_every_probe_argv_carries_the_shared_helpers_path(monkeypatch, tmp_path):
     for argv in _probe_argvs(monkeypatch, tmp_path):
         assert FAKE_PROGRAMS["true"] in argv, argv
+
+
+def test_a_lookup_that_finds_no_true_falls_back_to_an_absolute_path(
+    monkeypatch, tmp_path
+):
+    """The sandbox's lookup finds no ``true`` (an unusual PATH): every probe still
+    ends in an absolute path, ``/bin/true``, and never the bare name."""
+    argvs = _probe_argvs(monkeypatch, tmp_path, {"bwrap": FAKE_PROGRAMS["bwrap"]})
+
+    assert len(argvs) == 3
+    for argv in argvs:
+        assert "true" not in argv, argv
+        assert argv[-1] == "/bin/true", argv
 
 
 def test_the_plain_and_overlay_probes_end_in_the_helpers_path(monkeypatch, tmp_path):
