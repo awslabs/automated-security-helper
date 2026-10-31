@@ -325,6 +325,55 @@ def test_the_fresh_lint_reads_the_chain_the_callers_lint_read(tmp_path):
     assert "name" not in yaml.safe_load(fixed_content)["scanners"]["bandit"]
 
 
+@pytest.fixture
+def fresh_lint_arguments(monkeypatch):
+    """The keyword arguments of each lint the fix runs, recorded."""
+    calls = []
+    real = ConfigLinter.lint.__func__
+
+    def recording(cls, *args, **kwargs):
+        calls.append(kwargs)
+        return real(cls, *args, **kwargs)
+
+    monkeypatch.setattr(ConfigLinter, "lint", classmethod(recording))
+    return calls
+
+
+def test_the_fresh_lint_is_given_both_of_the_callers_directories(
+    tmp_path, fresh_lint_arguments
+):
+    """The fresh lint reads the chain and the report the caller's lint read only
+    when the fix hands it both directories: ``source_dir`` bounds where an
+    ``extends`` base may be, and ``output_dir`` is where the unused report is
+    looked for. The docstring of the test above names the source directory; this
+    one pins both."""
+    config_path = tmp_path / ".ash.yaml"
+    config_path.write_text("project_name: demo\n", encoding="utf-8")
+    output_dir = tmp_path / "out"
+
+    ConfigLinter.fix(config_path, [], output_dir=output_dir, source_dir=tmp_path)
+
+    assert fresh_lint_arguments == [
+        {"output_dir": output_dir, "source_dir": tmp_path}
+    ], fresh_lint_arguments
+
+
+def test_the_fresh_lint_is_given_no_directory_the_caller_did_not_have(
+    tmp_path, fresh_lint_arguments
+):
+    """The negative of the test above: a fix called without the directories lints
+    without them, rather than inventing one, so the two tests together show the
+    arguments are the caller's and not a constant."""
+    config_path = tmp_path / ".ash.yaml"
+    config_path.write_text("project_name: demo\n", encoding="utf-8")
+
+    ConfigLinter.fix(config_path, [])
+
+    assert fresh_lint_arguments == [{"output_dir": None, "source_dir": None}], (
+        fresh_lint_arguments
+    )
+
+
 def test_an_entry_the_fresh_lint_raises_but_the_operator_did_not_confirm_is_kept(
     tmp_path,
 ):
