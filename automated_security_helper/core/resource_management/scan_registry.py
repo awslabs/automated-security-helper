@@ -771,8 +771,12 @@ class ScanRegistry:
         compared by its directory: a second scan of the same tree, registered
         after the project scan left, has no record of it, while the first scan
         still in the registry does, and the project's files are in the one tree
-        both scans share. A directory equal to ``entry``'s own is not held: a
-        scan of that directory wrote over what an earlier scan left there.
+        both scans share. A directory equal to ``entry``'s own is not held when
+        ``entry`` ran: a scan of that directory wrote over what an earlier scan
+        left there. An entry that never claimed the tree (a workspace project
+        rolled back to CANCELLED while PENDING) wrote nothing over it, so
+        removing it would delete the files the earlier scan kept, and the
+        directory is held.
         """
         tree = entry.canonical_output_directory
         inside: List[str] = []
@@ -785,7 +789,10 @@ class ScanRegistry:
                 inside.append(other.scan_id)
         for holder in self._registry.values():
             for removed_id, directory in holder.removed_nested_scan_directories.items():
-                if tree not in directory.parents:
+                if directory == tree:
+                    if entry.claimed_output_tree:
+                        continue
+                elif tree not in directory.parents:
                     continue
                 if removed_id not in self._registry and removed_id not in inside:
                     inside.append(removed_id)

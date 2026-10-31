@@ -754,6 +754,74 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert removed is True
         assert ran == [1]
 
+    @staticmethod
+    def _project_left_with_its_files_then_another_entry_at_its_directory(
+        registry, tmp_path
+    ):
+        """A project scan cleaned up with its output kept (recorded on the root
+        scan), and then a second entry registered for the same project and
+        output directory. Returns the root scan, the project scan and the
+        second entry."""
+        old, project_scan, project, inner = (
+            TestRemovingAnOutputDirectoryAsksTheRegistry._root_scan_and_inner_project(
+                registry, tmp_path
+            )
+        )
+        registry.update_scan_status(project_scan, MCScanStatus.RUNNING)
+        registry.update_scan_status(project_scan, MCScanStatus.COMPLETED)
+        assert registry.cleanup_scan(project_scan) is True
+        return old, project_scan, _register(registry, project, inner)
+
+    def test_an_entry_that_never_ran_at_the_recorded_directory_does_not_free_it(
+        self, tmp_path
+    ):
+        """A workspace batch that rolled back marks its entries CANCELLED while
+        they are PENDING: nothing was written, so the project's kept files are
+        still the only ones in that directory. Removing the entry deleted them,
+        and the record on the root scan went with them."""
+        registry = ScanRegistry()
+        old, project_scan, rolled_back = (
+            self._project_left_with_its_files_then_another_entry_at_its_directory(
+                registry, tmp_path
+            )
+        )
+        registry.update_scan_status(rolled_back, MCScanStatus.CANCELLED)
+        assert registry.get_scan(rolled_back).claimed_output_tree is False
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(rolled_back), lambda: ran.append(1) or True
+        )
+
+        assert reason == "a later scan holds its results in this output directory"
+        assert removed is False
+        assert ran == []
+        assert registry.get_scan(old).removed_nested_scan_ids == [project_scan]
+
+    def test_an_entry_that_ran_at_the_recorded_directory_still_frees_it(
+        self, tmp_path
+    ):
+        """The control: this entry ran and wrote over the earlier scan's files,
+        so its removal deletes only its own."""
+        registry = ScanRegistry()
+        _old, _project_scan, rerun = (
+            self._project_left_with_its_files_then_another_entry_at_its_directory(
+                registry, tmp_path
+            )
+        )
+        registry.update_scan_status(rerun, MCScanStatus.RUNNING)
+        registry.update_scan_status(rerun, MCScanStatus.CANCELLED)
+        assert registry.get_scan(rerun).claimed_output_tree is True
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(rerun), lambda: ran.append(1) or True
+        )
+
+        assert reason is None
+        assert removed is True
+        assert ran == [1]
+
     def test_the_removal_of_another_inner_directory_keeps_the_record(self, tmp_path):
         """The control: a removal frees only the scans whose directories lie in
         the tree it deleted. The first project scan's directory is a sibling of
