@@ -173,6 +173,32 @@ class TestAnUnknownProvenanceFieldIsDropped:
         assert "x" * 200 not in text, text
         assert len(text) < 1500, len(text)
 
+    def test_a_long_key_among_the_named_ones_is_cut_in_the_line(self):
+        """The 5,000-character key above sorts after the twenty that are named,
+        so it never reaches the line and does not test the cut. A key that sorts
+        first is named, cut to its first 80 characters and "..."."""
+        from unittest.mock import patch
+
+        from automated_security_helper.core import sharding
+
+        sharding._WARNED_PROVENANCE_KEYS.clear()
+        long_key = "aaaa" + "y" * 200
+        with patch.object(sharding.ASH_LOGGER, "warning") as warning:
+            ShardAssignment.model_validate(
+                {
+                    "shard_index": 1,
+                    "shard_count": 2,
+                    "assigned_scanners": ["bandit"],
+                    long_key: True,
+                    "alpha": 1,
+                }
+            )
+
+        [call] = warning.call_args_list
+        text = str(call.args[0])
+        assert "aaaa" + "y" * 76 + "..., alpha" in text, text
+        assert "y" * 100 not in text, text
+
     def test_a_shard_index_that_is_a_list_does_not_make_the_line_its_size(
         self, capture
     ):
