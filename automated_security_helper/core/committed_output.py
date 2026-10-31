@@ -211,8 +211,9 @@ class _GitFailures:
     root's spool check and its projects-entry check ask about the same
     directory, and asked git once each, so a workspace check ran ``git
     ls-files`` for the root three times and derived three answers from one
-    listing. The second ask for a directory now reads the first's answer. Every
-    check of a directory, the results-path check included, asks through
+    listing. The second ask for a directory now reads the first's answer; a
+    failure remembered afterwards for a listed directory replaces its listing.
+    Every check of a directory, the results-path check included, asks through
     :func:`_index_below`, so a directory costs one ``git ls-files`` however many
     checks read it.
     """
@@ -224,6 +225,13 @@ class _GitFailures:
     def remember(self, answer: GitIndexAnswer) -> None:
         if answer.unanswered and answer.repository is not None:
             self._answers.setdefault(answer.repository, answer)
+            # A question asked after git had listed this directory (whether the
+            # repository above tracks it) went unanswered: that failure now
+            # answers for the directory, in place of the listing, so a later
+            # check of it is not given the listing and does not ask again.
+            base = _absolute(answer.base)
+            if base in self._listed:
+                self._listed[base] = answer
         elif answer.names is not None:
             self._listed.setdefault(_absolute(answer.base), answer)
 
