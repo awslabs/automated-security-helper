@@ -10,8 +10,9 @@
 
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --config      -c                <str>  Path to read/write the configuration file. By default,   │
-│                                        the config a scan of the current directory would use, or │
-│                                        a new .ashrc.yaml when there is none.                    │
+│                                        the config a scan of --source-dir would use (the current │
+│                                        directory when --source-dir is not given), or a new      │
+│                                        .ashrc.yaml in that directory when there is none.        │
 │                                        [env var: ASH_CONFIG]                                    │
 │ --source-dir                    <str>  The directory a scan would scan, as `ash scan            │
 │                                        --source-dir`: the config is discovered there unless     │
