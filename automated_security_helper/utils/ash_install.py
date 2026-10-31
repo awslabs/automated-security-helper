@@ -67,8 +67,9 @@ from urllib.request import url2pathname
 from importlib_metadata import packages_distributions
 
 from automated_security_helper.core.constants import ASH_REPO_URL
+from automated_security_helper.utils.error_text import traceback_text
 from automated_security_helper.utils.get_ash_version import get_ash_version
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 #: ASH's distribution name. Only meaningful with a direct reference after it.
 ASH_DISTRIBUTION_NAME = "automated-security-helper"
@@ -76,6 +77,18 @@ ASH_DISTRIBUTION_NAME = "automated-security-helper"
 #: The top-level package this module ships in, used to find ASH's distribution
 #: without naming it (see ``_distributions_declaring_this_module``).
 _ROOT_PACKAGE = __name__.split(".", 1)[0]
+
+
+def _debug_with_traceback(message: str, error: BaseException) -> None:
+    """Log *message* at debug level with *error*'s traceback after it.
+
+    The traceback is formatted by ``traceback_text`` and not handed to the log
+    record as ``exc_info``: the metadata reads that fail here raise errors whose
+    text can carry an environment-read value, and the handler would format the
+    raw traceback, last line included. ``traceback_text`` redacts the values the
+    error carries and prints the message once.
+    """
+    ASH_LOGGER.debug(f"{message}\n{traceback_text(error)}", extra=NO_MARKUP)
 
 
 def _local_path_from_file_url(url: object) -> Optional[Path]:
@@ -180,13 +193,12 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
         # ``metadata`` is None, read as a mapping) or no Name raises TypeError
         # or KeyError out of it, which is the sibling's defect, not this
         # install's, and the install-location strategy below reads no sibling.
-        # The cause goes with the record (``exc_info``), which the log handler
-        # formats once, rather than quoted into the message: a message that
-        # quoted the error showed its text twice.
-        ASH_LOGGER.debug(
+        # The cause goes after the message as the traceback, which prints the
+        # error's text once; a message that quoted the error showed it twice.
+        _debug_with_traceback(
             f"Could not enumerate the distributions providing {root_package!r}; "
             "trying the install-location strategy instead.",
-            exc_info=exc,
+            exc,
         )
         mapped = []
     # A dist-info with a top_level.txt or RECORD but no METADATA maps the package
@@ -408,10 +420,10 @@ def _requirements_declared(dist_name: str) -> List[Optional[List[str]]]:
         try:
             declared.append(dist.requires)
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
-            ASH_LOGGER.debug(
+            _debug_with_traceback(
                 f"Could not read requirements from a distribution named "
                 f"{dist_name!r}; skipping that copy.",
-                exc_info=exc,
+                exc,
             )
     return declared
 
@@ -447,10 +459,10 @@ def extra_requirements_from_metadata(extra: str) -> Optional[List[str]]:
         try:
             declared_lists = _requirements_declared(dist_name)
         except (PackageNotFoundError, OSError, ValueError) as exc:
-            ASH_LOGGER.debug(
+            _debug_with_traceback(
                 f"Could not read requirements from distribution {dist_name!r} "
                 f"providing {_ROOT_PACKAGE!r}; skipping it.",
-                exc_info=exc,
+                exc,
             )
             continue
         for declared in declared_lists:
