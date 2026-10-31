@@ -1131,6 +1131,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         # control plane left unchecked is checked again.
         self._control_client: Any = None
         self._run_model: Optional[str] = None
+        # The chain member ``_run_model`` was called for: the listing may spell
+        # a member another way than the chain does (a region's geography, a
+        # different case), and a walk resumed after the run's model failed
+        # continues from the chain, not from the listing's spelling.
+        self._run_model_member: Optional[str] = None
         self._configured_error: Optional[str] = None
         self._unavailable_models: set[str] = set()
         # The configured model and, as the listing spells it, the id the run's
@@ -1400,6 +1405,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         # A new run: no control-plane client yet, and the configured model first.
         self._control_client = None
         self._run_model = None
+        self._run_model_member = None
         self._configured_error = None
         self._unavailable_models = set()
         # The answer cache is keyed by fixed section names, so a second report()
@@ -2306,7 +2312,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             kept = call(run_model)
             if kept.ok or not kept.model_specific:
                 return kept
+            run_member = getattr(self, "_run_model_member", None)
             self._run_model = None
+            self._run_model_member = None
             return self._walk_outcome(
                 self._control_plane(),
                 opts.model_id,
@@ -2314,6 +2322,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 primary_error=self._configured_error,
                 resume_after=run_model,
                 resume_error=kept.text,
+                resume_member=run_member,
             )
         outcome = client.call(prompt, system_prompt)
         if outcome.ok or not opts.enable_fallback_models or not outcome.model_specific:
@@ -2395,6 +2404,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         resume_after: Optional[str] = None,
         resume_error: Optional[str] = None,
         primary_check: Optional[Any] = None,
+        resume_member: Optional[str] = None,
     ) -> CallOutcome:
         """Walk the fallback chain from *primary*: the one walk the report
         path (``_outcome_with_fallback``) and the shims (``_try_fallback_models``)
@@ -2486,6 +2496,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         if resume_after is not None and resume_after not in called:
             called.append(resume_after)
         visited = set(called) | {primary}
+        if resume_member is not None:
+            visited.add(resume_member)
         # The candidates an earlier walk of this run found the listing does
         # not name, or Converse refused as not permitted or not found: facts
         # about the model that do not change within a run, so a later section
@@ -2494,8 +2506,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         known_unavailable = (
             getattr(self, "_unavailable_models", None) if keep_as_run_model else None
         )
+        # The chain continues from the member the run's model was called for;
+        # the id it was called by is the listing's spelling, which the chain may
+        # not hold.
         model: Optional[str] = get_fallback_model(
-            primary if resume_after is None else resume_after
+            primary if resume_after is None else (resume_member or resume_after)
         )
         while model and model not in visited:
             visited.add(model)
@@ -2523,6 +2538,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     )
                     if keep_as_run_model:
                         self._run_model = called_id
+                        self._run_model_member = model
                     return outcome
                 if not outcome.model_specific:
                     # No connection, no credentials, the service down: every
