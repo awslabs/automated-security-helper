@@ -164,10 +164,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             workspace = (
                 f'<div id="projects" class="workspace-section">{workspace}</div>'
             )
-        counts = "".join(
-            f'<span class="severity-{level}"><strong>{count}</strong> {level.title()}</span>'
-            for level, count in summary["counts"].items()
-        )
+        counts = self._format_severity_counts(summary["counts"])
         # A scanner's name can be a results file's text (``ash report`` renders
         # one a repository committed), so it is one shown line wherever it is
         # printed. The filter's values are the same shown names the cards'
@@ -226,6 +223,20 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         return Template(
             assets.joinpath("ash-report.html").read_text(encoding="utf-8")
         ).substitute(data)
+
+    @staticmethod
+    def _format_severity_counts(counts: Dict[str, int]) -> str:
+        """The severity chips of the masthead, one per bucket of *counts*.
+
+        The buckets are an open set (a row rated outside the five levels counts
+        under its own name), so each key is escaped where it becomes a class
+        name and where it is shown.
+        """
+        return "".join(
+            f'<span class="severity-{html.escape(level, quote=True)}">'
+            f"<strong>{count}</strong> {html.escape(level.title())}</span>"
+            for level, count in counts.items()
+        )
 
     @staticmethod
     def _format_timestamp(value: Any) -> str:

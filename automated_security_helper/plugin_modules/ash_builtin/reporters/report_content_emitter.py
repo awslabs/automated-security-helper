@@ -92,8 +92,10 @@ def _count_severity(counts: Dict[str, int], severity: Any) -> None:
     a result with no level does. So the count never meets a sixth name from the
     model; a stand-in row that carries one gets a bucket of its own rather than
     being dropped, which once read more actionable findings than active ones.
+    A row with no severity counts under ``unknown``, the name the grading and
+    the finding lists give it, not under an empty name.
     """
-    level = str(severity or "").lower()
+    level = str(severity or "UNKNOWN").lower()
     counts[level] = counts.get(level, 0) + 1
 
 

@@ -108,3 +108,19 @@ class TestTheMastheadCountsSkippedScanners:
 
         document = _render(test_plugin_context, "bandit")
         assert re.search(r"\d+ skipped · \d+ unavailable", document)
+
+
+class TestTheSeverityChipsAreEscapedWhereTheyBecomeMarkup:
+    def test_a_bucket_name_is_escaped_in_the_class_and_in_the_text(self):
+        """The buckets are an open set: a row rated outside the five levels
+        counts under its own name, which reaches a class attribute and the text.
+
+        RED at the base: the name was written as it came.
+        """
+        chips = HtmlReporter._format_severity_counts({"high": 2, "r&d": 1})
+
+        assert '<span class="severity-high"><strong>2</strong> High</span>' in chips
+        assert (
+            '<span class="severity-r&amp;d"><strong>1</strong> R&amp;D</span>' in chips
+        )
+        assert "r&d" not in chips

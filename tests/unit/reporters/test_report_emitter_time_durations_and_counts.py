@@ -499,6 +499,45 @@ class TestFindingsAnAdditionalReportListsAreCounted:
         summary = ReportContentEmitter(model).get_scan_summary()
         assert set(summary["counts"]) == {"critical", "high", "medium", "low", "info"}
 
+    def test_a_stand_in_row_with_no_severity_counts_under_unknown(self):
+        """A row that bypasses the flattening and carries no severity.
+
+        The grading reads it as UNKNOWN and fails it closed, so the count names
+        it so: it was counted under an empty name, which the masthead rendered
+        as an unnamed chip with the class ``severity-``.
+
+        RED at the base: the bucket's name was the empty string.
+        """
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {"title": "a", "severity": "HIGH", "file_path": "app.py"}
+                ],
+            }
+        )
+        emitter = ReportContentEmitter(model)
+        emitter.flat_vulns = [
+            SimpleNamespace(
+                scanner="custom-plugin",
+                severity=None,
+                is_suppressed=False,
+                workspace_project=None,
+                source_report="custom-plugin",
+            )
+        ]
+
+        summary = emitter.get_scan_summary()
+
+        assert summary["counts"]["unknown"] == 1, summary
+        assert "" not in summary["counts"], summary
+
     def test_a_stand_in_row_rated_outside_the_ladder_keeps_its_own_bucket(self):
         """A row that bypasses the flattening and carries a sixth name.
 
