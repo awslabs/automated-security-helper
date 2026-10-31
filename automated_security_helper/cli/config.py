@@ -515,6 +515,11 @@ def _write_in_place(target: Path, data: str | bytes) -> None:
     taken to this path because the staged write was skipped (an owner this
     process is not, a file it may not write) was written where the guard would
     have refused it.
+
+    A text is written as it is given: ``newline=""`` keeps a text that already
+    carries CRLF (a file edited on Windows, its own line endings kept) from
+    being translated a second time, to CR CR LF, where the platform's line
+    ending is CRLF.
     """
     # Not at the top: fs_guard imports the sandbox package (atomic_write.py).
     from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -523,7 +528,7 @@ def _write_in_place(target: Path, data: str | bytes) -> None:
         with open_for_write(target, binary=True) as handle:
             handle.write(data)
     else:
-        with open_for_write(target, encoding="utf-8") as handle:
+        with open_for_write(target, encoding="utf-8", newline="") as handle:
             handle.write(data)
 
 
