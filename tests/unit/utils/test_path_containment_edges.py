@@ -28,7 +28,7 @@ import sys
 
 import pytest
 
-from automated_security_helper.utils import path_containment
+from automated_security_helper.utils import output_dir_links
 from automated_security_helper.utils.path_containment import (
     PathContainmentViolation,
     validate_contained_path,
@@ -100,16 +100,17 @@ def test_control_a_link_inside_the_root_is_still_refused(root):
 def test_a_spelling_the_file_system_reads_as_the_root_is_inside_it(
     root, tmp_path, monkeypatch
 ):
-    """Stood in for a case-insensitive file system: ``os.path.samefile`` answers as
-    one does for the two spellings, and nothing else about the paths changes."""
-    real_samefile = os.path.samefile
+    """Stood in for a case-insensitive file system: the identity both spellings of
+    the root have is the root's own, and nothing else about the paths changes."""
+    real_identity = output_dir_links._identity
+    named_root = os.path.realpath(root).lower()
 
-    def samefile(first, second):
-        if os.fspath(first).lower() == os.fspath(second).lower():
-            return True
-        return real_samefile(first, second)
+    def identity(path):
+        if os.fspath(path).lower() == named_root:
+            return real_identity(root)
+        return real_identity(path)
 
-    monkeypatch.setattr(path_containment.os.path, "samefile", samefile)
+    monkeypatch.setattr(output_dir_links, "_identity", identity)
     other_case = tmp_path / "WS" / "project-a"
 
     result = validate_contained_path(str(other_case), root)

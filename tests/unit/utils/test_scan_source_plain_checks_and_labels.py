@@ -35,7 +35,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from automated_security_helper.utils import scan_source
+from automated_security_helper.utils import output_dir_links, scan_source
 from automated_security_helper.utils.scan_source import (
     _admin_dirs_are_plain,
     _git_entry_is_plain,
@@ -70,18 +70,19 @@ def test_control_plain_segments_are_accepted(label):
 def test_the_label_is_relative_when_the_file_system_says_the_root_holds_it(
     tmp_path, monkeypatch
 ):
-    """Stood in for a case-insensitive volume: ``os.path.samefile`` answers as one
-    does for two spellings of the root, and nothing else about the paths changes."""
+    """Stood in for a case-insensitive volume: the identity both spellings of the
+    root have is the root's own, and nothing else about the paths changes."""
     root = tmp_path / "Repo"
     (root / "services" / "api").mkdir(parents=True)
-    real_samefile = os.path.samefile
+    real_identity = output_dir_links._identity
+    named_root = os.path.realpath(root).lower()
 
-    def samefile(first, second):
-        if os.fspath(first).lower() == os.fspath(second).lower():
-            return True
-        return real_samefile(first, second)
+    def identity(path):
+        if os.fspath(path).lower() == named_root:
+            return real_identity(root)
+        return real_identity(path)
 
-    monkeypatch.setattr(scan_source.os.path, "samefile", samefile)
+    monkeypatch.setattr(output_dir_links, "_identity", identity)
 
     label = scan_source_label(tmp_path / "repo" / "services" / "api", root)
 
