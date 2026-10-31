@@ -774,9 +774,10 @@ def _count_files_ash_would_scan(
     say.
 
     ASH's own exclusions are applied a directory at a time, so a pruned
-    ``node_modules`` costs a walk, one more listing of each directory for the names
-    of its symlinks (:func:`_names_of_links_in`, which answers from the listing and
-    not from an ``lstat`` per file), and a string test per file: a directory on the
+    ``node_modules`` costs a walk, one more listing of each directory that holds
+    files for the names of its symlinks (:func:`_names_of_links_in`, which answers
+    from the listing and not from an ``lstat`` per file), and a string test per
+    file: a directory on the
     bundled aws-cdk path is not entered, and a ``.git`` directory or a CDK asset
     directory is only searched for the ``*.template.json`` files the forced
     inclusion keeps. Links to directories are not followed, as in the walk that
@@ -810,7 +811,9 @@ def _count_files_ash_would_scan(
                 continue
             kept_dirs.append(d)
         dirs[:] = kept_dirs
-        links = _names_of_links_in(root)
+        # A directory with no files has no link to a file to look for, and a pruned
+        # ``node_modules`` is mostly such directories (``@scope/``, nested levels).
+        links = _names_of_links_in(root) if files else None
         count += sum(
             1
             for name in files

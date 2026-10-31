@@ -356,6 +356,32 @@ class TestAPrunedLinkIsNotFollowed:
             root, scan_set(source=str(root))
         )
 
+    def test_a_directory_with_no_files_is_not_listed_again_for_links(
+        self, tmp_path, monkeypatch
+    ):
+        """The link names come from one more listing of a directory, which only a file
+        can use. A pruned ``node_modules`` is mostly directories that hold no file
+        (``@scope/``, nested levels), and each paid that second listing for nothing."""
+        root = _build(
+            tmp_path / "src",
+            {
+                "build/@scope/pkg/a.txt": "a\n",
+                "build/@scope/pkg/b.txt": "b\n",
+                "build/only/dirs/x/y.txt": "y\n",
+            },
+        )
+        real = gss._names_of_links_in
+        listed = []
+
+        def spy(directory):
+            listed.append(Path(directory).relative_to(root).as_posix())
+            return real(directory)
+
+        monkeypatch.setattr(gss, "_names_of_links_in", spy)
+
+        assert gss._count_files_ash_would_scan(root / "build", str(root)) == 3
+        assert sorted(listed) == ["build/@scope/pkg", "build/only/dirs/x"], listed
+
 
 class TestIgnoreFileTextCannotRewriteTheRecord:
     """A line in a repository's ignore file is a rule or a comment, never a section marker.
