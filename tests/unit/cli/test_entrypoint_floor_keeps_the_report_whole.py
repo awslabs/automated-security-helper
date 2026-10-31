@@ -422,6 +422,9 @@ def test_a_flushed_line_start_hash_is_ended_by_end():
         ("  ##vso", "[task.complete result=Succeeded]x\n"),
         ("done ##vso", "[task.complete result=Succeeded]x\n"),
         ("path: ##teamcity", "[message text='x']\n"),
+        ("done x##vso", "[task.complete result=Succeeded]x\n"),
+        ("x#", "#vso[task.complete result=Succeeded]x\n"),
+        ("path/##teamcity", "[message text='x']\n"),
     ],
 )
 def test_a_flushed_front_of_a_command_name_is_kept_for_the_rest_of_its_line(
@@ -429,7 +432,9 @@ def test_a_flushed_front_of_a_command_name_is_kept_for_the_rest_of_its_line(
 ):
     """Only a piece made of colons and hashes was kept. "##vso" is no command on
     its own, so a flush wrote it, and the "[...]" written after finished a
-    command on the reader's line that was never shown as one."""
+    command on the reader's line that was never shown as one. The reader's
+    pattern has no word boundary, so a front glued to the text before it
+    ("done x##vso", "x#" before "#vso[") is kept the same."""
     from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
     real = io.StringIO()
@@ -486,12 +491,13 @@ def test_a_front_in_the_middle_of_a_line_is_kept_after_an_earlier_flush():
     assert "##vso[" not in real.getvalue()
 
 
-@pytest.mark.parametrize("piece", ["build #12", "see ## ", "ok #1a"])
+@pytest.mark.parametrize("piece", ["build #12", "see ## ", "ok #1a", "x#vso"])
 def test_a_flushed_piece_that_is_no_front_of_a_name_is_still_written(piece):
-    """The control: a last word that is not hash marks and letters, and a piece
-    that ends in a blank, are written at once. A lone "#" ending a piece is a
-    front (the next write may be "#vso["), so it is kept and is not in this
-    list."""
+    """The control: a last word that is not hash marks and letters, a piece
+    that ends in a blank, and one mark followed by letters glued to a word
+    ("x#vso" cannot become a `##name[` form) are written at once. A lone "#"
+    ending a piece is a front (the next write may be "#vso["), so it is kept
+    and is not in this list."""
     real = io.StringIO()
     shown = entrypoint._ShownLines(real)
 

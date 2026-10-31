@@ -506,6 +506,11 @@ def _report_failure(exc: BaseException, repaired: tuple[str, ...] = ()) -> None:
     )
 
 
+#: The letters a command name is made of in the CI forms ASH's text rule breaks
+#: (``##vso[``, ``##teamcity[``); the pattern there reads ASCII letters only.
+_ASCII_LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
 class _ShownLines:
     """A text stream that writes each line written to it to *stream*, shown.
 
@@ -556,7 +561,10 @@ class _ShownLines:
         completes the Azure and TeamCity forms can arrive in the next write.
         Anywhere in a line, a piece whose last word is hash marks followed only
         by letters (``done ##vso``): Azure and TeamCity read those forms in the
-        middle of a line too. A prompt such as ``# Send the report?
+        middle of a line too. The same when the marks are glued to the text
+        before them (``done x##vso``, ``path/##teamcity``, ``x#`` before
+        ``#vso[``): the reader's pattern has no word boundary, so the front
+        does not have to start a word. A prompt such as ``# Send the report?
         [y/N] `` ends in a blank and is written."""
         piece = self._held.lstrip()
         if not piece:
@@ -569,7 +577,17 @@ class _ShownLines:
             return True
         last_word = "" if piece[-1].isspace() else piece.split()[-1]
         name = last_word.lstrip("#")
-        return last_word[:1] == "#" and (not name or name.isalpha())
+        if last_word[:1] == "#" and (not name or name.isalpha()):
+            return True
+        # The piece's tail, read from the end: letters, then hash marks. Two
+        # marks or more with letters after them, or a single mark that ends the
+        # piece (the second one may be the next write's first), can be finished
+        # by the next write into a ``##name[`` form.
+        letters_end = len(piece)
+        while letters_end and piece[letters_end - 1] in _ASCII_LETTERS:
+            letters_end -= 1
+        marks = letters_end - len(piece[:letters_end].rstrip("#"))
+        return marks >= 2 or (marks == 1 and letters_end == len(piece))
 
     def flush(self) -> None:
         # A piece that could be the front of a CI command form (at a line's
