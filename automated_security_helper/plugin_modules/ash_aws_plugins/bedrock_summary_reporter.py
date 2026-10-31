@@ -1222,11 +1222,14 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         # the fallback walk validates candidates with, built once, the
         # fallback model that answered, which the run's later calls go to first,
         # the configured model's error, kept for an exhaustion after it, and
-        # the candidates a walk found the listing does not name, which a later
-        # section's walk takes as unavailable without asking again. Only that
-        # listing fact is kept: a candidate that was called and failed is
-        # called again with the next section's prompt, and a candidate the
-        # control plane left unchecked is checked again.
+        # the candidates a walk took as unavailable, which a later section's
+        # walk takes as unavailable without asking again: the ones an
+        # exhausted walk found the listing does not name, and the ones Converse
+        # refused as not permitted or not found (kept as soon as they are
+        # refused). Nothing else is kept: a candidate that was called and failed
+        # on one prompt (a validation error, a throttle, a timeout) is called
+        # again with the next section's prompt, and a candidate the control
+        # plane left unchecked is checked again.
         self._control_client: Any = None
         self._run_model: Optional[str] = None
         # The chain member ``_run_model`` was called for: the listing may spell
