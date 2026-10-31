@@ -246,7 +246,12 @@ class TestFindingUidIsStableAcrossRuns:
         list was cut to size) and shift every later uid onto another finding.
         The pairing now walks the rows and gives each result the next row that
         describes it, so the extra row is passed over: both findings keep the
-        uid of their own flattened id and nothing is derived from the extra."""
+        uid of their own flattened id and nothing is derived from the extra.
+
+        The extra row here is a copy of the first finding's row placed after
+        it, so the first finding has already taken its own row; an extra row
+        that describes no result is passed over wherever it sits (the next
+        test)."""
         model = AshAggregatedResults()
         model.sarif.runs[0].results = [
             Result(ruleId="R1", level=Level.error, message=Message(text="a")),
@@ -258,6 +263,33 @@ class TestFindingUidIsStableAcrossRuns:
             AshAggregatedResults,
             "to_flat_vulnerabilities",
             lambda self: [flat[0], extra, flat[1]],
+        )
+
+        uids = [r["finding_info"]["uid"] for r in json.loads(reporter.report(model))]
+
+        assert uids == [
+            str(uuid.uuid5(_FINDING_UID_NAMESPACE, item.id)) for item in flat
+        ]
+        assert str(uuid.uuid5(_FINDING_UID_NAMESPACE, "an-extra-row")) not in uids
+
+    @pytest.mark.parametrize("position", [0, 1, 2], ids=["first", "middle", "last"])
+    def test_an_extra_row_describing_no_result_is_passed_over_wherever_it_sits(
+        self, reporter, monkeypatch, position
+    ):
+        """Placed before the rows that describe the results, an extra row is
+        the first one the walk meets; it describes neither result, so each
+        finding still takes its own row."""
+        model = AshAggregatedResults()
+        model.sarif.runs[0].results = [
+            Result(ruleId="R1", level=Level.error, message=Message(text="a")),
+            Result(ruleId="R2", level=Level.error, message=Message(text="b")),
+        ]
+        flat = list(model.to_flat_vulnerabilities())
+        extra = flat[0].model_copy(update={"id": "an-extra-row", "rule_id": "R9"})
+        rows = list(flat)
+        rows.insert(position, extra)
+        monkeypatch.setattr(
+            AshAggregatedResults, "to_flat_vulnerabilities", lambda self: rows
         )
 
         uids = [r["finding_info"]["uid"] for r in json.loads(reporter.report(model))]
