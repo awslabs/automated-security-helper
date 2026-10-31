@@ -903,10 +903,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     def _environment_list(self, name: str) -> List[str]:
         """``name`` in the scan's environment as trivy reads a list flag from it.
 
-        This copies trivy's own rule (``Flag.cast`` for a ``[]string`` flag,
-        ``pkg/flag/options.go``, the same at v0.69.3 and v0.75.0): a value that
-        holds a comma is split on commas alone, and the entries are not trimmed,
-        so ``"vendor,build dir"`` is ``vendor`` and ``build dir`` and
+        This copies trivy's own rule (``Flag.cast`` for a string-list flag, in
+        trivy's ``pkg/flag/options`` source, the same at v0.69.3 and v0.75.0): a
+        value that holds a comma is split on commas alone, and the entries are not
+        trimmed, so ``"vendor,build dir"`` is ``vendor`` and ``build dir`` and
         ``"vendor, build"`` is ``vendor`` and `` build``; a value with no comma is
         split on whitespace, so ``"terraform dockerfile"`` is two names. The two
         splits are never combined. ASH passes these lists back as explicit flags
