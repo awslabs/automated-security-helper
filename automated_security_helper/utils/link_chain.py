@@ -68,6 +68,7 @@ Nothing here decides a refusal's wording or its platform gate; the callers do
 
 from __future__ import annotations
 
+import enum
 import ntpath
 import os
 import stat
@@ -220,18 +221,21 @@ def link_chain_names_a_windows_share(
     return _chain_names_a_windows_share(text, _Hops(hops))
 
 
-@dataclass(frozen=True)
-class _Finding:
-    """Why a walk stopped on a link.
+class UnsafeKind(enum.Enum):
+    """Why a walk answered with a component: one reason, never a pair of flags.
 
-    ``reaches_a_share`` is True when the chain names a share or a device, and
-    None when it cannot be judged. ``unexaminable`` is True when the entry the
-    caller named could not be examined at all (``os.lstat`` refused it), as
-    opposed to something its target leads through.
+    ``SHARE``: the chain from a link names a share or a device.
+    ``UNREADABLE_TARGET``: a link whose target cannot be read, or whose chain
+    cannot be judged within the hop bound, so what resolving would open cannot
+    be told. ``UNEXAMINABLE``: the component the caller named could not be
+    examined at all (``os.lstat`` refused it), so whether it is a link, let
+    alone where it leads, cannot be told. Inside a link's target an entry that
+    cannot be examined is the chain that cannot be told: ``UNREADABLE_TARGET``.
     """
 
-    reaches_a_share: Optional[bool]
-    unexaminable: bool = False
+    SHARE = "share"
+    UNREADABLE_TARGET = "unreadable_target"
+    UNEXAMINABLE = "unexaminable"
 
 
 def _parent(reached: str, *, pathmod: ModuleType = os.path) -> str:
@@ -304,7 +308,7 @@ def _split_target(directory: str, target: str) -> Tuple[str, List[str]]:
 
 def _walk_names(
     reached: str, names: List[str], budget: _Hops, *, spliced: bool
-) -> Tuple[Optional[str], Optional[_Finding]]:
+) -> Tuple[Optional[str], Optional[UnsafeKind]]:
     """Walk ``names`` down from ``reached``, a directory known to hold no link.
 
     Each name is looked up with ``os.lstat`` under the prefix reached so far,
@@ -319,11 +323,11 @@ def _walk_names(
 
     Returns the prefix reached when every name was walked and none was unsafe;
     ``(None, None)`` when a name is not there (nothing below it is there
-    either, so resolving opens nothing); and ``(None, finding)`` for the first
-    link whose chain leads to a share (``True``) or cannot be judged
-    (``None``): its target cannot be read, it is past the shared hop budget, or
-    an entry on the way cannot be examined. That last case is marked
-    ``unexaminable`` only for a name the caller itself gave (``spliced`` False
+    either, so resolving opens nothing); and ``(None, kind)`` for the first
+    link whose chain leads to a share (``SHARE``) or cannot be judged
+    (``UNREADABLE_TARGET``): its target cannot be read, it is past the shared
+    hop budget, or an entry on the way cannot be examined. That last case is
+    ``UNEXAMINABLE`` only for a name the caller itself gave (``spliced`` False
     until a link has been followed): inside a target it is the chain that
     cannot be told.
     """
@@ -351,12 +355,14 @@ def _walk_names(
             # entry it may not read, or a spelling the filesystem refuses, such
             # as an embedded NUL that ``os.lstat`` raises ValueError for): the
             # entry may itself be a link to a share, so the doubt is the answer.
-            return None, _Finding(None, unexaminable=not spliced)
+            return None, (
+                UnsafeKind.UNREADABLE_TARGET if spliced else UnsafeKind.UNEXAMINABLE
+            )
         if not is_link_stat(info):
             reached = candidate
             continue
         if not budget.take():
-            return None, _Finding(None)
+            return None, UnsafeKind.UNREADABLE_TARGET
         try:
             target = os.readlink(candidate)
         except (OSError, ValueError):
@@ -365,11 +371,11 @@ def _walk_names(
             # that names a path but is neither a symbolic link nor a junction
             # (a WSL link), and for one that names no path at all, which
             # ``is_link_stat`` reads as a link.
-            return None, _Finding(None)
+            return None, UnsafeKind.UNREADABLE_TARGET
         if names_a_windows_share(target):
-            return None, _Finding(True)
+            return None, UnsafeKind.SHARE
         if _is_drive_relative(target):
-            return None, _Finding(None)
+            return None, UnsafeKind.UNREADABLE_TARGET
         reached, target_names = _split_target(reached, target)
         pending.extend(reversed(target_names))
         spliced = True
@@ -385,9 +391,9 @@ def _chain_names_a_windows_share(text: str, budget: _Hops) -> Optional[bool]:
     # among them is judged before the link itself is read and the link's own
     # directory is the one reached: a relative target is taken from there, not
     # from where the caller spelled ``text``.
-    directory, parent_finding = _walk_names(anchor, names[:-1], budget, spliced=False)
-    if parent_finding is not None:
-        return True if parent_finding.reaches_a_share else None
+    directory, parent_kind = _walk_names(anchor, names[:-1], budget, spliced=False)
+    if parent_kind is not None:
+        return True if parent_kind is UnsafeKind.SHARE else None
     if directory is None:
         # A parent is not there, so the entry is not either.
         return None
@@ -404,10 +410,10 @@ def _chain_names_a_windows_share(text: str, budget: _Hops) -> Optional[bool]:
     if _is_drive_relative(target):
         return None
     start, target_names = _split_target(directory, target)
-    _, finding = _walk_names(start, target_names, budget, spliced=True)
-    if finding is None:
+    _, kind = _walk_names(start, target_names, budget, spliced=True)
+    if kind is None:
         return False
-    return True if finding.reaches_a_share else None
+    return True if kind is UnsafeKind.SHARE else None
 
 
 def components_down_to(text: str) -> List[str]:
@@ -435,21 +441,31 @@ def components_down_to(text: str) -> List[str]:
 
 @dataclass(frozen=True)
 class UnsafeLink:
-    """The first link on a path that resolving must not follow.
+    """The first component on a path that resolving must not be given.
 
-    ``component`` is the collapsed spelling of the component that is the link
-    (the path itself when ``is_last``); ``reaches_a_share`` is True when the
-    chain from it names a share or a device, and None when its target cannot be
-    read, so what resolving would open cannot be told. ``unexaminable`` is True
-    when the component could not be read at all (``os.lstat`` refused it), so
-    whether it is a link, let alone where it leads, cannot be told; such a
-    component is reported with ``reaches_a_share`` None and refused the same way.
+    ``component`` is the collapsed spelling of the component the answer is
+    about (the path itself when ``is_last``): a link for ``SHARE`` and
+    ``UNREADABLE_TARGET``, and for ``UNEXAMINABLE`` an entry that may or may not
+    be one. ``kind`` is the one reason (:class:`UnsafeKind`). The two readings
+    the callers branch on are derived from it, so no pair of them can disagree:
+    ``reaches_a_share`` is True when the chain from the link names a share or a
+    device, and None otherwise (its target cannot be read, so what resolving
+    would open cannot be told, or the component could not be examined);
+    ``unexaminable`` is True when the component could not be read at all, so
+    whether it is a link, let alone where it leads, cannot be told.
     """
 
     component: str
     is_last: bool
-    reaches_a_share: Optional[bool]
-    unexaminable: bool = False
+    kind: UnsafeKind
+
+    @property
+    def reaches_a_share(self) -> Optional[bool]:
+        return True if self.kind is UnsafeKind.SHARE else None
+
+    @property
+    def unexaminable(self) -> bool:
+        return self.kind is UnsafeKind.UNEXAMINABLE
 
 
 def first_unsafe_link(text: str, *, hops: int = LINK_HOPS) -> Optional[UnsafeLink]:
@@ -490,13 +506,12 @@ def _first_unsafe_link(text: str, budget: _Hops) -> Optional[UnsafeLink]:
     # once a local link has been followed.
     components = components_down_to(collapsed)
     for index, name in enumerate(names):
-        walked, finding = _walk_names(reached, [name], budget, spliced=False)
-        if finding is not None:
+        walked, kind = _walk_names(reached, [name], budget, spliced=False)
+        if kind is not None:
             return UnsafeLink(
                 component=components[index],
                 is_last=index == len(names) - 1,
-                reaches_a_share=finding.reaches_a_share,
-                unexaminable=finding.unexaminable,
+                kind=kind,
             )
         if walked is None:
             # Not there: nothing below it is there either, so resolving opens

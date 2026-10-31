@@ -839,3 +839,91 @@ class TestASpellingWindowsCallsInvalidIsNotThere:
 
         assert found is not None
         assert found.unexaminable is True
+
+
+class TestAnUnsafeLinkHoldsOneReason:
+    """The answer carries one ``UnsafeKind``; the two flags the callers read are
+    derived from it. The pair ``reaches_a_share`` True with ``unexaminable`` True
+    could be built before, and the two callers branched on the flags in
+    different orders."""
+
+    def test_each_kind_reads_back_as_the_two_flags_the_callers_use(self):
+        kinds = link_chain.UnsafeKind
+        share = link_chain.UnsafeLink("c", False, kinds.SHARE)
+        unreadable = link_chain.UnsafeLink("c", False, kinds.UNREADABLE_TARGET)
+        unexaminable = link_chain.UnsafeLink("c", True, kinds.UNEXAMINABLE)
+
+        assert (share.reaches_a_share, share.unexaminable) == (True, False)
+        assert (unreadable.reaches_a_share, unreadable.unexaminable) == (None, False)
+        assert (unexaminable.reaches_a_share, unexaminable.unexaminable) == (None, True)
+
+    def test_no_kind_is_both_a_share_and_unexaminable(self):
+        for kind in link_chain.UnsafeKind:
+            link = link_chain.UnsafeLink("c", True, kind)
+
+            assert not (link.reaches_a_share is True and link.unexaminable), kind
+
+    def test_the_two_flags_cannot_be_given_together(self):
+        """Red at the base: the invalid pair was built without a complaint."""
+        with pytest.raises(TypeError):
+            link_chain.UnsafeLink(  # type: ignore[call-arg]
+                "c", True, reaches_a_share=True, unexaminable=True
+            )
+
+    def test_the_walk_names_a_share(self, tmp_path):
+        (tmp_path / "link").symlink_to("\\\\server\\share")
+
+        found = link_chain.first_unsafe_link(str(tmp_path / "link"))
+
+        assert found is not None
+        assert found.kind is link_chain.UnsafeKind.SHARE
+
+    def test_the_walk_names_a_target_it_cannot_read(self, tmp_path, monkeypatch):
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+
+        def not_a_symlink(path, *args, **kwargs):
+            raise ValueError("not a symbolic link")
+
+        monkeypatch.setattr(os, "readlink", not_a_symlink)
+
+        found = link_chain.first_unsafe_link(str(tmp_path / "link"))
+
+        assert found is not None
+        assert found.kind is link_chain.UnsafeKind.UNREADABLE_TARGET
+
+    def test_the_walk_names_a_component_it_cannot_examine(self, tmp_path, monkeypatch):
+        (tmp_path / "mid").mkdir()
+        real_lstat = os.lstat
+
+        def refusing_lstat(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "mid":
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", refusing_lstat)
+
+        found = link_chain.first_unsafe_link(str(tmp_path / "mid"))
+
+        assert found is not None
+        assert found.kind is link_chain.UnsafeKind.UNEXAMINABLE
+
+    def test_an_entry_that_cannot_be_examined_inside_a_target_is_the_chain(
+        self, tmp_path, monkeypatch
+    ):
+        """Inside a link's target the doubt is about the chain, not about the
+        component the caller named."""
+        (tmp_path / "vendor").mkdir()
+        (tmp_path / "link").symlink_to(os.path.join("vendor", "cfg"))
+        real_lstat = os.lstat
+
+        def refusing_lstat(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "vendor":
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", refusing_lstat)
+
+        found = link_chain.first_unsafe_link(str(tmp_path / "link"))
+
+        assert found is not None
+        assert found.kind is link_chain.UnsafeKind.UNREADABLE_TARGET
