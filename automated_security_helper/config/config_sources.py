@@ -1719,6 +1719,35 @@ def _permitted(path: Path, permit: PermitBase) -> bool:
     return _resolved_if_permitted(path, permit) is not None
 
 
+def _descriptor_leads_to_the_judged_path(opened: OpenedConfig, resolved: Path) -> bool:
+    """Whether the descriptor ``opened`` leads to ``resolved``, the path judged.
+
+    The path the kernel reports for the descriptor is compared with the judged
+    one as text. A file system that ignores case can report the on-disk case of
+    a name the judgment spelled as it was typed (``/repo/.ASH.yaml`` for
+    ``/repo/.ash.yaml``), and a legitimate config was then refused as changed
+    after it was checked, a race that never happened. A path that differs only in
+    case therefore counts when the judged path is not a link and is the very file
+    the descriptor holds (the same device and inode). Any other difference, and a
+    descriptor whose path cannot be told, stays a refusal: no identity vouches
+    for a file the permit did not see.
+    """
+    if opened.real is None:
+        return False
+    if opened.real == resolved:
+        return True
+    if str(opened.real).casefold() != str(resolved).casefold():
+        return False
+    try:
+        leaf = os.lstat(resolved)
+    except (OSError, ValueError):
+        return False
+    return (
+        not _is_a_symlink_or_reparse_point(leaf)
+        and (leaf.st_dev, leaf.st_ino) == opened.identity
+    )
+
+
 def _identity_held_after_the_judgment(
     path: Path, resolved: Path, held: Optional[List[OpenedConfig]]
 ) -> FileIdentity:
@@ -1736,9 +1765,11 @@ def _identity_held_after_the_judgment(
     re-pointed between the two had its new target held as the file judged. It is
     ``ABSENT_FILE`` when the judged path leads to no regular file now (a
     directory, a dangling link, an unreadable name, a leaf made a link), when
-    the descriptor's path is not the judged one, and when the descriptor's path
-    cannot be told: no identity vouches for a file the permit did not see, and a
-    read held to ``ABSENT_FILE`` refuses whatever file is at the name by then.
+    the descriptor's path is not the judged one (a difference in case alone is
+    settled by the inode, ``_descriptor_leads_to_the_judged_path``), and when
+    the descriptor's path cannot be told: no identity vouches for a file the
+    permit did not see, and a read held to ``ABSENT_FILE`` refuses whatever file
+    is at the name by then.
 
     With ``held`` the descriptor is appended to it and stays open for the caller to
     close, so the inode stays in use while the caller's own reads compare the
@@ -1751,7 +1782,11 @@ def _identity_held_after_the_judgment(
     opened = open_config_for_judgment(resolved, follow_links=False)
     if opened is None:
         return ABSENT_FILE
-    identity = opened.identity if opened.real == resolved else ABSENT_FILE
+    identity = (
+        opened.identity
+        if _descriptor_leads_to_the_judged_path(opened, resolved)
+        else ABSENT_FILE
+    )
     if held is not None:
         held.append(opened)
     else:
