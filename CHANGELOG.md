@@ -5533,12 +5533,23 @@
   and Landlock a bundle kept under the home directory was passed through and could
   not be opened, and `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`
   and `SSL_CERT_DIR` were granted by none. All four backends now grant, read-only,
-  the files and directories that the values ASH started with name. A `SSL_CERT_DIR`
-  entry that is a home directory or holds one is not granted, with a warning. The
-  proxy and certificate names are now one environment list that every backend
-  reads, in the shape of a docker-compose `environment` list (a name passes the
-  value ASH has, `NAME=value` sets it); a name that marks a credential is refused
-  with its name.
+  the files and directories named by the values ASH started with, or by a
+  `NAME=value` entry of the environment list. A `SSL_CERT_DIR` entry that is a home directory or
+  holds one is not granted, with a warning. The proxy and certificate names are now
+  one environment list that every backend reads, in the shape of a docker-compose
+  `environment` list (a name passes the value ASH has, `NAME=value` sets it); a name
+  that marks a credential is refused with its name.
+
+- **Choose which environment variables sandboxed scanners are passed with
+  `sandbox.environment`.** The list is the docker-compose shape described above and
+  defaults to the proxy and certificate variables. A list you write replaces the
+  default, so list the proxy and certificate variables you still want. Override it for
+  one run with `--config-overrides 'sandbox.environment=[...]'`. Like
+  `sandbox.extra_read_paths`, it is honored only from `--config-overrides` and from
+  config files outside every git checkout and the scanned directory, because a
+  `NAME=value` entry sets a variable in every sandboxed scanner. A name that marks a
+  credential, `TMPDIR`, a string where a list belongs, and a name with a trailing
+  newline are refused with the variable named and no value shown.
 
 - **A `--cli-json-input` number where the parameter takes true/false or a whole
   number is refused with a usage error that names the key.** A JSON number for a

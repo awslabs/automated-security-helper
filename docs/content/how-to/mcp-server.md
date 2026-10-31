@@ -543,7 +543,7 @@ restrict the server's own but not widen them. A file whose own `sandbox` section
   or a module inside either.
 
 Any other sandbox grant or plugin module a delivered file asks for, such as a
-`read_path_scanners` or `env_scanners` entry, is dropped with a warning, as for a repository's
+`read_path_scanners`, `env_scanners` or `environment` entry, is dropped with a warning, as for a repository's
 config.
 
 The server's settings are the ones in the file `ASH_CONFIG` names, and that file grants nothing
