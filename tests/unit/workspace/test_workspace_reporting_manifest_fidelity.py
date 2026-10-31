@@ -369,6 +369,54 @@ class TestAWriteThatFailsDoesNotSinkTheManifest:
         assert outcome.failed
 
 
+def _returning(value):
+    """A merged reporter, named ``fake-empty``, whose ``report()`` returns *value*."""
+
+    class _Returning(FakeEmptyReporter):
+        def report(self, model):
+            return value
+
+    return _Returning
+
+
+class TestOnlyTheEmptyStringIsNothingToSay:
+    @pytest.mark.parametrize(
+        "value",
+        [{}, [], b"", 0, False, {"not": "text"}, b"bytes"],
+        ids=["dict", "list", "bytes", "zero", "false", "full-dict", "full-bytes"],
+    )
+    def test_a_report_that_is_not_text_is_a_failure_whatever_its_truth(
+        self, workspace, value
+    ):
+        """``if not content`` read ``{}``, ``[]`` and ``b""`` as "no content", a
+        note, while the same kinds of value non-empty failed at the write."""
+        _, output_dir, _ = workspace
+        stale = output_dir / REPORTS_DIR_NAME / "ash.empty.txt"
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        stale.write_text("from an earlier run", encoding="utf-8")
+
+        outcome = _emit(workspace, _returning(value))
+
+        assert "TypeError" in outcome.failed_reporters["fake-empty"]
+        entry = _manifest(output_dir)["reporters"]["fake-empty"]
+        assert "TypeError" in entry["error"]
+        assert "note" not in entry
+        assert entry["workspace_artifact"] is None
+        assert not stale.exists()
+        assert outcome.failed
+
+    def test_the_empty_string_stays_a_note(self, workspace):
+        """The control: the one falsy value that is text is still not a failure."""
+        _, output_dir, _ = workspace
+
+        outcome = _emit(workspace, _returning(""))
+
+        assert outcome.failed_reporters == {}
+        entry = _manifest(output_dir)["reporters"]["fake-empty"]
+        assert entry["note"] == "the reporter returned no content"
+        assert "error" not in entry
+
+
 class TestThePreScanLinkCheckBuildsTheSameReporterSet:
     def test_plugin_modules_reach_the_reporter_selection(self, workspace, monkeypatch):
         plan, output_dir, _ = workspace

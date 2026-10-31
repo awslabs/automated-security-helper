@@ -1438,6 +1438,20 @@ def emit_workspace_reports(
             ASH_LOGGER.error(f"Reporter {name}: {failures[key]}")
             continue
 
+        if not isinstance(content, str):
+            # The contract is a str, and only the empty string means "nothing to
+            # say". A falsy value of another type ({}, [], b"") is a reporter
+            # that returned the wrong thing, not an empty report: below it would
+            # have read as "no content" while the same value, non-empty, failed
+            # at the write.
+            failures[key] = (
+                f"TypeError: the reporter returned a {type(content).__name__} "
+                f"where its report must be text"
+            )
+            entry["error"] = failures[key]
+            ASH_LOGGER.error(f"Reporter {name}: {failures[key]}")
+            continue
+
         if not content:
             # Not an error: several reporters legitimately return nothing when
             # they have nothing to say. Recorded so that "returned nothing" is
@@ -1453,10 +1467,10 @@ def emit_workspace_reports(
         except Exception as exc:  # noqa: BLE001 -- one reporter's write must not sink the rest, or the manifest
             # write_report_file returns None for an OSError; anything else (a
             # link that appeared at the file's name after the pre-write check,
-            # a reporter returning a non-str, a filesystem error outside
-            # OSError) used to abort the step here, with earlier reports written
-            # and no manifest to say what happened. Nothing was written for this
-            # reporter, so recording it keeps the "nothing through a link" rule.
+            # a filesystem error outside OSError) used to abort the step here,
+            # with earlier reports written and no manifest to say what happened.
+            # Nothing was written for this reporter, so recording it keeps the
+            # "nothing through a link" rule.
             failures[key] = (
                 f"report file {filename!r} could not be written in {reports_dir}: "
                 f"{type(exc).__name__}: {error_text(exc)}"
