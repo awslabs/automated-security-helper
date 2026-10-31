@@ -31,8 +31,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigValidationError,
 )
-# The private name is kept: two other test modules still import it from here.
-from tests.utils.fifo_calls import returns_promptly as _returns_promptly
+from tests.utils.fifo_calls import returns_promptly
 from tests.utils.open_audit import record_opens
 
 pytestmark = pytest.mark.unit
@@ -61,7 +60,7 @@ class TestSpecialFilesAreNotRead:
         fifo = tmp_path / "pyproject.toml"
         os.mkfifo(fifo)
 
-        error = _returns_promptly(
+        error = returns_promptly(
             lambda: resolve_config(config_path=fifo, source_dir=tmp_path), fifo
         )
 
@@ -73,7 +72,7 @@ class TestSpecialFilesAreNotRead:
         fifo = tmp_path / "pyproject.toml"
         os.mkfifo(fifo)
 
-        assert _returns_promptly(lambda: describe_config_path(fifo), fifo) is None
+        assert returns_promptly(lambda: describe_config_path(fifo), fifo) is None
 
     @needs_fifo
     @pytest.mark.parametrize("name", ["cfg.yaml", "cfg.json", "cfg.toml"])
@@ -84,7 +83,7 @@ class TestSpecialFilesAreNotRead:
         fifo = tmp_path / name
         os.mkfifo(fifo)
 
-        error = _returns_promptly(lambda: read_config_file(fifo), fifo)
+        error = returns_promptly(lambda: read_config_file(fifo), fifo)
 
         assert isinstance(error, OSError), error
         assert "not a regular file" in str(error)
@@ -194,7 +193,7 @@ class TestDiscoveryOpensOnlyRegularFiles:
 
         # In a thread with a deadline: an open of the FIFO without O_NONBLOCK
         # would block the test rather than fail it.
-        error = _returns_promptly(
+        error = returns_promptly(
             lambda: config_sources.discover_config_source(tmp_path), pyproject
         )
 
@@ -214,7 +213,7 @@ class TestDiscoveryOpensOnlyRegularFiles:
         def discover():
             found["discovery"] = config_sources.discover_config_source(tmp_path)
 
-        assert _returns_promptly(discover, pyproject) is None
+        assert returns_promptly(discover, pyproject) is None
         discovery = found["discovery"]
         assert discovery.selected.path == tmp_path / ".ash.yaml"
         assert discovery.ignored == []

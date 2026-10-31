@@ -34,7 +34,7 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.utils import subprocess_utils
-from tests.unit.config.test_config_file_reads import _returns_promptly
+from tests.utils.fifo_calls import returns_promptly
 
 RUNNERS = ("docker", "podman", "finch", "nerdctl", "nix")
 MODES = ["container", "nix"]
@@ -220,7 +220,7 @@ def _promptly(make: Callable[[Path], None], path: Path, call: Callable[[], objec
         def run() -> None:
             outcome["value"] = call()
 
-        error = _returns_promptly(run, path)
+        error = returns_promptly(run, path)
         if error is not None:
             raise error
         return outcome["value"]

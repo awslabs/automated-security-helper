@@ -6,9 +6,9 @@
 A config path that is a FIFO, opened for reading, waits for a writer. A test of
 the refusal that must come before that open runs the call on a thread and waits
 a bounded time, so a regression of the refusal fails the test instead of
-stalling the suite to the CI timeout. Test modules used to import this from
-another test module; it lives here, as the wizard helper does
-(``wizard_script``), so a test module imports nothing from a sibling.
+stalling the suite to the CI timeout. It lives here, as the wizard helper does
+(``wizard_script``), and every test module imports it from here under this
+name, so none imports it from a sibling test module.
 """
 
 from __future__ import annotations
