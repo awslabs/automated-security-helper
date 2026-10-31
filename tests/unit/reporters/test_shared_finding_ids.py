@@ -170,6 +170,46 @@ class TestSharedIdsByPosition:
         assert flat_describes_result(_flat("id", "R1", "/repo/a.py"), result)
         assert not flat_describes_result(_flat("id", "R1", "file:///repo/a.py"), result)
 
+    @pytest.mark.parametrize(
+        ("uri", "path"),
+        [
+            ("file:///my%20app/a.py", "/my app/a.py"),
+            ("file:///C:/src/a.py", "C:/src/a.py"),
+            ("file://host/src/a.py", "/src/a.py"),
+        ],
+        ids=["percent-encoded", "drive-letter", "host-segment"],
+    )
+    def test_a_file_uri_is_reduced_as_the_flattening_reduces_it(self, uri, path):
+        """The flattening drops a host segment and the slash before a drive
+        letter and decodes percent escapes; a pairing that only cut the scheme
+        found no row for such a result, and its report printed a legacy id."""
+        result = _result("R1", "a", uri=uri)
+
+        assert flat_describes_result(_flat("id", "R1", path), result)
+        assert not flat_describes_result(_flat("id", "R1", uri), result)
+
+    def test_results_at_reduced_file_uris_keep_their_shared_ids_end_to_end(
+        self, test_plugin_context
+    ):
+        """Through the model: each row carries the path the flattening wrote
+        for its URI, and the pairing gives every result that row's id."""
+        model = AshAggregatedResults()
+        model.sarif.runs[0].results = [
+            _result("R1", "a", uri="file:///my%20app/a.py"),
+            _result("R2", "b", uri="file:///C:/src/b.py"),
+            _result("R3", "c", uri="file://host/src/c.py"),
+        ]
+
+        flat = model.to_flat_vulnerabilities()
+        results = model.sarif.get_all_results()
+
+        assert [row.file_path for row in flat] == [
+            "/my app/a.py",
+            "C:/src/b.py",
+            "/src/c.py",
+        ]
+        assert shared_ids_by_position(flat, results) == [row.id for row in flat]
+
     def test_a_result_with_no_location_pairs_with_a_row_with_no_file(self):
         result = Result(ruleId="R1", level=Level.error, message=Message(text="a"))
 

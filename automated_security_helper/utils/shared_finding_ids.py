@@ -74,12 +74,13 @@ def flat_describes_result(item: Any, result: Any) -> bool:
 
     Compared the way ``FlatVulnerability.from_sarif_result`` reads them: the
     result's ``ruleId`` (not a ``rule.id`` reference), its first location's
-    artifact URI with a ``file://`` scheme stripped, and that location's region
-    start line (None on both sides when the result has no region). The line is
-    compared because two hits of one rule in one file differ in nothing else a
-    row carries, and a flattening that ordered them the other way round swapped
-    their ids with no sign. A read that raises is a mismatch, never an exception:
-    the caller is deciding which id to print.
+    artifact URI reduced to a path (a ``file:`` URI loses its scheme and host
+    and is percent-decoded, as the flattening does), and that location's start
+    line: the region's, else the context region's (None on both sides when the
+    result names no line). The line is compared because two hits of one rule in
+    one file differ in nothing else a row carries, and a flattening that ordered
+    them the other way round swapped their ids with no sign. A read that raises
+    is a mismatch, never an exception: the caller is deciding which id to print.
     """
     try:
         flat_rule = getattr(item, "rule_id", None) or None
@@ -134,7 +135,13 @@ def _first_file_path(result: Any) -> Optional[str]:
         return None
     text = str(uri)
     if text.startswith("file://"):
-        text = text[7:]
-        if text.startswith("///"):
-            text = text[2:]
+        # The reducer the flattening applies to the same URI (it drops a host
+        # segment and the slash before a drive letter, and decodes percent
+        # escapes), so both sides spell a ``file:`` URI alike. Imported here
+        # because sarif_utils imports this module.
+        from automated_security_helper.utils.sarif_utils import (
+            _file_uri_to_path_text,
+        )
+
+        text = _file_uri_to_path_text(text)
     return text or None
