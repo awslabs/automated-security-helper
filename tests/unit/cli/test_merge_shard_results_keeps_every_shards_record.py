@@ -31,6 +31,7 @@ from __future__ import annotations
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.cli import merge as merge_module
 from automated_security_helper.cli.merge import (
     ShardCoverageError,
     ShardSettingsDisagreeError,
@@ -631,6 +632,58 @@ class TestAScannerRowNoShardOwnsIsKept:
         assert row.status == ScannerStatus.ERROR
         assert row.missing_reason == "the module failed to import"
         assert row is not shards[1].scanner_results["broken.plugin.module"]
+
+    def test_an_unowned_name_a_shard_already_supplied_is_not_copied_again(
+        self, monkeypatch
+    ):
+        """Two shards both carry a row, and a free-form report, that no shard
+        owns. The first shard's are kept, so the second shard's are never read:
+        copying them before the key was tested spent a deep copy per repeat and
+        threw it away. Only the entries that reach the merged report are copied;
+        the kept ones are still the first shard's, copied."""
+        shards = build_shards(2)
+        for index, shard in enumerate(shards):
+            shard.scanner_results["broken.plugin.module"] = ScannerTargetStatusInfo(
+                status=ScannerStatus.ERROR,
+                excluded=False,
+                dependencies_satisfied=True,
+                missing_reason=f"shard {index} could not import the module",
+            )
+            shard.additional_reports["free-form-note"] = {"written_by": index}
+        merged = shards[0].model_copy(deep=True)
+        entries = [
+            (path, model, read_shard_assignment(model))
+            for path, model in as_loaded(shards)
+        ]
+        owners = {
+            scanner.lower(): position
+            for position, (_, _, assignment) in enumerate(entries)
+            for scanner in assignment.assigned_scanners
+        }
+        copied_from = []
+        real_copied = merge_module._copied
+
+        def counting_copied(value):
+            copied_from.append(value)
+            return real_copied(value)
+
+        monkeypatch.setattr(merge_module, "_copied", counting_copied)
+
+        _adopt_owning_shard_results(merged, entries, owners)
+
+        later_row = shards[1].scanner_results["broken.plugin.module"]
+        later_report = shards[1].additional_reports["free-form-note"]
+        assert not any(value is later_row for value in copied_from)
+        assert not any(value is later_report for value in copied_from)
+        assert any(
+            value is shards[0].scanner_results["broken.plugin.module"]
+            for value in copied_from
+        )
+        assert (
+            merged.scanner_results["broken.plugin.module"].missing_reason
+            == "shard 0 could not import the module"
+        )
+        assert merged.additional_reports["free-form-note"] == {"written_by": 0}
 
     def test_a_non_owning_shards_skip_marker_is_still_dropped(self):
         """The control: owned scanners keep only their owner's row."""

@@ -2185,13 +2185,21 @@ def _adopt_owning_shard_results(
     # scanner that failed to construct, or of a plugin module that failed to
     # import, which _verify_scanner_union exempts from its refusal so that the
     # merged report still names it. Dropping it here would undo that exemption.
+    # The key is tested before the copy is made: a later shard's record of a name
+    # an earlier shard already supplied is never read, so it is not copied either.
     for _, shard, _ in shards:
         for name, entry in shard.scanner_results.items():
-            if _normalized(name) not in owner_by_scanner:
-                scanner_results.setdefault(name, _copied(entry))
+            if (
+                _normalized(name) not in owner_by_scanner
+                and name not in scanner_results
+            ):
+                scanner_results[name] = _copied(entry)
         for name, report in shard.additional_reports.items():
-            if _normalized(name) not in owner_by_scanner:
-                additional_reports.setdefault(name, _copied(report))
+            if (
+                _normalized(name) not in owner_by_scanner
+                and name not in additional_reports
+            ):
+                additional_reports[name] = _copied(report)
     merged.scanner_results = scanner_results
     merged.additional_reports = additional_reports
 
