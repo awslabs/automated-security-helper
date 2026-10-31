@@ -15,30 +15,17 @@ it.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
-from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
-from tests.unit.base.test_scanner_plugin_coverage import _scanner
+from tests.unit.base.scanner_support import build_scanner as _scanner
 
 pytestmark = pytest.mark.unit
 
-
-@pytest.fixture
-def plugin_context(tmp_path):
-    source_dir = tmp_path / "source"
-    source_dir.mkdir()
-    output_dir = tmp_path / "output"
-    output_dir.mkdir()
-    work_dir = output_dir / ASH_WORK_DIR_NAME
-    work_dir.mkdir()
-    return PluginContext(
-        source_dir=source_dir,
-        output_dir=output_dir,
-        work_dir=work_dir,
-        config=AshConfig(project_name="test"),
-    )
+_RUNNER = (
+    "automated_security_helper.utils.subprocess_utils.run_command_with_output_handling"
+)
 
 
 def _response(returncode: int = 0) -> dict:
@@ -95,15 +82,32 @@ def test_the_spawn_failure_recorder_retires_the_mark_too(plugin_context):
     assert not scanner._was_processed(failure)
 
 
-def test_a_retired_mark_does_not_shadow_the_next_response(plugin_context):
+def test_a_refused_run_leaves_no_mark(plugin_context, tmp_path, monkeypatch):
+    """The run is refused when the tool cannot start, and the handler records
+    the failure through the spawn-failure recorder. The uv mixin marks a
+    response right after it processes it; the marking stand-in below does the
+    same, so the failure reaches the recorder marked. A recorder that left the
+    mark would leave the response in the list for the plugin's life."""
     scanner = _scanner(plugin_context)
-    first = _response(returncode=1)
-    scanner._process_command_response(first)
-    scanner._mark_processed(first)
-    scanner._record_response(first, None, set())
+    scanner.use_uv_tool = False
+    real = type(scanner)._process_command_response
+    marked: list[dict] = []
 
-    second = _response(returncode=3)
-    assert not scanner._was_processed(second)
-    scanner._process_command_response(second)
+    def _process_then_mark(self, response):
+        real(self, response)
+        self._mark_processed(response)
+        marked.append(response)
 
-    assert scanner.exit_code == 3
+    monkeypatch.setattr(type(scanner), "_process_command_response", _process_then_mark)
+
+    with patch(_RUNNER, side_effect=OSError("could not start")):
+        response = scanner._run_subprocess(
+            ["stub-tool", "scan"], results_dir=str(tmp_path / "results")
+        )
+
+    assert response["spawn_failed"] is True
+    # The stand-in did mark the failure on its way through: without this the
+    # assertions below would pass for a run that never reached the recorder.
+    assert any(seen is response for seen in marked), marked
+    assert not scanner._was_processed(response)
+    assert len(scanner._processed_responses) == 0, scanner._processed_responses
