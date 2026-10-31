@@ -291,6 +291,28 @@ def _wait_writable(fd: int, seconds: float) -> bool:
     return bool(ready)
 
 
+def _handed_on(report: bytes, written: int) -> bytes:
+    """What the next descriptor is given after one took the first *written*
+    bytes of *report* and no more, so that no line is read cut in two.
+
+    Nothing taken: the whole report, as it was. Otherwise the report from the
+    last line the descriptor took whole, under a line that says the report
+    continues there; when the descriptor took no whole line, from its start,
+    with no such line, since there is nothing before it to continue. A line the
+    descriptor took only part of is ended first, with a newline: descriptors 1
+    and 2 can be one pipe (``2>&1``), and the next descriptor's first line would
+    be written straight after the fragment.
+    """
+    if written == 0:
+        return report
+    boundary = report.rfind(b"\n", 0, written) + 1
+    ends_the_fragment = b"\n" if written > boundary else b""
+    if boundary == 0:
+        return ends_the_fragment + report
+    handoff = f"{_BANNER}: the report continues from the last whole line\n"
+    return ends_the_fragment + handoff.encode("utf-8") + report[boundary:]
+
+
 def _write_raw(text: str) -> bool:
     """Write *text* to a raw descriptor, bypassing ``sys.stderr`` entirely.
 
@@ -300,14 +322,14 @@ def _write_raw(text: str) -> bool:
 
     Each ``os.write`` is repeated until its count covers the text: a pipe can
     take part of a write, and a short write counted as the whole report cut
-    the report. When a descriptor fails part-way, the next one gets the rest,
-    not the whole text again. A pipe that is full and non-blocking raises
+    the report. A pipe that is full and non-blocking raises
     ``BlockingIOError``, which is not a broken descriptor: the write waits for
     the pipe to drain (:func:`_wait_writable`, at most
-    :data:`_RAW_WRITE_WAIT_SECONDS`) and is repeated. When the wait runs out the
-    next descriptor gets the report from the last line this one took whole, under
-    a line that says the report continues there, so no line is read cut in two.
-    A descriptor that had no stream when the process started
+    :data:`_RAW_WRITE_WAIT_SECONDS`) and is repeated. When the wait runs out, or
+    a descriptor fails part-way (a broken pipe, an I/O error), the next
+    descriptor is given the report as :func:`_handed_on` says: from the last line
+    this one took whole, not the whole text again and not from the middle of a
+    line. A descriptor that had no stream when the process started
     (:data:`_CLOSED_AT_START`), or that was closed outright and is held with
     ``os.devnull`` (:data:`_RESERVED_DESCRIPTORS`), is skipped: nothing is
     reading it, and had it not been held, its number could by now be a file the
@@ -339,15 +361,12 @@ def _write_raw(text: str) -> bool:
                     raise OSError(errno.EIO, "write of 0 bytes")
                 written += count
             return True
-        except BlockingIOError:
-            # This descriptor took the report up to `written`; the next one gets
-            # it from the start of the line that was cut, after a line saying so.
-            boundary = report.rfind(b"\n", 0, written) + 1
-            handoff = f"{_BANNER}: the report continues from the last whole line\n"
-            report = handoff.encode("utf-8") + report[boundary:]
-            written = 0
         except OSError:
-            continue
+            # BlockingIOError, whose wait ran out, is one. This descriptor took
+            # the report up to `written` and no further; the next one gets it
+            # from the start of the line that was cut (_handed_on).
+            report = _handed_on(report, written)
+            written = 0
     return False
 
 

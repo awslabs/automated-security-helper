@@ -4,8 +4,9 @@
 """The console-script floor reports whole, through the hook the environment set.
 
 A reattached stream follows PYTHONIOENCODING; the raw writer finishes a short
-write, hands a failed descriptor's remainder on, skips a descriptor that was
-closed at start and flushes stdout first; an installed excepthook is called
+write, hands a failed descriptor's report on from its last whole line (and ends
+a cut line, since descriptors 1 and 2 can be one pipe), skips a descriptor that
+was closed at start and flushes stdout first; an installed excepthook is called
 without a stderr, and the hook typer chained to is called on typer's standard
 path; a broken ``__str__`` does not break the floor; a shown stream flushes a
 prompt and its cleanup never replaces the hook's outcome; a Ctrl-C is not
@@ -110,15 +111,22 @@ def test_a_short_write_is_completed(monkeypatch):
 
 def test_a_descriptor_that_fails_part_way_hands_the_rest_on(monkeypatch):
     """The next descriptor used to get the whole text again, so a report
-    stderr took half of was written one and a half times."""
-    writes = _Writes(limit=4, broken={2: 8})
+    stderr took half of was written one and a half times. It gets the report from
+    the last line stderr took whole, not from the middle of the line that broke
+    off, and the broken-off fragment is ended first so that the line it sits in
+    is not run into the one that follows (the descriptors can be one pipe)."""
+    writes = _Writes(limit=4, broken={2: 12})
     monkeypatch.setattr(entrypoint.os, "write", writes)
     monkeypatch.setattr(entrypoint, "_CLOSED_AT_START", set())
     monkeypatch.setattr(sys, "stdout", io.StringIO())
 
-    assert entrypoint._write_raw("stderr-1stdout-2") is True
-    assert writes.written[2] == b"stderr-1"
-    assert writes.written[1] == b"stdout-2"
+    assert entrypoint._write_raw("first line\nsecond line\n") is True
+    assert writes.written[2] == b"first line\ns"
+    before_the_banner, _, rest = writes.written[1].partition(b"\n")
+    assert before_the_banner == b"", before_the_banner
+    banner, _, rest = rest.partition(b"\n")
+    assert banner.startswith(entrypoint._BANNER.encode()), banner
+    assert rest == b"second line\n", rest
 
 
 def test_a_descriptor_that_takes_nothing_is_handed_on(monkeypatch):
@@ -175,7 +183,8 @@ def test_a_pipe_that_stays_full_hands_the_report_on_from_the_last_whole_line(
 ):
     """After the wait, descriptor 1 gets the report from the start of the line
     stderr took only part of, under a line that says it continues there, so no
-    line is read cut in two."""
+    line is read cut in two. The line stderr cut is ended first (the next test
+    reads why)."""
     written: dict[int, bytes] = {}
 
     def write(fd, payload):
@@ -194,8 +203,81 @@ def test_a_pipe_that_stays_full_hands_the_report_on_from_the_last_whole_line(
     assert entrypoint._write_raw("first line\nsecond line\n") is True
 
     assert written[2] == b"first line\nseco", written
-    announcement, _, rest = written[1].partition(b"\n")
-    assert announcement.startswith(entrypoint._BANNER.encode()), announcement
+    before_the_banner, _, rest = written[1].partition(b"\n")
+    assert before_the_banner == b"", before_the_banner
+    banner, _, rest = rest.partition(b"\n")
+    assert banner.startswith(entrypoint._BANNER.encode()), banner
+    assert rest == b"second line\n", rest
+
+
+def test_the_hand_off_does_not_run_into_the_fragment_on_a_shared_pipe(monkeypatch):
+    """With `2>&1` descriptors 1 and 2 are one pipe. Descriptor 2 left
+    `first line\\nseco` with no newline and descriptor 1 wrote its banner straight
+    after it, one line that is half of the report's and half of the banner."""
+    stream = bytearray()
+
+    def write(fd, payload):
+        if fd == 2 and len(stream) >= 15:
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        chunk = bytes(payload[:15]) if fd == 2 else bytes(payload)
+        stream.extend(chunk)
+        return len(chunk)
+
+    monkeypatch.setattr(entrypoint.os, "write", write)
+    monkeypatch.setattr(entrypoint, "_wait_writable", lambda fd, seconds: False)
+    monkeypatch.setattr(entrypoint, "_CLOSED_AT_START", set())
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+
+    assert entrypoint._write_raw("first line\nsecond line\n") is True
+
+    lines = bytes(stream).split(b"\n")
+    assert b"seco" in lines, lines
+    assert not [
+        line
+        for line in lines
+        if b"seco" in line and entrypoint._BANNER.encode() in line
+    ], lines
+    assert lines[-2:] == [b"second line", b""], lines
+
+
+def test_a_descriptor_that_took_nothing_is_not_followed_by_a_banner(monkeypatch):
+    """Stderr's pipe was full from the first byte, so no line was taken and
+    there is no last whole line for the report to continue from; the report is
+    given to descriptor 1 as it is, without a line saying it continues."""
+    written: dict[int, bytes] = {}
+
+    def write(fd, payload):
+        if fd == 2:
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        written[fd] = written.get(fd, b"") + bytes(payload)
+        return len(payload)
+
+    monkeypatch.setattr(entrypoint.os, "write", write)
+    monkeypatch.setattr(entrypoint, "_wait_writable", lambda fd, seconds: False)
+    monkeypatch.setattr(entrypoint, "_CLOSED_AT_START", set())
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+
+    assert entrypoint._write_raw("first line\nsecond line\n") is True
+
+    assert written == {1: b"first line\nsecond line\n"}, written
+
+
+def test_a_descriptor_that_breaks_after_a_whole_line_hands_on_from_the_next(
+    monkeypatch,
+):
+    """Stderr took exactly the first line and then failed with a broken pipe: no
+    line is cut, so there is nothing to end, and the report continues under the
+    banner from the second line."""
+    writes = _Writes(limit=11, broken={2: 11})
+    monkeypatch.setattr(entrypoint.os, "write", writes)
+    monkeypatch.setattr(entrypoint, "_CLOSED_AT_START", set())
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+
+    assert entrypoint._write_raw("first line\nsecond line\n") is True
+
+    assert writes.written[2] == b"first line\n"
+    banner, _, rest = writes.written[1].partition(b"\n")
+    assert banner.startswith(entrypoint._BANNER.encode()), banner
     assert rest == b"second line\n", rest
 
 
