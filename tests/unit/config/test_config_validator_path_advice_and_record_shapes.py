@@ -285,9 +285,25 @@ class TestRecordOfConfig:
         assert marks == ["!ENV ${ASH_TAB}y"]
 
     def test_a_key_rename_onto_an_existing_key_keeps_both_entries(self):
+        """Both entries stay, and the key the environment gave does not: a
+        record never holds the value, so the entry moves to the reference with
+        a number after it instead of staying under the resolved key."""
         rewrite = EnvironmentRewrite("key", ("m",), "k", "${K}", "k", "${K}")
         config = SimpleNamespace(_written_references=[rewrite])
-        assert record_of_config(config, {"m": {"k": 1, "${K}": 2}}) == {
+        recorded = record_of_config(config, {"m": {"k": 1, "${K}": 2}})
+        assert recorded == {"m": {"${K}#2": 1, "${K}": 2}}
+        assert "k" not in recorded["m"]
+        # The number steps past a key the mapping already holds.
+        crowded = record_of_config(config, {"m": {"k": 1, "${K}": 2, "${K}#2": 3}})
+        assert crowded == {"m": {"${K}#3": 1, "${K}": 2, "${K}#2": 3}}
+
+    def test_a_file_to_be_loaded_again_keeps_the_resolved_key_on_a_collision(self):
+        """With ``mark`` the writer refuses to write a key it cannot rename, so
+        the record leaves the resolved key for it to refuse; a renamed key would
+        load back as another key."""
+        rewrite = EnvironmentRewrite("key", ("m",), "k", "${K}", "k", "${K}")
+        config = SimpleNamespace(_written_references=[rewrite])
+        assert record_of_config(config, {"m": {"k": 1, "${K}": 2}}, mark=str) == {
             "m": {"k": 1, "${K}": 2}
         }
 

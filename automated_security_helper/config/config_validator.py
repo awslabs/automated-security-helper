@@ -3112,6 +3112,15 @@ def typed_from(current: Any, text: Any) -> bool:
     return bool(typed == current)
 
 
+def _unused_key(container: Dict[Any, Any], base: str) -> str:
+    """``base`` followed by ``#2``, ``#3`` and so on: the first such key
+    ``container`` does not hold."""
+    number = 2
+    while f"{base}#{number}" in container:
+        number += 1
+    return f"{base}#{number}"
+
+
 def record_of_config(
     config: Any, dumped: Any, mark: Optional[Callable[[str], Any]] = None
 ) -> Any:
@@ -3218,13 +3227,19 @@ def record_of_config(
         if not isinstance(container, dict) or rewrite.resolved not in container:
             continue
         written_key = marked(rewrite.written)
+        target = written_key
         if written_key != rewrite.resolved and written_key in container:
             # The mapping already holds an entry under the written key: the
             # rename would overwrite it, and the record would lose that
-            # entry. The resolved key stays.
-            continue
+            # entry. A file written to be loaded again keeps the resolved key,
+            # which the writer refuses to write as text. A record never holds
+            # the value, so there the entry stays under the reference with a
+            # number after it.
+            if mark is not None:
+                continue
+            target = _unused_key(container, written_key)
         renamed = {
-            (written_key if key == rewrite.resolved else key): value
+            (target if key == rewrite.resolved else key): value
             for key, value in container.items()
         }
         container.clear()
