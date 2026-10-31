@@ -178,6 +178,24 @@ def test_a_component_replaced_by_a_link_is_refused_whatever_the_open_says(
 
 
 @POSIX
+@pytest.mark.parametrize("writer", ["open_for_write", "open_for_atomic_write"])
+def test_a_file_where_a_directory_component_belongs_is_not_a_link_refusal(root, writer):
+    """The companion of the test above, which forces ENOTDIR and expects the link
+    refusal: an ENOTDIR is read again with lstat, and only a link is refused. A
+    regular file at the component (no patching, the real open's ENOTDIR) is a
+    NotADirectoryError, not an OutputLinkRefused, so the refusal is not what every
+    ENOTDIR maps to."""
+    (root / "comp").write_text("a file, not a directory")
+
+    with pytest.raises(NotADirectoryError) as refused:
+        with getattr(fs_guard, writer)(root / "comp" / "f") as handle:
+            handle.write("x")
+
+    assert not isinstance(refused.value, OutputLinkRefused), refused.value
+    assert (root / "comp").read_text() == "a file, not a directory"
+
+
+@POSIX
 def test_a_component_another_writer_creates_first_is_used(root, monkeypatch):
     original_mkdir = os.mkdir
 
