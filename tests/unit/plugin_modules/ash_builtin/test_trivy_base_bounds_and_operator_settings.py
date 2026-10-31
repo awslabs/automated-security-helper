@@ -1218,8 +1218,11 @@ def test_a_name_trivy_does_not_know_is_dropped_with_a_warning_without_its_text(
         args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
 
     assert _misconfig_flags(args) == ["--misconfig-scanners=dockerfile"], args
-    (dropped,) = [m for m in messages if "not names this trivy knows" in m]
+    (dropped,) = [m for m in messages if "not in this trivy's default list" in m]
     assert "1 of the 3" in dropped
+    # Said as it is: the help prints the default list only, so a name outside it
+    # is dropped whether or not trivy would accept it.
+    assert "prints the default list only" in dropped
     assert "TRIVY_MISCONFIG_SCANNERS" in dropped
     assert "zz-typo-zz" not in dropped
 
@@ -1242,6 +1245,7 @@ def test_an_operator_list_of_unknown_names_alone_runs_no_misconfig_checks(
     assert _scanners_value(args) == "vuln"
     (skipped,) = [m for m in messages if "skipped offline" in m]
     assert "none of the 1" in skipped
+    assert "in this trivy's default list" in skipped
     assert "zz-typo-zz" not in skipped
 
 

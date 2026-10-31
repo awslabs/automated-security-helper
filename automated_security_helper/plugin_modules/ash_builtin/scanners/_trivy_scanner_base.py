@@ -1532,7 +1532,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         list. An operator's narrower set is kept narrow.
 
         The operator's names are checked against the list trivy prints for the
-        flag (``_default_misconfig_scanners``) and passed in trivy's own spelling:
+        flag (``_default_misconfig_scanners``: the DEFAULT list, which is all the
+        help text holds; trivy's flag declares no list of accepted values, so a
+        name outside the default that trivy accepts is dropped like an unknown
+        one) and passed in trivy's own spelling:
         trivy given a name it does not know runs every misconfiguration scanner,
         the Terraform checks included (measured, ``trivy_default_misconfig_scanners``),
         so a typo, a name an older release removed, or ``Terraform`` with a capital
@@ -1570,10 +1573,13 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         if unknown and chosen:
             dropped = (
                 f"{len(unknown)} of the {len(operators_own)} misconfiguration scanner "
-                f"name(s) in {operators_key} are not names this trivy knows "
+                f"name(s) in {operators_key} are not in this trivy's default list "
                 f"({help_command}) and are not passed to it: trivy given a name it "
                 "does not know runs every misconfiguration scanner, the Terraform "
-                "checks included. The known names are passed in trivy's spelling."
+                "checks included, and its help prints the default list only, so "
+                "ASH cannot tell a name outside it that trivy accepts from one it "
+                "does not. The names in the default list are passed in trivy's "
+                "spelling."
             )
             if dropped not in self._warned_inputs:
                 self._warned_inputs.add(dropped)
@@ -1601,9 +1607,11 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 message = (
                     "trivy's misconfiguration checks are skipped offline: none of "
                     f"the {len(operators_own)} misconfiguration scanner name(s) in "
-                    f"{operators_key} is one this trivy knows ({help_command}), and "
-                    "trivy given a name it does not know runs every "
-                    "misconfiguration scanner, the Terraform checks included."
+                    f"{operators_key} is in this trivy's default list "
+                    f"({help_command}), and trivy given a name it does not know "
+                    "runs every misconfiguration scanner, the Terraform checks "
+                    "included; its help prints the default list only, so a name "
+                    "outside it cannot be told from one trivy does not know."
                 )
             elif operators_own:
                 message = (
