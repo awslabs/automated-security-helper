@@ -335,9 +335,11 @@ def reporter_companion_file_names(instance: object) -> Tuple[str, ...]:
     See ``ReporterPluginBase.companion_file_names``. Only file names are kept: a
     string, or a path-like object written as its string. A declaration that
     answers one string names that one file, not one file per character, and one
-    that answers None names none. A declaration that raises propagates: the
-    pre-write checks cannot vouch for the files of a reporter whose files are
-    unknown, so the run is refused rather than going on without them.
+    that answers None names none. A declaration that raises propagates, and the
+    caller decides what follows. The pre-write checks cannot vouch for the files
+    of a reporter whose files are unknown, so ``ReportPhase`` logs the error and
+    leaves that reporter out; the run goes on with the others. Nothing here
+    refuses the run.
     """
     declared = getattr(instance, "companion_file_names", None)
     if not callable(declared):
