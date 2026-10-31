@@ -1332,26 +1332,32 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         cut at all: the reservation keeps the links from adding one, so this
         returns nothing and trivy reads the whole list itself.
 
-        ``target_type`` (source or converted) is the scan the overflow warning is
-        about: the source scan carries output-directory flags the converted copy
-        usually does not, so the two counts differ. It names the scan in the
-        message and the log record and is part of the key the warning is said
-        once under.
+        ``target_type`` (source or converted) is the scan the warnings are about.
+        Each scan builds its own skip tokens, so what one of them leaves out is not
+        what the other does (the output-directory flags are the source scan's, and
+        a scan with no skip flag of ASH's at all returns above and says nothing
+        here), and the two counts differ. It names the scan in the message and the
+        log record and is part of the key each warning is said once under.
         """
         if not _carries_skip_flag(final_args):
             return []
         if skips is None:
             skips = self._operator_skip_plan(final_args)
+        line_break_scan = f"the {target_type} scan" if target_type else "this scan"
         for flag, source, position in skips.line_breaks:
-            refusal = f"operator-skip:line-break:{source}:{position}"
+            # Keyed on the scan as the overflow warning below is: a scan with no
+            # skip flag of ASH's returned above and trivy reads the entry itself,
+            # so the entry's being left out is said for each scan that leaves it.
+            refusal = f"operator-skip:line-break:{target_type}:{source}:{position}"
             if refusal not in self._warned_inputs:
                 self._warned_inputs.add(refusal)
                 self._plugin_log(
                     f"Not passing entry {position} of {source} to trivy as "
                     f"{flag}: the value is read as one line, and the entry "
                     "holds a line break, so trivy would skip a different "
-                    "path. That entry does not apply to this scan.",
+                    f"path. That entry does not apply to {line_break_scan}.",
                     level=logging.WARNING,
+                    target_type=target_type,
                 )
         over_budget = skips.over_budget
         if over_budget and skips.first_dropped is not None:

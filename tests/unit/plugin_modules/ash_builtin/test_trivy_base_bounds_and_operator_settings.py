@@ -2191,8 +2191,9 @@ def test_the_operator_overflow_warning_names_the_scan_it_is_about(
 ):
     """One scanner object scans the source and then the converted copy. The warning
     named neither, and was said under a key without the scan, so the second scan's
-    overflow, usually a different count because only the source carries the
-    output-directory flag, was left unsaid or read as the first one's."""
+    overflow, a different count when the scans build different skip tokens (here
+    the source scan's output-directory flag), was left unsaid or read as the first
+    one's."""
     scanner = _builtin_scanner(tmp_path)
     scanner.extra_env = {"TRIVY_SKIP_DIRS": "aaaa,bbbb,cccc,dddd"}
     ashs_own = "--skip-dirs=out"
@@ -2340,9 +2341,12 @@ def test_an_operator_entry_equal_to_an_ignored_path_is_passed_once(
     assert "--skip-files=keep.txt" in argv, argv
 
 
-def test_control_a_line_break_entry_is_said_once_for_both_targets_of_a_scanner(
+def test_a_line_break_entry_is_said_once_for_each_scan_that_leaves_it_out(
     tmp_path, monkeypatch
 ):
+    """Both scans of the scanner carry skip flags of ASH's here, so both leave the
+    entry out. The warning named neither scan and was said once under a key without
+    it, so it read as covering a scan that trivy reads the entry for itself."""
     _three_ignored_files(monkeypatch)
     _operator_config_in_env(
         tmp_path, monkeypatch, 'scan:\n  skip-dirs:\n    - "zz\\nzz"\n    - vendor\n'
@@ -2356,9 +2360,14 @@ def test_control_a_line_break_entry_is_said_once_for_both_targets_of_a_scanner(
                 Path(scanner.context.source_dir), target_type, []
             )
             assert "--skip-dirs=vendor" in argv, argv
+            # Said again by a second run of the same scan: once per scan.
+            scanner._execute_scan(Path(scanner.context.source_dir), target_type, [])
 
-    (warning,) = [m for m in messages if "holds a line break" in m]
-    assert "entry 1 of scan.skip-dirs" in warning, warning
+    first, second = [m for m in messages if "holds a line break" in m]
+    assert "entry 1 of scan.skip-dirs" in first, first
+    assert "does not apply to the source scan" in first, first
+    assert "entry 1 of scan.skip-dirs" in second, second
+    assert "does not apply to the converted scan" in second, second
 
 
 def test_control_a_line_break_entry_is_not_said_when_ash_passes_no_skip_flag(
