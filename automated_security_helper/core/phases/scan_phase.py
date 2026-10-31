@@ -2564,10 +2564,10 @@ class ScanPhase(EnginePhase):
 
         This method's direct callers predate the executor and read a plain
         container list, so the executor's succeeded flag is dropped here. A
-        direct call records no completion: the executor records one only in
-        its run loops. A cancelled scan starts no further scanner, and
-        nothing at all is built for one, so the check comes before the
-        executor.
+        direct call records no completion and announces no start: the executor
+        does both only in its run loops. A cancelled scan starts no further
+        scanner, and nothing at all is built for one, so the check comes before
+        the executor.
 
         The per-scanner methods on this phase (this one, _execute_scanner and
         the two run-loop delegators) are not hooks. A scan runs

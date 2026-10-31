@@ -8,8 +8,8 @@ the executor's tests double: a stub with those three parameters stands in for th
 scanner. A keyword argument the two run loops passed to switch SCAN_START on
 broke every such double: the loop caught the TypeError as the scanner's failure,
 recorded a failure row for it, and ``completed_scanners`` stayed empty while the
-run read as finished. SCAN_START is now issued inside the method with no switch,
-and the loops call it with the three arguments again.
+run read as finished. SCAN_START is now sent by the loops' own per-scanner call,
+before it calls the method with the three arguments again.
 
 Red at the base: both loops left ``completed_scanners`` empty and the double was
 never called.

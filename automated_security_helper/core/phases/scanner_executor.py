@@ -2518,6 +2518,50 @@ class ScannerExecutor:
         counts = get_severity_metrics_from_sarif(sarif_report, self.plugin_context)
         return counts, counts.total + counts.suppressed
 
+    def _refuse_start_if_cancelled(self, scanner_name: str) -> None:
+        """Raise ScanCancelled when the scan was cancelled, so no scanner starts.
+
+        Two checks make a cancelled scan start no further scanner.
+        raise_if_cancelled reads the scan's cancel event. _cancel_seen covers a
+        cancel that reached one scanner directly with that event unset: the
+        scanner's own ScanCancelled sets it, and the next start is refused even
+        when a worker dequeued it before the queue-shutdown could cancel it.
+        ScanCancelled is not an Exception, so it ends the scan instead of being
+        recorded as this scanner's failure.
+        """
+        raise_if_cancelled()
+        if self._cancel_seen.is_set():
+            raise ScanCancelled(
+                f"the scan was cancelled; scanner {scanner_name} is not started"
+            )
+
+    def _start_and_run(
+        self,
+        scanner_name: str,
+        scanner_plugin: ScannerPluginBase,
+        scan_targets: List[Dict[str, Any]],
+    ) -> Tuple[List[ScanResultsContainer], bool]:
+        """Announce one scanner's start, then run it: the call the run loops make.
+
+        SCAN_START is issued here, after the cancel checks and on the thread that
+        runs the scanner, so the event means the scanner starts. Sent by the
+        loops before the scanner was handed to a worker, it meant "queued": a
+        parallel run of fifteen scanners on four workers announced all fifteen
+        at once, and a queued scanner the cancel removed got a SCAN_START with
+        no SCAN_COMPLETE or ERROR after it.
+
+        The event is the loops' and not ``_safe_execute_scanner``'s, so a direct
+        call of that method (the scan phase's own, which records no completion)
+        announces a start nothing will close. It also keeps that method at its
+        three arguments: a keyword the loops passed to switch the event on broke
+        every three-argument double of it (the loop caught the TypeError as the
+        scanner's failure, and no scanner completed), and a double is still
+        called, and still gets its SCAN_START, from here.
+        """
+        self._refuse_start_if_cancelled(scanner_name)
+        self._notify_scan_start(scanner_name, scanner_plugin, scan_targets)
+        return self._safe_execute_scanner(scanner_name, scanner_plugin, scan_targets)
+
     def _safe_execute_scanner(
         self,
         scanner_name: str,
@@ -2531,29 +2575,11 @@ class ScannerExecutor:
         decide whether to record the scanner in completed_scanners.
 
         A cancelled scan starts no further scanner: ScanCancelled is raised here,
-        before the try, and is not an Exception, so it ends the scan instead of
-        being recorded as this scanner's failure. Two checks make that true.
-        raise_if_cancelled reads the scan's cancel event. _cancel_seen covers a
-        cancel that reached one scanner directly with that event unset: the
-        scanner's own ScanCancelled sets it, and the next start is refused even
-        when a worker dequeued it before the queue-shutdown could cancel it.
-
-        SCAN_START is issued here, after those checks and on the thread that
-        runs the scanner, so the event means the scanner starts. Sent by the
-        loops before this call, it meant "queued": a parallel run of fifteen
-        scanners on four workers announced all fifteen at once, and a queued
-        scanner the cancel removed got a SCAN_START with no SCAN_COMPLETE or
-        ERROR after it. Issued unconditionally, and the signature stays at
-        these three arguments: a keyword the loops passed to switch it on
-        broke every three-argument double of this method (the loop caught the
-        TypeError as the scanner's failure, and no scanner completed).
+        before the try (_refuse_start_if_cancelled), so a direct call refuses a
+        start too. No event is sent from here: SCAN_START is the run loops'
+        (_start_and_run), and a direct call announces nothing.
         """
-        raise_if_cancelled()
-        if self._cancel_seen.is_set():
-            raise ScanCancelled(
-                f"the scan was cancelled; scanner {scanner_name} is not started"
-            )
-        self._notify_scan_start(scanner_name, scanner_plugin, scan_targets)
+        self._refuse_start_if_cancelled(scanner_name)
         try:
             return self._execute_scanner(
                 scanner_name, scanner_plugin, scan_targets
@@ -2644,7 +2670,7 @@ class ScannerExecutor:
                 ASH_LOGGER.info(f"Running scanner: {scanner_name}")
 
                 # SCAN_START is issued inside, once the cancel checks pass.
-                results_list, scanner_succeeded = self._safe_execute_scanner(
+                results_list, scanner_succeeded = self._start_and_run(
                     scanner_name, scanner_plugin, scan_targets
                 )
 
@@ -2873,7 +2899,7 @@ class ScannerExecutor:
                 )
                 ASH_LOGGER.debug(f"Submitting {scanner_name} to thread pool")
                 # SCAN_START is issued by the worker that runs the scanner, once
-                # its cancel checks pass (_safe_execute_scanner), so the event
+                # its cancel checks pass (_start_and_run), so the event
                 # means the scanner starts: sent from here it meant "queued",
                 # every scanner at once, and a scanner the cancel took off the
                 # queue announced a start it never made. Subscribers are
@@ -2888,7 +2914,7 @@ class ScannerExecutor:
                 # threads at once.
                 future = executor.submit(
                     contextvars.copy_context().run,
-                    self._safe_execute_scanner,
+                    self._start_and_run,
                     scanner_name,
                     scanner_plugin,
                     scan_targets,
