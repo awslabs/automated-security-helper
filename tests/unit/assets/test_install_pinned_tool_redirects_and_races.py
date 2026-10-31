@@ -169,6 +169,53 @@ class TestARedirectLeavingHttpsIsRefused:
         assert plain("http://[::1/x") == "<unparseable URL>"
         assert len(plain("https://h.invalid/" + "a" * 5000)) <= 200
 
+    def test_a_plain_url_leaves_out_the_parameters_of_a_path_segment(self):
+        # Red before: urlsplit leaves ``;params`` in the path, so a credential given
+        # as a path parameter was printed with the rest of the path.
+        plain = installer._plain_url
+        assert (
+            plain("https://h.invalid/a;sig=PATH-SECRET/b;x=1?q=2")
+            == "https://h.invalid/a/b"
+        )
+        assert plain("https://u:p@h.invalid:8443/a;t=1") == "https://h.invalid:8443/a"
+        # Control: a path with no parameters is as it was.
+        assert plain("https://h.invalid/a/b/") == "https://h.invalid/a/b/"
+
+    def test_the_status_text_the_server_sent_is_cut_and_cleaned(self, capsys):
+        # Red before: the reason phrase was printed as it came, up to the 64 KiB that
+        # http.client reads for a line, with its carriage return and terminal escape.
+        reason = "Moved\r\x1b[31mRED" + "x" * 70000
+        handler = installer._HttpsOnlyRedirects()
+        with pytest.raises(SystemExit) as raised:
+            handler.redirect_request(
+                urllib.request.Request("https://h.invalid/a"),
+                io.BytesIO(b""),
+                302,
+                reason,
+                {},
+                "http://h.invalid/b",
+            )
+        printed = capsys.readouterr().err
+        for text in (printed, str(raised.value)):
+            assert len(text) < 400
+            assert "\r" not in text and "\x1b" not in text
+            assert "answered 302 Moved[31mRED" in text
+        assert len(printed.strip().splitlines()) == 1
+
+    def test_an_ordinary_status_text_is_printed_whole(self, capsys):
+        """Control: ``Found`` and ``Moved Permanently`` are not changed."""
+        handler = installer._HttpsOnlyRedirects()
+        with pytest.raises(SystemExit):
+            handler.redirect_request(
+                urllib.request.Request("https://h.invalid/a"),
+                io.BytesIO(b""),
+                301,
+                "Moved Permanently",
+                {},
+                "http://h.invalid/b",
+            )
+        assert "answered 301 Moved Permanently: refusing" in capsys.readouterr().err
+
     @staticmethod
     def _answer(location: str, code: int = 302, source: str = "https://h.invalid/x"):
         """Hand a 3xx response to the handler's ``http_error_<code>``, as urllib does.

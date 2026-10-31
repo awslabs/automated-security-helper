@@ -285,18 +285,32 @@ def resolve_arch(machine: str) -> str:
 def _plain_url(url: str) -> str:
     """``url`` as scheme://host[:port]/path, for a message.
 
-    The query string, the fragment and any user name or password are left out: on a
-    signed download URL they carry the credential. The port stays, because
-    ``http://host:8080/x`` and ``http://host/x`` are different servers. A URL that
-    does not parse is replaced, not echoed and not raised on, and the result is cut
-    at 200 characters.
+    The query string, the fragment, any user name or password and the ``;parameters``
+    of a path segment are left out: on a signed download URL they carry the
+    credential. The port stays, because ``http://host:8080/x`` and ``http://host/x``
+    are different servers. A URL that does not parse is replaced, not echoed and not
+    raised on, and the result is cut at 200 characters.
     """
     try:
         parts = urllib.parse.urlsplit(url)
     except ValueError:
         return "<unparseable URL>"
     host = parts.netloc.rpartition("@")[2]
-    return f"{parts.scheme}://{host}{parts.path}"[:200]
+    # urlsplit leaves ``;params`` in the path, on the segment that carries them.
+    path = "/".join(segment.partition(";")[0] for segment in parts.path.split("/"))
+    return f"{parts.scheme}://{host}{path}"[:200]
+
+
+def _plain_reason(reason: object) -> str:
+    """A server's status text, cut to 80 characters and kept to printable ASCII.
+
+    The text after the status code is the server's, up to the 64 KiB http.client reads
+    for a line, and it may hold carriage returns or terminal escapes that would reach
+    a build log as they are.
+    """
+    return "".join(
+        char for char in str(reason)[:80] if char.isascii() and char.isprintable()
+    )
 
 
 class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
@@ -311,7 +325,8 @@ class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
     the same URL, and being sent to plain http, again. Both URLs in the message, the
     one that answered and the one it named, are printed through ``_plain_url``: a
     signed download URL carries its credential in the query string, and on a chain
-    of redirects the request that answered is itself a signed URL.
+    of redirects the request that answered is itself a signed URL. The status text
+    the server sent is printed through ``_plain_reason``.
     """
 
     @staticmethod
@@ -322,7 +337,8 @@ class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
             scheme = ""
         if scheme != "https":
             raise _refuse(
-                f"{_plain_url(req.full_url)} answered {code} {msg}: refusing a "
+                f"{_plain_url(req.full_url)} answered {code} {_plain_reason(msg)}: "
+                "refusing a "
                 f"redirect to the non-https URL {_plain_url(newurl)}",
                 _EXIT_INTEGRITY,
             )
@@ -1241,15 +1257,24 @@ _PUBLISH_WORK_PREFIX = ".ash-third-party-"
 _PUBLISH_KEPT_MARKER = "KEPT"
 
 
-def _remove_kept_work_dirs(third_party_dir: Path, tool: str) -> None:
-    """Delete the work directories an earlier publish of ``tool`` kept.
+def _remove_kept_work_dirs(third_party_dir: Path, final: Path, staged: Path) -> None:
+    """Delete the work directories an earlier publish of ``final.name`` kept.
 
-    Called once a publish of ``tool`` has put its new entry in place, which
+    Called once a publish of the tool has put its new entry at ``final``, which
     supersedes the old copy those directories were kept for. Only a directory
     carrying the kept marker for this tool goes: another publish's work directory
     that is still in use has no marker. A directory that cannot be read or removed
     stays, and verify_third_party reports it.
+
+    Nothing goes unless an entry stands at ``final`` now, or the files there are
+    the ones this call staged. A concurrent publish of the same tool can have moved
+    the entry this call placed aside and failed to put it back; the directory it
+    kept then holds the only copy, and deleting it would leave the name empty with
+    the install reported as done.
     """
+    if not (_present(final, unknown=False) or _same_files(staged, final)):
+        return
+    tool = final.name
     try:
         candidates = sorted(third_party_dir.iterdir())
     except OSError:
@@ -1322,7 +1347,8 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
     A kept directory is marked with the tool's name. with-retry runs the install
     again after the failure, and a later publish of the same tool that finishes
     removes the directories marked for it, because the old copy they hold is
-    superseded by then. One that nothing removed is reported by
+    superseded by then, but only while an entry stands at the name. One that
+    nothing removed is reported by
     verify_third_party, so it cannot ship unnoticed in the image.
     """
     third_party_dir.mkdir(parents=True, exist_ok=True)
@@ -1389,7 +1415,7 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
             )
         else:
             shutil.rmtree(work, ignore_errors=True)
-    _remove_kept_work_dirs(third_party_dir, final.name)
+    _remove_kept_work_dirs(third_party_dir, final, staged)
     print(f"Installed {staged.name} license files to {final}", flush=True)
     return final
 

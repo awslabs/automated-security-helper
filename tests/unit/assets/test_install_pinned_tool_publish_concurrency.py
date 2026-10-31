@@ -394,3 +394,97 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
 
         assert (published / "LICENSE").read_bytes() == b"new\n"
         assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
+
+
+class TestAKeptDirectoryGoesOnlyWhileAnEntryStands:
+    """The directory a publish kept is removed by another publish only if the name holds an entry.
+
+    A publish that moved the entry another publish had just placed aside, and failed to
+    put it back, keeps that entry as the only copy. Removing the directory because a
+    publish of the same tool "finished" left the name empty with both reported done.
+    """
+
+    @staticmethod
+    def _keep_a_directory(third_party: Path, entry: bytes) -> Path:
+        kept = third_party / f"{installer._PUBLISH_WORK_PREFIX}other"
+        (kept / "old").mkdir(parents=True)
+        (kept / "old" / "LICENSE").write_bytes(entry)
+        (kept / installer._PUBLISH_KEPT_MARKER).write_text("demo\n", encoding="utf-8")
+        return kept
+
+    def test_it_stays_when_the_entry_this_call_placed_is_gone(
+        self, tmp_path, monkeypatch
+    ):
+        # Red before: the call that placed the entry deleted every directory marked
+        # for the tool, whether or not its entry was still at the name, and the
+        # directory it deleted held the only copy of what it had published.
+        third_party = tmp_path / "third-party"
+        third_party.mkdir()
+        final = third_party / "demo"
+        kept = third_party / f"{installer._PUBLISH_WORK_PREFIX}other"
+        real = os.replace
+
+        def replace(src, dst, *args, **kwargs):
+            real(src, dst, *args, **kwargs)
+            if Path(dst) == final and Path(src).name == "incoming":
+                # A second publish of the tool moves this entry aside, and its
+                # restore fails: the entry is now only in the directory it kept.
+                kept.mkdir()
+                real(final, kept / "old")
+                (kept / installer._PUBLISH_KEPT_MARKER).write_text(
+                    "demo\n", encoding="utf-8"
+                )
+
+        monkeypatch.setattr(os, "replace", replace)
+
+        installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+
+        assert not final.exists()
+        assert kept.exists(), "the directory holding the only copy was deleted"
+        assert (kept / "old" / "LICENSE").read_bytes() == b"new\n"
+
+    def test_it_goes_when_an_entry_stands_at_the_name(self, tmp_path):
+        """Control: the retried install of the tool supersedes the old copy."""
+        third_party = tmp_path / "third-party"
+        third_party.mkdir()
+        kept = self._keep_a_directory(third_party, b"old\n")
+
+        installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+
+        assert not kept.exists()
+        assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
+
+    def test_it_goes_when_the_files_prove_the_entry_though_asking_raises(
+        self, tmp_path, monkeypatch
+    ):
+        """Control: the staged files at the name are enough where exists() raises."""
+        third_party = tmp_path / "third-party"
+        third_party.mkdir()
+        final = third_party / "demo"
+        kept = self._keep_a_directory(third_party, b"old\n")
+        real_replace, real_exists = os.replace, Path.exists
+        armed = {"on": False}
+
+        def replace(src, dst, *args, **kwargs):
+            real_replace(src, dst, *args, **kwargs)
+            if Path(dst) == final and Path(src).name == "incoming":
+                armed["on"] = True
+
+        def exists(self, *args, **kwargs):
+            if armed["on"] and self == final:
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_exists(self, *args, **kwargs)
+
+        def is_symlink(self):
+            if armed["on"] and self == final:
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_is_symlink(self)
+
+        real_is_symlink = Path.is_symlink
+        monkeypatch.setattr(os, "replace", replace)
+        monkeypatch.setattr(Path, "exists", exists)
+        monkeypatch.setattr(Path, "is_symlink", is_symlink)
+
+        installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+
+        assert not kept.exists()
