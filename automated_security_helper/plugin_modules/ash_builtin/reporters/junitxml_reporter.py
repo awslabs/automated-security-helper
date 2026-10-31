@@ -28,6 +28,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_sk
     skipped_projects,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.policy_origin import is_policy_origin
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import (
     FINDING_KINDS,
@@ -71,31 +72,8 @@ SKIPPED_PROJECT_SKIP_TYPE = "project-skipped"
 SKIPPED_PROJECT_CLASSNAME = "ash.workspace"
 
 
-#: The ``properties.origin`` value the workspace executor writes on a finding from
-#: a scanner only the workspace policy added (``workspace.execution.POLICY_ORIGIN``,
-#: spelled here rather than imported so this reporter does not import the executor).
-_POLICY_ORIGIN = "workspace-policy"
-
 #: The ``type`` of the skip a non-gating policy-origin finding is reported with.
 POLICY_NOT_GATING_SKIP_TYPE = "policy-not-gating"
-
-
-def _is_policy_origin(props: object, extra: dict) -> bool:
-    """Whether a finding came from a scanner only the workspace policy added.
-
-    Read from ``properties.origin`` first (the field the schema documents) and
-    from the ``workspace-policy`` tag the executor writes beside it, as a
-    reporter that groups by tag would. Both land in the property bag's extras,
-    so the extras dict the caller already read is checked as well as the
-    attribute.
-    """
-    origin = extra.get("origin")
-    if origin is None and props is not None:
-        origin = getattr(props, "origin", None)
-    if origin == _POLICY_ORIGIN:
-        return True
-    tags = getattr(props, "tags", None) if props is not None else None
-    return isinstance(tags, (list, tuple)) and _POLICY_ORIGIN in tags
 
 
 def _normalized_threshold(value: object) -> str | None:
@@ -456,7 +434,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     ]
                 elif (
                     project
-                    and _is_policy_origin(props, extra)
+                    and is_policy_origin(props)
                     and policy_gates.get(project) is False
                 ):
                     # A finding from a scanner only the workspace policy added, in

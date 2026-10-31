@@ -216,12 +216,35 @@ def test_a_single_scan_policy_tagged_finding_is_graded_by_the_threshold(
     assert _outcome(cases["POLICY-STRICT"]) == "actionable"
 
 
-def test_a_policy_tag_alone_marks_the_finding(tmp_path, workspace_model):
-    """The executor writes the tag beside ``origin``; a reader of tags agrees."""
+def test_a_policy_tag_alone_does_not_mark_the_finding(tmp_path, workspace_model):
+    """A project's outcome reads ``origin`` alone, so this report does too.
+
+    The tag is free text that rule metadata or an imported results file can
+    carry. A finding holding it with no origin counted toward its project's
+    outcome, so it must not be shown as a skipped case that looks harmless.
+    """
     (result,) = [
         r for r in workspace_model.sarif.runs[0].results if r.ruleId == "POLICY-WATCH"
     ]
     del result.properties.__pydantic_extra__["origin"]
+    result.properties.tags = ["workspace-policy"]
+
+    cases = _cases(tmp_path, workspace_model)
+
+    # RED at the base: the tag marked the finding policy-origin, so the report
+    # showed Skipped "policy-not-gating" (below-threshold) for a finding the
+    # project's outcome counted as a failure.
+    assert _outcome(cases["POLICY-WATCH"]) == "actionable"
+    assert cases["POLICY-WATCH"].find("skipped") is None
+
+
+def test_the_origin_property_still_marks_a_finding_that_also_carries_the_tag(
+    tmp_path, workspace_model
+):
+    """The executor writes the tag beside ``origin``; the origin is what counts."""
+    (result,) = [
+        r for r in workspace_model.sarif.runs[0].results if r.ruleId == "POLICY-WATCH"
+    ]
     result.properties.tags = ["workspace-policy"]
 
     cases = _cases(tmp_path, workspace_model)
