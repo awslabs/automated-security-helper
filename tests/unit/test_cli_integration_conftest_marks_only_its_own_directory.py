@@ -5,10 +5,15 @@
 
 pytest hands ``pytest_collection_modifyitems`` every item of the session, and it
 loads this conftest only when it collects ``tests/integration/cli``. A rule scoped
-wider than the directory therefore marks a test in a sibling directory ``slow`` (and
-so skips it without ``--run-slow``) in a run that happens to collect the CLI tests,
-and leaves it alone in a run of the sibling on its own. The same test would run or
-not depending on which paths were on the command line.
+wider than the directory therefore puts a ``slow`` or ``mcp`` mark on a test in a
+sibling directory in a run that happens to collect the CLI tests, and leaves it
+alone in a run of the sibling on its own. Marker expressions (``-m``) and marker
+reports then see the same test differently depending on which paths were on the
+command line.
+
+The mark does not change whether the test runs. ``tests/conftest.py`` applies its
+``--run-slow`` skip in a hook that runs first, before this conftest's hook adds
+``slow``, so the skip never sees the mark this hook adds.
 
 The hook is called here with stand-in items, so nothing is collected or started.
 """
