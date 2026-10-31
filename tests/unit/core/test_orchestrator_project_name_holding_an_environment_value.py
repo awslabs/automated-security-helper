@@ -80,6 +80,16 @@ def test_a_label_with_surrounding_space_that_is_a_short_value_is_not_applied(
     assert _applied(tmp_path, f"  {short}  ", value=short) == "recorded"
 
 
+@pytest.mark.parametrize("short", ["a", "ab", "api"])
+def test_a_label_that_is_a_short_value_given_with_blanks_is_not_applied(
+    tmp_path, short
+):
+    # Red without the stripped values: the configured value is "<short>\n", so
+    # the stripped label is not equal to it, and the redaction leaves a text
+    # shorter than the padded value alone, so the label was applied.
+    assert _applied(tmp_path, short, value=f"{short}\n") == "recorded"
+
+
 def test_a_label_that_only_contains_a_short_value_is_applied(tmp_path):
     """The control for the short band: only an exact match is dropped there."""
     assert _applied(tmp_path, "payments-api", value="api") == "payments-api"

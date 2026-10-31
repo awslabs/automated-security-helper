@@ -1012,14 +1012,23 @@ class ASHScanOrchestrator(BaseModel):
         # project name among them is a value, not a label, and the reports print
         # metadata.project_name as text.
         environment_values = list(config_environment_values(self.config))
+        # The label is compared stripped, so each value is taken stripped too: a
+        # value the environment gave with a trailing newline or blanks is the
+        # same project name as the label without them. Both arms below read
+        # these, so neither drops a label the other applies.
+        label_values = environment_values + [
+            stripped
+            for stripped in (value.strip() for value in environment_values)
+            if stripped and stripped not in environment_values
+        ]
         for key, value in self.metadata.items():
             if key == "project_name":
                 if (
                     isinstance(value, str)
                     and value.strip()
                     and (
-                        value.strip() in environment_values
-                        or text_without_values(value.strip(), environment_values)
+                        value.strip() in label_values
+                        or text_without_values(value.strip(), label_values)
                         != value.strip()
                     )
                 ):
