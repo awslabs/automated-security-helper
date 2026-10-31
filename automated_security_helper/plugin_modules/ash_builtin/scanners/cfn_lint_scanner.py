@@ -371,10 +371,10 @@ def _combined_exit_code(codes: List[Any]) -> Optional[int]:
     for code in codes:
         if not _successful_exit(code):
             try:
-                return int(code)  # type: ignore[call-overload]
+                return int(code)
             except (TypeError, ValueError):
                 return 1
-        seen.append(int(code))  # type: ignore[call-overload]
+        seen.append(int(code))
     if not seen:
         return None
     combined = 0

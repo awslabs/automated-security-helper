@@ -3385,7 +3385,7 @@ def _windows_system_directory() -> Optional[str]:
     except ImportError:
         # A Python built without _ctypes: the environment's answer stands alone,
         # where the import used to raise past the stop and leave the child alive.
-        ctypes = None  # type: ignore[assignment]
+        ctypes = None
 
     windll = getattr(ctypes, "windll", None)
     if windll is not None:
@@ -4772,7 +4772,7 @@ def run_command(
     # encoding and no error handler are passed: either one switches Popen to
     # text mode, so a caller that asked for bytes got str.
     if not text:
-        encoding, errors = None, None  # type: ignore[assignment]
+        encoding, errors = None, None
     elif encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
@@ -6017,7 +6017,7 @@ def create_process_with_pipes(
     # Set encoding for Windows compatibility. In bytes mode no encoding and no
     # error handler are passed: either one switches Popen to text mode.
     if not text:
-        encoding, errors = None, None  # type: ignore[assignment]
+        encoding, errors = None, None
     elif encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 

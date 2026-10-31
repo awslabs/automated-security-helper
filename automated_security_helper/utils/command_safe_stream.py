@@ -217,7 +217,7 @@ class CommandSafeStream:
         if target is None:
             # A process with no standard stream: the writes are discarded, as
             # Rich discards them, rather than raised from None.
-            return _NULL_STREAM  # type: ignore[return-value]
+            return _NULL_STREAM
         return getattr(target, "rich_proxied_file", target)
 
     @property

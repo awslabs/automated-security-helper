@@ -2441,7 +2441,7 @@ def get_opengrep_url(
 
     # platform.machine() answers "AMD64" on Windows and "x86_64" or "aarch64"
     # elsewhere; the comparisons below are on the lowercase names.
-    arch = arch.lower()  # type: ignore[assignment]
+    arch = arch.lower()
 
     # Map platform and architecture to the appropriate binary name
     if target_platform == "linux":

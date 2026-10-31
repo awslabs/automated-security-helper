@@ -638,7 +638,7 @@ def _arm_adapter(annotation: Any, config: Any = None) -> Any:
         adapter = (
             TypeAdapter(annotation)
             if config is None
-            else TypeAdapter(List[annotation], config=config)  # type: ignore[valid-type]
+            else TypeAdapter(List[annotation], config=config)
         )
     except Exception:  # a shape pydantic cannot build is not read
         return None
@@ -2626,7 +2626,7 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
             for name, entry in list((held or {}).items()):
                 replacement = done.get(id(entry), entry)
                 if replacement is not entry:
-                    held[name] = replacement  # type: ignore[index]
+                    held[name] = replacement
         return fresh
     if isinstance(node, dict):
         items = [
