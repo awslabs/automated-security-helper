@@ -127,6 +127,31 @@ class TestSharedIdsByPosition:
 
         assert shared_ids_by_position(flat, results) == ["id-1", "id-2"]
 
+    def test_an_additional_report_row_never_takes_the_place_of_a_missing_sarif_row(
+        self,
+    ):
+        """The filter on ``source_report`` is what keeps these rows out. With
+        one SARIF row missing, the additional report's row for the second rule
+        would otherwise bring the row count up to the result count, and the
+        pairing by position would give that result the additional report's id."""
+        results = [_result("R1", "a"), _result("R2", "b")]
+        flat = [
+            _flat("id-1", "R1", "app/main.py"),
+            _flat("npm-2", "R2", "app/main.py", source_report="npm-audit"),
+        ]
+
+        assert shared_ids_by_position(flat, results) == ["id-1", None]
+
+    def test_an_additional_report_row_placed_before_the_sarif_rows_is_skipped(self):
+        results = [_result("R1", "a"), _result("R2", "b")]
+        flat = [
+            _flat("npm-1", "R1", "app/main.py", source_report="npm-audit"),
+            _flat("id-1", "R1", "app/main.py"),
+            _flat("id-2", "R2", "app/main.py"),
+        ]
+
+        assert shared_ids_by_position(flat, results) == ["id-1", "id-2"]
+
     def test_two_hits_of_one_rule_in_one_file_do_not_swap_ids(self):
         """Rule and file are the same for two hits of one rule in one file; the
         line is what tells them apart, and a flattening that ordered them the
