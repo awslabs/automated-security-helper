@@ -6,8 +6,9 @@
 ``to_flat_vulnerabilities`` resets the suppressed count of a scanner row that has no
 entry in the counts it takes from the flattened findings. A flattened finding names
 its scanner by the result's ``scanner_name``, then by the tool in the result's
-``scanner_details``, then by the run's tool name. The unified metrics name it by the
-same two properties and then by the result's tags, and never by the run's tool name.
+``scanner_details``, then by the run's tool name (a tag names it only when the run's
+tool is the generic aggregate name). The unified metrics name it by the same two
+properties and then by the result's tags, and never by the run's tool name.
 A result with no scanner name and a scanner tag is therefore one scanner's for the
 metrics (``bandit``, from the tag) and another's for the flatten (the run's tool),
 so the row the metrics filled had no entry and was reset to zero while the summary

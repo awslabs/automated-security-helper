@@ -1617,8 +1617,10 @@ class AshAggregatedResults(RecordModel):
         # the flatten names for another tool would be lowered to the part the
         # flatten names for it. A row that exists is therefore set to the larger of
         # the flattened count and the count the metrics give it. The flattened
-        # count still wins where it is higher, which keeps a model no metrics pass
-        # has visited counting from its findings.
+        # count wins only where it is higher, which happens when the flatten names
+        # a result for the run's tool and the metrics name it for a tag or for no
+        # scanner at all. The metrics read the SARIF and the dict reports as they
+        # stand, so they need no earlier pass to have visited the model.
         row_names = {
             name.lower() for name in self.scanner_results if isinstance(name, str)
         }
@@ -1637,7 +1639,8 @@ class AshAggregatedResults(RecordModel):
         # that still holds a count is touched: any other row is left as it is.
         #
         # The flattened findings name a scanner by its result's properties and
-        # then by the run's tool name; the metrics name it by the result's
+        # then by the run's tool name (a tag names it only when the run's tool is
+        # the generic aggregate name); the metrics name it by the result's
         # properties and then by its tags. A result with no scanner_name can be
         # one scanner's for the metrics and another's here, so a row missing from
         # the flattened counts is set to the count the metrics give it, which is
