@@ -271,6 +271,29 @@ def test_syft_refusal_warning_does_not_call_an_in_tree_config_a_work_product(
     assert refusals, [record.getMessage() for record in caplog.records]
 
 
+def test_syft_refusal_warning_stands_alone_when_an_earlier_scan_logged_the_refusal(
+    context, monkeypatch, caplog
+):
+    """path_trust logs a refusal once per process and the scanner's own line once
+    per instance, so in the MCP server a second scan's line has the refusal long
+    behind it. It names the key and the reasons itself and points at nothing."""
+    (context.source_dir / ".syft.yaml").write_text("enrich: [all]\n")
+    _syft(context, config_file=".syft.yaml")  # the earlier scan: logs the refusal
+    caplog.clear()
+
+    with caplog.at_level(logging.WARNING):
+        _scan(_syft(context, config_file=".syft.yaml"), context, monkeypatch)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert not [m for m in messages if m.startswith("Ignoring scanners.syft")], (
+        "the refusal should not be logged a second time in this process"
+    )
+    (not_used,) = [m for m in messages if "Configured syft config file was not" in m]
+    assert "scanners.syft.options.config_file" in not_used, not_used
+    assert "inside the scanned tree" in not_used, not_used
+    assert "warning above" not in not_used, not_used
+
+
 # --- grype's declared database bound reads the operator's file as grype does ------
 
 

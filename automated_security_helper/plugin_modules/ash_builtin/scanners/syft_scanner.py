@@ -253,14 +253,22 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     if configured:
                         # honored_path has logged why (inside the scanned tree,
                         # delivered by an MCP client, or a work product derived
-                        # from the repository); this line says what runs instead.
+                        # from the repository), but it logs each refusal once per
+                        # process while this line is given once per scanner
+                        # instance: in a long-lived process (the MCP server) a
+                        # later scan's instance gives this line with that one
+                        # long past. So this line names the key and the three
+                        # reasons itself and does not point at another line.
                         self._use_empty_config()
                         self._warn_once(
-                            "Configured syft config file was not used; the "
-                            "warning above names the file and the reason. Syft "
-                            "will run with an empty config file that ASH writes; "
-                            "no config file is discovered from the scanned tree "
-                            "in its place."
+                            "Configured syft config file was not used "
+                            "(scanners.syft.options.config_file): it is inside "
+                            "the scanned tree, was delivered by an MCP client, or "
+                            "was derived from the repository, and the first scan "
+                            "in this process to meet it logged which. Syft will "
+                            "run with an empty config file that ASH writes; no "
+                            "config file is discovered from the scanned tree in "
+                            "its place."
                         )
                         break
                     continue
