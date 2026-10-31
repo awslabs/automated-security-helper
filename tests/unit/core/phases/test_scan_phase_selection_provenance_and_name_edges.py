@@ -316,12 +316,71 @@ class TestTwoScannersWithOneName:
         queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
         assert queued == []
         # Both carriers are recorded SKIPPED, excluded: the first under its name,
-        # the later one under the same name (it is not a failure, so it needs no
-        # row of its own, and the rows say the same thing).
+        # the later one under a row of its own, named by its class (it is not a
+        # failure, but a row keyed by the shared name would be the first's).
         row = results.scanner_results["twin"]
         assert row.status == ScannerStatus.SKIPPED
         assert row.excluded is True
-        assert not [key for key in results.scanner_results if "OtherTwin" in key]
+        later_rows = [key for key in results.scanner_results if "OtherTwin" in key]
+        assert len(later_rows) == 1
+        assert results.scanner_results[later_rows[0]].status == ScannerStatus.SKIPPED
+        assert results.scanner_results[later_rows[0]].excluded is True
+
+    def test_a_later_holder_that_is_not_selected_leaves_the_first_holders_row_alone(
+        self, ctx
+    ):
+        """The first holder runs; the later one is left out by a Python-only run.
+        Red at the base: the later holder's SKIPPED row was written under the
+        shared name, so it was the first holder's row, and the name went on the
+        excluded list the enablement validation reads although the first holder
+        was queued. Now the later holder's row is keyed by its class and the
+        shared name stays out of the excluded list."""
+        first = _scanner_class("twin", python_only=True)
+        second = _scanner_class("twin", python_only=False)
+        second.__name__ = "OtherTwinScanner"
+        phase = _phase(ctx, [first, second])
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            results = _run(phase, python_based_plugins_only=True)
+
+        queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
+        assert queued == ["twin"]
+        # The phase writes no row for a scanner it queues (the executor files it),
+        # so a "twin" row here would be the later holder's. Red at the base: a
+        # SKIPPED, excluded row.
+        assert "twin" not in results.scanner_results
+        later_rows = [key for key in results.scanner_results if "OtherTwin" in key]
+        assert len(later_rows) == 1
+        assert later_rows[0].startswith("twin (")
+        later = results.scanner_results[later_rows[0]]
+        assert later.status == ScannerStatus.SKIPPED
+        assert later.excluded is True
+        enablement = phase.validation_manager.validate_scanner_enablement
+        excluded = enablement.call_args.kwargs["excluded_scanners"]
+        assert "twin" not in excluded
+        assert later_rows[0] in excluded
+
+    def test_a_third_holder_that_is_not_selected_gets_its_own_row(self, ctx):
+        """Two later holders of one name left out by a Python-only run get two
+        rows: the second row name is taken, so the third holder's is numbered."""
+        first = _scanner_class("twin", python_only=True)
+        second = _scanner_class("twin", python_only=False)
+        second.__name__ = "OtherTwinScanner"
+        third = _scanner_class("twin", python_only=False)
+        third.__name__ = "OtherTwinScanner"
+        phase = _phase(ctx, [first, second, third])
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            results = _run(phase, python_based_plugins_only=True)
+
+        later_rows = sorted(
+            key for key in results.scanner_results if "OtherTwin" in key
+        )
+        assert len(later_rows) == 2, later_rows
+        assert any("#2" in key for key in later_rows), later_rows
+        assert "twin" not in results.scanner_results
 
     def test_a_later_carrier_of_a_refused_name_is_told_the_first_does_not_run(
         self, ctx, logger

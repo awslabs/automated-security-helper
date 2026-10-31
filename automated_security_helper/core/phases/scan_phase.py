@@ -496,6 +496,36 @@ class ScanPhase(EnginePhase):
         )
         return self._record_scanner_error(display_name, refusal, aggregated_results)
 
+    @staticmethod
+    def _later_holder_row_name(
+        display_name: str,
+        plugin_instance: Any,
+        aggregated_results: AshAggregatedResults,
+    ) -> str:
+        """The row name for a scanner that is not the first to carry *display_name*.
+
+        The name followed by the scanner's class in parentheses, so the row cannot
+        replace the first holder's row, which is keyed by the name alone. The
+        qualifier is plain characters only, because the row's name is a directory
+        in the results tree. ``#N`` is added while the name is already a row, so
+        two later holders of one name get two rows. Both recorders for a later
+        holder (the ERROR row of a name that is refused and the SKIPPED row of one
+        the operator did not select) name the row here, so the two cannot differ
+        on what a later holder's row is called.
+        """
+        later = plugin_instance.__class__
+        later_text = f"{later.__module__}.{later.__name__}"
+        qualifier = "".join(c if c.isalnum() or c in "._-" else "_" for c in later_text)
+        taken = {
+            key.lower().strip() for key in (aggregated_results.scanner_results or {})
+        }
+        row_name = f"{display_name} ({qualifier})"
+        index = 2
+        while row_name.lower().strip() in taken:
+            row_name = f"{display_name} ({qualifier} #{index})"
+            index += 1
+        return row_name
+
     def _record_duplicate_scanner_name(
         self,
         display_name: str,
@@ -515,23 +545,17 @@ class ScanPhase(EnginePhase):
         ERROR, not SKIPPED, because the operator did not leave it out and the
         completeness gate has to see it. The caller settles selection first: a later
         holder of the name the operator did not select is recorded SKIPPED like any
-        other, not here. *first_runs* is False when the first holder's name was
-        refused by the tracker, so the text does not say it runs.
+        other, not here, under the same row name. *first_runs* is False when the
+        first holder's name was refused by the tracker, so the text does not say it
+        runs.
         """
         later = plugin_instance.__class__
         earlier = first_instance.__class__
         later_text = f"{later.__module__}.{later.__name__}"
         earlier_text = f"{earlier.__module__}.{earlier.__name__}"
-        # A directory name in the results tree: plain characters only.
-        qualifier = "".join(c if c.isalnum() or c in "._-" else "_" for c in later_text)
-        taken = {
-            key.lower().strip() for key in (aggregated_results.scanner_results or {})
-        }
-        row_name = f"{display_name} ({qualifier})"
-        index = 2
-        while row_name.lower().strip() in taken:
-            row_name = f"{display_name} ({qualifier} #{index})"
-            index += 1
+        row_name = self._later_holder_row_name(
+            display_name, plugin_instance, aggregated_results
+        )
         first_fate = (
             "which runs"
             if first_runs
@@ -1021,8 +1045,15 @@ class ScanPhase(EnginePhase):
                                 f"Scanner {display_name}'s name is carried by an "
                                 f"earlier scanner, and it was not selected to run"
                             )
+                            # Under a row of its own, as the ERROR row of a
+                            # later holder is: recorded under the name, it
+                            # replaced the first holder's row, marked that
+                            # row excluded and put the name on the excluded
+                            # list although the first holder may run.
                             aggregated_results = self._record_scanner_not_selected(
-                                display_name,
+                                self._later_holder_row_name(
+                                    display_name, plugin_instance, aggregated_results
+                                ),
                                 ", ".join(
                                     _not_selected_reasons(later_selection, names)
                                 ),
