@@ -66,6 +66,60 @@ def test_a_scanner_with_a_matched_result_has_a_rate():
     assert stats["field_preservation_rate"] == 1.0
 
 
+def _rendered(tmp_path, original_reports, aggregated):
+    """The page ``generate_html_report`` writes for what
+    ``validate_sarif_aggregation`` returns, not for statistics written by hand."""
+    results = validate_sarif_aggregation(original_reports, aggregated)
+    report = tmp_path / "report.html"
+    generate_html_report(results, str(report), {})
+    return html_module.unescape(report.read_text(encoding="utf-8"))
+
+
+def _scanner_table(page):
+    return page.split("<h2>Scanner Results</h2>")[-1].split("</table>")[0]
+
+
+def test_the_page_for_a_scanner_with_no_matched_result_shows_its_known_zero(tmp_path):
+    """Real output always carries ``match_rate``, so a scanner none of whose
+    results matched has a known 0%: the page says so and never ``n/a``."""
+    page = _rendered(tmp_path, {"bandit": _report(_result(3))}, _report())
+
+    table = _scanner_table(page)
+    assert "Match Rate: 0/1 (0.00%)" in page
+    assert "<td>0/1</td>" in table
+    assert "<td>0.00%</td>" in table
+    assert "n/a" not in table
+    assert "None" not in table
+
+
+def test_the_page_for_a_scanner_with_nothing_to_match_shows_zero_of_zero(tmp_path):
+    """A scanner whose report holds no result at all. Its statistics are the
+    initial ones: ``match_rate`` 0 with 0 of 0 matched, and no preservation rate.
+    The page prints what real output holds (0.00%), so a change to ``n/a`` for
+    this case is a decision made on purpose and not a drift."""
+    stats = validate_sarif_aggregation({"bandit": _report()}, _report(_result(3)))[
+        "match_statistics"
+    ]["bandit"]
+    assert stats["total_results"] == 0
+    assert stats["match_rate"] == 0
+    assert stats["field_preservation_rate"] is None
+
+    page = _rendered(tmp_path, {"bandit": _report()}, _report(_result(3)))
+
+    table = _scanner_table(page)
+    assert "Match Rate: 0/0 (0.00%)" in page
+    assert "<td>0/0</td>" in table
+    assert "n/a" not in table
+    assert "None" not in table
+
+
+def test_the_page_for_a_scanner_whose_every_result_matched_shows_all_of_them(tmp_path):
+    page = _rendered(tmp_path, {"bandit": _report(_result(3))}, _report(_result(3)))
+
+    assert "Match Rate: 1/1 (100.00%)" in page
+    assert "<td>100.00%</td>" in _scanner_table(page)
+
+
 def _page(tmp_path, stats):
     results = {
         "missing_fields": {
@@ -86,6 +140,10 @@ def _page(tmp_path, stats):
 
 
 def test_the_html_report_shows_n_a_for_a_rate_it_cannot_give(tmp_path):
+    """Statistics written by hand, as an older caller wrote them: without a
+    ``match_rate`` the report falls back to ``field_preservation_rate`` and shows
+    ``n/a`` when that is None. Real output never omits ``match_rate`` (see the
+    tests above), so this is the contract for a caller that does."""
     page = _page(
         tmp_path,
         {

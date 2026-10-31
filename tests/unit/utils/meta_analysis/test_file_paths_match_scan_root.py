@@ -158,13 +158,28 @@ def test_validate_sarif_aggregation_threads_the_root():
 
 
 def test_two_files_that_share_their_end_are_told_apart_with_a_root():
-    """A monorepo: ``src/main.py`` and ``services/api/src/main.py`` are two files."""
-    original = {"bandit": _report(_located("/work/app/src/main.py"))}
-    aggregated = _report(_located("services/api/src/main.py"))
+    """A monorepo: ``src/main.py`` and ``services/api/src/main.py`` are two files.
 
-    with_root = validate_sarif_aggregation(original, aggregated, scan_root=ROOT)
+    The original is the deeper file. Without the root its end is ``src/main.py``
+    too, so the shallower file's result matches it; with the root the original is
+    ``services/api/src/main.py`` and only that result does."""
+    original_uri = "/work/app/services/api/src/main.py"
+    original = {"bandit": _report(_located(original_uri))}
+
+    # Only the shallower file's result is in the aggregate.
+    shallow_only = _report(_located("src/main.py"))
+    without_root = validate_sarif_aggregation(original, shallow_only)
+    assert without_root["match_statistics"]["bandit"]["matched_results"] == 1
+    with_root = validate_sarif_aggregation(original, shallow_only, scan_root=ROOT)
     assert with_root["match_statistics"]["bandit"]["matched_results"] == 0
 
-    own = _report(_located("services/api/src/main.py"), _located("src/main.py"))
-    matched = validate_sarif_aggregation(original, own, scan_root=ROOT)
-    assert matched["match_statistics"]["bandit"]["matched_results"] == 1
+    # Both files' results are in it: which one the original matched.
+    results = [_located("src/main.py"), _located("services/api/src/main.py")]
+    assert find_matching_result(_located(original_uri), results) is results[0]
+    assert (
+        find_matching_result(_located(original_uri), results, scan_root=ROOT)
+        is results[1]
+    )
+    both = validate_sarif_aggregation(original, _report(*results), scan_root=ROOT)
+    assert both["match_statistics"]["bandit"]["matched_results"] == 1
+    assert both["match_statistics"]["bandit"]["fields_missing"] == 0

@@ -121,9 +121,10 @@ class TestInAggregatePercentage:
     aggregated, and 1 excluded field printed -11.1%.
     """
 
-    # Ten field paths that survive should_include_field (nine fields, of which
-    # ``message`` is both itself and ``message.text``), plus ruleIndex, which is
-    # intentionally excluded from the comparison.
+    # Ten field paths that survive should_include_field, plus ruleIndex, which is
+    # intentionally excluded from the comparison. Ten, not nine: ``message`` is a
+    # path of its own and so is the ``message.text`` it holds, on purpose (see
+    # test_a_container_is_counted_with_the_fields_it_holds).
     SCANNER_RESULT = {
         "ruleId": "B1",
         "ruleIndex": 0,
@@ -190,6 +191,49 @@ class TestInAggregatePercentage:
     ):
         columns = self._percentage(tmp_path, monkeypatch, capsys, {"ruleId": "B1"})
         assert columns[1:] == ["10", "10", "9", "1", "10.0%"]
+
+
+@pytest.mark.unit
+def test_a_container_is_counted_with_the_fields_it_holds():
+    """A container and each field it holds are all counted, on purpose.
+
+    ``flatten_sarif_results`` records every field under its own path, a container
+    as well as a scalar: the loss of a whole ``message`` or ``region`` in
+    aggregation is then reported under its own name, and an empty ``locations``
+    and a filled one are one field. A list is written ``name[]`` for the fields of
+    its elements and is not a path of its own. Counting leaf fields only would
+    drop the container paths and with them that report."""
+    from automated_security_helper.utils.sarif_field_analysis import (
+        flatten_sarif_results,
+    )
+
+    sarif = {
+        "runs": [
+            {
+                "results": [
+                    {
+                        "message": {"text": "m"},
+                        "locations": [
+                            {"physicalLocation": {"region": {"startLine": 1}}}
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+
+    included, excluded = flatten_sarif_results(sarif)
+
+    prefix = "runs[].results[]"
+    assert set(included) == {
+        f"{prefix}.message",
+        f"{prefix}.message.text",
+        f"{prefix}.locations",
+        f"{prefix}.locations[].physicalLocation",
+        f"{prefix}.locations[].physicalLocation.region",
+        f"{prefix}.locations[].physicalLocation.region.startLine",
+    }
+    assert excluded == {}
 
 
 @pytest.mark.unit
