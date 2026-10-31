@@ -286,8 +286,8 @@ def run_of_project(runs: List[Any], run_index: int, invocations: List[Any]) -> A
     stamp (one built by hand, or an empty list) names no project to look for.
     The index is then trusted exactly when no run of the document is stamped,
     and nothing is attached when any run is. The aggregator stamps every
-    invocation it writes, so this is the case of a caller that did not go
-    through it.
+    invocation it writes, so this is the case of a caller that built its
+    invocations another way.
     """
     key = (
         _stamped_property(invocations[0], "workspace_project") if invocations else None
