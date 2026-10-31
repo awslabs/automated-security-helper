@@ -489,15 +489,31 @@ def _test_value(written: Any, anchored: Any) -> Any:
     matched and the operator's chain failed to load. A base the load left as
     written (a file inside the scanned tree) still holds the path as written. The
     value compares equal to either spelling, so the test passes against whichever
-    one the document holds. A value that is not text is compared as written.
+    one the document holds.
+
+    A list or mapping value (cfn-guard's ``rules_paths`` is one) is built the
+    same way leaf by leaf, so its test holds against a document whose entries
+    are anchored, as written, or a mix: ``list`` and ``dict`` compare their
+    members with ``==``, and each text leaf compares equal to either spelling.
+    A leaf that is not text is compared as written, and a pair whose shapes
+    differ (they do not, for the anchored copy of a value) keeps the value as
+    written.
     """
+    if isinstance(written, str) and isinstance(anchored, str):
+        return written if written == anchored else _either_spelling(anchored, written)
     if (
-        not isinstance(written, str)
-        or not isinstance(anchored, str)
-        or written == anchored
+        isinstance(written, list)
+        and isinstance(anchored, list)
+        and len(written) == len(anchored)
     ):
-        return written
-    return _either_spelling(anchored, written)
+        return [_test_value(leaf, moved) for leaf, moved in zip(written, anchored)]
+    if (
+        isinstance(written, dict)
+        and isinstance(anchored, dict)
+        and written.keys() == anchored.keys()
+    ):
+        return {key: _test_value(written[key], anchored[key]) for key in written}
+    return written
 
 
 def anchor_override_paths(

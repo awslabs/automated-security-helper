@@ -196,6 +196,47 @@ def test_a_test_operation_compares_equal_to_both_spellings_of_its_path(tmp_path)
     assert anchored[1]["value"] == _anchored(tmp_path, "b.yaml")
 
 
+def test_a_test_operation_of_a_list_compares_each_entry_to_both_spellings(tmp_path):
+    """cfn-guard's ``rules_paths`` is a list. A test of it carries each entry
+    as anchored and as written, so it holds against a document whose entries
+    are anchored (an operator base), as written (a base inside the tree), or a
+    mix of the two, and still fails on an entry that is neither."""
+    ops = [
+        {
+            "op": "test",
+            "path": "/scanners/cfn-guard/options/rules_paths",
+            "value": ["rules", "more/rules"],
+        }
+    ]
+
+    tested = anchor_patch_operations(ops, tmp_path)[0]["value"]
+
+    anchored = [_anchored(tmp_path, "rules"), _anchored(tmp_path, "more/rules")]
+    assert anchored == tested
+    assert ["rules", "more/rules"] == tested
+    assert [anchored[0], "more/rules"] == tested
+    assert ["rules", "elsewhere"] != tested
+    assert ["rules"] != tested
+
+
+def test_a_test_operation_of_a_mapping_compares_each_leaf_to_both_spellings(
+    tmp_path,
+):
+    ops = [
+        {
+            "op": "test",
+            "path": "/scanners/cfn-guard/options",
+            "value": {"rules_paths": ["rules"], "mode": "strict"},
+        }
+    ]
+
+    tested = anchor_patch_operations(ops, tmp_path)[0]["value"]
+
+    assert {"rules_paths": [_anchored(tmp_path, "rules")], "mode": "strict"} == tested
+    assert {"rules_paths": ["rules"], "mode": "strict"} == tested
+    assert {"rules_paths": ["rules"], "mode": "loose"} != tested
+
+
 def test_a_test_of_a_same_directory_path_passes_against_the_anchored_base(tmp_path):
     """The operator's file extends a base beside it that names ``cfg/named.cfg``,
     and guards its replace with a test of the same relative path. The base's
