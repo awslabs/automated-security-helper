@@ -256,6 +256,69 @@ def test_a_checked_out_submodule_is_the_entry_its_superproject_tracks(
     assert found == [sub]
 
 
+def test_a_superproject_that_lists_nothing_at_the_path_does_not_track_the_submodule(
+    tmp_path, monkeypatch
+):
+    """The commonest shape of the question: the directory is a repository of its
+    own that a superproject does NOT track (a nested clone, an ignored checkout).
+    The superproject answers with an empty list, which is "no", so the directory
+    is not reported as the entry; only the files its own index lists at the
+    results paths are. The superproject is asked once, about the directory's
+    path under it."""
+    tree = Path(os.path.realpath(tmp_path))
+    outer = tree / "outer"
+    sub = outer / "sub"
+    sub.mkdir(parents=True)
+    roots = {sub: sub, outer: outer}
+    monkeypatch.setattr(
+        scan_output_dirs,
+        "_repository_root_of",
+        lambda directory: roots.get(Path(directory)),
+    )
+    asked = []
+
+    def listing(root, relative, **_):
+        asked.append((root, relative))
+        if (root, relative) == (sub, "."):
+            return ["ash_aggregated_results.json", "x.txt"], None, False
+        return [], None, False
+
+    monkeypatch.setattr(scan_output_dirs, "_index_listing", listing)
+
+    found = committed_files_at_results_paths(sub)
+
+    assert found == [sub / "ash_aggregated_results.json"]
+    assert asked == [(sub, "."), (outer, "sub")]
+
+
+def test_control_a_superproject_that_tracks_the_path_adds_the_directory_itself(
+    tmp_path, monkeypatch
+):
+    tree = Path(os.path.realpath(tmp_path))
+    outer = tree / "outer"
+    sub = outer / "sub"
+    sub.mkdir(parents=True)
+    roots = {sub: sub, outer: outer}
+    monkeypatch.setattr(
+        scan_output_dirs,
+        "_repository_root_of",
+        lambda directory: roots.get(Path(directory)),
+    )
+    listings = {
+        (sub, "."): ["ash_aggregated_results.json"],
+        (outer, "sub"): [""],
+    }
+    monkeypatch.setattr(
+        scan_output_dirs,
+        "_index_listing",
+        lambda root, relative, **_: (listings[(root, relative)], None, False),
+    )
+
+    found = committed_files_at_results_paths(sub)
+
+    assert found == [sub, sub / "ash_aggregated_results.json"]
+
+
 def test_a_superproject_that_gives_no_listing_is_not_read_as_not_tracking(
     tmp_path, monkeypatch
 ):

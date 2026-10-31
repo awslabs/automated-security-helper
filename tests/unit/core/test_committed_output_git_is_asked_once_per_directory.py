@@ -138,3 +138,33 @@ def test_a_kept_listing_whose_superproject_question_fails_is_unanswered(
     # itself still returns the kept listing, which is read before the failures.
     assert failures._answers[output.parent] is failed
     assert failures.known_for(output).names == ["reports/x.sarif"]
+
+
+@pytest.mark.parametrize(
+    "tracked, expected",
+    [
+        (False, lambda out: [out / "ash_aggregated_results.json"]),
+        (True, lambda out: [out, out / "ash_aggregated_results.json"]),
+    ],
+)
+def test_a_kept_listing_reads_the_superprojects_answer_both_ways(
+    tmp_path, monkeypatch, tracked, expected
+):
+    """A superproject that does not track the directory (the commonest shape: a
+    nested clone or an ignored checkout) answers "no", and the directory is not
+    added to what is committed; one that tracks it answers "yes" and is."""
+    output = (tmp_path / "out").resolve()
+    output.mkdir()
+    failures = _GitFailures()
+    _counting_git(monkeypatch, output, {output: ["ash_aggregated_results.json"]})
+    committed_output_module._index_below(output, failures)
+    monkeypatch.setattr(
+        committed_output_module,
+        "_an_enclosing_repository_tracks_the_root",
+        lambda answer: tracked,
+    )
+
+    found = _found_in_the_way(output, None, None, (), failures)
+
+    assert found.committed == expected(output)
+    assert found.answer is None

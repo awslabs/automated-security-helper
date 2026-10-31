@@ -39,6 +39,7 @@ import pytest
 
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.scan_output_dirs import (
+    _pathspec_element,
     classified_output_dirs,
     git_index_below,
 )
@@ -75,31 +76,71 @@ def _repository(tmp_path) -> Path:
     return repo
 
 
+#: Every variable that points git at another repository or index, or that changes
+#: how a pathspec is read. Each one is set to a value git would act on.
+_VARIABLES_LEFT_OUT = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS",
+    "GIT_ICASE_PATHSPECS",
+    "GIT_LITERAL_PATHSPECS",
+)
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin", "win32"])
 def test_the_variables_that_redirect_git_are_left_out_of_its_environment(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, platform
 ):
+    """On every platform: the case-insensitive branch sends ``:(literal,icase)``
+    on the pathspec, which git refuses (exit 128) beside a
+    ``GIT_LITERAL_PATHSPECS=1`` of the caller, and the case-exact branch sends
+    ``--literal-pathspecs``, which it refuses beside a ``GIT_ICASE_PATHSPECS=1``
+    or ``GIT_GLOB_PATHSPECS=1``. The test ran on the host's platform only, so
+    one of the two branches was never met."""
     repo = _repository(tmp_path)
     git = _GitStandIn()
     monkeypatch.setattr(subprocess_utils, "spawn_run", git)
+    monkeypatch.setattr(sys, "platform", platform)
+    for name in _VARIABLES_LEFT_OUT:
+        monkeypatch.setenv(name, "1")
     monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "hook-index"))
-    monkeypatch.setenv("GIT_ICASE_PATHSPECS", "1")
-    monkeypatch.setenv("GIT_GLOB_PATHSPECS", "1")
     monkeypatch.setenv("GIT_DIR", str(tmp_path / "other" / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "other"))
+    monkeypatch.setenv("GIT_COMMON_DIR", str(tmp_path / "other" / ".git"))
     monkeypatch.setenv("ASH_KEEP_ME", "yes")
 
     answer = git_index_below(repo / "out")
 
     assert answer.names == []
-    ((_, kwargs),) = git.calls
+    ((args, kwargs),) = git.calls
     environ = kwargs["env"]
-    for name in (
-        "GIT_INDEX_FILE",
-        "GIT_ICASE_PATHSPECS",
-        "GIT_GLOB_PATHSPECS",
-        "GIT_DIR",
-    ):
-        assert name not in environ
+    assert [name for name in _VARIABLES_LEFT_OUT if name in environ] == []
     assert environ["ASH_KEEP_ME"] == "yes"
+    # The command line names the repository, so none of the variables is needed
+    # to find it, and the pathspec form is the one the platform's branch sends.
+    assert f"--git-dir={repo / '.git'}" in args
+    assert f"--work-tree={repo}" in args
+    if platform == "linux":
+        assert "--literal-pathspecs" in args
+        assert args[-1] == "out"
+    else:
+        assert "--literal-pathspecs" not in args
+        assert args[-1] == ":(literal,icase)out"
+
+
+def test_control_a_variable_that_is_not_left_out_reaches_git(tmp_path, monkeypatch):
+    repo = _repository(tmp_path)
+    git = _GitStandIn()
+    monkeypatch.setattr(subprocess_utils, "spawn_run", git)
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "someone")
+
+    git_index_below(repo / "out")
+
+    ((_, kwargs),) = git.calls
+    assert kwargs["env"]["GIT_AUTHOR_NAME"] == "someone"
 
 
 @pytest.mark.parametrize("platform", ["darwin", "win32"])
@@ -149,6 +190,40 @@ def test_where_names_compare_without_case_a_leading_colon_is_still_a_name(
     ((args, _),) = git.calls
     assert args[-1] == ":(literal,icase):out"
     assert answer.names == ["README"]
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+@pytest.mark.parametrize(
+    "name", [":build", ":-x", ":!x", ":(top)x", "a/:b", "*.md", "[ab]", "a b"]
+)
+def test_where_names_compare_without_case_no_name_is_read_as_pathspec_magic(
+    monkeypatch, platform, name
+):
+    """The long-form magic ``:(literal,icase)`` ends at its ``)``, so the rest is a
+    name whatever it starts with: a ``:`` (short magic), ``:!`` (exclude), a glob
+    character. Checked on the element itself, so it needs no directory with such a
+    name; git is not run."""
+    monkeypatch.setattr(sys, "platform", platform)
+
+    assert _pathspec_element(name) == f":(literal,icase){name}"
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32", "linux"])
+def test_the_repository_root_is_the_dot_pathspec_on_every_platform(
+    monkeypatch, platform
+):
+    """``.`` names the root; it is not wrapped in magic, which git reads as the
+    whole tree on its own."""
+    monkeypatch.setattr(sys, "platform", platform)
+
+    assert _pathspec_element(".") == "."
+
+
+def test_control_on_linux_the_element_is_the_name_itself(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    assert _pathspec_element(":build") == ":build"
+    assert _pathspec_element("out/reports") == "out/reports"
 
 
 def test_control_on_linux_the_pathspec_is_literal_and_case_exact(tmp_path, monkeypatch):
