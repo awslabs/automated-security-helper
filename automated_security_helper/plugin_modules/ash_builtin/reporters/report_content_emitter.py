@@ -731,7 +731,7 @@ class ReportContentEmitter:
                 return _snippet_text(raw_data["snippet"])
 
             # SARIF puts a snippet in a location's physicalLocation, under its
-            # region (or its context region), never on the result or on a
+            # context region (or its region), never on the result or on a
             # thread-flow location itself.
             locations = raw_data.get("locations")
             if isinstance(locations, list):
@@ -775,15 +775,20 @@ class ReportContentEmitter:
 def _location_snippet(location: Any) -> str | None:
     """The snippet text of a SARIF location object, or None.
 
-    Read from ``physicalLocation.region.snippet`` and then
-    ``physicalLocation.contextRegion.snippet``, where SARIF 2.1.0 puts it.
+    Read from ``physicalLocation.contextRegion.snippet`` and then
+    ``physicalLocation.region.snippet``, where SARIF 2.1.0 puts it: the order the
+    flattener reads the first location's snippet in, because the context region
+    exists to give a viewer the surrounding lines. A secret finding's snippets
+    are masked whole in every one of its locations (``secret_masking`` masks the
+    physical locations of its locations, related locations and code flows) before
+    any reporter runs, so what is read here is already the masked text.
     """
     if not isinstance(location, dict):
         return None
     physical = location.get("physicalLocation")
     if not isinstance(physical, dict):
         return None
-    for key in ("region", "contextRegion"):
+    for key in ("contextRegion", "region"):
         region = physical.get(key)
         if isinstance(region, dict):
             text = _snippet_text(region.get("snippet"))

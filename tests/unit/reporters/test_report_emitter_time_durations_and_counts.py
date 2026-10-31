@@ -45,6 +45,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Message,
     PropertyBag,
     Result,
+    SarifReport,
+)
+from automated_security_helper.utils.secret_masking import (
+    MASKED_LINE,
+    mask_secrets_in_results,
 )
 
 pytestmark = pytest.mark.unit
@@ -616,6 +621,87 @@ class TestASnippetIsFoundWhereSarifPutsIt:
             ]
         }
         assert self._snippet(raw) == "eval(user_input)"
+
+    def test_the_context_region_is_read_before_the_region(self):
+        """A location with both reads as the flattener reads the first one.
+
+        The flattener prefers the context region's snippet, which exists to
+        give a viewer the surrounding lines; the fallback for the locations it
+        did not read took the region's first, so a finding showed different
+        text depending on which location the snippet sat in.
+
+        RED at the base: the region's text was returned.
+        """
+        location = {
+            "physicalLocation": {
+                "artifactLocation": {"uri": "app.py"},
+                "region": {"startLine": 3, "snippet": {"text": "region text"}},
+                "contextRegion": {"startLine": 2, "snippet": {"text": "context text"}},
+            }
+        }
+        assert self._snippet({"locations": [location]}) == "context text"
+
+    def test_a_secret_findings_second_location_reaches_the_report_masked(self):
+        """The snippet of a secret finding's other locations is the masked text.
+
+        Pins the layer the report relies on: the masker covers every physical
+        location of a secret finding, so the fallback that reads the second
+        location and a code flow's locations never sees the value.
+        """
+        value = "ql9x4v7kz2m8"
+        model = AshAggregatedResults()
+        model.sarif = SarifReport.model_validate(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "test"}},
+                        "results": [
+                            {
+                                "ruleId": "SECRET-KEYWORD",
+                                "level": "warning",
+                                "message": {
+                                    "text": "Secret of type 'Keyword' detected"
+                                },
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": "app.py"},
+                                            "region": {"startLine": 2, "endLine": 2},
+                                        }
+                                    },
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": "other.py"},
+                                            "region": {
+                                                "startLine": 7,
+                                                "endLine": 7,
+                                                "snippet": {
+                                                    "text": f'token = "{value}"\n'
+                                                },
+                                            },
+                                        }
+                                    },
+                                ],
+                                "properties": {
+                                    "scanner_name": "detect-secrets",
+                                    "tags": ["detect-secrets"],
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        mask_secrets_in_results(model)
+        emitter = ReportContentEmitter(model)
+        (vuln,) = emitter.flat_vulns
+
+        snippet = emitter._extract_code_snippet(vuln)
+
+        assert snippet is not None
+        assert value not in snippet, snippet
+        assert MASKED_LINE in snippet, snippet
 
     def test_a_result_with_no_snippet_is_none(self):
         assert self._snippet({"locations": [{"physicalLocation": {}}]}) is None
