@@ -591,11 +591,21 @@ def test_a_verified_path_binary_reports_its_own_version(tmp_path, monkeypatch):
     assert [call[0][0] for call in verify.calls] == [binary]
     assert scanner.use_uv_tool is False
     assert scanner.tool_version == "1.8.0"
+    # The probe's last chance to overwrite the version is the resolution the
+    # SARIF step and the inventory make: the version still reads the binary's.
+    scanner.resolve_deferred_tool_version()
+    assert scanner.tool_version == "1.8.0"
 
 
 def test_a_path_binary_with_no_version_answer_keeps_the_probes(tmp_path, monkeypatch):
     source = _tree(tmp_path, ["app.py"])
     scanner = _scanner(source, tmp_path)
+    # What the probe answers for a scanner nothing else touched: the control the
+    # version after validation is compared with.
+    control = _scanner(source, tmp_path)
+    control.resolve_deferred_tool_version()
+    expected = control.tool_version
+    assert expected is not None
     binary = str(tmp_path / "bandit")
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
@@ -605,13 +615,13 @@ def test_a_path_binary_with_no_version_answer_keeps_the_probes(tmp_path, monkeyp
     )
     verify = _verifier("unverifiable", binary, "no probe", None)
     monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", verify)
-    scanner.resolve_deferred_tool_version()
-    before = scanner.tool_version
-    assert before is not None
 
     assert scanner.validate_plugin_dependencies() is True
     assert [call[0][0] for call in verify.calls] == [binary]
-    assert scanner.tool_version == before
+    # Resolved after the validation, so a validation that cleared the probe
+    # (or one a later resolution undid) leaves the version unread.
+    scanner.resolve_deferred_tool_version()
+    assert scanner.tool_version == expected
 
 
 # ---------------------------------------------------------------------------
