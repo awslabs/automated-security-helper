@@ -1583,6 +1583,85 @@ class TestAFileClosedEntryIsNotReopenedOverAnotherScan:
         assert registry.update_scan_status(first, MCScanStatus.RUNNING) is True
         assert registry.get_scan(first).status is MCScanStatus.RUNNING
 
+    @staticmethod
+    def _file_closed_inside_a_root_scan(registry, tmp_path):
+        """A finished scan of a workspace root, and a project scan under its
+        output directory that a results file closed while it was PENDING."""
+        root = tmp_path / "ws"
+        project = root / "proj"
+        project.mkdir(parents=True)
+        outer = root / ".ash" / "ash_output"
+        inner = outer / "projects" / "proj-key"
+        inner.mkdir(parents=True)
+        (inner / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+        root_scan = _register(registry, root, outer)
+        registry.update_scan_status(root_scan, MCScanStatus.COMPLETED)
+        first = _register(registry, project, inner)
+        registry.check_scan_progress(first)
+        assert registry.get_scan(first).closed_from_file is True
+        return root_scan, first
+
+    def test_a_reopened_scan_that_leaves_with_its_files_is_recorded_on_the_root(
+        self, tmp_path
+    ):
+        """The tree of a file-closed project scan was removed, which set
+        ``output_removed``. Its runner then claimed the entry again and the scan
+        wrote a new tree, and cleaning it up without removing its output left
+        those files in the root scan's tree. The flag from the removal still
+        said it left nothing, so the root scan's removal deleted them."""
+        registry = ScanRegistry()
+        root_scan, first = self._file_closed_inside_a_root_scan(registry, tmp_path)
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(first), lambda: True
+        )
+        assert (reason, removed) == (None, True)
+        assert registry.get_scan(first).output_removed is True
+        assert registry.update_scan_status(first, MCScanStatus.RUNNING) is True
+        registry.update_scan_status(first, MCScanStatus.COMPLETED)
+        assert registry.cleanup_scan(first) is True
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(root_scan), lambda: ran.append(1) or True
+        )
+
+        assert reason == "a later scan holds its results in this output directory"
+        assert removed is False
+        assert ran == []
+
+    def test_an_entry_reopened_after_its_output_was_removed_writes_a_new_tree(
+        self, tmp_path
+    ):
+        registry = ScanRegistry()
+        _root_scan, first = self._file_closed_inside_a_root_scan(registry, tmp_path)
+        registry.remove_output_of_scan(registry.get_scan(first), lambda: True)
+        assert registry.get_scan(first).output_removed is True
+
+        assert registry.update_scan_status(first, MCScanStatus.RUNNING) is True
+
+        assert registry.get_scan(first).output_removed is False
+
+    def test_a_scan_whose_output_was_removed_and_not_reopened_holds_nothing(
+        self, tmp_path
+    ):
+        """The control: without a reopen the flag stands, and the file-closed
+        scan's cleanup leaves nothing for the root scan's removal to protect."""
+        registry = ScanRegistry()
+        root_scan, first = self._file_closed_inside_a_root_scan(registry, tmp_path)
+        registry.remove_output_of_scan(registry.get_scan(first), lambda: True)
+        assert registry.cleanup_scan(first) is True
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(root_scan), lambda: ran.append(1) or True
+        )
+
+        assert reason is None
+        assert removed is True
+        assert ran == [1]
+
 
 class TestAFinishedScanWhoseOutputIsGoneHasNoResults:
     """validate_directory_path's FILE_NOT_FOUND made the poll read no files, and

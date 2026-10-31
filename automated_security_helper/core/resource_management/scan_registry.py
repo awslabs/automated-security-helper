@@ -256,7 +256,8 @@ class ScanRegistryEntry:
         # Whether remove_output_of_scan deleted this scan's output tree (its
         # remover reported the tree gone). A scan removed from the registry
         # after that left no files behind, so it holds nothing in the tree of an
-        # enclosing scan (_remember_nested_scan).
+        # enclosing scan (_remember_nested_scan). Cleared when the scan is
+        # marked running again (mark_running): it writes a new tree.
         self.output_removed = False
         self.end_time: Optional[datetime] = None
         self.status = MCScanStatus.PENDING
@@ -355,6 +356,11 @@ class ScanRegistryEntry:
         end time, an error message, coverage, an exit code) is cleared, so an
         entry reopened from a file-derived close does not carry that file's
         coverage and error text into the new run's result.
+
+        The same holds for ``output_removed``: it says the tree was deleted
+        after the scan's last write, and a reopened scan writes again. Kept, it
+        hid the rerun's files from the enclosing scan's removal
+        (``ScanRegistry._remember_nested_scan``).
         """
         self.status = MCScanStatus.RUNNING
         self.process_id = process_id
@@ -363,6 +369,7 @@ class ScanRegistryEntry:
         self.coverage = None
         self.exit_code = None
         self.closed_from_file = False
+        self.output_removed = False
 
     def mark_completed(self) -> None:
         """Mark the scan as completed."""
