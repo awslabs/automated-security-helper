@@ -698,3 +698,71 @@ class TestTotalFollowsOneRule:
 
         assert by_severity["total"] == 5
         assert by_severity["high"] == 1
+
+
+class TestARowWithoutBucketsLeavesTheFilteredBucketsUnknown:
+    """``filter_summary`` reports unknown buckets for a row that counts findings
+    and records no breakdown, but only for the summary it derives itself. The two
+    recounts of the content filters (the ``scanners`` filter over a recorded
+    summary, and the actionable-only derivation for a workspace file) wrote the
+    zero buckets of such a row beside its positive total, so the view read "2
+    findings, none of them critical, high, medium, low or info"."""
+
+    @staticmethod
+    def _results_with_a_row_that_only_counts():
+        results = _results()
+        results["raw_results"]["scanner_results"]["trivy"] = {
+            "status": "PASSED",
+            "finding_count": 2,
+        }
+        return results
+
+    def test_a_scanners_filter_keeps_the_buckets_of_such_a_row_unknown(self):
+        filtered = apply_content_filters(
+            self._results_with_a_row_that_only_counts(), scanners="trivy"
+        )
+        by_severity = filter_summary(filtered)["findings_summary"]["by_severity"]
+
+        assert by_severity["total"] == 2
+        assert by_severity["critical"] is None
+        assert by_severity["high"] is None
+        assert by_severity["info"] is None
+        assert by_severity["suppressed"] is None
+
+    def test_one_such_row_among_the_kept_scanners_makes_every_bucket_unknown(self):
+        filtered = apply_content_filters(
+            self._results_with_a_row_that_only_counts(), scanners="bandit,trivy"
+        )
+        by_severity = filter_summary(filtered)["findings_summary"]["by_severity"]
+
+        # bandit's three findings and trivy's two: the total is exact, and the
+        # buckets bandit alone fills would be a lower bound shown as exact.
+        assert by_severity["total"] == 5
+        assert by_severity["high"] is None
+        assert by_severity["low"] is None
+
+    def test_a_scanners_filter_over_rows_with_buckets_keeps_them_known(self):
+        # Control: green before and after the cure. It proves the cure did not
+        # make every filtered bucket unknown.
+        filtered = apply_content_filters(
+            self._results_with_a_row_that_only_counts(), scanners="bandit"
+        )
+        by_severity = filter_summary(filtered)["findings_summary"]["by_severity"]
+
+        assert by_severity["total"] == 3
+        assert by_severity["high"] == 1
+        assert by_severity["low"] == 2
+
+    def test_an_actionable_view_of_a_workspace_file_keeps_them_unknown_too(self):
+        results = self._results_with_a_row_that_only_counts()
+        # The workspace unified results file carries no summary_stats: the
+        # producer puts {} in its place, and the filter derives one from the rows.
+        results["summary_stats"] = {}
+
+        filtered = filter_actionable_only(results)
+        buckets = filtered["summary_stats"]["severity_counts"]
+
+        assert buckets["critical"] is None
+        assert buckets["high"] is None
+        # The view holds no suppressed finding whatever the rows said: known.
+        assert buckets["suppressed"] == 0

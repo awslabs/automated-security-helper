@@ -139,6 +139,12 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
     actionable findings to count and may lack the field without making the sum
     unknown: a set made only of such scanners has 0 actionable findings, which
     is known. Starting the sum at None made that set read as unknown.
+
+    When a row counts findings but records no breakdown (see
+    :func:`_rows_without_a_breakdown`), no per-severity bucket of the set is
+    known: each is None, beside a ``total`` that is exact. Left at the sum of
+    the other rows' buckets, they read as exact numbers beside a total that
+    counted findings they do not hold.
     """
     counts = dict.fromkeys(_SEVERITY_KEYS, 0)
     stats: Dict[str, Any] = {
@@ -171,7 +177,11 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
             actionable_unknown = True
     if actionable_unknown:
         stats["actionable"] = None
-    stats["severity_counts"] = counts
+    stats["severity_counts"] = (
+        dict.fromkeys(_SEVERITY_KEYS)
+        if _rows_without_a_breakdown(scanner_results)
+        else counts
+    )
     return stats
 
 
