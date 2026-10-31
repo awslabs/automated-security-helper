@@ -37,6 +37,9 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    _grep_scanner_base,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     DEFAULT_EXCLUDES,
 )
@@ -934,3 +937,38 @@ def test_a_target_under_an_ordinary_directory_of_its_repository_is_still_refused
         scanner._post_process_sarif(
             _SARIF, [f"--json-output={paths_file.as_posix()}"], target
         )
+
+
+def test_the_default_ignores_the_target_covers_are_read_once_not_per_file(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """On the converted target the default ignores the target's own directories
+    cover come from a walk up the target's parents (``_covering_default_ignores``).
+    The grading used to repeat that walk for every excluded file; it is read once
+    per target now, so the number of walks does not grow with the number of files.
+
+    Fails on the code before this row: one walk per excluded file (1 walk for one
+    file, 6 for six).
+    """
+    real = _grep_scanner_base._covering_default_ignores
+    walks: list = []
+
+    def counting(target):
+        walks.append(target)
+        return real(target)
+
+    monkeypatch.setattr(_grep_scanner_base, "_covering_default_ignores", counting)
+    counts = {}
+    for files in (1, 6):
+        walks.clear()
+        scanner = _scanner(
+            test_plugin_context, monkeypatch, exclude=[*DEFAULT_EXCLUDES, "*.py"]
+        )
+        scanner._scan_target_type = "converted"
+        reported = _excluded(*(f"src/app{number}.py" for number in range(files)))
+        with pytest.raises(ScannerError, match="its --exclude patterns left out all"):
+            _grade(scanner, tmp_path, reported)
+        counts[files] = len(walks)
+
+    assert counts[1] >= 1, "the walk was not reached; the counter proves nothing"
+    assert counts[6] == counts[1], counts

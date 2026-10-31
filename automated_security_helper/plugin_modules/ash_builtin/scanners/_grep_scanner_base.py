@@ -1001,9 +1001,22 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             for relative in relatives
         ]
 
-    def _left_out_by_ash(self, path: str, target: Path) -> bool:
+    def _left_out_by_ash(
+        self,
+        path: str,
+        target: Path,
+        *,
+        below_root: Optional[tuple[str, ...]] = None,
+        default_ignores: Optional[List[str]] = None,
+    ) -> bool:
         """Whether ``path``, which the tool excluded, matches one of the exclusions
         ASH itself adds to every command rather than one the operator configured.
+
+        ``below_root`` and ``default_ignores`` are the target's own components below
+        the project root (``_parts_of_target_below_root``) and the default ignores
+        its command carries (``_default_ignores_passed``). Both depend on the target
+        alone, so a caller grading many files of one target reads them once and
+        passes them; left out, they are read here.
 
         Three sets, each what the tool would have skipped on its own or what ASH
         skips for every scanner: the names given for the global ignore paths
@@ -1030,7 +1043,11 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         command (_extra_args_for_target), so a converted file the tool excluded
         there matched a pattern the operator wrote, and is not ASH's.
         """
-        parts = (*_parts_of_target_below_root(target), *_parts_below(path, target))
+        if below_root is None:
+            below_root = _parts_of_target_below_root(target)
+        if default_ignores is None:
+            default_ignores = self._default_ignores_passed(target)
+        parts = (*below_root, *_parts_below(path, target))
         if set(self._ignore_exclude_names).intersection(parts):
             return True
         for relative in self._output_dir_excluded:
@@ -1045,7 +1062,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         # drops the directory defaults that cover it (_extra_args_for_target), so a
         # match there came from a pattern the operator wrote, whatever directory
         # the converted files sit under.
-        for pattern in self._default_ignores_passed(target):
+        for pattern in default_ignores:
             if pattern.endswith("/"):
                 if pattern[:-1] in parts[:-1]:
                     return True
@@ -1157,10 +1174,19 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 # A target whose files all sit under tests/ or vendor/, say, was
                 # SKIPPED by the tools' defaults before ASH re-passed that list as
                 # --exclude, and is SKIPPED still.
+                # What depends on the target alone is read once, not once per
+                # excluded file (each read walks the target's parents for .git).
+                below_root = _parts_of_target_below_root(target)
+                default_ignores = self._default_ignores_passed(target)
                 not_ignored = [
                     entry
                     for entry in excluded
-                    if not self._left_out_by_ash(str(entry.get("path", "")), target)
+                    if not self._left_out_by_ash(
+                        str(entry.get("path", "")),
+                        target,
+                        below_root=below_root,
+                        default_ignores=default_ignores,
+                    )
                 ]
                 if not_ignored:
                     # The operator is blamed only for a file one of the operator's
@@ -1176,7 +1202,10 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         entry
                         for entry in not_ignored
                         if _matches_an_exclude_pattern(
-                            str(entry.get("path", "")), target, operator_patterns
+                            str(entry.get("path", "")),
+                            target,
+                            operator_patterns,
+                            below_root=below_root,
                         )
                     ]
                     if blamed:
@@ -1340,7 +1369,13 @@ def _covering_default_ignores(target: Path) -> set:
     }
 
 
-def _matches_an_exclude_pattern(path: str, target: Path, patterns: List[str]) -> bool:
+def _matches_an_exclude_pattern(
+    path: str,
+    target: Path,
+    patterns: List[str],
+    *,
+    below_root: Optional[tuple[str, ...]] = None,
+) -> bool:
     """Whether one of ``patterns``, as the tools read an ``--exclude`` value, can
     name the reported ``path``: a glob matched against the file's name and against
     each directory of the path below the project root (a trailing ``/`` names a
@@ -1351,8 +1386,12 @@ def _matches_an_exclude_pattern(path: str, target: Path, patterns: List[str]) ->
     pattern this says cannot match certainly did not leave the file out. A
     leading ``/`` anchors a pattern at the project root in the tools'
     gitignore-style reading, and a trailing one names a directory; both are
-    dropped here, so ``/src/`` names the ``src`` component the way ``src/`` does."""
-    parts = (*_parts_of_target_below_root(target), *_parts_below(path, target))
+    dropped here, so ``/src/`` names the ``src`` component the way ``src/`` does.
+    ``below_root`` is the target's own components below the project root when the
+    caller has read them already (``_parts_of_target_below_root``)."""
+    if below_root is None:
+        below_root = _parts_of_target_below_root(target)
+    parts = (*below_root, *_parts_below(path, target))
     joined = ["/".join(parts[:end]) for end in range(1, len(parts) + 1)]
     candidates = (*parts, *joined, Path(path).as_posix())
     for pattern in patterns:
