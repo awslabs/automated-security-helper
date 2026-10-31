@@ -190,11 +190,22 @@
   reason. Before, a scanner could keep a symlink out of the sweep by making its
   directory unlistable, and the scan passed with the link in place. The check that
   runs before a sandboxed scanner starts (`refuse_links_below`) refuses a results
-  directory root that is itself a symlink. Called with the plugin's environment
-  values, it redacts and logs its refusals the same way instead of chaining the
-  operating system's error, which carries the full path; called with none, it logs
-  nothing and raises the refusal alone, for the scanner executor's own handler to
-  redact.
+  directory root that is itself a symlink. The scanner executor passes it the
+  sandbox's own environment values, so it redacts and logs its refusals the same
+  way instead of chaining the operating system's error, which carries the full
+  path; when the sandbox could not read those values, the line it logs names
+  neither the entry nor the root. A direct caller that passes no values at all gets
+  the refusal raised alone, with nothing logged.
+
+  ASH's guarded atomic writer writes text as given. By default no line ending is
+  translated on any platform, so a `\r\n` already in the content no longer comes
+  out as `\r\r\n` on Windows (a blank line after every CSV row); a caller that
+  wants the platform's line ending passes `newline=None`. Asking for a newline
+  translation on a binary write raises `ValueError`, as `open()` does. A file
+  already at the target keeps its read, write and execute bits when it is
+  replaced, whoever owns it, so a `0o600` results file that a root or container
+  run rewrites no longer becomes `0o644`. Its setuid, setgid and sticky bits are
+  not carried over, and the new file belongs to the process that wrote it.
 
   If a sandbox was requested and cannot be provided, ASH never falls back to
   running the scanner unsandboxed, and the scan exits 1. A backend named
