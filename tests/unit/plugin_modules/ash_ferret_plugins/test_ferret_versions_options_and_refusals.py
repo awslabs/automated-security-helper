@@ -740,7 +740,8 @@ def _at(name: str) -> dict:
 
 def test_every_artifact_location_of_a_result_is_resolved():
     """The places a result keeps a location besides ``locations``: its related
-    locations, its analysis target, its code flows and its fixes."""
+    locations, its analysis target, its code flows, its fixes, the frames of its
+    stacks and its attachments."""
     base = "file:///work/src/"
     result = {
         "ruleId": "r",
@@ -772,6 +773,18 @@ def test_every_artifact_location_of_a_result_is_resolved():
                 ]
             }
         ],
+        "stacks": [
+            {
+                "frames": [
+                    {
+                        "location": {
+                            "physicalLocation": {"artifactLocation": _at("s.txt")}
+                        }
+                    }
+                ]
+            }
+        ],
+        "attachments": [{"artifactLocation": _at("t.txt")}],
     }
     document = {
         "version": "2.1.0",
@@ -798,6 +811,9 @@ def test_every_artifact_location_of_a_result_is_resolved():
     assert result["fixes"][0]["artifactChanges"][0]["artifactLocation"] == {
         "uri": base + "g.txt"
     }
+    frame = result["stacks"][0]["frames"][0]["location"]
+    assert frame["physicalLocation"]["artifactLocation"] == {"uri": base + "s.txt"}
+    assert result["attachments"][0]["artifactLocation"] == {"uri": base + "t.txt"}
     assert "originalUriBaseIds" not in document["runs"][0]
 
 
