@@ -27,7 +27,18 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from automated_security_helper.core.enums import SandboxMode
 from automated_security_helper.utils.log import ASH_LOGGER, delivers
@@ -175,16 +186,52 @@ _resolved: Dict[Any, "SandboxBackend | SandboxUnavailable"] = {}
 #: process.
 _TRANSIENT_REASON_MARKERS: Tuple[str, ...] = ("timed out", "temporarily unavailable")
 
-#: How long an answer reached through a transient condition is kept. Longer than
-#: one scan's run of ``resolve_backend`` calls (a scan asks once per scanner,
-#: serialized by ``_probe_lock``, so with no memory a hanging probe cost one
-#: timeout PER SCANNER), shorter than the gap between two scans of the same tree
-#: in a long-lived process, where the condition may have passed.
+#: How long an answer reached through a transient condition is kept when no scan
+#: is running (a probe made outside any scan: ``ash dependencies``, a plugin
+#: probe before the scan opens). Inside a scan the answer is kept for the scan,
+#: not for a time (``_TransientHold``): a scan asks once per scanner, serialized
+#: by ``_probe_lock``, and scanners start as the pool frees up, so a clock window
+#: that ended mid-scan gave its later scanners another answer than its first.
 _TRANSIENT_RETRY_SECONDS = 60.0
 
-#: Cache keys whose answer was reached through a transient condition, with the
-#: monotonic time from which the answer is probed again.
-_transient_until: Dict[Any, float] = {}
+
+class _TransientHold(NamedTuple):
+    """How long one transient answer is kept.
+
+    ``scan`` is the notes set of the scan that was running when the answer was
+    reached (``_scan_notes``), held by reference so that "the same scan" is an
+    identity test; the answer is served to that scan only and is probed again by
+    the next scan, or by a request outside any scan. With ``scan`` None the
+    answer was reached outside a scan and ``until`` is the monotonic time from
+    which it is probed again.
+    """
+
+    scan: Optional[Set[Any]]
+    until: float
+
+    def lapsed(self, now: float, scan: Optional[Set[Any]]) -> bool:
+        if self.scan is not None:
+            return scan is not self.scan
+        return now >= self.until
+
+
+#: Cache keys whose answer was reached through a transient condition, and how
+#: long each is kept.
+_transient_holds: Dict[Any, _TransientHold] = {}
+
+
+def _scan_notes() -> Optional[Set[Any]]:
+    """The set the active scan keeps its once-only notes in, or None outside one.
+
+    ``scanning_tree`` gives a nested scope the enclosing scope's set, so every
+    scope of one scan, and the scanner threads that run with a copy of the scan's
+    context, share one set; the next scan opens its own. Its identity names the
+    scan, and the notes written into it end with the scan.
+    """
+    from automated_security_helper.utils.subprocess_utils import _TREE_SCOPE
+
+    tree = _TREE_SCOPE.get()
+    return tree.warned if tree is not None else None
 
 
 def _probe_reason_is_transient(refusal: SandboxUnavailable) -> bool:
@@ -221,7 +268,7 @@ def clear_backend_cache() -> None:
     """Forget probe results and the grant warnings already written. For tests."""
     with _probe_lock:
         _resolved.clear()
-        _transient_until.clear()
+        _transient_holds.clear()
         _WARNED_WITHHELD.clear()
 
 
@@ -261,7 +308,9 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     ask at the same moment and each probe starts a process. An answer reached
     through a transient condition (``_probe_reason_is_transient``: the refusal
     itself, or under auto a fallback taken because the preferred backend met one)
-    is kept for ``_TRANSIENT_RETRY_SECONDS`` and probed again after.
+    is kept for the scan that reached it (``_TransientHold``), so every scanner of
+    one scan gets one answer, and probed again by the next scan; reached outside
+    any scan, it is kept for ``_TRANSIENT_RETRY_SECONDS``.
     """
     from automated_security_helper.utils.subprocess_utils import tree_scope_key
 
@@ -271,10 +320,12 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     cache_key = (mode_value, tree_scope_key())
     with _probe_lock:
         now = time.monotonic()
+        scan = _scan_notes()
         cached = _resolved.get(cache_key)
-        until = _transient_until.get(cache_key)
-        if cached is not None and until is not None and now >= until:
-            # Reached through a transient condition, and its window has passed.
+        hold = _transient_holds.get(cache_key)
+        if cached is not None and hold is not None and hold.lapsed(now, scan):
+            # Reached through a transient condition, and the scan it was kept
+            # for is over (or the window outside a scan has passed).
             cached = None
         if cached is None:
             transient = False
@@ -295,13 +346,16 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
                 transient = _probe_reason_is_transient(cached)
             _resolved[cache_key] = cached
             if transient:
-                # Counted from the end of the probe: a probe that ran to its own
+                # Kept for the scan that asked. Outside a scan the window is
+                # counted from the end of the probe: a probe that ran to its own
                 # timeout used up part of the window if it started from ``now``,
                 # and two such probes under auto left it already past.
                 probed_at = time.monotonic()
-                _transient_until[cache_key] = probed_at + _TRANSIENT_RETRY_SECONDS
+                _transient_holds[cache_key] = _TransientHold(
+                    scan, probed_at + _TRANSIENT_RETRY_SECONDS
+                )
             else:
-                _transient_until.pop(cache_key, None)
+                _transient_holds.pop(cache_key, None)
     if isinstance(cached, SandboxUnavailable):
         # Classified at the raise, not in the cache, so a cached refusal is
         # always graded with the mode of the current request.

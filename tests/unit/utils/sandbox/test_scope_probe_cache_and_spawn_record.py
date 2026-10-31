@@ -27,14 +27,17 @@ Popen, was never counted. A failed plan is now counted apart (``failed_spawns``,
 
 from __future__ import annotations
 
+import contextvars
 import platform
 import shlex
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.sandbox import scope
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
 from automated_security_helper.utils.sandbox.policy import (
@@ -179,6 +182,109 @@ def test_the_window_runs_from_the_end_of_a_slow_probe(fresh_cache, monkeypatch, 
     with pytest.raises(scope.SandboxBackendUnavailable):
         scope.resolve_backend("bwrap")
     assert probes == ["bwrap", "bwrap"]
+
+
+def test_inside_a_scan_a_transient_answer_is_kept_for_the_whole_scan(
+    fresh_cache, monkeypatch, clock, tmp_path
+):
+    """Scanners start as the pool frees up, so one scan can outlast any window:
+    a scanner that asks late must get the answer the first one got."""
+    probes = _probe_answers(
+        monkeypatch, [SandboxUnavailable(TIMED_OUT), _backend("bwrap")]
+    )
+
+    with subprocess_utils.scanning_tree(tmp_path):
+        with pytest.raises(scope.SandboxBackendUnavailable):
+            scope.resolve_backend("bwrap")
+        # Red at the base: a request past the window probed again and ran.
+        clock.advance(PAST_THE_WINDOW * 10)
+        with pytest.raises(scope.SandboxBackendUnavailable):
+            scope.resolve_backend("bwrap")
+
+    assert probes == ["bwrap"]
+
+
+def test_the_next_scan_of_the_same_tree_probes_again(
+    fresh_cache, monkeypatch, tmp_path
+):
+    probes = _probe_answers(monkeypatch, [SandboxUnavailable(TIMED_OUT)])
+
+    with subprocess_utils.scanning_tree(tmp_path):
+        with pytest.raises(scope.SandboxBackendUnavailable):
+            scope.resolve_backend("bwrap")
+        with pytest.raises(scope.SandboxBackendUnavailable):
+            scope.resolve_backend("bwrap")
+    assert probes == ["bwrap"]
+
+    # The same tree and no time passed, but a new scan: the answer reached
+    # through a passing condition was the first scan's, not the process's.
+    # Red at the base: the 60 s window served the first scan's answer.
+    with subprocess_utils.scanning_tree(tmp_path):
+        with pytest.raises(scope.SandboxBackendUnavailable):
+            scope.resolve_backend("bwrap")
+    assert probes == ["bwrap", "bwrap"]
+
+
+def test_under_auto_a_scan_keeps_the_fallback_past_the_window(
+    fresh_cache, monkeypatch, clock, tmp_path
+):
+    """bwrap times out and firejail works: the scan keeps firejail, so it never
+    switches to bwrap mid-scan, and `using` is not announced twice."""
+    monkeypatch.setattr(
+        scope, "AUTO_ORDER", {platform.system().lower(): ("bwrap", "firejail")}
+    )
+    firejail = _backend("firejail")
+    answers = {"bwrap": [SandboxUnavailable(TIMED_OUT), _backend("bwrap")]}
+    probes: list = []
+
+    def probe(name):
+        probes.append(name)
+        if name == "firejail":
+            return firejail
+        answer = answers[name].pop(0) if len(answers[name]) > 1 else answers[name][0]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(scope, "_probe_backend", probe)
+
+    with subprocess_utils.scanning_tree(tmp_path):
+        assert scope.resolve_backend("auto") is firejail
+        clock.advance(PAST_THE_WINDOW * 10)
+        assert scope.resolve_backend("auto") is firejail
+
+    assert probes == ["bwrap", "firejail"]
+
+
+def test_two_scanner_threads_of_one_scan_share_one_probe(
+    fresh_cache, monkeypatch, tmp_path
+):
+    """Both threads ask at the same moment (a barrier, not a sleep); whichever
+    gets `_probe_lock` first probes, and the other is served its answer."""
+    probes = _probe_answers(monkeypatch, [SandboxUnavailable(TIMED_OUT)])
+    barrier = threading.Barrier(2)
+    refused: list = []
+
+    def ask():
+        barrier.wait(timeout=30)
+        try:
+            scope.resolve_backend("bwrap")
+        except scope.SandboxBackendUnavailable as error:
+            refused.append(str(error))
+
+    with subprocess_utils.scanning_tree(tmp_path):
+        threads = [
+            threading.Thread(target=contextvars.copy_context().run, args=(ask,))
+            for _ in range(2)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+
+    assert not any(thread.is_alive() for thread in threads)
+    assert len(refused) == 2
+    assert probes == ["bwrap"]
 
 
 def test_a_missing_backend_is_remembered(fresh_cache, monkeypatch, clock):
