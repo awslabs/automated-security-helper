@@ -18,7 +18,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Collection,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 import yaml
 
@@ -980,7 +990,10 @@ class ConfigLinter:
                 )
         fixed = "".join(text + ending for text, ending in lines)
         cls._refuse_an_edit_that_misreads_the_list(
-            fixed, len(dash_positions) - len(commented)
+            fixed,
+            len(dash_positions) - len(commented),
+            original=raw_content,
+            commented=commented,
         )
         return fixed, commented
 
@@ -1029,14 +1042,28 @@ class ConfigLinter:
             )
 
     @classmethod
-    def _refuse_an_edit_that_misreads_the_list(cls, fixed: str, expected: int) -> None:
+    def _refuse_an_edit_that_misreads_the_list(
+        cls,
+        fixed: str,
+        expected: int,
+        original: Optional[str] = None,
+        commented: Collection[int] = (),
+    ) -> None:
         """Refuse when the edited text does not compose, or its list does not
-        hold exactly the ``expected`` remaining entries.
+        hold exactly the ``expected`` remaining entries, each as it was.
 
         The anchor check names the one layout known to break the file; this
         reads the result itself, so any layout the token walk misreads (an
         entry whose lines were not all commented, a kept entry caught in a
         range) is refused before the caller writes the text.
+
+        The count alone does not tell: a line of a commented-out entry that is
+        still active (its ``reason:``, say) joins the kept entry above it as a
+        repeated key, the last value wins, and the list still has the expected
+        number of entries with one of them rewritten. With ``original``, the
+        text before the edit, and ``commented``, the indices of the entries
+        commented out, each remaining entry must also equal the entry of the
+        original at its place.
         """
         try:
             root = yaml.compose(fixed, Loader=yaml.SafeLoader)
@@ -1067,6 +1094,34 @@ class ConfigLinter:
                 "so the entries' lines were not told apart; comment them out by "
                 "hand"
             )
+        if original is None:
+            return
+        before = cls._suppression_entries_as_loaded(original)
+        after = cls._suppression_entries_as_loaded(fixed)
+        if before is None or after is None:
+            return
+        kept = [
+            repr(entry) for index, entry in enumerate(before) if index not in commented
+        ]
+        if kept != [repr(entry) for entry in after]:
+            raise UnusedSuppressionsNotEditable(
+                "commenting the entries out would change an entry that stays "
+                "(a line of a commented-out entry is still active and joins "
+                "it); comment them out by hand"
+            )
+
+    @staticmethod
+    def _suppression_entries_as_loaded(text: str) -> Optional[List[Any]]:
+        """``global_settings.suppressions`` of the YAML ``text`` as a plain load
+        reads it (a repeated key keeps its last value), or None when the text
+        does not load or holds no such list."""
+        try:
+            loaded = yaml.safe_load(text)
+        except (yaml.YAMLError, ValueError, RecursionError):
+            return None
+        settings = loaded.get("global_settings") if isinstance(loaded, dict) else None
+        entries = settings.get("suppressions") if isinstance(settings, dict) else None
+        return entries if isinstance(entries, list) else None
 
     # The line breaks PyYAML's reader counts (reader.py, ``forward``): LF, CRLF,
     # a lone CR, NEL (U+0085), LINE SEPARATOR (U+2028) and PARAGRAPH SEPARATOR
