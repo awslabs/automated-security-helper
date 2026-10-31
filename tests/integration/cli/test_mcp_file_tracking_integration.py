@@ -66,18 +66,14 @@ async def test_file_based_tracking_workflow(test_directory, mock_scan_process):
     test_file = source_dir / "test.py"
     test_file.write_text('password = "hardcoded_password"')  # pragma: allowlist secret
 
-    # Start a scan. The runner is replaced by a stand-in that takes the
-    # runner's first step, marking the ``ran`` flag the start passes it, and
-    # does nothing else: the entry stays PENDING, as this workflow assumes. A
-    # bare AsyncMock returns without marking it, and the start's done callback
-    # then reads a task that never ran and closes the entry as a scan that did
-    # not start (``_give_back_a_scan_that_did_not_start``).
-    def _runner_that_only_starts(**kwargs):
-        kwargs["ran"]["value"] = True
-
+    # Start a scan. The runner is replaced by a bare AsyncMock that returns at
+    # once. The start marks that the runner ran itself, before the runner's
+    # first line (``_start_scan_task``), so a runner that does nothing is not
+    # closed as a scan that did not start
+    # (``_give_back_a_scan_that_did_not_start``).
     with patch(
         "automated_security_helper.cli.mcp_tools._run_scan_async",
-        AsyncMock(side_effect=_runner_that_only_starts),
+        AsyncMock(),
     ) as mock_run_scan:
         result = await mcp_scan_directory(
             directory_path=str(source_dir),
@@ -96,6 +92,14 @@ async def test_file_based_tracking_workflow(test_directory, mock_scan_process):
     registry = get_scan_registry()
     entry = registry.get_scan(scan_id)
     assert entry is not None
+
+    # The runner's first step, which the stand-in does not take: it marks the
+    # scan running. The start has already claimed the entry for a runner while
+    # it is PENDING, and a poll reads no files for such an entry
+    # (``claimed_pending`` in ``check_scan_progress``): until the runner marks
+    # the scan running, whatever the tree holds is the previous scan's. A
+    # running scan's poll reports the scanners whose files are on disk.
+    registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
     # Create output directory structure to simulate scan progress
     output_dir = Path(entry.output_directory)
