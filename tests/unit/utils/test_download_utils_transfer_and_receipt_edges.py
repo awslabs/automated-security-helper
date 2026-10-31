@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import inspect
 import io
 import os
 import platform
@@ -143,7 +144,7 @@ def test_the_staged_files_mode_is_never_set_through_a_link(tmp_path):
     staging = bin_dir / ".tool.ash-partial"
     staging.symlink_to(elsewhere)
     with pytest.raises(OSError):
-        download_utils._finalize_staged(staging, bin_dir / "tool", _DIGEST)
+        download_utils._finalize_staged(staging, bin_dir / "tool", _DIGEST, mode=0o755)
     assert stat.S_IMODE(elsewhere.stat().st_mode) == 0o600
     assert not (bin_dir / "tool").exists()
 
@@ -261,7 +262,9 @@ def test_the_staged_file_is_hashed_byte_for_byte_whatever_bytes_it_holds(tmp_pat
     staging = bin_dir / ".tool.ash-partial"
     staging.write_bytes(_BINARY_BODY)
     target = bin_dir / "tool"
-    landed = download_utils._finalize_staged(staging, target, _BINARY_DIGEST)
+    landed = download_utils._finalize_staged(
+        staging, target, _BINARY_DIGEST, mode=0o755
+    )
     assert landed == _BINARY_DIGEST
     assert target.read_bytes() == _BINARY_BODY
     assert not staging.exists()
@@ -344,3 +347,23 @@ def test_a_negative_content_length_is_no_length(monkeypatch, tmp_path, quick_ret
         _URL, tmp_path / "bin", expected_sha256=_DIGEST
     )
     assert installed.read_bytes() == _BODY
+
+
+@pytest.mark.parametrize(
+    "helper", ["_download_verified", "_replace_atomically", "_finalize_staged"]
+)
+def test_the_internal_helpers_take_their_mode_as_a_required_keyword(helper):
+    """The helpers used to disagree on a default (0o644 for the download, 0o755
+    for the other two), the trap a caller that forgot the argument fell into.
+    Each caller now states the mode it means, and a call without one is a
+    TypeError rather than a file that lands with the other helper's mode."""
+    parameter = inspect.signature(getattr(download_utils, helper)).parameters["mode"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty
+
+
+def test_a_call_without_a_mode_is_refused(tmp_path):
+    staging = tmp_path / ".tool.ash-partial"
+    staging.write_bytes(_BODY)
+    with pytest.raises(TypeError, match="mode"):
+        download_utils._finalize_staged(staging, tmp_path / "tool", _DIGEST)

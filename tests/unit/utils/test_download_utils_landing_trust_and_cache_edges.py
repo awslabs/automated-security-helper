@@ -283,7 +283,9 @@ def test_a_link_swapped_in_at_the_target_after_the_rename_is_refused(
 
     monkeypatch.setattr(du.os, "replace", replace_then_swap)
     with pytest.raises(ToolDownloadIntegrityError):
-        du._finalize_staged(staging, target, hashlib.sha256(payload).hexdigest())
+        du._finalize_staged(
+            staging, target, hashlib.sha256(payload).hexdigest(), mode=0o755
+        )
     assert not target.exists() and not target.is_symlink()
     # The target of the planted link is untouched.
     assert elsewhere.read_bytes() == payload
@@ -298,7 +300,7 @@ def test_a_staging_file_that_cannot_be_made_removes_the_source(tmp_path):
     (tmp_path / "blocked").write_bytes(b"")
     target = tmp_path / "blocked" / "tool"
     with pytest.raises(OSError):
-        du._replace_atomically(source, target, expected_sha256=DIGEST_A)
+        du._replace_atomically(source, target, expected_sha256=DIGEST_A, mode=0o755)
     assert not source.exists()
     assert (tmp_path / "blocked").is_file()
 
@@ -658,7 +660,7 @@ def test_a_fifo_renamed_over_the_staging_name_is_refused_without_blocking(
     target = tmp_path / "tool"
     started = time.monotonic()
     with pytest.raises(ToolDownloadIntegrityError, match="not a regular file"):
-        du._finalize_staged(staging, target, DIGEST_A)
+        du._finalize_staged(staging, target, DIGEST_A, mode=0o755)
     assert time.monotonic() - started < 5
     assert not target.exists()
 

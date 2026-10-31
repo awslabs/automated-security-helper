@@ -393,7 +393,7 @@ def _download_verified(
     rename_to: Optional[str] = None,
     expected_sha256: Optional[str] = None,
     *,
-    mode: int = 0o644,
+    mode: int,
 ) -> "tuple[Path, str]":
     """``download_file``, and also the digest of the bytes that landed.
 
@@ -403,10 +403,13 @@ def _download_verified(
     reject. ``download_file`` keeps its plain ``Path`` return, because it is a public
     helper and a scanner plugin may be calling it.
 
-    ``mode`` is the mode the landed file gets: ``0o644`` by default, since what
-    this downloads is data (a release archive, a rules bundle);
-    ``install_binary_from_url`` passes ``0o755`` for the executable it lands, and
-    the extraction of an archive member sets its own.
+    ``mode`` is the mode the landed file gets, and it has no default here:
+    ``download_file`` passes ``0o644`` for the data it fetches by default (a release
+    archive, a rules bundle), ``install_binary_from_url`` passes ``0o755`` for the
+    executable it lands, and the extraction of an archive member sets its own. The
+    three helpers below this one (``_replace_atomically``, ``_finalize_staged``)
+    used to default to ``0o755`` while this one defaulted to ``0o644``, the trap a
+    caller that forgot the argument fell into: each caller states the mode it means.
     """
     # The URL first, before anything is made for the download: a refused URL
     # used to leave a freshly created destination directory behind.
@@ -550,14 +553,14 @@ def _open_staging(target: Path) -> "tuple[int, Path]":
 
 
 def _finalize_staged(
-    staging: Path, target: Path, expected_sha256: str, mode: int = 0o755
+    staging: Path, target: Path, expected_sha256: str, *, mode: int
 ) -> str:
     """Put ``staging`` at ``target``, verify what landed, and return its digest.
 
-    ``mode`` is the mode the landed file gets on POSIX: ``0o755`` for an
-    executable, which is what the archive members and the pinned binaries are;
-    ``download_file`` passes its caller's mode, ``0o644`` for the data files it
-    lands by default.
+    ``mode`` is the mode the landed file gets on POSIX, and every caller names it:
+    ``0o755`` for an executable, which is what the archive members and the pinned
+    binaries are; ``download_file`` passes its caller's mode, ``0o644`` for the data
+    files it lands by default.
 
     Two checks, covering two different intervals, and neither makes the other
     redundant.
@@ -580,9 +583,10 @@ def _finalize_staged(
     Returning that digest is the other half of the same property, and without it the
     check above is necessary but not sufficient. The caller has to record a digest in
     the install receipt, and re-deriving it from the target afterwards hands back
-    exactly what this check exists to reject: ``make_executable`` runs between here and
-    the receipt write, on macOS ``unquarantine_macos_binary`` spawns ``xattr`` as a
-    subprocess as well, and the install directory can be writable by other users,
+    exactly what this check exists to reject: between here and the receipt write, on
+    macOS ``unquarantine_macos_binary`` spawns ``xattr`` as a subprocess (nothing
+    else touches the file in that window: the mode is set above, on the staged
+    descriptor), and the install directory can be writable by other users,
     with no sticky bit, under a threat model where ASH
     executes repository code during a scan -- cdk-nag synthesizes CDK apps, npm-audit
     runs a package manager. A receipt built from a fresh hash of the target records
@@ -625,11 +629,11 @@ def _finalize_staged(
                 "the install path."
             )
         if platform.system() != "Windows":
-            # Set the final mode here rather than leaving make_executable to OR
-            # 0o111 onto the 0o600 mkstemp creates, which would produce 0o711 and
-            # quietly differ from the 0o755 the previous umask-dependent code
-            # produced. A scanner binary must be executable by whoever runs the
-            # scan, which is not always whoever installed it.
+            # Set the final mode here, on the staged descriptor, rather than OR
+            # 0o111 onto the 0o600 mkstemp creates by name afterwards, which
+            # would produce 0o711 and quietly differ from the 0o755 the previous
+            # umask-dependent code produced. A scanner binary must be executable
+            # by whoever runs the scan, which is not always whoever installed it.
             os.fchmod(fd, mode)  # nosec B103 - an executable must be executable
     finally:
         os.close(fd)
@@ -673,7 +677,8 @@ def _replace_atomically(
     source: Path,
     target: Path,
     expected_sha256: Optional[str] = None,
-    mode: int = 0o755,
+    *,
+    mode: int,
 ) -> str:
     """Move ``source`` onto ``target`` without ever following or trusting a link.
 
@@ -718,7 +723,7 @@ def _replace_atomically(
                 if expected_sha256 is not None
                 else copied.hexdigest()
             )
-            return _finalize_staged(staging, target, expected, mode)
+            return _finalize_staged(staging, target, expected, mode=mode)
         except BaseException:
             staging.unlink(missing_ok=True)
             raise
@@ -1307,9 +1312,9 @@ def install_binary_from_url(
             "url": url,
             "sha256": expected_sha256.lower() if expected_sha256 else None,
             # The digest verified when the bytes landed, never a fresh hash of the file
-            # taken here. make_executable has run by this point, and on macOS so has
-            # unquarantine_macos_binary's xattr subprocess; see _finalize_staged for
-            # what re-hashing after that window records instead.
+            # taken here. On macOS unquarantine_macos_binary's xattr subprocess has
+            # run by this point (the mode was set before the rename); see
+            # _finalize_staged for what re-hashing after that window records instead.
             "installed_sha256": installed_digest,
             "installed_as": installed_as,
         },
@@ -1483,7 +1488,7 @@ def _extract_single_member(
         # staging path from getting an attacker's bytes recorded in the receipt as
         # though ASH had installed them, and returning that digest is what stops the
         # caller re-deriving it from the target after the fact.
-        return _finalize_staged(staging, target, written.hexdigest())
+        return _finalize_staged(staging, target, written.hexdigest(), mode=0o755)
     except BaseException:
         if not fd_handed:
             # The fd was never handed to fdopen, so nothing closed it.
@@ -1839,7 +1844,7 @@ def install_pinned_tool(
             # the same staged, symlink-safe, pin-checked rename the unarchived URL path
             # uses; _replace_atomically refuses anything but the pinned digest.
             installed_digest = _replace_atomically(
-                downloaded, target, expected_sha256=asset.sha256
+                downloaded, target, expected_sha256=asset.sha256, mode=0o755
             )
         else:
             installed_digest = _extract_single_member(
@@ -1869,9 +1874,9 @@ def install_pinned_tool(
             # file that will actually be executed.
             #
             # Taken from the extraction, which verified it as the bytes landed, rather
-            # than by hashing the target here -- make_executable and, on macOS,
-            # unquarantine_macos_binary's xattr subprocess have run in between, in a
-            # directory other users may be able to write. See _finalize_staged.
+            # than by hashing the target here -- on macOS unquarantine_macos_binary's
+            # xattr subprocess has run in between, in a directory other users may be
+            # able to write. See _finalize_staged.
             "installed_sha256": installed_digest,
             "installed_as": asset.install_as,
         },

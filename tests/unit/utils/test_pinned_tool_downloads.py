@@ -778,7 +778,9 @@ class TestStagingCannotBeRacedOrGuessed:
             patch("os.replace", side_effect=counting),
             pytest.raises(ToolDownloadIntegrityError, match="before installing it"),
         ):
-            _finalize_staged(staging, target, hashlib.sha256(PAYLOAD).hexdigest())
+            _finalize_staged(
+                staging, target, hashlib.sha256(PAYLOAD).hexdigest(), mode=0o755
+            )
 
         assert renames == [], "unverified bytes were renamed onto the install path"
         assert not target.exists()
