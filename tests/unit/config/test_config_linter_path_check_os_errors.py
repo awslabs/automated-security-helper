@@ -46,19 +46,25 @@ pytestmark = pytest.mark.unit
         pytest.param(ValueError("embedded null byte"), id="value-error"),
     ],
 )
+@pytest.mark.parametrize("helper", ["absolute_path_warning", "path_pattern_advice"])
 def test_a_helper_that_refuses_the_probe_does_not_end_the_lint_run(
-    tmp_path, monkeypatch, raised
+    tmp_path, monkeypatch, raised, helper
 ):
     """Both guarded arms, on every interpreter: the real-filesystem case below
     reaches the OSError arm on Python 3.12 and older only (3.13's is_dir swallows
     ENAMETOOLONG), and the ValueError arm on none (Path.exists has caught it
-    everywhere), so the arms are pinned here with the helpers made to raise."""
+    everywhere), so the arms are pinned here with a helper made to raise. One
+    helper raises per run, the other is the real one, and the run records that
+    the raising helper was reached: the checks are chained, so the second is
+    called only when the first returns nothing, and a run in which neither
+    helper was called would pass for the wrong reason."""
+    calls = []
 
     def refuse(*_args, **_kwargs):
+        calls.append(helper)
         raise raised
 
-    monkeypatch.setattr(config_linter, "absolute_path_warning", refuse)
-    monkeypatch.setattr(config_linter, "path_pattern_advice", refuse)
+    monkeypatch.setattr(config_linter, helper, refuse)
     config_path = tmp_path / ".ash.yaml"
     config_path.write_text(
         "project_name: demo\n"
@@ -72,6 +78,7 @@ def test_a_helper_that_refuses_the_probe_does_not_end_the_lint_run(
 
     result = ConfigLinter.lint(config_path, source_dir=tmp_path)
 
+    assert calls, f"{helper} was never called, so the guard was not exercised"
     assert [
         i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
     ] == []
