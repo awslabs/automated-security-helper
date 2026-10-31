@@ -382,3 +382,12 @@ class TestALostBuiltinPackageIsLoud:
         # carry (the field alias, "detect-secrets"), not just any non-empty list.
         assert "bandit" in results.metadata.expected_scanners
         assert "detect-secrets" in results.metadata.expected_scanners
+        # "Loud" is the load failure itself: it is in the run's recorded import
+        # errors and on the ERROR row's report, not only that a row exists.
+        load_failure = "No module named 'yaml'"
+        assert (
+            load_failure
+            in results.metadata.plugin_load_errors[_BUILTIN_PLUGIN_MODULE_PREFIX]
+        ), results.metadata.plugin_load_errors
+        report = results.additional_reports[_BUILTIN_PLUGIN_MODULE_PREFIX]["None"]
+        assert any(load_failure in str(error) for error in report["errors"]), report
