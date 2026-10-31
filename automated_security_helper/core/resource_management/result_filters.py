@@ -10,7 +10,10 @@ mcp_get_scan_results into smaller, purpose-specific views.
 
 import copy
 from typing import Any, Dict, List, Optional
-from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_THRESHOLDS,
+    result_severity,
+)
 
 #: The per-severity buckets a summary carries, in the order the summary lists
 #: them. ``suppressed`` is a bucket of its own, as it is in SummaryStats.
@@ -581,6 +584,14 @@ def _workspace_project_gates(raw_results: Any) -> Dict[str, Dict[str, Any]]:
     ``WorkspaceProjectResult`` records them. Empty for a single scan, so every
     reader of it falls through to the scanner-keyed ``severity_thresholds`` map.
 
+    A scanner named in the entry's ``withheld_scanner_thresholds`` was graded
+    by a threshold the scan read from an environment variable, and the value is
+    not published. Grading its findings by the project gate would call a
+    finding non-actionable that the project's own count included whenever the
+    withheld value is the stricter one, so such a scanner is graded by the
+    strictest threshold (``ALL``): the view lists every unsuppressed finding of
+    it, the side that cannot hide an actionable finding.
+
     Why this is needed: ``severity_thresholds`` is resolved from the results'
     ``ash_config``, which a workspace's unified file does not carry, so for that
     file every entry reads ASH's default and every project's findings were judged
@@ -600,17 +611,20 @@ def _workspace_project_gates(raw_results: Any) -> Dict[str, Dict[str, Any]]:
             continue
         threshold = entry.get("severity_threshold")
         scanners = entry.get("scanner_thresholds")
+        withheld = entry.get("withheld_scanner_thresholds")
+        own_gates = {
+            str(name): value
+            for name, value in (scanners.items() if isinstance(scanners, dict) else ())
+            if isinstance(value, str) and value
+        }
+        for name in withheld if isinstance(withheld, list) else ():
+            if isinstance(name, str) and name:
+                own_gates.setdefault(name, SEVERITY_THRESHOLDS[0])
         gates[key] = {
             "threshold": threshold
             if isinstance(threshold, str) and threshold
             else None,
-            "scanners": {
-                str(name): value
-                for name, value in (
-                    scanners.items() if isinstance(scanners, dict) else ()
-                )
-                if isinstance(value, str) and value
-            },
+            "scanners": own_gates,
             "policy_gate": (
                 entry["policy_scanners_gate"]
                 if isinstance(entry.get("policy_scanners_gate"), bool)

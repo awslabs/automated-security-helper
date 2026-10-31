@@ -64,7 +64,10 @@ from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     is_workspace_scan,
 )
-from automated_security_helper.utils.severity_ladder import normalize_threshold
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_THRESHOLDS,
+    normalize_threshold,
+)
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -137,6 +140,13 @@ def workspace_project_scanner_thresholds(
     :func:`workspace_project_thresholds`, so the finding falls back to the
     project's gate. Empty for a single-directory scan and for a workspace file
     written before the field existed.
+
+    A scanner named in ``withheld_scanner_thresholds`` was graded by a threshold
+    the scan read from an environment variable, which the file does not carry.
+    It is listed here at the strictest gate (``ALL``) rather than left to the
+    project's gate: the project's gate may be looser than the withheld one, and
+    a finding the project's own count included would then read as a skipped case
+    in the merged report. The strictest gate is the side that cannot hide it.
     """
     if not is_workspace_scan(model):
         return {}
@@ -148,6 +158,8 @@ def workspace_project_scanner_thresholds(
             normalized = normalize_threshold(value)
             if normalized is not None:
                 gates[str(scanner)] = normalized
+        for scanner in getattr(project, "withheld_scanner_thresholds", None) or ():
+            gates.setdefault(str(scanner), SEVERITY_THRESHOLDS[0])
         if gates:
             by_project[project.project] = gates
     return by_project
