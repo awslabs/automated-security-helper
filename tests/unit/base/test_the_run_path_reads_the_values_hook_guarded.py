@@ -82,6 +82,8 @@ def test_a_raising_hook_before_the_run_refuses_the_run(
 
     runner.assert_not_called()
     assert response["spawn_failed"] is True
+    assert response["returncode"] == SPAWN_FAILURE_RETURNCODE
+    assert scanner.exit_code == SPAWN_FAILURE_RETURNCODE
     assert "values hook raised RuntimeError" in response["error"], response
     assert "ENVCANARY-9c1" not in response["error"]
     assert "ENVCANARY-9c1" not in response["stderr"]
@@ -111,6 +113,10 @@ def test_a_hook_that_raises_after_the_run_started_stays_inside_the_handler(
             ["stub-tool", "scan"], results_dir=str(tmp_path / "results")
         )
 
+    # The test measures the handler's guarded read only if the runner was
+    # entered: a patch that stopped reaching the call would leave the hook
+    # unraised and let the assertions below pass on the real runner's text.
+    assert state["run"] is True
     assert response["spawn_failed"] is True
     assert "text not shown" in response["error"], response
     assert "ENVCANARY-run-9c1" not in response["error"], response
