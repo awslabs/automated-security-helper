@@ -382,7 +382,8 @@ def _write_target(config_path: Path) -> Path:
     staged write beside it does. A process whose ``os.getcwd`` does not answer
     with the directory the files are in (one that reports a display name for it,
     or whose working directory was renamed) then wrote beside a directory that
-    is not there.
+    is not there. A relative link is resolved with ``realpath``, which does read
+    ``os.getcwd()``; that is the one case here that does.
     """
     target = Path(config_path)
     if target.is_symlink():
@@ -2424,7 +2425,11 @@ def wizard(
     # --config): the write at the end resolved them with os.getcwd, so the
     # wizard asked every question and then failed with "Error writing config
     # file" where the exit-5 refusal belongs.
-    if (source_dir is None) if config is None else (not Path(config).is_absolute()):
+    if config is None:
+        relative_to_the_working_directory = source_dir is None
+    else:
+        relative_to_the_working_directory = not Path(config).is_absolute()
+    if relative_to_the_working_directory:
         _working_directory()
     if config is None:
         # Relative to the working directory when no --source-dir (or
