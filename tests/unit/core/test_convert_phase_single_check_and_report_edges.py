@@ -47,6 +47,7 @@ from automated_security_helper.core.phases.convert_phase import (
 )
 from automated_security_helper.interactions.run_ash_scan import incomplete_converters
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.plugins.events import AshEventType
 
 pytestmark = pytest.mark.unit
 
@@ -95,9 +96,20 @@ def _observed(plugin_context, plugins, progress=None):
     progress = progress if progress is not None else _progress_stub()
     phase, agg = _build(plugin_context, plugins, progress)
     events: list = []
-    phase.notify_event = lambda event, **kwargs: events.append((str(event), kwargs))
+
+    def notify_event(event, **kwargs):
+        # The event member itself, and the list the real method returns.
+        events.append((event, kwargs))
+        return []
+
+    phase.notify_event = notify_event
     results = phase.execute(aggregated_results=agg)
     return results, events, progress
+
+
+def _events_of(events: list, kind: AshEventType) -> List[dict]:
+    """The keyword arguments of each recorded event of *kind*."""
+    return [kwargs for event, kwargs in events if event == kind]
 
 
 def _messages_with(caplog, phrase: str) -> List[str]:
@@ -474,7 +486,9 @@ class TestRefusedSpawnsAreNotNothingToConvert:
         # Red at the base: "No files to convert".
         assert any("sandbox refused 2 process" in d for d in mine), mine
         assert not any("No files to convert" in d for d in mine), mine
-        complete = [kw["message"] for name, kw in events if "CONVERT_COMPLETE" in name]
+        complete = [
+            kw["message"] for kw in _events_of(events, AshEventType.CONVERT_COMPLETE)
+        ]
         assert len(complete) == 1 and "sandbox refused 2 process" in complete[0]
         assert "sandbox refused" in results.converter_results["spawns-refused"].failure
         assert len(incomplete_converters(results)) == 1
@@ -520,7 +534,9 @@ class TestFailedPlansAreNotRefusals:
         mine = [d for d in _descriptions(progress) if "plan-failed" in d]
         assert any("could not plan 1 process" in d for d in mine), mine
         assert not any("No files to convert" in d for d in mine), mine
-        complete = [kw["message"] for name, kw in events if "CONVERT_COMPLETE" in name]
+        complete = [
+            kw["message"] for kw in _events_of(events, AshEventType.CONVERT_COMPLETE)
+        ]
         assert len(complete) == 1 and "could not plan 1 process" in complete[0]
         assert len(incomplete_converters(results)) == 1
 
@@ -614,7 +630,9 @@ class TestTheSandboxLossIsRedactedLikeEveryOtherFailureText:
 
         failure = results.converter_results["leaky-loss"].failure
         progress_rows = [d for d in _descriptions(progress) if "leaky-loss" in d]
-        complete = [kw["message"] for name, kw in events if "CONVERT_COMPLETE" in name]
+        complete = [
+            kw["message"] for kw in _events_of(events, AshEventType.CONVERT_COMPLETE)
+        ]
         assert progress_rows and len(complete) == 1
         # Red at the base: the environment value is already hidden there, but the
         # absolute home directory was written as it was in all three.
@@ -671,7 +689,7 @@ class TestAConverterThatRaisedEndsForItsSubscribers:
 
         results, events, _ = _observed(plugin_context, [broken])
 
-        errors = [kw for name, kw in events if name.endswith("ERROR")]
+        errors = _events_of(events, AshEventType.ERROR)
         # Red at the base: CONVERT_START and nothing after it.
         assert len(errors) == 1
         assert errors[0]["converter"] == "raises-late"
@@ -716,10 +734,7 @@ class TestEventHandlerFailuresAreRedacted:
             # phase's START event ends the run by contract, and the phase's
             # COMPLETE line redacts with the configuration's values, not with
             # the values this converter read from the environment.
-            if getattr(event, "name", str(event)) in (
-                "CONVERT_START",
-                "CONVERT_COMPLETE",
-            ):
+            if event in (AshEventType.CONVERT_START, AshEventType.CONVERT_COMPLETE):
                 raise RuntimeError(f"cannot reach {ENV_VALUE}")
 
         phase.notify_event = boom
