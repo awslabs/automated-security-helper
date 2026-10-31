@@ -1655,31 +1655,79 @@ def _written_separators() -> Set[str]:
     return {"/", os.sep} | ({os.altsep} if os.altsep else set())
 
 
-def _written_key(member_name: str, kind: Optional[Literal["zip", "tar"]]) -> str:
+def _written_key(
+    member_name: str, kind: Optional[Literal["zip", "tar"]], fold: bool = True
+) -> str:
     """The key two members are compared by to tell whether they are written to one
     file: the written path (_member_written_path), as the host compares names
-    (os.path.normcase) and case-folded, since the output directory may sit on a
-    case-insensitive filesystem (APFS, NTFS), where ``X.js`` and ``x.js`` are one
-    file. On a case-sensitive one the fold only renames a member that would have
-    been a second file, so nothing is lost either way.
+    (os.path.normcase), and case-folded when ``fold`` is set, for an output
+    directory on a case-insensitive filesystem (APFS, NTFS), where ``X.js`` and
+    ``x.js`` are one file. inspect_members measures the output filesystem once
+    (_filesystem_folds_case) and passes the answer: on a case-sensitive one the
+    fold is left off, because there ``Foo.js`` and ``foo.js/bar.js`` are two
+    paths, and folded they read as a file and a member under it, so the second was
+    refused for a collision the host never has. With nothing to measure the fold
+    is on, the side that loses nothing: it renames a member that would have been
+    a second file, where the other answer could let one member overwrite another.
     """
-    return os.path.normcase(_member_written_path(member_name, kind)).casefold()
+    key = os.path.normcase(_member_written_path(member_name, kind))
+    return key.casefold() if fold else key
 
 
 def _written_prefix_keys(
-    member_name: str, kind: Optional[Literal["zip", "tar"]]
+    member_name: str, kind: Optional[Literal["zip", "tar"]], fold: bool = True
 ) -> List[str]:
-    """The keys (_written_key) of the directories a member of this name is written
-    below, the top first: ``a`` and ``a/b`` for ``a/b/c.js``, none for ``c.js``.
-    A member written to one of them as a file, or a member whose own key is one
-    of another member's, cannot be extracted beside that member: the extractor
-    fails on whichever comes later (NotADirectoryError, IsADirectoryError), so
-    inspect_members refuses that one alone instead.
+    """The keys (_written_key, with the same ``fold``) of the directories a member
+    of this name is written below, the top first: ``a`` and ``a/b`` for
+    ``a/b/c.js``, none for ``c.js``. A member written to one of them as a file, or
+    a member whose own key is one of another member's, cannot be extracted beside
+    that member: the extractor fails on whichever comes later (NotADirectoryError,
+    IsADirectoryError), so inspect_members refuses that one alone instead.
     """
     parts = _member_written_path(member_name, kind).split("/")
     return [
-        _written_key("/".join(parts[:count]), kind) for count in range(1, len(parts))
+        _written_key("/".join(parts[:count]), kind, fold)
+        for count in range(1, len(parts))
     ]
+
+
+#: The name of the file _filesystem_folds_case writes to read the output
+#: filesystem's answer; its other-case spelling is what is looked for.
+_CASE_PROBE_NAME = ".ash-case-probe-{pid}.tmp"
+
+
+def _filesystem_folds_case(target_path: Optional[Path]) -> bool:
+    """Whether the filesystem the members are extracted onto reads two spellings of
+    one name that differ only in case as one file (APFS, NTFS, FAT, a Linux
+    directory with the casefold attribute), so two such members must be compared
+    as written to one path; False where they are two files (ext4, XFS, tmpfs), so
+    a member ``foo.js/bar.js`` stands beside a member ``Foo.js`` and both are
+    extracted. Measured, once per archive, by writing an empty probe file into the
+    nearest existing ancestor of ``target_path`` (the extraction directory itself is
+    made after the members are inspected) and reading whether its upper-case
+    spelling exists; the probe is removed. With no target path, or when the probe
+    cannot be written or read (OSError), the answer is True: the fold refuses or
+    renames a member that would have been a second file and loses nothing, where
+    the other answer could let a later member overwrite an earlier one.
+    """
+    if target_path is None:
+        return True
+    directory = target_path
+    while not directory.is_dir():
+        parent = directory.parent
+        if parent == directory:
+            return True
+        directory = parent
+    probe = directory / _CASE_PROBE_NAME.format(pid=os.getpid())
+    try:
+        with open(probe, "x"):
+            pass
+        try:
+            return (directory / probe.name.upper()).exists()
+        finally:
+            probe.unlink()
+    except OSError:
+        return True
 
 
 def _named_member(
@@ -1704,6 +1752,7 @@ def _renamed_member_name(
     written: Dict[str, str],
     directories: Set[str],
     counters: Dict[str, int],
+    fold: bool = True,
 ) -> str:
     """``member_name`` placed in a numbered directory beside the file it would have
     overwritten, its file name kept: ``vendor/m~2/m.js`` for ``vendor/m.js``,
@@ -1732,19 +1781,21 @@ def _renamed_member_name(
 
     ``counters`` holds, per written key, the counter the next rename of that key
     starts from, so N members bound for one path cost N names, not N squared.
+    ``fold`` is the output filesystem's answer (_filesystem_folds_case), the same
+    one every key here is read with.
     """
     cut = max(member_name.rfind(separator) for separator in _written_separators())
     head, base = member_name[: cut + 1], member_name[cut + 1 :]
     stem, dot, _extension = base.rpartition(".")
     directory_stem = stem if stem and dot else base
-    key = _written_key(member_name, kind)
+    key = _written_key(member_name, kind, fold)
     counter = counters.get(key, 2)
     while True:
         directory = f"{head}{directory_stem}~{counter}"
         renamed = f"{directory}/{base}"
         counter += 1
-        renamed_key = _written_key(renamed, kind)
-        directory_key = _written_key(directory, kind)
+        renamed_key = _written_key(renamed, kind, fold)
+        directory_key = _written_key(directory, kind, fold)
         if (
             renamed_key not in taken
             and renamed_key not in written
@@ -2219,7 +2270,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         extracted, so no scanner reads it, snyk-code included, which would upload
         it. A member written to the same path as an earlier member of the archive
         (``vendor//m.js`` after ``vendor/m.js``, a tar's repeated name, or two
-        spellings of one name on a case-insensitive filesystem) is written in a
+        spellings of one name where the output filesystem is measured to be
+        case-insensitive, _filesystem_folds_case) is written in a
         numbered directory beside the earlier one with its file name kept
         (``vendor/m~2/m.js``, _renamed_member_name), a placement no member of the
         archive is named by, with a warning naming both, so neither silently
@@ -2243,11 +2295,16 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # Refusals by reason: how many were listed, and how many more were not.
         listed: Dict[str, int] = {}
         unlisted: Dict[str, int] = {}
+        # Whether the output filesystem reads two spellings of one name as one
+        # file, measured once here and read into every key below: folded keys
+        # on a case-sensitive filesystem refused ``foo.js/bar.js`` beside
+        # ``Foo.js`` for a collision that host never has.
+        fold = _filesystem_folds_case(target_path)
         # The path each admitted member is written to (_written_key: as the host
-        # compares names, case-folded), so a later member bound for the same
-        # file is written in a numbered directory beside the earlier one, its
-        # file name kept, and both are scanned, rather than one written over
-        # the other.
+        # compares names, case-folded where the filesystem folds), so a later
+        # member bound for the same file is written in a numbered directory
+        # beside the earlier one, its file name kept, and both are scanned,
+        # rather than one written over the other.
         written: Dict[str, str] = {}
         # The directories the admitted members are written below (every prefix
         # of their written paths, _written_prefix_keys), so a later member bound
@@ -2265,8 +2322,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         for member in members:
             named = _named_member(member)
             if named is not None:
-                taken.add(_written_key(*named))
-                taken_directories.update(_written_prefix_keys(*named))
+                taken.add(_written_key(*named, fold=fold))
+                taken_directories.update(_written_prefix_keys(*named, fold=fold))
         # Per written key, where the next rename of it starts counting.
         rename_counters: Dict[str, int] = {}
         renamed_count = 0
@@ -2350,8 +2407,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             if problem is None and nested:
                 problem = _MEMBER_NESTED_ARCHIVE
             if problem is None:
-                destination = _written_key(member_name, kind)
-                prefixes = _written_prefix_keys(member_name, kind)
+                destination = _written_key(member_name, kind, fold=fold)
+                prefixes = _written_prefix_keys(member_name, kind, fold=fold)
                 through = next((key for key in prefixes if key in written), None)
                 if through is not None:
                     # x.js before x.js/y.js: the later member cannot be written
@@ -2384,6 +2441,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         written,
                         directories,
                         rename_counters,
+                        fold,
                     )
                     renamed_count += 1
                     if renamed_count <= MEMBER_REFUSALS_LISTED:
@@ -2400,10 +2458,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     else:
                         member.filename = renamed
                     member_name = renamed
-                    destination = _written_key(renamed, kind)
+                    destination = _written_key(renamed, kind, fold=fold)
                     # The placement adds a directory the name as read did not
                     # have, so the renamed member's own prefixes are recorded.
-                    prefixes = _written_prefix_keys(renamed, kind)
+                    prefixes = _written_prefix_keys(renamed, kind, fold=fold)
                 if problem is None:
                     written[destination] = member_name
                     directories.update(prefixes)

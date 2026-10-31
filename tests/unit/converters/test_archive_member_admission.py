@@ -427,9 +427,9 @@ def test_many_members_bound_for_one_path_are_renamed_in_bounded_time(
     calls = {"n": 0}
     real_key = archive_converter._written_key
 
-    def counting_key(member_name, kind):
+    def counting_key(member_name, kind, fold=True):
         calls["n"] += 1
-        return real_key(member_name, kind)
+        return real_key(member_name, kind, fold)
 
     monkeypatch.setattr(archive_converter, "_written_key", counting_key)
     converter = ArchiveConverter(
@@ -458,6 +458,102 @@ def test_many_members_bound_for_one_path_are_renamed_in_bounded_time(
     assert len(single) == archive_converter.MEMBER_REFUSALS_LISTED, len(single)
     expected = count - 1 - archive_converter.MEMBER_REFUSALS_LISTED
     assert len(aggregate) == 1 and f"{expected} more members" in aggregate[0], aggregate
+
+
+def _tmp_folds_case(directory: Path) -> bool:
+    """The test's own read of the filesystem under ``directory``: whether a file
+    written in lower case is found by its upper-case spelling."""
+    probe = directory / "case-probe-lower.tmp"
+    probe.write_bytes(b"")
+    try:
+        return (directory / "CASE-PROBE-LOWER.TMP").exists()
+    finally:
+        probe.unlink()
+
+
+def test_the_case_probe_reads_the_output_filesystem_and_leaves_nothing(tmp_path):
+    """The probe's answer for a not-yet-made extraction directory is the answer
+    for its nearest existing ancestor, equal to the test's own read of the same
+    filesystem, and the probe file is gone afterwards. With no target path the
+    answer is True, the side that loses nothing."""
+    expected = _tmp_folds_case(tmp_path)
+
+    answer = archive_converter._filesystem_folds_case(tmp_path / "out" / "a.zip")
+
+    assert answer is expected
+    assert list(tmp_path.iterdir()) == []
+    assert archive_converter._filesystem_folds_case(None) is True
+
+
+def test_a_member_under_a_directory_spelled_like_a_file_is_extracted_where_case_counts(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """``Foo.js`` then ``foo.js/bar.js``: on a case-sensitive filesystem these are
+    a file and a directory with different names, and both are written. The keys
+    used to fold case whatever the filesystem, so the second read as a member
+    under the first's file and was refused for a collision the host never has;
+    ``Foo.js`` and ``foo.js`` were likewise renamed as one path. The filesystem's
+    answer is set here, so the test reads the same on every host."""
+    monkeypatch.setattr(
+        archive_converter, "_filesystem_folds_case", lambda target_path: False
+    )
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [
+        zipfile.ZipInfo("Foo.js"),
+        zipfile.ZipInfo("foo.js/bar.js"),
+        zipfile.ZipInfo("foo.js"),
+    ]
+
+    admitted = converter.inspect_members(members, target_path=tmp_path, archive="a.zip")
+
+    assert [m.filename for m in admitted] == ["Foo.js", "foo.js/bar.js", "foo.js"]
+    assert converter.refused_inputs == []
+
+
+def test_a_member_under_a_directory_spelled_like_a_file_is_refused_where_case_folds(
+    test_plugin_context, tmp_path, monkeypatch
+):
+    """The control: where the filesystem folds case, ``foo.js/bar.js`` would be
+    written under the file ``Foo.js`` and is refused alone, and ``foo.js`` is
+    written beside ``Foo.js`` in a numbered directory, as before."""
+    monkeypatch.setattr(
+        archive_converter, "_filesystem_folds_case", lambda target_path: True
+    )
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [
+        zipfile.ZipInfo("Foo.js"),
+        zipfile.ZipInfo("foo.js/bar.js"),
+        zipfile.ZipInfo("foo.js"),
+    ]
+
+    admitted = converter.inspect_members(members, target_path=tmp_path, archive="a.zip")
+
+    assert [m.filename for m in admitted] == ["Foo.js", "foo~2/foo.js"]
+    (refused,) = converter.refused_inputs
+    assert refused.member == "foo.js/bar.js"
+    assert refused.reason == archive_converter._MEMBER_UNDER_A_FILE
+
+
+def test_a_zip_with_a_file_and_a_directory_differing_in_case_extracts_both_where_case_counts(
+    test_plugin_context, monkeypatch
+):
+    """End to end on this host's filesystem, where it is case-sensitive: the
+    archive is extracted with both members in place. Skipped where the
+    filesystem folds case, since there the refusal is right."""
+    source = Path(test_plugin_context.source_dir)
+    source.mkdir(parents=True, exist_ok=True)
+    if _tmp_folds_case(source):
+        pytest.skip("the filesystem under test folds case")
+    archive = _zip(source / "a.zip", [("Foo.js", b"1\n"), ("foo.js/bar.js", b"2\n")])
+
+    converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
+
+    assert files == {"Foo.js": b"1\n", "foo.js/bar.js": b"2\n"}
+    assert converter.refused_inputs == []
 
 
 def test_members_written_to_distinct_paths_are_all_extracted(
