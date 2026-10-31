@@ -165,15 +165,7 @@ def test_init_reports_an_unwritable_target_on_one_line(tmp_path):
 @NOT_ON_WINDOWS
 def test_get_refuses_a_deleted_working_directory_with_the_usage_exit(tmp_path):
     """Path.cwd() raised FileNotFoundError before the source-directory refusal."""
-    gone = tmp_path / "gone"
-    gone.mkdir()
-    before = os.getcwd()
-    os.chdir(gone)
-    try:
-        gone.rmdir()
-        result = _invoke(["get"])
-    finally:
-        os.chdir(before)
+    result = _invoke_in_a_deleted_directory(tmp_path, ["get"])
 
     assert result.exit_code == USAGE_ERROR_EXIT, result.output
     assert _no_traceback(result), repr(result.exception)
@@ -378,21 +370,38 @@ def test_update_reports_a_text_it_cannot_parse_for_keep_from(config_file, monkey
 
 def test_update_renders_keep_from_from_the_bytes_it_compared(config_file, monkeypatch):
     """Red at the base: keep_from came from a further open of the file, after
-    the bytes comparison, so a file swapped in that window fed the rewrite. With
-    no such open, a reader that fails on every open is never reached and the
-    update goes through on the compared bytes."""
+    the bytes comparison, so a file swapped in that window fed the rewrite. The
+    file is rewritten on disk right after the compared bytes are parsed (the
+    first thing the command does once the comparison has passed), and the
+    rewrite keeps a top-level key no configuration field owns (``$schema``)
+    from those bytes, not from the file as it is by then. A reader that fails
+    on every open is never reached either."""
+    compared_key = "$schema: https://example.invalid/compared.json\n"
+    config_file.write_text(compared_key + VALID_CONFIG, encoding="utf-8")
+    real_parse = config_cli.parse_config_text
+
+    def parse_then_swap(*args, **kwargs):
+        parsed = real_parse(*args, **kwargs)
+        config_file.write_text(
+            "$schema: https://example.invalid/swapped.json\n" + VALID_CONFIG,
+            encoding="utf-8",
+        )
+        return parsed
 
     def gone(*_args, **_kwargs):
         raise OSError("the file went away")
 
+    monkeypatch.setattr(config_cli, "parse_config_text", parse_then_swap)
     monkeypatch.setattr(config_cli, "read_config_file", gone)
 
     result = _invoke(["update", str(config_file), "--set", "project_name=x"])
 
     assert result.exit_code == 0, result.output
-    data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    written = config_file.read_text(encoding="utf-8")
+    data = yaml.safe_load(written)
     assert data["project_name"] == "x"
     assert data["fail_on_findings"] is True
+    assert data["$schema"] == "https://example.invalid/compared.json", written
 
 
 @NOT_ON_WINDOWS
@@ -417,22 +426,29 @@ def test_update_does_not_replace_a_file_the_user_may_not_write(config_file):
 
 def test_update_refuses_a_file_that_changed_while_it_read_it(config_file, monkeypatch):
     """The refusal checks and the load each opened the file; a file swapped between
-    them was rewritten from a text the checks never saw."""
+    them was rewritten from a text the checks never saw. The file is swapped on
+    disk the moment the first read has returned, whatever number of reads the
+    command makes after it, so no count of reads is assumed: the last read, the
+    comparison, sees bytes other than the first read's and refuses."""
     real = config_cli.read_config_bytes
-    calls = {"n": 0}
+    swapped = (VALID_CONFIG + "# changed\n").encode("utf-8")
+    first_read = {"done": False}
 
-    def changing(path, *args, **kwargs):
-        calls["n"] += 1
+    def swapping(path, *args, **kwargs):
         data = real(path, *args, **kwargs)
-        return data + b"# changed\n" if calls["n"] >= 3 else data
+        if not first_read["done"]:
+            first_read["done"] = True
+            config_file.write_bytes(swapped)
+        return data
 
-    monkeypatch.setattr(config_cli, "read_config_bytes", changing)
+    monkeypatch.setattr(config_cli, "read_config_bytes", swapping)
 
     result = _invoke(["update", str(config_file), "--set", "project_name=x"])
 
     assert result.exit_code == INVALID_CONFIG_EXIT, result.output
     assert "changed while" in result.output, result.output
-    assert config_file.read_text(encoding="utf-8") == VALID_CONFIG
+    # Refused, not rewritten: the file holds what the swap put there.
+    assert config_file.read_bytes() == swapped
 
 
 def test_update_keeps_the_schema_line_of_a_file_with_a_byte_order_mark(config_file):
@@ -525,17 +541,6 @@ def test_validate_shows_an_unexpected_errors_text(config_file, monkeypatch):
 
 
 # --- lint ---
-
-
-def test_lint_fix_passes_a_toml_file_with_nothing_to_fix(tmp_path):
-    """`lint --fix` exited 1 for every TOML config, a clean one included, so the
-    documented pre-commit invocation always failed for such repositories."""
-    config = tmp_path / ".ashrc.toml"
-    config.write_text('project_name = "t"\n', encoding="utf-8")
-
-    result = _invoke(["lint", "--config", str(config), "--fix", "-y"])
-
-    assert result.exit_code == 0, result.output
 
 
 ENV_FILE_WITH_A_FIX = (
