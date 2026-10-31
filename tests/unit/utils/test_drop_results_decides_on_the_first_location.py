@@ -80,3 +80,75 @@ def test_control_a_result_located_only_in_the_tree_is_kept(tmp_path):
     report = _report(_result("app.py"))
 
     assert drop_results_in_ash_output_dirs(report, context, scanned_files=[]) == 0
+
+
+def _location(uri) -> SimpleNamespace:
+    return SimpleNamespace(
+        physicalLocation=SimpleNamespace(
+            root=SimpleNamespace(artifactLocation=SimpleNamespace(uri=uri))
+        )
+    )
+
+
+#: First locations that name no file: a logical location with no physical one, a
+#: physical one with no artifact, one with no uri, and one with an empty uri.
+_NO_FILE_FIRST_LOCATIONS = [
+    pytest.param(SimpleNamespace(physicalLocation=None), id="no-physical-location"),
+    pytest.param(
+        SimpleNamespace(
+            physicalLocation=SimpleNamespace(
+                root=SimpleNamespace(artifactLocation=None)
+            )
+        ),
+        id="no-artifact-location",
+    ),
+    pytest.param(_location(None), id="no-uri"),
+    pytest.param(_location(""), id="empty-uri"),
+]
+
+
+@pytest.mark.parametrize("first", _NO_FILE_FIRST_LOCATIONS)
+def test_a_first_location_that_names_no_file_is_passed_over_for_one_in_the_output(
+    tmp_path, first
+):
+    """The first location that NAMES A FILE decides, so one that names none does
+    not: the result below is about ASH's own report, and is dropped."""
+    source, output, context = _tree(tmp_path)
+    report = _report(
+        SimpleNamespace(
+            locations=[first, _location(".ash/ash_output/reports/ash.sarif")]
+        )
+    )
+
+    removed = drop_results_in_ash_output_dirs(report, context, scanned_files=[])
+
+    assert removed == 1
+    assert report.runs[0].results == []
+
+
+@pytest.mark.parametrize("first", _NO_FILE_FIRST_LOCATIONS)
+def test_control_a_first_location_that_names_no_file_then_a_tree_file_is_kept(
+    tmp_path, first
+):
+    source, output, context = _tree(tmp_path)
+    report = _report(
+        SimpleNamespace(
+            locations=[
+                first,
+                _location("app.py"),
+                _location(".ash/ash_output/reports/ash.sarif"),
+            ]
+        )
+    )
+
+    assert drop_results_in_ash_output_dirs(report, context, scanned_files=[]) == 0
+    assert len(report.runs[0].results) == 1
+
+
+@pytest.mark.parametrize("locations", [[], None])
+def test_control_a_result_with_no_location_at_all_is_kept(tmp_path, locations):
+    source, output, context = _tree(tmp_path)
+    report = _report(SimpleNamespace(locations=locations))
+
+    assert drop_results_in_ash_output_dirs(report, context, scanned_files=[]) == 0
+    assert len(report.runs[0].results) == 1
