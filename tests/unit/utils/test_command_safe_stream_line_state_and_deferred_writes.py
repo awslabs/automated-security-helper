@@ -19,8 +19,10 @@ Properties of ``utils/command_safe_stream.py`` that nothing else pins:
 - ``copy.copy`` of a wrap or of its checked view does not recurse;
 - the checked byte view hands out no ``raw`` writer.
 
-Every cell drives the real wrap over in-memory streams; the deferral cells set
-the wrap's own state where a signal handler would, so they run on every platform.
+Every test drives the real wrap over in-memory streams, so they run on every
+platform. The deferral tests make the re-entry the way a signal handler's write
+reaches the wrap, from inside a write to the target; only the writes stranded
+after a drain, which no re-entry can produce on demand, set the wrap's own state.
 """
 
 from __future__ import annotations
@@ -33,6 +35,22 @@ import pytest
 from automated_security_helper.utils import command_safe_stream as css
 
 pytestmark = pytest.mark.unit
+
+
+class _ReenteringBytes(io.BytesIO):
+    """A byte target whose next write calls back into the wrap, as a signal
+    handler that writes to the same stream does in the middle of a write."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reenter = None
+
+    def write(self, data) -> int:
+        written = super().write(data)
+        callback, self.reenter = self.reenter, None
+        if callback is not None:
+            callback()
+        return written
 
 
 class _Terminal(io.StringIO):
@@ -85,17 +103,17 @@ def test_a_pass_through_byte_write_lands_after_the_held_tail():
 def test_a_deferred_text_write_lands_after_the_held_tail():
     """A text write deferred during a byte write that left a tail held lands
     after that tail, not ahead of it."""
-    raw = io.BytesIO()
+    raw = _ReenteringBytes()
     # newline="\n": the deferred text lands through this text layer, whose
     # default newline mode writes os.linesep (\r\n on Windows), while the byte
     # writes reach raw as they are; the test compares raw bytes.
     target = io.TextIOWrapper(raw, encoding="utf-8", newline="\n", write_through=True)
     wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
+    # What a signal handler's write does in the middle of that byte write: it
+    # reaches the wrap while the write is under way, and is deferred.
+    raw.reenter = lambda: wrap.write("X\n")
     wrap.buffer.write(b"caf\xc3")
-    # What a signal handler's write inside that byte write does: deferred.
-    wrap._mid_write = True
-    wrap.write("X\n")
-    wrap._end_write(failed=False)
+    assert wrap._pending == [] and wrap._mid_write is False
     wrap.buffer.write(b"\xa9\n")
     assert raw.getvalue() == b"caf\xc3X\n\xa9\n", raw.getvalue()
 
@@ -237,16 +255,19 @@ def test_the_held_tail_lands_ahead_of_every_deferred_item():
     """Bytes a byte write left held (an incomplete character's start) land once,
     before the deferred items, byte items included: emitted only before the first
     deferred text item, the tail landed after the deferred bytes before it."""
-    raw = io.BytesIO()
+    raw = _ReenteringBytes()
     # newline="\n" for the same reason as in the deferred-text test above.
     target = io.TextIOWrapper(raw, encoding="utf-8", newline="\n", write_through=True)
     wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
+
+    def handler() -> None:
+        # A signal handler's byte write and text write, in the middle of the
+        # byte write below.
+        wrap.buffer.write(b"B2")
+        wrap.write("T\n")
+
+    raw.reenter = handler
     wrap.buffer.write(b"caf\xc3")
-    # A signal handler's byte write and text write inside that byte write.
-    wrap._mid_write = True
-    wrap.buffer.write(b"B2")
-    wrap.write("T\n")
-    wrap._end_write(failed=False)
     assert raw.getvalue() == b"caf\xc3B2T\n", raw.getvalue()
 
 
@@ -272,6 +293,33 @@ def test_copy_copy_of_the_wrap_does_not_recurse():
     target = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
     wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
     assert isinstance(copy.copy(wrap), css.CommandSafeStream)
+
+
+def test_a_copy_that_skips_the_wraps_own_copy_does_not_recurse(monkeypatch):
+    """``__copy__`` answers ``copy.copy`` before copy builds an instance of its
+    own, so the test above never reaches the attribute guard that stops the
+    recursion. With ``__copy__`` taken away, copy makes the half-built instance
+    and looks attributes up on it before its ``__dict__`` is filled in: those
+    lookups must raise AttributeError, not read ``target`` again."""
+    monkeypatch.delattr(css.CommandSafeStream, "__copy__")
+    target = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
+    duplicate = copy.copy(wrap)
+    assert isinstance(duplicate, css.CommandSafeStream)
+    assert duplicate.target is wrap.target
+
+
+def test_copy_copy_of_the_checked_view_does_not_recurse():
+    """The view has no ``__copy__``, so copy builds an instance and looks
+    attributes up on it half-made. A view that cannot be copied at all (a
+    TypeError) is an answer; a recursion is not."""
+    target = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
+    try:
+        duplicate = copy.copy(wrap.buffer)
+    except TypeError:
+        return
+    assert isinstance(duplicate, css.CommandSafeBuffer)
 
 
 def test_copy_copy_of_the_wrap_is_a_fresh_wrap_of_the_same_target():
