@@ -152,17 +152,21 @@ def _uv_lock_watch(policy: SandboxPolicy) -> List[Callable[[], None]]:
     bytes in it for a later run, or truncate it. Only bwrap could bind a private
     file over it (firejail's bind is root's, Landlock and sandbox-exec grant a
     real path), so the grant stays and this watches it. uv takes an advisory lock
-    on the file and keeps nothing in it, so a change of size or modification time
-    between the plan and the end of the spawn means something wrote to it. A
-    warning only: the file is the operator's, and ASH does not rewrite it.
+    on the file and keeps nothing in it, so a change of its inode change time,
+    size or mode between the plan and the end of the spawn means something wrote
+    to it. The change time moves with every write and every chmod, and a writer
+    cannot set it back the way it can restore the modification time. A warning
+    only: the file is the operator's, and ASH does not rewrite it. Spawns that
+    overlap each see a change made by any of them, so the warning says the file
+    changed while this scanner ran, not that this scanner changed it.
     """
-    before: Dict[Path, Tuple[int, int]] = {}
+    before: Dict[Path, Tuple[int, int, int]] = {}
     for lock in policy.uv_tool_locks:
         try:
             info = os.stat(lock)
         except OSError:
             continue
-        before[lock] = (info.st_size, info.st_mtime_ns)
+        before[lock] = (info.st_ctime_ns, info.st_size, info.st_mode)
     if not before:
         return []
 
@@ -172,15 +176,26 @@ def _uv_lock_watch(policy: SandboxPolicy) -> List[Callable[[], None]]:
                 info = os.stat(lock)
             except OSError:
                 continue
-            if (info.st_size, info.st_mtime_ns) != was:
+            now = (info.st_ctime_ns, info.st_size, info.st_mode)
+            if now != was:
+                changes = []
+                if now[1] != was[1]:
+                    changes.append(f"size {was[1]} to {now[1]} bytes")
+                if now[2] != was[2]:
+                    changes.append(
+                        f"mode {oct(was[2] & 0o7777)} to {oct(now[2] & 0o7777)}"
+                    )
+                if not changes:
+                    changes.append("rewritten with its size and mode unchanged")
                 ASH_LOGGER.warning(
                     shown_on_one_line(
-                        f"The uv tools lock {lock.as_posix()} was written while the "
-                        f"sandboxed scanner {policy.scanner_name} ran (size {was[0]} "
-                        f"to {info.st_size} bytes). The sandbox may write this one "
+                        f"The uv tools lock {lock.as_posix()} changed while the "
+                        f"sandboxed scanner {policy.scanner_name} ran "
+                        f"({'; '.join(changes)}). The sandbox may write this one "
                         "host file so that `uv tool run` can take uv's lock, and uv "
-                        "keeps nothing in it, so a change means the scanner wrote "
-                        "to it."
+                        "keeps nothing in it, so a change means a sandboxed scanner "
+                        "wrote to it; when scanners run at the same time it may "
+                        "have been another one."
                     ),
                     extra=NO_MARKUP,
                 )

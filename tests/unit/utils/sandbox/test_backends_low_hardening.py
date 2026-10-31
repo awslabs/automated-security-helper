@@ -37,6 +37,7 @@ import subprocess  # nosec B404 - CompletedProcess is built by hand, nothing run
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -2003,5 +2004,64 @@ def test_a_scanner_that_wrote_the_uv_tool_lock_is_warned_of(
 
     [warning] = lock_warnings()
     assert lock.as_posix() in warning, warning
-    assert "sandboxed scanner probe" in warning, warning
+    assert "changed while the sandboxed scanner probe ran" in warning, warning
+    assert "was written" not in warning, warning
+    assert "may have been another one" in warning, warning
     assert "MARKER-left-for-a-later-run" not in warning, warning
+
+
+@POSIX
+@pytest.mark.parametrize("kind", _BACKEND_KINDS)
+@pytest.mark.parametrize("change", ["chmod", "rewrite-with-times-restored"])
+def test_a_change_to_the_uv_tool_lock_that_keeps_its_size_and_time_is_warned_of(
+    layout, monkeypatch, caplog, kind, change
+):
+    """The size and the modification time are the two things a writer can leave as
+    they were: a chmod touches neither, and a rewrite of the same length can put the
+    modification time back. The inode change time and the mode are what the watch
+    compares as well, so both draw the warning; an untouched lock draws none (the
+    control)."""
+    lock = layout.tmp / "tools" / ".lock"
+    lock.parent.mkdir()
+    lock.write_text("AAAA")
+    lock.chmod(0o644)
+    policy = _policy(layout, uv_tool_locks=(lock,))
+
+    def lock_warnings():
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if "uv tools lock" in record.getMessage()
+        ]
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        plan = _plan_of(kind, layout, monkeypatch, policy, {})
+        plan.run_cleanup()
+        assert lock_warnings() == []
+
+        plan = _plan_of(kind, layout, monkeypatch, policy, {})
+        # The inode change time comes from the kernel's coarse clock, which ticks
+        # every few milliseconds: a write in the same tick as the plan's reading
+        # would leave it equal.
+        time.sleep(0.1)
+        if change == "chmod":
+            lock.chmod(0o600)
+        else:
+            before = lock.stat()
+            lock.write_text("BBBB")
+            os.utime(lock, ns=(before.st_atime_ns, before.st_mtime_ns))
+            after = lock.stat()
+            assert (after.st_size, after.st_mtime_ns) == (
+                before.st_size,
+                before.st_mtime_ns,
+            )
+        plan.run_cleanup()
+
+    [warning] = lock_warnings()
+    assert lock.as_posix() in warning, warning
+    assert "changed while the sandboxed scanner probe ran" in warning, warning
+    if change == "chmod":
+        assert "mode 0o644 to 0o600" in warning, warning
+    else:
+        assert "rewritten with its size and mode unchanged" in warning, warning
+    assert "BBBB" not in warning, warning
