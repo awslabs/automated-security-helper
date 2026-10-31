@@ -260,6 +260,31 @@ def test_a_refused_target_records_its_own_end_time(context):
     assert scanner.end_time > after_the_source
 
 
+def test_a_converted_target_refused_for_its_tree_exclusions_records_its_own_run(
+    context,
+):
+    """The tree-exclusion refusal for a converted target ran before the exit code
+    was cleared and outside the handler that records the end time, so a converted
+    target refused there kept the source target's end time (an end before its
+    start) and reported exit code 0 for a tool that never started. The converted
+    target holds a file: an empty one is skipped before the refusals run."""
+    scanner, _ = _scan(
+        context, {"stdout": "", "stderr": "", "returncode": 0}, SNYK_SARIF
+    )
+    after_the_source = scanner.end_time
+    assert after_the_source is not None
+    (context.work_dir / "converted.py").write_text("print(2)\n")
+    (context.work_dir / ".dcignore").write_text("converted.py\n")
+
+    with pytest.raises(ScannerError, match="honor_tree_exclusions"):
+        scanner.scan(target=context.work_dir, target_type="converted")
+
+    assert scanner.exit_code is None
+    assert scanner.end_time is not after_the_source
+    assert scanner.start_time is not None
+    assert scanner.end_time >= scanner.start_time
+
+
 # --- the results file and the record --------------------------------------------------
 
 

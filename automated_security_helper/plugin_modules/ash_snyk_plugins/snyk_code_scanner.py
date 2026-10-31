@@ -633,31 +633,35 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             return False
 
         honor_gitignore = honors_ignore_files(getattr(self.context, "config", None))
-        if not self.config.options.honor_tree_exclusions and target_type != "source":
-            # The converted target is tested where ASH wrote it, so the exclusion
-            # files there are the ones snyk reads. The source target is tested as
-            # a copy of the scan set and is checked once the copy exists (below):
-            # a file outside the scan set (.git, an ignored directory, ASH's
-            # output) never reaches snyk, so it excludes nothing. A .gitignore
-            # counts when the scan set does not honor it, since then the files it
-            # names are tested by ASH and would be left out by snyk.
-            excluding = tree_exclusion_files(
-                Path(target), gitignore_excludes=not honor_gitignore
-            )
-            if excluding:
-                raise ScannerError(self._exclusion_refusal(excluding, Path(target)))
-
+        # No exit code until snyk returns one, as the template's scan() has it: a
+        # target refused before the tool starts reports no exit code, not the 0
+        # set above. The refusals below are the first such path, the tree
+        # exclusion refusal included.
+        self.exit_code = None
         # snyk has no option that leaves out a path, so before anything is copied or
         # sent, for either target, it is not given a directory that holds ASH's own
         # output directory, a link leaving it, or a file the operator's ignore paths
         # match. The copy of the source target leaves the same files out as a second
         # guard; the converted target is tested where ASH wrote it, so these refusals
         # are the only guard it has.
-        # No exit code until snyk returns one, as the template's scan() has it: a
-        # target refused before the tool starts reports no exit code, not the 0
-        # set above. The refusals below are the first such path.
-        self.exit_code = None
         try:
+            if (
+                not self.config.options.honor_tree_exclusions
+                and target_type != "source"
+            ):
+                # The converted target is tested where ASH wrote it, so the
+                # exclusion files there are the ones snyk reads. The source target
+                # is tested as a copy of the scan set and is checked once the copy
+                # exists (below): a file outside the scan set (.git, an ignored
+                # directory, ASH's output) never reaches snyk, so it excludes
+                # nothing. A .gitignore counts when the scan set does not honor
+                # it, since then the files it names are tested by ASH and would be
+                # left out by snyk.
+                excluding = tree_exclusion_files(
+                    Path(target), gitignore_excludes=not honor_gitignore
+                )
+                if excluding:
+                    raise ScannerError(self._exclusion_refusal(excluding, Path(target)))
             self._refuse_output_dir_inside(Path(target))
             self._refuse_links_leaving(Path(target))
             self._refuse_ignored_files(Path(target), global_ignore_paths)
