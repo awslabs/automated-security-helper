@@ -53,7 +53,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -1709,27 +1708,9 @@ def test_a_probe_the_system_could_not_run_does_not_make_the_scanner_missing(
     assert [m for m in messages if "could not check" in m], messages
 
 
-@pytest.mark.skipif(
-    shutil.which("trivy") is None, reason="needs a trivy executable on PATH"
-)
-def test_the_real_probe_reads_an_empty_cache_as_a_missing_database(
-    tmp_path, monkeypatch
-):
-    """The tests above replace the probe. This one runs ``trivy version`` against a
-    cache directory with no database in it and expects the scanner to land as
-    MISSING: the probe's ``ContentDatabaseAbsent`` is a ``ValueError``, the arm the
-    check reads as no database."""
-    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
-    empty_cache = tmp_path / "cache" / "empty"
-    empty_cache.mkdir(parents=True)
-    monkeypatch.setattr(TrivyRepoScanner, "_trivy_cache_dir", lambda self: empty_cache)
-    messages, logging_patch = _logged(scanner)
-
-    with logging_patch:
-        assert scanner._offline_database_available() is False
-
-    assert "no vulnerability database" in scanner.dependency_unavailable_reason
-    assert not [m for m in messages if "could not check" in m], messages
+# The probe run against a real trivy binary is in
+# tests/integration/scanners/test_trivy_offline_database_probe_real_binary.py: the
+# tests here replace the probe, so they do not depend on the machine they run on.
 
 
 # --- which lockfile entry a result names -------------------------------------------
