@@ -193,6 +193,53 @@ def test_the_config_warnings_name_the_config_as_configured_not_as_resolved(
         assert "zz-home" not in message and "zz-elsewhere" not in message, message
 
 
+def _symlinked_source_context(root: Path) -> tuple[PluginContext, Path]:
+    """A context whose source directory is a link to the real repository, as a
+    macOS ``/var`` temporary directory or a symlinked CI workspace is."""
+    real = root / "zz-real-repo"
+    real.mkdir()
+    link = root / "repo-link"
+    link.symlink_to(real, target_is_directory=True)
+    ctx = PluginContext(
+        source_dir=link,
+        output_dir=root / "out",
+        work_dir=root / "out" / "converted",
+        config=get_default_config(),
+    )
+    for directory in (ctx.output_dir, ctx.work_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    (real / "requirements.txt").write_text("requests==2.19.0\n")
+    return ctx, real
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+def test_an_in_tree_config_is_not_handed_to_the_refresh_when_the_source_is_a_link(
+    root,
+):
+    """The config is resolved before it is judged, and the source directory is
+    named by a link. Compared as spelled, the in-tree file read as outside the
+    tree and went to the database refresh, which runs outside the sandbox."""
+    ctx, real = _symlinked_source_context(root)
+    config = real / "grype.yaml"
+    config.write_text("only-fixed: true\n", encoding="utf-8")
+
+    scanner = _grype(ctx, config_file=str(config))
+
+    assert scanner._content_db_operator_config is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+def test_control_a_config_outside_a_linked_source_is_handed_to_the_refresh(root):
+    ctx, _ = _symlinked_source_context(root)
+    config = root / "zz-operator" / "grype.yaml"
+    config.parent.mkdir()
+    config.write_text("only-fixed: true\n", encoding="utf-8")
+
+    scanner = _grype(ctx, config_file=str(config))
+
+    assert scanner._content_db_operator_config == config
+
+
 # --- the configured path ------------------------------------------------------------
 
 
