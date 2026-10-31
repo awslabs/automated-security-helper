@@ -395,6 +395,60 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
 
         assert registry.get_scan_count() == 1
 
+    def test_a_finished_scan_inside_the_tree_holds_its_results_against_the_removal(
+        self, tmp_path
+    ):
+        """A project scan that ran and ended inside the root scan's output tree
+        wrote files the root scan's removal would delete with the tree, so the
+        removal is refused for it. The root scan's own results sit above the
+        project's directory and are not the project scan's: its progress does
+        not read as superseded."""
+        registry = ScanRegistry()
+        old, project_scan, _project, inner = self._root_scan_and_inner_project(
+            registry, tmp_path
+        )
+        outer = inner.parent.parent
+        outer.mkdir(parents=True, exist_ok=True)
+        (outer / "ash_aggregated_results.json").write_text(
+            json.dumps(_results_document("bandit")), encoding="utf-8"
+        )
+        registry.update_scan_status(project_scan, MCScanStatus.RUNNING)
+        registry.update_scan_status(project_scan, MCScanStatus.COMPLETED)
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: ran.append(1) or True
+        )
+
+        assert reason == "a later scan holds its results in this output directory"
+        assert removed is False
+        assert ran == []
+        progress = registry.check_scan_progress(old)
+        assert progress["output_superseded"] is False
+        assert "bandit" in progress["scanners"]
+
+    def test_a_finished_scan_beside_the_tree_is_not_a_later_scan_of_it(self, tmp_path):
+        """By path component: a scan that wrote to ``<output>-backup`` shares
+        nothing with ``<output>``, so it holds nothing against the removal."""
+        registry = ScanRegistry()
+        root = tmp_path / "ws"
+        root.mkdir()
+        beside_source = tmp_path / "beside"
+        beside_source.mkdir()
+        old = _register(registry, root, tmp_path / "out")
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        beside = _register(registry, beside_source, tmp_path / "out-backup")
+        registry.update_scan_status(beside, MCScanStatus.RUNNING)
+        registry.update_scan_status(beside, MCScanStatus.COMPLETED)
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: True
+        )
+
+        assert registry.get_scan(old).later_scan_ids == []
+        assert reason is None
+        assert removed is True
+
     def test_the_latest_scan_of_a_directory_removes_off_the_lock(self, tmp_path):
         registry = ScanRegistry()
         _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)

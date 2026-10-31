@@ -711,6 +711,35 @@ class ScanRegistry:
                 holding.append(later)
         return holding
 
+    def _later_scans_inside(self, entry: ScanRegistryEntry) -> List[str]:
+        """The later scans that wrote inside ``entry``'s output tree, oldest first.
+
+        A later scan whose output directory lies INSIDE this one (a project scan
+        under the output directory of a scan of the workspace root) is not in
+        ``later_scan_ids``, which records only scans of the very same directory
+        because its other reader, ``check_scan_progress``, hides this scan's own
+        files once a later scan has taken the directory over: a project scan
+        under ``<output>/projects`` leaves the files at the top of ``<output>``
+        as they were. Removing ``entry``'s tree does delete the project scan's
+        files, so the removal reads this as well (the caller holds the lock).
+        The later scan counts when it claimed its tree (it ran, as
+        :meth:`_record_supersession` reads it) and did not put the previous
+        results back.
+        """
+        inside: List[str] = []
+        for other in self._registry.values():
+            if other.scan_id == entry.scan_id:
+                continue
+            if other.registration_seq <= entry.registration_seq:
+                continue
+            if entry.canonical_output_directory not in (
+                other.canonical_output_directory.parents
+            ):
+                continue
+            if other.claimed_output_tree and not other.output_holds_previous_results:
+                inside.append(other.scan_id)
+        return inside
+
     def _forget_later_scan(self, removed: ScanRegistryEntry) -> None:
         """Drop ``removed`` from the earlier entries' ``later_scan_ids`` when its
         files are not what the tree holds: it put the previous results back. A
@@ -1346,7 +1375,7 @@ class ScanRegistry:
                         ),
                         False,
                     )
-            if self._later_scans_holding(entry):
+            if self._later_scans_holding(entry) or self._later_scans_inside(entry):
                 return (
                     "a later scan holds its results in this output directory",
                     False,
