@@ -159,9 +159,9 @@ def _command_line_bound_text(platform: str = os.name) -> str:
     """The bound ``_exclude_fits`` applies on ``platform``, for an error message."""
     if platform == "nt":
         return (
-            f"the {_WINDOWS_COMMAND_LINE_LIMIT}-character command line Windows "
-            f"allows, less the {_WINDOWS_COMMAND_LINE_MARGIN} characters kept for "
-            "the uv wrapper that runs bandit"
+            f"the {_WINDOWS_COMMAND_LINE_LIMIT}-unit (UTF-16) command line "
+            f"Windows allows, less the {_WINDOWS_COMMAND_LINE_MARGIN} units kept "
+            "for the uv wrapper that runs bandit"
         )
     return f"one command-line argument ({_EXCLUDE_ARGUMENT_LIMIT} bytes)"
 
@@ -1785,8 +1785,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         if left_out:
             self._plugin_log(
                 f"{left_out} globs for the global ignore paths are not in bandit's "
-                f"--exclude, which would not fit {_command_line_bound_text()}; "
-                "bandit reads the files they cover, and ASH drops their findings.",
+                "--exclude: it stops at the first glob that would not fit "
+                f"{_command_line_bound_text()}, and the ones after it are left out "
+                "with it. bandit reads the files they cover, and ASH drops their "
+                "findings.",
                 target_type=target_type,
                 level=logging.WARNING,
             )
@@ -2034,9 +2036,14 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             # files were "not excluded", so the operator went looking for one.
             # The cause is named with an example.
             failed = [path for path in unexcluded if path in skipped_all]
+            # The example is named from the scanned directory, as the operator
+            # knows the file, and not by the absolute path of this host.
+            example = failed[0] if failed else ""
+            if example.startswith(f"{root}/"):
+                example = example[len(root) + 1 :]
             cause = (
                 f"; bandit could not parse {len(failed)} of them (for example "
-                f"{failed[0]!r})"
+                f"{example!r})"
                 if failed
                 else ""
             )

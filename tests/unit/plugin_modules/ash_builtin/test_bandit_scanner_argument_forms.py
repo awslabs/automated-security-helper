@@ -292,6 +292,17 @@ def test_elsewhere_one_argument_is_bounded_on_its_own():
     assert _exclude_fits("--exclude=vendor", [], os.name)
 
 
+def test_the_windows_bound_is_worded_in_utf16_units_not_characters():
+    """The bound is counted in UTF-16 units (``_command_line_units``), and a
+    character outside the Basic Multilingual Plane is two of them, so the text
+    that names the bound says units."""
+    text = bandit_scanner._command_line_bound_text("nt")
+    assert "32767-unit (UTF-16)" in text
+    assert "2048 units" in text
+    assert "character" not in text
+    assert "bytes" in bandit_scanner._command_line_bound_text("posix")
+
+
 def test_the_required_entries_are_judged_on_the_resolved_command(tmp_path, monkeypatch):
     """The bound is measured beside the other arguments of the resolved
     command, and the token the scan passes is the one that was judged: the
