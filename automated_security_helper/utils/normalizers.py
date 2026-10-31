@@ -111,8 +111,9 @@ def get_normalized_filename(
 
     Args:
         str_to_normalize (str | Path): The string to normalize.
-        fold_case (bool): Escape letters that have a lower-case form, so the
-            result is unique on a case-insensitive filesystem too.
+        fold_case (bool): Escape every letter that is not its own case folding,
+            or whose upper-case form does not fold back to it, so the result is
+            unique on a case-insensitive filesystem too.
         max_bytes (int | None): The most bytes the name may take, at least 16
             when given. None puts no limit on it.
 
