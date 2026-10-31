@@ -1043,12 +1043,18 @@ def _session_config_refusal(error: Exception, operation: str) -> Dict[str, Any]:
     either: the file is gone and not written again under that removal, so it is
     answered as the other tools answer the hold, under the error's own
     ``error_type`` and with exit 1, for the client to send the request again.
+    The type is written as the constant the error class carries, because the
+    documentation reader (``scripts/_mcp_contract.py``) reads a module constant
+    and not an attribute of this function's parameter.
     """
     if getattr(error, "workspace_unwritable", False):
         from automated_security_helper.cli.mcp_tools import _bound_profile_unavailable
 
         return _bound_profile_unavailable(error, operation)
-    from automated_security_helper.cli.mcp.sessions import SessionWorkspaceBusyError
+    from automated_security_helper.cli.mcp.sessions import (
+        SESSION_WORKSPACE_BUSY,
+        SessionWorkspaceBusyError,
+    )
 
     if isinstance(error, SessionWorkspaceBusyError):
         from automated_security_helper.cli.mcp_tools import (
@@ -1058,7 +1064,7 @@ def _session_config_refusal(error: Exception, operation: str) -> Dict[str, Any]:
         response = _error_response(
             error, operation, exit_code=REFUSED_INTERNAL_EXIT_CODE
         )
-        response["error_type"] = error.error_type
+        response["error_type"] = SESSION_WORKSPACE_BUSY
         return response
     return _error_response(
         error,
