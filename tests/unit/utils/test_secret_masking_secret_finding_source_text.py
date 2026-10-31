@@ -501,9 +501,8 @@ class TestAnOverlappingFindingsSourceText:
         shown = getattr(model.sarif.runs[0].results[1].properties, "snippet")
         assert shown == ((MASKED_LINE + "\n") * 3 if masked_whole else snippet)
 
-    def test_a_snippet_is_placed_by_the_first_location_only(self):
-        """The snippet is the first location's code; a later location in a file
-        with a secret finding says nothing about where the snippet's lines are."""
+    def _two_locations(self, second_uri, second_line):
+        """A result whose snippet is harmless code, with a second location."""
         result = _result(
             "B404",
             "lib.py",
@@ -515,12 +514,38 @@ class TestAnOverlappingFindingsSourceText:
         result["locations"].append(
             {
                 "physicalLocation": {
-                    "artifactLocation": {"uri": "app.py"},
-                    "region": {"startLine": 2, "endLine": 2},
+                    "artifactLocation": {"uri": second_uri},
+                    "region": {"startLine": second_line, "endLine": second_line},
                 }
             }
         )
-        model = _results(self._secret(), result)
+        return _results(self._secret(), result)
+
+    def test_a_snippet_is_masked_when_a_later_location_is_on_a_secret_line(self):
+        """Which location a ``properties.snippet`` belongs to depends on the tool,
+        so a result whose second location is exactly the line a secret finding
+        reports has its snippet masked whole, as the suite does wherever a
+        placement is unclear."""
+        model = self._two_locations("app.py", 2)
+
+        mask_secrets_in_results(model)
+
+        neighbor = model.sarif.runs[0].results[1]
+        assert getattr(neighbor.properties, "snippet") == MASKED_LINE + "\n"
+
+    def test_a_snippet_is_kept_when_no_location_is_on_a_secret_line(self):
+        """Control: the second location is in the secret's file, away from its
+        line."""
+        model = self._two_locations("app.py", 9)
+
+        mask_secrets_in_results(model)
+
+        neighbor = model.sarif.runs[0].results[1]
+        assert getattr(neighbor.properties, "snippet") == OTHER_LINE
+
+    def test_a_snippet_is_kept_when_a_later_location_is_in_another_file(self):
+        """Control: a file with no secret finding says nothing about the snippet."""
+        model = self._two_locations("other.py", 2)
 
         mask_secrets_in_results(model)
 

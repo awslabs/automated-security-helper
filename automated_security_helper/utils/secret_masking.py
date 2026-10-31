@@ -1624,21 +1624,26 @@ def _line_spans(physical: Any) -> List[Tuple[Optional[int], Optional[int]]]:
     return spans
 
 
+def _reaches_a_secret(physical: Any, index: _SecretIndex) -> bool:
+    """Whether a physical location lies on a line a secret finding reports."""
+    placed = index.lines_for(_uri_of(physical, index))
+    if placed is None:
+        return False
+    whole, lines = placed
+    if whole:
+        return True
+    for first, last in _line_spans(physical):
+        if first is None or lines.overlaps(first, last if last is not None else first):
+            return True
+    return False
+
+
 def _overlaps_a_secret(result: Any, index: _SecretIndex) -> bool:
     """Whether a location of ``result`` lies on a line a secret finding reports."""
-    for physical in _physical_locations_of(result, related=True):
-        placed = index.lines_for(_uri_of(physical, index))
-        if placed is None:
-            continue
-        whole, lines = placed
-        if whole:
-            return True
-        for first, last in _line_spans(physical):
-            if first is None or lines.overlaps(
-                first, last if last is not None else first
-            ):
-                return True
-    return False
+    return any(
+        _reaches_a_secret(physical, index)
+        for physical in _physical_locations_of(result, related=True)
+    )
 
 
 def _overlapping_values(result: Any, index: _SecretIndex) -> Set[str]:
@@ -2290,16 +2295,20 @@ def _mask_tree(
                             (True, _LineRanges()),
                         )
         elif "ruleId" in fields and "locations" in fields:
-            # A result's properties.snippet is its first location's code, numbered
-            # from that location's first line when it spans no more lines than
-            # the region does. A snippet with more lines than the region (context
-            # lines above it) cannot be placed: the secret line could be any of
-            # them, so it is masked whole when any line it could cover is one a
-            # secret finding reports.
+            # A result's properties.snippet is the code of one of its locations,
+            # and which one depends on the tool. It is numbered from the first
+            # location's first line when it spans no more lines than the region
+            # does. A snippet with more lines than the region (context lines
+            # above it) cannot be placed: the secret line could be any of them,
+            # so it is masked whole when any line it could cover is one a secret
+            # finding reports. A snippet of a result with several locations is
+            # masked whole as well when any later location lies on such a line.
             properties = getattr(node, "properties", None)
             snippet = _extra_of(properties).get("snippet")
-            physical = next(iter(_physical_locations_of(node)), None)
+            locations = list(_physical_locations_of(node))
+            physical = locations[0] if locations else None
             if isinstance(snippet, str) and physical is not None:
+                masked = snippet
                 placed = index.lines_for(_uri_of(physical, index))
                 if placed is not None:
                     whole, lines = placed
@@ -2321,8 +2330,12 @@ def _mask_tree(
                         masked = _mask_text_whole(snippet)
                     else:
                         masked = _mask_lines(snippet, first, whole, lines)
-                    if masked != snippet:
-                        _set_extra(properties, "snippet", masked)
+                # Which location a snippet belongs to depends on the tool, so one
+                # that lies on a reported line, whichever it is, masks it whole.
+                if any(_reaches_a_secret(later, index) for later in locations[1:]):
+                    masked = _mask_text_whole(snippet)
+                if masked != snippet:
+                    _set_extra(properties, "snippet", masked)
             # A fenced code block in the message of a finding that overlaps a
             # secret finding's lines is that finding's excerpt of the same
             # lines, with no line numbers to place it by: masked whole, as its
