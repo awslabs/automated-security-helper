@@ -461,8 +461,43 @@ class TestGetScanProgressInfo:
         # stats themselves come back as they were recorded.
         assert info["findings_summary"]["critical"] == 7
         assert sum(info["findings_summary"].values()) == 7
+        # No total beside the buckets: the count is what they add up to, where
+        # it read 0 (the SARIF has no results) beside 7 critical.
+        assert info["findings_count"] == 7
         assert info["summary_stats"] == {"critical": 7}
         assert info["completion_time"] == "2024-05-05T00:00:00"
+
+    def test_summary_stats_that_name_no_bucket_leave_the_grading_to_the_sarif(
+        self, tmp_path
+    ):
+        """Stats with a total_findings and an actionable and no severity bucket
+        gave all-zero buckets while the SARIF results sat ungraded."""
+        out = tmp_path / "ash_output"
+        _write_results(
+            out,
+            {
+                "sarif": {
+                    "runs": [
+                        {
+                            "results": [
+                                {"ruleId": "B105", "level": "error"},
+                                {"ruleId": "B303", "level": "note"},
+                            ]
+                        }
+                    ]
+                },
+                "metadata": {
+                    "summary_stats": {"total_findings": 3, "actionable": 2},
+                },
+                "scanner_results": {"bandit": {"status": "PASSED"}},
+            },
+        )
+
+        info = get_scan_progress_info(out)
+
+        assert info["findings_summary"]["critical"] == 1
+        assert info["findings_summary"]["low"] == 1
+        assert info["findings_count"] == 2
 
     def test_a_malformed_aggregated_file_is_reported_as_an_error_status(self, tmp_path):
         out = tmp_path / "ash_output"

@@ -1845,16 +1845,22 @@ def _completed_findings_summary(
 
     From the summary stats the results document carries when it has them: the
     ``severity_counts`` they nest, or the flat bucket keys an older document puts
-    at the top. Without them, from the SARIF results.
+    at the top. Without them, from the SARIF results; and likewise when the
+    stats name no bucket at all (``total_findings`` and ``actionable`` alone, say),
+    which used to give all-zero buckets beside SARIF results that were never
+    graded.
     """
     summary = empty_severity_counts()
     if summary_stats:
         nested = summary_stats.get("severity_counts")
         recorded = nested if isinstance(nested, dict) else summary_stats
+        named_a_bucket = False
         for severity, value in recorded.items():
             if severity in summary and isinstance(value, int):
                 summary[severity] = value
-        return summary
+                named_a_bucket = True
+        if named_a_bucket:
+            return summary
 
     from automated_security_helper.utils.sarif_utils import is_result_suppressed
 
@@ -1873,17 +1879,22 @@ def _completed_findings_count(
 ) -> int:
     """The non-suppressed findings of a completed scan: SummaryStats' ``total``.
 
-    From ``summary_stats.total`` when the document carries one; else the SARIF
-    results less the suppressed ones, which is what the buckets of
-    ``findings_summary`` other than ``suppressed`` add up to. The running view
-    reports the same quantity (the scanners' non-suppressed recorded counts),
-    so a scan's count no longer rises by its suppressed findings the moment it
-    completes.
+    From ``summary_stats.total`` when the document carries one; else what the
+    buckets of ``findings_summary`` other than ``suppressed`` add up to: the SARIF
+    results less the suppressed ones when the buckets were graded from them, and
+    the recorded buckets' sum when they came from the summary stats. Taken from
+    the SARIF alone, a document whose stats gave ``{"critical": 7}`` and no
+    ``total`` read 7 critical beside a count of 0 (``findings`` is the SARIF
+    results, and only the stats' buckets were counted). The running view reports
+    the same quantity (the scanners' non-suppressed recorded counts), so a scan's
+    count no longer rises by its suppressed findings the moment it completes.
     """
     total = summary_stats.get("total")
     if isinstance(total, int) and not isinstance(total, bool) and total >= 0:
         return total
-    return max(len(findings) - findings_summary.get("suppressed", 0), 0)
+    return sum(
+        value for bucket, value in findings_summary.items() if bucket != "suppressed"
+    )
 
 
 def _partial_progress_info(output_dir: Path) -> Dict[str, Any]:
