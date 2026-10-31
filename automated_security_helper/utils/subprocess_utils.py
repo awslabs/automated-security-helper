@@ -1201,6 +1201,17 @@ def _own_path(path: str) -> str:
     return os.path.normcase(os.path.abspath(path))
 
 
+def _interpreter_family(path: str) -> str:
+    """The file name of ``path`` without a version, a ``w`` or ``.exe``.
+
+    ``python``, ``python3``, ``python3.12``, ``pythonw.exe`` and ``Python.EXE``
+    (the path is case-folded on Windows first) all read ``python``; a tool's
+    name, such as ``ruff`` or ``python-lint``, reads as itself.
+    """
+    name = os.path.basename(path).removesuffix(".exe")
+    return name.rstrip("0123456789.w")
+
+
 def _is_running_interpreter(candidate: str) -> bool:
     """The Python running ASH: already started, so refusing it protects nothing.
 
@@ -1214,9 +1225,13 @@ def _is_running_interpreter(candidate: str) -> bool:
     that is the same file (``python3`` next to the ``python`` ASH runs from, in
     the tree's own venv when ASH is installed there) reads the same pyvenv.cfg,
     so it IS the running interpreter under another name, and refusing it read a
-    tool that is already running as MISSING. A link in another directory, such
-    as another venv's link to the base interpreter, stays refused, and so does
-    a tool installed beside the interpreter inside a scanned tree.
+    tool that is already running as MISSING. Only a python-named sibling is
+    exempt: a link beside the interpreter that is named for another tool
+    (``<tree>/.venv/bin/ruff`` pointing at python) is refused, because the
+    interpreter would run with that tool's arguments. A link in another
+    directory, such as another venv's link to the base interpreter, stays
+    refused, and so does a tool installed beside the interpreter inside a
+    scanned tree.
     """
     if not sys.executable:
         return False
@@ -1225,6 +1240,8 @@ def _is_running_interpreter(candidate: str) -> bool:
     if path == own:
         return True
     if os.path.dirname(path) != os.path.dirname(own):
+        return False
+    if _interpreter_family(path) not in ("python", _interpreter_family(own)):
         return False
     try:
         return os.path.samefile(path, own)
