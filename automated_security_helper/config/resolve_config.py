@@ -2999,6 +2999,7 @@ _CONFINED_SANDBOX_SETTINGS = (
     ("sandbox", "extra_read_paths"),
     ("sandbox", "read_path_scanners"),
     ("sandbox", "env_scanners"),
+    ("sandbox", "environment"),
 )
 
 
@@ -6264,7 +6265,8 @@ _NARROWED_SANDBOX_SETTING = "network_scanners"
 #: rewrite to the mode already.
 _REWRITE_KEPT_SANDBOX_SETTING = "mode"
 
-#: The lists that only add access. A list the patch rewrites is kept to the entries
+#: The lists that only add access (``environment`` is one: each entry passes or sets
+#: a variable in every sandboxed scanner). A list the patch rewrites is kept to the entries
 #: that both the list the file wrote and the list the patch leaves name, so it still
 #: replaces the trusted base's list and the scan gets no path that neither names. One
 #: the file wrote and the patch removes is left out, and the trusted base's list
@@ -6272,7 +6274,7 @@ _REWRITE_KEPT_SANDBOX_SETTING = "mode"
 #: nothing, unless the patch only inserts an entry, which takes nothing from the
 #: trusted list (``_own_grants_after_patch``).
 _ADDITIVE_SANDBOX_SETTINGS = frozenset(
-    {"extra_read_paths", "read_path_scanners", "env_scanners"}
+    {"extra_read_paths", "read_path_scanners", "env_scanners", "environment"}
 )
 
 #: What a patch leaves of a list setting when it removes the setting itself.
@@ -6655,6 +6657,8 @@ def _warn_grant_list_limit(
                 "To keep a trusted path, spell it exactly as the trusted list "
                 "does; a relative path there is already absolute."
             )
+        elif setting in _ENTRY_GRANT_SETTINGS:
+            hint = "To keep a trusted entry, write it exactly as the trusted list does."
         else:
             hint = (
                 "To keep a trusted scanner, name it exactly as the trusted list does."
@@ -6669,8 +6673,13 @@ def _warn_grant_list_limit(
     ASH_LOGGER.warning(text, extra=NO_MARKUP)
 
 
-#: The grant lists whose entries are paths; the others hold scanner names.
+#: The grant lists whose entries are paths; the others hold scanner names, except
+#: the entry grants below.
 _PATH_GRANT_SETTINGS = frozenset({"extra_read_paths"})
+
+#: The grant lists whose entries are neither paths nor scanner names: environment
+#: variables, as ``NAME`` or ``NAME=value``.
+_ENTRY_GRANT_SETTINGS = frozenset({"environment"})
 
 
 def _entries(count: int) -> str:

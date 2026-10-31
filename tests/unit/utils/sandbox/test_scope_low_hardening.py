@@ -16,7 +16,9 @@ apart from the refusals; a registration that raises runs the plan's cleanup; the
 sweep is the cleanup's first step and passes over the plan's private directories; a
 record that raises releases
 each root once; and a DEBUG record names no argv when the plugin's values could not
-be read, saying for a class scope that none exist. Nothing runs a backend.
+be read, saying for a class scope that none exist; and the scope carries the
+sandbox settings' environment list to the policy of every spawn. Nothing runs a
+backend.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.sandbox import scope
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
 from automated_security_helper.utils.sandbox.policy import (
+    DEFAULT_ENVIRONMENT,
     SandboxRequirements,
     SandboxUnavailable,
 )
@@ -539,3 +542,40 @@ def test_the_record_of_a_class_scope_says_it_carries_no_values(
     assert "the-secret" not in record
     assert "carries no redaction values" in record
     assert "could not be read" not in record
+
+
+def test_the_scope_reads_the_environment_list_from_the_sandbox_settings(
+    fresh, tmp_path
+):
+    plugin = _Plugin.model_construct(config=_Cfg())
+
+    configured = scope.scanner_sandbox_scope(
+        plugin, _context(tmp_path, environment=["MY_VAR", "OTHER=1"]), None
+    )
+    default = scope.scanner_sandbox_scope(plugin, _context(tmp_path), None)
+
+    assert configured is not None and default is not None
+    assert configured.environment == ["MY_VAR", "OTHER=1"]
+    assert default.environment == list(DEFAULT_ENVIRONMENT)
+
+
+def test_the_scope_hands_its_environment_list_to_the_policy_of_every_spawn(
+    tmp_path, monkeypatch
+):
+    seen: list = []
+
+    class _Built(Exception):
+        pass
+
+    def building(*args, **kwargs):
+        seen.append(kwargs["environment"])
+        raise _Built
+
+    monkeypatch.setattr(scope, "build_scanner_policy", building)
+
+    for fields in ({"environment": ["MY_VAR", "OTHER=1"]}, {}):
+        with pytest.raises(_Built):
+            scope._plan_spawn(_scope(tmp_path, **fields), ["tool"], {}, None)
+
+    # A scope with no list leaves the policy its shipped default.
+    assert seen == [["MY_VAR", "OTHER=1"], None]

@@ -12,6 +12,9 @@ being asked. These sandbox settings grant scanners access:
 * ``sandbox.read_path_scanners`` and ``sandbox.env_scanners`` let the scanners they
   name have the read paths and environment variables their own options ask for
   (see ``SandboxRequirements.read_paths_require_grant`` and ``env_requires_grant``).
+* ``sandbox.environment`` is the list of environment variables every sandboxed
+  scanner is passed; a ``NAME=value`` entry sets a variable (``LD_PRELOAD``) in all of
+  them, so it is a grant like the others.
 
 A config file can't make these grants if it is inside any git checkout, meaning a
 directory at or above it, by its own path or its resolved path, holds a git-shaped
@@ -1440,7 +1443,12 @@ def confine_sandbox_grants(
     ignored = []
     if sandbox.network_scanners != trusted.network_scanners:
         ignored.append("sandbox.network_scanners")
-    for key in ("extra_read_paths", "read_path_scanners", "env_scanners"):
+    for key in (
+        "extra_read_paths",
+        "read_path_scanners",
+        "env_scanners",
+        "environment",
+    ):
         if list(getattr(sandbox, key)) != list(getattr(trusted, key)):
             ignored.append(f"sandbox.{key}")
     if trusted.mode != "off" and sandbox.mode != trusted.mode:
@@ -1459,6 +1467,7 @@ def confine_sandbox_grants(
     sandbox.extra_read_paths = list(trusted.extra_read_paths)
     sandbox.read_path_scanners = list(trusted.read_path_scanners)
     sandbox.env_scanners = list(trusted.env_scanners)
+    sandbox.environment = list(trusted.environment)
     sandbox.network_limit = list(limit) if limit is not None else None
     if ignored:
         if source is not None and not source.located:

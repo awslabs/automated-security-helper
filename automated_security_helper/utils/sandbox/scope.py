@@ -96,6 +96,9 @@ class SandboxScope:
     network_limit: Optional[List[str]] = None
     read_path_scanners: List[str] = field(default_factory=list)
     env_scanners: List[str] = field(default_factory=list)
+    #: The environment list every spawn's policy passes (``sandbox.environment``),
+    #: or None for the policy's shipped default. One list for every backend.
+    environment: Optional[List[str]] = None
     #: Spawns this scope refused (``SandboxUnavailable``: the policy or the backend
     #: would not have them), and why the last one was. A converter's row reads
     #: them: a refused spawn converted nothing.
@@ -564,6 +567,14 @@ def scanner_sandbox_scope(
         )
     read_path_scanners = list(getattr(settings, "read_path_scanners", []) or [])
     env_scanners = list(getattr(settings, "env_scanners", []) or [])
+    # A list, even an empty one (nothing beyond the fixed baseline), replaces the
+    # shipped default; settings that carry no list leave the default in place.
+    configured_environment = getattr(settings, "environment", None)
+    environment = (
+        list(configured_environment)
+        if isinstance(configured_environment, (list, tuple))
+        else None
+    )
     # read_paths alone: cache_paths that follow a scanner's options are never
     # mounted, granted or not (the policy gives such a tool a private cache), so
     # the read_path_scanners advice would not change what a cache-only scanner
@@ -612,6 +623,7 @@ def scanner_sandbox_scope(
         else None,
         read_path_scanners=read_path_scanners,
         env_scanners=env_scanners,
+        environment=environment,
         environment_values=environment_values,
         environment_values_unread=environment_values_unread,
         class_scope=isinstance(scanner_plugin, type),
@@ -1201,6 +1213,7 @@ def _plan_spawn(
         network_limit=scope.network_limit,
         read_path_scanners=scope.read_path_scanners,
         env_scanners=scope.env_scanners,
+        environment=scope.environment,
         # This thread's scanner run's own config files, and no other run's.
         tool_config_dir=active_tool_config_dir(),
         also_runs=_ALSO_RUNS.get(),

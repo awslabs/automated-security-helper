@@ -1137,6 +1137,29 @@ def _widenings(
                         False,
                     )
                 )
+        listed, entries = _walk(section, ["environment"])
+        if listed and isinstance(entries, list):
+            # Named by variable, never by entry: a NAME=value entry holds a value,
+            # and this reason is returned to the client.
+            extra = list(
+                dict.fromkeys(
+                    entry.partition("=")[0]
+                    if isinstance(entry, str)
+                    else f"an entry of type {type(entry).__name__}"
+                    for entry in entries
+                    if entry not in trusted.environment
+                )
+            )
+            if extra:
+                found.append(
+                    DocumentDenial(
+                        "sandbox.environment",
+                        "/sandbox/environment",
+                        f"passes {', '.join(extra)} to every scanner, which the "
+                        "server's sandbox settings do not",
+                        False,
+                    )
+                )
         listed, mode = _walk(section, ["mode"])
         if listed and trusted.mode != "off" and mode != trusted.mode:
             # The server's mode can be a value its config read from the

@@ -135,6 +135,10 @@ _SANDBOX_CASES = {
         {"op": "add", "path": "/sandbox/env_scanners/-", "value": "zizmor"},
         {"mode": "bwrap", "env_scanners": ["zizmor"]},
     ),
+    "environment": (
+        {"op": "add", "path": "/sandbox/environment/-", "value": "EXTRA_VAR=1"},
+        {"mode": "bwrap", "environment": ["EXTRA_VAR=1"]},
+    ),
 }
 
 

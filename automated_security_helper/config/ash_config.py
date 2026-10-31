@@ -1732,6 +1732,58 @@ class SandboxConfig(RedactedSection):
         ),
     ] = []
 
+    environment: Annotated[
+        List[str],
+        Field(
+            description=(
+                "The environment variables every sandboxed scanner is passed besides "
+                "its fixed baseline (PATH, locale and terminal settings, and the "
+                "ASH_, UV_, LC_ and PYTHON families), written as a docker-compose "
+                "'environment' list: NAME passes the value ASH has, NAME=value sets "
+                "one, and a name listed twice takes its last entry. The default "
+                "list is the proxy variables (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, "
+                "NO_PROXY and their lower-case spellings), which a scanner is passed "
+                "only when it has a network, and the CA-bundle variables "
+                "(SSL_CERT_FILE, SSL_CERT_DIR, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE, "
+                "NODE_EXTRA_CA_CERTS), whose files the sandbox also lets the scanner "
+                "read. A list here REPLACES the default, as a compose list replaces "
+                "an image's: [MY_VAR] alone drops the proxy and CA variables, so "
+                "list them too. A name that marks a credential (TOKEN, PASSWORD, "
+                "SECRET and the like), TMPDIR and ASH's own run id are refused with "
+                "the name; a scanner that needs a credential is granted it with "
+                "env_scanners. Honored only from --config-overrides or a config "
+                "file outside every git checkout and the scanned directory."
+            )
+        ),
+    ] = [
+        "ALL_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "NO_PROXY",
+        "all_proxy",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_DIR",
+    ]
+
+    @field_validator("environment")
+    @classmethod
+    def _environment_entries_are_ones_the_sandbox_passes(
+        cls, value: List[str]
+    ) -> List[str]:
+        # The sandbox's own validator, so the setting and the policy it builds
+        # refuse the same entries. Imported here because the sandbox package
+        # imports this module. Its message names a variable and never a value.
+        from automated_security_helper.utils.sandbox.policy import parse_environment
+
+        parse_environment(value)
+        return value
+
     # Set by config/sandbox_grants.py from a network_scanners list that a config
     # file the scanned repository could have written. Private, so no config file
     # can set it.
