@@ -12,8 +12,9 @@ advice and a warning is written once per scanned tree, scanner and setting (a
 second tree in the same process gets its own); a converter's offline option is
 read from the converters section; the probe directory is removed when the scope
 build raises anything; any planning failure is counted on the scope as a failure,
-apart from the refusals; a registration that raises runs the plan's cleanup; the sweep is the cleanup's first
-step and passes over the plan's private directories; a record that raises releases
+apart from the refusals; a registration that raises runs the plan's cleanup; the
+sweep is the cleanup's first step and passes over the plan's private directories; a
+record that raises releases
 each root once; and a DEBUG record names no argv when the plugin's values could not
 be read, saying for a class scope that none exist. Nothing runs a backend.
 """
