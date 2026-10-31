@@ -557,6 +557,46 @@ def test_the_walk_tries_the_regions_own_geography_before_the_us_spelling(
     assert control_plane.listings == 1
 
 
+def test_the_walk_falls_through_from_the_regions_geography_to_the_us_spelling(
+    monkeypatch, tmp_path
+):
+    """A reporter configured for an ``eu-`` region asks the listing for the
+    chain candidate under ``eu.`` first; this region lists the model under
+    ``us.`` only. The walk passes the unlisted ``eu.`` spelling, calls ``us.``,
+    and still reads the one cached listing. The existing ``us-east-1`` walk
+    cannot show this: there the region's geography and ``us.`` are the same
+    spelling."""
+    runtime = _RuntimeThatRefusesOne(PRIMARY_MODEL)
+    control_plane = ControlPlaneDouble(PRIMARY_MODEL, REGION_SPELLING)
+    monkeypatch.setattr(
+        f"{MODULE}.boto3.Session", _session_double(runtime, control_plane)
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.get_fallback_model",
+        {PRIMARY_MODEL: CHAIN_SPELLING, CHAIN_SPELLING: PRIMARY_MODEL}.get,
+    )
+    # Not make_reporter: it sets aws_region and model_id itself, so passing
+    # either raises TypeError. The options are built directly.
+    options = BedrockSummaryReporterConfigOptions(
+        aws_region="eu-west-1", model_id=PRIMARY_MODEL, max_retries=0
+    )
+    reporter = BedrockSummaryReporter(
+        context=plugin_context_in(tmp_path),
+        config=BedrockSummaryReporterConfig(options=options),
+    )
+    assert reporter.config.options.aws_region == "eu-west-1"
+    client = reporter._make_model_client(runtime)
+
+    outcome = reporter._outcome_with_fallback(client, "prompt", "system")
+
+    assert outcome.ok is True, outcome.text
+    assert runtime.models == [PRIMARY_MODEL, REGION_SPELLING], runtime.models
+    assert reporter._run_model == REGION_SPELLING
+    assert GEOGRAPHY_SPELLING not in runtime.models
+    # The chain, geography and us spellings were read from the one listing.
+    assert control_plane.listings == 1
+
+
 # ---------------------------------------------------------------------------
 # The answer cache keeps answers, for the prompt they answered
 # ---------------------------------------------------------------------------
