@@ -8079,13 +8079,13 @@
   for it): a file that does not fit is skipped, the files after it are still
   re-scanned, and the scan is reported as incomplete (exit 1). It reads at most
   100,000 names from the file, and one line of colons no longer makes a name for
-  each colon: names no file can have are not built, and what is left unread makes
-  the scan incomplete. A name repeated on several lines counts once, and a name
-  is measured in UTF-16 code units on every platform, as NTFS, exFAT, vfat and
-  HFS+ bound it, so a name that fits one of those file systems is not dropped
-  on a host that mounts it. The report gives the files not re-scanned, which
-  are real files and not every name a colon split makes, and the names left
-  unread as two separate counts. A `.gitleaksignore` that changed while
+  each colon: names no file can have are not built, and what is left unread
+  makes the scan incomplete. A name repeated on several lines counts once, and a
+  name is measured in UTF-16 code units on every platform, as NTFS, exFAT, vfat
+  and HFS+ bound it, so a name that fits one of those file systems is not
+  dropped on a host that mounts it. The report gives the files not re-scanned,
+  which are real files and not every name a colon split makes, and the names
+  left unread as two separate counts. A `.gitleaksignore` that changed while
   gitleaks ran fails the scan, and so does an empty re-scan report or one with
   no run, where each used to read as no dropped findings. Results under an
   earlier run's `.ash/ash_output` are dropped even when `--output-dir` points
@@ -8104,15 +8104,15 @@
 
 - **A detect-secrets baseline the repository controls is scanned like any other
   file.** A baseline found in the scanned tree (`.secrets.baseline`,
-  `.ash/.secrets.baseline`), or named by a config the operator did not write, was
-  left out of the scan, so anything a repository put in a file of that name was
-  never read. It is now in the scan set. A detector that reads back a hash the
-  baseline lists, whichever detector made the finding, is not reported for that
-  file, unless the baseline also holds that value outside its `hashed_secret`
-  entries (under `notes`, say): a token written in both places is reported. The
-  worker is not handed a baseline's `is_baseline_file` filter, which
-  skips files by name and can name any file, whoever's baseline it is; only the
-  operator's own settings can carry it.
+  `.ash/.secrets.baseline`), or named by a config the operator did not write,
+  was left out of the scan, so anything a repository put in a file of that name
+  was never read. It is now in the scan set. A detector that reads back a hash
+  the baseline lists, whichever detector made the finding, is not reported for
+  that file, unless the baseline also holds that value outside its
+  `hashed_secret` entries (under `notes`, say): a token written in both places
+  is reported. The worker is not handed a baseline's `is_baseline_file` filter,
+  which skips files by name and can name any file, whoever's baseline it is;
+  only the operator's own settings can carry it.
   When the configuration was also read from the repository's own files, an
   `is_baseline_file` entry or an exclude pattern counts as the operator's only
   where the operator's own configuration names the same entry. The baseline's
