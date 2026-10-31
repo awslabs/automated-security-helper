@@ -624,9 +624,12 @@ def test_an_error_after_the_sarif_validated_is_not_called_a_bad_results_file(
         )
 
     # The error reached the catch-all FROM the attach step, not from the results
-    # file read: any wrapped error satisfied the two text assertions alone.
+    # file read: any wrapped error satisfied the two text assertions alone. The
+    # text of the error the attach step raised is in the message, and the chain
+    # is not asserted: the trivy scanners forbid one, so a test of this scanner
+    # that required it would read the opposite rule into the same pattern.
     assert len(attached) == 1
-    assert raised.value.__context__ is validation_error
+    assert str(validation_error) in str(raised.value)
     assert "not SARIF" not in str(raised.value)
     assert "Ferret scan failed" in str(raised.value)
 
