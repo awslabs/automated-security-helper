@@ -176,7 +176,8 @@ def self_test() -> list[str]:
     tiered_cases = [
         ("tiered complete set", tiered, False),
         ("tiered last shard missing", tiered[:2], True),
-        # The unsharded unit run uploads one artifact, a complete set of one.
+        # An unsharded run uploads one artifact, shard1of1, a complete set of
+        # one; the check still admits it.
         ("tiered single set", [f"{unit_prefix}-shard1of1"], False),
         # An artifact from another tier is not one of this set's shards.
         (
