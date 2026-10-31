@@ -648,15 +648,26 @@ def _finalize_staged(
         # open before the digest check could refuse it.
         landed_fd = os.open(target, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
     except OSError as error:
-        target.unlink(missing_ok=True)
+        _remove_unverified(target)
         raise ToolDownloadIntegrityError(
             f"{target} could not be read back after it was installed ({error}); "
             "refusing to leave it in place."
         ) from error
     try:
+        # What is at the install path now is asked what it is before it is read,
+        # as the staged file was: a directory swapped in after the rename opens
+        # read-only on POSIX and fails only at the read, and the cleanup of it
+        # then raised an untyped OSError over the refusal.
+        if not stat.S_ISREG(os.fstat(landed_fd).st_mode):
+            _remove_unverified(target)
+            raise ToolDownloadIntegrityError(
+                f"{target} is not a regular file after it was installed. Something "
+                "replaced it between the rename and the read-back; refusing to "
+                "leave it in place."
+            )
         landed = _sha256_of_open_file(landed_fd)
     except OSError as error:
-        target.unlink(missing_ok=True)
+        _remove_unverified(target)
         raise ToolDownloadIntegrityError(
             f"{target} could not be read back after it was installed ({error}); "
             "refusing to leave it in place."
@@ -664,13 +675,30 @@ def _finalize_staged(
     finally:
         os.close(landed_fd)
     if landed != expected_sha256:
-        target.unlink(missing_ok=True)
+        _remove_unverified(target)
         raise ToolDownloadIntegrityError(
             f"{target} does not match the bytes it was verified against (expected "
             f"{expected_sha256}, found {landed}). Something replaced the file between "
             "verifying it and installing it; refusing to leave it in place."
         )
     return landed
+
+
+def _remove_unverified(target: Path) -> None:
+    """Remove what failed its read-back at ``target``, and never raise doing it.
+
+    The typed integrity error that follows is what the caller needs; an OSError
+    out of the removal (a directory swapped in at the path, a directory this user
+    may not write) replaced it with an untyped one. What cannot be removed is
+    named in the log so it can be removed by hand.
+    """
+    try:
+        target.unlink(missing_ok=True)
+    except OSError as error:
+        ASH_LOGGER.warning(
+            f"Could not remove {target} after it failed its read-back ({error}); "
+            "remove it by hand."
+        )
 
 
 def _replace_atomically(

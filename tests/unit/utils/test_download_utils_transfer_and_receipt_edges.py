@@ -362,6 +362,31 @@ def test_the_internal_helpers_take_their_mode_as_a_required_keyword(helper):
     assert parameter.default is inspect.Parameter.empty
 
 
+def test_a_directory_swapped_in_after_the_rename_is_a_typed_refusal(
+    tmp_path, monkeypatch
+):
+    """The read-back asked what the landed path is only by reading it. A directory
+    swapped in at the install path after the rename opens read-only on POSIX and
+    fails at the read, and the cleanup of it then raised an untyped OSError over
+    the integrity error. The descriptor is asked first, and a path that cannot be
+    removed is left and named, not raised."""
+    real_replace = os.replace
+
+    def replace_then_swap(source, target, *args, **kwargs):
+        real_replace(source, target, *args, **kwargs)
+        os.unlink(target)
+        os.mkdir(target)
+
+    monkeypatch.setattr(download_utils.os, "replace", replace_then_swap)
+    staging = tmp_path / ".tool.ash-partial"
+    staging.write_bytes(_BODY)
+    target = tmp_path / "tool"
+    with pytest.raises(ToolDownloadIntegrityError):
+        download_utils._finalize_staged(staging, target, _DIGEST, mode=0o755)
+    # Not the installer's to delete: a directory is left where it is.
+    assert target.is_dir()
+
+
 def test_a_call_without_a_mode_is_refused(tmp_path):
     staging = tmp_path / ".tool.ash-partial"
     staging.write_bytes(_BODY)
