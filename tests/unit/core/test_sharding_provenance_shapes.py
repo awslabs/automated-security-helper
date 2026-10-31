@@ -173,6 +173,86 @@ class TestAnUnknownProvenanceFieldIsDropped:
         assert "shard one\\x1b[0m" in printed, printed
         assert "\\\\x1b" not in printed and "\x1b" not in printed, repr(printed)
 
+    def test_many_unknown_keys_are_named_in_a_bounded_line(self):
+        """A results file can carry any number of keys this version does not
+        know. The warning names the count exactly and the first few keys, each
+        cut, and says how many more there were; 1,000 keys made a line 1,000
+        names long, and 100,000 made one of several hundred thousand
+        characters."""
+        from unittest.mock import patch
+
+        from automated_security_helper.core import sharding
+
+        sharding._WARNED_PROVENANCE_KEYS.clear()
+        unknown = {f"key_{number:04d}": True for number in range(1000)}
+        unknown["long_" + "x" * 5000] = True
+        with patch.object(sharding.ASH_LOGGER, "warning") as warning:
+            ShardAssignment.model_validate(
+                {
+                    "shard_index": 1,
+                    "shard_count": 2,
+                    "assigned_scanners": ["bandit"],
+                    **unknown,
+                }
+            )
+
+        [call] = warning.call_args_list
+        text = str(call.args[0])
+        assert "1001 field(s)" in text, text
+        assert "key_0000" in text, text
+        assert "key_0999" not in text, text
+        assert "and 981 more" in text, text
+        assert "x" * 200 not in text, text
+        assert len(text) < 1500, len(text)
+
+    def test_a_shard_index_that_is_a_list_does_not_make_the_line_its_size(self):
+        """The index is read from the same file and is put in the line; a list of
+        100,000 numbers made a line of 500,000 characters. A value that is neither
+        text nor a number is not quoted: the line says "a shard"."""
+        from pydantic import ValidationError
+
+        from automated_security_helper.core import sharding
+
+        sharding._WARNED_PROVENANCE_KEYS.clear()
+        with _recording() as records, pytest.raises(ValidationError):
+            ShardAssignment.model_validate(
+                {
+                    "shard_index": list(range(100_000)),
+                    "shard_count": 2,
+                    "assigned_scanners": ["bandit"],
+                    "field_from_a_newer_ash": True,
+                }
+            )
+
+        [record] = [r for r in records.records if "does not know" in r.getMessage()]
+        text = record.getMessage()
+        assert "The provenance of a shard carries 1 field(s)" in text, text
+        assert len(text) < 500, len(text)
+
+    def test_a_few_unknown_keys_are_all_named(self):
+        """The control: a short list is named whole, with no "more"."""
+        from unittest.mock import patch
+
+        from automated_security_helper.core import sharding
+
+        sharding._WARNED_PROVENANCE_KEYS.clear()
+        with patch.object(sharding.ASH_LOGGER, "warning") as warning:
+            ShardAssignment.model_validate(
+                {
+                    "shard_index": 1,
+                    "shard_count": 2,
+                    "assigned_scanners": ["bandit"],
+                    "alpha": 1,
+                    "beta": 2,
+                    "gamma": 3,
+                }
+            )
+
+        text = str(warning.call_args_list[0].args[0])
+        assert "3 field(s)" in text, text
+        assert "alpha, beta, gamma" in text, text
+        assert "more" not in text, text
+
     def test_a_record_with_only_known_fields_logs_nothing(self):
         """The control for the warning."""
         from unittest.mock import patch

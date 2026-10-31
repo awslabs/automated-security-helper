@@ -97,6 +97,7 @@ count without knowing the scanner count.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable, Sequence
 from itertools import islice
 
@@ -156,9 +157,22 @@ def shown_shard_text(value: object) -> str:
     return NAMED_HASH_COMMAND.sub(hash_command_broken, text)
 
 
-#: The (shard index, ignored fields) pairs ShardAssignment has warned about in
-#: this process; see ShardAssignment._name_the_dropped_keys.
-_WARNED_PROVENANCE_KEYS: set[tuple[str, tuple[str, ...]]] = set()
+#: How many ignored provenance keys the warning names before "and N more", and
+#: how much of one key or of the shard index it quotes. The count is exact; only
+#: the listing is bounded, so a results file with 100,000 unknown keys, or a list
+#: for the index, cannot make the warning line that size.
+_DROPPED_KEYS_SHOWN = 20
+_DROPPED_TEXT_SHOWN = 80
+
+
+def _cut_text(text: str, limit: int) -> str:
+    """*text* as it stands, or its first *limit* characters and "..."."""
+    return text if len(text) <= limit else f"{text[:limit]}..."
+
+
+#: The (shard index, digest of the ignored fields) pairs ShardAssignment has
+#: warned about in this process; see ShardAssignment._name_the_dropped_keys.
+_WARNED_PROVENANCE_KEYS: set[tuple[str, str]] = set()
 
 
 class ShardAssignment(StrippedRecordModel):
@@ -227,7 +241,21 @@ class ShardAssignment(StrippedRecordModel):
             dropped = sorted(str(key) for key in data if key not in known)
             if dropped:
                 shard = data.get("shard_index")
-                memo_key = (repr(shard), tuple(dropped))
+                # A results file can carry any value here and any number of
+                # unknown keys: a list for the index, 100,000 keys. The line names
+                # a text or numeric index, cut, and the first few keys, cut, with
+                # the count of the rest; the memo holds a digest, not the keys.
+                shard_text = (
+                    _cut_text(str(shard), _DROPPED_TEXT_SHOWN)
+                    if isinstance(shard, (str, int)) and not isinstance(shard, bool)
+                    else None
+                )
+                memo_key = (
+                    shard_text if shard_text is not None else type(shard).__name__,
+                    hashlib.sha256(
+                        "\0".join(dropped).encode("utf-8", "surrogatepass")
+                    ).hexdigest(),
+                )
                 if memo_key in _WARNED_PROVENANCE_KEYS:
                     return data
                 _WARNED_PROVENANCE_KEYS.add(memo_key)
@@ -235,8 +263,13 @@ class ShardAssignment(StrippedRecordModel):
                 # by shown_on_one_line, which the log sink writes as it is. A value
                 # shown here and the message shown again at the sink doubled the
                 # backslash of every escape (``\\x1b`` for one ESC).
-                where = f"shard {shard}" if shard is not None else "a shard"
-                names = ", ".join(dropped)
+                where = f"shard {shard_text}" if shard_text is not None else "a shard"
+                names = ", ".join(
+                    _cut_text(name, _DROPPED_TEXT_SHOWN)
+                    for name in dropped[:_DROPPED_KEYS_SHOWN]
+                )
+                if len(dropped) > _DROPPED_KEYS_SHOWN:
+                    names += f", and {len(dropped) - _DROPPED_KEYS_SHOWN} more"
                 ASH_LOGGER.warning(
                     shown_on_one_line(
                         f"The provenance of {where} carries {len(dropped)} field(s) "
