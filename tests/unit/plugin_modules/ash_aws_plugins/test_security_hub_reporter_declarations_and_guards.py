@@ -46,20 +46,20 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_repor
     _keep_created_at,
     reset_no_scan_source_notice,
 )
-from tests.unit.plugin_modules.ash_aws_plugins.test_security_hub_batch_import import (
+from tests.unit.plugin_modules.ash_aws_plugins.security_hub_reporter_doubles import (
     ACCOUNT,
     REGION,
-    _FixedClientSession,
-    _archive_run,
-    _model,
-    _report_with,
-    _reporter,
-    _result,
-    _stored,
-    _stubbed_client,
-    _validate_with,
+    FixedClientSession as _FixedClientSession,
+    archive_run as _archive_run,
     isolated_aws_environment,  # noqa: F401  (autouse fixture)
+    make_model as _model,
+    make_reporter as _reporter,
+    make_result as _result,
     no_retry_sleep,  # noqa: F401  (autouse fixture)
+    report_with as _report_with,
+    stored_finding as _stored,
+    stubbed_client as _stubbed_client,
+    validate_with as _validate_with,
 )
 
 pytestmark = pytest.mark.unit

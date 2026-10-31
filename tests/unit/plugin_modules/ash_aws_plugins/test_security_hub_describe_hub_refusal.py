@@ -20,11 +20,11 @@ import logging
 
 import pytest
 
-from tests.unit.plugin_modules.ash_aws_plugins.test_security_hub_batch_import import (
-    _caller,
-    _reporter,
-    _stubbed_client,
-    _validate_with,
+from tests.unit.plugin_modules.ash_aws_plugins.security_hub_reporter_doubles import (
+    caller_identity as _caller,
+    make_reporter as _reporter,
+    stubbed_client as _stubbed_client,
+    validate_with as _validate_with,
 )
 
 pytestmark = pytest.mark.unit

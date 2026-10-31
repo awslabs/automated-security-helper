@@ -27,17 +27,17 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_repor
     SecurityHubImportError,
     SecurityHubReporter,
 )
-from tests.unit.plugin_modules.ash_aws_plugins.test_security_hub_batch_import import (
-    _Capture,
-    _archive_run,
-    _built,
-    _model,
-    _ok,
-    _report_with,
-    _reporter,
-    _result,
-    _stored,
-    _stubbed_client,
+from tests.unit.plugin_modules.ash_aws_plugins.security_hub_reporter_doubles import (
+    Capture as _Capture,
+    archive_run as _archive_run,
+    built_finding as _built,
+    import_ok as _ok,
+    make_model as _model,
+    make_reporter as _reporter,
+    make_result as _result,
+    report_with as _report_with,
+    stored_finding as _stored,
+    stubbed_client as _stubbed_client,
 )
 
 pytestmark = pytest.mark.unit

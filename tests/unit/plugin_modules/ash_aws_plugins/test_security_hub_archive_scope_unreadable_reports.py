@@ -19,13 +19,13 @@ No test here calls AWS: the clients are botocore Stubbers over blocked sockets.
 
 import pytest
 
-from tests.unit.plugin_modules.ash_aws_plugins.test_security_hub_batch_import import (
-    _archive_run,
-    _built,
-    _model,
-    _reporter,
-    _result,
-    _stored,
+from tests.unit.plugin_modules.ash_aws_plugins.security_hub_reporter_doubles import (
+    archive_run as _archive_run,
+    built_finding as _built,
+    make_model as _model,
+    make_reporter as _reporter,
+    make_result as _result,
+    stored_finding as _stored,
 )
 
 pytestmark = pytest.mark.unit
