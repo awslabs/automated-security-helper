@@ -46,9 +46,12 @@ Entry = Union[bytes, List[str], BaseException]
 #: The calls the stand-ins below never hand on to the real module. Their /proc is
 #: made up, so a pid in it (4242, 21, 31) is the number of whatever process the host
 #: happens to run under it: a test that reached one of these with such a pid would
-#: signal or pin that process. A test that expects the call stubs it on the stand-in.
+#: signal or pin that process. ``os.dup2`` is on the list for another reason: the
+#: wrapper repoints descriptor 2 at /dev/null once a write to it has failed, and
+#: that descriptor is the pytest worker's own. A test that expects the call stubs
+#: it on the stand-in.
 _SIGNALLING = {
-    os: ("kill", "killpg", "pidfd_open", "pidfd_send_signal"),
+    os: ("kill", "killpg", "pidfd_open", "pidfd_send_signal", "dup2"),
     signal: ("pidfd_send_signal", "raise_signal", "pthread_kill"),
 }
 
@@ -1008,11 +1011,14 @@ def test_a_late_pass_without_children_files_still_reads_the_direct_children(
     assert landlock_exec._descendants(until=lambda: 5.0) == [101]
 
 
-@pytest.mark.parametrize("name", ["kill", "killpg", "pidfd_open", "pidfd_send_signal"])
+@pytest.mark.parametrize(
+    "name", ["kill", "killpg", "pidfd_open", "pidfd_send_signal", "dup2"]
+)
 def test_the_stand_in_os_refuses_every_signalling_call_it_was_not_given(procfs, name):
     """The stand-in /proc names pids that are only numbers here; the real process
     under one of them must never be signalled or pinned by a test that forgot to
-    stub the call."""
+    stub the call. Nor may descriptor 2 of the test worker be repointed at
+    /dev/null (``dup2``), which the wrapper does after a failed stderr write."""
     procfs({})
 
     with pytest.raises(AssertionError, match=name):
@@ -1024,7 +1030,7 @@ def test_a_recording_stand_in_refuses_the_signalling_calls_it_does_not_record():
 
     recording.kill(4242, signal.SIGKILL)  # recorded, sent to no process
     assert recording.getpid() == os.getpid()
-    for name in ("killpg", "pidfd_open", "pidfd_send_signal"):
+    for name in ("killpg", "pidfd_open", "pidfd_send_signal", "dup2"):
         with pytest.raises(AssertionError, match=name):
             getattr(recording, name)
     for name in ("pidfd_send_signal", "raise_signal", "pthread_kill"):
@@ -1054,7 +1060,9 @@ def _break_stderr(monkeypatch) -> _BrokenStderr:
     phase begins (``SysCapture.resume``), so a stand-in a fixture installed during
     setup is no longer there when the code under test writes. The wrapper
     repoints descriptor 2 after a failed write, so each test also stubs
-    ``os.dup2``: this process's own descriptor 2 must not be.
+    ``os.dup2``: this process's own descriptor 2 must not be. The stand-ins
+    refuse ``dup2`` when a test has not stubbed it, so a forgotten stub fails the
+    test instead of repointing the worker's descriptor.
     """
     stderr = _BrokenStderr()
     monkeypatch.setattr(sys, "stderr", stderr)
