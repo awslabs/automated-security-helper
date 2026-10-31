@@ -645,16 +645,34 @@ def test_refuse_links_below_refuses_a_root_that_is_itself_a_link(tmp_path):
 def test_a_refused_pre_check_leaves_no_directory_descriptor_open(tmp_path):
     """The pre-check raises out of the walk from two directories down; the walk's
     open descriptors are closed on the way out (the generator is closed, not
-    left to finalization, which another interpreter can defer)."""
+    left to finalization, which another interpreter can defer).
+
+    Read as the descriptors that point under tmp_path, not as a count of all of
+    them: the count moves when anything else in the process opens or closes a
+    file while the test runs (a log handler, a thread), and the directories the
+    walk opened are the only descriptors that can point here."""
     root = tmp_path / "results"
     (root / "a" / "b").mkdir(parents=True)
     (root / "a" / "b" / "escape").symlink_to(tmp_path)
-    before = len(os.listdir("/proc/self/fd"))
+    home = os.path.realpath(tmp_path)
+
+    def descriptors_under_tmp_path():
+        found = []
+        for entry in os.listdir("/proc/self/fd"):
+            try:
+                target = os.readlink(f"/proc/self/fd/{entry}")
+            except OSError:
+                continue  # closed since the listing, or the listing's own descriptor
+            if target == home or target.startswith(home + os.sep):
+                found.append(target)
+        return found
+
+    assert descriptors_under_tmp_path() == []
 
     with pytest.raises(OutputDirLinkRefused):
         fs_guard.refuse_links_below(root)
 
-    assert len(os.listdir("/proc/self/fd")) == before
+    assert descriptors_under_tmp_path() == []
 
 
 @needs_unprivileged
