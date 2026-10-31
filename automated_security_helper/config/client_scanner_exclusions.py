@@ -1131,6 +1131,11 @@ def strip_client_scanner_exclusions(
     ]
     # None with no root given and no working directory left: the one use of
     # the root, a delivered trivy ignore file, is then not read.
+    delivered_documents = [
+        (Path(path), document)
+        for path, document in documents.items()
+        if delivered(path)
+    ]
     named_root = scanned_root or source_dir
     root = Path(named_root) if named_root else working_directory()
     recorded: List[ClientScannerExclusion] = list(
@@ -1144,6 +1149,20 @@ def strip_client_scanner_exclusions(
         # scanner reads in the merged config, as the client's are below.
         operator_entries = _operator_entries(
             spec, operator_documents, base, read_key=read_key
+        )
+        # Which patterns a file wrote, in any spelling of the scanner's section:
+        # the delivered files' are the client's, and the operator files' under a
+        # spelling the scanner does not read are the operator's. The merged
+        # option holds both, and every entry whose pattern is an operator's was
+        # taken for a client copy, so an expired operator entry was blamed on
+        # the client in the warning, as was an operator entry under a spelling
+        # the scanner never reads.
+        spellings = [section_key for section_key, _ in sections]
+        client_patterns = _patterns_written(delivered_documents, spec, spellings)
+        operator_unread = _patterns_written(
+            operator_documents,
+            spec,
+            [section_key for section_key in spellings if section_key != read_key],
         )
         for key, section in sections:
             options = _options_of(section)
@@ -1200,7 +1219,9 @@ def strip_client_scanner_exclusions(
             kept: List[Any] = []
             moved: List[ClientScannerExclusion] = []
             expired: List[str] = []
+            expired_by_operator: List[str] = []
             unread: List[str] = []
+            unread_operator: List[str] = []
             replaced = 0
             for entry in value:
                 pattern, reason, expiration = _entry_fields(entry)
@@ -1217,7 +1238,14 @@ def strip_client_scanner_exclusions(
                     # (a plain string) would have applied for good.
                     operator_entry = operator_entries[pattern]
                     if _entry_expired(_entry_fields(operator_entry)[2]):
-                        expired.append(pattern)
+                        # The client's, only when a delivered file wrote it: an
+                        # operator entry no delivered file touched is dropped
+                        # all the same (the scanner would not apply it) but
+                        # not blamed on the client.
+                        if pattern in client_patterns:
+                            expired.append(pattern)
+                        else:
+                            expired_by_operator.append(pattern)
                         continue
                     spelled = _spelled_like(entry, operator_entry)
                     if spelled != entry:
@@ -1230,7 +1258,10 @@ def strip_client_scanner_exclusions(
                     expired.append(pattern)
                     continue
                 if not is_read:
-                    unread.append(pattern)
+                    if pattern in operator_unread and pattern not in client_patterns:
+                        unread_operator.append(pattern)
+                    else:
+                        unread.append(pattern)
                     continue
                 moved.append(
                     ClientScannerExclusion(
@@ -1242,7 +1273,14 @@ def strip_client_scanner_exclusions(
                         scan_timeout=_scan_timeout_of(options),
                     )
                 )
-            if not moved and not expired and not unread and not replaced:
+            if not (
+                moved
+                or expired
+                or expired_by_operator
+                or unread
+                or unread_operator
+                or replaced
+            ):
                 continue
             # Written back whenever an entry changed, a client's copy of an
             # operator entry replaced by the operator's own included: left
@@ -1279,9 +1317,42 @@ def strip_client_scanner_exclusions(
                     f"excluded nothing and {'is' if len(unread) == 1 else 'are'} "
                     "not applied."
                 )
+            if expired_by_operator:
+                listed = ", ".join(repr(pattern) for pattern in expired_by_operator)
+                many = len(expired_by_operator) != 1
+                warnings.append(
+                    f"{spec.key}: {listed} {'have' if many else 'has'} expired in "
+                    f"the operator's own config, so {'they are' if many else 'it is'} "
+                    f"not applied: the {spec.scanner} scanner would not have applied "
+                    f"{'them' if many else 'it'}, and the files are scanned."
+                )
+            if unread_operator:
+                listed = ", ".join(repr(pattern) for pattern in unread_operator)
+                many = len(unread_operator) != 1
+                warnings.append(
+                    f"{spec.key}: {listed} {'are' if many else 'is'} written in an "
+                    f"operator file under scanners.{key}, a section the "
+                    f"{spec.scanner} scanner does not read, so "
+                    f"{'they excluded' if many else 'it excluded'} nothing and "
+                    f"{'are' if many else 'is'} not applied."
+                )
     config._client_scanner_exclusions = _unique(recorded)
     config._resolution_warnings = warnings
     return config
+
+
+def _patterns_written(
+    documents: Sequence[Tuple[Path, Any]],
+    spec: ScannerExclusionOption,
+    spellings: Sequence[str],
+) -> Set[str]:
+    """The patterns ``documents`` write at ``spec``'s option under any of ``spellings`` of its scanner's section."""
+    found: Set[str] = set()
+    for _path, document in documents:
+        for spelling in spellings:
+            for value in _document_values(document, spec, spelling):
+                found |= _patterns_in(value)
+    return found
 
 
 def _unique(items: Iterable[ClientScannerExclusion]) -> List[ClientScannerExclusion]:

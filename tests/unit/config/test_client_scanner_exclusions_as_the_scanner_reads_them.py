@@ -307,6 +307,51 @@ def test_a_client_copy_of_an_expired_operator_entry_is_dropped(tmp_path, client_
     ), config._resolution_warnings
 
 
+def test_an_expired_operator_entry_is_blamed_on_the_client_only_when_a_delivered_file_wrote_it(
+    tmp_path,
+):
+    """Every merged entry whose pattern is an operator's was taken for a client
+    copy, so an operator entry that had simply expired was dropped with the
+    warning "came from a config an MCP client delivered", though no delivered
+    file touched the option. Dropped either way (the scanner would not apply
+    it), but blamed only on the files that wrote it."""
+    operator = _operator_bandit(
+        {"path": "legacy", "reason": "op", "expiration": "2000-01-01"}
+    )
+    untouched = AshConfig()
+    untouched.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="legacy", reason="op", expiration="2000-01-01"),
+    ]
+
+    _strip(untouched, {}, operator, tmp_path)
+
+    assert _bandit_paths(untouched) == []
+    assert untouched._client_scanner_exclusions == []
+    warnings = untouched._resolution_warnings
+    assert not any("MCP client delivered" in warning for warning in warnings), warnings
+    assert any(
+        "'legacy'" in warning and "operator" in warning and "expired" in warning
+        for warning in warnings
+    ), warnings
+
+    # The control: a delivered file that writes the same pattern is blamed.
+    written = AshConfig()
+    written.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="legacy", reason="client", expiration="2099-01-01"),
+    ]
+    delivered = _operator_bandit(
+        {"path": "legacy", "reason": "client", "expiration": "2099-01-01"}
+    )
+
+    _strip(written, delivered, operator, tmp_path)
+
+    assert _bandit_paths(written) == []
+    assert any(
+        "'legacy'" in warning and "MCP client delivered" in warning
+        for warning in written._resolution_warnings
+    ), written._resolution_warnings
+
+
 @pytest.mark.parametrize(
     ("expiration", "kept"),
     [("2000-01-01", []), ("2099-01-01", ["shared"])],
