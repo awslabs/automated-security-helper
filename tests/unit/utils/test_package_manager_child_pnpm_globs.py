@@ -11,9 +11,12 @@ a module that skips on Windows for its symlink fixtures.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 import yaml
 
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.package_manager_child import (
     _member_glob_stays_inside,
     _pnpm_workspace_copy,
@@ -107,6 +110,61 @@ def test_the_copy_keeps_only_the_globs_that_stay_inside():
         "packages": ["packages/*", "!**/fixtures/**"],
         "auditConfig": AUDIT_CONFIG,
     }
+
+
+@pytest.fixture
+def debug_messages():
+    """ASH's logger at DEBUG with a handler of our own: the logger does not
+    propagate, so caplog does not see it."""
+    messages: list[str] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record):
+            messages.append(record.getMessage())
+
+    handler = Collect(level=logging.DEBUG)
+    saved = ASH_LOGGER.level
+    ASH_LOGGER.addHandler(handler)
+    ASH_LOGGER.setLevel(logging.DEBUG)
+    yield messages
+    ASH_LOGGER.removeHandler(handler)
+    ASH_LOGGER.setLevel(saved)
+
+
+def test_each_glob_the_copy_leaves_out_is_logged_with_its_reason(debug_messages):
+    """A glob left out was dropped without a word, and a dropped negation
+    widens the member set the copy audits. One debug line each names the glob
+    and the rule it broke; a glob that stays has none."""
+    _copy_of(
+        {
+            "packages": [
+                "packages/*",
+                "../sibling/*",
+                "{..,x}/*",
+                "/srv/shared/*",
+                "!../x",
+                "!**/fixtures/**",
+            ],
+            "auditConfig": AUDIT_CONFIG,
+        }
+    )
+
+    lines = [m for m in debug_messages if "member glob" in m]
+    assert len(lines) == 4, debug_messages
+    by_glob = {
+        line.split("member glob ", 1)[1].split(" ", 1)[0]: line for line in lines
+    }
+    assert sorted(by_glob) == [
+        "'!../x'",
+        "'../sibling/*'",
+        "'/srv/shared/*'",
+        "'{..,x}/*'",
+    ]
+    assert "parent step" in by_glob["'../sibling/*'"]
+    assert "brace group" in by_glob["'{..,x}/*'"]
+    assert "absolute" in by_glob["'/srv/shared/*'"]
+    assert "negation" in by_glob["'!../x'"]
+    assert all("negation" not in by_glob[g] for g in by_glob if not g.startswith("'!"))
 
 
 def test_globs_that_all_leave_the_package_give_the_package_itself():

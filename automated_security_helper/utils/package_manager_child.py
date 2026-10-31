@@ -586,9 +586,13 @@ def _pnpm_workspace_copy(data: Optional[bytes], *, ignore_suppressions: bool) ->
     releases refuse as an invalid workspace configuration, so a copy cut down
     to ``auditConfig`` alone failed an audit that ran with no file at all. A
     glob only crosses when it stays inside the package: a relative pattern with
-    no ``..`` component (a leading ``!`` negation is admitted). An absolute
-    pattern or one that climbs out names a path outside the package the copy
-    holds, and is left out; when none remains the globs are ``["."]``.
+    no ``..`` component and no brace group (a leading ``!`` negation is
+    admitted). An absolute pattern, one that climbs out, and one with a brace
+    (pnpm expands ``{a,b}`` into patterns of its own, so it can reach a path
+    the pattern as written does not name) are left out, each with a debug line
+    naming the glob and why; leaving out a negation lets the audit reach
+    members it excluded, and the line says so. When none remains the globs are
+    ``["."]``.
     Every other key (the registry among them) is a setting the module does not
     let the repository set, and stays out. Under ``--ignore-suppressions``
     nothing crosses, as the manifest's key is dropped, and the file is
@@ -612,7 +616,24 @@ def _pnpm_workspace_copy(data: Optional[bytes], *, ignore_suppressions: bool) ->
     }
     packages = document.get("packages")
     if isinstance(packages, list) and all(isinstance(p, str) for p in packages):
-        inside = [glob for glob in packages if _member_glob_stays_inside(glob)]
+        inside = []
+        for glob in packages:
+            refusal = _member_glob_refusal(glob)
+            if refusal is None:
+                inside.append(glob)
+                continue
+            # A negation that is left out stops excluding what it excluded, so
+            # the copy can audit more members than the repository's file does.
+            widens = (
+                "; it is a negation, so the audit can reach members it excluded"
+                if glob.startswith("!")
+                else ""
+            )
+            ASH_LOGGER.debug(
+                f"npm-audit: the pnpm-workspace.yaml member glob {glob!r} "
+                f"{refusal}, so the private copy leaves it out{widens}",
+                extra={"markup": False},
+            )
         if inside:
             copied["packages"] = inside
     return yaml.safe_dump(copied).encode("utf-8")
@@ -620,6 +641,16 @@ def _pnpm_workspace_copy(data: Optional[bytes], *, ignore_suppressions: bool) ->
 
 def _member_glob_stays_inside(glob: str) -> bool:
     """Whether a ``pnpm-workspace.yaml`` member glob names paths inside the package.
+
+    ``_member_glob_refusal`` holds the rule and says which part of it a glob
+    breaks.
+    """
+    return _member_glob_refusal(glob) is None
+
+
+def _member_glob_refusal(glob: str) -> Optional[str]:
+    """Why a ``pnpm-workspace.yaml`` member glob is left out of the copy, or None
+    when it names paths inside the package.
 
     pnpm resolves the globs against the workspace root with forward or
     backward slashes, so a pattern is read on both separators: it stays inside
@@ -636,15 +667,17 @@ def _member_glob_stays_inside(glob: str) -> bool:
     """
     body = glob.lstrip("!")
     if not body:
-        return False
+        return "is empty"
     if "{" in body or "}" in body:
-        return False
+        return "holds a brace group, which pnpm expands into patterns of its own"
     windows = PureWindowsPath(body)
     if PurePosixPath(body).is_absolute() or windows.is_absolute():
-        return False
+        return "is an absolute path"
     if windows.drive or windows.root:
-        return False
-    return ".." not in re.split(r"[\\/]+", body)
+        return "is rooted at a drive or at the root of the current one"
+    if ".." in re.split(r"[\\/]+", body):
+        return "has a parent step (..)"
+    return None
 
 
 def _links_into_skipped_dir(linked: Path, package_dir: Path) -> bool:

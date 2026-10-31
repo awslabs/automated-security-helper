@@ -2626,6 +2626,49 @@
   in `-<number>` and another package's advisory id can spell the same rule id; that is
   a limit of the id's shape and is unchanged here.
 
+- **npm-audit reports a copy that only a dependency makes vulnerable as a transitive
+  finding, graded by that dependency.** An npm entry can be vulnerable through an
+  advisory of its own and through a package named in its `via` list. A copy outside
+  every range of the entry's own advisories used to keep that advisory's rule id,
+  severity and fix text, although the advisory does not cover it, and a suppression of
+  the advisory then hid the dependency's problem. Such a copy now gets an
+  `npm-audit-transitive-<package>` result, graded at the highest severity of the
+  entries it depends on, and the advisory's result stays on the copies it covers. The
+  transitive result is traced to its dependencies' advisories only, so suppressing
+  those advisories suppresses it. A suppression whose `rule_id` names the entry's own
+  advisory no longer reaches that copy.
+
+- **npm-audit fails the audit of a package when a file it admitted cannot be copied,
+  instead of auditing part of the workspace.** The private copy opens each input and
+  judges the open file. A file that turned out not to be a regular file, to lie outside
+  the scanned tree, or to have been swapped for a link after the check was left out of
+  the copy without a record, and the package manager audited what was left. The audit
+  now fails with a message naming the file and the reason, the way an unreadable input
+  already did. For yarn, a workspace member found below a linked directory is now
+  listed under the link's name too, since yarn reaches it through that path; a package
+  that would list more than 10,000 such manifests is refused, with the reason given for
+  one that reaches too many linked directories.
+
+- **With `--ignore-suppressions`, only pnpm's copy of `package.json` is parsed.** A
+  manifest the parser could not read failed the package's audit with a message about
+  `pnpm.auditConfig`, although only pnpm reads that key, so one broken `package.json`
+  fixture anywhere in a yarn workspace failed the whole audit. npm and yarn now get the
+  manifest's bytes unchanged, and a manifest that held the key is no longer rewritten
+  for them. pnpm still refuses a manifest it cannot read.
+
+- **When two lockfiles report one advisory, the merged rule keeps the higher score.**
+  The first lockfile's score used to win, so scores of 5.0 and 7.5 graded both results
+  MEDIUM or both HIGH depending on the order the lockfiles were walked in. The merged
+  `dependencies` total in the scan's metadata is recounted from its counts when only one
+  report gave a total.
+
+- **A `pnpm-workspace.yaml` member glob with a brace group is left out of the audit's
+  copy.** pnpm expands `{a,b}` into patterns of its own, so `{..,x}/*` reaches a path
+  above the package although no part of it is `..` as written. Absolute globs and
+  globs with a parent step were already left out. Each glob left out is now named in
+  the debug log with the reason, and leaving out a negated glob (`!pattern`) can add
+  members to the audit, which the line says.
+
 - **npm-audit's package managers read none of the scanned repository's settings
   files, and run no file it names.** npm, pnpm and yarn ran in the package's
   directory, so the repository's `.npmrc` (and, for pnpm, `pnpm-workspace.yaml`),
