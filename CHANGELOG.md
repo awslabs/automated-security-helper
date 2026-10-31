@@ -5539,16 +5539,20 @@
   1 included: the click that typer bundles reads a boolean from a JSON boolean or
   from text only. A number with a fraction or an exponent for a whole-number
   parameter (`"shard_index": 1.9`) was truncated by `int()` without a word, so
-  shard 1 ran. Both are usage errors now (exit 5) that name the key; `true`,
-  `false`, whole numbers and the text forms click already read are unchanged.
+  shard 1 ran, and so did `2.0` and `1e2`, which `--shard-index 2.0` refuses.
+  Both are usage errors now (exit 5) that name the key; `true`, `false`, whole
+  numbers and the text forms click already read are unchanged. `Infinity`,
+  `-Infinity`, `NaN` and an integer with more digits than Python reads make the
+  document invalid JSON, which is a usage error too, with no traceback.
 
 - **`--cli-json-input` reads a document as tools write it.** A UTF-8 byte order
   mark on a file or on stdin is accepted; stdin is read as UTF-8 whatever the
   process locale, and a read that fails is the usage refusal a file gets, not a
-  traceback. The text after `file://` is a path, relative or absolute,
-  percent-decoded, as the AWS CLI reads the prefix: it used to be parsed as a URI,
-  so `file://params.json` was refused as a remote host and a `#` in a file's name
-  cut the name. A document nested too deeply to parse, a number too large for a
+  traceback. A `file:///` or `file://localhost/` URI is percent-decoded as a URI
+  is; any other text after `file://` is a path exactly as written, relative or
+  absolute, as the AWS CLI reads the prefix, so a `%` in a file's name stays a
+  `%`. It used to be parsed as a URI, so `file://params.json` was refused as a
+  remote host and a `#` in a file's name cut the name. A document nested too deeply to parse, a number too large for a
   whole-number parameter and a file name with a null byte (`file://a%00b`) are
   usage refusals, not tracebacks. `--help` and
   `--generate-cli-skeleton` run before the document is read, so a bad document
@@ -8083,14 +8087,6 @@
   scanned tree is handed over as written, so one generated in a repository as
   `.secrets.baseline` and moved out still skips every file of that name, the
   repository's own baseline included, until its `filename` is edited.
-
-- **`--cli-json-input` takes a JSON number only where the same option on the
-  command line would take it.** A true/false parameter takes `true` or `false`; a
-  number, `0` and `1` included, is a usage error that names the key. An integer
-  parameter takes an integer written with digits only: `3.5` is refused instead of
-  running as 3, and so are `2.0` and `1e2`, as `--shard-index 2.0` is. `Infinity`,
-  `-Infinity`, `NaN` and an integer with more digits than Python reads make the
-  document invalid JSON, which is a usage error too, with no traceback.
 
 ### Reporting changes
 
