@@ -652,6 +652,23 @@ class TestShortfalls:
         assert record.status_detail.endswith("The array is incomplete.")
         assert record.status == "Incomplete"
 
+    def test_a_shortfall_with_no_counts_is_not_built(self, reporter, metadata):
+        """With both counts zero the record was titled "0 record(s) built by the
+        fallback path" and marked "Degraded", about nothing. The builder refuses
+        it, and the wrapper that guards the builder answers None."""
+        with pytest.raises(ValueError):
+            reporter._create_shortfall_finding(0, 0, metadata, _now_ms())
+
+        assert reporter._shortfall_record(0, 0, metadata, _now_ms()) is None
+
+    def test_a_shortfall_with_only_degraded_records_is_still_built(
+        self, reporter, metadata
+    ):
+        record = reporter._create_shortfall_finding(0, 1, metadata, _now_ms())
+
+        assert record.finding_info.title == "1 record(s) built by the fallback path"
+        assert record.status == "Degraded"
+
     def test_an_all_failed_to_serialize_response_counts_nothing_as_processed(
         self, reporter, monkeypatch
     ):

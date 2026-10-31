@@ -1231,7 +1231,18 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         alarmed on a complete array, and the title named the wrong problem.
         ``status`` is "Incomplete" only when findings are absent; an array
         that is whole but carries fallback records is "Degraded".
+
+        Raises ValueError when both counts are zero: there is nothing for the
+        record to say, and it used to be titled "0 record(s) built by the
+        fallback path" with the status "Degraded". :meth:`report` builds the
+        record only when a count is not zero, and :meth:`_shortfall_record`
+        answers None for this error like any other it cannot build.
         """
+        if not (missing or degraded):
+            raise ValueError(
+                "a shortfall record needs a finding that is absent or a record "
+                "built by the fallback path"
+            )
         missing_text = (
             f"{missing} finding(s) of this scan could not be converted to OCSF and "
             "are absent from this array"
