@@ -172,16 +172,26 @@ def test_the_configured_patterns_are_restored_when_resolving_raises(
     root = mock_plugin_context.source_dir
     (root / "real.txt").write_text("in the tree\n", encoding="utf-8")
     scanner = _scanner(mock_plugin_context, exclude_patterns=["*.log"])
+    held_while_resolving: list[list[str]] = []
+
+    def resolving_breaks(*args, **kwargs):
+        # What the options hold at the moment the raise happens: the run's own list
+        # if the swap was made, the configured one if it never was.
+        held_while_resolving.append(list(scanner.config.options.exclude_patterns))
+        raise RuntimeError("resolving broke")
 
     with (
         patch.object(scanner, "_pre_scan", return_value=True),
         patch.object(scanner, "_post_scan"),
         patch.object(scanner, "_plugin_log"),
-        patch.object(
-            scanner, "_resolve_arguments", side_effect=RuntimeError("resolving broke")
-        ),
+        patch.object(scanner, "_resolve_arguments", side_effect=resolving_breaks),
         pytest.raises(ScannerError, match="resolving broke"),
     ):
         scanner.scan(target=root, target_type="source")
 
+    # Without this the assertion below passes just as well when the swap is
+    # conditional or happens after the raise, and the restore never did anything.
+    assert held_while_resolving and held_while_resolving[0] != ["*.log"], (
+        held_while_resolving
+    )
     assert scanner.config.options.exclude_patterns == ["*.log"]
