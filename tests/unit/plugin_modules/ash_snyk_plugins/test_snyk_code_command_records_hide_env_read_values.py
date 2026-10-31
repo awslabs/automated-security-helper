@@ -19,7 +19,6 @@ name is the value that reaches the command line here.
 import json
 import logging
 import shlex
-import tempfile
 from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
@@ -176,7 +175,7 @@ def test_a_directory_name_read_from_the_environment_is_hidden_in_command_records
     # The fake snyk was the binary that ran, and it ran on a copy of the scan set:
     # the directory argument is a temporary directory, not the scanned one. The
     # records name the scanned directory.
-    assert argv[0] == str(snyk_on_path) or argv[0] == "snyk", argv
+    assert argv[0] == str(snyk_on_path), argv
     source = tmp_path / MARKED_DIRECTORY / "src"
     # The argv element as the command spelled it (as_posix), kept as a string for
     # the record check below: str(Path(...)) re-spells it with backslashes on
@@ -184,7 +183,12 @@ def test_a_directory_name_read_from_the_environment_is_hidden_in_command_records
     copy_argument = next(a for a in argv[3:] if not a.startswith("--"))
     copy = Path(copy_argument)
     assert copy.resolve() != source.resolve(), copy
-    assert copy.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve()), copy
+    # tmp_path sits under the temporary directory by default, so "somewhere under
+    # the temporary directory" holds for the source, the output and the work
+    # directory too. The copy is the scanner's own: named with its prefix, and in
+    # none of the directories this test made.
+    assert copy.name.startswith(snyk_code_scanner._COPY_PREFIX), copy
+    assert not copy.resolve().is_relative_to(tmp_path.resolve()), copy
     assert running, "the scan did not reach the Running command log call"
     invocation = report.runs[0].invocations[0]
     assert MARKED_DIRECTORY not in invocation.commandLine, invocation.commandLine
