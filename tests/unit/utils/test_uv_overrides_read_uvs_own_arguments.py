@@ -26,6 +26,7 @@ Nothing here starts uv: the function reads argv and the environment only.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -175,6 +176,22 @@ def test_uv_system_python_is_a_choice_where_uv_reads_it(
     # UV_PYTHON is read by every subcommand.
     monkeypatch.setenv("UV_PYTHON", "/x/py")
     assert uv_child_overrides(["uv", "run", "bandit"]) == {"UV_NO_PROJECT": "1"}
+
+
+def test_a_path_or_bytes_argument_is_read_as_text_never_raised_on(no_operator_choice):
+    """subprocess accepts a Path or bytes anywhere in argv, and plugins put them
+    there. The words were compared and ``startswith``-ed as they came, so a
+    ``Path`` argument raised AttributeError and a bytes program TypeError out of
+    the spawn, recorded as a spawn failure of a command that is fine."""
+    path = Path("requirements.txt")
+    assert uv_child_overrides(["uv", "pip", "install", "-r", path]) == BOTH
+    assert uv_child_overrides([b"uv", "pip", "list"]) == BOTH
+    assert uv_child_overrides([Path("/opt/bin/uv"), "run", Path("tool.py")]) == BOTH
+    assert (
+        uv_child_overrides([sys.executable, "-m", "uv", "pip", "install", path]) == BOTH
+    )
+    # Not decodable as subprocess would not: no uv command is read.
+    assert uv_child_overrides(["uv", "pip", 3]) == {}
 
 
 def test_a_subcommand_that_runs_no_program_reads_every_argument(no_operator_choice):

@@ -353,14 +353,24 @@ def _uv_arguments(argv: Sequence[str]) -> Optional[List[str]]:
     separate ``-m`` then ``uv`` gave those spellings no overrides, so the uv they
     started found the scanned tree's project and ``.venv``, the hazard the
     overrides exist for.
+
+    Every argument is read as text the way subprocess reads it (``os.fsdecode``: a
+    str, bytes or a path-like), once, here: the callers compare and ``startswith``
+    the words, and a ``Path`` argument or a bytes program raised AttributeError or
+    TypeError out of the spawn. An argument subprocess would refuse too means no uv
+    command is read (None).
     """
     if not argv:
         return None
-    name = re.split(r"[\\/]", os.fspath(argv[0]))[-1].lower()
+    try:
+        words = [os.fsdecode(word) for word in argv]
+    except TypeError:
+        return None
+    name = re.split(r"[\\/]", words[0])[-1].lower()
     if name in _UV_PROGRAM_NAMES:
-        return list(argv[1:])
-    if runs_module_or_code(argv):
-        found = python_module_arguments(argv[1:])
+        return words[1:]
+    if runs_module_or_code(words):
+        found = python_module_arguments(words[1:])
         if found is not None and found[0] in _UV_MODULES:
             return found[1]
     return None
