@@ -1475,3 +1475,57 @@ def test_the_policy_builder_carries_the_environment_list(layout):
     assert built.environment == ("MY_VAR", "OTHER=1")
     with pytest.raises(SandboxUnavailable, match="GITHUB_TOKEN"):
         _build_policy(layout, environment=["GITHUB_TOKEN"])
+
+
+@POSIX
+@pytest.mark.parametrize("kind", _BACKEND_KINDS)
+def test_a_ca_value_the_list_sets_is_the_operators_and_is_granted(
+    layout, monkeypatch, kind
+):
+    """The other half of the operator's value: ASH started with no such setting, and
+    the environment list sets it with a ``NAME=value`` entry."""
+    bundle = layout.home / "corp.pem"
+    bundle.write_text("")
+    monkeypatch.setattr(backends, "startup_environ", dict)
+    policy = _policy(layout, environment=(f"SSL_CERT_FILE={bundle}",))
+
+    granted = _granted_for(kind, layout, monkeypatch, policy, {})
+
+    assert _real(bundle).as_posix() in granted
+
+
+@POSIX
+def test_a_landlock_plan_reads_the_ca_settings_and_never_runs_them(layout, monkeypatch):
+    """The CA files and directories are the scan's data: read, never executable, and
+    a relative, missing, wrong-kind or already visible entry is left out."""
+    bundle = layout.home / "corp.pem"
+    bundle.write_text("")
+    certs = layout.home / "certs"
+    certs.mkdir()
+    not_a_file = layout.home / "not-a-file"
+    not_a_file.mkdir()
+    missing = layout.home / "missing.pem"
+    visible = layout.system / "certs"
+    visible.mkdir()
+    env = {
+        "SSL_CERT_FILE": str(bundle),
+        "REQUESTS_CA_BUNDLE": "relative/corp.pem",
+        "CURL_CA_BUNDLE": str(missing),
+        "NODE_EXTRA_CA_CERTS": str(not_a_file),
+        "SSL_CERT_DIR": os.pathsep.join([str(certs), str(visible)]),
+    }
+    monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+
+    plan = _plan_of("landlock", layout, monkeypatch, _policy(layout), env)
+    try:
+        document = _landlock_document(plan)
+    finally:
+        plan.run_cleanup()
+
+    read_data, read_and_run = set(document["read_data"]), set(document["read_only"])
+    for granted in (bundle, certs):
+        assert _real(granted).as_posix() in read_data
+        assert _real(granted).as_posix() not in read_and_run
+    for left_out in (not_a_file, missing, visible):
+        assert _real(left_out).as_posix() not in read_data
+    assert not any(path.endswith("relative/corp.pem") for path in read_data)
