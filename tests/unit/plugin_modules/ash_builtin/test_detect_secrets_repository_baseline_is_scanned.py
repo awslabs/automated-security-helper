@@ -29,8 +29,13 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
     HEX_HIGH_ENTROPY_TYPE,
+    IS_BASELINE_FILE_FILTER,
+    SHOULD_EXCLUDE_FILE_FILTER,
     DetectSecretsScanner,
     DetectSecretsScannerConfig,
+    DetectSecretsScannerConfigOptions,
+    DetectSecretsScanSettings,
+    DetectSecretsScanSettingsFiltersUsed,
     _detect_secrets_api,
 )
 
@@ -43,6 +48,16 @@ LISTED_ONE = "".join(["AKIA", "IOSFODNN7", "EXAMPLE"])  # noqa: FLY002
 LISTED_TWO = "".join(["AKIA", "I44QH8DHB", "EXAMPLE"])  # noqa: FLY002
 PLANTED = "".join(["AKIA", "ZZZZZZZZZ", "EXAMPLE"])  # noqa: FLY002
 AWS_RULE = "SECRET-AWS-ACCESS-KEY"
+
+# The filter detect-secrets writes into every baseline it updates with
+# ``--baseline``, naming the baseline: it skips every file of that name.
+SKIP_BY_NAME = {"path": IS_BASELINE_FILE_FILTER, "filename": BASELINE_NAME}
+# A pattern a baseline carries that matches the baseline's own name.
+EXCLUDE_THE_BASELINE = {
+    "path": SHOULD_EXCLUDE_FILE_FILTER,
+    "pattern": [r"^\.secrets\.baseline$"],
+}
+UUID_FILTER = {"path": "detect_secrets.filters.heuristic.is_potential_uuid"}
 
 
 def _hash(secret: str) -> str:
@@ -63,10 +78,18 @@ def _context(tmp_path: Path) -> PluginContext:
     return context
 
 
-def _write_baseline(source: Path, *, notes: str | None = None) -> str:
+def _write_baseline(
+    source: Path,
+    *,
+    notes: str | None = None,
+    filters_used: list | None = None,
+    path: Path | None = None,
+) -> str:
     """A baseline of the shape ``detect-secrets scan`` writes: two listed
     entries, one per line, and the detectors a repository ordinarily has on.
-    Returns the text, so a test can find the line a key sits on."""
+    ``filters_used`` is what the file carries as its filters, and ``path`` is
+    the file it is written to (the tree's own, by default). Returns the text,
+    so a test can find the line a key sits on."""
     document: dict = {
         "version": "1.5.0",
         "plugins_used": [
@@ -74,7 +97,7 @@ def _write_baseline(source: Path, *, notes: str | None = None) -> str:
             {"name": "HexHighEntropyString", "limit": 3.0},
             {"name": "KeywordDetector", "keyword_exclude": ""},
         ],
-        "filters_used": [],
+        "filters_used": filters_used or [],
         "results": {
             "settings.py": [
                 {
@@ -98,7 +121,7 @@ def _write_baseline(source: Path, *, notes: str | None = None) -> str:
     if notes is not None:
         document["notes"] = notes
     text = json.dumps(document, indent=2) + "\n"
-    (source / BASELINE_NAME).write_text(text, encoding="utf-8")
+    (path or source / BASELINE_NAME).write_text(text, encoding="utf-8")
     return text
 
 
@@ -202,3 +225,188 @@ def test_the_real_worker_reports_nothing_on_a_baseline_that_only_lists(
 
     assert report is not False
     assert _on_the_baseline(report) == []
+
+
+def _recording_worker(scanner, monkeypatch) -> dict:
+    """Replace the worker with one that returns nothing and records what the
+    scan handed it: the names of the files and the paths of the filters."""
+    seen: dict = {}
+
+    def scanned(self, *, baseline, scan_paths, scan_settings_dict, **kwargs):
+        seen["names"] = sorted(Path(path).name for path in scan_paths)
+        seen["filters"] = [
+            item.get("path") for item in scan_settings_dict.get("filters_used", [])
+        ]
+        collection_cls, _, _ = _detect_secrets_api()
+        collection = collection_cls()
+        collection.root = self._secrets_collection.root
+        return collection
+
+    monkeypatch.setattr(type(scanner), "_scan_in_worker", scanned)
+    return seen
+
+
+def test_the_filter_that_skips_files_by_name_is_not_taken_from_the_repositorys_baseline(
+    tmp_path, monkeypatch
+):
+    """``detect-secrets scan --baseline`` writes ``is_baseline_file`` into the
+    baseline, naming it, and the worker skips every file of that name. Read
+    from a baseline the repository controls, the name is the repository's
+    choice, so the file is in the scan set and never scanned. The worker is not
+    handed the filter; the baseline's other filters still reach it."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    _write_baseline(source, filters_used=[SKIP_BY_NAME, UUID_FILTER])
+    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+    assert scanner._baseline_entries_trusted() is False
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert BASELINE_NAME in seen["names"]
+    assert UUID_FILTER["path"] in seen["filters"]
+    assert IS_BASELINE_FILE_FILTER not in seen["filters"]
+
+
+def test_the_operators_own_name_filter_still_reaches_the_worker(tmp_path, monkeypatch):
+    """The same filter written in the operator's own settings is the operator's
+    to use, and a baseline entry for the same path yields to it."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    _write_baseline(source, filters_used=[SKIP_BY_NAME])
+    settings = DetectSecretsScanSettings(
+        filters_used=[
+            DetectSecretsScanSettingsFiltersUsed(
+                path=IS_BASELINE_FILE_FILTER, filename="vendored.baseline"
+            )
+        ]
+    )
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(scan_settings=settings)
+        ),
+    )
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert seen["filters"].count(IS_BASELINE_FILE_FILTER) == 1
+
+
+def test_the_operators_own_baseline_keeps_its_name_filter(tmp_path, monkeypatch):
+    """A baseline the operator names outside the tree is the operator's file,
+    so what it carries is the operator's choice: the filter reaches the worker."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    baseline = tmp_path / "operator.baseline"
+    _write_baseline(
+        source,
+        filters_used=[{"path": IS_BASELINE_FILE_FILTER, "filename": baseline.name}],
+        path=baseline,
+    )
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(baseline_file=str(baseline))
+        ),
+    )
+    assert scanner._baseline_entries_trusted() is True
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert IS_BASELINE_FILE_FILTER in seen["filters"]
+
+
+def test_a_pattern_in_the_repositorys_baseline_does_not_drop_the_baseline_from_the_scan(
+    tmp_path, monkeypatch
+):
+    """The baseline's own ``should_exclude_file`` patterns leave files out of
+    the scan set, and a repository could name the baseline itself. Its patterns
+    apply to the other files and not to it."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    (source / "kept.py").write_text("x = 1\n", encoding="utf-8")
+    (source / "skipped.py").write_text("x = 2\n", encoding="utf-8")
+    _write_baseline(
+        source,
+        filters_used=[
+            {
+                "path": SHOULD_EXCLUDE_FILE_FILTER,
+                "pattern": [r"^\.secrets\.baseline$", r"^skipped\.py$"],
+            }
+        ],
+    )
+    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+    assert scanner._baseline_entries_trusted() is False
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert seen["names"] == [BASELINE_NAME, "kept.py"]
+
+
+def test_a_pattern_the_operator_wrote_still_drops_the_baseline_from_the_scan(
+    tmp_path, monkeypatch
+):
+    """The operator's own exclusion patterns are theirs to write: one that names
+    the repository's baseline leaves it out of the scan set."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    (source / "kept.py").write_text("x = 1\n", encoding="utf-8")
+    _write_baseline(source)
+    settings = DetectSecretsScanSettings(
+        filters_used=[
+            DetectSecretsScanSettingsFiltersUsed(
+                path=SHOULD_EXCLUDE_FILE_FILTER, pattern=[r"^\.secrets\.baseline$"]
+            )
+        ]
+    )
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(scan_settings=settings)
+        ),
+    )
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert seen["names"] == ["kept.py"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "filter_entry",
+    [SKIP_BY_NAME, EXCLUDE_THE_BASELINE],
+    ids=["skip_by_name", "exclude_pattern"],
+)
+def test_the_real_worker_reads_a_key_in_a_baseline_that_carries_a_filter_naming_itself(
+    tmp_path, monkeypatch, filter_entry
+):
+    """A baseline that carries a filter naming itself, by file name or by
+    exclusion pattern, with a live key under a key of its own. The real worker
+    reports the key: the file is neither left out of the scan set nor skipped
+    by the worker."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    text = _write_baseline(source, notes=PLANTED, filters_used=[filter_entry])
+    line = next(
+        number
+        for number, content in enumerate(text.splitlines(), 1)
+        if PLANTED in content
+    )
+    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+    assert scanner._baseline_entries_trusted() is False
+
+    report = scanner.scan(target=source, target_type="source")
+
+    assert report is not False
+    assert _on_the_baseline(report) == [(AWS_RULE, line)]

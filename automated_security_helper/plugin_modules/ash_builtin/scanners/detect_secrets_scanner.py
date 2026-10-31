@@ -182,6 +182,12 @@ MAX_WORKER_OUTPUT_MIB = 4096
 #: relative to the scan root, and does not hand it to the worker.
 SHOULD_EXCLUDE_FILE_FILTER = "detect_secrets.filters.regex.should_exclude_file"
 
+#: The detect-secrets filter that skips every file whose name is its ``filename``
+#: setting. detect-secrets writes it into the baseline it updates, naming the
+#: baseline, and applies it in the worker; read from a baseline the scanned
+#: repository controls it can name any file, the baseline itself included.
+IS_BASELINE_FILE_FILTER = "detect_secrets.filters.common.is_baseline_file"
+
 #: The detect-secrets filter that drops a candidate whose value is in a word
 #: list. detect-secrets opens the list's ``file_name`` when the settings are
 #: applied, in the worker, from the worker's own working directory, and the
@@ -2744,13 +2750,36 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     )
                 before_baseline = len(scannable)
                 if baseline_patterns:
-                    scannable = self._apply_file_exclusions(
-                        scannable,
+                    # A baseline the repository controls is scanned like any
+                    # other file (above), so its own exclusion patterns do not
+                    # apply to it: a committed ``^\.secrets\.baseline$`` would
+                    # take it out of the scan set again. The operator's
+                    # patterns still do.
+                    kept_apart: Set[str] = (
+                        {
+                            item
+                            for item in scannable
+                            if self._root_relative(item, scan_root) in baseline_names
+                        }
+                        if baseline_names and not known_entries_trusted
+                        else set()
+                    )
+                    kept_by_patterns = self._apply_file_exclusions(
+                        [item for item in scannable if item not in kept_apart],
                         baseline_patterns,
                         baseline_anchor,
                         timeout=scan_timeout,
                         source=baseline_source,
                     )
+                    if kept_apart:
+                        kept_set = set(kept_by_patterns)
+                        scannable = [
+                            item
+                            for item in scannable
+                            if item in kept_apart or item in kept_set
+                        ]
+                    else:
+                        scannable = kept_by_patterns
                 for excluded_count, origin in (
                     (before_own - before_baseline, "the operator's exclude patterns"),
                     (before_baseline - len(scannable), "baseline exclude patterns"),
@@ -2763,11 +2792,37 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             target_type=target_type,
                         )
             if "filters_used" in scan_settings_dict:
-                scan_settings_dict["filters_used"] = [
+                # ASH never hands the worker a baseline, so the filter that
+                # skips the baseline by name has no job there. Read from a file
+                # the repository controls it skips whatever file the
+                # repository names, the baseline (scanned above) included, so
+                # only an entry the operator's own settings carry survives.
+                operator_wrote_baseline_filter = any(
+                    id(item) in self._operator_filter_ids
+                    and item.path == IS_BASELINE_FILE_FILTER
+                    for item in self.config.options.scan_settings.filters_used
+                )
+                left_out = {SHOULD_EXCLUDE_FILE_FILTER}
+                if not known_entries_trusted and not operator_wrote_baseline_filter:
+                    left_out.add(IS_BASELINE_FILE_FILTER)
+                kept_filters = [
                     item
                     for item in scan_settings_dict["filters_used"]
-                    if item.get("path") != SHOULD_EXCLUDE_FILE_FILTER
+                    if item.get("path") not in left_out
                 ]
+                if IS_BASELINE_FILE_FILTER in left_out and any(
+                    item.get("path") == IS_BASELINE_FILE_FILTER
+                    for item in scan_settings_dict["filters_used"]
+                ):
+                    self._plugin_log(
+                        "Not handing the detect-secrets worker the "
+                        f"{IS_BASELINE_FILE_FILTER} filter: it came from a file "
+                        "the scanned repository controls, and it would skip "
+                        "files by name",
+                        level=logging.VERBOSE,
+                        target_type=target_type,
+                    )
+                scan_settings_dict["filters_used"] = kept_filters
 
             if global_ignore_paths:
                 from automated_security_helper.utils.suppression_matcher import (
