@@ -80,16 +80,20 @@ def test_the_container_scan_runs_inside_a_registered_shutdown_scope(
     monkeypatch.setattr(
         "automated_security_helper.cli.image.run_ash_scan", stand_in_scan
     )
-    CliRunner().invoke(_build_image_app(), args)
+    result = CliRunner().invoke(_build_image_app(), args)
 
-    assert isinstance(seen.get("event"), CancelEvent), (
+    assert "event" in seen, result.output
+    assert isinstance(seen["event"], CancelEvent), (
         "the command must run the scan inside a cancel scope of its own"
     )
     assert seen["registered"] == (seen["event"],), (
         "the scan's scope is not registered with the shutdown handler, so a "
         "SIGTERM takes the default-kill branch"
     )
-    assert cancellation._SHUTDOWN_SCOPES == (), "the scope leaked its registration"
+    assert cancellation._SHUTDOWN_SCOPES == (), (
+        "the scope is still registered after the command ended, so a later "
+        "SIGTERM would cancel a scan that is over"
+    )
 
 
 def test_a_stopped_scan_exits_terminated_with_one_line(shutdown_state, monkeypatch):
@@ -109,6 +113,29 @@ def test_a_stopped_scan_exits_terminated_with_one_line(shutdown_state, monkeypat
     assert "ASH build-image stopped by SIGTERM" in result.output
     assert "did not complete" in result.output
     assert cancellation._SHUTDOWN_SCOPES == (), "the scope leaked its registration"
+
+
+def test_an_interrupted_run_cancels_its_event_before_exiting(
+    shutdown_state, monkeypatch
+):
+    """As ``ash scan`` does: a cancellable spawn running in another thread polls
+    the event, and would keep going on a run the operator interrupted."""
+    seen: dict = {}
+
+    def stand_in_scan(**kwargs):
+        seen["event"] = current_cancel_event()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        "automated_security_helper.cli.image.run_ash_scan", stand_in_scan
+    )
+    result = CliRunner().invoke(_build_image_app(), [])
+
+    assert result.exit_code == ASH_EXIT_INTERRUPTED, result.output
+    assert "ASH build-image interrupted" in result.output
+    assert "event" in seen, result.output
+    assert seen["event"].is_set()
+    assert seen["event"].stop_promptly is True
 
 
 def test_a_stopped_build_only_run_owes_no_verdict(shutdown_state, monkeypatch):
