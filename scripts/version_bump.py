@@ -145,7 +145,10 @@ def fix_with_set(version: str) -> str:
 
     For a version that is not final the command CHANGES the version (2.0.0rc1 to
     2.0.0 finalizes the release; 3.8.0.post1 to 3.8.0 moves it backwards), so the
-    advice says so and names how to keep the version instead.
+    advice says so. It offers no way to keep the version: ``validate`` accepts a
+    final version only, so a tree that kept a pre-release, a post-release, a
+    development version or a local part (1.2.3+local) would fail it again with
+    whatever spelling the reader chose.
     """
     try:
         parsed = _read_version(version)
@@ -153,35 +156,23 @@ def fix_with_set(version: str) -> str:
         return "run 'set X.Y.Z' with a final version, such as 'set 3.1.0'"
     if _is_final(parsed):
         return f"run 'set {parsed}'"
-    if parsed.local is None and str(parsed) != version:
-        keep = f"spell it {parsed} in both [project] and [tool.commitizen]"
-    else:
-        keep = "edit both version fields by hand"
     return (
         f"run 'set {parsed.base_version}' to change {version} to "
-        f"{parsed.base_version} (set writes final X.Y.Z versions only); "
-        f"to keep {version}, {keep}"
+        f"{parsed.base_version} (set writes final X.Y.Z versions only)"
     )
 
 
 def regenerate_pages_with(version: str) -> str:
-    """The command that regenerates the pages for ``version`` as it stands.
+    """The command that regenerates the pages for the final ``version``.
 
-    For a final version ``set`` does it and changes nothing else. For a version
-    that is not final ``set`` would change the version, so the advice is the
-    template manager's ``generate``, which renders the pages with the version the
-    pyproject.toml already holds.
+    ``set`` does it and changes nothing else. It is named for a final version
+    only: ``validate`` compares no page under any other version, because the
+    pins in the pages and the checks that read them match X.Y.Z alone, so the
+    template manager's ``generate`` is not advised for a pre-release (it would
+    write ``@v2.0.0rc1`` into every page, a pin those readers take for 2.0.0).
+    A version that is not final gets ``fix_with_set``'s advice instead.
     """
-    try:
-        parsed = _read_version(version)
-    except ValueError:
-        return fix_with_set(version)
-    if _is_final(parsed):
-        return f"{fix_with_set(version)} to regenerate it"
-    return (
-        "run 'python scripts/version_template_manager.py generate' to render the "
-        f"pages for {version} (set would change the version to {parsed.base_version})"
-    )
+    return f"{fix_with_set(version)} to regenerate it"
 
 
 class VersionBumper:
@@ -313,7 +304,9 @@ class VersionBumper:
         pyproject.toml at the project root, and each generated page with its
         template rendered for that version (what ``set`` would write now). While
         the two tables disagree no page is compared, because there is no one
-        version to render for.
+        version to render for. The same holds while the version is not a final
+        X.Y.Z (a pre-release such as 2.0.0rc1 included): it is reported, with the
+        ``set`` that finalizes it, and the pages are not compared.
 
         Returns:
             True if all versions are consistent
@@ -339,14 +332,29 @@ class VersionBumper:
         # `set` refuses (3.8.0-rc1, written by an older set) or text that is not a
         # version at all (not-a-version) passed here as long as the pages matched,
         # and the advice below would have told the reader to run `set` with it.
-        # Canonical is the spelling check only: a pre-release such as 2.0.0rc1 is
-        # canonical and passes, although `set` itself writes final versions only.
         canonical = validate_version(current_version)
         if not canonical:
             print(
                 f"Error: [project] version {current_version!r} is not a canonical "
                 "version (PEP 440 with three release numbers, spelled as pip prints "
                 f"it, no local part); {fix_with_set(current_version)}"
+            )
+            consistent = False
+        # A canonical pre-release (2.0.0rc1), post-release or development version
+        # is not accepted either. The pins in the pages and the checks that read
+        # them match X.Y.Z alone: `_SEMVER` has no right boundary, so
+        # `@v2.0.0rc1` is read as 2.0.0, and the template manager's `convert`
+        # would write it back as `@v{{VERSION}}rc1`. Passing such a tree, and
+        # advising `generate` for a stale page, wrote pins into the pages that no
+        # reader of them could tell from another release's; `set` refuses the same
+        # versions for the same reason, so the advice is the `set` that finalizes.
+        final = canonical and _is_final(_read_version(current_version))
+        if canonical and not final:
+            print(
+                f"Error: [project] version {current_version} is not a final "
+                "release; the pins in the pages and the checks that read them "
+                "match X.Y.Z alone, so no page is compared for it; "
+                f"{fix_with_set(current_version)}"
             )
             consistent = False
 
@@ -407,7 +415,7 @@ class VersionBumper:
                 print(f"Error: could not read {target}: {e}")
                 consistent = False
                 continue
-            if not (tables_agree and canonical):
+            if not (tables_agree and final):
                 continue
             try:
                 expected = self.template_manager.render(

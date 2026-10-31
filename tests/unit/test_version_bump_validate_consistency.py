@@ -28,9 +28,13 @@ What is asserted
 * The pyproject.toml version itself must be canonical (PEP 440, three release
   numbers, spelled as pip prints it). A spelling set refuses, or text that is not a
   version, fails with advice naming a command ``set`` accepts: the canonical
-  spelling, or the final release for a pre-release set cannot write. A canonical
-  pre-release passes the spelling check even though ``set`` writes final versions
-  only; validate says "canonical", not "a version set can write".
+  spelling, or the final release for a pre-release set cannot write.
+* The version must also be final. A canonical pre-release, post-release or
+  development version (2.0.0rc1) fails, whatever its pages say, with the ``set``
+  that finalizes it and no way to keep it, and no page is compared for it: the pins in
+  the pages and the checks that read them match X.Y.Z alone, so ``generate`` would
+  write a pin they read as another release. The template manager's ``generate`` is
+  never the advice for it.
 * It passes on a tree where all of them agree.
 * The version it prints comes from the pyproject.toml at the project root; with no
   such file it fails and prints no version that came from somewhere else.
@@ -413,20 +417,47 @@ class TestTheVersionItselfIsChecked:
         assert "run 'set X.Y.Z' with a final version" in out
         assert "validation passed" not in out
 
-    def test_a_canonical_pre_release_whose_pages_match_passes(
+    def test_a_canonical_pre_release_whose_pages_match_still_fails(
         self, project, monkeypatch, capsys
     ):
-        # Validate checks the spelling only, so it neither passes this version off
-        # as one `set` can write nor complains about it.
+        # Red before: validate checked the spelling only, compared the pages for
+        # 2.0.0rc1, found them equal and returned True, for a tree whose pins every
+        # reader of the pages takes for 2.0.0.
         _write_pyproject(project, "2.0.0rc1", "2.0.0rc1")
         project.joinpath("README.md").write_text(
             TEMPLATE.replace("{{VERSION}}", "2.0.0rc1"), encoding="utf-8"
         )
         module = _load_version_bump(monkeypatch)
-        assert _bumper(module, project).validate_consistency() is True
+        assert _bumper(module, project).validate_consistency() is False
         out = capsys.readouterr().out
-        assert "can write" not in out
-        assert "canonical" not in out
+        assert "[project] version 2.0.0rc1 is not a final release" in out
+        assert "run 'set 2.0.0' to change 2.0.0rc1 to 2.0.0" in out
+        assert "is not a canonical version" not in out
+        assert "validation passed" not in out
+
+    @pytest.mark.parametrize(
+        ("version", "base"),
+        [
+            ("2.0.0a1", "2.0.0"),
+            ("2.0.0b2", "2.0.0"),
+            ("2.0.0.dev1", "2.0.0"),
+            ("2.0.0rc1.dev2", "2.0.0"),
+            ("3.8.0.post1", "3.8.0"),
+        ],
+    )
+    def test_every_kind_of_non_final_version_fails_with_the_set_that_finalizes_it(
+        self, project, monkeypatch, capsys, version, base
+    ):
+        _write_pyproject(project, version, version)
+        project.joinpath("README.md").write_text(
+            TEMPLATE.replace("{{VERSION}}", version), encoding="utf-8"
+        )
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert f"[project] version {version} is not a final release" in out
+        assert f"run 'set {base}'" in out
+        assert "validation passed" not in out
 
     def test_set_and_validate_name_different_things_for_a_pre_release(
         self, project, monkeypatch, capsys
@@ -437,47 +468,52 @@ class TestTheVersionItselfIsChecked:
         assert _bumper(module, project).set_version("2.0.0rc1") is False
         assert "is not a final release" in capsys.readouterr().out
 
-    def test_a_stale_page_under_a_pre_release_is_not_advised_a_set_that_finalizes(
+    def test_a_stale_page_under_a_pre_release_is_not_compared_or_advised_generate(
         self, project, monkeypatch, capsys
     ):
-        # Red before: the advice was "run 'set 2.0.0' ... to regenerate it", but set
-        # does not regenerate the pages for 2.0.0rc1: it rewrites both tables to
-        # 2.0.0, which finalizes the release.
+        # Red before: the page was compared for 2.0.0rc1, reported stale, and the
+        # advice was the template manager's generate, which writes @v2.0.0rc1 into
+        # every page. Now the version is reported and no page is compared.
         _write_pyproject(project, "2.0.0rc1", "2.0.0rc1")
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is False
         out = capsys.readouterr().out
-        assert "README.md is not its template rendered for 2.0.0rc1" in out
-        assert "run 'set" not in out
-        assert "version_template_manager.py generate" in out
-        assert "set would change the version to 2.0.0" in out
+        assert "[project] version 2.0.0rc1 is not a final release" in out
+        assert "not its template rendered" not in out
+        assert "version_template_manager.py generate" not in out
+        assert "set would change the version" not in out
 
-    def test_a_stale_page_under_a_post_release_is_not_advised_a_set_backwards(
+    def test_a_stale_page_under_a_post_release_is_not_compared_or_advised_generate(
         self, project, monkeypatch, capsys
     ):
-        # 3.8.0.post1 is later than 3.8.0, which may already be published.
+        # 3.8.0.post1 is later than 3.8.0, which may already be published; the
+        # advice says the set changes the version, and offers no way to keep it.
         _write_pyproject(project, "3.8.0.post1", "3.8.0.post1")
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is False
         out = capsys.readouterr().out
-        assert "run 'set" not in out
-        assert "version_template_manager.py generate" in out
-        assert "set would change the version to 3.8.0" in out
+        assert "run 'set 3.8.0' to change 3.8.0.post1 to 3.8.0" in out
+        assert "not its template rendered" not in out
+        assert "version_template_manager.py generate" not in out
 
-    def test_the_command_named_for_a_stale_pre_release_page_repairs_it(
+    def test_the_pin_generate_would_write_for_a_pre_release_reads_as_the_final_release(
         self, project, monkeypatch
     ):
-        # The advice is only worth giving if it works: generate renders the pages
-        # for the version the tables already hold, and validate then passes.
-        _write_pyproject(project, "2.0.0rc1", "2.0.0rc1")
+        # The reason validate refuses the version: the page generate would render
+        # for 2.0.0rc1 carries a pin that the readers of the pages (the template
+        # manager's own _ash_pins is one) take for 2.0.0. If this changes, the
+        # refusal is no longer needed and the advice may name generate again.
         module = _load_version_bump(monkeypatch)
-        bumper = _bumper(module, project)
-        assert bumper.validate_consistency() is False
-
-        assert bumper.template_manager.generate_all_from_templates() == 1
-
-        assert bumper.validate_consistency() is True
-        assert "2.0.0rc1" in project.joinpath("README.md").read_text(encoding="utf-8")
+        manager_module = importlib.import_module(
+            type(_bumper(module, project).template_manager).__module__
+        )
+        page = (
+            "pip install git+https://github.com/awslabs/automated-security-"
+            "helper.git@v2.0.0rc1\n"
+        )
+        assert [number for _form, number, _start in manager_module._ash_pins(page)] == [
+            "2.0.0"
+        ]
 
     def test_the_set_advice_for_a_pre_release_says_it_changes_the_version(
         self, project, monkeypatch, capsys
@@ -487,8 +523,24 @@ class TestTheVersionItselfIsChecked:
         assert _bumper(module, project).validate_consistency() is False
         out = capsys.readouterr().out
         assert "run 'set 3.8.0' to change 3.8.0-rc1 to 3.8.0" in out
-        # The route that keeps the release candidate: the spelling pip prints.
-        assert "to keep 3.8.0-rc1, spell it 3.8.0rc1 in both" in out
+        # No route that keeps the release candidate: validate fails every
+        # spelling of it, so such a route would only lead back to this error.
+        assert "to keep" not in out
+        assert "3.8.0rc1" not in out
+
+    def test_a_local_part_is_dropped_by_the_advice_not_offered_to_be_kept(
+        self, project, monkeypatch, capsys
+    ):
+        # Red before: "to keep 1.2.3+local, edit both version fields by hand",
+        # advice that leads to a tree validate rejects again for the local part.
+        _write_pyproject(project, "1.2.3+local", "1.2.3+local")
+        module = _load_version_bump(monkeypatch)
+        assert _bumper(module, project).validate_consistency() is False
+        out = capsys.readouterr().out
+        assert "'1.2.3+local' is not a canonical version" in out
+        assert "run 'set 1.2.3' to change 1.2.3+local to 1.2.3" in out
+        assert "to keep" not in out
+        assert "by hand" not in out
 
     def test_tables_that_disagree_on_a_pre_release_do_not_advise_a_silent_finalize(
         self, project, monkeypatch, capsys
@@ -498,7 +550,7 @@ class TestTheVersionItselfIsChecked:
         assert _bumper(module, project).validate_consistency() is False
         out = capsys.readouterr().out
         assert "run 'set 2.0.0' to change 2.0.0rc1 to 2.0.0" in out
-        assert "to keep 2.0.0rc1, edit both version fields by hand" in out
+        assert "to keep" not in out
 
 
 class TestDisagreeingTablesAreReportedOnceNotAsEveryPageStale:
