@@ -207,9 +207,53 @@ def _shown(text: str) -> str:
     )
 
 
+def _write_stderr(text: str) -> None:
+    """``text``, shown and not obeyed, and a newline on stderr, or nothing when
+    stderr cannot be written.
+
+    Every line this program writes after its policy is read is a report about
+    something else it is doing (a reap pass, a kill, an exit status), and none of
+    them is worth ending that work for. The interpreter ignores SIGPIPE, so a
+    stderr whose reader has gone raises BrokenPipeError here; unhandled, the
+    exception ended a reap pass early, left the scanner's leftovers running, or
+    replaced the status the wrapper owes ASH with a traceback and exit 1. A write
+    that fails is dropped, and the stream is given a place to put what it kept.
+    """
+    try:
+        sys.stderr.write(_shown(text) + "\n")
+    except OSError:
+        _give_up_stderr()
+    except (AttributeError, ValueError):
+        # No stderr at all (a descriptor 2 that was closed at startup), or one
+        # closed since: there is nowhere to write to.
+        pass
+
+
+def _give_up_stderr() -> None:
+    """Point descriptor 2 at /dev/null after a write to it failed.
+
+    ``sys.stderr`` keeps the bytes it could not write and the interpreter
+    flushes it again as it exits; a flush that fails there replaces the exit
+    status with 120. The wrapper's status is the scanner's, so the kept bytes
+    are given a descriptor that accepts them.
+    """
+    try:
+        sink = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        if sink != 2:
+            os.dup2(sink, 2)
+    except OSError:
+        pass
+    finally:
+        if sink != 2:
+            os.close(sink)
+
+
 def fail(message: str) -> NoReturn:
     # The message quotes policy paths, which name the scanned tree's directories.
-    sys.stderr.write(_shown(f"ash-landlock: {message}") + "\n")
+    _write_stderr(f"ash-landlock: {message}")
     sys.exit(126)
 
 
@@ -645,13 +689,7 @@ def _kill_descendant(pid: int, tree: Set[int]) -> bool:
         # whose stat cannot be read is left alone too (the guard against a
         # reused pid stays), but not in silence.
         if os.path.exists(f"/proc/{pid}"):
-            sys.stderr.write(
-                _shown(
-                    f"ash-landlock: could not read the parent of process {pid}; "
-                    "it is left alone"
-                )
-                + "\n"
-            )
+            _note(f"could not read the parent of process {pid}; it is left alone")
         return False
     if parent not in tree:
         return False
@@ -753,21 +791,18 @@ def _child_setup(restrict: Callable[[], None]) -> None:
     # instructions between the fork and here is caught by _run_child, which
     # compares the parent to the pid the wrapper read before the fork.
     if libc.prctl(PR_SET_PDEATHSIG, int(signal.SIGTERM), 0, 0, 0) != 0:
-        sys.stderr.write(
-            _shown(
-                "ash-landlock: prctl(PR_SET_PDEATHSIG): "
-                f"{os.strerror(ctypes.get_errno())}; the scanner outlives a killed "
-                "wrapper"
-            )
-            + "\n"
+        _note(
+            f"prctl(PR_SET_PDEATHSIG): {os.strerror(ctypes.get_errno())}; "
+            "the scanner outlives a killed wrapper"
         )
     restrict()
     _restore_dispositions()
 
 
 def _note(text: str) -> None:
-    """One ``ash-landlock:`` line on stderr, shown and not obeyed."""
-    sys.stderr.write(_shown(f"ash-landlock: {text}") + "\n")
+    """One ``ash-landlock:`` line on stderr, shown and not obeyed; dropped when
+    stderr cannot be written (``_write_stderr``)."""
+    _write_stderr(f"ash-landlock: {text}")
 
 
 def _run_child(
@@ -1068,13 +1103,10 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
         # The deadline ended the loop with processes still found: said, so ASH's
         # log shows that something the scanner started outlived the stop, where
         # the scanner's own status alone read as a clean end.
-        sys.stderr.write(
-            _shown(
-                f"ash-landlock: {len(survivors)} process(es) the scanner started "
-                "could not be ended before the deadline: "
-                + ", ".join(str(p) for p in survivors[:10])
-            )
-            + "\n"
+        _note(
+            f"{len(survivors)} process(es) the scanner started "
+            "could not be ended before the deadline: "
+            + ", ".join(str(p) for p in survivors[:10])
         )
     if os.WIFSIGNALED(status):
         return _die_of(os.WTERMSIG(status))

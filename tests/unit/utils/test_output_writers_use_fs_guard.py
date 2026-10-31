@@ -328,6 +328,10 @@ _STDOUT_DIVERSION = (
     "os.devnull, opened to be duplicated over the process's standard output when "
     "standard error cannot be: no file is written"
 )
+_STDERR_DIVERSION = (
+    "os.devnull, opened to be duplicated over the Landlock wrapper's standard error "
+    "after a write to it failed: no file is written"
+)
 _MCP_PROFILE_SNAPSHOT = (
     "the MCP server's workspace root: the copy of a session's profile that one scan "
     "loads, beside the profile, taken exclusively at mode 0600"
@@ -697,6 +701,10 @@ NOT_WRITES: Dict[Site, Tuple[int, str]] = {
         _STDOUT_DIVERSION,
     ),
     (f"{_ASH}/cli/report.py", "report_command", "os.open"): (1, _STDOUT_DIVERSION),
+    (f"{_ASH}/utils/sandbox/landlock_exec.py", "_give_up_stderr", "os.open"): (
+        1,
+        _STDERR_DIVERSION,
+    ),
     (f"{_ASH}/utils/cdk_nag_wrapper.py", "run_cdk_nag_against_cfn_template", "open"): (
         1,
         _NULL_DEVICE,

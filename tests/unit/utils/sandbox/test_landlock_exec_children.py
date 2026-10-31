@@ -971,6 +971,89 @@ def test_a_recording_stand_in_refuses_the_signalling_calls_it_does_not_record():
             getattr(_Recording(signal, set(), []), name)
 
 
+class _BrokenStderr:
+    """A stderr whose reader has gone: every write raises BrokenPipeError."""
+
+    def __init__(self) -> None:
+        self.writes = 0
+
+    def write(self, text: str) -> int:
+        self.writes += 1
+        raise BrokenPipeError(errno.EPIPE, "Broken pipe")
+
+    def flush(self) -> None:
+        pass
+
+
+@pytest.fixture
+def broken_stderr(monkeypatch):
+    """Replace sys.stderr with one nobody reads. The wrapper repoints descriptor 2
+    after a failed write, so each test stubs ``os.dup2``: this process's own
+    descriptor 2 must not be."""
+    stderr = _BrokenStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    return stderr
+
+
+def test_a_note_to_a_stderr_nobody_reads_is_dropped_and_descriptor_2_given_up(
+    broken_stderr, monkeypatch
+):
+    """The write raises BrokenPipeError because the interpreter ignores SIGPIPE;
+    the note is dropped, and descriptor 2 is pointed at a descriptor of /dev/null
+    so the interpreter's flush as it exits cannot fail and turn the wrapper's
+    status into 120."""
+    calls: List[Tuple[str, tuple]] = []
+    monkeypatch.setattr(landlock_exec, "os", _Recording(os, {"dup2"}, calls))
+
+    landlock_exec._note("a pass was cut short")
+
+    assert broken_stderr.writes == 1
+    assert [name for name, _ in calls] == ["dup2"]
+    ((_, (_, target)),) = calls
+    assert target == 2
+
+
+def test_a_failure_to_a_stderr_nobody_reads_still_exits_126(broken_stderr, monkeypatch):
+    monkeypatch.setattr(landlock_exec, "os", _Recording(os, {"dup2"}, []))
+
+    with pytest.raises(SystemExit) as raised:
+        landlock_exec.fail("exec /bin/true: gone")
+
+    assert raised.value.code == 126
+    assert broken_stderr.writes == 1
+
+
+def test_a_reap_pass_goes_on_to_the_next_process_when_its_note_cannot_be_written(
+    procfs, broken_stderr, monkeypatch
+):
+    """The note about a process whose stat cannot be read used to raise out of
+    ``_kill_descendant`` and end the pass, so the processes after it in the
+    list were never reached and outlived the wrapper."""
+    proc = procfs(
+        {
+            "/proc/11": [],
+            "/proc/11/stat": PermissionError(errno.EACCES, "denied"),
+            "/proc/22": [],
+            "/proc/22/stat": PermissionError(errno.EACCES, "denied"),
+        }
+    )
+    landlock_exec.os.dup2 = lambda source, target: None
+    landlock_exec.os.waitpid = lambda pid, options: (0, 0)
+    walks = [[11, 22]]
+    monkeypatch.setattr(
+        landlock_exec, "_descendants", lambda until=None: walks.pop(0) if walks else []
+    )
+    monkeypatch.setattr(
+        landlock_exec,
+        "time",
+        types.SimpleNamespace(monotonic=lambda: 10.0, sleep=lambda seconds: None),
+    )
+
+    landlock_exec._reap_leftovers(lambda: 20.0)
+
+    assert "/proc/22/stat" in proc.opened
+
+
 def test_the_stand_in_proc_is_only_opened_for_reading():
     proc = _Procfs({"/proc/1/stat": b"1 (init) S 0"})
 
