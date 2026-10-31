@@ -193,9 +193,11 @@ def python_module_arguments(options: Sequence[str]) -> Optional[Tuple[str, List[
     and a letter that takes a value (``-c``, ``-m``, ``-W``, ``-X``) takes the rest
     of its argument (``-muv``) or, when nothing follows it, the next argument.
     ``-c``, a script, ``-`` or ``--`` means no module runs. A ``-m`` with no module
-    after it is no module either. The one reader of a Python command line's
-    module in ASH: ``cli/dependencies.py`` and :func:`uv_child_overrides` both ask
-    it, so a spelling one of them accepts the other accepts too.
+    after it is no module either. :func:`uv_child_overrides` asks it.
+    ``cli/dependencies.py`` does not: it keeps its own reader of the same command
+    line (``_uv_arguments`` and ``_python_module_arguments``, with option tables of
+    their own that already differ), so a spelling one accepts the other may not,
+    and a change to the rules here is made there too.
     """
     try:
         words = [os.fsdecode(option) for option in options]
