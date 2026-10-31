@@ -834,8 +834,17 @@ def _as_reached(path: Path, names: Optional[Mapping[Path, Sequence[Path]]]) -> P
     return Path(reached[0]) if reached else path
 
 
-def _with_own_patch(document: Any, base: AshConfig) -> Any:
+def _with_own_patch(
+    document: Any, base: AshConfig, *, over_report: bool = True
+) -> Any:
     """``document`` with its own ``patch`` ops applied, over the trusted ``base``.
+
+    ``over_report`` picks which way a failed op errs. The default reads on past
+    a failed op (below), which suits the restrict-only check: it only adds
+    refusals. Marking which entries are the operator's has the opposite need:
+    an entry counted as the operator's when the load never applied it grows the
+    operator's set, so ``over_report=False`` applies the whole patch or stops
+    at the first op that fails and keeps only what came before it.
 
     So the restrict-only check sees a sandbox setting or plugin module a ``patch``
     op asks for, as well as one written out. Applied over ``base`` because an op
@@ -882,7 +891,9 @@ def _with_own_patch(document: Any, base: AshConfig) -> Any:
         try:
             current = _apply_patch(current, [op], where).document
         except ASHConfigSourceError:
-            continue
+            if over_report:
+                continue
+            break
     return current
 
 
@@ -1373,7 +1384,7 @@ def _mark_client_supplied(
     models = {"suppressions": AshSuppression, "ignore_paths": IgnorePathWithReason}
     operators: Dict[str, List[Dict[str, Any]]] = {field: [] for field in models}
     sources: List[Any] = [
-        _with_own_patch(document, base)
+        _with_own_patch(document, base, over_report=False)
         for path, document in documents.items()
         if not delivered(path)
     ]
