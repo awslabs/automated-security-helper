@@ -57,7 +57,29 @@ def test_a_one_line_region_does_not_take_the_contexts_end_line():
     )
 
     assert flat.line_start == 10
+    # None, not 10, on purpose: the flat finding records what the region said,
+    # and a region that names no endLine said none. The vendored SARIF model
+    # states no default for endLine, so none is invented here. Every reader of
+    # the range reads None as "the same line as the start"
+    # (AshSuppression._line_range_matches and suppression_id both fall back to
+    # line_start), which the next test pins from the reader's side.
     assert flat.line_end is None, flat.line_end
+
+
+def test_a_reader_takes_a_missing_end_line_as_the_start_line():
+    from automated_security_helper.models.core import AshSuppression
+
+    flat = FlatVulnerability.from_sarif_result(
+        _result(Region(startLine=10), Region(startLine=5, endLine=20)),
+        "bandit",
+        "SAST",
+    )
+    on_the_line = AshSuppression(path="**", reason="r", line_start=10, line_end=10)
+    past_the_line = AshSuppression(path="**", reason="r", line_start=11, line_end=12)
+
+    assert on_the_line.matches(flat) is True
+    # The context window runs to line 20; the finding does not.
+    assert past_the_line.matches(flat) is False
 
 
 def test_a_region_with_both_lines_keeps_them():
