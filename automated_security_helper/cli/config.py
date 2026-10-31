@@ -2253,6 +2253,15 @@ def _apply_fixes(
     return False
 
 
+def _config_unreadable_for_fix(config_path: Path) -> str:
+    """The line printed when the unused-suppression fixer could not read the
+    config it was asked to edit, on one line whatever the path holds."""
+    return shown_on_one_line(
+        f"⚠️  Nothing is commented out: {describe_config_path(config_path)} could "
+        "not be read or parsed just now (it changed since lint read it)."
+    )
+
+
 def _entries_of(fixed_issues: List[Any]) -> List[tuple]:
     """The entries a fix comments out, as (place, message) pairs, to compare
     what was shown at a prompt with what is written after it."""
@@ -2366,8 +2375,13 @@ def _apply_unused_fixes(
     # Compute the fix, to show what it would comment out.
     fixed_content, fixed_issues, _ = compute_fix()
 
-    if not fixed_issues or fixed_content is None:
-        # No content comes back only with no issues (the config did not read).
+    if fixed_content is None:
+        # No content comes back only with no issues, when the config did not
+        # read. Lint read it a moment ago, so it changed or went away since
+        # (a file swapped for a pipe, say): that is not "nothing to comment out".
+        secho(_config_unreadable_for_fix(config_path), fg=typer.colors.YELLOW)
+        return False
+    if not fixed_issues:
         secho("✅ No unused suppressions to comment out.", fg=typer.colors.GREEN)
         return False
 
@@ -2387,7 +2401,10 @@ def _apply_unused_fixes(
         # waited (an edit that made the list uneditable is refused the same way).
         approved = _entries_of(fixed_issues)
         fixed_content, fixed_issues, _ = compute_fix()
-        if not fixed_issues or fixed_content is None:
+        if fixed_content is None:
+            secho(_config_unreadable_for_fix(config_path), fg=typer.colors.YELLOW)
+            return False
+        if not fixed_issues:
             secho("✅ No unused suppressions to comment out.", fg=typer.colors.GREEN)
             return False
         # The text is the new one, but what was approved is the list shown above.

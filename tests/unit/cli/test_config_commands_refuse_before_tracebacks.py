@@ -659,6 +659,51 @@ def test_fix_unused_is_not_run_on_a_file_that_does_not_parse(tmp_path, monkeypat
     assert _no_traceback(result), repr(result.exception)
 
 
+def test_fix_unused_says_so_when_the_fixer_could_not_read_the_config(
+    tmp_path, monkeypatch
+):
+    """Red at the base: the fixer answers no content when the config it was
+    asked to edit did not read (a file swapped for a pipe between lint's read
+    and the fixer's), and the command printed the green "No unused suppressions
+    to comment out" for it, as if the fixer had looked and found none."""
+    config = tmp_path / ".ashrc.yaml"
+    config.write_text(VALID_CONFIG, encoding="utf-8")
+    report = tmp_path / "report.json"
+    report.write_text('{"unused_suppressions": []}', encoding="utf-8")
+    unused = _issue(
+        LintSeverity.INFO,
+        LintCategory.SUPPRESSION_UNUSED,
+        "unused",
+        fixable=True,
+    )
+    monkeypatch.setattr(
+        ConfigLinter,
+        "lint",
+        staticmethod(
+            lambda **_: LintResult(
+                issues=[unused], config_path=config, unused_report_path=report
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        ConfigLinter,
+        "get_unused_report_age",
+        staticmethod(lambda *_a, **_k: _fresh_report(report)),
+    )
+    monkeypatch.setattr(
+        ConfigLinter,
+        "fix_unused_suppressions",
+        staticmethod(lambda *_a, **_k: (None, [], None)),
+    )
+
+    result = _invoke(["lint", "--config", str(config), "--fix-unused", "-y"])
+
+    assert result.exit_code == 0, result.output
+    assert "could not be read or parsed" in result.output, result.output
+    assert "No unused suppressions to comment out" not in result.output, result.output
+    assert config.read_text(encoding="utf-8") == VALID_CONFIG
+
+
 def test_fix_unused_writes_the_text_computed_after_the_prompt(tmp_path, monkeypatch):
     """The new text was computed before the confirmation prompt and written after
     it, over any edit made while the prompt waited."""
