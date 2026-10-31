@@ -1392,6 +1392,11 @@ _WRAPPER_VALUE_OPTIONS = {
     "nohup": frozenset(),
     "time": frozenset(),
 }
+# The words that open a command inside a loop or a conditional: the command after one
+# is what runs. ``do sh x.sh $p`` runs sh.
+_COMPOUND_KEYWORDS = frozenset(
+    {"do", "then", "else", "elif", "if", "while", "until", "!"}
+)
 _ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=\S*")
 # A shell redirection among the arguments of the install: "> /dev/null", "2>".
 _REDIRECTION = re.compile(r"(?:(?<=\s)|^)\d*(?:>>|>|<)\s*\S*")
@@ -1545,15 +1550,21 @@ def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
     ``bash -e /tmp/x.sh jq``, ``. x.sh``, ``source <(cat x.sh)``), or inside a ``-c``
     script (``sh -c 'chmod +x x.sh && x.sh'``), or when the shell is piped the commands
     before it in the same pipeline and one of them names the file (``cat x.sh | sh -s
-    jq``). The names are matched without their directory, so a different directory is
-    taken for the same file: the body is then read as commands, which is the side of
-    caution.
+    jq``). A command that follows a compound-command keyword runs as if the keyword
+    were not there (``for p in jq git; do sh x.sh $p; done``, ``if sh x.sh jq; then``,
+    ``! sh x.sh jq``). The names are matched without their directory, so a different
+    directory is taken for the same file: the body is then read as commands, which is
+    the side of caution.
     """
     wanted = {path.rsplit("/", 1)[-1] for path in files} - {""}
     for pipeline in pipelines:
         fed: list[str] = []  # the words of the commands piped into this one
         for command in pipeline:
             words = [w.strip("'\"") for w in _REDIRECT_WORD.sub(" ", command).split()]
+            lead = 0
+            while lead < len(words) and words[lead] in _COMPOUND_KEYWORDS:
+                lead += 1
+            words = words[lead:]
             program = _program(words)
             if program in wanted:
                 return True

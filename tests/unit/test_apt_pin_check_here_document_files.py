@@ -279,6 +279,15 @@ class TestAFileTheSameInstructionRunsIsCommands:
             "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh | sh -s jq",
             "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh | bash -s -- jq",
             "RUN cat > /tmp/i.sh <<'EOF' && cat < /tmp/i.sh | sh -s jq",
+            # The run sits inside a loop or a conditional, behind a keyword.
+            "RUN cat > /tmp/i.sh <<'EOF' && for p in jq git; do sh /tmp/i.sh $p; done",
+            "RUN cat > /tmp/i.sh <<'EOF' && if sh /tmp/i.sh jq; then echo ok; fi",
+            "RUN cat > /tmp/i.sh <<'EOF' && while sh /tmp/i.sh jq; do break; done",
+            "RUN cat > /tmp/i.sh <<'EOF' && until sh /tmp/i.sh jq; do :; done",
+            "RUN cat > /tmp/i.sh <<'EOF' && if false; then :; else sh /tmp/i.sh jq; fi",
+            "RUN cat > i.sh <<'EOF' && if :; then :; elif sh i.sh jq; then :; fi",
+            "RUN cat > /tmp/i.sh <<'EOF' && ! sh /tmp/i.sh jq",
+            "RUN cat > i.sh <<'EOF' && for p in jq; do if :; then . i.sh $p; fi; done",
         ],
     )
     def test_a_positional_parameter_in_a_script_the_run_executes_is_refused(
@@ -304,6 +313,9 @@ class TestAFileTheSameInstructionRunsIsCommands:
             "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh | wc -l",
             # `||` starts a new pipeline: the shell reads nothing from the cat.
             "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh || sh -s jq",
+            # A loop or a conditional that runs another file, or none, runs none of it.
+            "RUN cat > /tmp/i.sh <<'EOF' && for p in jq; do sh /tmp/other.sh $p; done",
+            "RUN cat > /tmp/i.sh <<'EOF' && if :; then echo ok; fi",
         ],
     )
     def test_a_script_that_is_only_written_stays_a_file_body(
@@ -361,6 +373,12 @@ class TestAFileTheSameInstructionRunsIsCommands:
             ("cat > /x <<'EOF' && cat /x | wc -l", [("EOF", True)]),
             ("cat > /x <<'EOF' && cat /x || sh -s jq", [("EOF", True)]),
             ("cat > /x <<'EOF' && cat /x; sh -s jq", [("EOF", True)]),
+            # A keyword before the shell does not hide it; a brace group never did.
+            ("cat > /x <<'EOF' && for p in a; do sh /x $p; done", [("EOF", False)]),
+            ("cat > /x <<'EOF' && if sh /x jq; then :; fi", [("EOF", False)]),
+            ("cat > /x <<'EOF' && ! sh /x jq", [("EOF", False)]),
+            ("cat > /x <<'EOF' && { sh /x jq; }", [("EOF", False)]),
+            ("cat > /x <<'EOF' && for p in a; do sh /y $p; done", [("EOF", True)]),
             # Each marker is judged by its own file: bash reads B, no file is named, so
             # A's stays a file; and only B's file (/b) is the one sh runs.
             ("cat > /a <<'A'; bash <<'B'", [("A", True), ("B", False)]),
