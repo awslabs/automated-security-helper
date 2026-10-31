@@ -506,6 +506,41 @@ def test_a_run_ended_by_an_exit_is_reported_as_failed(tmp_path):
     assert "ASH Security Scan Completed" not in infos
 
 
+def test_a_run_ended_by_the_shutdowns_exit_is_an_interrupted_run(tmp_path, monkeypatch):
+    """The scanner executor reads an exit raised while a shutdown signal has
+    asked the scans to end as the process going down, and lets it end the scan
+    as an interrupt. The engine above it read the same exit as a failure: the
+    completion event said succeeded False and the closing banner said "Failed",
+    over a run that was told to end. Red at the base: both were sent, and the
+    display was closed as not interrupted."""
+    engine = _engine(tmp_path)
+    engine.show_summary = True
+    engine.progress_display.live = object()
+    manager = _manager()
+    completed = []
+    manager.subscribe(AshEventType.EXECUTION_COMPLETE, _program_handler(completed))
+    monkeypatch.setattr(f"{_ENGINE_MODULE}.shutdown_requested", lambda: True)
+
+    with (
+        patch(f"{_ENGINE_MODULE}.ASH_LOGGER") as logger,
+        pytest.raises(SystemExit) as raised,
+    ):
+        _run(engine, ["scan"], manager, scan_phase=_ExitingScanPhase)
+
+    assert raised.value.code == 3
+    assert completed == []
+    # The one call on the display that takes the flag closes it: interrupted.
+    flags = [
+        call.kwargs["interrupted"]
+        for call in engine.progress_display.method_calls
+        if "interrupted" in call.kwargs
+    ]
+    assert flags == [True], engine.progress_display.method_calls
+    infos = " ".join(str(c.args[0]) for c in logger.info.call_args_list)
+    assert "ASH Security Scan Failed after" not in infos
+    assert "ASH Security Scan Completed" not in infos
+
+
 def test_a_completed_run_still_says_so(tmp_path):
     """Control: the message and the banner of a run that completed are unchanged."""
     engine = _engine(tmp_path)

@@ -19,6 +19,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.cancellation import (
     ScanCancelled,
     raise_if_cancelled,
+    shutdown_requested,
 )
 from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
 from automated_security_helper.core.exceptions import ScannerSelectionError
@@ -1242,6 +1243,17 @@ class ScanExecutionEngine:
             # the display stops as interrupted, and no final table or model
             # rebuild below.
             interrupted = True
+            raise
+        except SystemExit:
+            # An exit raised while a shutdown signal has asked the scans to end
+            # (an embedder's SIGTERM handler, chained before ASH's own, calling
+            # sys.exit) is the process going down, as the scanner executor reads
+            # it (_exit_is_the_shutdowns): the run is interrupted, not failed,
+            # so it sends no EXECUTION_COMPLETE with succeeded False and prints
+            # no "Failed" banner. Any other exit (a plugin's own sys.exit) is a
+            # failure of this run, and is left to the finally block below.
+            if shutdown_requested():
+                interrupted = True
             raise
         finally:
             # A run that left the try without finishing it and without being
