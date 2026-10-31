@@ -264,10 +264,12 @@ def print_coverage_shortfalls(
         return
     for scanner_name, attempted, failed in shortfalls:
         if attempted is None or failed is None:
-            # Unusable stored counters: the shortfall exists, its size is unknown.
+            # The shortfall exists, its size is unknown. Two causes land here:
+            # stored counters that cannot be read, and a coverage claim filed under
+            # another scanner's key. The sentence names neither, so it is true of both.
             console.print(
                 f"[bold yellow]Incomplete coverage:[/bold yellow] {escape(scanner_name)} "
-                f"recorded target counters that could not be read, so how many targets "
+                f"has coverage that could not be determined, so how many targets "
                 f"it evaluated is unknown."
             )
             continue
