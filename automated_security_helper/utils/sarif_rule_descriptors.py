@@ -23,6 +23,8 @@ in order.
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from automated_security_helper.utils.error_text import error_text
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import (
     result_rule_id,
     result_scanner_name,
@@ -134,7 +136,9 @@ def rule_descriptors_by_result(sarif: Any) -> List[Optional[RuleDescriptor]]:
     no component declares it.
 
     A result whose lookup raises gets None: the descriptor only improves a
-    description, so its absence costs the text, not the report.
+    description, so its absence costs the text, not the report. The failure is
+    logged at debug level, with its position among the results, so a message
+    given by id that fell back to the id can be traced.
     """
     found: List[Optional[RuleDescriptor]] = []
     for run in getattr(sarif, "runs", None) or []:
@@ -142,6 +146,10 @@ def rule_descriptors_by_result(sarif: Any) -> List[Optional[RuleDescriptor]]:
         for result in getattr(run, "results", None) or []:
             try:
                 found.append(_descriptor_for(result, tool))
-            except Exception:  # noqa: BLE001 -- see the docstring
+            except Exception as e:  # noqa: BLE001 -- see the docstring
+                ASH_LOGGER.debug(
+                    f"The rule of result {len(found)} could not be read "
+                    f"({error_text(e)}); its message is described without it"
+                )
                 found.append(None)
     return found

@@ -9,6 +9,8 @@ within the run in the component the result names, else the component its scanner
 name names, else the driver and then the extensions in order.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -26,6 +28,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
     ToolComponentReference,
 )
+from automated_security_helper.utils import sarif_rule_descriptors as descriptors_module
 from automated_security_helper.utils.sarif_rule_descriptors import (
     rule_descriptors_by_result,
 )
@@ -169,6 +172,57 @@ class TestTheStringsOfTheComponent:
 
         assert found.messageStrings["default"].text == "rule text"
         assert found.messageStrings["other"].text == "other component text"
+
+
+class _UnreadableRule:
+    """A result stand-in whose rule id cannot be read."""
+
+    @property
+    def ruleId(self):
+        raise ValueError("UNREADABLE-RULE-MARKER")
+
+
+class TestAFailedLookupIsLogged:
+    def _recording_logger(self, monkeypatch) -> list:
+        lines: list = []
+        monkeypatch.setattr(
+            descriptors_module,
+            "ASH_LOGGER",
+            SimpleNamespace(debug=lines.append),
+            raising=False,
+        )
+        return lines
+
+    def test_a_result_whose_rule_cannot_be_read_gets_none_and_a_debug_line(
+        self, monkeypatch
+    ):
+        """The result still gets None, so the report is written; the debug line
+        is what lets a message that fell back to its id be traced."""
+        lines = self._recording_logger(monkeypatch)
+        tool = Tool(driver=_component("one", _rule("R1", "text one")))
+        sarif = SimpleNamespace(
+            runs=[
+                SimpleNamespace(tool=tool, results=[_result("R1"), _UnreadableRule()])
+            ]
+        )
+
+        found = rule_descriptors_by_result(sarif)
+
+        assert [None if d is None else _default_text(d) for d in found] == [
+            "text one",
+            None,
+        ]
+        assert len(lines) == 1
+        assert "result 1 " in lines[0]
+
+    def test_a_lookup_that_succeeds_logs_nothing(self, monkeypatch):
+        lines = self._recording_logger(monkeypatch)
+        tool = Tool(driver=_component("one", _rule("R1", "text one")))
+        sarif = _sarif(Run(tool=tool, results=[_result("R1"), _result("MISSING")]))
+
+        rule_descriptors_by_result(sarif)
+
+        assert lines == []
 
 
 class TestTheAnswerIsOnePerResult:
