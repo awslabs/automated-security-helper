@@ -150,10 +150,18 @@ def _source_dir(source_dir: str | None) -> Path:
     Refused as `ash scan` refuses it, with exit 5 and the same text
     (utils/directory_refusals.py), when it names no directory a scan could read, so
     these commands never report "No config file found in" a directory that does
-    not exist, as if they had looked in one.
+    not exist, as if they had looked in one. A value that was given is checked as
+    given, an empty one included: ``--source-dir ""`` names no directory, as the
+    scan refuses it, and is not read as the current directory.
     """
-    scan_root = Path(source_dir) if source_dir else _working_directory()
-    refusal = source_dir_refusal(scan_root)
+    if source_dir is None:
+        scan_root = _working_directory()
+        refusal = source_dir_refusal(scan_root)
+    else:
+        # The text as given: Path("") is the current directory, which the scan's
+        # own check of the empty string does not find.
+        scan_root = Path(source_dir)
+        refusal = source_dir_refusal(source_dir)
     if refusal is not None:
         echo(shown_on_one_line(refusal), err=True)
         raise typer.Exit(ASH_EXIT_USAGE_ERROR)
@@ -1329,12 +1337,20 @@ def update(
     )
     config_path = _named_config(ctx, config_path, config)
 
+    # A --source-dir (or ASH_SOURCE_DIR) that names no directory a scan could
+    # read is refused as init, validate and lint refuse it, whether or not a
+    # config path is named: given beside a path it was not read at all, so a
+    # typo in it passed silently. With none given, the working directory is
+    # read only below, when the file has to be discovered.
+    scan_root = _source_dir(source_dir) if source_dir is not None else None
+
     # Find the config file if not specified: the one a scan of --source-dir (or
     # ASH_SOURCE_DIR, the scan option's variable) would read, as get, validate
     # and lint find it. Discovered in the working directory alone, this command
     # edited a different file than those commands showed and a scan read.
     if config_path is None:
-        scan_root = _source_dir(source_dir)
+        if scan_root is None:
+            scan_root = _source_dir(None)
         try:
             found = find_config_file(scan_root)
         except ASHConfigValidationError as e:
