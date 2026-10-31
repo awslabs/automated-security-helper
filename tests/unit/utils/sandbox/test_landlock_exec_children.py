@@ -1238,6 +1238,33 @@ def test_the_socket_filter_route_reports_a_failed_exec_with_sigpipe_ignored(
     }
 
 
+def test_the_socket_filter_route_reports_an_exec_refused_for_its_value(monkeypatch):
+    """``os.execvp`` raises ValueError, not OSError, for a value it cannot hand
+    to the kernel (a NUL byte in the program name). The forking route reports any
+    exception from its exec and exits 126; the route that execs in place does the
+    same, and does not leave the interpreter's traceback and exit 1, which
+    scanners use for "findings found"."""
+    events: List[Tuple[str, tuple]] = []
+
+    def refused(*args) -> None:
+        raise ValueError("embedded null byte")
+
+    fake_os = _Recording(os, set(), events)
+    fake_os.execvp = refused
+    monkeypatch.setattr(landlock_exec, "os", fake_os)
+    monkeypatch.setattr(landlock_exec, "signal", _Recording(signal, {"signal"}, events))
+    monkeypatch.setattr(landlock_exec, "libc", _Recording(None, {"prctl"}, events))
+    monkeypatch.setattr(landlock_exec, "apply_socket_seccomp", lambda allow_ip: None)
+    monkeypatch.setattr(sys, "stderr", _RecordedStderr(events))
+
+    with pytest.raises(SystemExit) as raised:
+        landlock_exec.exec_with_socket_filter(True, ["/bin/true"])
+
+    assert raised.value.code == 126
+    written = [args[0] for name, args in events if name == "write"]
+    assert any("exec /bin/true: embedded null byte" in text for text in written)
+
+
 @pytest.mark.parametrize(
     "key, value",
     [

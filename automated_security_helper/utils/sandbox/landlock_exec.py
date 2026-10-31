@@ -582,7 +582,9 @@ def exec_with_socket_filter(allow_ip: bool, command: List[str]) -> NoReturn:
     _restore_dispositions()
     try:
         os.execvp(command[0], command)
-    except OSError as e:
+    except (OSError, ValueError) as e:
+        # ValueError: a value the kernel cannot be given (a NUL byte), which the
+        # forking route's exec reports the same way (``_run_child``).
         # The exec did not happen, so the line below is written by this program
         # with the default SIGPIPE and SIGXFSZ just restored: a stderr whose
         # reader is gone, or one at a file size limit, would end the process with
