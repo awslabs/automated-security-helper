@@ -157,8 +157,10 @@ def _runner_marker_args(
     return args
 
 
-# Memoizes the buildx capability probe, keyed by resolved runner path.
-_BUILDX_SUPPORT_CACHE: dict[str, bool] = {}
+# Memoizes the buildx capability probe, keyed by the wrapper prefix and the resolved
+# runner path (the words, not their joined text: two different word lists can join
+# to the same string).
+_BUILDX_SUPPORT_CACHE: dict[tuple[str, ...], bool] = {}
 
 
 def _validate_ash_revision(revision: str) -> bool:
@@ -1466,7 +1468,7 @@ def _runner_supports_buildx(resolved_oci_runner: str) -> bool:
     per wrapper and path.
     """
     probe = [*_get_oci_wrapper_prefix(), resolved_oci_runner]
-    key = " ".join(probe)
+    key = tuple(probe)
     if key in _BUILDX_SUPPORT_CACHE:
         return _BUILDX_SUPPORT_CACHE[key]
 
@@ -4903,12 +4905,15 @@ def _assemble_run_command(
     # applied nowhere; a one-directory scan's exit code is recomputed on the
     # host, where --min-severity is applied, and forwarding it there would
     # have the container print a clean summary the host then judges again.
+    # The member's value, not its text: str() of a MinSeverity is its class and
+    # member name, which the scan inside refuses as an unknown severity.
+    severity_text = str(getattr(min_severity, "value", min_severity))
     if (
         workspace_relative_file is not None
         and min_severity
-        and str(min_severity).lower() != "low"
+        and severity_text.lower() != "low"
     ):
-        ash_args.extend(["--min-severity", str(min_severity)])
+        ash_args.extend(["--min-severity", severity_text])
 
     for phase in phases:
         ash_args.extend(

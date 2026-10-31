@@ -511,6 +511,24 @@ def test_a_workspace_scan_inside_the_container_is_given_the_minimum_severity(
     assert cmd[cmd.index("--min-severity") + 1] == "high"
 
 
+def test_a_minimum_given_as_its_enum_member_is_forwarded_as_its_value(
+    tmp_path, monkeypatch
+):
+    """str() of a MinSeverity member is its class and member name, which the scan
+    inside the container refuses as an unknown severity."""
+    from automated_security_helper.core.enums import MinSeverity
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+
+    cmd = _assembled(
+        tmp_path,
+        workspace_relative_file="dev.code-workspace",
+        min_severity=MinSeverity.HIGH,
+    )
+
+    assert cmd[cmd.index("--min-severity") + 1] == "high"
+
+
 def test_a_one_directory_scan_inside_the_container_is_not(tmp_path, monkeypatch):
     """Control: the host recomputes a one-directory exit code and applies the
     minimum itself, so the container is not told."""

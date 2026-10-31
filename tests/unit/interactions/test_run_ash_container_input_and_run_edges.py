@@ -309,6 +309,28 @@ def test_the_buildx_probe_runs_through_the_wrapper(monkeypatch):
     assert probes == [["sudo", "-E", "/usr/bin/docker", "buildx", "version"]]
 
 
+def test_the_buildx_answer_is_kept_per_word_list_not_per_joined_text(monkeypatch):
+    """A runner path holding a space and a wrapper word holding one join to the
+    same text as a wrapper of two words and a shorter path; they are different
+    commands and are probed apart."""
+    monkeypatch.setattr(rac, "_BUILDX_SUPPORT_CACHE", {})
+    probes: List[List[str]] = []
+
+    def run_command(cmd, **kwargs):
+        probes.append([str(c) for c in cmd])
+        return create_completed_process(
+            args=probes[-1], returncode=0, stdout="", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess_utils, "run_command", run_command)
+    monkeypatch.setattr(rac, "_get_oci_wrapper_prefix", lambda: ["sudo"])
+    assert rac._runner_supports_buildx("/opt/my docker/docker") is True
+    monkeypatch.setattr(rac, "_get_oci_wrapper_prefix", lambda: ["sudo", "/opt/my"])
+    assert rac._runner_supports_buildx("docker/docker") is True
+
+    assert len(probes) == 2, probes
+
+
 def test_an_id_of_many_digits_is_read_without_int():
     assert rac._non_root_stage_uid_refusal("non-root", "0" * 5000, "1000") is not None
     assert rac._non_root_stage_uid_refusal("non-root", "1" * 5000, "1000") is None
