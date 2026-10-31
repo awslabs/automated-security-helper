@@ -344,6 +344,57 @@ def test_a_result_named_by_a_run_with_no_threshold_of_its_own_is_still_judged_gl
     assert ras._gating_actionable_count(results, opts, False) == 0
 
 
+def _results_with_the_report_named_apart_from_ash_sarif(tmp_path, monkeypatch):
+    """The metrics count nothing; the report this run wrote is reports/custom.sarif
+    and holds one actionable finding. The count is taken from that file."""
+    from automated_security_helper.core.unified_metrics import ScannerMetrics
+
+    results = _results_with_the_file_apart_from_the_model(
+        tmp_path, in_model=[], in_file=[_finding("semgrep", "error", "HIGH")]
+    )
+    results.validation_checkpoints = []
+    record_reports_written(results, [("custom.sarif", "sarif")])
+    reports = tmp_path / "out" / "reports"
+    (reports / "ash.sarif").rename(reports / "custom.sarif")
+    metric = ScannerMetrics(
+        scanner_name="semgrep",
+        status="PASSED",
+        actionable=0,
+        targets_attempted=1,
+        targets_failed=0,
+    )
+    monkeypatch.setattr(
+        ras, "get_unified_scanner_metrics", lambda *_args, **_kwargs: [metric]
+    )
+    return results, reports
+
+
+def test_the_count_does_not_open_the_report_through_a_link(tmp_path, monkeypatch):
+    """A link at the report's name points at a file beside it, so it passes the
+    confinement check. The count was read before the exit code's link check
+    ran, and opened the file the link names: here the finding in another run's
+    report decided the count."""
+    results, reports = _results_with_the_report_named_apart_from_ash_sarif(
+        tmp_path, monkeypatch
+    )
+    (reports / "custom.sarif").rename(reports / "earlier-run.sarif")
+    try:
+        (reports / "custom.sarif").symlink_to("earlier-run.sarif")
+    except (OSError, NotImplementedError):
+        pytest.skip("this host cannot create a symlink")
+
+    assert ras._gating_actionable_count(results, _opts(tmp_path, "low"), True) == 0
+
+
+def test_the_count_still_reads_the_report_that_is_a_file(tmp_path, monkeypatch):
+    """Control: the same report as a regular file decides the count."""
+    results, _reports = _results_with_the_report_named_apart_from_ash_sarif(
+        tmp_path, monkeypatch
+    )
+
+    assert ras._gating_actionable_count(results, _opts(tmp_path, "low"), True) == 1
+
+
 # ---------------------------------------------------------------------------
 # A workspace plan with --mode nix enters the shell
 # ---------------------------------------------------------------------------

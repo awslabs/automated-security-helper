@@ -7250,6 +7250,19 @@ def _compute_exit_code(
     return 0
 
 
+def _is_a_regular_report_file(path: Path) -> bool:
+    """Whether *path* is itself a regular file, read with lstat.
+
+    stat, which ``Path.exists`` uses, follows a link, so a link to a file that
+    exists answered True and a link to a pipe could be opened, and a pipe
+    without a writer blocks the open.
+    """
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
 def _gating_actionable_count(
     results: AshAggregatedResults,
     opts: ScanOptions,
@@ -7308,9 +7321,13 @@ def _gating_actionable_count(
     counted_in_file: Optional[bool] = None
 
     sarif_file = confined_report_path(reports_dir, sarif_name) if sarif_name else None
+    # A file in reports/ and not a link to one: the name is the results file's, and
+    # a link at it (to a report beside it, or to a pipe, which blocks the open) is
+    # refused by _compute_exit_code's link check, which runs after this count is
+    # read. Opening it here would read the file it points to first.
     if (
         sarif_file is not None
-        and sarif_file.exists()
+        and _is_a_regular_report_file(sarif_file)
         and report_sarif_written_this_run is not False
     ):
         try:
