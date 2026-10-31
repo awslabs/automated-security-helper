@@ -64,6 +64,17 @@ def _scanner_message(name: str, status: ScannerStatus) -> str:
     )
 
 
+#: The one ``warn`` message the report gives when the scan module cannot say
+#: what the scan covered (it raised, or could not be imported).
+_COVERAGE_UNREAD = {
+    "level": "warn",
+    "value": (
+        "Scanner coverage could not be determined; this report cannot say "
+        "whether the scan was complete."
+    ),
+}
+
+
 def _result(rule_id: str, text: str, kind: Kind | None = None) -> Result:
     # ``kind`` is passed only when given: the model's default is ``fail``, and
     # an explicit None would be a different result from the one every other
@@ -210,9 +221,7 @@ class TestScanStatusReportsScannersThatDidNotComplete:
         report = json.loads(reporter.report(model))
 
         assert len(report["vulnerabilities"]) == 1
-        assert not any(
-            m["level"] == "fatal" for m in report["scan"].get("messages", [])
-        )
+        assert report["scan"]["messages"] == [_COVERAGE_UNREAD]
 
 
 def _stale_record(scanner: str, database: str) -> ContentDbAgeRecord:
@@ -453,7 +462,7 @@ class TestACoverageThatCannotBeReadIsNotVouchedFor:
         report = json.loads(reporter.report(model))
 
         assert report["scan"]["status"] == "failure"
-        assert [m["level"] for m in report["scan"]["messages"]] == ["warn"]
+        assert report["scan"]["messages"] == [_COVERAGE_UNREAD]
 
 
 class TestScanTimestampsAreUtc:
