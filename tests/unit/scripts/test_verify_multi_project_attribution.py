@@ -800,6 +800,22 @@ class TestRunRootPerLocation:
         )
         assert gate.check_result_paths_resolve_against_their_run_root([run]) == []
 
+    def test_a_uri_under_a_second_declared_base_is_clean(self, gate, workspace):
+        """The other cases here end in a violation, or use the run's own root, so a
+        check refusing every base but the root would pass all of them."""
+        root_a = (workspace / "project-a").as_uri() + "/"
+        root_src = (workspace / "project-a" / "src").as_uri() + "/"
+        run = gate.RunEvidence(
+            index=0,
+            attributed_project="project-a",
+            uri_base=root_a,
+            uri_bases={"PROJECTROOT": root_a, "SRCROOT": root_src},
+            raw_uris=("insecure.py",),
+            raw_uri_bases=("SRCROOT",),
+            result_projects=("project-a",),
+        )
+        assert gate.check_result_paths_resolve_against_their_run_root([run]) == []
+
 
 class TestSuppressionWithoutARun:
     def test_a_project_with_no_run_is_told_so(self, gate):
