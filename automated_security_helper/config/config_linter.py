@@ -738,8 +738,9 @@ class ConfigLinter:
         # A report that cannot be edited from (its scan evaluated no suppression,
         # or it lists scanners that did not run) comments nothing out. The
         # command asks ``unused_report_blocker`` the same question before it
-        # asks about the report's age, so the reason is told once and the two
-        # cannot disagree.
+        # asks about the report's age, and lint marks an entry fixable only when
+        # ``_report_blocker`` gives none (``_check_unused_suppressions``), so the
+        # three cannot disagree.
         if cls._report_blocker(report_data) is not None:
             return raw_content, [], report_timestamp
 
@@ -2367,8 +2368,11 @@ class ConfigLinter:
 
         # A scan that did not run some scanner cannot say which of the entries it
         # lists belong to that scanner, so none of them is offered to
-        # --fix-unused (the fixer reads the same key and comments nothing out).
+        # --fix-unused (the fixer asks ``_report_blocker`` and comments nothing
+        # out). The note below tells the operator; whether an entry is offered
+        # is the blocker's answer, the one the fixer and the command give.
         not_run = cls._scanners_not_run_of(report_data)
+        blocker = cls._report_blocker(report_data)
         if not_run:
             result.issues.append(
                 LintIssue(
@@ -2414,7 +2418,7 @@ class ConfigLinter:
                 # free text, with what the chain read from the environment
                 # redacted.
                 message = redact_values(message, result.environment_values)
-            fixable = unused_id in own_ids and not not_run
+            fixable = unused_id in own_ids and blocker is None
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.INFO,

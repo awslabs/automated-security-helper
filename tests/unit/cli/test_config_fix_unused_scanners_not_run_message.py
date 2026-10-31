@@ -22,7 +22,7 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.config import config_app
-from automated_security_helper.config.config_linter import ConfigLinter
+from automated_security_helper.config.config_linter import ConfigLinter, LintCategory
 
 pytestmark = pytest.mark.unit
 
@@ -79,6 +79,38 @@ def test_the_blocker_says_so_for_an_unreadable_report(tmp_path):
     assert "could not be read" in ConfigLinter.unused_report_blocker(
         tmp_path / "missing.json"
     )
+
+
+def _offered(result):
+    """Whether lint marks each unused-suppression entry as fixable."""
+    return [
+        issue.fixable
+        for issue in result.issues
+        if issue.category == LintCategory.SUPPRESSION_UNUSED
+        and issue.message.startswith("Unused suppression")
+    ]
+
+
+def test_lint_offers_an_entry_only_when_the_blocker_gives_no_reason(
+    tmp_path, monkeypatch
+):
+    """Red at the base: lint decided "fixable" from the report's scanner list by
+    its own copy of the rule, so a reason the blocker gave for any other cause
+    left the entry offered to a fixer that then commented nothing out."""
+    config, _path = _layout(tmp_path, {"unused_suppressions": [ENTRY]})
+    output_dir = tmp_path / ".ash" / "ash_output"
+
+    assert _offered(
+        ConfigLinter.lint(config, output_dir=output_dir, check_unused=True)
+    ) == [True]
+
+    monkeypatch.setattr(
+        ConfigLinter, "_report_blocker", classmethod(lambda cls, data: "a reason")
+    )
+
+    assert _offered(
+        ConfigLinter.lint(config, output_dir=output_dir, check_unused=True)
+    ) == [False]
 
 
 def test_a_partial_report_is_not_asked_about_and_the_reason_is_printed(tmp_path):
