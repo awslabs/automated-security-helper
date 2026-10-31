@@ -495,14 +495,17 @@ class TestExpiryWarning:
         assert any("suppressions will expire within 30 days" in w for w in warnings)
 
     def test_nothing_expiring_is_warned_about_under_ignore_suppressions(self, tmp_path):
-        """--ignore-suppressions lifts the ignore paths as well as the suppressions.
+        """--ignore-suppressions lifts the suppressions and the global ignore paths.
 
         ``models.core.ignore_paths_that_skip_scanning`` hands the scanners and
-        converters no ignore path under the flag and the SARIF step applies none
-        (docs/content/concepts/suppressions.md), so an ignore path's expiry
-        changes nothing about the run either, and the checker names neither
-        kind. This test used to expect the ignore path to be warned about on the
-        reading that the flag turned off suppressions only.
+        converters no global ignore path under the flag and the SARIF step
+        applies none (docs/content/concepts/suppressions.md), so a global ignore
+        path's expiry changes nothing about the run either, and the checker names
+        neither kind. A scanner's own option list (bandit ``excluded_paths``,
+        checkov ``skip_path``, syft ``exclude``) is not lifted and is still
+        checked (TestExpiryWarningsCoverScannerOptionLists). This test used to
+        expect the ignore path to be warned about on the reading that the flag
+        turned off suppressions only.
         """
         config = _config(
             ignore_paths=[
@@ -597,8 +600,10 @@ class TestExpiredEntriesWarning:
         assert "build/**" not in message and "B602" not in message
 
     def test_nothing_is_reported_expired_under_ignore_suppressions(self, tmp_path):
-        """Under the flag no entry applies, the expired ones included, so an
-        expired entry changes nothing about the scan and no message names one.
+        """Under the flag no suppression and no global ignore path applies, the
+        expired ones included, so an expired one changes nothing about the scan and
+        no message names one (a scanner's own option list is not lifted, and its
+        expired entries are named: TestExpiryWarningsCoverScannerOptionLists).
         This test used to expect the expired ignore path to be named, on the
         reading that the flag turned off suppressions only."""
         warnings = self._warnings(
@@ -850,6 +855,53 @@ class TestExpiryWarningsCoverScannerOptionLists:
         (expired,) = [w for w in warnings if "have expired" in w]
         assert f"{subject} 'old' expired on 2026-06-01" in expired, expired
         assert "vendor" not in expired, expired
+
+    @pytest.mark.parametrize(
+        "scanner,field,subject",
+        [
+            ("bandit", "excluded_paths", "Bandit excluded path"),
+            ("checkov", "skip_path", "Checkov skip path"),
+            ("syft", "exclude", "Syft exclude entry"),
+        ],
+    )
+    def test_an_expiring_entry_is_still_named_under_ignore_suppressions(
+        self, tmp_path, scanner, field, subject
+    ):
+        """An entry that will expire within 30 days is named for the same reason
+        an expired one is (the test above): the tool is handed the list under
+        the flag. Deleting the handler's expiring-entries call for the scanner
+        lists leaves every other test green; this one goes red. The global
+        ignore path that is about to expire too is not named."""
+        config = AshConfig(
+            project_name="test-project",
+            global_settings={
+                "ignore_paths": [
+                    {"path": "vendor/**", "reason": "r", "expiration": "2026-07-01"}
+                ]
+            },
+            scanners={
+                scanner: {
+                    "options": {
+                        field: [
+                            {
+                                "path": "soon",
+                                "reason": "r",
+                                "expiration": "2026-07-01",
+                            }
+                        ]
+                    }
+                }
+            },
+        )
+        context = _context(tmp_path, config)
+        context.ignore_suppressions = True
+
+        warnings = self._warnings_for(context)
+
+        assert "The following ignore paths will expire within 30 days:" in warnings
+        named = "\n".join(warnings)
+        assert f"{subject} 'soon' expires on 2026-07-01" in named, warnings
+        assert "vendor" not in named, warnings
 
     @staticmethod
     def _warnings_for(context) -> list[str]:

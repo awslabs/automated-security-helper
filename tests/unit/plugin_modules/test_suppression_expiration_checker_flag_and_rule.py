@@ -3,8 +3,10 @@
 
 """The expiry checker under ``--ignore-suppressions`` and its rule-id spelling.
 
-Before the fix, the checker warned about expiring ignore paths under the flag
-although the flag lifts every ignore path for the run, and the 30-day
+Before the fix, the checker warned about expiring global ignore paths under the
+flag although the flag lifts every global ignore path for the run (a scanner's
+own option list is not lifted and is still checked, in
+tests/unit/utils/test_ignore_path_expiration.py), and the 30-day
 suppression warning printed Rule 'None' where the expired-entries warning
 printed ``*`` for the same entry.
 """
@@ -52,8 +54,8 @@ def _context(ignore_suppressions: bool):
 
 
 def test_nothing_is_warned_about_under_ignore_suppressions():
-    """Red before the fix: the expiring ignore path was warned about although
-    the flag lifts every ignore path for the run."""
+    """Red before the fix: the expiring global ignore path was warned about
+    although the flag lifts every global ignore path for the run."""
     with patch(_LOGGER) as logger:
         suppression_expiration_checker.handle_suppression_expiration_check(
             plugin_context=_context(ignore_suppressions=True)
