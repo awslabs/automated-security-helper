@@ -342,10 +342,15 @@ class TestAFailedPlacementLeavesTheLicensesAlone:
         self, tmp_path, monkeypatch
     ):
         """The copy is made first, so a publish that fails has a file to clean up."""
+        # Red before: the test saw only the directory after the failure, which is the
+        # same under the old order (publish first, copy after) where there was no copy
+        # to clean up. The directory is now read inside the failing publish.
         setup = _Setup(monkeypatch)
         bin_dir, existing, third_party = self._old_install(tmp_path)
+        seen: list[list[str]] = []
 
         def refuse(staged, directory):
+            seen.append(sorted(p.name for p in bin_dir.iterdir()))
             raise OSError(errno.EACCES, "Permission denied")
 
         monkeypatch.setattr(installer, "publish_third_party", refuse)
@@ -353,6 +358,10 @@ class TestAFailedPlacementLeavesTheLicensesAlone:
         with pytest.raises(PermissionError):
             setup.install(bin_dir, third_party)
 
+        assert len(seen) == 1
+        assert len(seen[0]) == 2 and "demo" in seen[0], (
+            "the executable was not copied beside the destination before the publish"
+        )
         assert existing.read_bytes() == _OLD_BINARY
         assert sorted(p.name for p in bin_dir.iterdir()) == ["demo"], (
             "a partial file was left beside the destination"
