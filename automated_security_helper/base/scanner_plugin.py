@@ -2187,8 +2187,19 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 log_unreadable = os.path.lexists(log_path)
             if raw_log or read_cut:
                 try:
+                    # The log is the tool's stderr as it wrote it, so the
+                    # plugin's text-shaping hook (the one that hides what the
+                    # plugin's tool echoes back from its own input) shapes it
+                    # before the excerpt is built, as it shapes the stream
+                    # the recorded lines come from. A hook that raises, or
+                    # answers something that is not text, is a broken answer:
+                    # the excerpt is dropped and the log is named below,
+                    # never quoted unshaped.
+                    shaped_log = self._tool_text_for_records(raw_log, "stderr")
+                    if not isinstance(shaped_log, str):
+                        raise TypeError("the text-shaping hook answered non-text")
                     excerpt = shown_excerpt(
-                        raw_log, read_cut, log_path, read_bound, _show
+                        shaped_log, read_cut, log_path, read_bound, _show
                     )
                 except Exception:  # noqa: BLE001 -- see the comment above
                     detail += (
