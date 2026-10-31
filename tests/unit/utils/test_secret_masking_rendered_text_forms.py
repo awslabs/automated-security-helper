@@ -15,12 +15,13 @@ The values here are derived at import time; none is a credential.
 """
 
 import hashlib
-import html
-import re
 import string
 
 import pytest
 
+from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
+    _markdown_escaped as _as_markdown,
+)
 from automated_security_helper.utils.secret_masking import (
     _mask_secret_value,
     _yaml_double_quoted,
@@ -39,11 +40,6 @@ def _derived(label, length):
 VALUE = _derived("u27-text-value", 10)
 #: Holds two characters the Markdown reporter escapes.
 MARKDOWN_VALUE = VALUE[:6] + "_" + VALUE[6:] + "*"
-
-
-def _as_markdown(value):
-    """How ``markdown_reporter._text`` writes a value."""
-    return re.sub(r"([\\`*_\[\]{}#|~])", r"\\\1", html.escape(value, quote=False))
 
 
 class TestAValueAfterAnEscape:
