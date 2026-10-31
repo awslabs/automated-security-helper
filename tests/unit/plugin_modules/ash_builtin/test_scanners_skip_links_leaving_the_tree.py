@@ -225,8 +225,11 @@ class TestBandit:
         "link, also",
         [
             ("a[1].py", {}),
-            ("a*b.py", {}),
-            ("a?b.py", {}),
+            # A neighbor the link's name matches as a glob when its ``*`` or
+            # ``?`` is left as written; only escaping the character leaves it
+            # scanned (a glob that brackets just the last character does not).
+            ("a*b.py", {"a_long_b.py": "y = 2\n"}),
+            ("a?b.py", {"axb.py": "y = 2\n"}),
             # bandit also excludes every path the entry is a substring of; the
             # bracketed spelling is a text the longer name does not hold.
             ("x.py", {"x.pyw": "z = 3\n"}),
