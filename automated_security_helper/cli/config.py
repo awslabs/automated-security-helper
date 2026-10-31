@@ -1967,7 +1967,15 @@ def lint(
                 output_dir=output_dir_path,
                 source_dir=scan_root,
             )
-        if fix_unused and loadable and not lint_result.scan_ignores_file:
+        # Not after a refused fix: the unused-suppression fixer rewrote the file
+        # the first fixer had just refused to touch, and the run exited with the
+        # refusal's code over a file it had changed all the same.
+        if (
+            fix_unused
+            and loadable
+            and not lint_result.scan_ignores_file
+            and not fix_refused
+        ):
             applied = (
                 _apply_unused_fixes(
                     config_path, output_dir_path, non_interactive, color
