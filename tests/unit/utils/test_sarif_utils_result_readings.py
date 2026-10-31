@@ -181,6 +181,27 @@ class TestResultMessageText:
         )
         assert result_message_text(escaped) == "{0} is x, {done}"
 
+    def test_a_rules_message_string_reads_doubled_braces_with_or_without_arguments(
+        self,
+    ):
+        """A message string is a format string (SARIF 3.11.5), so ``{{x}}`` is
+        ``{x}`` whether or not the result carries arguments; read only beside
+        arguments, one string rendered two ways."""
+        rule = ReportingDescriptor(
+            id="R1",
+            messageStrings={
+                "default": MultiformatMessageString(text="Use {{x}} for {0}")
+            },
+        )
+        without = _result(message=Message(root=Message2(id="default")))
+        assert result_message_text(without, rule) == "Use {x} for {0}"
+        empty = _result(message=Message(root=Message2(id="default", arguments=[])))
+        assert result_message_text(empty, rule) == "Use {x} for {0}"
+        with_argument = _result(
+            message=Message(root=Message2(id="default", arguments=["y"]))
+        )
+        assert result_message_text(with_argument, rule) == "Use {x} for y"
+
     def test_a_placeholder_past_the_last_argument_is_left_as_written(self):
         short = _result(
             message=Message(root=Message1(text="Found {3} and {0}", arguments=["x"]))

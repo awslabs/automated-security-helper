@@ -749,14 +749,21 @@ def is_not_a_finding(
 _MESSAGE_PLACEHOLDER = re.compile(r"\{\{|\}\}|\{(\d{1,9})\}")
 
 
-def _fill_message_arguments(text: str, arguments: Any) -> str:
+def _fill_message_arguments(
+    text: str, arguments: Any, *, format_string: bool = False
+) -> str:
     """*text* with its ``{N}`` placeholders replaced by the message's
     ``arguments`` (SARIF 3.11.5), ``{{`` and ``}}`` read as one brace each.
 
     A message with no arguments is returned as written, escapes included: it has
-    nothing to fill, and a scanner's own text may hold braces. A placeholder
-    whose index is past the last argument is left as written, never raised on."""
-    if not isinstance(arguments, (list, tuple)) or not arguments:
+    nothing to fill, and a scanner's own text may hold braces. A *format_string*,
+    a rule's ``messageStrings`` entry, which SARIF defines as a format string, is
+    read the same way with or without arguments, so one string does not render as
+    ``{x}`` beside an argument and ``{{x}}`` without. A placeholder whose index is
+    past the last argument is left as written, never raised on."""
+    if not isinstance(arguments, (list, tuple)):
+        arguments = ()
+    if not arguments and not format_string:
         return text
 
     def fill(match: "re.Match[str]") -> str:
@@ -811,7 +818,7 @@ def result_message_text(
             value = getattr(source, field, None)
             if isinstance(value, str) and value.strip():
                 if source is named:
-                    return _fill_message_arguments(value, arguments)
+                    return _fill_message_arguments(value, arguments, format_string=True)
                 return value
     return message_id
 
