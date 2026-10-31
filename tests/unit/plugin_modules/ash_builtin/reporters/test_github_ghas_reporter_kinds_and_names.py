@@ -89,6 +89,25 @@ class TestUnjudgedKindsAreCounted:
             for message in warned
         )
 
+    def test_the_warning_says_only_what_this_file_does(self, reporter, monkeypatch):
+        """The warning also said what another report does with these results
+        ("the OCSF report keeps them"), which is wrong when that report is not
+        enabled. It names the count and what this file does."""
+        logger = MagicMock()
+        monkeypatch.setattr(github_ghas_reporter, "ASH_LOGGER", logger)
+        results = [
+            Result(
+                ruleId="B", kind=Kind.open, level=Level.error, message=Message(text="b")
+            )
+        ]
+        run = Run(tool=Tool(driver=ToolComponent(name="ASH")), results=results)
+
+        reporter.report(_model(run))
+
+        warned = [call.args[0] for call in logger.warning.call_args_list]
+        assert any("1 of kind 'open'" in message for message in warned)
+        assert not any("OCSF" in message for message in warned)
+
     def test_a_pass_or_not_applicable_result_is_not_warned_about(
         self, reporter, monkeypatch
     ):

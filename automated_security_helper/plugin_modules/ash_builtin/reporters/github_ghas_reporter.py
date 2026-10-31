@@ -210,7 +210,7 @@ def _component_scanner(component: Any) -> str:
 
 #: The kinds whose results a reader still has to judge (SARIF 3.27.9). A result of
 #: either is left out of this file with every other non-failing kind; the count
-#: per kind is logged, because OCSF keeps them.
+#: per kind is logged, because a reader still has to judge them.
 _UNJUDGED_KINDS = ("open", "review")
 
 
@@ -722,10 +722,12 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         out of the file (:data:`_UNJUDGED_KINDS`).
 
         ``_left_out`` drops every result whose kind is not ``fail``, ``open`` and
-        ``review`` included, while the OCSF report keeps them; the file said
-        nothing, so a reviewer comparing the two found findings in one and not the
-        other. Only the count is logged: whether those kinds belong in the file is
-        a decision this method does not take.
+        ``review`` included, and the file said nothing about them, so a reviewer
+        comparing it with another report of the same scan found results that were
+        not in the file. Only the count is logged, and only what this file does:
+        whether those kinds belong in the file is a decision this method does
+        not take, and what another report does with them depends on which
+        reports are enabled.
         """
         counts = dict.fromkeys(_UNJUDGED_KINDS, 0)
         for run in runs:
@@ -740,7 +742,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             )
             ASH_LOGGER.warning(
                 f"GHAS report: {listed} left out of the file, as every result whose "
-                "kind is not 'fail' is; the OCSF report keeps them"
+                "kind is not 'fail' is"
             )
 
     def _used_uri_base_ids(self, run: Any) -> set:
