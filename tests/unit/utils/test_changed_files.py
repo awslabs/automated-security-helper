@@ -672,7 +672,7 @@ class TestLocationReadings:
         byte as ``secr%E9t.py``; decoding it as UTF-8 with surrogateescape gave a
         surrogate that names no file there, so the finding was still dropped. The
         bytes are read through the codec git's names are decoded with too, here
-        stood in by latin-1; a reading with no surrogate gains no spelling."""
+        stood in by latin-1."""
         source_dir = tmp_path / "repo"
         source_dir.mkdir()
         name = "secrét.py"
@@ -691,6 +691,54 @@ class TestLocationReadings:
             for result in filtered.sarif.runs[0].results
         ]
         assert uris == ["secr%E9t.py"]
+
+    def test_a_utf8_name_on_a_latin1_host_matches_the_changed_set(
+        self, tmp_path, monkeypatch
+    ):
+        """``secr%C3%A9t.py`` is valid UTF-8, so it decodes to ``secrét.py`` with no
+        surrogate. On a host whose filesystem encoding is latin-1 the same file's
+        bytes are named ``secrÃ©t.py`` by git and so by the changed set, and a
+        re-read limited to readings that hold a surrogate never produced that
+        spelling: the finding of a changed file was dropped."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "secrÃ©t.py").resolve()}
+        monkeypatch.setattr(
+            get_scan_set, "_git_output_codec", lambda: ("latin-1", "strict")
+        )
+        results = _make_results_with_sarif(
+            [_make_result("secr%C3%A9t.py"), _make_result("other.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        uris = [
+            result.locations[0].physicalLocation.root.artifactLocation.uri
+            for result in filtered.sarif.runs[0].results
+        ]
+        assert uris == ["secr%C3%A9t.py"]
+
+    def test_a_utf8_name_on_a_utf8_host_gains_no_spelling(self, tmp_path, monkeypatch):
+        """Control for the test above: with a UTF-8 codec a UTF-8 name reads back as
+        itself, so the re-read adds nothing and a finding that names no changed
+        file stays dropped."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        monkeypatch.setattr(
+            get_scan_set, "_git_output_codec", lambda: ("utf-8", "surrogateescape")
+        )
+        results = _make_results_with_sarif(
+            [_make_result("secr%C3%A9t.py"), _make_result("other.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        uris = [
+            result.locations[0].physicalLocation.root.artifactLocation.uri
+            for result in filtered.sarif.runs[0].results
+        ]
+        assert uris == ["other.py"]
 
     def test_a_byte_the_filesystem_encoding_refuses_adds_no_spelling(
         self, tmp_path, monkeypatch

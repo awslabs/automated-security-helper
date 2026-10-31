@@ -122,17 +122,22 @@ def _filesystem_readings(readings: List[str]) -> List[str]:
     git and ``os.fsdecode`` give the file on a UTF-8 host. On a host whose
     filesystem encoding is a legacy POSIX locale the same file is named
     ``secrét.py``, so the surrogate reading matched nothing and the finding was
-    dropped though its file had changed. The bytes of each reading that holds
-    such a surrogate (turned back by the same handler) are therefore also read
-    through the codec git's names and the changed set are decoded with
-    (``get_scan_set._git_output_codec``: UTF-8 with ``surrogatepass`` on Windows
-    whatever the filesystem encoding says there, the filesystem's own codec
-    elsewhere), not ``os.fsdecode``, which differs from it under
-    ``PYTHONLEGACYWINDOWSFSENCODING``. A reading with no surrogate is left as it
-    is: re-reading ``secrét.py`` through a latin-1 filesystem codec would have
-    added the spelling ``secrÃ©t.py``, a name no changed file has unless an
-    unrelated one happens to, and that one would then have kept the finding. A
-    spelling equal to an earlier one is left out, so a UTF-8 host sees the
+    dropped though its file had changed. The bytes of each reading (turned back by
+    the same handler) are therefore also read through the codec git's names and
+    the changed set are decoded with (``get_scan_set._git_output_codec``: UTF-8
+    with ``surrogatepass`` on Windows whatever the filesystem encoding says
+    there, the filesystem's own codec elsewhere), not ``os.fsdecode``, which
+    differs from it under ``PYTHONLEGACYWINDOWSFSENCODING``.
+
+    Every reading is re-read, not only one that holds a surrogate: a percent-encoded
+    name is bytes by definition, and a valid UTF-8 name (``secr%C3%A9t.py``)
+    decodes to ``secrét.py`` with no surrogate at all. On a latin-1 host git and
+    the changed set name that file ``secrÃ©t.py``, so a re-read limited to
+    surrogates dropped the finding of a changed file. The extra spelling can only
+    keep a finding it would otherwise drop (an unrelated changed file with the
+    same mojibake name), which is the safe side for a filter of findings.
+
+    A spelling equal to an earlier one is left out, so a UTF-8 host sees the
     readings it did before; a text that cannot be re-encoded (a lone surrogate
     outside the escape range) adds none, and neither does one the codec cannot
     decode (``surrogatepass`` refuses a byte that is not UTF-8), rather than that
@@ -143,8 +148,6 @@ def _filesystem_readings(readings: List[str]) -> List[str]:
     encoding, errors = _git_output_codec()
     spellings = list(readings)
     for reading in readings:
-        if not any("\udc80" <= char <= "\udcff" for char in reading):
-            continue
         try:
             spelling = reading.encode("utf-8", "surrogateescape").decode(
                 encoding, errors
