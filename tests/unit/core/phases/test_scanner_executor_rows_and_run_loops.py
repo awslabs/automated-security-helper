@@ -550,10 +550,15 @@ class TestTheRunLoops:
                     )
                 )
 
+        # Two scanners: run_parallel hands a queue of one to run_sequential, so a
+        # single task never reached the pool's announce under the lock.
         context = _context(tmp_path)
         executor = _executor(
             context,
-            [("lost", _scanner(context, _sarif()), _targets(context))],
+            [
+                ("lost", _scanner(context, _sarif()), _targets(context)),
+                ("other", _scanner(context, _sarif()), _targets(context)),
+            ],
             notify_fn=_notify,
         )
         monkeypatch.setattr(
@@ -564,7 +569,13 @@ class TestTheRunLoops:
 
         getattr(executor, mode)(AshAggregatedResults())
 
-        assert seen == [("lost", [], False, 0)], seen
+        # The order of the two turns is the pool's in a parallel run, so what is
+        # compared is order-free: both are announced as failed, each takes itself
+        # off the list, and the counts read one left and then none.
+        assert sorted(name for name, _, _, _ in seen) == ["lost", "other"], seen
+        assert all(succeeded is False for _, _, succeeded, _ in seen), seen
+        assert all(name not in remaining for name, remaining, _, _ in seen), seen
+        assert sorted(count for _, _, _, count in seen) == [0, 1], seen
 
     def test_a_scan_that_scanned_nothing_is_not_shown_as_clean(self):
         """A scanner with no container (every target was missing) or only
