@@ -1046,23 +1046,29 @@ class _BrokenStderr:
         pass
 
 
-@pytest.fixture
-def broken_stderr(monkeypatch):
-    """Replace sys.stderr with one nobody reads. The wrapper repoints descriptor 2
-    after a failed write, so each test stubs ``os.dup2``: this process's own
-    descriptor 2 must not be."""
+def _break_stderr(monkeypatch) -> _BrokenStderr:
+    """Replace sys.stderr with one nobody reads, and return it.
+
+    Call this as the first statement of the test body, never from a fixture:
+    pytest's global capture points sys.stderr at its own file again when the call
+    phase begins (``SysCapture.resume``), so a stand-in a fixture installed during
+    setup is no longer there when the code under test writes. The wrapper
+    repoints descriptor 2 after a failed write, so each test also stubs
+    ``os.dup2``: this process's own descriptor 2 must not be.
+    """
     stderr = _BrokenStderr()
     monkeypatch.setattr(sys, "stderr", stderr)
     return stderr
 
 
 def test_a_note_to_a_stderr_nobody_reads_is_dropped_and_descriptor_2_given_up(
-    broken_stderr, monkeypatch
+    monkeypatch,
 ):
     """The write raises BrokenPipeError because the interpreter ignores SIGPIPE;
     the note is dropped, and descriptor 2 is pointed at a descriptor of /dev/null
     so the interpreter's flush as it exits cannot fail and turn the wrapper's
     status into 120."""
+    broken_stderr = _break_stderr(monkeypatch)
     calls: List[Tuple[str, tuple]] = []
     monkeypatch.setattr(landlock_exec, "os", _Recording(os, {"dup2"}, calls))
 
@@ -1074,7 +1080,8 @@ def test_a_note_to_a_stderr_nobody_reads_is_dropped_and_descriptor_2_given_up(
     assert target == 2
 
 
-def test_a_failure_to_a_stderr_nobody_reads_still_exits_126(broken_stderr, monkeypatch):
+def test_a_failure_to_a_stderr_nobody_reads_still_exits_126(monkeypatch):
+    broken_stderr = _break_stderr(monkeypatch)
     monkeypatch.setattr(landlock_exec, "os", _Recording(os, {"dup2"}, []))
 
     with pytest.raises(SystemExit) as raised:
@@ -1085,11 +1092,12 @@ def test_a_failure_to_a_stderr_nobody_reads_still_exits_126(broken_stderr, monke
 
 
 def test_a_reap_pass_goes_on_to_the_next_process_when_its_note_cannot_be_written(
-    procfs, broken_stderr, monkeypatch
+    procfs, monkeypatch
 ):
     """The note about a process whose stat cannot be read used to raise out of
     ``_kill_descendant`` and end the pass, so the processes after it in the
     list were never reached and outlived the wrapper."""
+    broken_stderr = _break_stderr(monkeypatch)
     proc = procfs(
         {
             "/proc/11": [],
@@ -1113,6 +1121,9 @@ def test_a_reap_pass_goes_on_to_the_next_process_when_its_note_cannot_be_written
     landlock_exec._reap_leftovers(lambda: 20.0)
 
     assert "/proc/22/stat" in proc.opened
+    # One note for each of the two processes reached the stand-in, so the pass
+    # went through failed writes and not around them.
+    assert broken_stderr.writes == 2
 
 
 def test_the_stand_in_proc_is_only_opened_for_reading():
