@@ -1067,6 +1067,7 @@ def test_a_ca_directory_that_holds_a_home_is_not_granted(
     """SSL_CERT_DIR naming a directory above the home would show the whole home."""
     env = {"SSL_CERT_DIR": str(layout.tmp)}
     monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+    monkeypatch.setattr(backends, "_ca_unspelled_warned", set())
 
     with caplog.at_level(logging.WARNING, logger="ash"):
         granted = _granted_for(kind, layout, monkeypatch, _policy(layout), env)
@@ -1076,6 +1077,27 @@ def test_a_ca_directory_that_holds_a_home_is_not_granted(
         "SSL_CERT_DIR" in record.getMessage() and "expose" in record.getMessage()
         for record in caplog.records
     ), [record.getMessage() for record in caplog.records]
+
+
+@POSIX
+def test_a_ca_directory_that_holds_a_home_is_warned_of_once(
+    layout, monkeypatch, caplog
+):
+    """Every scanner spawn plans again; the warning is for the first of them."""
+    env = {"SSL_CERT_DIR": str(layout.tmp)}
+    monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+    monkeypatch.setattr(backends, "_ca_unspelled_warned", set())
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        for _ in range(3):
+            _granted_for("bwrap", layout, monkeypatch, _policy(layout), env)
+
+    warned = [
+        record
+        for record in caplog.records
+        if "SSL_CERT_DIR" in record.getMessage() and "expose" in record.getMessage()
+    ]
+    assert len(warned) == 1, [record.getMessage() for record in caplog.records]
 
 
 @POSIX
@@ -1384,10 +1406,41 @@ def test_a_credential_shaped_name_is_refused_with_its_name_even_when_listed(
         _policy(layout, environment=("MY_VAR", entry))
 
 
-@pytest.mark.parametrize("entry", ["", "1BAD", "A B=c", "=value", "TWO=1\x00"])
+@pytest.mark.parametrize(
+    "entry",
+    ["", "1BAD", "A B=c", "=value", "TWO=1\x00", "MY_VAR\n", "MY_VAR\n=1"],
+)
 def test_an_entry_that_is_not_a_variable_is_refused(entry):
     with pytest.raises(ValueError):
         policy_module.parse_environment([entry])
+
+
+def test_the_refusal_of_a_malformed_entry_shows_no_value():
+    """An entry with no ``=`` may be a value written without its name, so it is
+    named by its place in the list; with one, only the part before it is shown."""
+    with pytest.raises(ValueError) as bare:
+        policy_module.parse_environment(["MY_VAR", "hunter2 or something else"])
+    assert "hunter2" not in str(bare.value)
+    assert "number 2" in str(bare.value)
+
+    with pytest.raises(ValueError) as named:
+        policy_module.parse_environment(["A B=hunter2"])
+    assert "hunter2" not in str(named.value)
+    assert "A B" in str(named.value)
+
+
+@pytest.mark.parametrize("shape", ["MY_VAR", b"MY_VAR", {"MY_VAR": "1"}])
+def test_a_list_that_is_a_string_or_a_mapping_is_refused_with_its_shape(layout, shape):
+    """A bare string would pass the variables M, Y, _, V, A and R, and a mapping
+    would pass its keys with the values gone."""
+    with pytest.raises(ValueError, match="list of entries"):
+        policy_module.parse_environment(shape)
+
+    with pytest.raises(SandboxUnavailable, match="list of entries"):
+        _policy(layout, environment=shape)
+
+    with pytest.raises(SandboxUnavailable, match="list of entries"):
+        _build_policy(layout, environment=shape)
 
 
 def test_a_name_listed_twice_takes_its_last_entry():
@@ -1397,26 +1450,28 @@ def test_a_name_listed_twice_takes_its_last_entry():
     assert values == {"B": "2", "C": "3"}
 
 
-def test_the_policy_builder_carries_the_environment_list(layout):
+def _build_policy(layout, **kwargs) -> SandboxPolicy:
+    """``build_scanner_policy`` for a probe scanner over the layout's results."""
     source = layout.tmp / "src"
-    source.mkdir()
+    source.mkdir(exist_ok=True)
+    return policy_module.build_scanner_policy(
+        "probe",
+        policy_module.SandboxRequirements(),
+        argv0=sys.executable,
+        source_dir=source,
+        output_dir=layout.results.parent,
+        results_dir=layout.results,
+        scan_target=source,
+        cwd=source,
+        offline=False,
+        network_scanners=None,
+        **kwargs,
+    )
 
-    def build(**kwargs):
-        return policy_module.build_scanner_policy(
-            "probe",
-            policy_module.SandboxRequirements(),
-            argv0=sys.executable,
-            source_dir=source,
-            output_dir=layout.results.parent,
-            results_dir=layout.results,
-            scan_target=source,
-            cwd=source,
-            offline=False,
-            network_scanners=None,
-            **kwargs,
-        )
 
-    assert build().environment == policy_module.DEFAULT_ENVIRONMENT
-    assert build(environment=["MY_VAR", "OTHER=1"]).environment == ("MY_VAR", "OTHER=1")
+def test_the_policy_builder_carries_the_environment_list(layout):
+    assert _build_policy(layout).environment == policy_module.DEFAULT_ENVIRONMENT
+    built = _build_policy(layout, environment=["MY_VAR", "OTHER=1"])
+    assert built.environment == ("MY_VAR", "OTHER=1")
     with pytest.raises(SandboxUnavailable, match="GITHUB_TOKEN"):
-        build(environment=["GITHUB_TOKEN"])
+        _build_policy(layout, environment=["GITHUB_TOKEN"])

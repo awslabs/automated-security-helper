@@ -215,7 +215,28 @@ DEFAULT_ENVIRONMENT: Tuple[str, ...] = (
     *CA_BUNDLE_ENV_NAMES,
 )
 
-_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+#: A variable name, matched whole: a pattern anchored with ``$`` alone would admit
+#: one trailing newline.
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _environment_entries(entries: Iterable[str]) -> Tuple[str, ...]:
+    """*entries* as a tuple, once it is known to be a list of entries.
+
+    A bare string is an iterable of one-letter names, and a mapping is an iterable
+    of its keys with the values gone, so both would be read as a list that says
+    something else than what was written. They are refused with the shape named.
+
+    Raises:
+        ValueError: *entries* is a string, bytes or a mapping.
+    """
+    if isinstance(entries, (str, bytes, Mapping)):
+        kind = type(entries).__name__
+        raise ValueError(
+            f"the environment must be a list of entries, not a {kind}: "
+            "write [NAME, NAME=value]"
+        )
+    return tuple(entries)
 
 
 def parse_environment(
@@ -232,23 +253,27 @@ def parse_environment(
     A name that marks a credential (``CREDENTIAL_MARKERS``) and a name the sandbox
     always drops (``DROPPED_ENV_NAMES``) are refused even when listed, so the
     list cannot open the channel that a scanner's own ``env_names`` grant is for.
-    The error names the variable and never shows a value, which may be a secret.
+    The error names the variable and never shows a value, which may be a secret:
+    an entry with no ``=`` that is not a variable name is named by its position,
+    because the whole entry may be a value written without its name.
 
     Raises:
-        ValueError: An entry is not text, names no variable, names a credential or
-            a dropped variable, or carries a NUL in its value.
+        ValueError: The list is a string or a mapping, or an entry is not text,
+            names no variable, names a credential or a dropped variable, or
+            carries a NUL in its value.
     """
     names: Dict[str, None] = {}
     values: Dict[str, str] = {}
-    for entry in entries:
+    for position, entry in enumerate(_environment_entries(entries), start=1):
         if not isinstance(entry, str):
             raise ValueError(
                 f"an environment entry must be text, not {type(entry).__name__}"
             )
         name, has_value, value = entry.partition("=")
-        if not _ENV_NAME.match(name):
+        if not _ENV_NAME.fullmatch(name):
+            shown = f"{name!r}" if has_value else f"number {position}"
             raise ValueError(
-                f"environment entry {name!r} is not a variable name: write NAME to "
+                f"environment entry {shown} is not a variable name: write NAME to "
                 "pass the caller's value or NAME=value to set one"
             )
         if name in DROPPED_ENV_NAMES:
@@ -1639,9 +1664,17 @@ def build_scanner_policy(
         environment: The operator's environment list (``parse_environment``), or
             None for ``DEFAULT_ENVIRONMENT``. A list replaces the default, as a
             docker-compose ``environment`` list replaces the image's. An entry the
-            sandbox refuses (a credential-shaped name) raises SandboxUnavailable
-            naming the variable.
+            sandbox refuses (a credential-shaped name), or a list that is a bare
+            string, raises SandboxUnavailable naming the variable or the shape.
     """
+    try:
+        listed_environment = (
+            DEFAULT_ENVIRONMENT
+            if environment is None
+            else _environment_entries(environment)
+        )
+    except ValueError as refused:
+        raise SandboxUnavailable(str(refused)) from None
     real_home = _policy_home()
     read_granted = not requirements.read_paths_require_grant or scanner_name in set(
         read_path_scanners
@@ -1837,7 +1870,5 @@ def build_scanner_policy(
         unpack_dir_env=requirements.unpack_dir_env,
         uv_tool_locks=tuple(_uv_tool_locks(uv_data)),
         unread=tuple(unread),
-        environment=(
-            DEFAULT_ENVIRONMENT if environment is None else tuple(environment)
-        ),
+        environment=listed_environment,
     )

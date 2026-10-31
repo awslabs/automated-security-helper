@@ -431,9 +431,10 @@ def _is_within(path: Path, parent: Path) -> bool:
         return False
 
 
-#: The CA-bundle entries already reported as unspellable, as (variable, entry). A
-#: backend that cannot write an entry in its options leaves it out at every spawn;
-#: the warning is for the first one.
+#: The CA-bundle entries already reported, as (variable, entry). An entry a backend
+#: cannot write in its options, one that sits behind a link in the home, and a
+#: directory that would expose a home are each left out at every spawn; the
+#: warning is for the first one.
 _ca_unspelled_warned: Set[Tuple[str, str]] = set()
 
 
@@ -517,11 +518,16 @@ def _operator_ca_reads(
                 if not os.path.isdir(real):
                     continue
                 if _exposes_a_home(real, homes):
-                    ASH_LOGGER.warning(
-                        f"${name} names {entry!r}, which is not readable in the "
-                        "scanner sandbox: it would expose far more than one "
-                        "directory. Point it at the directory of certificates."
-                    )
+                    # Every scanner spawn plans again, so the warning is for the
+                    # first one.
+                    if (f"{name} home", entry) not in _ca_unspelled_warned:
+                        _ca_unspelled_warned.add((f"{name} home", entry))
+                        ASH_LOGGER.warning(
+                            f"${name} names {entry!r}, which is not readable in "
+                            "the scanner sandbox: it would expose far more than "
+                            "one directory. Point it at the directory of "
+                            "certificates."
+                        )
                     continue
             elif not os.path.isfile(real):
                 continue
