@@ -270,6 +270,27 @@ def _flush_quietly(stream) -> None:
         pass
 
 
+#: How long :func:`_write_raw` waits for one descriptor whose pipe is full and
+#: non-blocking to take a write again, in total, before it hands the report on.
+_RAW_WRITE_WAIT_SECONDS = 5.0
+
+
+def _wait_writable(fd: int, seconds: float) -> bool:
+    """Whether descriptor *fd* can take a write within *seconds*.
+
+    ``select`` is imported here, not at module scope (see the module docstring).
+    Where it cannot wait on *fd* (a Windows handle that is not a socket) the
+    answer is False, and the caller hands the report on.
+    """
+    try:
+        import select
+
+        _, ready, _ = select.select([], [fd], [], max(seconds, 0.0))
+    except (ImportError, OSError, ValueError):
+        return False
+    return bool(ready)
+
+
 def _write_raw(text: str) -> bool:
     """Write *text* to a raw descriptor, bypassing ``sys.stderr`` entirely.
 
@@ -280,28 +301,51 @@ def _write_raw(text: str) -> bool:
     Each ``os.write`` is repeated until its count covers the text: a pipe can
     take part of a write, and a short write counted as the whole report cut
     the report. When a descriptor fails part-way, the next one gets the rest,
-    not the whole text again. A descriptor that had no stream when the process
-    started (:data:`_CLOSED_AT_START`), or that was closed outright and is held
-    with ``os.devnull`` (:data:`_RESERVED_DESCRIPTORS`), is skipped: nothing is
+    not the whole text again. A pipe that is full and non-blocking raises
+    ``BlockingIOError``, which is not a broken descriptor: the write waits for
+    the pipe to drain (:func:`_wait_writable`, at most
+    :data:`_RAW_WRITE_WAIT_SECONDS`) and is repeated. When the wait runs out the
+    next descriptor gets the report from the last line this one took whole, under
+    a line that says the report continues there, so no line is read cut in two.
+    A descriptor that had no stream when the process started
+    (:data:`_CLOSED_AT_START`), or that was closed outright and is held with
+    ``os.devnull`` (:data:`_RESERVED_DESCRIPTORS`), is skipped: nothing is
     reading it, and had it not been held, its number could by now be a file the
     run opened. Before stdout is written, ``sys.stdout`` is flushed, so the
     report lands after what ASH printed through it, not ahead.
     """
-    payload = text.encode("utf-8", "backslashreplace")
+    import time
+
+    report = text.encode("utf-8", "backslashreplace")
+    written = 0
     for fd in (2, 1):
         if fd in _CLOSED_AT_START or fd in _RESERVED_DESCRIPTORS:
             continue
         if fd == 1:
             _flush_quietly(getattr(sys, "stdout", None))
+        give_up_at = time.monotonic() + _RAW_WRITE_WAIT_SECONDS
         try:
-            while payload:
-                count = os.write(fd, payload)
+            while written < len(report):
+                try:
+                    count = os.write(fd, report[written:])
+                except BlockingIOError:
+                    left = give_up_at - time.monotonic()
+                    if left <= 0 or not _wait_writable(fd, left):
+                        raise
+                    continue
                 if count == 0:
                     # Accepted nothing and raised nothing: repeated, this
                     # would never end. Handed on as a failed write is.
                     raise OSError(errno.EIO, "write of 0 bytes")
-                payload = payload[count:]
+                written += count
             return True
+        except BlockingIOError:
+            # This descriptor took the report up to `written`; the next one gets
+            # it from the start of the line that was cut, after a line saying so.
+            boundary = report.rfind(b"\n", 0, written) + 1
+            handoff = f"{_BANNER}: the report continues from the last whole line\n"
+            report = handoff.encode("utf-8") + report[boundary:]
+            written = 0
         except OSError:
             continue
     return False

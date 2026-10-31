@@ -141,6 +141,63 @@ def test_a_descriptor_that_takes_nothing_is_handed_on(monkeypatch):
     assert writes.written == {1: b"report\n"}
 
 
+def test_a_full_pipe_is_waited_for_and_the_line_is_written_whole(monkeypatch):
+    """A full non-blocking pipe is not a broken descriptor. It raised
+    BlockingIOError, the writer moved on to the next descriptor, and the report
+    was handed off in the middle of a line."""
+    calls: list[tuple[int, bytes]] = []
+    waits: list[int] = []
+
+    def write(fd, payload):
+        calls.append((fd, bytes(payload)))
+        if len(calls) == 1:
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        return len(payload)
+
+    def drained(fd, seconds):
+        waits.append(fd)
+        return True
+
+    monkeypatch.setattr(entrypoint.os, "write", write)
+    monkeypatch.setattr(entrypoint, "_wait_writable", drained)
+    monkeypatch.setattr(entrypoint, "_CLOSED_AT_START", set())
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+
+    assert entrypoint._write_raw("one whole line\n") is True
+
+    assert calls == [(2, b"one whole line\n"), (2, b"one whole line\n")], calls
+    assert waits == [2], waits
+
+
+def test_a_pipe_that_stays_full_hands_the_report_on_from_the_last_whole_line(
+    monkeypatch,
+):
+    """After the wait, descriptor 1 gets the report from the start of the line
+    stderr took only part of, under a line that says it continues there, so no
+    line is read cut in two."""
+    written: dict[int, bytes] = {}
+
+    def write(fd, payload):
+        so_far = written.get(fd, b"")
+        if fd == 2 and len(so_far) >= 15:
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        chunk = bytes(payload[:15])
+        written[fd] = so_far + chunk
+        return len(chunk)
+
+    monkeypatch.setattr(entrypoint.os, "write", write)
+    monkeypatch.setattr(entrypoint, "_wait_writable", lambda fd, seconds: False)
+    monkeypatch.setattr(entrypoint, "_CLOSED_AT_START", set())
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+
+    assert entrypoint._write_raw("first line\nsecond line\n") is True
+
+    assert written[2] == b"first line\nseco", written
+    announcement, _, rest = written[1].partition(b"\n")
+    assert announcement.startswith(entrypoint._BANNER.encode()), announcement
+    assert rest == b"second line\n", rest
+
+
 def test_a_descriptor_closed_at_start_is_never_written(monkeypatch):
     """Found closed by ensure_std_streams, descriptor 2 can since have been
     given to a file the run opened; the report must not land in it."""
