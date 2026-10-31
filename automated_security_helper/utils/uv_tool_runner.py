@@ -2959,6 +2959,14 @@ _uv_command_binary: Dict[str, str] = {}
 # probe remembered here, the second project's lookup reuses the first's answer
 # and runs only its own tree-scoped lookups. Cleared with the other lookups.
 _uv_probe_answers: Dict[str, bool] = {}
+#: The probes that exited non-zero inside a sandbox scope, keyed by the probe's
+#: own key and the scope's backend (``_probe_scope_key``). That exit is the
+#: wrapper's view of the filesystem and network, not uv's answer about the tool,
+#: so it is not in ``_uv_probe_answers`` and no caller outside the scope reads
+#: it; inside the scope it spares each later lookup the same spawn, a ``--from``
+#: probe being up to ``_UV_TOOL_VERSION_PROBE_TIMEOUT`` long. Guarded by
+#: ``_uv_tool_runner_cache_lock``; cleared with the caches.
+_uv_scoped_probe_misses: set[str] = set()
 #: The retry window a timed-out ``get_uv_tool_command`` probe opened for its key:
 #: the monotonic time until which the uv probe is skipped for that key. Guarded
 #: by ``_uv_tool_runner_cache_lock``; cleared with the caches.
@@ -3223,6 +3231,7 @@ def _reset_uv_tool_runner_caches() -> None:
         _uv_command_cache.clear()
         _uv_command_binary.clear()
         _uv_probe_answers.clear()
+        _uv_scoped_probe_misses.clear()
         _uv_command_probe_windows.clear()
         _uv_executable_cache.clear()
         _executable_cache.clear()
@@ -3248,6 +3257,7 @@ def _forget_lookups() -> None:
         _uv_command_binary.clear()
         # An install is exactly what changes a probe's answer.
         _uv_probe_answers.clear()
+        _uv_scoped_probe_misses.clear()
         _uv_command_probe_windows.clear()
         _uv_executable_cache.clear()
         _executable_cache.clear()
@@ -3650,14 +3660,25 @@ def get_uv_tool_command(
         # spawn failed or was refused, answered nothing about the tool, and its
         # None is not remembered (see above).
         probe_exited = False
+        # The key of a probe that missed inside the active sandbox scope, and
+        # whether that miss is already known (see _uv_scoped_probe_misses).
+        scoped_miss_key: Optional[str] = None
+        scoped_miss = False
         if uv_path is not None:
             probe_offline = offline or is_checking_only()
             probe_key = (
                 f"{tool_name}::{from_spec or ''}::offline={int(probe_offline)}"
                 f"::{uv_path}"
             )
+            scope_key = _probe_scope_key()
+            if scope_key is not None:
+                scoped_miss_key = f"{probe_key}::scope={scope_key!r}"
             with _uv_tool_runner_cache_lock:
                 remembered_probe = _uv_probe_answers.get(probe_key)
+                scoped_miss = (
+                    scoped_miss_key is not None
+                    and scoped_miss_key in _uv_scoped_probe_misses
+                )
             if remembered_probe is not None:
                 # The same question was answered for another scanned tree in
                 # this process: uv's answer about its copy of the tool does not
@@ -3679,7 +3700,12 @@ def get_uv_tool_command(
             if window_until is not None and time.monotonic() >= window_until:
                 _uv_command_probe_windows.pop(cache_key, None)
                 window_until = None
-        if uv_path is not None and not probe_exited and window_until is None:
+        if (
+            uv_path is not None
+            and not probe_exited
+            and window_until is None
+            and not scoped_miss
+        ):
             probe_command = [uv_path, "tool", "run"]
             probe_env: Optional[Dict[str, str]] = None
             # Offline in check-only mode too, which must not download.
@@ -3734,6 +3760,18 @@ def get_uv_tool_command(
                     with _uv_tool_runner_cache_lock:
                         if _lookup_generation == generation:
                             _uv_probe_answers[probe_key] = probe.returncode == 0
+                elif (
+                    probe.returncode != 0
+                    and scoped_miss_key is not None
+                    and not is_checking_only()
+                ):
+                    # The scope's own miss: remembered under the scope's key
+                    # only, so each later lookup in it takes the PATH binary
+                    # without starting the probe again, and no caller outside
+                    # the scope is told what its wrapper could not reach.
+                    with _uv_tool_runner_cache_lock:
+                        if _lookup_generation == generation:
+                            _uv_scoped_probe_misses.add(scoped_miss_key)
             except subprocess.TimeoutExpired:
                 with _uv_tool_runner_cache_lock:
                     _uv_command_probe_windows[cache_key] = (

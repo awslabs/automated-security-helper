@@ -63,6 +63,22 @@ def spawn(monkeypatch):
     return mock
 
 
+def _scope_of(tmp_path, backend_name):
+    """A sandbox scope on a backend of that name, for the probe's scope key."""
+    from automated_security_helper.utils.sandbox import scope as sandbox_scope
+
+    return sandbox_scope.SandboxScope(
+        backend=SimpleNamespace(name=backend_name),
+        scanner_name="zz-scanner",
+        requirements=None,
+        source_dir=tmp_path,
+        output_dir=tmp_path,
+        results_dir=tmp_path,
+        scan_target=None,
+        offline=False,
+    )
+
+
 @pytest.fixture
 def runner():
     r = UVToolRunner(uv_executable=UV_PATH)
@@ -184,6 +200,39 @@ class TestGetUvToolCommandMemo:
             assert get_uv_tool_command("bandit") == ["uv", "tool", "run", "bandit"]
         assert get_uv_tool_command("bandit") == ["uv", "tool", "run", "bandit"]
         assert spawn.call_count == 1
+
+    def test_a_miss_inside_a_sandbox_scope_is_not_probed_again_in_that_scope(
+        self, spawn, monkeypatch, tmp_path
+    ):
+        """The miss is not uv's answer, so no caller outside the scope reads it,
+        but inside the scope every later lookup used to start the probe again (a
+        ``--from`` probe is up to 15 s long): it is remembered for the scope."""
+        from automated_security_helper.utils.sandbox import scope as sandbox_scope
+
+        monkeypatch.setattr(
+            uv_tool_runner, "find_executable", lambda name: "/usr/bin/bandit"
+        )
+        with sandbox_scope.sandbox_scope(_scope_of(tmp_path, "zz-backend")):
+            assert get_uv_tool_command("bandit") == ["/usr/bin/bandit"]
+            assert get_uv_tool_command("bandit") == ["/usr/bin/bandit"]
+        assert spawn.call_count == 1, spawn.call_args_list
+        assert uv_tool_runner._uv_probe_answers == {}
+        assert uv_tool_runner._uv_command_cache == {}
+
+    def test_a_miss_in_one_backends_scope_does_not_stop_another_from_probing(
+        self, spawn, monkeypatch, tmp_path
+    ):
+        """The control: the remembered miss is the scope's backend's own."""
+        from automated_security_helper.utils.sandbox import scope as sandbox_scope
+
+        monkeypatch.setattr(
+            uv_tool_runner, "find_executable", lambda name: "/usr/bin/bandit"
+        )
+        with sandbox_scope.sandbox_scope(_scope_of(tmp_path, "zz-backend")):
+            get_uv_tool_command("bandit")
+        with sandbox_scope.sandbox_scope(_scope_of(tmp_path, "yy-backend")):
+            get_uv_tool_command("bandit")
+        assert spawn.call_count == 2, spawn.call_args_list
 
     def test_a_from_spec_probe_gets_the_environment_building_budget(self, spawn):
         """Resolving a spec with extras and a constraint on a cold cache builds
