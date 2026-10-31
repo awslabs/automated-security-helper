@@ -9,8 +9,10 @@
 - ``verify_sarif_finding_counts`` compares the SARIF with the findings the SARIF
   can hold: the counts a scanner recorded on a dict result are not a mismatch.
 - An ``additional_reports`` entry names a scanner only when one of its values is
-  shaped as a serialized container (a ``status`` or a ``scanner_name``): a
-  plugin's mapping of mappings is not a phantom ERROR scanner.
+  shaped as a serialized container: it carries a ``scanner_name`` key, or a
+  ``status`` whose value is exactly one the enum writes (a plugin's own ``ok`` or
+  ``failed`` is not one). A plugin's mapping of mappings is not a phantom ERROR
+  scanner.
 """
 
 from __future__ import annotations
