@@ -471,6 +471,16 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                         f"{title:<30} "
                         f"{file_path:<30}"
                     )
+                # The list stops at the same limit as the one above, so say
+                # where the rest is, as that list does.
+                if len(left_out) < summary["policy_not_gating"]:
+                    text_parts.append("")
+                    text_parts.append(
+                        f"Note: Showing {len(left_out)} of {summary['policy_not_gating']} "
+                        "findings left out of the outcome. The HTML report lists "
+                        "the rest under its 'Not gating' scope. "
+                        "Configure 'max_detailed_findings' to adjust this limit."
+                    )
                 text_parts.append("")
 
         # Add footer

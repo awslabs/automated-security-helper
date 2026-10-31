@@ -8523,8 +8523,10 @@
   masthead and in the Markdown and text summary lines, and a "Not gating"
   choice in the HTML scope menu; the default view shows it. The Markdown report
   lists it in a "Not gating (workspace policy)" table, and the text report does
-  when it lists detailed findings. The scan summary carries the count as
-  `policy_not_gating`, and `below_threshold` no longer includes these findings, so
+  when it lists detailed findings; a list cut at `max_detailed_findings` points
+  to the HTML report's "Not gating" scope for the rest. The scan summary
+  carries the count as `policy_not_gating`, and `below_threshold` no longer
+  includes these findings, so
   it is no longer `active` minus `actionable` when any are present. When no
   finding counts toward the outcome and some were left out, the headline sentence
   says so instead of saying that no finding reached its threshold. A report with

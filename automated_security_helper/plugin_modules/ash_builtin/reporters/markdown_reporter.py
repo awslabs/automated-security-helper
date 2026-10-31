@@ -676,6 +676,16 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                         + " |"
                     )
                 parts.append("")
+                # The table stops at the same limit as the list above, so
+                # say where the rest is, as that list does.
+                if len(left_out) < summary["policy_not_gating"]:
+                    parts.append(
+                        f"> Showing {len(left_out)} of {summary['policy_not_gating']} "
+                        "findings left out of the outcome. "
+                        'Open the HTML report and choose the "Not gating" scope '
+                        "to review the full set. "
+                        "Configure `max_detailed_findings` to adjust this limit.\n"
+                    )
 
         if not options.compact:
             parts.extend(

@@ -36,6 +36,8 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporte
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
     MarkdownReporter,
+    MarkdownReporterConfig,
+    MarkdownReporterConfigOptions,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
@@ -474,3 +476,90 @@ class TestEveryReportNamesIt:
         assert [row["rule_id"] for row in rows] == ["POLICY-ZZZ", "POLICY-MMM"], rows
         assert emitter.get_policy_not_gating_findings(0) == []
         assert emitter.get_policy_not_gating_findings(-1) == []
+
+
+def _three_left_out(tmp_path) -> AshAggregatedResults:
+    """Three CRITICAL findings the project's outcome leaves out."""
+    findings = [
+        _result(f"POLICY-{name}", "error", origin="workspace-policy")
+        for name in ("AAA", "BBB", "CCC")
+    ]
+    return _model(
+        tmp_path,
+        findings,
+        policy_scanners_gate=False,
+        policy_origin_finding_count=3,
+    )
+
+
+def _markdown_not_gating_section(out: str) -> str:
+    heading = "## Not gating (workspace policy)"
+    assert heading in out, out
+    return out.split(heading, 1)[1].split("\n## ", 1)[0]
+
+
+def _text_not_gating_section(out: str) -> str:
+    heading = "NOT GATING (WORKSPACE POLICY)"
+    assert heading in out, out
+    return out.split(heading, 1)[1]
+
+
+def _text_reporter(context, limit: int) -> TextReporter:
+    return TextReporter(
+        context=context,
+        config=TextReporterConfig(
+            options=TextReporterConfigOptions(
+                include_detailed_findings=True, max_detailed_findings=limit
+            )
+        ),
+    )
+
+
+class TestTheCutListPointsToTheRest:
+    def test_the_markdown_list_cut_at_the_limit_says_where_the_rest_is(
+        self, tmp_path, test_plugin_context
+    ):
+        """RED at the base: the table stopped at ``max_detailed_findings`` and
+        nothing told the reader that the rest were in the HTML report."""
+        reporter = MarkdownReporter(
+            context=test_plugin_context,
+            config=MarkdownReporterConfig(
+                options=MarkdownReporterConfigOptions(max_detailed_findings=2)
+            ),
+        )
+
+        out = reporter.report(_three_left_out(tmp_path))
+
+        section = _markdown_not_gating_section(out)
+        assert "Showing 2 of 3 findings reported and left out" in section, section
+        assert (
+            "> Showing 2 of 3 findings left out of the outcome. Open the HTML report "
+            'and choose the "Not gating" scope to review the full set.'
+        ) in section, section
+        assert "`max_detailed_findings`" in section, section
+
+    def test_the_text_list_cut_at_the_limit_says_where_the_rest_is(
+        self, tmp_path, test_plugin_context
+    ):
+        out = _text_reporter(test_plugin_context, 2).report(_three_left_out(tmp_path))
+
+        section = _text_not_gating_section(out)
+        assert "Showing 2 of 3 findings reported and left out" in section, section
+        assert (
+            "Note: Showing 2 of 3 findings left out of the outcome. The HTML report "
+            "lists the rest under its 'Not gating' scope."
+        ) in section, section
+
+    def test_a_list_that_holds_every_finding_has_no_pointer(
+        self, tmp_path, test_plugin_context
+    ):
+        """The control: all three are listed, so there is no rest to point to."""
+        model = _three_left_out(tmp_path)
+        markdown = MarkdownReporter(context=test_plugin_context).report(model)
+        text = _text_reporter(test_plugin_context, 3).report(model)
+
+        assert "Showing 3 of 3 findings reported" in markdown, markdown
+        assert "Showing 3 of 3 findings reported" in text, text
+        for out in (markdown, text):
+            assert '"Not gating" scope' not in out, out
+            assert "'Not gating' scope" not in out, out
