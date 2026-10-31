@@ -128,6 +128,28 @@ def test_a_remote_sessions_granted_file_keeps_the_working_directory(
     assert seen["no_scanned_tree"] is False
 
 
+def test_a_granted_file_inside_the_working_directory_keeps_that_judgment(
+    _server, monkeypatch, tmp_path
+) -> None:
+    """The judgment follows who granted the file, not where the process runs.
+    The test above holds only while the granted root sits outside the working
+    directory; run from a directory that contains it, the file is inside the
+    tree the judgment names, and the answer must be the same."""
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    monkeypatch.chdir(tmp_path)
+    assert _server["named"].resolve().is_relative_to(working_directory()), (
+        "the control: the granted file must sit inside the working directory"
+    )
+    seen = _judgment(monkeypatch)
+
+    with pytest.raises(_Stop):
+        mcp_get_config(config_path=str(_server["named"]), session_id=REMOTE_SESSION)
+
+    assert seen["scanned_root"] == working_directory()
+    assert seen["no_scanned_tree"] is False
+
+
 def test_the_local_client_keeps_its_working_directory(_server, monkeypatch) -> None:
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
