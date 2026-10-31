@@ -364,7 +364,11 @@ class TestAFileTheSameInstructionRunsIsCommands:
     def test_a_named_variable_in_a_script_the_run_executes_is_refused(
         self, tmp_path, install
     ):
-        """Control: refused before too, as a named variable in any file body is."""
+        """Control: refused before too, as a named variable in any file body is.
+
+        Before, on the body's own line (4); now on the instruction's (3). The line is
+        not what the test pins: the refusal and the name it gives are.
+        """
         body = (
             "RUN cat > /tmp/i.sh <<'EOF' && sh /tmp/i.sh\n"
             'PKGS="jq curl"\n'
@@ -372,7 +376,28 @@ class TestAFileTheSameInstructionRunsIsCommands:
             "EOF\n"
         )
         with pytest.raises(
-            checker.PinEnumerationError, match=r"Dockerfile:3 installs '\$\{?PKGS\}?'"
+            checker.PinEnumerationError,
+            match=r"Dockerfile:[34] installs '\$\{?PKGS\}?'",
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    @pytest.mark.parametrize(
+        ("first_line", "line"),
+        [
+            # Both helpers are live: the script is run (read as commands) and its body
+            # is an xargs install that reads a file. A script nothing runs is refused
+            # the same way, on the body's own line.
+            ("RUN cat > /tmp/i.sh <<'EOF' && sh /tmp/i.sh", 3),
+            ("RUN cat > /tmp/i.sh <<'EOF'", 4),
+        ],
+    )
+    def test_an_xargs_install_reading_a_file_is_refused_run_or_not(
+        self, tmp_path, first_line, line
+    ):
+        body = f"{first_line}\nxargs apt-get install -y < packages.txt\nEOF\n"
+        with pytest.raises(
+            checker.PinEnumerationError,
+            match=rf"Dockerfile:{line} installs packages with apt-get through xargs",
         ):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 

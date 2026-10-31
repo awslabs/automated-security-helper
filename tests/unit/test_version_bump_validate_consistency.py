@@ -352,16 +352,16 @@ class TestTheTemplatePathComesFromTheManager:
         targets = list(manager.target_files)
         assert targets
         assert all(isinstance(target, str) for target in targets)
-        every_template_exists = all(
-            manager.template_path_for(target).exists() for target in targets
-        )
+        # The tree sets up the README only, so any other target the manager lists
+        # has no template here. A target whose template is missing fails validate
+        # whatever else holds. If the list ever shrinks to the README alone this
+        # assert says so, and the check below is not left to decide nothing.
+        missing = [t for t in targets if not manager.template_path_for(t).exists()]
+        assert missing, "the manager lists only targets this tree sets up"
 
         passed = bumper.validate_consistency()
 
-        # A target whose template is missing fails validate whatever else holds. When
-        # every template exists the pages decide, which this tree does not set up.
-        if not every_template_exists:
-            assert passed is False
+        assert passed is False
         out = capsys.readouterr().out
         for target in targets:
             template = manager.template_path_for(target)
