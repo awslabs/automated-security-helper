@@ -224,8 +224,10 @@ it needs.
   that has a network. A name the rule above drops, `TMPDIR` (every backend gives each
   scanner a private one) and ASH's own run id are refused with the name, so the list
   is not a channel for secrets. A `NAME=value` entry whose value carries
-  `user:password@` in a URL is dropped without a refusal, as the same value from the
-  environment would be.
+  `user:password@` in a URL is refused with the variable named and no value shown,
+  because the sandbox would drop it from every scanner and the entry would do
+  nothing. A variable the list passes by name is held to the same rule when ASH is
+  started with such a value: it is dropped without a message.
 - A certificate setting you made is readable inside the sandbox, on every backend,
   where bwrap, firejail and Landlock hide the home directory: the files that
   `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS`
@@ -457,9 +459,10 @@ is no separate flag.
 
 A `NAME=value` entry sets a variable in every sandboxed scanner, `LD_PRELOAD` and
 `NODE_OPTIONS` included, so the setting grants access like the others below and
-follows the same rule about who may set it. A name that marks a credential, `TMPDIR`
-and ASH's own run id are refused when the config is read, with the variable named and
-no value shown. A scanner that needs a credential is granted it with
+follows the same rule about who may set it. A name that marks a credential, `TMPDIR`,
+ASH's own run id and a `NAME=value` entry whose value is a URL with a user name and
+password (a proxy such as `http://user:password@proxy:3128`) are refused when the
+config is read, with the variable named and no value shown. A scanner that needs a credential is granted it with
 `sandbox.env_scanners` and its own variable names instead.
 
 #### Who may grant

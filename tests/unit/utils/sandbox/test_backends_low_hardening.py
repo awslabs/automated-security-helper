@@ -1351,12 +1351,49 @@ def test_a_listed_name_passes_the_callers_value_and_an_entry_with_a_value_sets_o
     assert offline == {"MY_VAR": "mine", "OTHER": "1", "ADDED": "2", "HOME": home}
 
 
-def test_an_entry_with_a_value_is_screened_like_any_value(layout):
-    """A value that carries a user name and password in a URL is dropped, as the
-    caller's would be."""
-    policy = _policy(layout, network=True, environment=("HTTPS_PROXY=http://u:p@h",))
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "HTTPS_PROXY=http://MARKER-user:MARKER-pw@proxy:3128",
+        "https_proxy=https://MARKER-user@proxy",
+        "MY_TOOL_URL=socks5://MARKER-user:MARKER-pw@host:1080",
+    ],
+)
+def test_an_entry_that_sets_a_url_with_a_user_name_is_refused_not_dropped(
+    layout, entry
+):
+    """``filter_env`` drops such a value from every scanner, so an entry that sets
+    one passed validation and did nothing, and a networked scanner failed with a
+    connection error that named no cause. It is refused with the variable named; the
+    value is never shown."""
+    name = entry.partition("=")[0]
+    with pytest.raises(ValueError, match=name) as refused:
+        policy_module.parse_environment(["MY_VAR", entry])
+    assert "MARKER" not in str(refused.value)
 
-    assert "HTTPS_PROXY" not in policy.filter_env({})
+    with pytest.raises(SandboxUnavailable, match=name) as unavailable:
+        _policy(layout, network=True, environment=("MY_VAR", entry))
+    assert "MARKER" not in str(unavailable.value)
+
+
+def test_control_a_proxy_entry_without_a_user_name_is_accepted_and_passed(layout):
+    policy = _policy(
+        layout, network=True, environment=("HTTPS_PROXY=http://proxy:3128/a@b",)
+    )
+
+    assert policy.filter_env({})["HTTPS_PROXY"] == "http://proxy:3128/a@b"
+
+
+def test_control_a_listed_name_with_a_user_name_in_the_callers_value_is_dropped(
+    layout,
+):
+    """The caller's own value is not an entry of the list: it is dropped as before,
+    and the list that names the variable is not refused for it."""
+    policy = _policy(layout, network=True, environment=("HTTPS_PROXY",))
+
+    env = policy.filter_env({"HTTPS_PROXY": "http://MARKER-user:MARKER-pw@proxy:3128"})
+
+    assert "HTTPS_PROXY" not in env
 
 
 @POSIX

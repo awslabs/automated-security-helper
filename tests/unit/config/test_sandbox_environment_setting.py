@@ -66,6 +66,7 @@ def test_an_empty_list_is_accepted_and_replaces_the_default():
         ("DB_PASSWORD=hunter2", "DB_PASSWORD"),
         ("TMPDIR=/somewhere", "TMPDIR"),
         (OUTER_RUN_ID_ENV, OUTER_RUN_ID_ENV),
+        ("HTTPS_PROXY=http://user:hunter2@proxy:3128", "HTTPS_PROXY"),
     ],
 )
 def test_a_refused_entry_is_named_and_its_value_is_not_shown(entry, name):

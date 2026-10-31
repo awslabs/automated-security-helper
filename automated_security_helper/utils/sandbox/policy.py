@@ -277,7 +277,8 @@ def parse_environment(
     Raises:
         ValueError: The list is a string or a mapping, or an entry is not text,
             names no variable, names a credential, a dropped variable or
-            ``TMPDIR``, or carries a NUL in its value.
+            ``TMPDIR``, carries a NUL in its value, or sets a URL with a user name
+            and password (``filter_env`` would drop it from every scanner).
     """
     names: Dict[str, None] = {}
     values: Dict[str, str] = {}
@@ -312,6 +313,16 @@ def parse_environment(
             )
         if "\x00" in value:
             raise ValueError(f"environment entry {name!r} has a NUL in its value")
+        if has_value and _URL_USERINFO.match(value):
+            # ``filter_env`` drops such a value from every scanner, so an entry
+            # that sets one would pass silently and do nothing: a networked scanner
+            # given only this proxy would fail with a connection error that names
+            # no cause. The value is not shown, only the variable.
+            raise ValueError(
+                f"environment entry {name!r} is refused: its value is a URL with a "
+                "user name and password in it, which the sandbox drops from every "
+                "scanner's environment"
+            )
         names.setdefault(name)
         if has_value:
             values[name] = value

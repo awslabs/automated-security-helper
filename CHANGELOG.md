@@ -5548,8 +5548,11 @@
   `sandbox.extra_read_paths`, it is honored only from `--config-overrides` and from
   config files outside every git checkout and the scanned directory, because a
   `NAME=value` entry sets a variable in every sandboxed scanner. A name that marks a
-  credential, `TMPDIR`, a string where a list belongs, and a name with a trailing
-  newline are refused with the variable named and no value shown.
+  credential, `TMPDIR`, a string where a list belongs, a name with a trailing
+  newline, and a `NAME=value` entry whose value is a URL with a user name and
+  password are refused with the variable named and no value shown. The last used to
+  be accepted and then dropped from every scanner without a message, so a proxy
+  written that way left the scanners without one.
 
 - **A `--cli-json-input` number where the parameter takes true/false or a whole
   number is refused with a usage error that names the key.** A JSON number for a
