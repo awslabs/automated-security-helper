@@ -154,6 +154,22 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
     return stats
 
 
+def _rows_without_a_breakdown(scanner_results: Dict[str, Any]) -> bool:
+    """Whether a scanner row counts findings but records no severity breakdown.
+
+    ``_stats_of_scanners`` adds such a row's ``finding_count`` to the total and
+    nothing to any bucket (it has none to add), so the buckets of the derived
+    stats are a lower bound beside an exact total: 0 per severity next to a
+    total of 4. The summary reports them as unknown instead.
+    """
+    return any(
+        isinstance(data, dict)
+        and not isinstance(data.get("severity_counts"), dict)
+        and _count(data.get("finding_count")) > 0
+        for data in scanner_results.values()
+    )
+
+
 def _seed_scanners_the_sarif_never_named(
     raw_results: Dict[str, Any], kept_per_scanner: Dict[str, Dict[str, int]]
 ) -> None:
@@ -223,7 +239,10 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
 
     summary_stats = results.get("summary_stats") or {}
     scanner_results = raw_results.get("scanner_results", {})
+    # Whether the derived total counts findings that no severity bucket does.
+    buckets_unknown = False
     if not summary_stats and scanner_results:
+        buckets_unknown = _rows_without_a_breakdown(scanner_results)
         # A results document with no summary_stats (the workspace unified
         # results file) still carries every scanner's own counts, so the
         # summary is derived from them. Defaulting each count to 0 instead
@@ -245,7 +264,9 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
         return summary_stats.get(name) if summary_stats else None
 
     def _severity(name: str) -> Optional[int]:
-        if not summary_stats:
+        # A derived total that counts findings of a scanner with no breakdown
+        # has no per-severity answer: the buckets read 0 beside a total of 4.
+        if not summary_stats or buckets_unknown:
             return None
         return severity_counts.get(name, summary_stats.get(name, 0))
 

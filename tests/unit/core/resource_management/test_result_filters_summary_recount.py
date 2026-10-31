@@ -641,3 +641,32 @@ class TestTotalFollowsOneRule:
         by_severity = filter_summary(results)["findings_summary"]["by_severity"]
 
         assert by_severity["total"] == 4
+        # The four findings are in no bucket the row records, so the buckets
+        # are unknown, not a confident 0 per severity beside a total of 4.
+        assert by_severity["critical"] is None
+        assert by_severity["high"] is None
+        assert by_severity["suppressed"] is None
+
+    def test_one_row_without_buckets_makes_the_derived_buckets_unknown(self):
+        results = _results(with_summary_stats=False)
+        results["raw_results"]["scanner_results"]["trivy"] = {
+            "status": "PASSED",
+            "finding_count": 2,
+        }
+
+        by_severity = filter_summary(results)["findings_summary"]["by_severity"]
+
+        assert by_severity["total"] == 7
+        assert by_severity["high"] is None
+
+    def test_a_row_without_buckets_and_without_findings_keeps_the_buckets(self):
+        results = _results(with_summary_stats=False)
+        results["raw_results"]["scanner_results"]["trivy"] = {
+            "status": "PASSED",
+            "finding_count": 0,
+        }
+
+        by_severity = filter_summary(results)["findings_summary"]["by_severity"]
+
+        assert by_severity["total"] == 5
+        assert by_severity["high"] == 1
