@@ -755,7 +755,7 @@ def _is_a_terminal(stream: Any) -> bool:
     """Whether *stream* is a console a person reads, False when it cannot say."""
     try:
         return bool(stream.isatty())
-    except (AttributeError, ValueError, OSError):
+    except (AttributeError, TypeError, ValueError, OSError):
         return False
 
 

@@ -176,6 +176,20 @@ def test_a_stream_with_no_isatty_keeps_the_ascii_rule(monkeypatch):
     assert log._console_writes() is None
 
 
+def test_a_stream_whose_isatty_is_not_callable_keeps_the_ascii_rule(monkeypatch):
+    # The encoding check treats a stream that is not what it expects as one it
+    # knows nothing about; the terminal check does the same for isatty.
+    _console(monkeypatch, "cp1252")
+
+    class _Odd:
+        encoding = "cp1252"
+        isatty = True
+
+    monkeypatch.setattr("sys.stdout", _Odd())
+
+    assert log._console_writes() is None
+
+
 def test_the_filter_escapes_an_accented_letter_into_a_redirected_stream(monkeypatch):
     windows = _active_filter(monkeypatch, "cp1252", terminal=False)
 
