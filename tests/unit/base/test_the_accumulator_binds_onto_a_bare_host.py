@@ -6,6 +6,10 @@
 The method is a documented extension seam, and the uv mixin's tests drive the
 real accumulator through a stub plugin that carries ``output``, ``errors``,
 ``exit_code``, ``command`` and ``context`` and nothing else of PluginBase. The
+host below has those, plus the two members the method still reads without a
+default: ``_values_to_redact`` (read for the values to redact) and
+``_scan_kept_flag`` (read on the exit-code step). It has no ``use_uv_tool``,
+which the method reads with a default of false. The
 processed-response mark and the records hook are PluginBase members, so a hard
 read of either made the bound method raise on such a host, and the uv response
 path kept that raise as the response's error with no stderr line recorded.
@@ -30,7 +34,6 @@ def _bare_host(values):
     # on a fresh plugin). Nothing else of PluginBase is present.
     host = SimpleNamespace(
         command="bandit",
-        use_uv_tool=False,
         exit_code=0,
         output=[],
         errors=[],
