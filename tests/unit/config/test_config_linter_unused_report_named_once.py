@@ -121,6 +121,11 @@ def test_the_command_hands_the_config_lint_read_to_the_age_read_and_the_fixer(
         ),
     )
     seen = {}
+    # The report the age read hands back is read before the fixer is asked
+    # (the command says why it comments nothing out of one it cannot read), so
+    # the file sits where the stub names it: an empty report, complete.
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"unused_suppressions": []}), encoding="utf-8")
     # What a call that names no report path would see, so a keyword left out of
     # the call is told from one passed as None.
     not_passed = "report_path was not passed"
@@ -128,7 +133,7 @@ def test_the_command_hands_the_config_lint_read_to_the_age_read_and_the_fixer(
     def age(config_path, output_dir=None, report_config=None, report_path=not_passed):
         seen["age"] = report_config
         seen["age_path"] = report_path
-        return (tmp_path / "report.json", datetime.now(), 0.0)
+        return (report, datetime.now(), 0.0)
 
     def fix(config_path, output_dir=None, report_config=None, report_path=not_passed):
         seen["fix"] = report_config
@@ -250,6 +255,8 @@ def test_the_command_hands_the_report_lint_read_to_the_age_read_and_the_fixer(
     config = tmp_path / ".ashrc.yaml"
     config.write_text("project_name: demo\n", encoding="utf-8")
     listed = tmp_path / "listed.json"
+    # Read before the fixer is asked, so the file lint listed is there.
+    listed.write_text(json.dumps({"unused_suppressions": []}), encoding="utf-8")
     issue = LintIssue(
         severity=LintSeverity.INFO,
         category=LintCategory.SUPPRESSION_UNUSED,
