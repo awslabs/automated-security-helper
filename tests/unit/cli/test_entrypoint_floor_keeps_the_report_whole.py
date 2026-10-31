@@ -329,6 +329,8 @@ def test_a_flushed_line_start_hash_is_ended_by_end():
         ("##teamcity", "[message text='x']\n"),
         ("::wa", "rn::x\n"),
         ("  ##vso", "[task.complete result=Succeeded]x\n"),
+        ("done ##vso", "[task.complete result=Succeeded]x\n"),
+        ("path: ##teamcity", "[message text='x']\n"),
     ],
 )
 def test_a_flushed_front_of_a_command_name_is_kept_for_the_rest_of_its_line(
@@ -369,6 +371,43 @@ def test_a_flushed_prompt_that_starts_with_a_hash_or_a_colon_is_still_written():
     shown.flush()
 
     assert real.getvalue().endswith("see :"), real.getvalue()
+
+
+def test_a_front_in_the_middle_of_a_line_is_kept_after_an_earlier_flush():
+    """The line was already started by an earlier flush, so it is not at its
+    start, and the front of a command name in it is still kept until the rest
+    of the line arrives."""
+    from automated_security_helper.utils.terminal_text import shown_not_obeyed
+
+    real = io.StringIO()
+    shown = entrypoint._ShownLines(real)
+
+    shown.write("done ")
+    shown.flush()
+    shown.write("##vso")
+    shown.flush()
+    assert real.getvalue() == "done ", real.getvalue()
+    shown.write("[task.complete result=Succeeded]x\n")
+
+    assert real.getvalue() == "done " + str(
+        shown_not_obeyed("##vso[task.complete result=Succeeded]x\n")
+    )
+    assert "##vso[" not in real.getvalue()
+
+
+@pytest.mark.parametrize("piece", ["build #12", "see ## ", "ok #1a"])
+def test_a_flushed_piece_that_is_no_front_of_a_name_is_still_written(piece):
+    """The control: a last word that is not hash marks and letters, and a piece
+    that ends in a blank, are written at once. A lone "#" ending a piece is a
+    front (the next write may be "#vso["), so it is kept and is not in this
+    list."""
+    real = io.StringIO()
+    shown = entrypoint._ShownLines(real)
+
+    shown.write(piece)
+    shown.flush()
+
+    assert real.getvalue() == piece, real.getvalue()
 
 
 def test_an_exception_whose_text_cannot_be_read_is_still_reported(monkeypatch):
