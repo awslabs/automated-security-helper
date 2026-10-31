@@ -745,7 +745,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         # cannot be checked (PermissionError); TimeoutExpired when it outlives its
         # bound. It runs the tool with check=False, so a non-zero exit is no
         # CalledProcessError, and it reads the JSON through isinstance guards, so a
-        # document of another shape is no KeyError. The two arms below hold all of it.
+        # document of another shape is no KeyError. The two arms below hold all of the
+        # probe's own; a cancellation (spawn_run raises ScanCancelled inside a
+        # cancelled scan) and a failure of the context builder (the values hook can
+        # raise RuntimeError) are not the probe's and pass through.
         try:
             _built_from_trivy(self.content_database_probe_context())
         except ValueError as exc:
