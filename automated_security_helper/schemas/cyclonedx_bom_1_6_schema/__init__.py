@@ -89,6 +89,16 @@ ZeroToOneFloat = Annotated[float, Field(ge=0.0, le=1.0)]
 #   rule that a BOM holds either license entries or exactly one expression is
 #   not enforced: a scanner may write several expression entries, and that BOM
 #   still loads.
+# - The warning about a stray license entry is once per entry shape per load,
+#   not per entry: `_LICENSE_SHAPES_WARNED` (a ContextVar) holds the shapes
+#   seen, and the `mode="wrap"` model validator
+#   `CycloneDXReport._one_load_warns_once_per_license_shape` opens and resets it
+#   around each load. Without that validator the set is empty and a list
+#   deduplicates only within itself.
+# - The description of a stray entry is bounded, because it is scanned content:
+#   `_SHAPE_KEYS_LISTED`, `_SHAPE_KEY_CHARS` and `_SHAPES_WARNED_PER_LOAD` cap
+#   the keys listed, the characters of each key and the shapes described per
+#   load, and `_license_entry_shape` quotes each key with `repr`.
 # - Signer.algorithm is text where the codegen used AnyUrl, which re-emitted a
 #   URI normalized (a trailing slash added to a path-less one).
 
