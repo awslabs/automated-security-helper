@@ -43,6 +43,7 @@ def test_a_relative_config_env_is_anchored_to_ashs_working_directory(
     operator_dir.mkdir()
     (operator_dir / "rules.toml").write_text('title = "operator"\n')
     monkeypatch.chdir(operator_dir)
+    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     monkeypatch.setenv("GITLEAKS_CONFIG", "rules.toml")
     scanner = _scanner(tmp_path)
     # The scanned tree holds a file of the same name, the one gitleaks would
@@ -71,6 +72,7 @@ def test_a_home_relative_config_env_is_anchored_to_the_operators_home(
 ):
     home = _operator_home(tmp_path, monkeypatch)
     (home / "rules.toml").write_text('title = "operator"\n')
+    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     monkeypatch.setenv("GITLEAKS_CONFIG", "~/rules.toml")
     scanner = _scanner(tmp_path)
     # The scanned tree holds a directory literally named "~": where gitleaks,
@@ -96,6 +98,7 @@ def test_the_rescan_anchors_the_variable_where_the_first_run_did(tmp_path, monke
     operator_dir = tmp_path / "operator"
     operator_dir.mkdir()
     monkeypatch.chdir(operator_dir)
+    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     scanner = _scanner(tmp_path)
     source = scanner.context.source_dir
 
@@ -119,6 +122,7 @@ def test_the_rescan_anchors_the_variable_where_the_first_run_did(tmp_path, monke
 
 def test_an_absolute_config_env_is_left_to_gitleaks(tmp_path, monkeypatch):
     """Control: the shape the existing test pins, unchanged."""
+    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     monkeypatch.setenv("GITLEAKS_CONFIG", str(tmp_path / "operator.toml"))
     scanner = _scanner(tmp_path)
     assert scanner._resolve_config_file() is None

@@ -343,6 +343,10 @@ def test_a_gitleaks_config_env_var_is_left_to_gitleaks(tmp_path, monkeypatch, va
         if variable == "GITLEAKS_CONFIG"
         else 'title = "inline"\n'
     )
+    # Only the variable under test is set: the other one, if the runner's
+    # environment carries it, would add a second route to the same answer.
+    monkeypatch.delenv("GITLEAKS_CONFIG", raising=False)
+    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     monkeypatch.setenv(variable, value)
     scanner = _scanner(tmp_path)
     (scanner.context.source_dir / ".gitleaks.toml").write_text("")
