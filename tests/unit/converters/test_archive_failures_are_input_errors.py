@@ -420,9 +420,10 @@ def test_a_member_pair_the_admission_check_misses_is_the_archives_own_input_erro
     from automated_security_helper.models.asharp_model import waives_gate
 
     monkeypatch.setattr(
-        archive_converter,
-        "_written_prefix_keys",
-        lambda member_name, kind, fold=True: [],
+        archive_converter._AdmittedPaths, "file_below", lambda self, key: None
+    )
+    monkeypatch.setattr(
+        archive_converter._AdmittedPaths, "is_directory", lambda self, key: False
     )
     source = Path(test_plugin_context.source_dir)
     source.mkdir(parents=True, exist_ok=True)

@@ -1718,21 +1718,90 @@ def _written_key(
     return os.path.normcase(path).casefold() if fold else path
 
 
-def _written_prefix_keys(
-    member_name: str, kind: Optional[Literal["zip", "tar"]], fold: bool = True
-) -> List[str]:
-    """The keys (_written_key, with the same ``fold``) of the directories a member
-    of this name is written below, the top first: ``a`` and ``a/b`` for
-    ``a/b/c.js``, none for ``c.js``. A member written to one of them as a file, or
-    a member whose own key is one of another member's, cannot be extracted beside
+def _key_separator(fold: bool = True) -> str:
+    """The separator the keys (_written_key) are joined with: ``/`` as the written
+    path has it, and with ``fold`` on what the host's os.path.normcase makes of it
+    (a backslash where the host folds names as Windows does)."""
+    return os.path.normcase("/") if fold else "/"
+
+
+class _AdmittedPaths:
+    """The paths the admitted members are written to, as a tree of path components,
+    so a member's directories are answered without a string for each of them.
+
+    A member written to a directory another member's path runs through as a file,
+    or whose own path runs through another member's file, cannot be extracted beside
     that member: the extractor fails on whichever comes later (NotADirectoryError,
-    IsADirectoryError), so inspect_members refuses that one alone instead.
+    IsADirectoryError), so inspect_members refuses that one alone instead. Both
+    questions used to be asked of the directory keys of every admitted member, a
+    string per directory each as long as the directory (_written_key of each
+    prefix), kept for the whole archive: a name of thousands of components cost
+    gigabytes of text, and N such members N times that. A component is stored once
+    per directory it opens, under the number of its parent directory, so the cost
+    of a member is the length of its name, whatever its depth.
+
+    Every key given is a _written_key made with the same ``fold`` the tree was
+    made with, and is split on the separator those keys carry (_key_separator): a
+    component holds neither separator, so two keys name one path only if they are
+    equal.
     """
-    parts = _member_written_path(member_name, kind).split("/")
-    return [
-        _written_key("/".join(parts[:count]), kind, fold)
-        for count in range(1, len(parts))
-    ]
+
+    def __init__(self, fold: bool = True) -> None:
+        self._separator = _key_separator(fold)
+        # (the number of the parent directory, a component) -> the number of the
+        # directory it names; the top is 0. Directories only: the member's own
+        # file is in _files, so a key is a directory only where some member's
+        # path runs through it.
+        self._directories: Dict[Tuple[int, str], int] = {}
+        # (the number of the parent directory, a component) -> the key of the
+        # file an admitted member is written to there.
+        self._files: Dict[Tuple[int, str], str] = {}
+
+    def file_below(self, key: str) -> Optional[str]:
+        """The key of the admitted file that ``key`` runs through, the topmost one,
+        or None: a proper prefix of ``key``, ending at a separator, that an
+        admitted member is written to as a file. ``key`` itself is not asked."""
+        parts = key.split(self._separator)
+        parts.pop()
+        parent = 0
+        for part in parts:
+            step = (parent, part)
+            file_key = self._files.get(step)
+            if file_key is not None:
+                return file_key
+            child = self._directories.get(step)
+            if child is None:
+                # Nothing is admitted below this directory, so no deeper prefix
+                # of ``key`` is a file.
+                return None
+            parent = child
+        return None
+
+    def is_directory(self, key: str) -> bool:
+        """Whether the path of some admitted member runs through ``key``, so a
+        member written to ``key`` as a file would stand where a directory does."""
+        parent = 0
+        for part in key.split(self._separator):
+            child = self._directories.get((parent, part))
+            if child is None:
+                return False
+            parent = child
+        return True
+
+    def add(self, key: str) -> None:
+        """Record the admitted member written to ``key``: its directories, and the
+        file."""
+        parts = key.split(self._separator)
+        name = parts.pop()
+        parent = 0
+        for part in parts:
+            step = (parent, part)
+            child = self._directories.get(step)
+            if child is None:
+                child = len(self._directories) + 1
+                self._directories[step] = child
+            parent = child
+        self._files[(parent, name)] = key
 
 
 #: The name of the file _filesystem_folds_case writes to read the output
@@ -1806,7 +1875,7 @@ def _a_member_runs_through(key: str, sorted_keys: List[str], fold: bool = True) 
     the host folds names as Windows does); with it off the keys are the written
     paths as they are, so ``/`` on every host.
     """
-    start = key + (os.path.normcase("/") if fold else "/")
+    start = key + _key_separator(fold)
     index = bisect.bisect_left(sorted_keys, start)
     return index < len(sorted_keys) and sorted_keys[index].startswith(start)
 
@@ -1817,7 +1886,7 @@ def _renamed_member_name(
     taken: Set[str],
     sorted_taken: List[str],
     written: Dict[str, str],
-    directories: Set[str],
+    directories: _AdmittedPaths,
     counters: Dict[str, int],
     fold: bool = True,
 ) -> str:
@@ -1829,7 +1898,7 @@ def _renamed_member_name(
     archive is named by (``taken``, every member's _written_key, read before any
     is renamed), whose file is not a directory any member's path runs through
     (``sorted_taken``, ``taken`` sorted, read by _a_member_runs_through; and
-    ``directories``, the admitted members' own), and whose file
+    ``directories``, the admitted members' own, _AdmittedPaths), and whose file
     and directory no earlier member is written to (``written``). A placement only
     ``written`` was checked against could be a later member's own, which then
     lost its name to the rename; a placement checked against no directory set
@@ -1867,7 +1936,7 @@ def _renamed_member_name(
             renamed_key not in taken
             and renamed_key not in written
             and not _a_member_runs_through(renamed_key, sorted_taken, fold)
-            and renamed_key not in directories
+            and not directories.is_directory(renamed_key)
             and directory_key not in taken
             and directory_key not in written
         ):
@@ -2469,12 +2538,14 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # beside the earlier one, its file name kept, and both are scanned,
         # rather than one written over the other.
         written: Dict[str, str] = {}
-        # The directories the admitted members are written below (every prefix
-        # of their written paths, _written_prefix_keys), so a later member bound
-        # for one of them as a file, or one whose path runs through an admitted
-        # member's file, is refused alone instead of failing the whole archive
-        # at extraction (NotADirectoryError, IsADirectoryError).
-        directories: Set[str] = set()
+        # The directories the admitted members are written below and the files
+        # they are written to (_AdmittedPaths, by path component), so a later
+        # member bound for one of the directories as a file, or one whose path
+        # runs through an admitted member's file, is refused alone instead of
+        # failing the whole archive at extraction (NotADirectoryError,
+        # IsADirectoryError). No string is built for a directory, so a name of
+        # thousands of components costs its own length, admitted or not.
+        directories = _AdmittedPaths(fold)
         # Every member's key before any is renamed, so a renamed member never
         # takes the name of a member that comes later in the archive. The same
         # keys, sorted at the first rename, say whether a member's path runs
@@ -2575,15 +2646,14 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 problem = _MEMBER_NESTED_ARCHIVE
             if problem is None:
                 destination = _written_key(member_name, kind, fold=fold)
-                prefixes = _written_prefix_keys(member_name, kind, fold=fold)
-                through = next((key for key in prefixes if key in written), None)
+                through = directories.file_below(destination)
                 if through is not None:
                     # x.js before x.js/y.js: the later member cannot be written
                     # under a file, and is refused alone; the file is named in
                     # the log line, not in the reason (the listing cap's key).
                     problem = _MEMBER_UNDER_A_FILE
                     detail = f"runs through '{written[through]}'"
-                elif destination in directories:
+                elif directories.is_directory(destination):
                     # a/b.js before a: the later member cannot be written as a
                     # file where the earlier members' directory stands.
                     problem = _MEMBER_OVER_A_DIRECTORY
@@ -2646,14 +2716,12 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         else:
                             member.filename = renamed
                         member_name = renamed
-                        destination = _written_key(renamed, kind, fold=fold)
                         # The placement adds a directory the name as read did
-                        # not have, so the renamed member's own prefixes are
-                        # recorded.
-                        prefixes = _written_prefix_keys(renamed, kind, fold=fold)
+                        # not have; it is recorded with the renamed member.
+                        destination = _written_key(renamed, kind, fold=fold)
                 if problem is None:
                     written[destination] = member_name
-                    directories.update(prefixes)
+                    directories.add(destination)
             if problem is not None:
                 if problem == _MEMBER_PATH_TOO_LONG:
                     too_long += 1

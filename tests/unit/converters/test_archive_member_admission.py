@@ -534,15 +534,16 @@ def test_a_member_left_out_costs_no_directory_strings(test_plugin_context, monke
     thousands of components built a string per prefix, each as long as the prefix
     (a 64 KiB ``a/a/.../a`` is about a gigabyte of characters), even for a member
     no scanner reads and that is left out unlooked at. A member left out reaches
-    no prefix key now: the run's only calls are for members past that point."""
+    no directory key now: the run's only key for it is the one read before any
+    member is renamed, so the count of keys made is the count of members."""
     calls = {"n": 0}
-    real = archive_converter._written_prefix_keys
+    real = archive_converter._written_key
 
     def counting(member_name, kind, fold=True):
         calls["n"] += 1
         return real(member_name, kind, fold)
 
-    monkeypatch.setattr(archive_converter, "_written_prefix_keys", counting)
+    monkeypatch.setattr(archive_converter, "_written_key", counting)
     converter = ArchiveConverter(
         context=test_plugin_context, config=ArchiveConverterConfig()
     )
@@ -552,7 +553,7 @@ def test_a_member_left_out_costs_no_directory_strings(test_plugin_context, monke
 
     assert admitted == []
     assert converter.refused_inputs == []
-    assert calls["n"] == 0
+    assert calls["n"] == len(members)
 
 
 def _windows_like_normcase(path: str) -> str:
@@ -669,6 +670,101 @@ def test_a_renamed_member_never_takes_a_name_a_later_members_directory_stands_on
 
     assert [m.filename for m in admitted] == ["m.js", "m~3/m.js", "m~2/m.js/x.py"]
     assert converter.refused_inputs == []
+
+
+def test_an_admitted_member_costs_no_directory_strings(
+    test_plugin_context, monkeypatch
+):
+    """The cost of a member that is extracted is the length of its name, whatever
+    its depth. Every directory of every admitted member used to be built as a key
+    (a string as long as the directory, one per component) and kept for the whole
+    archive: a 64 KiB ``a/a/.../a.js`` is about a gigabyte of characters on a host
+    with no path limit, and each such member added its own. The count of keys made
+    is the measure: two per member (the one read before any is renamed and the
+    member's destination), where a member of 200 components made 201 more."""
+    calls = {"n": 0}
+    real_key = archive_converter._written_key
+
+    def counting_key(member_name, kind, fold=True):
+        calls["n"] += 1
+        return real_key(member_name, kind, fold)
+
+    monkeypatch.setattr(archive_converter, "_written_key", counting_key)
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [zipfile.ZipInfo(f"d{i}/" + "a/" * 200 + "x.js") for i in range(20)]
+
+    admitted = converter.inspect_members(members, target_path=None)
+
+    assert len(admitted) == len(members)
+    assert converter.refused_inputs == []
+    assert calls["n"] <= 2 * len(members), calls["n"]
+
+
+def test_deep_admitted_members_are_still_checked_against_each_other(
+    test_plugin_context,
+):
+    """The checks the directory keys served hold for names of many components: a
+    member below an admitted file and a file where an admitted member's directory
+    stands are each refused alone, and the others are extracted."""
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    deep = "a/" * 200
+    members = [
+        zipfile.ZipInfo(deep + "x.js"),
+        zipfile.ZipInfo(deep + "x.js/y.js"),
+        zipfile.ZipInfo(deep + "lib.js/z.py"),
+        zipfile.ZipInfo(deep + "lib.js"),
+    ]
+
+    admitted = converter.inspect_members(members, target_path=None, archive="a.zip")
+
+    assert [m.filename for m in admitted] == [deep + "x.js", deep + "lib.js/z.py"]
+    assert sorted(r.reason for r in converter.refused_inputs) == sorted(
+        [
+            archive_converter._MEMBER_UNDER_A_FILE,
+            archive_converter._MEMBER_OVER_A_DIRECTORY,
+        ]
+    )
+
+
+@pytest.mark.parametrize("fold", [True, False], ids=["fold-on", "fold-off"])
+@pytest.mark.parametrize("host", ["posix", "windows-like"])
+def test_the_admitted_paths_answer_by_component_on_either_separator(
+    fold, host, monkeypatch
+):
+    """``file_below`` names the admitted file a path runs through (not the path
+    itself), ``is_directory`` says whether an admitted member's path runs through a
+    key, and a key that only starts with the same characters is neither. The keys
+    are made by ``_written_key`` with the switch the tree is made with, so on a
+    host that writes ``/`` as a backslash when it folds names they carry the
+    backslash with the fold on and ``/`` with it off."""
+    if host == "windows-like":
+        _stand_in_windows_normcase(monkeypatch)
+
+    def key(name: str) -> str:
+        return archive_converter._written_key(name, "zip", fold)
+
+    admitted = archive_converter._AdmittedPaths(fold)
+    admitted.add(key("lib/sub/a.js"))
+    admitted.add(key("lib/b.js"))
+
+    assert admitted.file_below(key("lib/sub/a.js/x.py")) == key("lib/sub/a.js")
+    assert admitted.file_below(key("lib/b.js/c/d.py")) == key("lib/b.js")
+    assert admitted.file_below(key("lib/sub/a.js")) is None
+    assert admitted.file_below(key("lib/sub/other.js")) is None
+    assert admitted.file_below(key("other/a.js/x.py")) is None
+    assert admitted.file_below(key("li/b.js/x.py")) is None
+
+    assert admitted.is_directory(key("lib")) is True
+    assert admitted.is_directory(key("lib/sub")) is True
+    assert admitted.is_directory(key("lib/sub/a.js")) is False
+    assert admitted.is_directory(key("lib/b.js")) is False
+    assert admitted.is_directory(key("li")) is False
+    assert admitted.is_directory(key("lib/su")) is False
+    assert admitted.is_directory(key("sub")) is False
 
 
 def _tmp_folds_case(directory: Path) -> bool:
@@ -815,13 +911,15 @@ def test_the_written_key_keeps_case_with_the_fold_off_on_a_host_that_lower_cases
     monkeypatch.setattr(os.path, "normcase", str.lower)
 
     assert archive_converter._written_key("Foo.js", "zip", fold=False) == "Foo.js"
-    assert archive_converter._written_prefix_keys(
-        "Lib/Sub/Foo.js", "zip", fold=False
-    ) == ["Lib", "Lib/Sub"]
     assert archive_converter._written_key("Foo.js", "zip", fold=True) == "foo.js"
-    assert archive_converter._written_prefix_keys(
-        "Lib/Sub/Foo.js", "zip", fold=True
-    ) == ["lib", "lib/sub"]
+    for fold, directory, other_case in (
+        (False, "Lib/Sub", "lib/sub"),
+        (True, "lib/sub", "Lib/Sub"),
+    ):
+        admitted = archive_converter._AdmittedPaths(fold)
+        admitted.add(archive_converter._written_key("Lib/Sub/Foo.js", "zip", fold))
+        assert admitted.is_directory(directory) is True
+        assert admitted.is_directory(other_case) is False
 
 
 def test_a_zip_with_a_file_and_a_directory_differing_in_case_extracts_both_where_case_counts(
