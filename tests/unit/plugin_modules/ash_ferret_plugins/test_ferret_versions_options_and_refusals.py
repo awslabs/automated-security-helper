@@ -361,6 +361,24 @@ def test_a_link_whose_ignored_directory_got_no_pattern_is_refused_like_any_other
 
 
 @POSIX_ONLY
+def test_control_the_same_tree_without_the_link_starts_the_scan(mock_plugin_context):
+    """The refusal above is the link's: with ``leaving.js`` absent, the directory
+    whose ignore pattern cannot be written (its path holds a comma) is merely read
+    by ferret-scan, and ASH drops its findings after the scan."""
+    root = _tree(mock_plugin_context.source_dir, ["src/a.js", "ven,dor/x.js"])
+    started: list[list[str]] = []
+
+    _scan(
+        _scanner(mock_plugin_context),
+        _run_double({"returncode": 0}, EMPTY_SARIF, started),
+        root,
+        [IgnorePathWithReason(path="ven,dor/", reason="third party")],
+    )
+
+    assert len(started) == 1
+
+
+@POSIX_ONLY
 def test_an_ignored_link_whose_own_pattern_was_left_out_gets_one_as_a_link(
     mock_plugin_context, tmp_path
 ):
