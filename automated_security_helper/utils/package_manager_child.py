@@ -589,11 +589,18 @@ def _member_glob_stays_inside(glob: str) -> bool:
     when it is relative on both path flavors (no leading slash or backslash,
     no drive: a root-relative ``\\packages\\*`` names the current drive's root,
     not the workspace, and ``PureWindowsPath.is_absolute`` alone admits it),
-    holds no ``..`` component and is not empty. A leading ``!`` marks a pattern
-    pnpm excludes and is read past.
+    holds no ``..`` component and is not empty. Leading ``!`` characters mark a
+    pattern pnpm excludes (a second one undoes the first) and are all read past.
+    A pattern with a brace is refused: pnpm's matcher expands ``{a,b}`` into
+    separate patterns, so ``{..,x}/*`` reaches ``../*`` and ``{/srv/shared,x}/*``
+    an absolute path while no component of the pattern as written is ``..`` or
+    absolute. A brace-free component that merely contains two dots
+    (``packages/..cache/*``, ``v1..2/*``) is not a parent step and stays inside.
     """
-    body = glob.removeprefix("!")
+    body = glob.lstrip("!")
     if not body:
+        return False
+    if "{" in body or "}" in body:
         return False
     windows = PureWindowsPath(body)
     if PurePosixPath(body).is_absolute() or windows.is_absolute():

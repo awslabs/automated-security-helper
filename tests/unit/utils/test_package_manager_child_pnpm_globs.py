@@ -26,7 +26,18 @@ AUDIT_CONFIG = {"ignoreCves": ["CVE-2026-0001"], "ignoreGhsas": ["GHSA-aaaa-bbbb
 
 @pytest.mark.parametrize(
     "glob",
-    ["packages/*", "apps/**", "!**/fixtures/**", "libs\\core", "a/b/c", "."],
+    [
+        "packages/*",
+        "apps/**",
+        "!**/fixtures/**",
+        "libs\\core",
+        "a/b/c",
+        ".",
+        # Two dots inside a component are not a parent step: a filter that
+        # looked for ".." anywhere in the pattern would drop these members.
+        "packages/..cache/*",
+        "v1..2/*",
+    ],
 )
 def test_a_relative_glob_without_a_parent_step_stays_inside(glob):
     assert _member_glob_stays_inside(glob) is True
@@ -49,12 +60,21 @@ def test_a_relative_glob_without_a_parent_step_stays_inside(glob):
         "apps/../../escape",
         "apps\\..\\..\\escape",
         "!../x",
+        # A brace group expands into separate patterns, so each of these
+        # reaches a path outside the package though no component as written
+        # is a parent step or absolute.
+        "{..,x}/*",
+        "{/srv/shared,x}/*",
+        # A doubled negation is a positive pattern, so the second "!" is not
+        # part of the first component.
+        "!!../x",
     ],
 )
 def test_an_absolute_root_relative_or_climbing_glob_leaves_the_package(glob):
     """A root-relative pattern (a leading slash or backslash with no drive)
     names the current drive's root, which ``PureWindowsPath.is_absolute``
-    alone does not refuse; the drive and the parent step are refused too."""
+    alone does not refuse; the drive, the parent step, a brace group and a
+    doubled negation are refused too."""
     assert _member_glob_stays_inside(glob) is False
 
 
