@@ -39,6 +39,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Kind,
     Level,
     Message,
+    Message1,
     PropertyBag,
     Result,
 )
@@ -339,9 +340,13 @@ class TestFindingUidIsStableAcrossRuns:
 class TestTheIdentityOfAResultWithNoSharedId:
     @staticmethod
     def _markdown_result(markdown: str) -> Result:
-        result = Result(ruleId="R1", level=Level.error)
-        result.message = Message.model_validate({"markdown": markdown})
-        return result
+        # The schema requires ``text`` on a message that carries markdown, so a
+        # message "given in markdown" is an empty ``text`` beside the markdown.
+        return Result(
+            ruleId="R1",
+            level=Level.error,
+            message=Message(root=Message1(text="", markdown=markdown)),
+        )
 
     def test_messages_given_in_markdown_are_told_apart_at_one_site(self):
         """Read as ``text`` alone, every markdown-only message was the same

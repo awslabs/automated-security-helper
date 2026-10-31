@@ -132,8 +132,11 @@ class TestNonFindingKinds:
 
 class TestMessageAndSecretText:
     def test_a_message_given_by_id_names_the_id(self, reporter):
-        result = Result(ruleId="R1", level=Level.warning)
-        result.message = Message.model_validate({"id": "default"})
+        result = Result(
+            ruleId="R1",
+            level=Level.warning,
+            message=Message.model_validate({"id": "default"}),
+        )
 
         (vuln,) = _report(reporter, _model(result))["vulnerabilities"]
 
@@ -144,8 +147,11 @@ class TestMessageAndSecretText:
     def _vulnerability_with_rule(reporter, rule: ReportingDescriptor) -> dict:
         """The one vulnerability of a run whose driver declares *rule* and whose
         only result names the message string ``default`` by id."""
-        result = Result(ruleId="R1", level=Level.warning)
-        result.message = Message.model_validate({"id": "default"})
+        result = Result(
+            ruleId="R1",
+            level=Level.warning,
+            message=Message.model_validate({"id": "default"}),
+        )
         model = AshAggregatedResults()
         model.sarif = SarifReport(
             version="2.1.0",
