@@ -1308,6 +1308,10 @@ def _scan_one_project(
     # masking rewrites the reports a scan saved before it raised, and leaves a
     # previous run's files alone for a project that never reached a scan.
     handed = False
+    # The scan's results once it returned, so an arm below that catches a raise
+    # from the reduction can still hand the values they exposed to the masking
+    # set; None until then.
+    results: Any = None
     try:
         resolved_config = _project_config_with_policy(project, settings)
 
@@ -1421,6 +1425,7 @@ def _scan_one_project(
             duration_seconds=time.monotonic() - started,
         )
         cancelled.output_written = handed
+        cancelled.secret_values = exposed_secret_values(results)
         return cancelled
     except ASHConfigValidationError as exc:
         # The label the single-directory CLI prints ("Scan refused" for committed
@@ -1450,6 +1455,7 @@ def _scan_one_project(
             duration_seconds=time.monotonic() - started,
         )
         refused.output_written = handed
+        refused.secret_values = exposed_secret_values(results)
         return refused
     except Exception as exc:  # noqa: BLE001 -- one project must not sink the workspace
         ASH_LOGGER.error(f"Project '{project.key}' failed: {error_text(exc)}")
@@ -1474,6 +1480,10 @@ def _scan_one_project(
         # clear where it quoted them; the masking pass rewrites them like any
         # finished project's. Before this every FAILED project was skipped.
         failed.output_written = handed
+        # The values the scan's findings exposed, when the raise came after the
+        # scan returned (the reduction): the masking pass over every project's
+        # output reads them from the outcome, and the outcome was built here.
+        failed.secret_values = exposed_secret_values(results)
         return failed
 
 
