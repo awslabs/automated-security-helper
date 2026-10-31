@@ -7,18 +7,19 @@ Why these tests exist
 ---------------------
 ``ConvertPhase`` records an ``excluded`` row for a converter the config turned
 off, and the completeness gate (``incomplete_converters``) skips an excluded row
-before it looks at anything else. Two places still treated such a row as a
-failure:
+before it looks at anything else. Two places keep such a row from reading as a
+failure, and these tests pin them:
 
-* on a Python-only run the row builder asked a turned-off converter
-  ``is_python_only()``, which the dependency loop never does, and a question
-  that raised gave the row a ``failure`` beside ``excluded=True``;
+* on a Python-only run the row builder does not ask a turned-off converter
+  ``is_python_only()``, which the dependency loop never does, so a question
+  that raises gives the row no ``failure`` beside ``excluded=True``;
 * the phase's "No converter ran, and at least one did not start" warning and its
-  end-of-phase list read the row's ``failure`` before its ``excluded`` flag, so a
-  run whose every converter was turned off still said a converter "did not
+  end-of-phase list read the row's ``excluded`` flag before its ``failure``, so a
+  run whose every converter was turned off does not say a converter "did not
   start" when one of them had a section its model refused.
 
-Each test states the assertion that fails at the base.
+They pin landed behavior: each test names the assertion that would fail if its
+place went back to reading the row the other way.
 """
 
 from __future__ import annotations
@@ -99,8 +100,9 @@ class TestATurnedOffConverterIsNotAskedWhetherItIsPythonOnly:
 
         row = results.converter_results["turned-off-converter"]
         assert row.excluded is True
-        # Red at the base: "its is_python_only() check raised RuntimeError: ...",
-        # a failure the question the dependency loop never asks had produced.
+        # Fails if the row builder asks the question: the row then carries
+        # "its is_python_only() check raised RuntimeError: ...", a failure the
+        # dependency loop's question would never have produced.
         assert row.failure is None
         assert incomplete_converters(results) == []
 
@@ -130,8 +132,9 @@ class TestAllTurnedOffWithOneUnconstructableSaysNothingDidNotStart:
         assert row.excluded is True
         assert row.failure and "ValueError" in row.failure
         messages = [record.getMessage() for record in caplog.records]
-        # Red at the base: "No converter ran, and at least one did not start,
-        # so conversion is skipped: _UnconstructableConverter (ValueError: ...)".
+        # Fails if the warning reads failure before excluded: it then says "No
+        # converter ran, and at least one did not start, so conversion is
+        # skipped: _UnconstructableConverter (ValueError: ...)".
         assert not any("did not start" in message for message in messages), messages
         assert any("No enabled converter plugins found" in m for m in messages), (
             messages

@@ -7,13 +7,15 @@ Why these tests exist
 ---------------------
 Two registered scanner classes with one configured name cannot both run: the row,
 the results directory, the shard and the ``--scanners`` matching all key on the
-name. ``ScanPhase`` records the later one ERROR and leaves it out. That check ran
-before any selection test, so a duplicate the operator had excluded, left out of
-``--scanners``, or disabled in the configuration was recorded ERROR with
-``excluded=False``, and the completeness gate failed a run that ran everything it
-selected. Every other scanner is judged by selection before it is diagnosed.
+name. ``ScanPhase`` records the later one ERROR and leaves it out. It makes that
+check after the selection tests, so a duplicate the operator excluded, left out
+of ``--scanners``, or disabled in the configuration is not recorded ERROR with
+``excluded=False``, and the completeness gate does not fail a run that ran
+everything it selected. Every other scanner is judged by selection before it is
+diagnosed.
 
-Each test states the assertion that fails at the base.
+They pin landed behavior: each test names the assertion that would fail if the
+duplicate check ran before selection.
 """
 
 from __future__ import annotations
@@ -88,7 +90,8 @@ def test_an_excluded_name_shared_by_two_scanners_is_not_an_error(tmp_path):
 
     rows, queued = _run(tmp_path, plugins, excluded_scanners=["dupe"])
 
-    # Red at the base: the second scanner was recorded ERROR, excluded False.
+    # Fails if the duplicate check runs first: the second scanner is recorded
+    # ERROR, excluded False.
     assert _errors(rows) == [], rows
     assert queued == []
     skipped = [r for r in rows.values() if r.status == ScannerStatus.SKIPPED]

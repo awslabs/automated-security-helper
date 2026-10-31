@@ -7,17 +7,18 @@ Why these tests exist
 ---------------------
 ``cancellation.stop_grace_in_progress`` makes a first Ctrl-C latch the
 registered scans' cancel instead of raising ``KeyboardInterrupt``, so the
-shutdown that is waiting out a tool's grace can finish its SIGKILL. Its own tests entered
-the context manager by hand. Nothing in production entered it: the subprocess
-layer's ``_wait_out_grace`` never used it, the branch in the SIGINT handler that
-reads the count was dead, and a first Ctrl-C during a grace still aborted the
-wait before the SIGKILL.
+shutdown that is waiting out a tool's grace can finish its SIGKILL. The context
+manager's own tests enter it by hand, which leaves open whether the subprocess
+layer's ``_wait_out_grace`` enters it at all. If it did not, the branch in the
+SIGINT handler that reads the count would be dead, and a first Ctrl-C during a
+grace would abort the wait before the SIGKILL.
 
 These tests drive the real ``_wait_out_grace`` with a stand-in child whose
 ``poll`` delivers the Ctrl-C, so the count the handler reads is the one the wait
 sets. No signal is raised and no process is started.
 
-Each test states the assertion that fails at the base.
+They pin behavior the wait has: each test names the assertion that would fail
+if ``_wait_out_grace`` stopped entering the context.
 """
 
 from __future__ import annotations
@@ -78,7 +79,7 @@ class TestTheGraceWaitCountsItself:
 
         subprocess_utils._wait_out_grace(child, None, 5.0)
 
-        # Red at the base: every read was 0, the wait never entered the context.
+        # Fails if the wait stops entering the context: every read is then 0.
         assert child.counts and set(child.counts) == {1}
         assert cancellation._GRACE_WAITS == 0
 
@@ -121,8 +122,9 @@ class TestAFirstCtrlCInsideTheGraceWaitDoesNotEndIt:
         except KeyboardInterrupt:
             interrupted = True
 
-        # Red at the base: the handler chained the default handler from inside
-        # the wait, and KeyboardInterrupt ended it before the SIGKILL.
+        # Fails if the wait stops entering the context: the handler then chains
+        # the default handler from inside the wait, and KeyboardInterrupt ends
+        # it before the SIGKILL.
         assert interrupted is False
         assert child.returncode == 0
         assert scan._signalled is True
