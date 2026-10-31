@@ -454,8 +454,9 @@ changing the session's tree. Chunks are still accepted, because they land beside
 `session_workspace_busy` while an HTTP server removes the workspace of a session for being
 unused longer than `--session-workspace-ttl`, a stateless one or a stateful one the MCP SDK
 dropped without telling the server. The upload and the bound profile are removed with the
-workspace, so the client selects the profile again and sends the upload again from chunk 0. A session whose
-SSE event stream is still open is kept whatever its age; see [Clean up](#clean-up).
+workspace, so the client selects the profile again and sends the upload again from chunk 0.
+A session whose SSE event stream is still open is kept whatever its age; see
+[Clean up](#clean-up).
 ASH sets no quota on uploads per session or in total. The server's config limits how many scans run and
 for how long; see [Limit how many scans run and for how long](#limit-how-many-scans-run-and-for-how-long).
 
