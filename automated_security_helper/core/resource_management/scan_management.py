@@ -101,6 +101,31 @@ def _remove_output_tree(output_dir: Path) -> bool:
     return not output_dir.exists()
 
 
+def _removed_meanwhile_response(scan_id: str, why: str) -> Dict[str, Any]:
+    """The not-found answer of a cleanup whose scan another cleanup removed.
+
+    The same response a cleanup of an unknown id gets (``scan_not_found``), so
+    a caller that branches on the category, ``cleanup_old_scans`` among them,
+    reads a scan that is gone as gone. ``why`` is the first suggestion.
+    """
+    from automated_security_helper.core.resource_management.error_handling import (
+        ErrorCategory,
+        create_error_response,
+    )
+
+    return create_error_response(
+        error=MCPResourceError(
+            f"Scan {scan_id} not found",
+            context={
+                "scan_id": scan_id,
+                "error_category": ErrorCategory.SCAN_NOT_FOUND.value,
+            },
+        ),
+        operation="cleanup_scan_resources",
+        suggestions=[why, "Nothing is left to clean up for this scan id"],
+    )
+
+
 def _scoped(session_id: Optional[str]) -> Dict[str, str]:
     """The registry keyword that scopes a lookup to ``session_id``, if one is given.
 
@@ -449,19 +474,9 @@ async def cleanup_scan_resources(
         # is reported as not found: whoever removed it did this work.
         entry = registry.get_scan(scan_id, **_scoped(session_id))
         if entry is None:
-            return create_error_response(
-                error=MCPResourceError(
-                    f"Scan {scan_id} not found",
-                    context={
-                        "scan_id": scan_id,
-                        "error_category": ErrorCategory.SCAN_NOT_FOUND.value,
-                    },
-                ),
-                operation="cleanup_scan_resources",
-                suggestions=[
-                    "The scan was removed from the registry while it was stopping",
-                    "Nothing is left to clean up for this scan id",
-                ],
+            return _removed_meanwhile_response(
+                scan_id,
+                "The scan was removed from the registry while it was stopping",
             )
 
         # The runner's finish is not the last writer's. A cancel that could not
@@ -634,6 +649,18 @@ async def cleanup_scan_resources(
 
         # Remove scan from registry
         removed_from_registry = registry.cleanup_scan(scan_id, **_scoped(session_id))
+        # The registry declines for a scan it cannot find as well as for one it
+        # keeps. The awaits above (the runner, the delete) are where a second
+        # cleanup of the same scan runs; when it removed the entry first, this
+        # call is the not-found answer, which cleanup_old_scans counts as
+        # already removed, and not a failed cleanup with no category.
+        if (
+            not removed_from_registry
+            and registry.get_scan(scan_id, **_scoped(session_id)) is None
+        ):
+            return _removed_meanwhile_response(
+                scan_id, "The scan was removed from the registry by another cleanup"
+            )
 
         result = {
             "success": removed_from_registry,

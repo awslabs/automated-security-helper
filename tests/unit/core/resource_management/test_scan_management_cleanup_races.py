@@ -621,6 +621,44 @@ class TestTheProgressReadPassesTheTransportsWord:
         )
 
 
+class TestAScanAnotherCleanupRemovedIsAlreadyRemoved:
+    """The cleanup awaits worker threads between its first read of the entry
+    and its unregister. A second cleanup of the same scan that ran in that gap
+    removed the entry, and the unregister then answered False: the first call
+    reported "Failed to clean up scan resources" with no category, and
+    cleanup_old_scans counted the scan as a failed cleanup."""
+
+    def test_an_unregister_that_finds_the_scan_gone_answers_not_found(
+        self, registry, tmp_path
+    ):
+        entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
+        # The first two reads are the cleanup's own; by the third the other
+        # cleanup has removed the entry.
+        registry.get_scan.side_effect = [entry, entry, None]
+        registry.cleanup_scan.return_value = False
+
+        with _use(registry):
+            result = asyncio.run(cleanup_scan_resources("scan-1"))
+
+        assert result["success"] is False
+        assert result["error_category"] == ErrorCategory.SCAN_NOT_FOUND.value
+
+    def test_an_unregister_that_the_registry_refuses_is_still_a_failure(
+        self, registry, tmp_path
+    ):
+        """The control: the entry is still there, so the refusal stands."""
+        entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
+        registry.get_scan.return_value = entry
+        registry.cleanup_scan.return_value = False
+
+        with _use(registry):
+            result = asyncio.run(cleanup_scan_resources("scan-1"))
+
+        assert result["success"] is False
+        assert result["message"] == "Failed to clean up scan resources"
+        assert "error_category" not in result
+
+
 class TestTheEntryIsReadAgainAfterTheWait:
     """The cancel and the runner wait both give up control. A cleanup of the same
     scan that ran meanwhile removed the entry; this call then went on with the
