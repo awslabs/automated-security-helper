@@ -309,7 +309,11 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
     through a link while the walk returned the real path, or the reverse), the
     lexical compare raised, this answered None, and every result of the
     lockfile lost its package identity while the range exclusion was silently
-    off; both sides resolved place it.
+    off; both sides resolved place it. The fallback resolves the lockfile's
+    directory and keeps its own name: resolving the file itself followed a
+    lockfile that is a link to its target, so ``app/package-lock.json`` linked
+    to ``shared/package-lock.json`` was reported as the target, and two projects
+    sharing one linked lockfile collapsed into one identity.
     """
     if lock_file is None:
         return None
@@ -323,7 +327,10 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
     except ValueError:
         pass
     try:
-        return Path(lock_file).resolve().relative_to(root.resolve()).as_posix()
+        lock = Path(lock_file)
+        return (
+            (lock.parent.resolve() / lock.name).relative_to(root.resolve()).as_posix()
+        )
     except (ValueError, OSError):
         return None
 

@@ -1115,6 +1115,27 @@ def test_a_root_named_through_a_link_still_places_its_lockfile(tmp_path):
     )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+def test_a_linked_lockfile_is_shown_where_it_sits_when_the_root_is_an_alias(tmp_path):
+    """The lockfile is reported where it sits, a link included. With the root
+    named through a link the lexical compare fails and the resolved one runs;
+    it resolved the lockfile FILE too, so ``app/package-lock.json`` linked to
+    ``shared/package-lock.json`` was reported as the target, and two projects
+    sharing one linked lockfile were one identity. Only the directory resolves."""
+    real = tmp_path / "repo"
+    (real / "app").mkdir(parents=True)
+    (real / "shared").mkdir()
+    shared = real / "shared" / "package-lock.json"
+    shared.write_text(json.dumps({"lockfileVersion": 3, "packages": {}}))
+    os.symlink(shared, real / "app" / "package-lock.json")
+    alias = tmp_path / "alias"
+    os.symlink(real, alias)
+
+    shown = npm_audit_scanner._shown_lockfile(real / "app" / "package-lock.json", alias)
+
+    assert shown == "app/package-lock.json"
+
+
 class _LogMessages(logging.Handler):
     """What a file handler writes: the message, not Rich's rendering of it."""
 
