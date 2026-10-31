@@ -591,6 +591,37 @@ def test_an_env_read_value_holding_a_quote_is_hidden_in_both_spellings(
     assert "the-value-read-from-the-environment" not in record
 
 
+def test_a_bytes_argument_is_decoded_so_a_hidden_value_in_it_is_hidden(
+    tmp_path, debug_record
+):
+    """Shown by its ``str``, bytes print as their escaped form, and a value with a
+    non-ASCII character in it is no longer the text the redaction looks for."""
+    value = f"s{chr(0xE9)}cret-env-read-value"
+    sandbox_scope = _scope(tmp_path, environment_values=(value,))
+
+    with scope.sandbox_scope(sandbox_scope):
+        scope._plan_spawn(
+            sandbox_scope, ["tool", b"--token=" + value.encode(), b"a b"], {}, None
+        )
+
+    record = _record(debug_record)
+    # Red at the base: b'--token=s\xc3\xa9cret-env-read-value' in the record.
+    assert "cret-env-read-value" not in record
+    assert "\\xc3" not in record
+    assert "b'" not in record
+    assert record.startswith("Scanner sandbox (fake, network=no) for scanner: tool ")
+    assert "--token=" in record
+    assert record.endswith(" 'a b'")
+
+
+def test_a_path_like_and_bytes_argument_are_text_in_the_record_line():
+    argv = [b"two words", Path("a dir") / "f", 7, "plain"]
+
+    assert scope._argv_text(argv) == shlex.join(
+        ["two words", str(Path("a dir") / "f"), "7", "plain"]
+    )
+
+
 def test_quoted_spellings_cover_only_texts_quoting_rewrites(tmp_path):
     plain = "no-quote-here"
     quoted = "has'quote"

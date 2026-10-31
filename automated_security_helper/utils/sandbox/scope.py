@@ -1287,13 +1287,19 @@ def _record_plan(scope: SandboxScope, policy: Any, plan: SpawnPlan) -> None:
 def _argv_text(argv: Sequence[Any]) -> str:
     """``argv`` as one shell-quoted line, for the record of a planned spawn.
 
-    Each argument by its ``str``: subprocess accepts a path object as an
-    argument, and a plain join raised TypeError for one here, after the plan
-    had made its temporary directories and the writable-root registrations
-    above, which nothing then released. Quoted (``shlex.join``) so an argument
-    holding a blank stays one argument in the record.
+    Each argument as the text the process will see: subprocess accepts a path
+    object or a bytes argument, and a plain join raised TypeError for a path here,
+    after the plan had made its temporary directories and the writable-root
+    registrations above, which nothing then released. A bytes argument is decoded
+    like a path (``os.fsdecode``), not shown by its ``str``: that prints the
+    escaped bytes (``b'--token=s\\xc3\\xa9cret'``), which a redaction of the value
+    by its text never matches and anyone can decode. Quoted (``shlex.join``) so
+    an argument holding a blank stays one argument in the record.
     """
-    return shlex.join(str(arg) for arg in argv)
+    return shlex.join(
+        os.fsdecode(arg) if isinstance(arg, (bytes, os.PathLike)) else str(arg)
+        for arg in argv
+    )
 
 
 def _quoted_spellings(scope: SandboxScope) -> List[str]:
