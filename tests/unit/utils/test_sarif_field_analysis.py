@@ -121,7 +121,8 @@ class TestInAggregatePercentage:
     aggregated, and 1 excluded field printed -11.1%.
     """
 
-    # Nine fields that survive should_include_field, plus ruleIndex, which is
+    # Ten field paths that survive should_include_field (nine fields, of which
+    # ``message`` is both itself and ``message.text``), plus ruleIndex, which is
     # intentionally excluded from the comparison.
     SCANNER_RESULT = {
         "ruleId": "B1",
@@ -175,20 +176,20 @@ class TestInAggregatePercentage:
         self, tmp_path, monkeypatch, capsys
     ):
         cells = self._percentage(tmp_path, monkeypatch, capsys, {"foo": "bar"})
-        assert cells[1:] == ["9", "9", "9", "1", "0.0%"]
+        assert cells[1:] == ["10", "10", "10", "1", "0.0%"]
 
     def test_everything_aggregated_is_one_hundred(self, tmp_path, monkeypatch, capsys):
         aggregate = {k: v for k, v in self.SCANNER_RESULT.items() if k != "ruleIndex"}
         cells = self._percentage(tmp_path, monkeypatch, capsys, aggregate)
         # Unique Fields counts the scanners that emit a field; the aggregate
         # carries every field this scanner emits, so it is not one of them.
-        assert cells[1:] == ["9", "9", "0", "1", "100.0%"]
+        assert cells[1:] == ["10", "10", "0", "1", "100.0%"]
 
     def test_partial_aggregation_counts_only_included_fields(
         self, tmp_path, monkeypatch, capsys
     ):
         cells = self._percentage(tmp_path, monkeypatch, capsys, {"ruleId": "B1"})
-        assert cells[1:] == ["9", "9", "8", "1", "11.1%"]
+        assert cells[1:] == ["10", "10", "9", "1", "10.0%"]
 
 
 @pytest.mark.unit
