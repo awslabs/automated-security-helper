@@ -692,17 +692,23 @@ def _streamed_line(
 
 
 #: A line of a multi-line value that is the value's shape and carries none of it: a
-#: PEM armor or separator line, a line of punctuation alone, or a short JSON
-#: ``"key": scalar`` pair. Hidden on its own, one of these would be hidden
-#: wherever the report quotes the same words (the private-key header a finding
-#: describes, a JSON ``"type": "service_account"`` in an example).
+#: PEM armor or separator line, a line of punctuation alone, a JSON pair under a
+#: structure key (``type``, ``version``, ``kind``, ``schema``, ``format``) with a
+#: short scalar, or a JSON pair whose value is a bare ``true``, ``false`` or
+#: ``null``. Hidden on its own, one of these would be hidden wherever the report
+#: quotes the same words (the private-key header a finding describes, a JSON
+#: ``"type": "service_account"`` in an example). A pair under any other key keeps
+#: its scalar, however short, because that is where an access key id or a short
+#: password sits, so it stays a value of its own.
 _STRUCTURE_LINE = re.compile(
     r"""^(?:
         -{3,}[^\n]*  # PEM armor, a rule line
       | [\W_]+  # punctuation alone
-      | "[^"\n]{1,30}"\s*:\s*(?:"[^"\n]{0,24}"|true|false|null|-?\d{1,6})\s*,?
+      | "(?:type|kind|version|schema|schema_version|api_version|apiversion|format)"
+        \s*:\s*(?:"[^"\n]{0,24}"|true|false|null|-?\d{1,6})\s*,?
+      | "[^"\n]{1,30}"\s*:\s*(?:true|false|null)\s*,?
     )$""",
-    re.VERBOSE,
+    re.VERBOSE | re.IGNORECASE,
 )
 
 

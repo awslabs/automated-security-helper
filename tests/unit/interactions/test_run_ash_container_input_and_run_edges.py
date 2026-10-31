@@ -225,6 +225,30 @@ def test_a_json_values_generic_key_lines_are_not_hidden_on_their_own():
     assert '"client_email": "svc@project.iam.gserviceaccount.com"' in lines
 
 
+def test_a_short_credential_pair_of_a_json_value_is_still_hidden_on_its_own():
+    """Only a pair under a structure key, or a bare true/false/null, is left out.
+    A pair under any other key keeps its scalar however short it is: an access
+    key id or a short password is a line a report can quote by itself."""
+    value = (
+        "{\n"
+        '  "version": 2,\n'
+        '  "enabled": true,\n'
+        '  "aws_access_key_id": "NOT-A-REAL-KEY-ID-0001",\n'
+        '  "password": "not-a-real-password",\n'
+        '  "pin": 123456\n'
+        "}"
+    )
+
+    lines = rac._value_lines((value,))
+
+    assert '"version": 2,' not in lines
+    assert '"enabled": true,' not in lines
+    assert '"aws_access_key_id": "NOT-A-REAL-KEY-ID-0001",' in lines
+    assert '"password": "not-a-real-password",' in lines
+    assert '"pin": 123456' in lines
+    assert value in lines
+
+
 class _TextPipe:
     """A child's pipe as Popen opens it in text mode: universal newlines."""
 
