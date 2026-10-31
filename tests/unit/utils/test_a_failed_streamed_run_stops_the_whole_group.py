@@ -62,7 +62,10 @@ class _ReadFailsPopen:
         self.calls.append("kill")
         self.returncode = -9
 
-    def ended_by_the_group_signal(self):
+    def ended_by_the_group_signal(self, signum):
+        # Into the same record as the waits, so the order of the two is what a
+        # case can assert, not only that both happened.
+        self.calls.append(("group_signal", signum))
         self.returncode = -9
 
     def wait(self, timeout=None):
@@ -88,7 +91,7 @@ def streamed_run(monkeypatch):
     def signal_group(pgid, signum):
         sent.append((pgid, signum))
         for child in _ReadFailsPopen.instances:
-            child.ended_by_the_group_signal()
+            child.ended_by_the_group_signal(signum)
         return True
 
     monkeypatch.setattr(spu, "_signal_group", signal_group)
@@ -113,6 +116,38 @@ def test_the_cleanup_of_a_failed_run_stops_the_group_the_child_leads(
     assert streamed_run == [(_PID, signal.SIGKILL)], streamed_run
     assert "kill" not in child.calls, "the child was killed alone, its group left"
     assert child.returncode == -9, "the child was not reaped after the group kill"
+    # The group signal ends the stand-in by itself (it sets the code), so the
+    # code proves nothing about the reap. The bounded wait is what reaps, and it
+    # must come after the signal: a cleanup that signalled the group and left the
+    # child unwaited would pass the checks above and leave a zombie.
+    group_signalled = child.calls.index(("group_signal", signal.SIGKILL))
+    reaped = child.calls.index(("wait", spu._REAP_SECONDS))
+    assert group_signalled < reaped, child.calls
+    assert "close" in child.calls
+
+
+def test_a_group_signal_the_kernel_refuses_is_logged_and_the_run_is_unrecorded(
+    monkeypatch, streamed_run, caplog
+):
+    """EPERM on the group kill (a member the server may not signal): the error
+    is not raised out of the run, the code says ASH could not record it, the
+    refusal is on the log, and the pipe is still closed."""
+    monkeypatch.setattr(spu, "_leads_its_own_group", lambda process: True)
+
+    def refused(pgid, signum):
+        streamed_run.append((pgid, signum))
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(spu, "_signal_group", refused)
+    with caplog.at_level("ERROR"):
+        code = spu.run_command_stream_output(["ash-u26-no-such-tool"])
+
+    (child,) = _ReadFailsPopen.instances
+    assert code == spu.UNRECORDED_RUN_RETURNCODE
+    assert streamed_run == [(_PID, signal.SIGKILL)], streamed_run
+    messages = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert any("Operation not permitted" in m for m in messages), messages
+    assert any("was not reaped" in m for m in messages), messages
     assert "close" in child.calls
 
 
