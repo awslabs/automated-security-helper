@@ -49,6 +49,23 @@ def test_a_build_time_inside_the_skew_allowance_is_still_cacheable():
     built = _NOW + CLOCK_SKEW_ALLOWANCE - timedelta(minutes=1)
     assert save_allowed(entry, built, _NOW)
     assert use_allowed(entry, built, _NOW)
+    # The scan reads the same build time the same way: inside the allowance it is
+    # not stale, so the CI check and the scan agree on this side as on the other.
+    assert not is_stale(entry, built, _NOW)
+
+
+def test_the_skew_allowance_is_inclusive_and_one_second_past_it_is_refused():
+    """Exactly the allowance ahead is still measured (the comparison is strict);
+    a second more is not, for the scan and for both CI checks alike."""
+    entry = _cacheable()
+    at_the_edge = _NOW + CLOCK_SKEW_ALLOWANCE
+    assert not is_stale(entry, at_the_edge, _NOW)
+    assert save_allowed(entry, at_the_edge, _NOW)
+    assert use_allowed(entry, at_the_edge, _NOW)
+    past = at_the_edge + timedelta(seconds=1)
+    assert is_stale(entry, past, _NOW)
+    assert not save_allowed(entry, past, _NOW)
+    assert not use_allowed(entry, past, _NOW)
 
 
 @pytest.mark.parametrize(
