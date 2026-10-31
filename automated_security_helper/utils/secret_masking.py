@@ -1314,7 +1314,7 @@ def _shape_pattern(shape: SecretValueShape) -> str:
     The hidden characters may be any non-whitespace character, or any character
     but a line break for a value that held whitespace. Every token of the shape
     that could be a propagating value is masked, including ones that are not the
-    value (``_mask_match`` keeps the ordinary words): over-masking is the accepted
+    value (``_mask_token`` keeps the ordinary words): over-masking is the accepted
     cost of masking a value no result set holds any more.
     """
     hidden = shape.length - len(shape.prefix) - len(shape.suffix)
@@ -2754,7 +2754,7 @@ def mask_secret_shapes_in_text(text: str, shapes: Iterable[Any]) -> str:
     ``SecretValueShape`` objects or their serialized dicts, read as
     ``_SecretIndex.add_shapes`` reads them: a shape ASH did not write is
     ignored. A token of a shape is masked only when it could be a value the
-    shape stands for; an ordinary word of the shape is kept (``_mask_match``).
+    shape stands for; an ordinary word of the shape is kept (``_mask_token``).
 
     A shape is matched in the plain spelling of a value only: an encoding that
     changes a value's length (a JSON escape) leaves no token of the shape to
