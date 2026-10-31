@@ -689,7 +689,7 @@ def test_an_explicit_empty_oci_runner_is_refused_and_ash_oci_runner_is_not_used(
     # argument; it does not ask for discovery. OCI_RUNNER applies only when the
     # caller named no runner at all, so it is not used here either. An -OCIRunner
     # left to default from an empty OCI_RUNNER discovers a runner
-    # (test_every_invoke_ash_refusal_exits_with_its_code's accepted cell).
+    # (test_every_invoke_ash_refusal_exits_with_its_code's accepted case).
     result, calls = _run_script(
         tmp_path,
         _wrapped("Invoke-ASH -NoBuild -SourceDir src -OutputDir out -OCIRunner ''"),
@@ -976,7 +976,7 @@ def test_the_wrapped_form_does_not_exit_0_for_an_error_raised_before_invoke_ash_
 # outside the file system, a parameter given an empty or blank value, an explicit
 # --sandbox that is not off); every other refusal exits 3, the code ASH uses for input
 # it refuses. Run as a script runs it, `pwsh -File`
-# with the catch form the help gives, so the process exits with that code. Each cell:
+# with the catch form the help gives, so the process exits with that code. Each case:
 # the call, what the test directory needs first, the environment, the code, and text
 # found only in the message.
 _INVOKE = "Invoke-ASH -NoBuild -NoRun -SourceDir src -OutputDir out"
@@ -1036,7 +1036,7 @@ _INVOKE_ASH_SITES = {
         REFUSAL_EXIT,
         "Theimagename'myimage:tag'",
     ),
-    # The inputs ./ash's image-name cells use; a control character is shown as \xHH.
+    # The inputs ./ash's image-name cases use; a control character is shown as \xHH.
     "image-name-leading-space": (
         f"{_INVOKE} -AshImageName ' ash:ci'",
         {},
@@ -1355,7 +1355,7 @@ def test_every_invoke_ash_refusal_exits_with_its_code(tmp_path, site):
 #: A-Z, a-z, 0-9 and . _ : / @ -, not starting with '-', and refuses anything else
 #: with 3: whitespace of any kind (U+00A0, U+0085 and U+2028, which bash's
 #: [[:space:]] and .NET's \s can disagree on), a non-ASCII letter, and the Kelvin
-#: sign, which a case-insensitive [A-Za-z] would take as K. Each cell: the name and
+#: sign, which a case-insensitive [A-Za-z] would take as K. Each case: the name and
 #: the code every run gives (0: the name was taken).
 _IMAGE_NAMES = {
     "no-break-space": (f"ash{chr(0x00A0)}name:ci", REFUSAL_EXIT),
@@ -1491,7 +1491,7 @@ def test_the_wrappers_agree_on_a_base_image_override(tmp_path, name):
 
 #: Characters a refusal must not print as they are: each would move the cursor or
 #: change colors (ESC), reverse the text after it (U+202E), hide in it (U+200B), or
-#: break the line (U+2028). Each cell: the character and how Invoke-ASH writes it.
+#: break the line (U+2028). Each case: the character and how Invoke-ASH writes it.
 _HIDDEN_CHARACTERS = {
     "escape": (chr(0x1B), "\\x1B"),
     "right-to-left-override": (chr(0x202E), "\\u202E"),
@@ -1735,7 +1735,7 @@ def test_the_wrappers_show_a_refused_value_alike(tmp_path, where, character):
 #: --workspace and an explicit --sandbox other than off, together, in either order,
 #: given as separate arguments or as one quoted argument. The sandbox is the usage
 #: error ASH itself gives, so both wrappers refuse it with 5 whatever its place; the
-#: workspace pass runs after it. Each cell: ./ash's arguments and Invoke-ASH's.
+#: workspace pass runs after it. Each case: ./ash's arguments and Invoke-ASH's.
 _WORKSPACE_AND_SANDBOX = {
     "separate-workspace-first": (
         ["--workspace", "w.code-workspace", "--sandbox", "bwrap"],
@@ -1761,9 +1761,9 @@ _WORKSPACE_AND_SANDBOX = {
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
 )
-@pytest.mark.parametrize("cell", sorted(_WORKSPACE_AND_SANDBOX))
-def test_the_wrappers_refuse_a_sandbox_next_to_a_workspace_alike(tmp_path, cell):
-    ash_args, invocation = _WORKSPACE_AND_SANDBOX[cell]
+@pytest.mark.parametrize("case", sorted(_WORKSPACE_AND_SANDBOX))
+def test_the_wrappers_refuse_a_sandbox_next_to_a_workspace_alike(tmp_path, case):
+    ash_args, invocation = _WORKSPACE_AND_SANDBOX[case]
     (tmp_path / "src").mkdir()
     runner = _native_runner(tmp_path)
     proc = subprocess.run(  # nosec B603 - fixed interpreter and script, list args
@@ -1916,7 +1916,7 @@ def test_the_wrappers_show_ash_config_in_their_warning_alike(tmp_path, character
 #: A build target or a --sandbox mode with a control or format character after it.
 #: PowerShell's -eq, -in and -notin compare with the culture, which ignores those
 #: characters, so 'ci' + ESC was taken as ci and 'off' + U+200B as off, where ./ash
-#: refuses both. Each cell: ./ash's arguments, the variable Invoke-ASH reads the value
+#: refuses both. Each case: ./ash's arguments, the variable Invoke-ASH reads the value
 #: from, the value, and the code both give (0: taken).
 _TARGET_AND_MODE_LOOKALIKES = {
     **{
@@ -1949,9 +1949,9 @@ _TARGET_AND_MODE_LOOKALIKES = {
     not sys.platform.startswith("linux"),
     reason="./ash's runs in this module are measured on Linux",
 )
-@pytest.mark.parametrize("cell", sorted(_TARGET_AND_MODE_LOOKALIKES))
-def test_the_wrappers_agree_on_a_lookalike_target_or_mode(tmp_path, cell):
-    option, value, code = _TARGET_AND_MODE_LOOKALIKES[cell]
+@pytest.mark.parametrize("case", sorted(_TARGET_AND_MODE_LOOKALIKES))
+def test_the_wrappers_agree_on_a_lookalike_target_or_mode(tmp_path, case):
+    option, value, code = _TARGET_AND_MODE_LOOKALIKES[case]
     (tmp_path / "src").mkdir()
     runner = _native_runner(tmp_path)
     proc = subprocess.run(  # nosec B603 - fixed interpreter and script, list args
@@ -2193,7 +2193,7 @@ def _unshown_values(tmp_path: Path, source: Path) -> tuple[int, list[str]]:
 def test_every_value_a_message_interpolates_is_shown(tmp_path):
     """A value in a throw or a Write-* call goes through Format-AshShownValue.
 
-    The cells above reach the sites an input can reach. This reads the source with
+    The cases above reach the sites an input can reach. This reads the source with
     PowerShell's parser, so it holds a site no input reaches (the -AshArgs parse
     error) to the same rule, whatever form the message takes: a throw on one line
     with its if, a concatenation, a -f format, Write-Error, Write-Verbose or
