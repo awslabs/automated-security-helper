@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import multiprocessing
+import os
 import re
 import time
 from pathlib import Path
@@ -227,7 +228,10 @@ def test_the_scan_bounds_the_filter_by_its_scan_timeout(tmp_path, monkeypatch):
 
 
 def _sources_the_scan_gives_the_filter(
-    tmp_path: Path, monkeypatch, values: tuple[str, ...]
+    tmp_path: Path,
+    monkeypatch,
+    values: tuple[str, ...],
+    written: str | None = None,
 ) -> tuple[list[str], str]:
     """Every ``source`` text a scan hands the baseline's file filter, and the
     baseline's path.
@@ -236,6 +240,8 @@ def _sources_the_scan_gives_the_filter(
     through ``baseline_file``, and its ``should_exclude_file`` filter is the one
     the scan applies. ``values`` stands for what the config read from the
     environment (``_environment_values``): the scan redacts its lines with them.
+    ``written`` is the spelling given for ``baseline_file`` when it is not the
+    file's own absolute path.
     """
     from detect_secrets.core.potential_secret import PotentialSecret
 
@@ -270,7 +276,9 @@ def _sources_the_scan_gives_the_filter(
     scanner = DetectSecretsScanner(
         context=context,
         config=DetectSecretsScannerConfig(
-            options=DetectSecretsScannerConfigOptions(baseline_file=str(baseline))
+            options=DetectSecretsScannerConfigOptions(
+                baseline_file=str(baseline) if written is None else written
+            )
         ),
     )
     assert scanner._baseline_in_use()
@@ -332,6 +340,56 @@ def test_the_filters_source_hides_a_baseline_path_written_with_backslashes(
     for source in sources:
         assert "should_exclude_file" in source
         assert "operator-baseline-from-environment" not in source
+
+
+def _spellings_that_resolve_to_the_baseline(tmp_path: Path) -> dict[str, str]:
+    """Ways to write ``baseline_file`` for the baseline the helper above makes
+    that the scan resolves to another text: one climbs out of the scanned tree
+    from where a relative value is taken, one carries a ``.`` segment."""
+    name = "operator-baseline-from-environment.json"
+    return {
+        "parent-segment": f"../{name}",
+        "dot-segment": f"{tmp_path}{os.sep}.{os.sep}{name}",
+    }
+
+
+@pytest.mark.parametrize("spelling", ["parent-segment", "dot-segment"])
+def test_the_filters_source_hides_a_baseline_written_as_another_spelling(
+    tmp_path, monkeypatch, spelling
+):
+    """The text the filter's error quotes prints the path the scan reads, which
+    is not the text the operator wrote when the value holds ``..`` or a ``.``
+    segment. Hiding the written value alone left the resolved path, and the
+    file's name with it, in clear."""
+    written = _spellings_that_resolve_to_the_baseline(tmp_path)[spelling]
+
+    sources, path = _sources_the_scan_gives_the_filter(
+        tmp_path, monkeypatch, (written,), written=written
+    )
+
+    assert path not in written
+    assert sources
+    for source in sources:
+        assert "should_exclude_file" in source
+        assert path not in source
+        assert "operator-baseline-from-environment" not in source
+
+
+def test_the_filters_source_names_a_baseline_written_from_no_environment_value(
+    tmp_path, monkeypatch
+):
+    """Control: a value that is not the baseline's does not hide the baseline's
+    path, however the baseline was written."""
+    written = _spellings_that_resolve_to_the_baseline(tmp_path)["parent-segment"]
+
+    sources, path = _sources_the_scan_gives_the_filter(
+        tmp_path, monkeypatch, ("an-unrelated-environment-value",), written=written
+    )
+
+    assert sources
+    for source in sources:
+        assert "should_exclude_file" in source
+        assert path in source
 
 
 def test_the_filters_source_names_a_baseline_that_is_not_an_environment_value(

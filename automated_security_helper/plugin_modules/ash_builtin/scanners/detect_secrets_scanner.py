@@ -600,6 +600,31 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             Path(getattr(self.context, "source_dir", None) or "."),
         )
 
+    def _baseline_path_needles(self, named: Tuple[str, ...]) -> Tuple[str, ...]:
+        """The spellings of the baseline's path a line prints, when the
+        ``baseline_file`` option was written from one of the ``named`` values.
+
+        A line that names the baseline prints the path the scan reads
+        (``_baseline_file_path``: ``~`` expanded, a relative value taken from
+        the scanned tree, links and ``..`` resolved). The value the operator
+        wrote is a needle too, but it is not always a part of that text: a
+        value written as ``../x``, ``~/x`` or through a link prints another
+        spelling, and the redaction found nothing to hide. When the written
+        option holds a ``named`` value, the printed spellings (forward slashes
+        as ``as_posix`` gives them, and the platform's own) are needles as
+        well. Nothing is added when no baseline is in use or the option was
+        not written from a named value, so a baseline that is not an
+        environment value still prints its path.
+        """
+        configured = self._configured_baseline_file()
+        if not named or configured is None or not self._baseline_in_use():
+            return ()
+        written = environment_strings(configured)
+        if not any(value in text for value in named for text in written):
+            return ()
+        printed = Path(self._baseline_file_path())
+        return (printed.as_posix(), str(printed))
+
     def _baseline_refusal(self, named: Path, real: Path) -> Optional[str]:
         """Why ASH may not read the baseline named ``named``, resolving to ``real``.
 
@@ -2889,13 +2914,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # and this text is quoted in the error the filter raises:
                 # redacted like every other line here that names the baseline.
                 # The path prints with forward slashes (as_posix), so a Windows
-                # value written with backslashes is hidden in that spelling too.
+                # value written with backslashes is hidden in that spelling too,
+                # and it prints as the scan resolves it, so a value written as
+                # ``../x`` or through a link is hidden in the resolved spelling.
                 named = environment_strings(values)
                 forward = tuple(v.replace("\\", "/") for v in named if "\\" in v)
-                own_source = text_without_values(own_source, (*named, *forward))
-                baseline_source = text_without_values(
-                    baseline_source, (*named, *forward)
-                )
+                needles = (*named, *forward, *self._baseline_path_needles(named))
+                own_source = text_without_values(own_source, needles)
+                baseline_source = text_without_values(baseline_source, needles)
                 # A run with no patterns keeps every file and is not made, so
                 # the filter is handed only the runs that have something to
                 # match and each text it is given names where those came from.
