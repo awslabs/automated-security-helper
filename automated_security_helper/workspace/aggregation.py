@@ -1397,11 +1397,12 @@ class WorkspaceAggregator:
         for result in rebased.get("results") or []:
             if not isinstance(result, Mapping):
                 continue
-            properties = result.get("properties")
-            scanner = None
-            if isinstance(properties, Mapping):
-                scanner = properties.get("scanner_name")
-            name = self._rollup_key(str(scanner) if scanner else UNATTRIBUTED_SCANNER)
+            # Named as the project's per-scanner split names it
+            # (result_scanner_name): a name that is not a string is the
+            # unattributed scanner there, and was a row of its own here, so one
+            # scanner's findings and its actionable count sat under two rows.
+            scanner = result_scanner_name(result)
+            name = self._rollup_key(scanner or UNATTRIBUTED_SCANNER)
             by_scanner.setdefault(name, []).append(result)
             self._scanner_status.setdefault(name, None)
             if result_is_suppressed(result):
