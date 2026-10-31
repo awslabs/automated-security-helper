@@ -17,7 +17,9 @@ The Nix launcher is replaced by a recorder, so no shell is ever started.
 
 from __future__ import annotations
 
+import subprocess
 import sys
+from types import SimpleNamespace
 from typing import Any, Dict
 from unittest.mock import MagicMock
 
@@ -30,6 +32,7 @@ from automated_security_helper.core.enums import (
     ExportFormat,
     RunMode,
 )
+from automated_security_helper.interactions import run_ash_nix
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 
@@ -75,9 +78,12 @@ def _run(tmp_path, **options):
         show_summary=False,
         **options,
     )
-    # No results file is written by the recorder, so the read-back exits 1.
-    with pytest.raises(SystemExit):
+    # No results file is written by the recorder, so the read-back exits 1. Any
+    # other code is a run that ended for another reason, after (or before) the
+    # command was recorded.
+    with pytest.raises(SystemExit) as exited:
         ras._run_nix_mode(opts, MagicMock())
+    assert exited.value.code == 1
     return opts
 
 
@@ -120,8 +126,8 @@ def test_a_json_input_flag_on_the_command_line_does_not_reach_the_inner_scan(
     assert "-" not in argv
 
 
-def test_every_forwarded_option_is_spelled_as_the_scan_cli_reads_it(tmp_path):
-    opts = ras.ScanOptions(
+def _every_option_set(tmp_path):
+    return ras.ScanOptions(
         source_dir=tmp_path / "src",
         output_dir=tmp_path / "out",
         mode=RunMode.nix,
@@ -156,6 +162,77 @@ def test_every_forwarded_option_is_spelled_as_the_scan_cli_reads_it(tmp_path):
         shard_index=1,
         shard_count=4,
     )
+
+
+def _as_the_command_reads_it(value):
+    """A parsed value as plain data: an enum member as its value, a tuple as a list."""
+    if isinstance(value, (list, tuple)):
+        return [_as_the_command_reads_it(item) for item in value]
+    return getattr(value, "value", value)
+
+
+def test_the_scan_cli_reads_every_forwarded_option_as_the_builder_spells_it(
+    tmp_path, monkeypatch
+):
+    """The spelling test below compares the builder with strings typed into the
+    test. This one hands the same command line to the scan command itself, the one
+    the inner scan runs, so a renamed flag, a missing ``--no-*`` partner or a value
+    spelled another way is an error here and not a Nix run that fails inside the
+    shell. The flags given together (``--quiet --verbose --debug``) are accepted by
+    the parse; what the scan makes of them is its own."""
+    import typer
+
+    from automated_security_helper.cli.main import app
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    opts = _every_option_set(tmp_path)
+    argv = ras._nix_inner_argv(opts)
+
+    scan = typer.main.get_command(app).commands["scan"]
+    parsed = scan.make_context("scan", argv[1:], resilient_parsing=False).params
+
+    def read(name):
+        return _as_the_command_reads_it(parsed[name])
+
+    assert read("source_dir") == str(opts.source_dir)
+    assert read("output_dir") == str(opts.output_dir)
+    assert read("config") == opts.config
+    assert read("config_overrides") == ["a=1", "b=2"]
+    assert read("scanners") == ["bandit", "semgrep"]
+    assert read("exclude_scanners") == ["grype"]
+    assert read("ash_plugin_modules") == ["my.plugins"]
+    assert read("output_formats") == [ExportFormat.SARIF.value]
+    assert read("phases") == [ExecutionPhase.SCAN.value]
+    assert read("strategy") == ExecutionStrategy.SEQUENTIAL.value
+    assert read("log_level") == AshLogLevel.DEBUG.value
+    assert read("offline_semgrep_rulesets") == "p/custom"
+    assert str(read("min_severity")).lower() == "high"
+    assert read("base_ref") == "origin/trunk"
+    assert read("shard_index") == 1
+    assert read("shard_count") == 4
+    for flag, given in {
+        "offline": True,
+        "progress": False,
+        "color": False,
+        "show_summary": False,
+        "quiet": True,
+        "verbose": True,
+        "debug": True,
+        "simple": True,
+        "cleanup": True,
+        "inspect": True,
+        "python_based_plugins_only": True,
+        "ignore_suppressions": True,
+        "fail_on_findings": False,
+        "fail_on_incomplete_scanners": True,
+        "changed_files_only": True,
+        "use_existing": True,
+    }.items():
+        assert read(flag) is given, (flag, read(flag))
+
+
+def test_every_forwarded_option_is_spelled_as_the_scan_cli_reads_it(tmp_path):
+    opts = _every_option_set(tmp_path)
 
     argv = ras._nix_inner_argv(opts)
 
@@ -199,7 +276,9 @@ def test_every_forwarded_option_is_spelled_as_the_scan_cli_reads_it(tmp_path):
     assert "--mode" not in argv
 
 
-def test_the_defaults_forward_only_the_two_directories(tmp_path):
+def test_the_defaults_forward_only_the_directories_the_phases_and_the_strategy(
+    tmp_path,
+):
     opts = ras.ScanOptions(
         source_dir=tmp_path / "src", output_dir=tmp_path / "out", mode=RunMode.nix
     )
@@ -442,60 +521,234 @@ _REFUSED_FOR_THE_MODE = {
     "keep_previous_results": True,
     "trusted_config_path": "/elsewhere/ash.yaml",
 }
+#: Each field the inner scan is not given, and why that loses nothing.
 _NOT_FORWARDED_ON_PURPOSE = {
-    "mode",
-    "workspace_plan",
-    "workspace_config_as_named",
-    "client_overrides",
-    "selection_origin",
-    "build",
-    "run",
-    "force",
-    "oci_runner",
-    "build_target",
-    "container_uid",
-    "container_gid",
-    "container_network",
-    "ash_revision_to_install",
-    "custom_containerfile",
-    "custom_build_arg",
+    "mode": "rewrite_mode_args appends the local mode",
+    "workspace_plan": (
+        "its definition and policy are forwarded as --workspace and --workspace-config"
+    ),
+    "workspace_config_as_named": (
+        "container mode's hand-over spelling; the shell shares this filesystem and "
+        "gets the resolved path"
+    ),
+    "client_overrides": "who gave the options on this side; the inner scan has its own",
+    "selection_origin": "who gave the options on this side; the inner scan has its own",
+    "build": "container only; no shell reads it",
+    "run": "container only; no shell reads it",
+    "force": "container only; no shell reads it",
+    "oci_runner": "container only; no shell reads it",
+    "build_target": "container only; no shell reads it",
+    "container_uid": "container only; no shell reads it",
+    "container_gid": "container only; no shell reads it",
+    "container_network": "container only; no shell reads it",
+    "ash_revision_to_install": "container only; no shell reads it",
+    "custom_containerfile": "container only; no shell reads it",
+    "custom_build_arg": "container only; no shell reads it",
 }
 
 
 def test_every_scan_option_is_forwarded_refused_or_excluded_by_name():
     fields = set(ras.ScanOptions.model_fields)
     refused = set(_REFUSED_FOR_THE_MODE)
+    left_off = set(_NOT_FORWARDED_ON_PURPOSE)
 
-    unplaced = fields - _FORWARDED - refused - _NOT_FORWARDED_ON_PURPOSE
+    unplaced = fields - _FORWARDED - refused - left_off
     assert not unplaced, (
         f"ScanOptions gained {sorted(unplaced)}; decide whether the Nix inner "
         "scan is given it, refuses it or leaves it out, and list it"
     )
-    stale = (_FORWARDED | refused | _NOT_FORWARDED_ON_PURPOSE) - fields
+    stale = (_FORWARDED | refused | left_off) - fields
     assert not stale, (
         f"the lists name fields ScanOptions no longer has: {sorted(stale)}"
     )
     assert not (_FORWARDED & refused)
-    assert not (_FORWARDED & _NOT_FORWARDED_ON_PURPOSE)
-    assert not (refused & _NOT_FORWARDED_ON_PURPOSE)
+    assert not (_FORWARDED & left_off)
+    assert not (refused & left_off)
+    assert all(_NOT_FORWARDED_ON_PURPOSE.values()), "a field left off needs its reason"
 
 
-def test_the_builder_reads_every_forwarded_field(tmp_path):
-    """The forwarded set is the builder's own: a field listed as forwarded that
-    the builder never reads would pass the placement test above and still be
-    lost."""
-    import inspect
-    import re
+# Each forwarded field with a value that is not its default, and the other fields
+# that value needs to be read at all (a base ref only travels with
+# --changed-files-only). The field named in the key is the one that changes.
+_VARIED = {
+    "source_dir": ({}, "/other/src"),
+    "output_dir": ({}, "/other/out"),
+    "config": ({}, "/other/ash.yaml"),
+    "config_overrides": ({}, ["a=1"]),
+    "scanners": ({}, ["bandit"]),
+    "excluded_scanners": ({}, ["grype"]),
+    "ash_plugin_modules": ({}, ["my.plugins"]),
+    "output_formats": ({}, [ExportFormat.SARIF]),
+    "phases": ({}, [ExecutionPhase.SCAN]),
+    "strategy": ({}, ExecutionStrategy.SEQUENTIAL),
+    "offline": ({}, True),
+    "offline_semgrep_rulesets": ({}, "p/custom"),
+    "progress": ({}, False),
+    "color": ({}, False),
+    "show_summary": ({}, False),
+    "quiet": ({}, True),
+    "verbose": ({}, True),
+    "debug": ({}, True),
+    "simple": ({}, True),
+    "cleanup": ({}, True),
+    "inspect": ({}, True),
+    "python_based_plugins_only": ({}, True),
+    "ignore_suppressions": ({}, True),
+    "log_level": ({}, AshLogLevel.DEBUG),
+    "fail_on_findings": ({}, False),
+    "fail_on_incomplete_scanners": ({}, True),
+    "min_severity": ({}, "high"),
+    "changed_files_only": ({}, True),
+    "base_ref": ({"changed_files_only": True}, "origin/trunk"),
+    "existing_results": ({}, "/other/out/ash_aggregated_results.json"),
+    "shard_index": ({}, 1),
+    "shard_count": ({}, 4),
+}
 
-    source = inspect.getsource(ras._nix_inner_argv)
-    # Whole-word reads: `opts.config` is not read because `opts.config_overrides`
-    # is, nor `opts.offline` because `opts.offline_semgrep_rulesets` is.
-    unread = sorted(
-        name
-        for name in _FORWARDED
-        if not re.search(rf"\bopts\.{re.escape(name)}\b", source)
+
+def test_the_values_varied_below_are_the_forwarded_fields_but_one():
+    """allow_missing_projects travels only with a workspace plan, so it has a test
+    of its own."""
+    assert set(_VARIED) == _FORWARDED - {"allow_missing_projects"}
+
+
+@pytest.mark.parametrize("name", sorted(_VARIED))
+def test_setting_a_forwarded_field_changes_the_inner_command_line(
+    tmp_path, monkeypatch, name
+):
+    """A field listed as forwarded that the builder never reads would pass the
+    placement test above and still be lost. This runs the builder, so a read
+    in a helper counts and a mention in a comment does not."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    needs, given = _VARIED[name]
+    base = {
+        "source_dir": tmp_path / "src",
+        "output_dir": tmp_path / "out",
+        "mode": RunMode.nix,
+        **needs,
+    }
+
+    unchanged = ras._nix_inner_argv(ras.ScanOptions(**base))
+    changed = ras._nix_inner_argv(ras.ScanOptions(**{**base, name: given}))
+
+    assert changed != unchanged, f"{name} is forwarded and does not reach the argv"
+
+
+def test_allow_missing_projects_reaches_the_inner_scan_of_a_workspace(tmp_path):
+    plan = SimpleNamespace(
+        workspace_file="/ws/ash-workspace.yaml",
+        workspace_config_source="/ws/config.yaml",
     )
-    assert not unread, unread
+    opts = ras.ScanOptions(
+        source_dir=tmp_path / "src", output_dir=tmp_path / "out", mode=RunMode.nix
+    )
+    # model_copy(update=) sets the field as given, without the model's checks,
+    # which the stand-in plan would not pass.
+    workspace = opts.model_copy(update={"workspace_plan": plan})
+    tolerant = workspace.model_copy(update={"allow_missing_projects": True})
+
+    argv = ras._nix_inner_argv(tolerant)
+
+    assert _after_flag(argv, "--workspace") == ["/ws/ash-workspace.yaml"]
+    assert _after_flag(argv, "--workspace-config") == ["/ws/config.yaml"]
+    assert "--allow-missing-projects" in argv
+    assert "--source-dir" not in argv, "a workspace scan names no single directory"
+    assert "--allow-missing-projects" not in ras._nix_inner_argv(workspace)
+
+
+@pytest.fixture
+def entered_shell(monkeypatch):
+    """What run_ash_nix hands the process that starts the Nix shell; none starts."""
+    seen: Dict[str, Any] = {}
+
+    def record(cmd, env):
+        seen["cmd"] = list(cmd)
+        seen["env"] = env
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(run_ash_nix, "_enter_shell", record)
+    monkeypatch.setattr(
+        run_ash_nix, "find_executable", lambda _name: "/nonexistent/nix"
+    )
+    monkeypatch.delenv(run_ash_nix.ASH_IN_NIX_ENV_VAR, raising=False)
+    return seen
+
+
+def test_values_a_shell_would_split_reach_the_launcher_as_single_arguments(
+    entered_shell, tmp_path
+):
+    """The inner command line is built from values a library caller supplies. It
+    reaches the launcher as an argument list (the child is started without a
+    shell), so a space, a quote, a ``$`` or a ``;`` in a path or an override stays
+    inside its one argument."""
+    awkward_dir = tmp_path / "dir with $HOME; `id` 'q' \"d\" café"
+    awkward_override = "a=$(x); b='c d' > /dev/null"
+    opts = ras.ScanOptions(
+        source_dir=awkward_dir,
+        output_dir=tmp_path / "out",
+        mode=RunMode.nix,
+        config_overrides=[awkward_override],
+        scanners=["scanner with space"],
+    )
+
+    run_ash_nix.run_ash_nix(argv=ras._nix_inner_argv(opts))
+
+    cmd = entered_shell["cmd"]
+    for flag, value in (
+        ("--source-dir", str(awkward_dir)),
+        ("--config-overrides", awkward_override),
+        ("--scanners", "scanner with space"),
+    ):
+        assert cmd.count(value) == 1, (value, cmd)
+        assert cmd[cmd.index(value) - 1] == flag, (flag, cmd)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        pytest.param("sandbox.mode=auto", id="sandbox"),
+        pytest.param("honor_ignore_files=false", id="honor-ignore-files"),
+        pytest.param("reporters.markdown.options.compact=true", id="compact-report"),
+    ],
+)
+def test_options_the_cli_turns_into_overrides_reach_the_inner_scan_as_overrides(
+    entered_shell, tmp_path, override
+):
+    """``--sandbox``, ``--honor-ignore-files``, ``--compact-report`` and
+    ``--allow-stale-content-db`` are not fields of the options: the scan command
+    folds each into ``--config-overrides`` before the call, in every mode. They
+    reach the shell as that override."""
+    opts = ras.ScanOptions(
+        source_dir=tmp_path / "src",
+        output_dir=tmp_path / "out",
+        mode=RunMode.nix,
+        config_overrides=[override],
+    )
+
+    run_ash_nix.run_ash_nix(argv=ras._nix_inner_argv(opts))
+
+    cmd = entered_shell["cmd"]
+    assert _after_flag(cmd, "--config-overrides") == [override]
+
+
+def test_the_in_tree_tools_variable_stays_in_the_shells_environment(
+    entered_shell, monkeypatch, tmp_path
+):
+    """``--allow-in-tree-tools`` is carried by ASH_ALLOW_IN_TREE_TOOLS, set in this
+    process by the scan command so that the processes it starts see the same
+    answer. It is not one of the option variables removed for an argv-built scan."""
+    from automated_security_helper.utils.subprocess_utils import (
+        ALLOW_IN_TREE_TOOLS_ENV,
+    )
+
+    monkeypatch.setenv(ALLOW_IN_TREE_TOOLS_ENV, "1")
+    opts = ras.ScanOptions(
+        source_dir=tmp_path / "src", output_dir=tmp_path / "out", mode=RunMode.nix
+    )
+
+    run_ash_nix.run_ash_nix(argv=ras._nix_inner_argv(opts))
+
+    assert entered_shell["env"].get(ALLOW_IN_TREE_TOOLS_ENV) == "1"
 
 
 @pytest.mark.parametrize(
@@ -522,16 +775,37 @@ def test_an_option_the_shell_cannot_be_given_is_refused_for_nix_mode(tmp_path, o
         )
 
     (name,) = option
-    assert name in str(refused.value)
-    assert "nix" in str(refused.value)
+    # The refusal's own opening, not any ValueError that names the option: a
+    # validation error of the options model names it too, and so does a path of
+    # tmp_path, which pytest builds from the first words of the test's name.
+    assert str(refused.value).startswith(_refusal_opening(name, "nix")), refused.value
+
+
+def _refusal_opening(name: str, mode: str) -> str:
+    """How run_ash_scan words the refusal of *name* for a mode that re-executes ASH."""
+    if name == "config_base_gate":
+        return f"config_base_gate is applied only to a scan in local mode, not to mode={mode!r}"
+    return (
+        f"{name} is applied only to a single-directory scan in local mode, "
+        f"not to mode={mode!r}"
+    )
+
+
+# The refused fields container mode refuses as well: its runner has no parameter
+# and builds no flag for them. Taken from the table above, so the values cannot
+# drift from the ones the Nix cases use.
+_ALSO_REFUSED_FOR_CONTAINER = (
+    "severity_threshold_restriction",
+    "keep_previous_results",
+    "trusted_config_path",
+)
 
 
 @pytest.mark.parametrize(
     "option",
     [
-        pytest.param({"severity_threshold_restriction": "HIGH"}, id="restriction"),
-        pytest.param({"keep_previous_results": True}, id="keep-previous-results"),
-        pytest.param({"trusted_config_path": "/elsewhere/ash.yaml"}, id="trusted"),
+        pytest.param({name: _REFUSED_FOR_THE_MODE[name]}, id=name)
+        for name in _ALSO_REFUSED_FOR_CONTAINER
     ],
 )
 def test_an_option_the_container_cannot_be_given_is_refused_for_container_mode(
@@ -553,8 +827,9 @@ def test_an_option_the_container_cannot_be_given_is_refused_for_container_mode(
         )
 
     (name,) = option
-    assert name in str(refused.value)
-    assert "container" in str(refused.value)
+    assert str(refused.value).startswith(_refusal_opening(name, "container")), (
+        refused.value
+    )
 
 
 def test_the_missing_payload_message_names_what_ran():
