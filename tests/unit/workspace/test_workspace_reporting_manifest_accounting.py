@@ -101,6 +101,24 @@ class FakeUnconstructibleReporter(ReporterPluginBase[_UnconstructibleConfig]):
         raise AssertionError("never constructed")
 
 
+class _NoExtensionConfig(ReporterPluginConfigBase):
+    name: str = "fake-no-extension"
+    enabled: bool = True
+
+
+class FakeUnconstructibleNoExtensionReporter(ReporterPluginBase[_NoExtensionConfig]):
+    """Cannot be built, and its class declares no extension, so the name of the
+    file it would have written is not known from the class."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
+
+    def model_post_init(self, context):
+        raise RuntimeError("cannot be built")
+
+    def report(self, model) -> str:  # pragma: no cover - never constructed
+        raise AssertionError("never constructed")
+
+
 class _UnconstructibleOffConfig(ReporterPluginConfigBase):
     name: str = "fake-unconstructible-off"
     extension: str = "unconstructible-off.txt"
@@ -491,6 +509,27 @@ class TestAnUnbuildableReporterFailsOnlyWhatItOwed:
 
         assert not stale.exists()
         assert "fake-unconstructible" in outcome.failed_reporters
+        assert (reports / "ash.merged.txt").is_file()
+
+    def test_a_reporter_with_no_declared_extension_leaves_ash_txt_alone(
+        self, workspace
+    ):
+        """``ash.txt`` is the name a reporter with no extension writes to, but
+        for a class that cannot be built it is a guess: a constructor may set an
+        extension, and a regular file at that name may belong to anything. The
+        removal named it from the fallback and deleted the file."""
+        _, output_dir, _ = workspace
+        reports = output_dir / REPORTS_DIR_NAME
+        reports.mkdir(parents=True, exist_ok=True)
+        kept = reports / "ash.txt"
+        kept.write_text("not this reporter's", encoding="utf-8")
+
+        outcome = _emit(
+            workspace, FakeUnconstructibleNoExtensionReporter, FakeMergedReporter
+        )
+
+        assert kept.read_text(encoding="utf-8") == "not this reporter's"
+        assert "fake-no-extension" in outcome.failed_reporters
         assert (reports / "ash.merged.txt").is_file()
 
     def test_a_requested_reporter_that_cannot_be_built_still_fails(self, workspace):

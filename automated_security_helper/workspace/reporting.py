@@ -439,6 +439,8 @@ def _remove_previous_workspace_reports(
     *unbuilt_file_names* are the report files of the reporters that could not be
     built this run, named from their classes (:func:`_declared_file_name`): their
     earlier file stayed beside a manifest saying they could not be constructed.
+    A class that declares no extension has no name here, because ``ash.txt`` for
+    it is a guess, so its earlier file, if any, is left where it is.
 
     Nothing clears ``reports/`` before this step, so a file a previous run wrote
     for a reporter that this run skips, that raises, or that returns nothing
@@ -507,13 +509,17 @@ class _ConstructionFailure:
     states it where there is no instance to read it from, and so a ``PER_PROJECT``
     reporter, for which the step owes no workspace-level file, is not failed for
     one it could not build here. ``file_name`` is the file its report phase writes
-    in each project, from the extension its declared config model defaults to.
+    in each project, from the extension its declared config model defaults to;
+    ``file_name_declared`` says the class declared that extension. Without it
+    ``file_name`` is the ``ash.txt`` fallback, a guess, and the earlier run's file
+    of that name is left alone: it may not be this reporter's.
     """
 
     error: str
     skipped: Optional[str]
     behaviour: Optional[ReporterWorkspaceBehaviour] = None
     file_name: str = "ash.txt"
+    file_name_declared: bool = False
 
 
 def _construction_skip_reason(
@@ -568,18 +574,19 @@ def _construction_skip_reason(
     return None if enabled else SKIP_DISABLED
 
 
-def _declared_file_name(reporter_class: type) -> str:
-    """The file ``ReportPhase`` would write a reporter of this class to, from its class.
+def _declared_file_name(reporter_class: type) -> Optional[str]:
+    """The file ``ReportPhase`` would write a reporter of this class to, if its class says.
 
     ``ash.<extension>`` with the extension its declared config model defaults to,
-    and ``ash.txt`` where it declares none, as :func:`_report_filename` names the
-    file of a built reporter. An extension a constructor sets some other way is
-    not known without an instance.
+    as :func:`_report_filename` names the file of a built reporter. None where the
+    class declares no extension: the file is then ``ash.txt`` only if nothing sets
+    an extension some other way (a constructor does, and that is not known without
+    an instance), so the name is a guess and nothing is removed under it.
     """
     declared = declared_config_model(reporter_class, ReporterPluginConfigBase)
     extension_field = (getattr(declared, "model_fields", None) or {}).get("extension")
     extension = getattr(extension_field, "default", None)
-    return f"ash.{extension}" if isinstance(extension, str) and extension else "ash.txt"
+    return f"ash.{extension}" if isinstance(extension, str) and extension else None
 
 
 def _construction_failure(
@@ -601,6 +608,7 @@ def _construction_failure(
     skipped: Optional[str] = None
     behaviour: Optional[ReporterWorkspaceBehaviour] = None
     file_name = "ash.txt"
+    file_name_declared = False
     try:
         skipped = _construction_skip_reason(reporter_class, key, config, output_formats)
     except Exception as exc:  # noqa: BLE001 -- a broken class must not take the step down
@@ -616,7 +624,10 @@ def _construction_failure(
             f"{error_text(exc)}"
         )
     try:
-        file_name = _declared_file_name(reporter_class)
+        declared_name = _declared_file_name(reporter_class)
+        if declared_name is not None:
+            file_name = declared_name
+            file_name_declared = True
     except Exception as exc:  # noqa: BLE001 -- as above
         ASH_LOGGER.warning(
             f"Could not read the report file name reporter {key} declares: "
@@ -627,6 +638,7 @@ def _construction_failure(
         skipped=skipped,
         behaviour=behaviour,
         file_name=file_name,
+        file_name_declared=file_name_declared,
     )
 
 
@@ -1214,6 +1226,7 @@ def emit_workspace_reports(
             failure.file_name
             for failure in construction_failures.values()
             if failure.behaviour is not ReporterWorkspaceBehaviour.PER_PROJECT
+            and failure.file_name_declared
         ],
     )
 
