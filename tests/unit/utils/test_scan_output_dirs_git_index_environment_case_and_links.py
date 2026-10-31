@@ -43,6 +43,7 @@ from automated_security_helper.utils.scan_output_dirs import (
     classified_output_dirs,
     git_index_below,
 )
+from tests.utils.scan_output_support import needs_symlinks
 
 pytestmark = pytest.mark.unit
 
@@ -240,9 +241,7 @@ def test_control_on_linux_the_pathspec_is_literal_and_case_exact(tmp_path, monke
     assert answer.names == ["kept.md"]
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+@needs_symlinks
 def test_the_repository_is_found_from_where_the_directory_really_is(
     tmp_path, monkeypatch
 ):
@@ -264,9 +263,7 @@ def test_the_repository_is_found_from_where_the_directory_really_is(
     assert kwargs["cwd"] == repo
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+@needs_symlinks
 def test_a_directory_that_is_itself_a_link_is_asked_about_by_its_own_name(
     tmp_path, monkeypatch
 ):
@@ -289,9 +286,7 @@ def test_a_directory_that_is_itself_a_link_is_asked_about_by_its_own_name(
     assert args[-1] == ".ash/ash_output"
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+@needs_symlinks
 def test_a_link_whose_parent_sits_through_a_link_is_asked_where_the_parent_is(
     tmp_path, monkeypatch
 ):
@@ -313,9 +308,7 @@ def test_a_link_whose_parent_sits_through_a_link_is_asked_where_the_parent_is(
     assert args[-1] == "sub/out"
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+@needs_symlinks
 def test_control_a_directory_below_a_link_is_still_asked_about_where_it_really_is(
     tmp_path, monkeypatch
 ):
@@ -365,9 +358,7 @@ def test_control_a_repository_above_an_earlier_output_dir_names_it(
     assert scanned == []
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+@needs_symlinks
 def test_a_ceiling_spelled_through_a_link_still_stops_the_walk(tmp_path, monkeypatch):
     """The walk starts from where the directory really is, so a GIT_CEILING_DIRECTORIES
     entry is compared the same way: spelled through a link, it names the directory

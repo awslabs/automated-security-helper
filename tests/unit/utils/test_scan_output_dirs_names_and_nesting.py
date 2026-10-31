@@ -30,7 +30,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -46,6 +45,7 @@ from automated_security_helper.utils.scan_output_dirs import (
     output_dirs_to_exclude,
     results_path_names,
 )
+from tests.utils.scan_output_support import located
 
 pytestmark = pytest.mark.unit
 
@@ -125,25 +125,13 @@ def test_a_named_dir_nested_in_one_holding_a_committed_file_is_excluded_whole(
     assert earlier / "analysis" in excluded
 
 
-def _located(uri: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        locations=[
-            SimpleNamespace(
-                physicalLocation=SimpleNamespace(
-                    root=SimpleNamespace(artifactLocation=SimpleNamespace(uri=uri))
-                )
-            )
-        ]
-    )
-
-
 def test_an_encoded_name_longer_than_the_filesystem_allows_names_no_file(tmp_path):
     """The encoded spelling (900 characters) is what ``Path.exists`` raised on; it
     names no file, so the decoded name is resolved and yielded as the one path, as
     it is for any decoded name that is not on disk."""
     encoded = "%41" * 300 + ".py"
 
-    paths = list(_result_paths(_located(encoded), tmp_path))
+    paths = list(_result_paths(located(encoded), tmp_path))
 
     assert paths == [Path(os.path.realpath(tmp_path)) / ("A" * 300 + ".py")]
 
@@ -152,6 +140,6 @@ def test_control_an_encoded_name_that_decodes_to_a_file_is_resolved(tmp_path):
     (tmp_path / "out(1)").mkdir()
     (tmp_path / "out(1)" / "x.tf").write_text("", encoding="utf-8")
 
-    paths = list(_result_paths(_located("out%281%29/x.tf"), tmp_path))
+    paths = list(_result_paths(located("out%281%29/x.tf"), tmp_path))
 
     assert paths == [Path(os.path.realpath(tmp_path / "out(1)" / "x.tf"))]

@@ -48,12 +48,9 @@ from automated_security_helper.utils.scan_output_dirs import (
     warn_about_look_alike,
 )
 from automated_security_helper.utils.undecodable_text import path_in_record_form
+from tests.utils.scan_output_support import located, needs_symlinks
 
 pytestmark = pytest.mark.unit
-
-needs_symlinks = pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
 
 
 @pytest.fixture(autouse=True)
@@ -370,25 +367,11 @@ def test_control_a_plain_output_directory_in_a_repository_is_not_an_entry(
     assert committed_files_at_results_paths(out) == []
 
 
-def _located(uri: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        locations=[
-            SimpleNamespace(
-                physicalLocation=SimpleNamespace(
-                    root=SimpleNamespace(artifactLocation=SimpleNamespace(uri=uri))
-                )
-            )
-        ]
-    )
-
-
 def test_a_file_uri_without_an_authority_names_the_path_it_holds(tmp_path):
     source = Path(os.path.realpath(tmp_path))
     (source / "a.py").write_text("", encoding="utf-8")
 
-    paths = list(
-        _result_paths(_located("file:" + (source / "a.py").as_posix()), source)
-    )
+    paths = list(_result_paths(located("file:" + (source / "a.py").as_posix()), source))
 
     assert paths == [source / "a.py"]
 
@@ -406,7 +389,7 @@ def test_an_encoded_name_that_is_not_utf8_is_decoded_as_the_file_system_decodes_
     except (OSError, UnicodeEncodeError) as error:
         pytest.skip(f"the file system refuses the name: {error}")
 
-    paths = list(_result_paths(_located("a%FF.txt"), source))
+    paths = list(_result_paths(located("a%FF.txt"), source))
 
     assert paths == [path_in_record_form(source / name)]
 
@@ -463,7 +446,7 @@ def test_the_drop_keeps_a_committed_file_reported_in_another_case_on_macos(
     report = SimpleNamespace(
         runs=[
             SimpleNamespace(
-                results=[_located("out/reports/x.md"), _located("out/reports/y.md")]
+                results=[located("out/reports/x.md"), located("out/reports/y.md")]
             )
         ]
     )

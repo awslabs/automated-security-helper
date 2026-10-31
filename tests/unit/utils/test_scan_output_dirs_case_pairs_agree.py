@@ -34,6 +34,7 @@ from automated_security_helper.utils.scan_output_dirs import (
     entries_at_results_paths,
     output_dirs_inside,
 )
+from tests.utils.scan_output_support import needs_symlinks
 
 pytestmark = pytest.mark.unit
 
@@ -145,9 +146,7 @@ def test_two_spellings_of_one_named_directory_leave_one_named(
     assert scanned == []
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
-)
+@needs_symlinks
 def test_reached_through_a_link_walks_from_a_base_in_another_case(folding, tmp_path):
     tree = Path(os.path.realpath(tmp_path))
     (tree / "Repo" / ".ash").mkdir(parents=True)
