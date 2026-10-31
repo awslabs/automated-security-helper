@@ -92,24 +92,25 @@ def test_the_page_for_a_scanner_with_no_matched_result_shows_its_known_zero(tmp_
     assert "None" not in table
 
 
-def test_the_page_for_a_scanner_with_nothing_to_match_shows_zero_of_zero(tmp_path):
-    """A scanner whose report holds no result at all. Its statistics are the
-    initial ones: ``match_rate`` 0 with 0 of 0 matched, and no preservation rate.
-    The page prints what real output holds (0.00%), so a change to ``n/a`` for
-    this case is a decision made on purpose and not a drift."""
+def test_the_page_for_a_scanner_with_nothing_to_match_shows_n_a(tmp_path):
+    """A scanner whose report holds no result at all has no match rate: 0 of 0 is
+    not 0%, as a scanner none of whose results matched is. The statistics carry
+    ``None`` and the page says ``n/a`` beside the counts, which stay."""
     stats = validate_sarif_aggregation({"bandit": _report()}, _report(_result(3)))[
         "match_statistics"
     ]["bandit"]
     assert stats["total_results"] == 0
-    assert stats["match_rate"] == 0
+    assert stats["match_rate"] is None
     assert stats["field_preservation_rate"] is None
 
     page = _rendered(tmp_path, {"bandit": _report()}, _report(_result(3)))
 
     table = _scanner_table(page)
-    assert "Match Rate: 0/0 (0.00%)" in page
+    assert "Match Rate: n/a<" in page
+    assert "Match Rate: 0/0" not in page
     assert "<td>0/0</td>" in table
-    assert "n/a" not in table
+    assert "<td>0.00%</td>" not in table
+    assert "<td>n/a</td>" in table
     assert "None" not in table
 
 

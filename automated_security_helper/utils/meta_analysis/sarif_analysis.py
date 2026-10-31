@@ -119,8 +119,9 @@ def validate_sarif_aggregation(
     are preserved in the aggregated report.
 
     Per scanner, ``match_statistics`` carries ``match_rate`` (matched results
-    over results) and ``field_preservation_rate`` (the share of the compared
-    fields of the matched results that the aggregate preserved, from
+    over results; None, not 0, for a scanner whose report holds no result, since
+    nothing was there to match) and ``field_preservation_rate`` (the share of
+    the compared fields of the matched results that the aggregate preserved, from
     ``fields_compared`` and ``fields_missing``). The latter used to be the match
     rate under the other name, so a scanner whose every matched result had lost
     critical fields still read 1.0. It is None, not 0, for a scanner with no
@@ -198,7 +199,7 @@ def validate_sarif_aggregation(
             {
                 "total_results": 0,
                 "matched_results": 0,
-                "match_rate": 0,
+                "match_rate": None,
                 "fields_compared": 0,
                 "fields_missing": 0,
                 "field_preservation_rate": None,
