@@ -3,6 +3,7 @@ import logging
 """Module containing the detect-secrets security scanner implementation."""
 
 from datetime import datetime, timezone
+import hashlib
 from importlib.metadata import version
 import importlib.util
 import json
@@ -190,6 +191,11 @@ SHOULD_EXCLUDE_FILE_FILTER = "detect_secrets.filters.regex.should_exclude_file"
 WORDLIST_FILTER = "detect_secrets.filters.wordlist.should_exclude_secret"
 #: The ``min_length`` detect-secrets' own ``wordlist.initialize`` defaults to.
 WORDLIST_DEFAULT_MIN_LENGTH = 3
+
+#: The type detect-secrets reports for a run of hex digits with high entropy, which
+#: is how it reads the ``hashed_secret`` values a baseline lists
+#: (``DetectSecretsScanner._baseline_hash_echoes``).
+HEX_HIGH_ENTROPY_TYPE = "Hex High Entropy String"
 
 
 def _module_importable(name: str) -> bool:
@@ -2295,6 +2301,35 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 known[key] = known.get(key, False) or entry.get("is_secret") is True
         return known
 
+    @staticmethod
+    def _baseline_hash_echoes(document: Optional[Dict[str, Any]]) -> frozenset[str]:
+        """The hashes of the ``hashed_secret`` values a baseline lists.
+
+        detect-secrets' hex entropy detector reads each ``hashed_secret`` in a
+        baseline as a high-entropy string, and a finding is keyed by the hash of
+        the string it found, so the finding on such a value has the hash of that
+        value. A baseline scanned as an ordinary file reports one such finding
+        per entry; those, and only those, are dropped
+        (``scan``). A value that is not 40 hexadecimal digits is not a hash
+        detect-secrets wrote, so its finding stays.
+        """
+        echoes: Set[str] = set()
+        results = (document or {}).get("results")
+        if not isinstance(results, dict):
+            return frozenset()
+        for entries in results.values():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                value = entry.get("hashed_secret") if isinstance(entry, dict) else None
+                if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value):
+                    echoes.add(
+                        hashlib.sha1(
+                            value.encode("utf-8"), usedforsecurity=False
+                        ).hexdigest()
+                    )
+        return frozenset(echoes)
+
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — DetectSecrets overrides scan() directly; this is unreachable."""
         raise NotImplementedError(
@@ -2549,29 +2584,40 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 str(item) for item in candidates if Path(item).name not in skipped_names
             ]
 
-            # The baseline in use is not scanned. Its entries hold the hashes
-            # of the secrets it records, which the entropy detectors report,
-            # and the file is the record of the findings, not a finding. The
-            # scan set holds an in-tree baseline like any other file, so it is
-            # removed here, under the name it was chosen by and the name it
-            # resolves to. Only a baseline the scan has (the parsed document):
-            # a chosen file that turned out malformed is not in use
+            # The baseline in use, under the name it was chosen by and the
+            # name it resolves to. Its entries hold the hashes of the secrets
+            # it records, which the entropy detectors report, and the file is
+            # the record of the findings, not a finding, so the operator's
+            # own baseline is left out of the scan set. A baseline the
+            # repository controls is NOT: it is a file like any other, and
+            # the parsed document is only what detect-secrets reads from it.
+            # Left out, a repository hid anything it put in a file of that
+            # name, under a key the shape check admits
+            # (``{"results": {}, "notes": "<live key>"}``). The detectors'
+            # reading of the hashes it lists is dropped from the findings
+            # instead (_baseline_hash_echoes), and nothing else on the file.
+            # Only a baseline the scan has (the parsed document): a chosen
+            # file that turned out malformed is not in use
             # (_process_config_options fell back to the default settings), so
-            # it is scanned like any other file. Gated on the baseline being
-            # chosen, a repository could put anything in a file of that name
-            # and detect-secrets never read it.
+            # it is scanned like any other file.
+            baseline_names: Set[str] = set()
             if target_type == "source" and self._baseline_document is not None:
                 baseline_names = {
                     self._root_relative(str(path), scan_root)
                     for path in (self._baseline_named, self._baseline_real)
                     if path is not None
                 }
-                if baseline_names:
+                if baseline_names and known_entries_trusted:
                     scannable = [
                         item
                         for item in scannable
                         if self._root_relative(item, scan_root) not in baseline_names
                     ]
+            baseline_echoes = (
+                self._baseline_hash_echoes(self._baseline_document)
+                if baseline_names and not known_entries_trusted
+                else frozenset()
+            )
 
             # Build the scan_settings dict for transient_settings, ensuring
             # filters_used from the baseline are included so detect-secrets
@@ -2837,6 +2883,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             for filename, detections in self._secrets_collection.data.items():
                 uri = self._finding_uri(filename, scan_root)
                 for finding in detections:
+                    if (
+                        baseline_echoes
+                        and uri in baseline_names
+                        and finding.type == HEX_HIGH_ENTROPY_TYPE
+                        and finding.secret_hash in baseline_echoes
+                    ):
+                        # The detectors reading a hash the baseline lists.
+                        continue
                     key = (uri, finding.secret_hash, finding.type)
                     is_known = key in known
                     is_real = bool(known.get(key))

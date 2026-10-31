@@ -16,9 +16,8 @@ Every such baseline now takes the fallback: a warning, the default settings,
 and a scan with no baseline, as for a missing file. A ``results`` entry whose
 items are not objects with a string ``type`` and ``hashed_secret`` is malformed
 too: ``load_from_baseline`` reads both by key. And a malformed file is scanned
-like any other file: it is not in use, so it is not taken out of the scan set
-(gated on the baseline being chosen, a repository could put anything in a file
-of that name and detect-secrets never read it).
+like any other file, as is a well-formed baseline the repository controls: the
+scan set leaves out only a baseline the operator named outside the checkout.
 """
 
 from __future__ import annotations
@@ -160,7 +159,8 @@ def test_a_well_formed_baseline_is_the_scans(tmp_path, monkeypatch):
     scanner.scan(target=context.source_dir, target_type="source")
 
     # The worker is never seeded with the baseline (the scanner applies the
-    # entries to the scan's own findings); the baseline in use is not scanned.
+    # entries to the scan's own findings); the tree's own baseline is the
+    # repository's file, so it is scanned like any other.
     assert seen["baseline"] is None
-    assert ".secrets.baseline" not in _scanned(seen)
+    assert ".secrets.baseline" in _scanned(seen)
     assert "settings.py" in _scanned(seen)

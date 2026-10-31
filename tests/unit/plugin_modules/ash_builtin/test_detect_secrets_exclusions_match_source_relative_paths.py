@@ -21,7 +21,9 @@ ignore paths, so:
   reported by the entropy detectors.
 
 Every match is now made against the path relative to the scan root, the filter
-is applied by ASH alone, and the baseline is left out of the scan set. The scan
+is applied by ASH alone, and the findings that are only the detectors reading
+the hashes a baseline lists are dropped (the baseline itself is scanned when the
+repository controls it). The scan
 is driven in-process: ``_scan_in_worker`` is replaced by a recorder, so what
 the worker would have been given is what the tests read.
 """
@@ -214,7 +216,12 @@ def test_other_filters_still_reach_the_worker(tmp_path, monkeypatch):
     ] == [heuristic]
 
 
-def test_the_baseline_in_use_is_not_scanned(tmp_path, monkeypatch):
+def test_a_baseline_the_repository_controls_is_scanned_like_any_file(
+    tmp_path, monkeypatch
+):
+    """The tree's own baseline is the repository's file, so it is handed to
+    the worker. Left out of the scan set, whatever the repository put in a
+    file of that name under a key the shape check admits was never read."""
     context = _context(tmp_path)
     source = Path(context.source_dir)
     _write(source, "settings.py")
@@ -227,6 +234,7 @@ def test_the_baseline_in_use_is_not_scanned(tmp_path, monkeypatch):
                 "plugins_used": [{"name": "AWSKeyDetector"}],
                 "filters_used": [],
                 "results": {},
+                "notes": "an extra top-level key the shape check admits",
                 "generated_at": "2026-01-01T00:00:00Z",
             }
         ),
@@ -234,11 +242,12 @@ def test_the_baseline_in_use_is_not_scanned(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
     assert scanner._baseline_in_use()
+    assert scanner._baseline_entries_trusted() is False
     seen = _record_worker(scanner, monkeypatch)
 
     scanner.scan(target=source, target_type="source")
 
-    assert _relative_scan_paths(seen, source) == ["settings.py"]
+    assert _relative_scan_paths(seen, source) == [".secrets.baseline", "settings.py"]
 
 
 def test_ignore_paths_apply_to_a_relative_source_directory(tmp_path, monkeypatch):

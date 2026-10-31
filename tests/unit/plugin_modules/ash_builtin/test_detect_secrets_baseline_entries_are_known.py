@@ -322,6 +322,71 @@ def test_a_baseline_the_operator_names_inside_the_scanned_tree_only_marks(
         assert _findings(report) == [("other.py", 1)]
 
 
+def test_a_repository_baseline_is_scanned_and_only_its_hash_echoes_are_dropped(
+    tmp_path, monkeypatch
+):
+    """The tree's own baseline is handed to the worker like any file. The
+    entropy detectors read each ``hashed_secret`` it lists, and those findings
+    (the hex type, on a value the baseline lists) are dropped; a hex string it
+    does not list and a key under an extra top-level key are reported. Left out
+    of the scan set, a repository could hide a key under a key of its own."""
+    from detect_secrets.core.potential_secret import PotentialSecret
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+        HEX_HIGH_ENTROPY_TYPE,
+        _detect_secrets_api,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    (source / "settings.py").write_text(f"KEY = '{KEPT_SECRET}'\n", encoding="utf-8")
+    listed = _hash(KEPT_SECRET)
+    unlisted = _hash(GONE_SECRET)
+    document = _baseline(
+        {
+            "settings.py": [
+                {
+                    "type": SECRET_TYPE,
+                    "hashed_secret": listed,
+                    "line_number": 1,
+                    "is_secret": False,
+                }
+            ]
+        }
+    )
+    document["notes"] = NEW_SECRET
+    (source / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
+    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_entries_trusted() is False
+
+    seen: dict = {}
+
+    def scanned(self, *, baseline, scan_paths, scan_settings_dict, **kwargs):
+        seen["names"] = sorted(Path(path).name for path in scan_paths)
+        collection_cls, _, _ = _detect_secrets_api()
+        collection = collection_cls()
+        collection.root = self._secrets_collection.root
+        name = ".secrets.baseline"
+        for kind, secret, line in (
+            (HEX_HIGH_ENTROPY_TYPE, listed, 9),
+            (HEX_HIGH_ENTROPY_TYPE, unlisted, 3),
+            (SECRET_TYPE, NEW_SECRET, 2),
+        ):
+            collection[name].add(
+                PotentialSecret(kind, name, secret=secret, line_number=line)
+            )
+        return collection
+
+    monkeypatch.setattr(type(scanner), "_scan_in_worker", scanned)
+
+    report = scanner.scan(target=source, target_type="source")
+
+    assert ".secrets.baseline" in seen["names"]
+    assert _findings(report) == [(".secrets.baseline", 2), (".secrets.baseline", 3)]
+
+
 @pytest.mark.parametrize("operator_named", [True, False], ids=["operator", "repo"])
 def test_the_worker_is_told_whose_baseline_the_scan_runs_under(
     tmp_path, monkeypatch, operator_named
@@ -648,7 +713,15 @@ def _recording_known_worker(scanner, monkeypatch) -> dict:
 
 
 def _relative(seen: dict, root: Path) -> list[str]:
-    return sorted(Path(path).relative_to(root).as_posix() for path in seen["paths"])
+    """The scan paths relative to ``root``, the baseline file itself left out:
+    the repository's own baseline is scanned like any file (see
+    test_a_repository_baseline_is_scanned_and_only_its_hash_echoes_are_dropped),
+    and these tests read which OTHER files the exclude patterns removed."""
+    return sorted(
+        Path(path).relative_to(root).as_posix()
+        for path in seen["paths"]
+        if Path(path).name != ".secrets.baseline"
+    )
 
 
 def test_the_operators_own_exclude_patterns_keep_the_scan_root_under_a_re_anchored_baseline(
