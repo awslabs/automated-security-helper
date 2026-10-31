@@ -298,6 +298,8 @@ def _rule_of(
     scanner = result_scanner_labels(result) if component_names else frozenset()
 
     def in_scope(candidate):
+        """The rule with id *candidate* in the component the reference names, else
+        in the component of the result's scanner; None when neither holds it."""
         if named_rules is not None:
             found = _first_rule_with_id(named_rules, candidate)
             if found is not None:
@@ -308,17 +310,30 @@ def _rule_of(
                     found = _first_rule_with_id(rules, candidate)
                     if found is not None:
                         return found
-        return by_id.get(candidate)
+        return None
 
     def by_stated_id():
+        # The stated id, then each shorter prefix at a "/".
+        candidates = []
         candidate = stated_id
         while candidate:
+            candidates.append(candidate)
+            if "/" not in candidate:
+                break
+            candidate = candidate.rsplit("/", 1)[0]
+        # Every prefix is tried within the result's own scope before any is tried
+        # across every component. A prefix tried globally as soon as it missed in
+        # scope let another scanner's exact ``CA1001/sub`` win over the result's
+        # own component's ``CA1001``: the bleed between scanners the scope exists
+        # to prevent.
+        for candidate in candidates:
             found = in_scope(candidate)
             if found is not None:
                 return found
-            if "/" not in candidate:
-                return None
-            candidate = candidate.rsplit("/", 1)[0]
+        for candidate in candidates:
+            found = by_id.get(candidate)
+            if found is not None:
+                return found
         return None
 
     if body is not None:
