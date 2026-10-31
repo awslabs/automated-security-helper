@@ -415,6 +415,7 @@ from automated_security_helper.workspace.reporting import (
     exit_code_after_report_step,
     refuse_linked_workspace_report_paths,
     unsupported_reporter_names,
+    unsupported_reporters_refusal,
 )
 
 #: How often the outer loop wakes to check per-project deadlines. Small enough
@@ -2915,6 +2916,7 @@ def execute_workspace(
         #
         # Gated on the report phase because a reporter that cannot produce a
         # workspace artefact is not an operator's problem until they ask for one.
+        unreadable_declarations: Dict[str, str] = {}
         refusing = unsupported_reporter_names(
             plan,
             output_dir,
@@ -2922,13 +2924,13 @@ def execute_workspace(
             python_based_plugins_only=settings.python_based_plugins_only,
             reporter_classes=reporter_classes,
             plugin_modules=workspace_plugin_modules(plan, settings),
+            unreadable=unreadable_declarations,
         )
         if refusing:
+            # A reporter whose declaration is a typo made no claim of being
+            # unable to work, and the manifest words it that way too.
             raise WorkspaceDefinitionError(
-                f"reporter(s) {', '.join(refusing)} declare that they cannot "
-                f"produce a correct report in workspace mode, and are enabled. "
-                f"Nothing was scanned. Disable them, narrow --output-format to "
-                f"exclude them, or scan the projects separately."
+                unsupported_reporters_refusal(refusing, unreadable_declarations)
             )
         # Here for the same two reasons: a link at a workspace report path
         # refuses the run before any project is scanned. With the workspace's

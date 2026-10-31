@@ -1055,6 +1055,7 @@ def unsupported_reporter_names(
     python_based_plugins_only: bool = False,
     reporter_classes: Optional[Sequence[type]] = None,
     plugin_modules: Sequence[str] = (),
+    unreadable: Optional[Dict[str, str]] = None,
 ) -> Tuple[str, ...]:
     """Enabled reporters that declare they cannot work in workspace mode.
 
@@ -1083,27 +1084,84 @@ def unsupported_reporter_names(
     same argument ``models.workspace`` makes for keeping exit 4 distinct from
     exit 2.
 
+    Args:
+        unreadable: Filled in place, when given, with the name and declared text
+            of each returned reporter whose ``workspace_behaviour`` ASH could not
+            read (a typo or a wrong type), the way the manifest words it. Such a
+            reporter is returned as unsupported, but it made no claim: the
+            caller words its refusal as a declaration to fix.
+
     Returns:
         The configured names, in registry order. Empty is the normal case: no
         reporter shipped in this repository declares ``UNSUPPORTED``.
     """
     context, config_lookup = _workspace_context(plan.workspace_root, Path(output_dir))
-    return tuple(
-        _reporter_name(instance)
-        for instance, behaviour, skipped in _selected_reporters(
-            context=context,
-            config_lookup=config_lookup,
-            output_formats=output_formats,
-            python_based_plugins_only=python_based_plugins_only,
-            reporter_classes=reporter_classes,
-            check_dependencies=False,
-            plugin_modules=plugin_modules,
-        )
+    names: List[str] = []
+    for instance, behaviour, skipped in _selected_reporters(
+        context=context,
+        config_lookup=config_lookup,
+        output_formats=output_formats,
+        python_based_plugins_only=python_based_plugins_only,
+        reporter_classes=reporter_classes,
+        check_dependencies=False,
+        plugin_modules=plugin_modules,
+    ):
         # ``skipped is None`` is what makes disabling the documented way out
         # actually work: a reporter the operator turned off must not refuse a run
         # it is not part of.
-        if skipped is None and behaviour is ReporterWorkspaceBehaviour.UNSUPPORTED
-    )
+        if (
+            skipped is not None
+            or behaviour is not ReporterWorkspaceBehaviour.UNSUPPORTED
+        ):
+            continue
+        name = _reporter_name(instance)
+        names.append(name)
+        declaration = _unreadable_declaration(instance.__class__)
+        if unreadable is not None and declaration is not None:
+            unreadable[name] = declaration
+    return tuple(names)
+
+
+def unsupported_reporters_refusal(
+    names: Sequence[str], unreadable: Mapping[str, str]
+) -> str:
+    """The text that refuses a run because *names* are enabled and unsupported.
+
+    A reporter that truly declares ``UNSUPPORTED`` is worded as before. One whose
+    declaration ASH could not read (*unreadable*, from
+    :func:`unsupported_reporter_names`) made no such claim: its text quotes the
+    declaration and says to fix it, as the manifest entry does for the same
+    reporter, rather than telling the operator it "declares that it cannot".
+    """
+    declared = [name for name in names if name not in unreadable]
+    garbled = [f"{name} ({unreadable[name]})" for name in names if name in unreadable]
+    sentences: List[str] = []
+    if declared:
+        sentences.append(
+            f"reporter(s) {', '.join(declared)} declare that they cannot "
+            f"produce a correct report in workspace mode, and are enabled."
+        )
+    if garbled:
+        sentences.append(
+            f"reporter(s) {', '.join(garbled)} declare a workspace_behaviour "
+            f"that is not one of {_BEHAVIOUR_VALUES}, and are enabled."
+        )
+    if garbled and not declared:
+        remedy = (
+            "Fix the declaration, disable the reporter, or narrow "
+            "--output-format to exclude it."
+        )
+    elif garbled:
+        remedy = (
+            "Disable them, narrow --output-format to exclude them, fix the "
+            "declarations, or scan the projects separately."
+        )
+    else:
+        remedy = (
+            "Disable them, narrow --output-format to exclude them, or scan the "
+            "projects separately."
+        )
+    return " ".join([*sentences, "Nothing was scanned.", remedy])
 
 
 def emit_workspace_reports(
