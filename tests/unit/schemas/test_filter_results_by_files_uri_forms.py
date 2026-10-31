@@ -43,17 +43,15 @@ pytestmark = pytest.mark.unit
 def _link_top_levels(monkeypatch, links: dict[str, str]) -> None:
     """Make each top-level directory in *links* read as a symlink to its target.
 
-    ``Path.is_symlink`` and ``Path.readlink`` both answer from *links* (a dict
-    the caller may empty later), so the same fake serves a check that asks
-    whether the entry is a link and one that reads where it points; an entry not
-    in *links* is no link (``readlink`` raises the error a real file does)."""
+    ``Path.readlink`` answers from *links* (a dict the caller may empty later),
+    the one link read the schema file makes; an entry not in *links* is no link
+    (``readlink`` raises the error a real file does)."""
 
     def fake_readlink(self):
         if self.as_posix() in links:
             return Path(links[self.as_posix()])
         raise OSError(22, "Invalid argument", self.as_posix())
 
-    monkeypatch.setattr(Path, "is_symlink", lambda self: self.as_posix() in links)
     monkeypatch.setattr(Path, "readlink", fake_readlink)
 
 
