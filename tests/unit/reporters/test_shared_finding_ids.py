@@ -349,18 +349,14 @@ class TestBothReportersGiveTheFlattenedId:
         )
         ocsf = json.loads(OcsfReporter(context=test_plugin_context).report(model))
 
-        # Only the SARIF-derived entries are compared: a later export of the
-        # additional report's own findings adds entries of its own and must not
-        # break this test, while a SARIF result that fell back to another id
-        # still drops out of the filtered list and fails it.
+        # Exact equality, not a list filtered to the expected ids: neither report
+        # exports the additional report's own findings, so an entry beyond the
+        # SARIF results is that report leaking into the export, which a
+        # filtered comparison would let through. A later export of those
+        # findings would add entries of its own and is the change that updates
+        # this assertion on purpose.
         expected_uids = [
             str(uuid.uuid5(_FINDING_UID_NAMESPACE, flat_id)) for flat_id in sarif_ids
         ]
-        assert [
-            v["id"] for v in gitlab["vulnerabilities"] if v["id"] in sarif_ids
-        ] == sarif_ids
-        assert [
-            r["finding_info"]["uid"]
-            for r in ocsf
-            if r["finding_info"]["uid"] in expected_uids
-        ] == expected_uids
+        assert [v["id"] for v in gitlab["vulnerabilities"]] == sarif_ids
+        assert [r["finding_info"]["uid"] for r in ocsf] == expected_uids
