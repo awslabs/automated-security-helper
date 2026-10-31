@@ -129,7 +129,7 @@ def test_a_half_deleted_held_set_is_not_taken_for_the_last_complete_results(
     def remove(path: Path) -> None:
         if Path(path) == held:
             # Stops partway: one entry goes, then the delete is refused.
-            real_remove(sorted(held.iterdir())[0])
+            real_remove(min(held.iterdir()))
             raise PermissionError(13, "Permission denied", str(path))
         real_remove(path)
 
