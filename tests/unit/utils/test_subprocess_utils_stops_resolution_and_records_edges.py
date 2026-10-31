@@ -69,14 +69,25 @@ _FAKE_PID = 2**30 + 47
 
 @pytest.fixture(autouse=True)
 def _no_state_carried_between_tests(monkeypatch):
-    """Each test starts with an empty tool-pid registry and empty stand-in
-    records: the fake pid rides four spawn paths here with ``_reap`` patched
-    out, so a registration one test left would be read by the next, and the
-    streaming stand-ins' class-level records would hold the earlier instances."""
+    """Each test starts with the module's registries and every stand-in's
+    class-level records empty, and puts the originals back after it.
+
+    The fake pid rides several spawn paths here with ``_reap`` patched out, so
+    a registration or a recorded kill one test left would be read by the next.
+    Every stand-in that keeps ``instances`` is reset, and every one that is
+    given a cancel ``event`` has it cleared: the event a test hands the
+    interrupt-raising stand-in is read on the main thread, so one left over
+    would raise KeyboardInterrupt in a later test, outside ``pytest.raises``,
+    and pytest takes that as a user abort that ends the whole session."""
     monkeypatch.setattr(cancellation, "_TOOL_PIDS", ())
-    monkeypatch.setattr(_StreamingPopen, "instances", [])
-    monkeypatch.setattr(_StreamingPopen, "event", None)
-    monkeypatch.setattr(_SilentPopen, "instances", [])
+    monkeypatch.setattr(cancellation, "_TOOL_GROUPS", ())
+    monkeypatch.setattr(spu, "_SERVER_KILLED", set())
+    monkeypatch.setattr(spu, "_RUNNING_GROUPS", {})
+    monkeypatch.setattr(spu, "_SPAWNS_STARTING", 0)
+    for stand_in in _STAND_INS_WITH_INSTANCES:
+        monkeypatch.setattr(stand_in, "instances", [])
+    for stand_in in _STAND_INS_WITH_AN_EVENT:
+        monkeypatch.setattr(stand_in, "event", None)
 
 
 class _FakeChild:
@@ -434,12 +445,10 @@ class _TimingOutPopen(_FakeChild):
 
 
 def test_an_interrupt_during_the_stoppable_runners_grace_still_kills(monkeypatch):
-    _TimingOutPopen.instances.clear()
     monkeypatch.setattr(spu.subprocess, "Popen", _TimingOutPopen)
+    # The reap that would forget a record is replaced, so a record made here is
+    # left to the test's own registry (the autouse reset above).
     monkeypatch.setattr(spu, "_reap", lambda args, process: None)
-    # A registry of this test's own: the reap that would forget a record is
-    # replaced above, so a record made here would otherwise outlive the test.
-    monkeypatch.setattr(spu, "_RUNNING_GROUPS", {})
     with pytest.raises(KeyboardInterrupt):
         spu._run_stoppable(["tool"], timeout=0.01)
     (child,) = _TimingOutPopen.instances
@@ -745,8 +754,7 @@ class _StreamingPopen(_FakeChild):
 
 def test_a_streamed_run_stops_its_child_on_the_scans_cancel(monkeypatch):
     event = CancelEvent()
-    _StreamingPopen.event = event
-    _StreamingPopen.instances.clear()
+    monkeypatch.setattr(_StreamingPopen, "event", event)
     monkeypatch.setattr(spu.subprocess, "Popen", _StreamingPopen)
     monkeypatch.setattr(spu, "_resolved_or_refused", lambda *a: None)
     monkeypatch.setattr(spu, "_prepare_spawn", lambda *a, **k: None)
@@ -799,7 +807,6 @@ def test_a_streamed_run_stops_a_child_silent_since_the_cancel(monkeypatch):
     """Read between output lines alone, the cancel never reached a tool that
     printed nothing more, and the wait on it had no bound."""
     event = CancelEvent()
-    _SilentPopen.instances.clear()
     monkeypatch.setattr(spu.subprocess, "Popen", _SilentPopen)
     monkeypatch.setattr(spu, "_resolved_or_refused", lambda *a: None)
     monkeypatch.setattr(spu, "_prepare_spawn", lambda *a, **k: None)
@@ -824,6 +831,9 @@ class _LingeringPopen(_FakeChild):
     the watcher began must wait out its grace before anything kills the child."""
 
     instances: List["_LingeringPopen"] = []
+    #: The scan's cancel event, given by the test that uses it (the autouse
+    #: fixture clears it again).
+    event: Any = None
 
     def __init__(self, args, **kwargs):
         super().__init__()
@@ -868,8 +878,7 @@ def test_a_line_printed_after_the_watchers_sigterm_does_not_cut_its_grace(
     finally's kill in front of the grace the watcher is still waiting out."""
     grace = 0.4
     event = CancelEvent()
-    _LingeringPopen.event = event
-    _LingeringPopen.instances.clear()
+    monkeypatch.setattr(_LingeringPopen, "event", event)
     monkeypatch.setattr(spu.subprocess, "Popen", _LingeringPopen)
     monkeypatch.setattr(spu, "_resolved_or_refused", lambda *a: None)
     monkeypatch.setattr(spu, "_prepare_spawn", lambda *a, **k: None)
@@ -954,8 +963,7 @@ def test_a_second_interrupt_during_the_grace_wait_still_kills_the_child(
     and its pipe closed before the interrupt leaves the runner: a wait that put
     those behind it skipped them all on the second Ctrl-C."""
     event = _InterruptedEvent()
-    _ReadFailsPopen.event = event
-    _ReadFailsPopen.instances.clear()
+    monkeypatch.setattr(_ReadFailsPopen, "event", event)
     monkeypatch.setattr(spu.subprocess, "Popen", _ReadFailsPopen)
     monkeypatch.setattr(spu, "_resolved_or_refused", lambda *a: None)
     monkeypatch.setattr(spu, "_prepare_spawn", lambda *a, **k: None)
@@ -974,6 +982,18 @@ def test_a_second_interrupt_during_the_grace_wait_still_kills_the_child(
     assert "kill" in child.calls, "the second interrupt skipped the kill"
     assert ("wait", None) in child.calls, "the killed child was not reaped"
     assert child.closed, "the output pipe was left open"
+
+
+#: Every stand-in that records its instances at class level, and every one that is
+#: handed a cancel event, for the autouse reset above.
+_STAND_INS_WITH_INSTANCES = (
+    _TimingOutPopen,
+    _StreamingPopen,
+    _SilentPopen,
+    _LingeringPopen,
+    _ReadFailsPopen,
+)
+_STAND_INS_WITH_AN_EVENT = (_StreamingPopen, _LingeringPopen, _ReadFailsPopen)
 
 
 class _OneLinePopen(_FakeChild):
@@ -1018,7 +1038,6 @@ def test_a_watcher_whose_start_raised_is_not_joined(monkeypatch):
 
 
 def test_a_streamed_run_starts_nothing_in_a_cancelled_scan(monkeypatch):
-    _StreamingPopen.instances.clear()
     monkeypatch.setattr(spu.subprocess, "Popen", _StreamingPopen)
     monkeypatch.setattr(spu, "_resolved_or_refused", lambda *a: None)
     event = CancelEvent()
@@ -1067,3 +1086,23 @@ def test_a_process_with_pipes_in_bytes_mode_passes_no_encoding(monkeypatch):
     spu.create_process_with_pipes(["tool"], text=False)
     assert seen["text"] is False
     assert seen["encoding"] is None and seen["errors"] is None
+
+
+# --- what an earlier test leaves behind ------------------------------------------------------
+
+
+def test_a_test_starts_with_nothing_the_earlier_ones_left_behind():
+    """Kept last in the file, after every test that fills a stand-in's class-level
+    record, hands a stand-in a cancel event, or ends a child against the module's
+    registries. The autouse reset must have emptied all of them again: an event
+    left on the interrupt-raising stand-in would raise KeyboardInterrupt into
+    whichever test reads it next, outside ``pytest.raises``, and a fake pid left
+    in the registries would be read by the next test that ends a child."""
+    for stand_in in _STAND_INS_WITH_INSTANCES:
+        assert stand_in.instances == [], stand_in.__name__
+    for stand_in in _STAND_INS_WITH_AN_EVENT:
+        assert stand_in.event is None, stand_in.__name__
+    assert spu._SERVER_KILLED == set()
+    assert spu._RUNNING_GROUPS == {}
+    assert spu._SPAWNS_STARTING == 0
+    assert cancellation._TOOL_GROUPS == ()

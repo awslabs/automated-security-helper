@@ -70,8 +70,11 @@ def stops(monkeypatch) -> List[Tuple[str, object]]:
     The registration itself runs: the Ctrl-C-during-Popen path is where a
     record could be left behind for a later shutdown sweep to signal, so each
     case reads the registry afterwards. The registry is this test's, so no
-    other test's record is met and none of ours is left for one."""
+    other test's record is met and none of ours is left for one. So is the
+    count of spawns still starting: a Ctrl-C path that kept its count would
+    otherwise leave it raised for every later test, and the case reads it."""
     recorded: List[Tuple[str, object]] = []
+    monkeypatch.setattr(subprocess_utils, "_SPAWNS_STARTING", 0)
     monkeypatch.setattr(
         subprocess_utils,
         "_stop_child",
@@ -103,7 +106,6 @@ def test_a_ctrl_c_during_popen_stops_the_child_the_timeout_put_in_its_own_group(
 ):
     child = _Child()
     _popen_that_starts(monkeypatch, child, ctrl_c=True)
-    starting = subprocess_utils._SPAWNS_STARTING
 
     with pytest.raises(KeyboardInterrupt):
         subprocess_utils._run_plain(["tool"], timeout=5)
@@ -113,7 +115,7 @@ def test_a_ctrl_c_during_popen_stops_the_child_the_timeout_put_in_its_own_group(
     # The group the timeout registered is forgotten by the reap: nothing is
     # left for the server's last stop to signal under this pid.
     assert subprocess_utils._RUNNING_GROUPS == {}
-    assert subprocess_utils._SPAWNS_STARTING == starting, "the start count was kept"
+    assert subprocess_utils._SPAWNS_STARTING == 0, "the start count was kept"
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
 
 
@@ -132,6 +134,7 @@ def test_a_ctrl_c_during_popen_kills_a_child_in_the_runners_own_group(
     assert stops == [("_kill", child)], stops
     assert "communicate" not in child.calls
     assert subprocess_utils._RUNNING_GROUPS == {}, "no group to register, none kept"
+    assert subprocess_utils._SPAWNS_STARTING == 0, "a spawn outside a group was counted"
 
 
 def test_without_a_ctrl_c_the_handler_is_put_back_and_nothing_is_stopped(
@@ -145,4 +148,5 @@ def test_without_a_ctrl_c_the_handler_is_put_back_and_nothing_is_stopped(
     assert stops == []
     assert "communicate" in child.calls
     assert subprocess_utils._RUNNING_GROUPS == {}, "the reap forgets the group"
+    assert subprocess_utils._SPAWNS_STARTING == 0, "the record gave the count up"
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler

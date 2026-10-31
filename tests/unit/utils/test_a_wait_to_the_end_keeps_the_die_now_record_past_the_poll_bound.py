@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 from types import SimpleNamespace
 from typing import List, Tuple
 
@@ -93,10 +94,32 @@ def child(monkeypatch) -> _FakeChild:
 
 @pytest.fixture
 def at_discard(monkeypatch, child) -> _Discards:
+    """The spy on the discard, and a die-now mirror of this test's own.
+
+    The mirror is replaced here, not only in ``no_waitid``, because the waitid
+    test cannot use that fixture: a discard the code under test failed to make
+    would otherwise leave the fake pid in the session-wide mirror for every
+    later test. The original is put back after the test."""
     spy = _Discards(child)
+    monkeypatch.setattr(cancellation, "_TOOL_PIDS", ())
     monkeypatch.setattr(subprocess_utils, "discard_tool_pid", spy)
     cancellation.record_tool_pid(child.pid)
     return spy
+
+
+def _sleeping_fails_on_the_main_thread(monkeypatch, message: str) -> None:
+    """``time.sleep`` replaced so the thread under test fails on a sleep and any
+    other thread (a background thread of the session) sleeps as usual: the
+    replacement is process-wide, and a failure delivered to a thread that is
+    not the test's would be raised there, not in the test."""
+    real_sleep = subprocess_utils.time.sleep
+
+    def sleep(seconds):
+        if threading.current_thread() is threading.main_thread():
+            pytest.fail(message)
+        real_sleep(seconds)
+
+    monkeypatch.setattr(subprocess_utils.time, "sleep", sleep)
 
 
 def test_a_wait_that_is_not_after_a_kill_keeps_the_record_until_the_child_ends(
@@ -134,10 +157,8 @@ def test_a_wait_to_the_end_with_waitid_blocks_instead_of_polling(
         return SimpleNamespace(si_pid=pid)
 
     monkeypatch.setattr(subprocess_utils.os, "waitid", waitid)
-    monkeypatch.setattr(
-        subprocess_utils.time,
-        "sleep",
-        lambda seconds: pytest.fail("the wait to the end slept between polls"),
+    _sleeping_fails_on_the_main_thread(
+        monkeypatch, "the wait to the end slept between polls"
     )
 
     subprocess_utils.discard_tool_pid_before_reap(child, just_killed=False)  # type: ignore[arg-type]
@@ -149,6 +170,25 @@ def test_a_wait_to_the_end_with_waitid_blocks_instead_of_polling(
     child.returncode = None
     subprocess_utils.discard_tool_pid_before_reap(child)  # type: ignore[arg-type]
     assert seen == [(os.P_PID, _PID, os.WEXITED | os.WNOHANG | os.WNOWAIT)], seen
+
+
+def test_a_sleep_on_another_thread_is_not_the_main_threads_failure(monkeypatch):
+    """The sleep guard fails the main thread only: a background thread that
+    sleeps while it is installed gets the real sleep."""
+    _sleeping_fails_on_the_main_thread(monkeypatch, "the main thread slept")
+    ran: List[bool] = []
+
+    def background() -> None:
+        subprocess_utils.time.sleep(0)
+        ran.append(True)
+
+    worker = threading.Thread(target=background, daemon=True)
+    worker.start()
+    worker.join(timeout=5.0)
+
+    assert ran == [True], "the background thread was failed or never ran"
+    with pytest.raises(pytest.fail.Exception, match="the main thread slept"):
+        subprocess_utils.time.sleep(0)
 
 
 def test_the_nix_shell_without_a_cancel_event_keeps_its_record_until_it_ends(

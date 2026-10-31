@@ -86,9 +86,13 @@ class _Stops:
 @pytest.fixture
 def stops(monkeypatch):
     """The stop of the paths under test replaced by a recorder, and a registry of
-    their own, so no signal is sent and no other test's record is met."""
+    their own, so no signal is sent and no other test's record is met. The count
+    of spawns still starting is their own too, at zero: the cases compare it with
+    its value at their start, and a path that kept its count would otherwise
+    leave it raised for every later test."""
     recorded = _Stops()
     monkeypatch.setattr(subprocess_utils, "_RUNNING_GROUPS", {})
+    monkeypatch.setattr(subprocess_utils, "_SPAWNS_STARTING", 0)
     monkeypatch.setattr(
         subprocess_utils,
         "_stop_child",
