@@ -195,6 +195,65 @@ class TestAUrlTypedField:
         assert password not in uri
         assert _mask_secret_value(password) in uri
 
+    #: ``#``, ``@`` and ``?``: a path encodes the first and last and leaves the
+    #: middle raw; a query encodes the first alone. Neither is
+    #: ``quote(value, safe="")``.
+    SPECIAL = (
+        _derived("url-path", 5)
+        + "#"
+        + _derived("url-path-b", 5)
+        + "@"
+        + _derived("url-path-c", 3)
+        + "?"
+        + _derived("url-path-d", 2)
+        + "9"
+    )
+
+    def _masked_uri_with(self, url, written_form):
+        model = _report_with_a_url(url, _bandit(HARDCODED + f"'{self.SPECIAL}'"))
+        written = str(model.sarif.runs[0].versionControlProvenance[0].repositoryUri)
+        assert written_form in written and self.SPECIAL not in written
+
+        mask_secrets_in_results(model)
+
+        return str(model.sarif.runs[0].versionControlProvenance[0].repositoryUri)
+
+    def test_a_value_in_a_urls_path_is_masked_in_the_path_spelling(self):
+        """The path leaves ``@`` raw and encodes ``#`` and ``?``, so the value
+        reads ``...%23...@...%3F...`` there, a spelling that neither the plain
+        value, ``quote(value, safe="")`` nor the userinfo form matches."""
+        form = quote(self.SPECIAL, safe="!$&'()*+,%/:;=@")
+        assert form != quote(self.SPECIAL, safe="")
+
+        uri = self._masked_uri_with(f"https://example.com/{form}/repo", form)
+
+        assert form not in uri
+        assert quote(self.SPECIAL, safe="") not in uri
+        assert self.SPECIAL not in uri
+        assert _mask_secret_value(self.SPECIAL) in uri
+
+    def test_a_value_in_a_urls_query_is_masked_in_the_query_spelling(self):
+        """The query leaves ``?`` raw as well, so the value reads
+        ``...%23...@...?...`` there."""
+        form = quote(self.SPECIAL, safe="!$&'()*+,%/:;=?@")
+        assert form != quote(self.SPECIAL, safe="!$&'()*+,%/:;=@")
+
+        uri = self._masked_uri_with(f"https://example.com/repo?token={form}", form)
+
+        assert form not in uri
+        assert self.SPECIAL not in uri
+        assert _mask_secret_value(self.SPECIAL) in uri
+
+    def test_a_url_path_that_holds_nothing_exposed_is_kept(self):
+        """Control: the same URL shape with another value in its path."""
+        url = "https://example.com/a%23b@c/repo"
+        model = _report_with_a_url(url, _bandit(HARDCODED + f"'{self.SPECIAL}'"))
+
+        mask_secrets_in_results(model)
+
+        provenance = model.sarif.runs[0].versionControlProvenance[0]
+        assert str(provenance.repositoryUri) == url
+
     def test_a_url_that_holds_nothing_exposed_is_kept(self):
         """Control."""
         url = "https://example.com/repo"

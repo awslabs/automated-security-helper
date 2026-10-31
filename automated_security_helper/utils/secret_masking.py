@@ -2909,7 +2909,7 @@ def _xml_attribute(value: str) -> str:
 #: string, HTML or XML text and attributes, doubled quotes (CSV, YAML), a
 #: backslash-escaped single quote (shell and script strings), percent-encoded
 #: (URLs, with a space as ``%20`` or ``+``, and as a pydantic URL writes its
-#: userinfo), inside a YAML double-quoted scalar,
+#: userinfo, path and query), inside a YAML double-quoted scalar,
 #: as the reports show it, and as the JUnit report's XML attributes carry it.
 _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     lambda value: value,
@@ -2931,6 +2931,16 @@ _TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
     # A credential written into a URL as is (``https://user:pa@ss!1@host``) is
     # in ``str(url)`` in this spelling, which neither form above matches.
     lambda value: quote(value, safe="!$&'()*+,%"),
+    # A URL's path and query as pydantic writes them: the path leaves ``@ : = ;
+    # /`` raw and encodes ``?``, ``#``, space and the brackets and braces; the
+    # query leaves ``?`` raw too, and a special scheme's query encodes ``'``
+    # (``_mask_url``). The path form is tried with and without the characters
+    # ``[ ] \ ^ |`` encoded, since the URL standard's path set has changed on
+    # them.
+    lambda value: quote(value, safe="!$&'()*+,%/:;=@"),
+    lambda value: quote(value, safe="!$&'()*+,%/:;=@[]\\^|"),
+    lambda value: quote(value, safe="!$&'()*+,%/:;=?@[]\\^|`{}"),
+    lambda value: quote(value, safe="!$&()*+,%/:;=?@[]\\^|`{}"),
     # The Markdown reporter: HTML-escaped, then every Markdown character
     # backslash-escaped (markdown_reporter._text).
     lambda value: _MARKDOWN_CHARACTER.sub(r"\\\1", html.escape(value, quote=False)),
