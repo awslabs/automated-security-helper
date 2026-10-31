@@ -1712,8 +1712,8 @@ def _filesystem_folds_case(target_path: Optional[Path]) -> bool:
     as written to one path; False where they are two files (ext4, XFS, tmpfs), so
     a member ``foo.js/bar.js`` stands beside a member ``Foo.js`` and both are
     extracted. Measured, once per archive, by writing an empty probe file into the
-    nearest existing ancestor of ``target_path`` (the extraction directory itself is
-    made after the members are inspected) and reading whether its upper-case
+    nearest existing ancestor of ``target_path`` (the extraction directory may or
+    may not exist yet, by archive kind) and reading whether its upper-case
     spelling exists; the probe is removed. With no target path, or when the probe
     cannot be written or read (OSError), the answer is True: the fold refuses or
     renames a member that would have been a second file and loses nothing, where
