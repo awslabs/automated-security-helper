@@ -1217,18 +1217,55 @@ def test_a_process_with_pipes_in_bytes_mode_passes_no_encoding(monkeypatch):
 # --- what an earlier test leaves behind ------------------------------------------------------
 
 
-def test_a_test_starts_with_nothing_the_earlier_ones_left_behind():
-    """Kept last in the file, after every test that fills a stand-in's class-level
-    record, hands a stand-in a cancel event, or ends a child against the module's
-    registries. The autouse reset must have emptied all of them again: an event
-    left on the interrupt-raising stand-in would raise KeyboardInterrupt into
-    whichever test reads it next, outside ``pytest.raises``, and a fake pid left
-    in the registries would be read by the next test that ends a child."""
+def test_what_a_test_writes_to_the_registries_does_not_outlive_it(monkeypatch):
+    """A pid, a count, a recorded instance or a cancel event one test writes is
+    never read by the next: the autouse reset hands each test fresh registries and
+    fresh stand-in records and puts the originals back afterwards. An event left
+    on the interrupt-raising stand-in would raise KeyboardInterrupt into whichever
+    test reads it next, outside ``pytest.raises``, and a fake pid left in the
+    registries would be read by the next test that ends a child.
+
+    The test writes a mark into every one of them, then undoes the patches as the
+    teardown does, and reads the originals back. With the reset missing, or reset
+    to empty the originals in place, the marks land in the originals and the
+    reads below fail; a check of the empty state at the start of a test could not
+    fail, since the reset has just made it empty."""
+    mark = object()
+    count_mark = 10**6
+    spu._RUNNING_GROUPS[_FAKE_PID] = _FakeChild()
+    spu._SERVER_KILLED.add(_FAKE_PID)
+    spu._SPAWNS_STARTING = count_mark
+    cancellation._TOOL_PIDS = (_FAKE_PID,)
+    cancellation._TOOL_GROUPS = (_FAKE_PID,)
     for stand_in in _STAND_INS_WITH_INSTANCES:
-        assert stand_in.instances == [], stand_in.__name__
+        stand_in.instances.append(mark)
     for stand_in in _STAND_INS_WITH_AN_EVENT:
-        assert stand_in.event is None, stand_in.__name__
-    assert spu._SERVER_KILLED == set()
-    assert spu._RUNNING_GROUPS == {}
-    assert spu._SPAWNS_STARTING == 0
-    assert cancellation._TOOL_GROUPS == ()
+        stand_in.event = mark
+    monkeypatch.undo()
+    try:
+        assert _FAKE_PID not in spu._RUNNING_GROUPS
+        assert _FAKE_PID not in spu._SERVER_KILLED
+        assert spu._SPAWNS_STARTING != count_mark
+        assert _FAKE_PID not in cancellation._TOOL_PIDS
+        assert _FAKE_PID not in cancellation._TOOL_GROUPS
+        for stand_in in _STAND_INS_WITH_INSTANCES:
+            assert mark not in stand_in.instances, stand_in.__name__
+        for stand_in in _STAND_INS_WITH_AN_EVENT:
+            assert stand_in.event is not mark, stand_in.__name__
+    finally:
+        # With the reset broken the marks sit in the originals: take them out
+        # again so the failure stays this test's. Nothing to do otherwise.
+        spu._RUNNING_GROUPS.pop(_FAKE_PID, None)
+        spu._SERVER_KILLED.discard(_FAKE_PID)
+        if spu._SPAWNS_STARTING == count_mark:
+            spu._SPAWNS_STARTING = 0
+        if cancellation._TOOL_PIDS == (_FAKE_PID,):
+            cancellation._TOOL_PIDS = ()
+        if cancellation._TOOL_GROUPS == (_FAKE_PID,):
+            cancellation._TOOL_GROUPS = ()
+        for stand_in in _STAND_INS_WITH_INSTANCES:
+            while mark in stand_in.instances:
+                stand_in.instances.remove(mark)
+        for stand_in in _STAND_INS_WITH_AN_EVENT:
+            if stand_in.event is mark:
+                stand_in.event = None
