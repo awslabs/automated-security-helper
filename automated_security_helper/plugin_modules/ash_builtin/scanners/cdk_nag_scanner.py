@@ -1476,6 +1476,16 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 level=logging.WARNING,
             )
 
+        # The name of CDK's own validation plugin, read once per scan and used where a
+        # failed template's results are split into requested packs and the rest. Imported
+        # here, at the scope of the scan, rather than inside the per-target failure
+        # branch: the scanner imports the wrapper lazily by design, and this point is
+        # reached only after the dependency check passed, so the module is already
+        # loaded and the import cannot fail.
+        from automated_security_helper.utils.cdk_nag_wrapper import (
+            CDK_OWN_PLUGIN_NAME,
+        )
+
         outdir = self.results_dir.joinpath(target_type)
         sarif_results: List[Result] = []
         # The tree the candidates came from. Each template is checked against it here,
@@ -1634,10 +1644,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         # not make the target partly evaluated: with it counted, a
                         # template every requested pack threw on read "1 pack(s)
                         # evaluated it" where no cdk-nag rule had run.
-                        from automated_security_helper.utils.cdk_nag_wrapper import (
-                            CDK_OWN_PLUGIN_NAME,
-                        )
-
                         results = nag_result_dict.results or {}
                         ran = {
                             pack: findings
