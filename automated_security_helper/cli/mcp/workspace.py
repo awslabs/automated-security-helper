@@ -208,6 +208,7 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.core.resource_management.scan_registry import (
+    OUTPUT_REMOVAL_WAIT_SECONDS,
     MCScanStatus,
     get_scan_registry,
 )
@@ -1541,6 +1542,10 @@ def _register_projects(
     _refuse_outputs_another_scan_writes(registry, plan, project_outputs, output_dir)
     registered: Dict[str, str] = {}
     slot = str(uuid.uuid4())
+    # One wait for the whole batch: each register_scan waits for the removal of an
+    # output tree it meets, up to the wait it is given, and a wait per call made
+    # a workspace of N projects wait N times as long. Each call gets what is left.
+    removal_deadline = time.monotonic() + OUTPUT_REMOVAL_WAIT_SECONDS
     try:
         for project in plan.active_projects:
             registered[project.key] = registry.register_scan(
@@ -1554,6 +1559,7 @@ def _register_projects(
                 session_id=session_id,
                 slot=slot,
                 environment_values=environment_values,
+                removal_wait_seconds=max(0.0, removal_deadline - time.monotonic()),
             )
         if not registered:
             # No active project (every project missing under
@@ -1570,6 +1576,7 @@ def _register_projects(
                 session_id=session_id,
                 slot=slot,
                 environment_values=environment_values,
+                removal_wait_seconds=max(0.0, removal_deadline - time.monotonic()),
             )
     except Exception:
         for scan_id in registered.values():
