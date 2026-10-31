@@ -86,6 +86,9 @@ class TestAFileBodyIsNotCommands:
             "RUN cat <<'EOF' > /usr/local/bin/setup.sh",
             "RUN cat <<-'EOF' >> /usr/local/bin/setup.sh",
             "RUN cat 2>/dev/null > /usr/local/bin/setup.sh <<'EOF'",
+            # A backslash before the name quotes the marker as a quote around it does.
+            "RUN cat > /usr/local/bin/setup.sh <<\\EOF",
+            "RUN cat <<\\EOF > /usr/local/bin/setup.sh",
         ],
     )
     def test_the_installs_in_a_written_file_are_not_the_images(
@@ -198,6 +201,20 @@ class TestAFileBodyIsStillRead:
         with pytest.raises(checker.PinEnumerationError, match="Dockerfile:4.*'jq'"):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
+    def test_an_unpinned_package_in_a_backslash_quoted_script_is_refused(
+        self, tmp_path
+    ):
+        # Red before: `<<\EOF` was no marker, so the lines after it were taken for
+        # instructions of their own, none of which is a RUN, and the unpinned jq in the
+        # script was never read.
+        body = (
+            "RUN cat > /tmp/install.sh <<\\EOF && sh /tmp/install.sh\n"
+            f"apt-get install -y --no-install-recommends {CURL} jq\n"
+            "EOF\n"
+        )
+        with pytest.raises(checker.PinEnumerationError, match="Dockerfile:4.*'jq'"):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
     def test_a_pinned_package_in_a_written_script_is_looked_up(self, tmp_path):
         # Red before: the pin was never enumerated, so it was never looked up.
         body = (
@@ -231,6 +248,10 @@ class TestAShellBodyIsStillCommands:
             "RUN bash <<EOF >/dev/null",
             "RUN bash <<EOF 2>&1",
             "RUN cat <<EOF | sh",
+            # A backslash-quoted marker: a shell still runs its body, and tee with no
+            # file writes nothing, so neither body is a file's content.
+            "RUN bash <<\\EOF",
+            "RUN tee <<\\EOF",
         ],
     )
     def test_an_expansion_in_an_install_is_still_refused(self, tmp_path, first_line):

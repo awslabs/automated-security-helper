@@ -1312,10 +1312,13 @@ _NODESOURCE_URL_MAJOR = re.compile(
 )
 # Docker reads instruction names without regard to case.
 _RUN_INSTRUCTION = re.compile(r"^RUN\s", re.IGNORECASE)
-# A here-document marker on a RUN line: <<EOF, <<-EOF, <<"EOF". Not a here-string (<<<),
-# and not a name that goes on into a call.
+# A here-document marker on a RUN line: <<EOF, <<-EOF, <<"EOF", <<\EOF. Not a
+# here-string (<<<), and not a name that goes on into a call. A quote around the name,
+# or a backslash before it, stops the shell expanding the body (see _heredoc_markers).
+_HEREDOC_NAME = r"[A-Za-z_][A-Za-z0-9_]*"
 _HEREDOC_MARKER = re.compile(
-    r"(?<!<)<<-?\s*([\"']?)([A-Za-z_][A-Za-z0-9_]*)\1(?![\w(])"
+    rf"(?<!<)<<-?\s*(?:([\"'])(?P<name>{_HEREDOC_NAME})\1"
+    rf"|(?P<escaped>\\)?(?P<bare>{_HEREDOC_NAME}))(?![\w(])"
 )
 # Shell arithmetic, $((1 << shift)) or ((x = 1 << n)), with one level of inner
 # parentheses. Its shift operator is not a here-document, so it is cut out before the
@@ -1328,7 +1331,7 @@ _COMMAND_END = re.compile(r"\|\||&&|[;|]|(?<![<>&])&(?![>&])")
 # descriptor (``2>&1``), and not /dev/null, which keeps nothing.
 _FILE_REDIRECT = re.compile(r"(?:&|\d*)>>?(?!&)\s*(?!/dev/null(?![\w/.-]))[^\s<>|;&]")
 # A redirection or a here-document marker among the words of a command.
-_REDIRECT_WORD = re.compile(r"(?:&|\d*)>>?\s*\S*|<<-?\s*[\"']?\w+[\"']?")
+_REDIRECT_WORD = re.compile(r"(?:&|\d*)>>?\s*\S*|<<-?\s*[\"'\\]?\w+[\"']?")
 # What _split_substitutions leaves in place of a command substitution, $(...) or
 # `...`: one word, with no shell metacharacter in it, that no package spelling matches.
 _SUBSTITUTION_WORD = "$(...)"
@@ -1385,9 +1388,9 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
     shell (``bash <<EOF > log``), or to commands that write no file, is commands. Both
     are read for installs; the flag only decides whether a positional parameter in an
     install (``"$@"``) is skipped as the caller's. A marker that is not quoted
-    (``<<EOF``, not ``<<'EOF'``) has the build shell expand the body as it is written,
-    so what lands in the file is whatever the RUN's variables were; that body is read
-    as commands too.
+    (``<<EOF``, not ``<<'EOF'`` or ``<<\\EOF``) has the build shell expand the body as
+    it is written, so what lands in the file is whatever the RUN's variables were; that
+    body is read as commands too.
     """
     cleaned = _ARITHMETIC.sub(" ", line)
     segments: list[tuple[int, int, str]] = []  # (start, stop, what ended the command)
@@ -1414,8 +1417,11 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
             writes = writes or bool(_FILE_REDIRECT.search(command))
             writes = writes or _writes_a_file(words)
             shell = shell or _runs_a_shell(words)
-        quoted = bool(match.group(1))
-        markers.append((match.group(2), writes and not shell and quoted))
+        # A quoted name (<<'EOF') or a backslash before it (<<\EOF) is a marker the
+        # shell does not expand the body for.
+        quoted = bool(match.group(1) or match.group("escaped"))
+        name = match.group("name") or match.group("bare")
+        markers.append((name, writes and not shell and quoted))
     return markers
 
 
