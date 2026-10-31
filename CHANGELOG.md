@@ -8157,7 +8157,12 @@
   and opens it anew at its real position; a vulnerability with one location is
   unchanged. The `id` and the ASH finding-id identifier of every vulnerability
   are now the finding's `id` in `ash.flat.json` (see the entry on that id below),
-  so they change once with it.
+  so they change once with it. A vulnerability that has no rule identifier (its
+  result has no rule id, or no scanner name) carries the ASH finding id as its
+  only identifier, so for it that change is also a change of the identifier
+  GitLab matches vulnerabilities on: the first pipeline after the upgrade
+  reports it as a new vulnerability and marks the earlier one as no longer
+  detected.
 
 - **Every OCSF `finding_info.uid` changes once, and then stays.** It was a fresh
   random UUID on every run, so no SIEM could match a finding across two scans. It
