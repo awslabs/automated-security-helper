@@ -20,6 +20,11 @@ import xml.etree.ElementTree as ET  # nosec B405
 
 import pytest
 
+from automated_security_helper.models.workspace import (
+    ProjectRunStatus,
+    WorkspaceProjectResult,
+    WorkspaceResults,
+)
 from automated_security_helper.schemas.sarif_schema_model import (
     Message,
     Message1,
@@ -82,7 +87,9 @@ class TestForbiddenCharactersAreWrittenAsEscapes:
         case = root.find(".//testcase")
         assert CONTROL not in output
         assert case.get("classname") == f"R{SHOWN}1"
-        assert SHOWN in case.find("system-out").text
+        # The value itself, not just a control's escape: the rule id is in
+        # the same element and would satisfy a bare check for the escape.
+        assert f"p{SHOWN}v" in case.find("system-out").text
 
     def test_layout_characters_are_kept(self, tmp_path):
         """Tab and line feed are legal XML and system-out is joined by them."""
@@ -94,6 +101,55 @@ class TestForbiddenCharactersAreWrittenAsEscapes:
         system_out = ET.fromstring(output).find(".//system-out").text  # nosec B314
         assert "a\tb" in system_out
         assert "\n" in system_out
+
+    @pytest.mark.parametrize(
+        "character, shown",
+        [
+            (chr(0x00), "\\x00"),
+            (chr(0x08), "\\x08"),
+            (chr(0x0B), "\\x0b"),
+            (chr(0x0C), "\\x0c"),
+            (chr(0x0E), "\\x0e"),
+            (chr(0x1F), "\\x1f"),
+            (chr(0xD800), "\\" + "ud800"),
+            (chr(0xDCFF), "\\" + "udcff"),
+            (chr(0xFFFE), "\\" + "ufffe"),
+            (chr(0xFFFF), "\\" + "uffff"),
+        ],
+        ids=lambda value: f"U+{ord(value):04X}" if len(value) == 1 else None,
+    )
+    def test_every_forbidden_character_is_written_as_its_escape(
+        self, tmp_path, character, shown
+    ):
+        """XML 1.0 forbids the C0 controls but tab, line feed and carriage
+        return, the surrogates (a file name that is not UTF-8 reaches Python as
+        a lone one) and U+FFFE and U+FFFF. One character covers none of the
+        range: an escape that stopped at U+0008, or one that took the vertical
+        tab and the form feed for whitespace, would pass the single control
+        above."""
+        result = _make_result(level="error")
+        # Set past the model's validation: a lone surrogate is not text the
+        # model accepts, and the reporter reads whatever the attribute holds.
+        result.message.root.__dict__["text"] = f"bad{character}name"
+
+        output = _render(tmp_path, [result])
+
+        root = ET.fromstring(output)  # nosec B314
+        case = root.find(".//testcase")
+        assert character not in output
+        assert f"bad{shown}name" in case.get("name")
+
+    @pytest.mark.parametrize("character", ["\t", "\n", "\r"])
+    def test_every_layout_character_is_left_unescaped(self, tmp_path, character):
+        """The allowed set: none of the three is written as an escape, and the
+        document still parses with it in the text."""
+        result = _make_result(level="error")
+        result.properties.__pydantic_extra__["note"] = f"a{character}b"
+
+        output = _render(tmp_path, [result])
+
+        ET.fromstring(output)  # nosec B314
+        assert f"\\x{ord(character):02x}" not in output
 
 
 class TestAResultWithoutPropertiesKeepsItsCase:
@@ -154,9 +210,35 @@ class TestAScannerNameThatIsNotTextKeepsItsCase:
         result = _make_result(rule_id="ODDPROJECT", level="error")
         result.properties.__pydantic_extra__["workspace_project"] = project
         result.properties.tags = []
+        # A workspace with a project, so the ``{project: gate}`` table the lookup
+        # reads is not empty: a reporter that skips the lookup for an empty
+        # table would never hash the value, and this test would guard nothing.
+        model = _make_model(runs=[_make_run(results=[result])])
+        model.workspace = WorkspaceResults(
+            workspace_file=(tmp_path / "fixture.code-workspace").as_posix(),
+            workspace_root=tmp_path.as_posix(),
+            exit_code=0,
+            projects=[
+                WorkspaceProjectResult(
+                    project="svc",
+                    relative_path="svc",
+                    display_label="svc",
+                    status=ProjectRunStatus.COMPLETED,
+                    severity_threshold="MEDIUM",
+                    output_path="projects/svc",
+                )
+            ],
+        )
 
-        output = _render(tmp_path, [result])
+        output = _get_reporter(tmp_path).report(model)
 
         root = ET.fromstring(output)  # nosec B314
         cases = [case.get("classname") for case in root.iter("testcase")]
         assert "ODDPROJECT" in cases, output
+        # Filed under the default suite, not under the value read as text: a
+        # case under "7/test-scanner" or "['svc', 'lib']/test-scanner" would
+        # still be present above.
+        shown = str(project)
+        names = [suite.get("name") for suite in root.iter("testsuite")]
+        if shown:
+            assert not any(shown in name for name in names), names

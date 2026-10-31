@@ -124,6 +124,26 @@ def test_a_recorded_gate_is_read_whatever_its_case(tmp_path, workspace_model):
     assert _outcome(cases["RULE-LAX"]) == "below-threshold"
 
 
+@pytest.mark.parametrize(
+    "index, written, rule",
+    [(0, "all", "RULE-STRICT"), (1, "low", "RULE-LAX")],
+    ids=["all", "low"],
+)
+def test_a_lowercase_gate_is_not_read_as_critical(
+    tmp_path, workspace_model, index, written, rule
+):
+    """The case above cannot tell a reader that skips the normalization: the
+    ladder is case-sensitive and reads a spelling it does not know as CRITICAL,
+    so ``"critical"`` grades the same with or without it. A lowercase gate
+    below CRITICAL does tell: unnormalized, it would grade like CRITICAL and
+    skip a finding the gate reports, loosening it without a word."""
+    workspace_model.workspace.projects[index].severity_threshold = written
+
+    cases = _cases(tmp_path, workspace_model)
+
+    assert _outcome(cases[rule]) == "actionable"
+
+
 def test_the_suites_still_carry_the_project(tmp_path, workspace_model):
     """The grading change leaves the suite naming as it was."""
     output = _get_reporter(tmp_path).report(workspace_model)

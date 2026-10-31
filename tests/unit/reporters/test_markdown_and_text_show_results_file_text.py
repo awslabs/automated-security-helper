@@ -34,6 +34,9 @@ from automated_security_helper.utils.content_db_staleness import (
     STALE_NOTIFICATION_ID,
     ContentDbAgeRecord,
 )
+from tests.unit.plugin_modules.ash_builtin.reporters.test_junitxml_reporter import (
+    _without_scanner_thresholds,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -134,6 +137,9 @@ class TestInputsNotScannedShowsNameAndReason:
         (line,) = [l for l in out.splitlines() if "package-lock.json" in l]
         assert "\x1b" not in line and "\x07" not in line, repr(line)
         assert "npm\\*audit" in line, repr(line)
+        # The reason is shown, not dropped: the three checks above and below
+        # would all pass for a line that held the name and no reason.
+        assert "audited" in line, repr(line)
         assert not any(l.startswith("## x") for l in out.splitlines())
 
 
@@ -158,6 +164,9 @@ class TestTheShowingNoteCountsActionableFindings:
             for index in range(below)
         ]
         model = AshAggregatedResults(ash_config=get_default_config())
+        # ``get_default_config`` honours ASH_CONFIG: a bandit threshold it set
+        # would grade these findings by itself and not by the MEDIUM below.
+        _without_scanner_thresholds(model)
         model.ash_config.global_settings.severity_threshold = "MEDIUM"
         model.sarif = SarifReport.model_validate(
             {
