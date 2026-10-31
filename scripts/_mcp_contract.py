@@ -848,6 +848,9 @@ class Evaluator:
         #: Caught classes whose constructions are being read right now; a second
         #: read of one, inside the first, is unread. See :meth:`_caught`.
         self._caught_in_progress: set[int] = set()
+        #: The caught classes in progress that a second read answered "unread" for
+        #: since the innermost read began; a read that leaves any is not kept.
+        self._caught_hits: set[int] = set()
         #: Parent of each node, per module tree, for :meth:`_construction_site`.
         self._parents: dict[int, dict[int, ast.AST]] = {}
         #: How often each name is used in the package, and the names an import
@@ -2277,8 +2280,13 @@ class Evaluator:
         caught exception and raises the class again with that local makes the
         caught value need the construction and the construction need the caught
         value. The second read of a class whose constructions are already being
-        read is unread; the first read then completes, and the memo it leaves
-        carries that unread part.
+        read is unread. A read that ends with such an answer for a class still
+        in progress above it (two classes that raise each other, the inner one
+        met second) is not kept, since it would hold the unread part the outer
+        class's own read fills in; it is read afresh once the outer read has
+        ended. A read whose only unread answer was for its own class is kept.
+        So the types a handler lists do not depend on which of the two classes
+        the reader met first.
         """
         types = type_node.elts if isinstance(type_node, ast.Tuple) else [type_node]
         parts: list[Shape] = []
@@ -2289,43 +2297,54 @@ class Evaluator:
                 continue
             key = id(ref.node)
             if key in self._caught_in_progress:
+                self._caught_hits.add(key)
                 parts.append(
                     unread(f"{scope.site(type_expr)} (caught type under resolution)")
                 )
                 continue
-            if key not in self._caught_memo:
-                self._caught_in_progress.add(key)
-                try:
-                    kinds = [ref, *self._subclasses(ref)]
-                    family = [kind.node for kind in kinds if kind.node is not None]
-                    built = [
-                        (
-                            call,
-                            self._instance(kind, call, _Scope(module=module), family),
-                        )
-                        for kind in kinds
-                        for module, call in self._constructions(kind.node.name)  # type: ignore[union-attr]
-                        if self._is_class(call.func, module, kind.node)  # type: ignore[arg-type]
-                    ]
-                    # A construction that only raises a caught exception again
-                    # adds no value of its own. Without one that does, the
-                    # exceptions come from somewhere this reader does not see (an
-                    # alias of the class, ``cls(...)``, a partial), so nothing is
-                    # known.
-                    grounded = [
-                        c for c, _ in built if (id(c), key) not in self._reraise_calls
-                    ]
-                    self._caught_memo[key] = (
-                        union(*(shape for _, shape in built))
-                        if grounded
-                        else unread(
-                            f"{ref.module.rel}:{getattr(ref.node, 'lineno', 0)}"
-                            f" (never built, or only raised again from a caught one)"
-                        )
+            if key in self._caught_memo:
+                parts.append(self._caught_memo[key])
+                continue
+            self._caught_in_progress.add(key)
+            outer_hits, self._caught_hits = self._caught_hits, set()
+            try:
+                kinds = [ref, *self._subclasses(ref)]
+                family = [kind.node for kind in kinds if kind.node is not None]
+                built = [
+                    (
+                        call,
+                        self._instance(kind, call, _Scope(module=module), family),
                     )
-                finally:
-                    self._caught_in_progress.discard(key)
-            parts.append(self._caught_memo[key])
+                    for kind in kinds
+                    for module, call in self._constructions(kind.node.name)  # type: ignore[union-attr]
+                    if self._is_class(call.func, module, kind.node)  # type: ignore[arg-type]
+                ]
+                # A construction that only raises a caught exception again
+                # adds no value of its own. Without one that does, the
+                # exceptions come from somewhere this reader does not see (an
+                # alias of the class, ``cls(...)``, a partial), so nothing is
+                # known.
+                grounded = [
+                    c for c, _ in built if (id(c), key) not in self._reraise_calls
+                ]
+                result = (
+                    union(*(instance for _, instance in built))
+                    if grounded
+                    else unread(
+                        f"{ref.module.rel}:{getattr(ref.node, 'lineno', 0)}"
+                        f" (never built, or only raised again from a caught one)"
+                    )
+                )
+            finally:
+                self._caught_in_progress.discard(key)
+                # Answers for this class itself end with its read; any other
+                # is for a class still in progress above, which this read
+                # then depends on and hands up.
+                above = self._caught_hits - {key}
+                self._caught_hits = outer_hits | above
+            if not above:
+                self._caught_memo[key] = result
+            parts.append(result)
         return union(*parts)
 
     def _subclasses(self, ref: _Ref) -> list[_Ref]:
