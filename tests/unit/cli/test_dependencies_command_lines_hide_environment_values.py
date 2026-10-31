@@ -200,6 +200,9 @@ def _one_scanner_with(monkeypatch, tmp_path, commands):
 
 
 def _install(tmp_path):
+    # What the command printed is read from the result's `output` (stdout and
+    # stderr as the terminal shows them), not its `stdout`: on Click 8.2 and
+    # later `stdout` leaves stderr out, so a value printed there was never read.
     return CliRunner().invoke(
         dependencies_app,
         ["--plugin-type", "scanner", "--bin-path", str(tmp_path / "bin")],
@@ -212,7 +215,7 @@ def test_the_running_command_line_hides_the_values(tmp_path, monkeypatch):
 
     result = _install(tmp_path)
 
-    printed = lines.getvalue() + result.stdout
+    printed = lines.getvalue() + result.output
     assert "Running command: fetch --token" in printed, printed
     assert CANARY not in printed, printed
     # The run set the configuration's values for the runner's own lines: with
@@ -247,6 +250,6 @@ def test_an_argv_with_a_path_element_is_shown_and_run(tmp_path, monkeypatch):
 
     result = _install(tmp_path)
 
-    printed = lines.getvalue() + result.stdout
+    printed = lines.getvalue() + result.output
     assert "Running command: copy plain-path" in printed, printed
     assert "TypeError" not in printed + str(result.exception), result.exception
