@@ -256,6 +256,36 @@ class TestShownFlakeRef:
             "git+https://<userinfo>@host/repo"
         )
 
+    @pytest.mark.parametrize(
+        "ref, shown",
+        [
+            pytest.param(
+                "git+https://host/org/repo?private_token=hunter2",
+                "git+https://host/org/repo?private_token=<hidden>",
+                id="private-token",
+            ),
+            pytest.param(
+                "git+https://host/repo?ref=main&access_token=hunter2&rev=abc",
+                "git+https://host/repo?ref=main&access_token=<hidden>&rev=abc",
+                id="access-token-between-others",
+            ),
+            pytest.param(
+                "git+https://alice:hunter2@host/repo?API_KEY=hunter2",
+                "git+https://<userinfo>@host/repo?API_KEY=<hidden>",
+                id="userinfo-and-query",
+            ),
+        ],
+    )
+    def test_a_query_value_named_for_a_credential_is_not_shown(self, ref, shown):
+        # The userinfo is not the only place a URL flake reference carries a token:
+        # a git host's API takes one as a query parameter.
+        assert shown_flake_ref(ref) == shown
+        assert "hunter2" not in shown_flake_ref(ref)
+
+    def test_a_query_of_ordinary_parameters_is_shown_as_it_is(self):
+        ref = "git+https://host/repo?ref=main&rev=0123abc&dir=sub"
+        assert shown_flake_ref(ref) == ref
+
     def test_an_at_sign_after_the_authority_is_left_alone(self):
         # Only the authority holds userinfo; a `@` in the path or query is data.
         ref = "github:owner/repo?ref=release@2"

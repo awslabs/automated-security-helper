@@ -181,17 +181,30 @@ def resolve_flake_ref(explicit: Optional[str] = None) -> str:
 _URL_USERINFO = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*://)([^/?#]*)@")
 
 
+#: A query parameter of a URL flake reference whose name says it carries a
+#: credential (``?private_token=...``, ``&access_token=...``), and its value.
+#: Matched on the name only: a value read as a secret by its shape would hide
+#: ordinary refs and revisions.
+_URL_QUERY_CREDENTIAL = re.compile(
+    r"([?&;][^=&#\s]*(?:token|secret|pass(?:word|wd)?|key|auth|credential|sig)"
+    r"[^=&#\s]*=)[^&#\s]*",
+    re.IGNORECASE,
+)
+
+
 def shown_flake_ref(ref: str) -> str:
-    """``ref`` as a log line or a debug echo shows it: a URL's userinfo replaced.
+    """``ref`` as a log line or a debug echo shows it: a URL's credentials replaced.
 
     A flake reference can be a URL (``git+https://user:token@host/repo``), and the
     token in its userinfo is a credential the operator put in ASH_NIX_FLAKE_REF so
-    nix can fetch the flake. The INFO line and the debug command line go to the
-    console and to ash.log in the output directory, which neither should carry.
-    The reference nix is given is not changed; a reference with no userinfo is
-    returned as it is.
+    nix can fetch the flake. So is the value of a query parameter named for one
+    (``?private_token=...``), the form a git host's API accepts. The INFO line and
+    the debug command line are written to the console and to ash.log in the
+    output directory, which neither should carry. The reference nix is given is not
+    changed; a reference with neither is returned as it is.
     """
-    return _URL_USERINFO.sub(r"\1<userinfo>@", ref, count=1)
+    shown = _URL_USERINFO.sub(r"\1<userinfo>@", ref, count=1)
+    return _URL_QUERY_CREDENTIAL.sub(r"\1<hidden>", shown)
 
 
 #: Given to the inner scan, as container mode gives it to the scan in the image: the
