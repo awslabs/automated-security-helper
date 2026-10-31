@@ -227,7 +227,8 @@ class ScannerOptionsBase(PluginOptionsBase):
     # prevents is a property of the shared subprocess path, not of any one tool.
     # detect-secrets previously carried its own copy of this option, which is why
     # it was the only scanner that timed out cleanly while the rest could run
-    # unbounded. 300 matches the default it chose.
+    # unbounded. The default is 1800 seconds; detect-secrets chose 300 for its
+    # own copy.
     scan_timeout: Annotated[
         int | None,
         Field(

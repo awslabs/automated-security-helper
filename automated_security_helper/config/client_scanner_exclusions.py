@@ -552,16 +552,19 @@ class EvaluationBudget:
         if key in self._timed_out:
             raise ScannerError(
                 f"A regular expression from {source} already ran past {timeout} "
-                "seconds, the scanner's scan_timeout, earlier in this pass. It is "
-                "not searched again, and the scan fails."
+                "seconds, the pattern time limit (the scanner's scan_timeout, or "
+                "the scan_timeout default where the scanner's is null), earlier in "
+                "this pass. It is not searched again, and the scan fails."
             )
         remaining = self.remaining(timeout)
         if remaining <= 0:
             self._timed_out[key] = source
             raise ScannerError(
-                f"The scanner's scan_timeout of {timeout} seconds was spent on "
-                f"earlier regular expressions of this pass before one from {source} "
-                "could be searched. The scan fails rather than run past it."
+                f"The pattern time limit of {timeout} seconds (the scanner's "
+                "scan_timeout, or the scan_timeout default where the scanner's is "
+                "null) was spent on earlier regular expressions of this pass before "
+                f"one from {source} could be searched. The scan fails rather than "
+                "run past it."
             )
         ran_out = False
         try:
@@ -629,9 +632,12 @@ class _EvaluationWorker:
     ) -> T:
         """``function(*args)`` in the worker, killed when ``wait`` seconds pass.
 
-        ``wait`` is what is left of ``timeout``, the scanner's ``scan_timeout``,
-        which the error names. Both None waits for the answer with no deadline,
-        for a scanner left unbounded: the search still runs in the child.
+        ``wait`` is what is left of ``timeout``, the pattern time limit (the
+        scanner's ``scan_timeout``, or its default where the scanner's is null),
+        which the error names. ``EvaluationBudget.evaluate`` never hands in None
+        for either: it turns a scanner left unbounded into that default first.
+        This method alone, given None, would wait for the answer with no deadline
+        (the search still runs in the child).
         """
         self.last_search_seconds = 0.0
         connection = self._started()
@@ -647,7 +653,7 @@ class _EvaluationWorker:
             if not connection.poll(wait):
                 raise EvaluationTimedOut(
                     f"A regular expression from {source} did not finish matching "
-                    f"within {timeout} seconds, the scanner's scan_timeout. Its "
+                    f"within {timeout} seconds, the pattern time limit. Its "
                     "evaluation was stopped, and the scan fails rather than wait on "
                     "it."
                 )
