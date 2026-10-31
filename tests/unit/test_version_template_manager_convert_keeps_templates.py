@@ -75,6 +75,27 @@ def test_overwrite_replaces_it(doc_and_template, tmp_path):
     assert "{{RELEASE}}" not in text
 
 
+def test_convert_and_the_target_list_follow_one_template_rule(tmp_path, monkeypatch):
+    """Where a template sits is written once; convert and generate both ask it."""
+    # Red before: there was no one place. convert_file built the template's name
+    # itself, so changing the rule in template_path_for left convert writing the old
+    # name; the monkeypatch of the shared rule fails there with no such attribute.
+    manager = VersionTemplateManager(tmp_path)
+    monkeypatch.setattr(
+        manager, "template_beside", lambda page: page.with_name(page.name + ".kept")
+    )
+    page = tmp_path / "docs" / "guide.md"
+    page.parent.mkdir()
+    page.write_text(DOC, encoding="utf-8")
+
+    assert manager.convert_to_template(page) is True
+
+    kept = tmp_path / "docs" / "guide.md.kept"
+    assert manager.template_path_for("docs/guide.md") == kept
+    assert kept.is_file()
+    assert not (tmp_path / "docs" / "guide.md.template").exists()
+
+
 def test_a_doc_with_no_template_is_converted(tmp_path):
     """The control: the first convert still writes the template."""
     doc = tmp_path / "README.md"

@@ -549,7 +549,7 @@ class VersionTemplateManager:
             print(f"Error: File {file_path} does not exist.")
             return FileResult.FAILED
 
-        template_path = file_path.with_suffix(file_path.suffix + self.template_suffix)
+        template_path = self.template_beside(file_path)
         if template_path.exists() and not overwrite:
             print(
                 f"Template {template_path} exists; keeping it (convert replaces an "
@@ -679,15 +679,23 @@ class VersionTemplateManager:
 
         return converted_count
 
+    def template_beside(self, page: Path) -> Path:
+        """The template of a page: beside it, the template suffix appended to its name.
+
+        The one place that rule is written. ``convert_file`` is handed the page itself,
+        which can be any path, and asks here; ``template_path_for`` asks here for a
+        ``target_files`` entry.
+        """
+        return page.with_name(page.name + self.template_suffix)
+
     def template_path_for(self, target: str) -> Path:
         """The template that ``generate`` renders into the ``target_files`` entry.
 
         One rule for everything that walks the ``target_files`` list (generate, list,
         and the version checker): the template sits beside its target with the
-        template suffix appended to the name. ``convert_file`` is handed the page
-        itself, which can be any path, and builds the same name from it.
+        template suffix appended to the name (``template_beside``).
         """
-        return self.project_root / (target + self.template_suffix)
+        return self.template_beside(self.project_root / target)
 
     def generate_all_from_templates(self) -> int:
         """
