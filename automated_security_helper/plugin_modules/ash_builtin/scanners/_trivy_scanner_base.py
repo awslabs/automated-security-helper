@@ -996,8 +996,17 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
 
     @staticmethod
     def _canonical_scanners(names: List[str]) -> List[str]:
-        """``names`` with each alias trivy accepts replaced by the name it means."""
-        return [_TRIVY_SCANNER_ALIASES.get(name, name) for name in names]
+        """``names`` with each alias trivy accepts replaced by the name it means, and
+        each scanner once, in the order it first appears.
+
+        A set written ``vuln,vulnerability`` names one scanner twice once the alias
+        is replaced. A caller that only tests membership does not mind, but the
+        misconfiguration handling builds a ``--scanners`` value from the whole list
+        (``_offline_misconfig_args``), which would repeat the name.
+        """
+        return list(
+            dict.fromkeys(_TRIVY_SCANNER_ALIASES.get(name, name) for name in names)
+        )
 
     def _scan_environment(self) -> Dict[str, str]:
         """The environment the scan runs with: the host's plus ``extra_env``."""

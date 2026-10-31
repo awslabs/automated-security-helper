@@ -1605,6 +1605,33 @@ def test_the_other_spellings_trivy_accepts_for_a_scanner_are_read_as_that_scanne
     ]
 
 
+@pytest.mark.parametrize(
+    ("written", "expected"),
+    [
+        ("vuln,vulnerability", ["vuln"]),
+        ("config,misconf,secret,misconfiguration", ["misconfig", "secret"]),
+        ("vuln,secret,vuln", ["vuln", "secret"]),
+    ],
+)
+def test_a_scanner_set_names_each_scanner_once_whatever_the_spellings(
+    tmp_path, written, expected
+):
+    """Replacing an alias by the name it means could leave one scanner twice
+    (``vuln,vulnerability`` read ``["vuln", "vuln"]``). The set keeps the order of
+    first appearance, as ``_known_scanner_names`` keeps it for the checks."""
+    from_env = _repo_scanner(tmp_path, scanners=[])
+    from_env.extra_env = {"TRIVY_SCANNERS": written}
+    assert from_env._effective_scanners(EMPTY_CONFIG_ARGS) == expected
+
+    from_file = _repo_scanner(tmp_path, scanners=[])
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text(f"scan:\n  scanners: [{written}]\n", encoding="utf-8")
+    assert from_file._effective_scanners([f"--config={operator.as_posix()}"]) == (
+        expected
+    )
+
+
 def test_offline_the_terraform_checks_are_left_out_of_a_set_written_with_config(
     tmp_path, monkeypatch
 ):
