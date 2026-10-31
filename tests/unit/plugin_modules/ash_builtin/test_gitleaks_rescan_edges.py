@@ -504,6 +504,28 @@ def test_the_copies_stop_at_the_byte_budget_and_report_the_rest(
     assert "2 file(s) the scanned tree's .gitleaksignore names were not" in caplog.text
 
 
+def test_a_file_too_big_for_the_budget_does_not_stop_the_smaller_ones(
+    tmp_path, monkeypatch, caplog
+):
+    """One large file that sorts early used to end the copying: every later named
+    file was un-scanned and only reported as not evaluated. Now the large file is
+    skipped and counted, and the files that fit are re-scanned."""
+    monkeypatch.setattr(module, "MAX_RESCAN_BYTES", 5)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/a.py", "a" * 10)
+    _write(source, "app/b.py", "bb")
+    _write(source, "app/c.py", "cc")
+    (source / ".gitleaksignore").write_text(
+        "app/a.py:github-pat:1\napp/b.py:github-pat:1\napp/c.py:github-pat:1\n"
+    )
+    with caplog.at_level("WARNING"):
+        _add_back(scanner, source, _report(), tmp_path)
+    assert [call["files"] for call in calls] == [["app/b.py", "app/c.py"]]
+    assert scanner._rescan_skipped == 1
+    assert "1 file(s) the scanned tree's .gitleaksignore names were not" in caplog.text
+
+
 def test_no_copy_is_made_once_the_deadline_has_passed(tmp_path, monkeypatch):
     """The copies ran before the first deadline check, outside scan_timeout."""
     clock = iter([0.0, 1000.0, 1000.0, 1000.0])

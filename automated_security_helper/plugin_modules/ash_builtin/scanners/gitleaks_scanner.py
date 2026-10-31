@@ -249,9 +249,10 @@ MAX_RESCAN_FILES = 10_000
 #: Most bytes the ``.gitleaksignore`` re-scan copies in all. The copies go to
 #: the run's own directory, under TMPDIR by default, and a tree could otherwise
 #: have ASH duplicate gigabytes there by naming large files. A file that would
-#: take the total past this is the first name not re-scanned, and it and the
-#: names after it are reported as not evaluated, as names past
-#: ``MAX_RESCAN_FILES`` are.
+#: take the total past this is not re-scanned and is reported as not evaluated,
+#: as names past ``MAX_RESCAN_FILES`` are; the names after it are still tried,
+#: so one large file does not leave the smaller ones that fit un-scanned. The cap
+#: has no option: raising it is a decision about the disk the copies use.
 MAX_RESCAN_BYTES = 1 << 30
 
 #: Most bytes of the tree's ``.gitleaksignore`` ASH reads. A larger file stops
@@ -1273,6 +1274,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         # file is also linked under another name.
         itself_names: List[str] = []
         not_checked = 0
+        past_the_limit = 0
         copied_bytes = 0
         listings: Dict[Path, Set[str]] = {}
         spellings_seen: Set[str] = set()
@@ -1327,7 +1329,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             # last real file is not a file left behind, and a tree that names
             # exactly MAX_RESCAN_FILES real files was re-scanned in full.
             if in_tree + len(itself_names) >= MAX_RESCAN_FILES:
-                not_checked = 1 + unreached(relatives[index + 1 :])
+                past_the_limit = unreached(relatives[index + 1 :])
+                not_checked += 1 + past_the_limit
                 break
             try:
                 handle = open_in_scanned_tree(
@@ -1351,10 +1354,13 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 ):
                     continue
                 if copied_bytes + size > MAX_RESCAN_BYTES:
-                    # This file and every name after it: the budget is spent,
-                    # and the names are reported as not evaluated.
-                    not_checked = 1 + unreached(relatives[index + 1 :])
-                    break
+                    # This file does not fit what is left of the budget: it is
+                    # reported as not evaluated, and the names after it are
+                    # still tried, since a smaller one may fit. Stopping here
+                    # left every later file un-scanned behind one large file
+                    # that sorted early.
+                    not_checked += 1
+                    continue
                 copied_bytes += size
                 try:
                     _write_private_copy(handle, destination)
@@ -1393,9 +1399,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             report = "self.sarif" if number == 0 else f"self-{number}.sarif"
             batches.append((self_dir, name, reports_dir / report))
         # The files the ignore file names: the ones the directories list, whether
-        # or not they were copied, and the one the limit stopped at with those
-        # after it (not_checked counts it, and spellings_seen holds it).
-        named = len(spellings_seen) + max(not_checked - 1, 0)
+        # or not they were copied (spellings_seen), and those after the file the
+        # file limit stopped at.
+        named = len(spellings_seen) + past_the_limit
         return batches, in_tree + len(itself_names), not_checked, named
 
     @staticmethod
