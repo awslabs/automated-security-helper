@@ -28,6 +28,7 @@ from automated_security_helper.utils.workspace_paths import (
     SUPPRESSION,
     to_project_pattern,
 )
+from tests.unit.utils.workspace_path_contract import assert_contract
 
 pytestmark = pytest.mark.unit
 
@@ -49,12 +50,7 @@ def _down(pattern, prefix, kind=SUPPRESSION):
 
 def _contract_holds(pattern, prefix, converted, paths=PROBE_PATHS):
     """The converted pattern reaches exactly the files the workspace one does."""
-    for path in paths:
-        project_side = (
-            False if converted is None else file_path_matches(path, converted)
-        )
-        workspace_side = file_path_matches(f"{prefix}/{path}", pattern)
-        assert project_side is workspace_side, (pattern, prefix, converted, path)
+    assert_contract(pattern, prefix, SUPPRESSION, paths, converted)
 
 
 class TestFixedLengthLeadingThatCannotSpanThePrefix:

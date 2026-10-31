@@ -30,13 +30,13 @@ import inspect
 import pytest
 
 from automated_security_helper.core.exceptions import WorkspacePatternError
-from automated_security_helper.utils.suppression_matcher import file_path_matches
 from automated_security_helper.utils.workspace_paths import (
     drive_anchor,
     SUPPRESSION,
     to_project_pattern,
     to_workspace_pattern,
 )
+from tests.unit.utils.workspace_path_contract import assert_contract
 
 pytestmark = pytest.mark.unit
 
@@ -58,16 +58,7 @@ PROBE_PATHS = [
 
 def _contract_holds(pattern: str, prefix: str) -> None:
     """The module's contract, read on both sides with the real matcher."""
-    converted = to_project_pattern(pattern, prefix, kind=SUPPRESSION)
-    for path in PROBE_PATHS:
-        workspace_side = file_path_matches(f"{prefix}/{path}", pattern)
-        project_side = (
-            False if converted is None else file_path_matches(path, converted)
-        )
-        assert project_side == workspace_side, (
-            f"{pattern!r} over {prefix!r} -> {converted!r} disagrees with the "
-            f"matcher at {path!r}: project {project_side}, workspace {workspace_side}"
-        )
+    assert_contract(pattern, prefix, SUPPRESSION, PROBE_PATHS)
 
 
 class TestAColonInANameIsNotADrive:
