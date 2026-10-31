@@ -213,6 +213,21 @@ it needs.
   `AUTH`, `CREDENTIAL`, `API_KEY` or `SESSION`, and any value carrying
   `user:password@` in a URL, is dropped unless the scanner names that exact variable
   (snyk-code names `SNYK_TOKEN`). Cloud credentials and tokens are not passed in.
+- The proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and the
+  lowercase forms) and the certificate settings (`SSL_CERT_FILE`, `SSL_CERT_DIR`,
+  `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`) are the default of
+  one environment list, which has the shape of a docker-compose `environment` list:
+  a name passes the value ASH has, and `NAME=value` sets it. Every backend reads the
+  same list, and a list replaces the default one. A proxy setting is passed only to a
+  scanner that has a network. A credential-shaped name in the list (one the rule
+  above drops) is refused with its name, so the list is not a channel for secrets.
+- A certificate setting you made is readable inside the sandbox, on every backend,
+  where bwrap, firejail and Landlock hide the home directory: the files that
+  `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS`
+  name, read-only, and each directory `SSL_CERT_DIR` names. The grant is for the value
+  ASH started with (or one the list sets), never for a value that appears later in
+  the environment. A `SSL_CERT_DIR` entry that is a home directory or holds one is
+  not granted, with a warning, because it would show far more than the certificates.
 - No local IPC endpoint is reachable, with or without a network: not the Docker or
   Podman socket, the session bus, `$SSH_AUTH_SOCK`, the journal, nor a socket in a
   directory the sandbox mounts, such as the Nix daemon's under `/nix`. On Linux every

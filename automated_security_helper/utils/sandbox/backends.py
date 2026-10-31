@@ -30,11 +30,15 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import startup_environ
 from automated_security_helper.utils.sandbox.policy import (
+    CA_BUNDLE_DIR_ENV_NAMES,
+    CA_BUNDLE_ENV_NAMES,
     SandboxPolicy,
     SandboxUnavailable,
     _distinct_home,
+    _exposes_a_home,
     _home_link_targets,
     _passwd_home,
+    parse_environment,
 )
 
 PROBE_TIMEOUT_SECONDS = 20
@@ -398,6 +402,67 @@ def _is_within(path: Path, parent: Path) -> bool:
         return False
 
 
+def _operator_ca_reads(
+    policy: SandboxPolicy, child_env: Mapping[str, str]
+) -> List[Path]:
+    """The files and directories the operator's CA-bundle settings name, as spelled.
+
+    Every backend that hides the home directory gives these back as read-only, so
+    a bundle kept under the home (``~/corp-ca.pem``) is readable inside the sandbox
+    on bwrap, firejail and Landlock as it is under sandbox-exec. Read for the
+    variables the policy's environment list passes: ``SSL_CERT_FILE``,
+    ``REQUESTS_CA_BUNDLE``, ``CURL_CA_BUNDLE`` and ``NODE_EXTRA_CA_CERTS`` name a
+    file, ``SSL_CERT_DIR`` names directories joined with the path separator.
+
+    The grant is for the operator's value alone: the one in the environment ASH
+    started with (``process_env.startup_environ``), not the live one, because
+    scanner threads change the environment while others spawn and a value one of
+    them set is not the operator's; or one the operator wrote as a ``NAME=value``
+    entry of the environment list. A value the spawn's environment carries from
+    elsewhere is passed through like every listed variable and opens nothing. Left
+    out: a relative entry, one that does not exist, a directory that is, holds or
+    sits above a home directory (it would expose far more than the directory the
+    operator meant, so it is warned about), and anything inside a path the policy
+    already lists, which the spawn sees.
+    """
+    listed, configured = parse_environment(policy.environment)
+    started = startup_environ()
+    homes = _homes_to_hide(policy)
+    seen = [_real(p) for p in [*policy.read_only, *policy.cache, *policy.writable]]
+    reads: List[Path] = []
+    for name in CA_BUNDLE_ENV_NAMES:
+        value = child_env.get(name)
+        if name not in listed or not value:
+            continue
+        if value != started.get(name) and value != configured.get(name):
+            continue
+        is_directory = name in CA_BUNDLE_DIR_ENV_NAMES
+        for entry in value.split(os.pathsep) if is_directory else [value]:
+            if not entry or not os.path.isabs(entry):
+                continue
+            real = _real(Path(entry))
+            if is_directory:
+                if not real.is_dir():
+                    continue
+                if _exposes_a_home(real, homes):
+                    ASH_LOGGER.warning(
+                        f"${name} names {entry!r}, which is not readable in the "
+                        "scanner sandbox: it would expose far more than one "
+                        "directory. Point it at the directory of certificates."
+                    )
+                    continue
+            elif not real.is_file():
+                continue
+            # Visible already, unless a home carved out of the path that shows it
+            # (a HOME under /opt) is where it sits.
+            in_a_home = any(real == h or _is_within(real, h) for h in homes)
+            if not in_a_home and any(real == p or _is_within(real, p) for p in seen):
+                continue
+            if Path(entry) not in reads:
+                reads.append(Path(entry))
+    return reads
+
+
 def _carved_homes(policy: SandboxPolicy) -> List[Path]:
     """The homes a granted path that holds one must not reopen, resolved.
 
@@ -654,6 +719,12 @@ class BwrapBackend(SandboxBackend):
 
         for p in policy.read_only:
             add(p, _RO)
+        child_env = policy.filter_env(env)
+        # The bundle or directory the operator's CA-bundle settings name, readable
+        # even where it sits under the home directory the sandbox hides.
+        ca_reads = _operator_ca_reads(policy, child_env)
+        for p in ca_reads:
+            add(p, _RO)
         caches_read_only = not self._overlay
         # The caches that did take an overlay, so that _private_caches redirects
         # only the variables of the read-only ones when the two kinds meet in one
@@ -777,7 +848,12 @@ class BwrapBackend(SandboxBackend):
         # are recreated as they always were.
         bound = [p for p in mounts if p != Path("/") and p != home]
         seen_links: Set[Path] = set()
-        spellings = list(policy.read_only) + list(policy.writable) + list(policy.cache)
+        spellings = (
+            list(policy.read_only)
+            + list(policy.writable)
+            + list(policy.cache)
+            + ca_reads
+        )
         if policy.cwd:
             spellings.append(policy.cwd)
         spellings.append(policy.home)
@@ -814,7 +890,6 @@ class BwrapBackend(SandboxBackend):
             cmd.extend(["--chdir", _real(policy.cwd).as_posix()])
         cmd.append("--")
         cmd.extend(_with_socket_filter(argv))
-        child_env = policy.filter_env(env)
         cleanup: List[Callable[[], None]] = []
         private_dirs: List[Path] = []
         if caches_read_only:
@@ -1033,6 +1108,10 @@ class FirejailBackend(SandboxBackend):
         # directory are usually inside read_only already; a name that resolves
         # nowhere fails at the spawn, so nothing is added for it here.
         program = argv[0] if os.path.isabs(argv[0]) else _sandbox_program(argv[0])
+        child_env = policy.filter_env(env)
+        # The bundle or directory the operator's CA-bundle settings name, readable
+        # even where it sits under the home directory --private hides.
+        ca_reads = [_real(p) for p in _operator_ca_reads(policy, child_env)]
         granted = [
             _real(p)
             for p in [
@@ -1043,7 +1122,7 @@ class FirejailBackend(SandboxBackend):
                 *policy.writable,
                 *policy.uv_tool_locks,
             ]
-        ]
+        ] + ca_reads
         cmd = [self._executable, "--quiet", *_FIREJAIL_CONFINEMENT]
         if not policy.network:
             cmd.append("--net=none")
@@ -1066,9 +1145,11 @@ class FirejailBackend(SandboxBackend):
 
         # firejail has no throwaway overlay, so a cache is read-only like the rest;
         # _private_caches gives the tools that write one a private directory.
-        readable = [_real(p) for p in policy.read_only] + [
-            _real(p) for p in policy.cache
-        ]
+        readable = (
+            [_real(p) for p in policy.read_only]
+            + [_real(p) for p in policy.cache]
+            + ca_reads
+        )
         writable = [_real(p) for p in policy.writable]
         # Whitelisting any path inside $HOME (or /tmp) makes everything else there
         # invisible, which is how firejail hides the home directory.
@@ -1127,7 +1208,6 @@ class FirejailBackend(SandboxBackend):
                 cmd.append(f"--read-write={_firejail_path(_real(lock))}")
         cmd.append("--")
         cmd.extend(_with_socket_filter(argv))
-        child_env = policy.filter_env(env)
         cleanup, private_dirs = _private_caches(policy, child_env)
         # firejail does not call setsid, so the spawner starts it as the leader
         # of a session of its own and the stop paths' group signals reach the
@@ -1274,9 +1354,13 @@ class LandlockBackend(SandboxBackend):
         # a policy built by hand with an executable path outside read_only gets the
         # exec grant it asks for rather than none.
         exec_paths = list(policy.executable)
+        child_env = policy.filter_env(env)
+        # The bundle or directory the operator's CA-bundle settings name is data
+        # too: read, never run, and readable where it sits under the home.
+        ca_reads = _operator_ca_reads(policy, child_env)
         data_paths = [
             p for p in policy.read_only if os.path.realpath(p) not in programs
-        ]
+        ] + ca_reads
         read_only = _around(exec_paths + list(policy.cache), carved)
         read_data = _around(data_paths, carved)
         document = {
@@ -1313,7 +1397,6 @@ class LandlockBackend(SandboxBackend):
             resolved_argv0,
             *argv[1:],
         ]
-        child_env = policy.filter_env(env)
         child_env["TMPDIR"] = private_tmp.as_posix()
         child_env["HOME"] = private_home.as_posix()
         caches, private_dirs = _private_caches(policy, child_env)
@@ -1584,6 +1667,7 @@ class SandboxExecBackend(SandboxBackend):
         trust_roots: Optional[Path] = None,
         unpack_dir: Optional[Path] = None,
         private_uv_cache: Optional[Path] = None,
+        ca_reads: Sequence[Path] = (),
     ) -> str:
         # HOME's directory and the passwd entry's home, when HOME names another
         # directory: reading starts from "/", so a home that is not denied here
@@ -1696,6 +1780,11 @@ class SandboxExecBackend(SandboxBackend):
             lines.append(
                 f"(allow file-read* (literal {_sbpl_string(_real(trust_roots))}))"
             )
+        # The operator's other CA-bundle settings: a file by its literal path, a
+        # directory by its subpath, read-only like the trust roots above.
+        for real in sorted({_real(p) for p in ca_reads}):
+            kind = "subpath" if real.is_dir() else "literal"
+            lines.append(f"(allow file-read* ({kind} {_sbpl_string(real)}))")
         # Last of the file rules, so no path the policy grants can reopen them: the
         # system and login keychains, whatever the keychain daemon would allow.
         keychains = " ".join(
@@ -1780,6 +1869,13 @@ class SandboxExecBackend(SandboxBackend):
                 trust_roots = roots_dir / "roots.pem"
                 trust_roots.write_text(pem, encoding="ascii", errors="replace")
                 child_env["SSL_CERT_FILE"] = trust_roots.as_posix()
+        # The other CA-bundle settings the operator made, the way the other
+        # backends grant them; the SSL_CERT_FILE above has its own rule.
+        ca_reads = [
+            p
+            for p in _operator_ca_reads(policy, child_env)
+            if trust_roots is None or _real(p) != _real(trust_roots)
+        ]
         unpack_dir = None
         if policy.unpack_dir_env:
             unpack_dir = Path(tempfile.mkdtemp(prefix="ash-sandbox-unpack-"))
@@ -1801,7 +1897,12 @@ class SandboxExecBackend(SandboxBackend):
             self.executable,
             "-p",
             self.profile(
-                policy, private_tmp, trust_roots, unpack_dir, private_uv_cache
+                policy,
+                private_tmp,
+                trust_roots,
+                unpack_dir,
+                private_uv_cache,
+                ca_reads,
             ),
             *argv,
         ]

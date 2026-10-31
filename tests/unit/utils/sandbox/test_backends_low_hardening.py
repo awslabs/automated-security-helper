@@ -17,8 +17,12 @@ granted read without exec, uv's lock is writable, and a spawn with no working
 directory gets the private one. sandbox-exec: a root home denies nothing, the
 third shared temp directory is denied, shared memory is named, uv's lock is not
 executable, an operator's SSL_CERT_FILE is readable, and a refused profile leaves
-no temp directory. Nothing here starts a sandbox: ``_probe_run`` is replaced where
-a plan would probe, and every assertion reads a command line or a profile.
+no temp directory. The environment list: every backend passes one list, an entry
+sets or passes a variable as a docker-compose ``environment`` entry does, a
+credential-shaped name is refused with its name, and every backend gives back
+what the operator's CA-bundle settings name. Nothing here starts a sandbox:
+``_probe_run`` is replaced where a plan would probe, and every assertion reads a
+command line or a profile.
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox import backends
 from automated_security_helper.utils.sandbox import policy as policy_module
@@ -932,3 +937,300 @@ def test_a_refused_profile_leaves_no_temp_directory(layout, monkeypatch):
         SandboxExecBackend().plan(["/bin/true"], {}, _policy(layout))
 
     assert list(scratch.iterdir()) == []
+
+
+# ---------------------------------------------------------------------------
+# the environment list and the CA-bundle settings
+# ---------------------------------------------------------------------------
+
+_BACKEND_KINDS = ["bwrap", "firejail", "landlock", "sandbox-exec"]
+_PROXY_NAMES = {
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+}
+_CA_FILE_NAMES = (
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+)
+_CA_NAMES = {*_CA_FILE_NAMES, "SSL_CERT_DIR"}
+
+
+def _plan_of(kind, layout, monkeypatch, policy, env):
+    """One backend's plan for ``policy`` and ``env``, built without starting anything.
+
+    The caller runs the plan's cleanup. Landlock and sandbox-exec make their private
+    directories under the layout's temporary directory.
+    """
+    monkeypatch.setattr(tempfile, "tempdir", str(layout.tmp))
+    if kind == "bwrap":
+        return _bwrap().plan(["/bin/true"], env, policy)
+    if kind == "firejail":
+        backend = FirejailBackend()
+        backend._executable = "/fj"
+        return backend.plan(["/bin/true"], env, policy)
+    if kind == "landlock":
+        return LandlockBackend().plan(["/bin/true"], env, policy)
+    return SandboxExecBackend().plan(["/bin/true"], env, policy)
+
+
+def _read_grants(kind, plan) -> set:
+    """Every path a plan lists as readable, resolved, as text."""
+    if kind == "bwrap":
+        return {path.as_posix() for path in _mounts(plan.argv, "--ro-bind")}
+    if kind == "firejail":
+        return {
+            arg.split("=", 1)[1] for arg in plan.argv if arg.startswith("--read-only=")
+        }
+    if kind == "landlock":
+        document = _landlock_document(plan)
+        return set(document["read_only"]) | set(document["read_data"])
+    profile = plan.argv[plan.argv.index("-p") + 1]
+    return {
+        found
+        for line in profile.splitlines()
+        if line.startswith("(allow file-read*")
+        for found in re.findall(r'\((?:literal|subpath) "([^"]*)"\)', line)
+    }
+
+
+def _granted_for(kind, layout, monkeypatch, policy, env) -> set:
+    plan = _plan_of(kind, layout, monkeypatch, policy, env)
+    try:
+        return _read_grants(kind, plan)
+    finally:
+        plan.run_cleanup()
+
+
+@POSIX
+@pytest.mark.parametrize("kind", _BACKEND_KINDS)
+def test_every_backend_reads_back_what_the_operators_ca_settings_name(
+    layout, monkeypatch, kind
+):
+    """A bundle kept under the home is readable on bwrap, firejail and Landlock too.
+
+    Only sandbox-exec granted the operator's SSL_CERT_FILE, and no backend granted
+    the others, so under the three that hide the home a bundle there was passed
+    through and unreadable. The settings are the operator's: the values ASH started
+    with. SSL_CERT_DIR holds two directories joined with the path separator.
+    """
+    env = {}
+    files = []
+    for name in _CA_FILE_NAMES:
+        bundle = layout.home / f"{name.lower()}.pem"
+        bundle.write_text("")
+        env[name] = str(bundle)
+        files.append(bundle)
+    first, second = layout.home / "certs-a", layout.home / "certs-b"
+    first.mkdir()
+    second.mkdir()
+    env["SSL_CERT_DIR"] = os.pathsep.join([str(first), str(second)])
+    monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+
+    granted = _granted_for(kind, layout, monkeypatch, _policy(layout), env)
+
+    for path in (*files, first, second):
+        assert _real(path).as_posix() in granted, (kind, path.name)
+
+
+@POSIX
+@pytest.mark.parametrize("kind", _BACKEND_KINDS)
+def test_a_ca_value_that_is_not_the_operators_opens_nothing(layout, monkeypatch, kind):
+    """The control of the test above: the same variables, a value ASH did not start
+    with (a scanner thread's), are passed through and open nothing."""
+    secret = layout.home / ".ssh" / "id_rsa"
+    secret.parent.mkdir()
+    secret.write_text("")
+    monkeypatch.setattr(backends, "startup_environ", dict)
+    env = {name: str(secret) for name in _CA_FILE_NAMES}
+
+    plan = _plan_of(kind, layout, monkeypatch, _policy(layout), env)
+    try:
+        assert plan.env["REQUESTS_CA_BUNDLE"] == str(secret)
+        assert _real(secret).as_posix() not in _read_grants(kind, plan)
+    finally:
+        plan.run_cleanup()
+
+
+@POSIX
+@pytest.mark.parametrize("kind", _BACKEND_KINDS)
+def test_a_ca_directory_that_holds_a_home_is_not_granted(
+    layout, monkeypatch, caplog, kind
+):
+    """SSL_CERT_DIR naming a directory above the home would show the whole home."""
+    env = {"SSL_CERT_DIR": str(layout.tmp)}
+    monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        granted = _granted_for(kind, layout, monkeypatch, _policy(layout), env)
+
+    assert _real(layout.tmp).as_posix() not in granted
+    assert any(
+        "SSL_CERT_DIR" in record.getMessage() and "expose" in record.getMessage()
+        for record in caplog.records
+    ), [record.getMessage() for record in caplog.records]
+
+
+def test_the_default_environment_list_is_the_proxy_family_and_the_ca_set(layout):
+    """With no list written, exactly these are passed, and nothing else the caller has."""
+    expected = _PROXY_NAMES | _CA_NAMES
+    assert set(policy_module.DEFAULT_ENVIRONMENT) == expected
+    env = dict.fromkeys(expected, "value")
+    env.update({"MY_VAR": "mine", "GITHUB_TOKEN": "t", "AWS_REGION": "r"})
+
+    online = _policy(layout, network=True).filter_env(env)
+    offline = _policy(layout).filter_env(env)
+
+    assert set(online) == expected | {"HOME"}
+    # A proxy setting is passed only to a scanner that has a network.
+    assert set(offline) == _CA_NAMES | {"HOME"}
+
+
+def test_the_baseline_names_the_reference_documents_are_unchanged():
+    """The scanner reference is generated from BASE_ENV_NAMES, so moving the CA-bundle
+    names into the environment list must leave that set as it was."""
+    assert policy_module.BASE_ENV_NAMES == {
+        "PATH",
+        "LANG",
+        "LANGUAGE",
+        "TERM",
+        "TZ",
+        "NO_COLOR",
+        "FORCE_COLOR",
+        "COLUMNS",
+        "VIRTUAL_ENV",
+        "JAVA_HOME",
+        "GEM_HOME",
+        "GEM_PATH",
+        "SYSTEMROOT",
+        *_CA_NAMES,
+    }
+
+
+def test_a_listed_name_passes_the_callers_value_and_an_entry_with_a_value_sets_one(
+    layout,
+):
+    env = {
+        "MY_VAR": "mine",
+        "OTHER": "the caller's",
+        "HTTP_PROXY": "http://proxy:3128",
+        "SSL_CERT_FILE": "/etc/ssl/corp.pem",
+        "UNLISTED": "x",
+    }
+    entries = ("MY_VAR", "OTHER=1", "HTTP_PROXY", "ADDED=2")
+
+    online = _policy(layout, network=True, environment=entries).filter_env(env)
+    offline = _policy(layout, environment=entries).filter_env(env)
+
+    home = layout.home.as_posix()
+    # The value an entry carries wins over the caller's, and sets a variable the
+    # caller does not have; the list replaces the default, so the CA setting the
+    # caller has is dropped, and a proxy setting still needs a network.
+    assert online == {
+        "MY_VAR": "mine",
+        "OTHER": "1",
+        "HTTP_PROXY": "http://proxy:3128",
+        "ADDED": "2",
+        "HOME": home,
+    }
+    assert offline == {"MY_VAR": "mine", "OTHER": "1", "ADDED": "2", "HOME": home}
+
+
+def test_an_entry_with_a_value_is_screened_like_any_value(layout):
+    """A value that carries a user name and password in a URL is dropped, as the
+    caller's would be."""
+    policy = _policy(layout, network=True, environment=("HTTPS_PROXY=http://u:p@h",))
+
+    assert "HTTPS_PROXY" not in policy.filter_env({})
+
+
+@POSIX
+def test_the_four_backends_pass_one_identical_list(layout, monkeypatch):
+    env = {
+        "MY_VAR": "mine",
+        "HTTP_PROXY": "http://proxy:3128",
+        "SSL_CERT_FILE": "/etc/ssl/corp.pem",
+        "UNLISTED": "x",
+    }
+    monkeypatch.setattr(backends, "startup_environ", dict)
+    policy = _policy(
+        layout, network=True, environment=("MY_VAR", "OTHER=1", "HTTP_PROXY")
+    )
+    names = {"MY_VAR", "OTHER", "HTTP_PROXY", "SSL_CERT_FILE", "UNLISTED"}
+
+    passed = {}
+    for kind in _BACKEND_KINDS:
+        plan = _plan_of(kind, layout, monkeypatch, policy, env)
+        try:
+            passed[kind] = {k: v for k, v in plan.env.items() if k in names}
+        finally:
+            plan.run_cleanup()
+
+    expected = {"MY_VAR": "mine", "OTHER": "1", "HTTP_PROXY": "http://proxy:3128"}
+    assert passed == dict.fromkeys(_BACKEND_KINDS, expected)
+
+
+@pytest.mark.parametrize(
+    "entry, name",
+    [
+        ("GITHUB_TOKEN", "GITHUB_TOKEN"),
+        ("DB_PASSWORD=hunter2", "DB_PASSWORD"),
+        ("npm_config__authToken", "npm_config__authToken"),
+        (OUTER_RUN_ID_ENV, OUTER_RUN_ID_ENV),
+    ],
+)
+def test_a_credential_shaped_name_is_refused_with_its_name_even_when_listed(
+    layout, entry, name
+):
+    with pytest.raises(ValueError) as refused:
+        policy_module.parse_environment(["MY_VAR", entry])
+    assert name in str(refused.value)
+    assert "hunter2" not in str(refused.value)
+
+    with pytest.raises(SandboxUnavailable, match=name):
+        _policy(layout, environment=("MY_VAR", entry))
+
+
+@pytest.mark.parametrize("entry", ["", "1BAD", "A B=c", "=value", "TWO=1\x00"])
+def test_an_entry_that_is_not_a_variable_is_refused(entry):
+    with pytest.raises(ValueError):
+        policy_module.parse_environment([entry])
+
+
+def test_a_name_listed_twice_takes_its_last_entry():
+    names, values = policy_module.parse_environment(["A=1", "B", "A", "B=2", "C=3"])
+
+    assert names == ("A", "B", "C")
+    assert values == {"B": "2", "C": "3"}
+
+
+def test_the_policy_builder_carries_the_environment_list(layout):
+    source = layout.tmp / "src"
+    source.mkdir()
+
+    def build(**kwargs):
+        return policy_module.build_scanner_policy(
+            "probe",
+            policy_module.SandboxRequirements(),
+            argv0=sys.executable,
+            source_dir=source,
+            output_dir=layout.results.parent,
+            results_dir=layout.results,
+            scan_target=source,
+            cwd=source,
+            offline=False,
+            network_scanners=None,
+            **kwargs,
+        )
+
+    assert build().environment == policy_module.DEFAULT_ENVIRONMENT
+    assert build(environment=["MY_VAR", "OTHER=1"]).environment == ("MY_VAR", "OTHER=1")
+    with pytest.raises(SandboxUnavailable, match="GITHUB_TOKEN"):
+        build(environment=["GITHUB_TOKEN"])

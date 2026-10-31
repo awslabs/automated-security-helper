@@ -5458,6 +5458,18 @@
 
 ### Fixes
 
+- **A certificate setting you made is readable inside every sandbox backend.** Only
+  sandbox-exec granted reading the file `SSL_CERT_FILE` names. Under bwrap, firejail
+  and Landlock a bundle kept under the home directory was passed through and could
+  not be opened, and `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`
+  and `SSL_CERT_DIR` were granted by none. All four backends now grant, read-only,
+  the files and directories that the values ASH started with name. A `SSL_CERT_DIR`
+  entry that is a home directory or holds one is not granted, with a warning. The
+  proxy and certificate names are now one environment list that every backend
+  reads, in the shape of a docker-compose `environment` list (a name passes the
+  value ASH has, `NAME=value` sets it); a name that marks a credential is refused
+  with its name.
+
 - **A `--cli-json-input` number where the parameter takes true/false or a whole
   number is refused with a usage error that names the key.** A JSON number for a
   true/false parameter (`"verbose": 1`) ended in an AttributeError traceback, 0 and

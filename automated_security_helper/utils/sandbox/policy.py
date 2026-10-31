@@ -127,9 +127,21 @@ class SandboxRequirements:
     staged_input_only: bool = False
 
 
-#: The baseline environment allowlist. Exact names, then prefixes. Anything else in
-#: the parent environment -- AWS_*, GITHUB_TOKEN, *_PASSWORD -- is dropped.
-BASE_ENV_NAMES = frozenset(
+#: The variables a TLS client reads its trusted roots from: the files (a bundle),
+#: and the directory (a hashed directory, or several joined with the path separator).
+#: Each is passed through by the environment list below, and a backend that hides
+#: the home directory grants reading what the operator's value names.
+CA_BUNDLE_FILE_ENV_NAMES = (
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+)
+CA_BUNDLE_DIR_ENV_NAMES = ("SSL_CERT_DIR",)
+CA_BUNDLE_ENV_NAMES = CA_BUNDLE_FILE_ENV_NAMES + CA_BUNDLE_DIR_ENV_NAMES
+
+#: Names every sandboxed scanner gets whatever the environment list says.
+_FIXED_ENV_NAMES = frozenset(
     {
         "PATH",
         "LANG",
@@ -139,11 +151,6 @@ BASE_ENV_NAMES = frozenset(
         "NO_COLOR",
         "FORCE_COLOR",
         "COLUMNS",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-        "REQUESTS_CA_BUNDLE",
-        "CURL_CA_BUNDLE",
-        "NODE_EXTRA_CA_CERTS",
         "VIRTUAL_ENV",
         "JAVA_HOME",
         "GEM_HOME",
@@ -151,6 +158,12 @@ BASE_ENV_NAMES = frozenset(
         "SYSTEMROOT",
     }
 )
+#: The baseline environment allowlist as the reference documents it: the fixed
+#: names and the CA-bundle names the default environment list holds. Exact names,
+#: then prefixes. Anything else in the parent environment -- AWS_*, GITHUB_TOKEN,
+#: *_PASSWORD -- is dropped. Only the fixed names are always passed; the CA-bundle
+#: names follow ``SandboxPolicy.environment``.
+BASE_ENV_NAMES = _FIXED_ENV_NAMES | frozenset(CA_BUNDLE_ENV_NAMES)
 BASE_ENV_PREFIXES = ("LC_", "ASH_", "UV_", "PYTHON")
 #: Dropped whatever a scanner declares. The run ID a container or nix scan's outer
 #: process gives its inner run is for the inner run's results file only; see
@@ -191,6 +204,74 @@ PROXY_ENV_NAMES = frozenset(
         "no_proxy",
     }
 )
+
+#: The environment list a sandbox starts from, written the way a docker-compose
+#: ``environment`` list is: the proxy family and the CA-bundle set, by name, each
+#: passed with the value the caller has. These are the variables an operator's host
+#: sets for the whole system, not a channel for a tool's own settings. A policy
+#: built with another list passes that list instead of these (``SandboxPolicy.environment``).
+DEFAULT_ENVIRONMENT: Tuple[str, ...] = (
+    *sorted(PROXY_ENV_NAMES),
+    *CA_BUNDLE_ENV_NAMES,
+)
+
+_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def parse_environment(
+    entries: Iterable[str],
+) -> Tuple[Tuple[str, ...], Dict[str, str]]:
+    """The names an environment list passes, and the values it sets.
+
+    Each entry is a variable name, which passes the caller's value, or
+    ``NAME=value``, which sets the value (and passes it whether or not the caller
+    has the variable), as in a docker-compose ``environment`` list. A name that
+    appears twice takes its last entry. Returns the names in the order first
+    listed and a map of the entries that carry a value.
+
+    A name that marks a credential (``CREDENTIAL_MARKERS``) and a name the sandbox
+    always drops (``DROPPED_ENV_NAMES``) are refused even when listed, so the
+    list cannot open the channel that a scanner's own ``env_names`` grant is for.
+    The error names the variable and never shows a value, which may be a secret.
+
+    Raises:
+        ValueError: An entry is not text, names no variable, names a credential or
+            a dropped variable, or carries a NUL in its value.
+    """
+    names: Dict[str, None] = {}
+    values: Dict[str, str] = {}
+    for entry in entries:
+        if not isinstance(entry, str):
+            raise ValueError(
+                f"an environment entry must be text, not {type(entry).__name__}"
+            )
+        name, has_value, value = entry.partition("=")
+        if not _ENV_NAME.match(name):
+            raise ValueError(
+                f"environment entry {name!r} is not a variable name: write NAME to "
+                "pass the caller's value or NAME=value to set one"
+            )
+        if name in DROPPED_ENV_NAMES:
+            raise ValueError(
+                f"environment entry {name!r} is refused: the sandbox never passes it"
+            )
+        marker = next((m for m in CREDENTIAL_MARKERS if m in name.upper()), None)
+        if marker is not None:
+            raise ValueError(
+                f"environment entry {name!r} is refused: a name containing {marker} "
+                "marks a credential, which a listed name does not pass. A scanner "
+                "that needs one is granted it with sandbox.env_scanners and its own "
+                "env_names"
+            )
+        if "\x00" in value:
+            raise ValueError(f"environment entry {name!r} has a NUL in its value")
+        names.setdefault(name)
+        if has_value:
+            values[name] = value
+        else:
+            values.pop(name, None)
+    return tuple(names), values
+
 
 #: Host directories every sandbox mounts read-only when they exist. These are the
 #: system's own files; nothing user-specific lives here on a normal installation.
@@ -280,6 +361,22 @@ class SandboxPolicy:
     #: and ``/tmp``, so under those a tree inside a directory they show stays
     #: readable.
     unread: Tuple[Path, ...] = ()
+    #: The environment list: the variables passed besides the fixed baseline, written
+    #: as a docker-compose ``environment`` list (``parse_environment``). A name passes
+    #: the caller's value; ``NAME=value`` sets it. Every backend reads this one list
+    #: through ``filter_env``, and a backend that hides the home directory grants
+    #: reading what the operator's CA-bundle settings in it name. A proxy name is
+    #: passed only to a scanner that has a network, listed or not.
+    environment: Tuple[str, ...] = DEFAULT_ENVIRONMENT
+
+    def __post_init__(self) -> None:
+        # Checked where the list is set, so a policy never reaches a backend with an
+        # entry the sandbox refuses; the config validator and the policy builder
+        # answer the same question through the same function.
+        try:
+            parse_environment(self.environment)
+        except ValueError as refused:
+            raise SandboxUnavailable(str(refused)) from None
 
     @property
     def results_dir(self) -> Path:
@@ -290,8 +387,12 @@ class SandboxPolicy:
         """Reduce ``env`` to the allowlist, then point HOME inside."""
         prefixes = BASE_ENV_PREFIXES + tuple(self.env_prefixes)
         named = set(self.env_names)
+        listed_names, listed_values = parse_environment(self.environment)
+        listed = set(listed_names)
         kept = {}
-        for key, value in env.items():
+        # A NAME=value entry sets the value before anything is screened, so it is
+        # held to the same rules as a value the caller has.
+        for key, value in {**env, **listed_values}.items():
             if key in DROPPED_ENV_NAMES:
                 continue
             if key == "PYTHONPATH":
@@ -308,9 +409,9 @@ class SandboxPolicy:
                 kept[key] = value
                 continue
             allowed = (
-                key in BASE_ENV_NAMES
+                key in _FIXED_ENV_NAMES
                 or key.startswith(prefixes)
-                or (self.network and key in PROXY_ENV_NAMES)
+                or (key in listed and (self.network or key not in PROXY_ENV_NAMES))
             )
             if not allowed:
                 continue
@@ -1500,6 +1601,7 @@ def build_scanner_policy(
     also_runs: Sequence[str] = (),
     scanned_trees: Sequence[Path] = (),
     read_grants: Sequence[Path] = (),
+    environment: Optional[Sequence[str]] = None,
 ) -> SandboxPolicy:
     """The policy one scanner gets for one spawn.
 
@@ -1534,6 +1636,11 @@ def build_scanner_policy(
             joins ``scan_data``, so under sandbox-exec nothing in it is executable
             (the other backends do not restrict exec). The pre-installed tool
             check's staged Nix metadata under TMPDIR is the one such directory.
+        environment: The operator's environment list (``parse_environment``), or
+            None for ``DEFAULT_ENVIRONMENT``. A list replaces the default, as a
+            docker-compose ``environment`` list replaces the image's. An entry the
+            sandbox refuses (a credential-shaped name) raises SandboxUnavailable
+            naming the variable.
     """
     real_home = _policy_home()
     read_granted = not requirements.read_paths_require_grant or scanner_name in set(
@@ -1730,4 +1837,7 @@ def build_scanner_policy(
         unpack_dir_env=requirements.unpack_dir_env,
         uv_tool_locks=tuple(_uv_tool_locks(uv_data)),
         unread=tuple(unread),
+        environment=(
+            DEFAULT_ENVIRONMENT if environment is None else tuple(environment)
+        ),
     )
