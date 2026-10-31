@@ -426,11 +426,12 @@ def _check_shape(param: Parameter, value: Any) -> str | None:
     a boolean from a bool or from text (``"yes"``, ``"1"``), so every number, 0
     and 1 included, reached its text conversion and raised AttributeError
     (upstream click's ``BoolParamType`` takes 0 and 1 as the booleans; the
-    bundled copy does not). A JSON number with a fraction for an integer
-    parameter is refused too, as ``--shard-index 3.5`` is: click's integer type
-    truncated ``3.5`` to 3 without a word. A number json reads as infinite
-    (``1e400``) is refused for a float parameter, which click accepted as
-    infinity; argv has no spelling for it.
+    bundled copy does not). A JSON number with a fraction or an exponent for an
+    integer parameter is refused too, as ``--shard-index 3.5`` and
+    ``--shard-index 1e2`` are: click's integer type truncated ``3.5`` to 3
+    without a word, and argv takes only the digits of an integer. A number json
+    reads as infinite (``1e400``) is refused for a float parameter, which click
+    accepted as infinity; argv has no spelling for it.
     """
     takes_list = param.multiple or param.nargs != 1
     items = value if isinstance(value, list) else [value]
@@ -444,16 +445,18 @@ def _check_shape(param: Parameter, value: Any) -> str | None:
         if isinstance(item, bool) and not isinstance(param.type, BoolParamType):
             return "a JSON boolean is only accepted for a true/false parameter"
         if isinstance(item, (int, float)) and not isinstance(item, bool):
-            # click reads a boolean from text (``"yes"``, ``"1"``), so a number
-            # reached its text handling and raised an AttributeError, which
-            # is an internal error, not a refusal naming the key.
+            # The boolean type reads text (``"yes"``, ``"1"``), so a number,
+            # 0 and 1 included, reached its text handling and raised an
+            # AttributeError, which is an internal error, not a refusal naming
+            # the key.
             if isinstance(param.type, BoolParamType):
                 return (
                     "expected a JSON boolean (true or false) for a true/false "
                     "parameter, not a number"
                 )
             # click's integer type is ``int(value)``, which truncates a float:
-            # 1.9 was accepted as 1, and 1e2 as 100.
+            # 1.9 was accepted as 1. A whole float (2.0, 1e2) is refused as
+            # well, because ``--shard-index 2.0`` is: argv takes digits only.
             if isinstance(param.type, IntParamType) and not isinstance(item, int):
                 return (
                     "expected a JSON integer for this parameter, not a number "

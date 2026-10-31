@@ -8084,6 +8084,14 @@
   `.secrets.baseline` and moved out still skips every file of that name, the
   repository's own baseline included, until its `filename` is edited.
 
+- **`--cli-json-input` takes a JSON number only where the same option on the
+  command line would take it.** A true/false parameter takes `true` or `false`; a
+  number, `0` and `1` included, is a usage error that names the key. An integer
+  parameter takes an integer written with digits only: `3.5` is refused instead of
+  running as 3, and so are `2.0` and `1e2`, as `--shard-index 2.0` is. `Infinity`,
+  `-Infinity`, `NaN` and an integer with more digits than Python reads make the
+  document invalid JSON, which is a usage error too, with no traceback.
+
 ### Reporting changes
 
 - **GitLab SAST reports a finding with several locations at its first located
