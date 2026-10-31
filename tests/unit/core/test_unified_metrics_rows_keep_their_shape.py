@@ -102,6 +102,35 @@ class TestTheReportReaders:
         message = warning.call_args.args[0]
         assert "'bandit'" in message and "'semgrep'" in message, message
 
+    def test_the_misfiled_claim_warning_is_logged_once_per_model(self):
+        """The console table and the report emitter each read the shortfalls for
+        one run. The warning names a fact about the model, so a second read of the
+        same model does not log it again; a different model with the same claim
+        still does."""
+
+        def misfiled_model() -> AshAggregatedResults:
+            model = AshAggregatedResults()
+            model.additional_reports = {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "semgrep",
+                        "status": "ERROR",
+                        "targets_attempted": 4,
+                        "targets_failed": 1,
+                    }
+                }
+            }
+            return model
+
+        first, second = misfiled_model(), misfiled_model()
+
+        with patch.object(unified_metrics.ASH_LOGGER, "warning") as warning:
+            assert coverage_shortfalls(first) == [("semgrep", None, None)]
+            assert coverage_shortfalls(first) == [("semgrep", None, None)]
+            assert warning.call_count == 1
+            assert coverage_shortfalls(second) == [("semgrep", None, None)]
+            assert warning.call_count == 2
+
     def test_a_misfiled_report_that_claims_no_coverage_is_not_a_shortfall(self):
         """Control: the same misfiled report with only a status says nothing about
         coverage, so no scanner is listed and nothing is warned."""

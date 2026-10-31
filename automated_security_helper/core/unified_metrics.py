@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import math
+import weakref
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 from pydantic import ConfigDict, Field, computed_field
@@ -506,6 +507,33 @@ def tool_exit_code(asharp_model: AshAggregatedResults, scanner_name: str) -> int
     return max(codes) if codes else None
 
 
+#: ``id(model)`` -> the ``(recorded scanner, key)`` claims already warned about for that
+#: model. The console table and the report emitter each call ``coverage_shortfalls`` for
+#: one run, so without this the same warning was logged once per call. An entry is
+#: dropped when its model is collected, so a reused ``id`` never inherits a warning.
+_WARNED_CLAIMS: dict[int, set[tuple[str, str]]] = {}
+
+
+def _first_warning_for(asharp_model: Any, claim: tuple[str, str]) -> bool:
+    """True the first time *claim* is warned about for *asharp_model*, False after.
+
+    A model that cannot be weakly referenced is never remembered, so it warns on every
+    call, as it did before this existed.
+    """
+    key = id(asharp_model)
+    warned = _WARNED_CLAIMS.get(key)
+    if warned is None:
+        try:
+            weakref.finalize(asharp_model, _WARNED_CLAIMS.pop, key, None)
+        except TypeError:
+            return True
+        warned = _WARNED_CLAIMS[key] = set()
+    if claim in warned:
+        return False
+    warned.add(claim)
+    return True
+
+
 def coverage_shortfalls(
     asharp_model: AshAggregatedResults,
 ) -> list[tuple[str, int | None, int | None]]:
@@ -544,11 +572,12 @@ def coverage_shortfalls(
         shortfalls.append((scanner_name, attempted, failed))
     listed = {str(name).lower() for name, _attempted, _failed in shortfalls}
     for recorded, filed_under in sorted(_uncredited_coverage_claims(asharp_model)):
-        ASH_LOGGER.warning(
-            f"A report filed under '{filed_under}' names scanner '{recorded}' and "
-            "carries a coverage claim (target counters or unscanned inputs). It is "
-            f"read as neither scanner's, so the coverage of '{recorded}' is unknown."
-        )
+        if _first_warning_for(asharp_model, (recorded, filed_under)):
+            ASH_LOGGER.warning(
+                f"A report filed under '{filed_under}' names scanner '{recorded}' and "
+                "carries a coverage claim (target counters or unscanned inputs). It is "
+                f"read as neither scanner's, so the coverage of '{recorded}' is unknown."
+            )
         if recorded.lower() not in listed:
             listed.add(recorded.lower())
             shortfalls.append((recorded, None, None))
