@@ -403,6 +403,25 @@ class TestTwoScannersWithOneName:
         assert any("#2" in key for key in later_rows), later_rows
         assert "twin" not in results.scanner_results
 
+    def test_a_later_holders_skipped_reason_says_why_its_row_is_qualified(self, ctx):
+        """The later holder's row is keyed by its class, not by the shared name, and
+        a reader of the row alone cannot tell why. Its skipped reason says the name
+        is carried by an earlier scanner and gives the row's name. Red at the base:
+        the reason held only why the scanner was not selected."""
+        first = _scanner_class("twin", python_only=True)
+        second = _scanner_class("twin", python_only=False)
+        second.__name__ = "OtherTwinScanner"
+        phase = _phase(ctx, [first, second])
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            results = _run(phase, python_based_plugins_only=True)
+
+        (later_key,) = [key for key in results.scanner_results if "OtherTwin" in key]
+        reason = results.scanner_results[later_key].skipped_reason
+        assert "carried by an earlier scanner" in reason, reason
+        assert later_key in reason, reason
+
     def test_a_selected_later_holder_runs_when_the_first_holder_is_left_out(self, ctx):
         """Selection is decided for every holder of a name before one is chosen.
         Red at the base: the first holder was chosen in discovery order, so the

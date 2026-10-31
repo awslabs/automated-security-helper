@@ -592,13 +592,15 @@ class ScanPhase(EnginePhase):
     ) -> str:
         """The row name for a scanner that is not the first to carry *display_name*.
 
-        The name followed by the scanner's class in parentheses, so the row cannot
+        The name, a space and the scanner's class in parentheses, so the row cannot
         replace the first holder's row, which is keyed by the name alone. The
-        qualifier keeps the class path's letters, digits, dots, underscores and
-        hyphens and writes any other character as an underscore, so that it adds
-        no path separator or other character a directory name could not carry:
-        the row is keyed by this name, and the row's results directory takes its
-        name from the same key. ``#N`` is added while the name is already a row, so
+        qualifier inside the parentheses keeps the class path's letters, digits,
+        dots, underscores and hyphens and writes any other character as an
+        underscore, so that it adds no path separator or other character a
+        directory name could not carry. The space and the parentheses around it
+        are the row name's own, and the display name is kept as written: the row is
+        keyed by this name, and the row's results directory takes its name from
+        the same key. ``#N`` is added while the name is already a row, so
         two later holders of one name get two rows. Both recorders for a later
         holder (the ERROR row of a name that is refused and the SKIPPED row of one
         the operator did not select) name the row here, so the two cannot differ
@@ -1157,13 +1159,17 @@ class ScanPhase(EnginePhase):
                             # replaced the first holder's row, marked that
                             # row excluded and put the name on the excluded
                             # list although the first holder may run.
+                            later_row_name = self._later_holder_row_name(
+                                display_name, plugin_instance, aggregated_results
+                            )
+                            not_selected_reasons = ", ".join(
+                                _not_selected_reasons(later_selection, names)
+                            )
                             aggregated_results = self._record_scanner_not_selected(
-                                self._later_holder_row_name(
-                                    display_name, plugin_instance, aggregated_results
-                                ),
-                                ", ".join(
-                                    _not_selected_reasons(later_selection, names)
-                                ),
+                                later_row_name,
+                                f"{not_selected_reasons} (its name {display_name!r} "
+                                "is carried by an earlier scanner, so its row is "
+                                f"named {later_row_name!r})",
                                 aggregated_results,
                                 excluded_scanner_names,
                             )
