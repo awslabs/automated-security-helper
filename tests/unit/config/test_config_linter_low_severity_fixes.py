@@ -515,7 +515,9 @@ class TestWhichSuppressionsTheReportLists:
         assert not any("No unused suppressions report found" in m for m in messages), (
             messages
         )
-        assert any(m.startswith("Unused suppression:") for m in messages), messages
+        assert any(
+            m.startswith("Unused suppression:") and "src/own.py" in m for m in messages
+        ), messages
 
     @pytest.mark.parametrize(
         "merged, found",
