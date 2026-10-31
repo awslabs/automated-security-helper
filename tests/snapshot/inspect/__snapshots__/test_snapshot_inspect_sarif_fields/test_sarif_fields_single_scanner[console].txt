@@ -10,18 +10,18 @@ Wrote HTML report to <INSPECT_OUT>/sarif_validation_report.html
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
 ┃ Metric                          ┃ Value ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
-│ Total unique fields (included)  │ 9     │
+│ Total unique fields (included)  │ 16    │
 │ Total unique fields (excluded)  │ 1     │
 │ Total unique scanners           │ 1     │
-│ Fields used by all scanners     │ 9     │
-│ Fields used by only one scanner │ 9     │
+│ Fields used by all scanners     │ 16    │
+│ Fields used by only one scanner │ 16    │
 └─────────────────────────────────┴───────┘
                                  Per-Scanner SARIF Field Statistics
 ┏━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┓
 ┃         ┃              ┃               ┃ Missing            ┃ Missing           ┃                ┃
 ┃ Scanner ┃ Total Fields ┃ Unique Fields ┃ (Unexpected)       ┃ (Intentional)     ┃ % in Aggregate ┃
 ┡━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━┩
-│ bandit  │ 9            │ 9             │ 9                  │ 1                 │ 0.0%           │
+│ bandit  │ 16           │ 16            │ n/a                │ 1                 │ n/a            │
 └─────────┴──────────────┴───────────────┴────────────────────┴───────────────────┴────────────────┘
 WARNING: no aggregate report (reports/ash.sarif) was analyzed, so no field was checked against the aggregate
 [exit code: 0]

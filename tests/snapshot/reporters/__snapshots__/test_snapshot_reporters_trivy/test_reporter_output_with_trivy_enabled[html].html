@@ -349,7 +349,7 @@ td:first-child { font-weight: 550; }
       <div class="section-heading"><h2 id="findings-title">Findings</h2><p>Sorted by severity</p></div>
       <div class="finding-controls js-only">
         <div class="search-control"><label for="finding-search">Search findings</label><input id="finding-search" type="search" placeholder="Rule, file, message, or scanner…" autocomplete="off"></div>
-        <div><label for="finding-scope">Show</label><select id="finding-scope"><option value="actionable">Actionable</option><option value="active">All active</option><option value="suppressed">Suppressed</option><option value="all">All findings</option></select></div>
+        <div><label for="finding-scope">Show</label><select id="finding-scope"><option value="actionable">Actionable</option><option value="policy-not-gating">Not gating</option><option value="active">All active</option><option value="suppressed">Suppressed</option><option value="all">All findings</option></select></div>
         <div><label for="finding-severity">Severity</label><select id="finding-severity"><option value="all">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option><option value="unknown">Unknown</option></select></div>
         <div><label for="finding-scanner">Scanner</label><select id="finding-scanner"><option value="">All scanners</option><option value="trivy">trivy</option></select></div>
         <button type="button" id="reset-filters" class="quiet-button">Reset</button>
@@ -575,7 +575,11 @@ Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)</p><p><strong
     let shown = 0;
     for (const card of cards) {
       const status = card.dataset.status;
+      // A finding the project's outcome left out (a workspace policy scanner
+      // whose policy does not gate) is shown by the default view, whatever its
+      // severity: it is reported, not set aside as below the threshold.
       const matchesScope = scope.value === "all" || status === scope.value ||
+        (scope.value === "actionable" && status === "policy-not-gating") ||
         (scope.value === "active" && status !== "suppressed");
       const matches = matchesScope &&
         (severity.value === "all" || card.dataset.severity === severity.value) &&

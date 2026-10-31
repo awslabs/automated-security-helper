@@ -92,7 +92,7 @@ run: echo "${{ github.event.issue.title }}"
 - Rule ID: deprecated-commands
 - Location: .github/workflows/vulnerable.yml:24
 
-workflow command "set-env" was deprecated. use \`echo "\{name\}=\{value\}" &gt;&gt; $GITHUB\_ENV\` instead: `https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions`
+workflow command "set-env" was deprecated. use \`echo "\{name\}=\{value\}" &gt;&gt; \$GITHUB\_ENV\` instead: `https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions`
 
 Code snippet:
 
@@ -113,7 +113,7 @@ run: echo "::set-env name=MODE::fast"
 - Rule ID: if-cond
 - Location: .github/workflows/vulnerable.yml:26
 
-if: condition "$\{\{ github.event\_name == 'issues' \}\} &amp;&amp; false" is always evaluated to true because extra characters are around $\{\{ \}\}
+if: condition "\$\{\{ github.event\_name == 'issues' \}\} &amp;&amp; false" is always evaluated to true because extra characters are around \$\{\{ \}\}
 
 Code snippet:
 

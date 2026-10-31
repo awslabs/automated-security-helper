@@ -189,7 +189,22 @@
       "network_scanners": null,
       "extra_read_paths": [],
       "read_path_scanners": [],
-      "env_scanners": []
+      "env_scanners": [],
+      "environment": [
+        "ALL_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "NO_PROXY",
+        "all_proxy",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_DIR"
+      ]
     },
     "content_db_staleness": "fail",
     "content_db_staleness_overrides": [],
@@ -912,10 +927,10 @@
                   "tool_name": "bandit",
                   "tool_version": "1.8.6",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 1.25,
                     "start_time": "2026-01-15T12:00:00+00:00",
-                    "end_time": "2026-01-15T12:00:01.250000+00:00"
+                    "end_time": "2026-01-15T12:00:01.250000+00:00",
+                    "exit_code": 0,
+                    "duration": 1.25
                   }
                 }
               }
@@ -1040,10 +1055,10 @@
                   "tool_name": "checkov",
                   "tool_version": "3.2.469",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 7.5,
                     "start_time": "2026-01-15T12:00:01.250000+00:00",
-                    "end_time": "2026-01-15T12:00:08.750000+00:00"
+                    "end_time": "2026-01-15T12:00:08.750000+00:00",
+                    "exit_code": 0,
+                    "duration": 7.5
                   }
                 }
               }
@@ -1128,10 +1143,10 @@
                   "tool_name": "semgrep",
                   "tool_version": "1.140.0",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 4.0,
                     "start_time": "2026-01-15T12:00:08.750000+00:00",
-                    "end_time": "2026-01-15T12:00:12.750000+00:00"
+                    "end_time": "2026-01-15T12:00:12.750000+00:00",
+                    "exit_code": 0,
+                    "duration": 4.0
                   }
                 }
               }
@@ -1196,10 +1211,10 @@
                   "tool_name": "detect-secrets",
                   "tool_version": "1.5.0",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 0.5,
                     "start_time": "2026-01-15T12:00:12.750000+00:00",
-                    "end_time": "2026-01-15T12:00:13.250000+00:00"
+                    "end_time": "2026-01-15T12:00:13.250000+00:00",
+                    "exit_code": 0,
+                    "duration": 0.5
                   }
                 }
               }
@@ -1290,10 +1305,10 @@
                   "tool_name": "grype",
                   "tool_version": "0.100.0",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 3.0,
                     "start_time": "2026-01-15T12:00:13.250000+00:00",
-                    "end_time": "2026-01-15T12:00:16.250000+00:00"
+                    "end_time": "2026-01-15T12:00:16.250000+00:00",
+                    "exit_code": 0,
+                    "duration": 3.0
                   }
                 }
               }
@@ -1337,10 +1352,10 @@
                   "tool_name": "cfn-nag",
                   "tool_version": "0.8.10",
                   "tool_invocation": {
-                    "exit_code": 1,
-                    "duration": 0.25,
                     "start_time": "2026-01-15T12:00:18.250000+00:00",
-                    "end_time": "2026-01-15T12:00:18.500000+00:00"
+                    "end_time": "2026-01-15T12:00:18.500000+00:00",
+                    "exit_code": 1,
+                    "duration": 0.25
                   }
                 }
               }
@@ -1445,10 +1460,10 @@
                 "tool_name": "bandit",
                 "tool_version": "1.8.6",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 1.25,
                   "start_time": "2026-01-15T12:00:00+00:00",
-                  "end_time": "2026-01-15T12:00:01.250000+00:00"
+                  "end_time": "2026-01-15T12:00:01.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 1.25
                 }
               }
             }
@@ -1536,10 +1551,10 @@
                 "tool_name": "bandit",
                 "tool_version": "1.8.6",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 1.25,
                   "start_time": "2026-01-15T12:00:00+00:00",
-                  "end_time": "2026-01-15T12:00:01.250000+00:00"
+                  "end_time": "2026-01-15T12:00:01.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 1.25
                 }
               }
             }
@@ -1626,10 +1641,10 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
                 }
               }
             }
@@ -1716,10 +1731,10 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
                 }
               }
             }
@@ -1806,10 +1821,10 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
                 }
               }
             }
@@ -1896,10 +1911,10 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
                 }
               }
             }
@@ -1986,10 +2001,10 @@
                 "tool_name": "semgrep",
                 "tool_version": "1.140.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 4.0,
                   "start_time": "2026-01-15T12:00:08.750000+00:00",
-                  "end_time": "2026-01-15T12:00:12.750000+00:00"
+                  "end_time": "2026-01-15T12:00:12.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 4.0
                 }
               }
             }
@@ -2076,10 +2091,10 @@
                 "tool_name": "semgrep",
                 "tool_version": "1.140.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 4.0,
                   "start_time": "2026-01-15T12:00:08.750000+00:00",
-                  "end_time": "2026-01-15T12:00:12.750000+00:00"
+                  "end_time": "2026-01-15T12:00:12.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 4.0
                 }
               }
             }
@@ -2178,10 +2193,10 @@
                 "tool_name": "detect-secrets",
                 "tool_version": "1.5.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 0.5,
                   "start_time": "2026-01-15T12:00:12.750000+00:00",
-                  "end_time": "2026-01-15T12:00:13.250000+00:00"
+                  "end_time": "2026-01-15T12:00:13.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 0.5
                 }
               }
             }
@@ -2268,10 +2283,10 @@
                 "tool_name": "grype",
                 "tool_version": "0.100.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 3.0,
                   "start_time": "2026-01-15T12:00:13.250000+00:00",
-                  "end_time": "2026-01-15T12:00:16.250000+00:00"
+                  "end_time": "2026-01-15T12:00:16.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 3.0
                 }
               }
             }
@@ -2358,10 +2373,10 @@
                 "tool_name": "grype",
                 "tool_version": "0.100.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 3.0,
                   "start_time": "2026-01-15T12:00:13.250000+00:00",
-                  "end_time": "2026-01-15T12:00:16.250000+00:00"
+                  "end_time": "2026-01-15T12:00:16.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 3.0
                 }
               }
             }

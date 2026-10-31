@@ -48,7 +48,7 @@ Converter implementation for Jupyter notebooks security scanning.
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Command: `jupyter-nbconvert`
-- Install: `uv tool install` on first use (`nbconvert<8.0.0,>=7.16.0` plus `jupyter`)
+- Install: `uv tool install` on first use (`nbconvert>=7.16.0,<8.0.0` plus `jupyter`)
 
 Options, under `converters.jupyter.options`. An option not listed here refuses the configuration.
 

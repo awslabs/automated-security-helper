@@ -75,7 +75,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
-        'unknown': 0,
+        'unknown': 1,
       }),
       'severity_threshold': None,
       'skipped_scanners': list([
@@ -992,7 +992,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
-        'unknown': 0,
+        'unknown': 1,
       }),
       'severity_threshold': None,
       'skipped_scanners': list([
@@ -2337,7 +2337,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
-        'unknown': 0,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2436,7 +2436,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
-        'unknown': 0,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2535,7 +2535,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
-        'unknown': 0,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2651,7 +2651,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
-        'unknown': 0,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2755,7 +2755,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
-        'unknown': 0,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2928,7 +2928,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
-        'unknown': 0,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([

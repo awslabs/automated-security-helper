@@ -7,11 +7,31 @@
     "ash": true,
     "bandit": true
   },
+  "runs[].results[].message": {
+    "ash": true,
+    "bandit": true
+  },
   "runs[].results[].message.text": {
     "ash": true,
     "bandit": true
   },
+  "runs[].results[].locations": {
+    "ash": true,
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation": {
+    "ash": true,
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.artifactLocation": {
+    "ash": true,
+    "bandit": true
+  },
   "runs[].results[].locations[].physicalLocation.artifactLocation.uri": {
+    "ash": true,
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.region": {
     "ash": true,
     "bandit": true
   },
@@ -27,7 +47,13 @@
     "ash": true,
     "bandit": true
   },
+  "runs[].results[].locations[].physicalLocation.region.snippet": {
+    "bandit": true
+  },
   "runs[].results[].locations[].physicalLocation.region.snippet.text": {
+    "bandit": true
+  },
+  "runs[].results[].fingerprints": {
     "bandit": true
   },
   "runs[].results[].fingerprints.bandit/v1": {

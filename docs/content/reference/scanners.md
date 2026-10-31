@@ -41,7 +41,7 @@ Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanne
 
 ## Environment in the sandbox
 
-When `sandbox.mode` confines scanners, a scanner process receives only an allowlist of the environment ASH was started with. Every sandboxed scanner gets these names: `COLUMNS`, `CURL_CA_BUNDLE`, `FORCE_COLOR`, `GEM_HOME`, `GEM_PATH`, `JAVA_HOME`, `LANG`, `LANGUAGE`, `NODE_EXTRA_CA_CERTS`, `NO_COLOR`, `PATH`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_DIR`, `SSL_CERT_FILE`, `SYSTEMROOT`, `TERM`, `TZ`, `VIRTUAL_ENV`; and names starting with `LC_`, `ASH_`, `UV_`, `PYTHON`. A scanner's own prefixes and names, listed with each scanner below, are added to that. A name containing `TOKEN`, `PASSWORD`, `PASSWD`, `SECRET`, `CREDENTIAL`, `AUTH`, `APIKEY`, `API_KEY`, `PRIVATE_KEY`, `SESSION` is dropped even under an allowed prefix, unless the scanner names it exactly. The proxy variables `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `all_proxy`, `http_proxy`, `https_proxy`, `no_proxy` are passed only to a scanner that has a network. The lists are in `automated_security_helper/utils/sandbox/policy.py`.
+When `sandbox.mode` confines scanners, a scanner process receives only an allowlist of the environment ASH was started with. Every sandboxed scanner gets these names: `COLUMNS`, `FORCE_COLOR`, `GEM_HOME`, `GEM_PATH`, `JAVA_HOME`, `LANG`, `LANGUAGE`, `NO_COLOR`, `PATH`, `SYSTEMROOT`, `TERM`, `TZ`, `VIRTUAL_ENV`; and names starting with `LC_`, `ASH_`, `UV_`, `PYTHON`. The proxy variables `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `all_proxy`, `http_proxy`, `https_proxy`, `no_proxy` and the certificate variables `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_DIR` are the default of `sandbox.environment`, a docker-compose style list that replaces them when it is set. A proxy variable is passed only to a scanner that has a network. A scanner's own prefixes and names, listed with each scanner below, are added to all of that. A name containing `TOKEN`, `PASSWORD`, `PASSWD`, `SECRET`, `CREDENTIAL`, `AUTH`, `APIKEY`, `API_KEY`, `PRIVATE_KEY`, `SESSION` is dropped even under an allowed prefix, unless the scanner names it exactly. The lists are in `automated_security_helper/utils/sandbox/policy.py`.
 
 The network entry of each scanner below is its default. `sandbox.network_scanners`, when it is set, replaces every scanner's declared need: only the scanners it names get a network. A config file inside a git checkout or the scanned directory can only take network away, and an offline scan gives no scanner a network.
 
@@ -80,7 +80,7 @@ Bandit is a Python source code security analyzer.
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `bandit`
-- Install: `uv tool install` on first use (`bandit[sarif,toml]<2.0.0,>=1.7.8`)
+- Install: `uv tool install` on first use (`bandit[sarif,toml]>=1.7.8,<2.0.0`)
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: `BANDIT_*`
@@ -161,7 +161,7 @@ Options, under `scanners.cfn-guard.options`. An option not listed here refuses t
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `cfn-lint`
-- Install: `uv tool install` on first use (`cfn-lint[sarif]<2.0.0,>=1.43.3`)
+- Install: `uv tool install` on first use (`cfn-lint[sarif]>=1.43.3,<2.0.0`)
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline
@@ -212,7 +212,7 @@ Options, under `scanners.cfn-nag.options`. An option not listed here refuses the
 - Enabled by default: yes
 - Tool type: IAC
 - Command: `checkov`
-- Install: `uv tool install` on first use (`checkov<4.0.0,>=3.2.0`)
+- Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0`)
 - Offline strategy: `cache_flags`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: `CHECKOV_*`, `CKV_*`
@@ -370,7 +370,7 @@ Options, under `scanners.opengrep.options`. An option not listed here refuses th
 - Enabled by default: yes on Linux and macOS; no on Windows
 - Tool type: SAST
 - Command: `semgrep`
-- Install: `uv tool install` on first use (`semgrep<2.0.0,>=1.125.0`)
+- Install: `uv tool install` on first use (`semgrep>=1.125.0,<2.0.0`)
 - Offline strategy: `cache_flags`
 - Network in the sandbox, by default: yes, unless the scan is offline
 - Environment passed into the sandbox: `SEMGREP_*`
@@ -457,7 +457,7 @@ zizmor finds security issues in GitHub Actions workflows and composite actions.
 - Enabled by default: yes
 - Tool type: SAST
 - Command: `zizmor`
-- Install: `uv tool install` on first use (`zizmor<2.0.0,>=1.29.0`)
+- Install: `uv tool install` on first use (`zizmor>=1.29.0,<2.0.0`)
 - Offline strategy: `bundled`
 - Network in the sandbox, by default: no
 - Environment passed into the sandbox: none beyond the baseline

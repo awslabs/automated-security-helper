@@ -939,6 +939,21 @@
       'sandbox': dict({
         'env_scanners': list([
         ]),
+        'environment': list([
+          'ALL_PROXY',
+          'HTTPS_PROXY',
+          'HTTP_PROXY',
+          'NO_PROXY',
+          'all_proxy',
+          'http_proxy',
+          'https_proxy',
+          'no_proxy',
+          'SSL_CERT_FILE',
+          'REQUESTS_CA_BUNDLE',
+          'CURL_CA_BUNDLE',
+          'NODE_EXTRA_CA_CERTS',
+          'SSL_CERT_DIR',
+        ]),
         'extra_read_paths': list([
         ]),
         'mode': 'off',
@@ -1528,6 +1543,21 @@
       }),
       'sandbox': dict({
         'env_scanners': list([
+        ]),
+        'environment': list([
+          'ALL_PROXY',
+          'HTTPS_PROXY',
+          'HTTP_PROXY',
+          'NO_PROXY',
+          'all_proxy',
+          'http_proxy',
+          'https_proxy',
+          'no_proxy',
+          'SSL_CERT_FILE',
+          'REQUESTS_CA_BUNDLE',
+          'CURL_CA_BUNDLE',
+          'NODE_EXTRA_CA_CERTS',
+          'SSL_CERT_DIR',
         ]),
         'extra_read_paths': list([
         ]),

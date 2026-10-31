@@ -60,13 +60,13 @@
     <div class='scanner'>
       <div class='scanner-header'>
         <h3>ash</h3>
-        <div>Match Rate: 7/7 (100.00%)</div>
+        <div>Match Rate: 12/12 (100.00%)</div>
       </div>
     </div>
     <div class='scanner'>
       <div class='scanner-header'>
         <h3>bandit</h3>
-        <div>Match Rate: 7/9 (77.78%)</div>
+        <div>Match Rate: 12/16 (75.00%)</div>
       </div>
     </div>
   </div>
@@ -74,8 +74,8 @@
     <div class='summary'>
       <h2>Validation Summary</h2>
       <div class='stats'>
-        <div class='stat'>Total Fields: 10</div>
-        <div class='stat'>Fields in Aggregate: 7 (70.00%)</div>
+        <div class='stat'>Total Fields: 17</div>
+        <div class='stat'>Fields in Aggregate: 12 (70.59%)</div>
       </div>
       <div class='stats'>
         <div class='stat critical'>Critical Missing Fields: 0</div>
@@ -95,7 +95,7 @@
       </tr>
       <tr>
         <td>ash</td>
-        <td>7/7</td>
+        <td>12/12</td>
         <td>100.00%</td>
         <td class='critical'>0</td>
         <td class='important'>0</td>
@@ -103,8 +103,8 @@
       </tr>
       <tr>
         <td>bandit</td>
-        <td>7/9</td>
-        <td>77.78%</td>
+        <td>12/16</td>
+        <td>75.00%</td>
         <td class='critical'>0</td>
         <td class='important'>0</td>
         <td class='informational'>0</td>
@@ -149,12 +149,36 @@
       <tr>
 
         <td class='field-path'>
+            <span class='field-name'>runs[].results[].fingerprints</span>
+            <div class='dropdown'>
+                <button class='dropbtn'>JQ</button>
+                <div class='dropdown-content'>
+                    <code id='jq-0'>jq &#x27;.runs[].results[] | select(.fingerprints != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-0' class='copy-btn' onclick="copyToClipboard('jq-0')">Copy</button>
+                </div>
+            </div>
+        </td>
+
+        <td>bandit</td>
+        <td>unknown</td>
+        <td class='missing'>No</td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+      </tr>
+      <tr>
+
+        <td class='field-path'>
             <span class='field-name'>runs[].results[].fingerprints.bandit/v1</span>
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-0'>jq &#x27;.runs[].results[] | select(.fingerprints[&quot;bandit/v1&quot;] != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
-                    <button id='btn-jq-0' class='copy-btn' onclick="copyToClipboard('jq-0')">Copy</button>
+                    <code id='jq-1'>jq &#x27;.runs[].results[] | select(.fingerprints[&quot;bandit/v1&quot;] != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-1' class='copy-btn' onclick="copyToClipboard('jq-1')">Copy</button>
                 </div>
             </div>
         </td>
@@ -177,8 +201,8 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-1'>jq &#x27;.runs[].results[] | select(.level != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
-                    <button id='btn-jq-1' class='copy-btn' onclick="copyToClipboard('jq-1')">Copy</button>
+                    <code id='jq-2'>jq &#x27;.runs[].results[] | select(.level != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-2' class='copy-btn' onclick="copyToClipboard('jq-2')">Copy</button>
                 </div>
             </div>
         </td>
@@ -197,12 +221,84 @@
       <tr>
 
         <td class='field-path'>
+            <span class='field-name'>runs[].results[].locations</span>
+            <div class='dropdown'>
+                <button class='dropbtn'>JQ</button>
+                <div class='dropdown-content'>
+                    <code id='jq-3'>jq &#x27;.runs[].results[] | select(.locations != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-3' class='copy-btn' onclick="copyToClipboard('jq-3')">Copy</button>
+                </div>
+            </div>
+        </td>
+
+        <td>ash, bandit</td>
+        <td>unknown</td>
+        <td class='present'>Yes</td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+      </tr>
+      <tr>
+
+        <td class='field-path'>
+            <span class='field-name'>runs[].results[].locations[].physicalLocation</span>
+            <div class='dropdown'>
+                <button class='dropbtn'>JQ</button>
+                <div class='dropdown-content'>
+                    <code id='jq-4'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-4' class='copy-btn' onclick="copyToClipboard('jq-4')">Copy</button>
+                </div>
+            </div>
+        </td>
+
+        <td>ash, bandit</td>
+        <td>unknown</td>
+        <td class='present'>Yes</td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+      </tr>
+      <tr>
+
+        <td class='field-path'>
+            <span class='field-name'>runs[].results[].locations[].physicalLocation.artifactLocation</span>
+            <div class='dropdown'>
+                <button class='dropbtn'>JQ</button>
+                <div class='dropdown-content'>
+                    <code id='jq-5'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation.artifactLocation != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-5' class='copy-btn' onclick="copyToClipboard('jq-5')">Copy</button>
+                </div>
+            </div>
+        </td>
+
+        <td>ash, bandit</td>
+        <td>unknown</td>
+        <td class='present'>Yes</td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+      </tr>
+      <tr>
+
+        <td class='field-path'>
             <span class='field-name'>runs[].results[].locations[].physicalLocation.artifactLocation.uri</span>
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-2'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation.artifactLocation.uri != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
-                    <button id='btn-jq-2' class='copy-btn' onclick="copyToClipboard('jq-2')">Copy</button>
+                    <code id='jq-6'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation.artifactLocation.uri != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-6' class='copy-btn' onclick="copyToClipboard('jq-6')">Copy</button>
                 </div>
             </div>
         </td>
@@ -221,12 +317,36 @@
       <tr>
 
         <td class='field-path'>
+            <span class='field-name'>runs[].results[].locations[].physicalLocation.region</span>
+            <div class='dropdown'>
+                <button class='dropbtn'>JQ</button>
+                <div class='dropdown-content'>
+                    <code id='jq-7'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation.region != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-7' class='copy-btn' onclick="copyToClipboard('jq-7')">Copy</button>
+                </div>
+            </div>
+        </td>
+
+        <td>ash, bandit</td>
+        <td>unknown</td>
+        <td class='present'>Yes</td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+      </tr>
+      <tr>
+
+        <td class='field-path'>
             <span class='field-name'>runs[].results[].locations[].physicalLocation.region.endLine</span>
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-3'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation.region.endLine != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
-                    <button id='btn-jq-3' class='copy-btn' onclick="copyToClipboard('jq-3')">Copy</button>
+                    <code id='jq-8'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation.region.endLine != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-8' class='copy-btn' onclick="copyToClipboard('jq-8')">Copy</button>
                 </div>
             </div>
         </td>
@@ -245,12 +365,36 @@
       <tr>
 
         <td class='field-path'>
+            <span class='field-name'>runs[].results[].locations[].physicalLocation.region.snippet</span>
+            <div class='dropdown'>
+                <button class='dropbtn'>JQ</button>
+                <div class='dropdown-content'>
+                    <code id='jq-9'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation.region.snippet != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-9' class='copy-btn' onclick="copyToClipboard('jq-9')">Copy</button>
+                </div>
+            </div>
+        </td>
+
+        <td>bandit</td>
+        <td>unknown</td>
+        <td class='missing'>No</td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+      </tr>
+      <tr>
+
+        <td class='field-path'>
             <span class='field-name'>runs[].results[].locations[].physicalLocation.region.snippet.text</span>
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-4'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation.region.snippet.text != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
-                    <button id='btn-jq-4' class='copy-btn' onclick="copyToClipboard('jq-4')">Copy</button>
+                    <code id='jq-10'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation.region.snippet.text != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-10' class='copy-btn' onclick="copyToClipboard('jq-10')">Copy</button>
                 </div>
             </div>
         </td>
@@ -273,8 +417,8 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-5'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation.region.startLine != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
-                    <button id='btn-jq-5' class='copy-btn' onclick="copyToClipboard('jq-5')">Copy</button>
+                    <code id='jq-11'>jq &#x27;.runs[].results[] | select(any(.locations[]; .physicalLocation.region.startLine != null))&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-11' class='copy-btn' onclick="copyToClipboard('jq-11')">Copy</button>
                 </div>
             </div>
         </td>
@@ -293,12 +437,36 @@
       <tr>
 
         <td class='field-path'>
+            <span class='field-name'>runs[].results[].message</span>
+            <div class='dropdown'>
+                <button class='dropbtn'>JQ</button>
+                <div class='dropdown-content'>
+                    <code id='jq-12'>jq &#x27;.runs[].results[] | select(.message != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-12' class='copy-btn' onclick="copyToClipboard('jq-12')">Copy</button>
+                </div>
+            </div>
+        </td>
+
+        <td>ash, bandit</td>
+        <td>unknown</td>
+        <td class='present'>Yes</td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+        <td class='field-path'></td>
+      </tr>
+      <tr>
+
+        <td class='field-path'>
             <span class='field-name'>runs[].results[].message.text</span>
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-6'>jq &#x27;.runs[].results[] | select(.message.text != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
-                    <button id='btn-jq-6' class='copy-btn' onclick="copyToClipboard('jq-6')">Copy</button>
+                    <code id='jq-13'>jq &#x27;.runs[].results[] | select(.message.text != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-13' class='copy-btn' onclick="copyToClipboard('jq-13')">Copy</button>
                 </div>
             </div>
         </td>
@@ -321,8 +489,8 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-7'>jq &#x27;.runs[].results[] | select(.properties != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
-                    <button id='btn-jq-7' class='copy-btn' onclick="copyToClipboard('jq-7')">Copy</button>
+                    <code id='jq-14'>jq &#x27;.runs[].results[] | select(.properties != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-14' class='copy-btn' onclick="copyToClipboard('jq-14')">Copy</button>
                 </div>
             </div>
         </td>
@@ -345,8 +513,8 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-8'>jq &#x27;.runs[].results[] | select(.ruleId != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
-                    <button id='btn-jq-8' class='copy-btn' onclick="copyToClipboard('jq-8')">Copy</button>
+                    <code id='jq-15'>jq &#x27;.runs[].results[] | select(.ruleId != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-15' class='copy-btn' onclick="copyToClipboard('jq-15')">Copy</button>
                 </div>
             </div>
         </td>
@@ -369,8 +537,8 @@
             <div class='dropdown'>
                 <button class='dropbtn'>JQ</button>
                 <div class='dropdown-content'>
-                    <code id='jq-9'>jq &#x27;.runs[].results[] | select(.ruleIndex != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
-                    <button id='btn-jq-9' class='copy-btn' onclick="copyToClipboard('jq-9')">Copy</button>
+                    <code id='jq-16'>jq &#x27;.runs[].results[] | select(.ruleIndex != null)&#x27; <SARIF_INPUT>/scanners/bandit/**/*.sarif</code>
+                    <button id='btn-jq-16' class='copy-btn' onclick="copyToClipboard('jq-16')">Copy</button>
                 </div>
             </div>
         </td>

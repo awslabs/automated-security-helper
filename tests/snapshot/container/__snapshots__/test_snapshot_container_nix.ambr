@@ -15,59 +15,6 @@
     'stdout': '',
   })
 # ---
-# name: test_equals_form_of_mode_is_rewritten
-  dict({
-    'ASH_IN_NIX': list([
-      '1',
-    ]),
-    'ASH_OFFLINE': list([
-      'YES',
-    ]),
-    'exit_code': 1,
-    'nix_commands': list([
-      list([
-        '/nix/var/nix/profiles/default/bin/nix',
-        '--extra-experimental-features',
-        'nix-command flakes',
-        'develop',
-        'path:<REPO>',
-        '--command',
-        '<PYTHON>',
-        '<SAFE_PATH_FLAGS>',
-        '-c',
-        '''
-          import sys; sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]
-          exec(compile("import os, sys; outer = os.environ.pop('ASH_NIX_OUTER_PYTHONPATH', ''); sys.path[:0] = [os.path.abspath(d) for d in outer.split(os.pathsep)] if outer else []; sys.argv[0] = 'ash'; from automated_security_helper.cli.entrypoint import main; main()", '<ash>', 'exec'))
-  
-        ''',
-        'scan',
-        '--source-dir',
-        '<TMP>/src',
-        '--output-dir',
-        '<TMP>/out',
-        '--phases',
-        'convert',
-        '--phases',
-        'scan',
-        '--phases',
-        'report',
-        '--strategy',
-        'parallel',
-        '--no-progress',
-        '--mode',
-        'local',
-        '--no-show-summary',
-      ]),
-    ]),
-    'stderr': '',
-    'stdout': '''
-      INFO     Entering Nix shell from flake: path:<REPO>
-      WARNING  Nix shell exited with code 1
-      ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The Nix shell exited with code 1.
-  
-    ''',
-  })
-# ---
 # name: test_nix_not_installed
   dict({
     'exit_code': 1,
