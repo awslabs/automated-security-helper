@@ -229,6 +229,19 @@ def _refuse(message: str) -> WorkspaceDefinitionError:
     return WorkspaceDefinitionError(message)
 
 
+def _prefix_text(project_prefix: PathLike) -> str:
+    """A project's workspace-relative path as the one text the policy compares.
+
+    Forward-slash separated on every host: ``Path(...).as_posix()`` keeps a
+    backslash on POSIX, where it is a name character, so a prefix written with
+    backslashes would be one text here and another once the pattern converters
+    (which read a backslash as a separator everywhere) had used it. The
+    per-project policy records this form and the cross-project read compares the
+    plan's prefixes in the same form, so like compares with like.
+    """
+    return Path(str(project_prefix).replace("\\", "/")).as_posix()
+
+
 def _as_named(path: PathLike) -> Path:
     """*path* made absolute as it was named: no link followed, no ``..`` collapsed.
 
@@ -1029,7 +1042,7 @@ def refuse_package_paths_naming_no_project(
     scanned = {project_policy.project_prefix for project_policy in resolved}
     skipped = [
         prefix
-        for prefix in (Path(prefix).as_posix() for prefix in every_project_prefix)
+        for prefix in (_prefix_text(prefix) for prefix in every_project_prefix)
         if prefix not in scanned
     ]
     problems: list[str] = []
@@ -1122,7 +1135,7 @@ def policy_for_project(
             ignore_paths=(),
             policy_scanners=(),
             policy_scanners_gate=False,
-            project_prefix=Path(project_prefix).as_posix(),
+            project_prefix=_prefix_text(project_prefix),
         )
 
     ceiling = policy.max_severity_threshold
@@ -1169,5 +1182,5 @@ def policy_for_project(
         policy_scanners_gate=policy.policy_scanners_gate,
         package_paths_applied=suppressions.package_path_applied,
         package_paths_dropped=suppressions.package_path_dropped,
-        project_prefix=Path(project_prefix).as_posix(),
+        project_prefix=_prefix_text(project_prefix),
     )
