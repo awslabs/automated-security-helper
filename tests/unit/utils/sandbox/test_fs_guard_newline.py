@@ -205,14 +205,7 @@ def test_replace_without_following_hands_the_text_layer_an_empty_newline_by_defa
     tmp_path, monkeypatch
 ):
     """The guide writer: LF content stays LF on every platform."""
-    seen = []
-    real = os.fdopen
-
-    def recording(fd, *args, **kwargs):
-        seen.append(kwargs.get("newline", "<not passed>"))
-        return real(fd, *args, **kwargs)
-
-    monkeypatch.setattr(fs_guard.os, "fdopen", recording)
+    seen = _record_newline_of_the_text_layer(monkeypatch)
     target = tmp_path / "guide.md"
 
     fs_guard.replace_without_following(target, "a\nb\n")
