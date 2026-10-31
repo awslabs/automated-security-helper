@@ -388,9 +388,10 @@ class VersionBumper:
 
         # Every target the manager lists, as `set` counts them and `generate`
         # renders them, and not the templates that happen to exist: a listed
-        # target whose template is missing is skipped with a warning by generate,
-        # so a loop over the existing templates never reached it and validate
-        # passed over a page that `set` reports as not regenerated.
+        # target whose template is missing is a failure for generate (it prints an
+        # error and counts the target as not generated), so a loop over the existing
+        # templates never reached it and validate passed over a page that `set`
+        # reports as not regenerated.
         for relative in targets:
             target = self.project_root / relative
             template = self.template_manager.template_path_for(relative)

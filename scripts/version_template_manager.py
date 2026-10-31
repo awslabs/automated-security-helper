@@ -682,9 +682,10 @@ class VersionTemplateManager:
     def template_path_for(self, target: str) -> Path:
         """The template that ``generate`` renders into the ``target_files`` entry.
 
-        One rule for everything that walks the list (generate, list, and the
-        version checker): the template sits beside its target with the template
-        suffix appended to the name.
+        One rule for everything that walks the ``target_files`` list (generate, list,
+        and the version checker): the template sits beside its target with the
+        template suffix appended to the name. ``convert_file`` is handed the page
+        itself, which can be any path, and builds the same name from it.
         """
         return self.project_root / (target + self.template_suffix)
 
