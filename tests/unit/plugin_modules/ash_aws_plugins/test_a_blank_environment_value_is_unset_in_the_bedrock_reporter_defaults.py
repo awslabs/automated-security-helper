@@ -90,3 +90,36 @@ def test_the_reference_generator_still_reads_both_region_variables():
 
     assert chains["aws_region"] == ["AWS_REGION", "AWS_DEFAULT_REGION"], chains
     assert chains["aws_profile"] == ["AWS_PROFILE"], chains
+
+
+def test_the_environment_page_keeps_the_region_defaults_it_lists(tmp_path):
+    """The environment-variable page is generated from the same factory, and its
+    Default column is the default each read passes: AWS_REGION's is the inner
+    read as written, AWS_DEFAULT_REGION's is the built-in region. Dropping that
+    second argument from the source makes the committed page stale, which the
+    page's freshness check reports."""
+    scripts = Path(__file__).resolve().parents[4] / "scripts"
+    sys.path.insert(0, str(scripts))
+    try:
+        import generate_env_var_reference
+    finally:
+        sys.path.remove(str(scripts))
+
+    package = "automated_security_helper"
+    relative = "plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py"
+    source = Path(__file__).resolve().parents[4] / package / relative
+    planted = tmp_path / package / relative
+    planted.parent.mkdir(parents=True)
+    (tmp_path / package / "__init__.py").write_text("", encoding="utf-8")
+    planted.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+    scan = generate_env_var_reference.collect_env_reads(tmp_path)
+    defaults = {}
+    for read in scan.reads:
+        if read.default is not None:
+            defaults.setdefault(read.name, set()).add(read.default)
+
+    assert defaults.get("AWS_REGION") == {
+        'os.environ.get("AWS_DEFAULT_REGION", "us-east-1")'
+    }, defaults
+    assert defaults.get("AWS_DEFAULT_REGION") == {"us-east-1"}, defaults

@@ -744,13 +744,16 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
         Field(
             # A blank AWS_REGION is unset, so it neither hides
             # AWS_DEFAULT_REGION nor reaches the pattern as an empty name. The
-            # first read names AWS_DEFAULT_REGION as its fallback, which is the
-            # shape the environment-variable reference is generated from (it
-            # lists both variables); the second read is what a blank value
-            # falls to.
+            # first read names AWS_DEFAULT_REGION, with the built-in region, as
+            # its fallback, which is the shape the environment-variable and
+            # configuration references are generated from (they list both
+            # variables and these two defaults); the second read is what a
+            # blank value falls to.
             default_factory=lambda: (
                 stripped_or_none(
-                    os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION"))
+                    os.environ.get(
+                        "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+                    )
                 )
                 or stripped_or_none(os.environ.get("AWS_DEFAULT_REGION"))
                 or "us-east-1"
