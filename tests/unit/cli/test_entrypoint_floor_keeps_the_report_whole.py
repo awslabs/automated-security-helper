@@ -748,8 +748,9 @@ def test_an_interrupted_command_under_a_module_app_exits_130_silently(
 def test_an_app_with_no_arguments_prints_its_help_under_a_module_app(
     monkeypatch, capsys
 ):
-    """typer's NoArgsIsHelpError is a usage error that prints nothing itself;
-    the branch prints the help as typer prints it and exits with ASH's usage
+    """typer's NoArgsIsHelpError is a usage error that prints nothing itself,
+    and typer's Rich printer skips it too; the branch writes the help to
+    stderr, as the class's own show() does, and exits with ASH's usage
     code, as the root group does."""
     app = typer.Typer()
 

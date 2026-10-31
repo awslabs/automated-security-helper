@@ -826,13 +826,15 @@ def _run_module_app(app: Callable[..., Any]) -> None:
     click's standalone handling prints a usage error itself and exits with its
     code, 2; outside it the error is raised to here, where ASH prints it as
     cli/main.py does for the root group and exits ASH_EXIT_USAGE_ERROR. typer's
-    NoArgsIsHelpError prints the help instead, as typer prints it. A command's
-    ``typer.Exit`` comes back as its code, and click's Abort (an interrupted
-    prompt) exits 1 with its one word, as click does. Outside standalone mode
-    click returns a command's own return value through the same channel as
-    ``Exit``'s code, so a command that returns an ``int`` exits with it where
-    standalone mode exited 0; a command that returns anything else exits 0.
-    Imports are inside: this runs after the streams are known good.
+    NoArgsIsHelpError prints the help instead, written here because typer's
+    Rich printer skips that class. A command's ``typer.Exit`` comes back as its
+    code, and Abort (an end of input at a prompt) exits 1 with its one word. A
+    KeyboardInterrupt never reaches here as itself: typer turns it into
+    ``Exit(130)``, which comes back as 130 with nothing printed. Outside
+    standalone mode click returns a command's own return value through the same
+    channel as ``Exit``'s code, so a command that returns an ``int`` exits with
+    it where standalone mode exited 0; a command that returns anything else
+    exits 0. Imports are inside: this runs after the streams are known good.
     """
     # Abort is typer's own (typer.exceptions, exported at the top level); the
     # vendored click package has no Abort, so importing it from there raised an
@@ -851,10 +853,17 @@ def _run_module_app(app: Callable[..., Any]) -> None:
         shown = _shown_usage_error(exc)
         if shown is exc:
             # typer's NoArgsIsHelpError: its message is the help text, which
-            # _shown_usage_error leaves to typer's own printer.
-            from typer import rich_utils
+            # _shown_usage_error leaves to the caller. typer's Rich printer
+            # returns without printing for this class, so the help is written
+            # here, to stderr as the class's own show() writes it.
+            from automated_security_helper.utils.terminal_text import (
+                shown_not_obeyed,
+            )
 
-            rich_utils.rich_format_error(exc)
+            _emit(
+                str(shown_not_obeyed(exc.format_message())) + "\n",
+                getattr(sys, "stderr", None),
+            )
             raise SystemExit(exc.exit_code) from None
         raise SystemExit(getattr(shown, "exit_code", ASH_EXIT_USAGE_ERROR)) from None
     except Abort:
