@@ -958,18 +958,48 @@ def _bound_profile_unavailable(error: Exception, operation: str) -> Dict[str, An
     The profile ``select_profile`` bound is no longer registered, or its file is
     gone and cannot be written to the session's workspace again. That is the
     session's state, not the file the call asked about, so it is answered as
-    ``run_ash_scan`` answers it (``bound_profile_unavailable``, exit code 3) and
-    never as that file's load failure.
+    ``run_ash_scan`` answers it (``bound_profile_unavailable``) and never as
+    that file's load failure.
+
+    The two causes are told apart by the error's chained cause, as
+    ``run_ash_scan`` tells them: none when the profile is no longer registered,
+    which is a config refusal, exit code 3; the writer's error (an OSError, or
+    the sandbox's RuntimeError) when the session's workspace cannot be
+    written, which is the server's failure and not the caller's config: exit
+    code 1, the category of the cause, and a warning in the server log for the
+    operator, who is the one that can act on a workspace permission. Answered
+    as a config refusal, an unwritable workspace read as the caller's own
+    fault and left nothing in the log.
     """
+    cause = error.__cause__
+    if cause is None:
+        return with_exit_code(
+            {
+                "success": False,
+                "error": raw_controls_on_one_line(str(error)),
+                "error_type": "bound_profile_unavailable",
+                "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+                "operation": operation,
+            },
+            REFUSED_CONFIG_EXIT_CODE,
+        )
+    _logger.warning(
+        "The session's bound profile could not be written to its workspace, so "
+        f"{operation} was refused: {raw_controls_on_one_line(str(error))}"
+    )
     return with_exit_code(
         {
             "success": False,
             "error": raw_controls_on_one_line(str(error)),
             "error_type": "bound_profile_unavailable",
-            "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+            "error_category": (
+                ErrorCategory.PERMISSION_DENIED.value
+                if isinstance(cause, PermissionError)
+                else ErrorCategory.UNEXPECTED_ERROR.value
+            ),
             "operation": operation,
         },
-        REFUSED_CONFIG_EXIT_CODE,
+        REFUSED_INTERNAL_EXIT_CODE,
     )
 
 
