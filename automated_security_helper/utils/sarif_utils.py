@@ -833,10 +833,11 @@ def shared_finding_ids(model: Any, all_results: List[Any]) -> List[str | None]:
     still collide), so a uid or identifier derived from it is the same string
     the GitLab SAST, OCSF and flat JSON reports carry, and distinct for two
     identical results in one run. None at every position when the flattening
-    fails or has another length, and at a position whose row does not describe
-    its result (another rule or another file), so that result's id comes from
-    the reporter's own fallback instead of another finding's id
-    (``shared_ids_by_position``).
+    fails. Otherwise the rows read from SARIF results line up with the results by
+    position, or are walked when the counts differ, and a result whose row does
+    not describe it (another rule, file or line), or that no row is left for,
+    gets None there alone, so its id comes from the reporter's own fallback
+    instead of another finding's id (``shared_ids_by_position``).
     """
     try:
         flat = list(model.to_flat_vulnerabilities())

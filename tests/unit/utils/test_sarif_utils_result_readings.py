@@ -250,7 +250,13 @@ class TestSharedFindingIds:
 
         assert shared_finding_ids(Model(), [_result(), _result()]) == [None, None]
 
-    def test_a_flattening_of_another_length_vouches_for_no_position(self):
+    def test_a_flattening_of_another_length_vouches_only_where_a_row_fits(self):
+        """One row for two results: ``shared_ids_by_position`` walks the rows, so
+        the row vouches for the first result it describes (same rule, no file, no
+        line) and the second result, with no row left, gets None there alone.
+        Before the walk a length mismatch gave None at every position, which
+        changed every id of a report for one stray row."""
+
         class Flat:
             id = "f-1"
             rule_id = "R1"
@@ -260,7 +266,7 @@ class TestSharedFindingIds:
             def to_flat_vulnerabilities(self) -> List[Any]:
                 return [Flat()]
 
-        assert shared_finding_ids(Model(), [_result(), _result()]) == [None, None]
+        assert shared_finding_ids(Model(), [_result(), _result()]) == ["f-1", None]
 
     def test_a_row_that_describes_its_result_gives_its_id(self):
         class Flat:
