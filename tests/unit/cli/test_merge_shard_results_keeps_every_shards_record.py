@@ -719,6 +719,63 @@ class TestIgnoreSuppressionsLiftsTheSuppressionAgreement:
         assert len(named) == 1, named
         assert "vendor/**" in named[0], named
 
+    @staticmethod
+    def _named_under_the_flag(shards, tmp_path, capture):
+        merged = merge_shard_results(as_loaded(shards))
+        apply_aggregated_suppressions(
+            merged,
+            PluginContext(
+                source_dir=tmp_path,
+                output_dir=tmp_path / "out",
+                config=merged.ash_config,
+                ignore_suppressions=True,
+            ),
+        )
+        return [
+            record.getMessage()
+            for record in capture.records
+            if "ignore path" in record.getMessage()
+        ]
+
+    def test_a_client_supplied_ignore_path_is_not_named_as_one_the_flag_cannot_lift(
+        self, tmp_path, capture
+    ):
+        """An ignore path a delivered tree's config supplied does not drop the
+        result: the shard keeps the finding under it with a marked suppression,
+        and the flag lifts that suppression like the rest. Naming it beside the
+        operator's own path told the reader the flag could not bring back
+        findings it does bring back. The operator's path is still named, and
+        counted alone."""
+        shards = build_shards(2)
+        for shard in shards:
+            shard.ash_config.global_settings.ignore_paths = [
+                IgnorePathWithReason(path="vendor/**", reason="third party"),
+                IgnorePathWithReason(
+                    path="delivered/**", reason="client tree", client_supplied=True
+                ),
+            ]
+
+        named = self._named_under_the_flag(shards, tmp_path, capture)
+
+        assert len(named) == 1, named
+        assert "vendor/**" in named[0], named
+        assert "delivered/**" not in named[0], named
+        assert "1 ignore path(s)" in named[0], named
+
+    def test_only_client_supplied_ignore_paths_leave_nothing_to_name(
+        self, tmp_path, capture
+    ):
+        """The control for the list being empty after the filter: no warning."""
+        shards = build_shards(2)
+        for shard in shards:
+            shard.ash_config.global_settings.ignore_paths = [
+                IgnorePathWithReason(
+                    path="delivered/**", reason="client tree", client_supplied=True
+                )
+            ]
+
+        assert self._named_under_the_flag(shards, tmp_path, capture) == []
+
     def test_ignore_paths_are_not_named_without_the_flag(self, tmp_path, capture):
         """The control: without the flag the ignore paths are the scan's own rule."""
         merged = merge_shard_results(as_loaded(self._agreeing_on_an_ignore_path()))

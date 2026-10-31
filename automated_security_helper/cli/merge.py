@@ -2408,11 +2408,18 @@ def _warn_ignore_paths_the_flag_cannot_lift(config: Any) -> None:
     reports fewer findings than the scan would. Said at WARNING, with the paths,
     so the difference is not read as the flag having no effect. Silent when the
     merged config names none.
+
+    An ignore path a delivered tree's own config supplied (``client_supplied``)
+    is not one of them: the shards kept the finding under it as a marked,
+    suppressed result (``ignore_paths_that_skip_scanning``), and the lift
+    removes that suppression like the rest, so the flag does bring those
+    findings back and the path is left out of the list.
     """
     settings = getattr(config, "global_settings", None)
     ignored = [
         str(getattr(entry, "path", entry))
         for entry in getattr(settings, "ignore_paths", None) or []
+        if getattr(entry, "client_supplied", False) is not True
     ]
     if not ignored:
         return
