@@ -76,13 +76,18 @@ reads the setting the way trivy 0.75.0 does, measured case by case in
 ``tests/unit/utils/test_content_db_refresh.py``; a form it does not recognize leaves
 the update in, and trivy's refusal then fails the scan with trivy's own message.
 
-grype has one such setting, ``GRYPE_DB_AUTO_UPDATE`` (``db.auto-update`` in its
-config), read as false by Go's ``strconv.ParseBool`` to turn its own scan-time
-download off; ``grype_update_opt_outs`` honors it the same way, so an operator who
-keeps grype off the database registry keeps ASH's update off too. It is read from the
-environment the refresh runs with, which is the process's own: ASH hands sandboxed
-grype ``GRYPE_PREPARED_ENV`` (the same value) through the child's environment only,
-never through ``os.environ``, so the refresh does not read its own setting back.
+grype has a setting of the same kind, ``GRYPE_DB_AUTO_UPDATE`` (``db.auto-update`` in
+its config), read as false by ``strconv.ParseBool`` to turn its own scan-time
+download off. It is not an opt-out of ASH's update: ``grype db update`` runs beside
+it, and the setting is commonly set across a CI image or a team's environment file
+only to skip grype's check on each scan, so reading it as one left the cached
+database to age past its bound and fail every scan after it. ASH updates grype's
+database anyway and says so once per process (``grype_update_opt_outs`` reads the
+setting for that notice). An operator who wants ASH off the registry scans offline.
+The setting is read from the environment the refresh runs with, which is the
+process's own: ASH hands sandboxed grype ``GRYPE_PREPARED_ENV`` (the same value)
+through the child's environment only, never through ``os.environ``, so the refresh
+does not read its own setting back.
 
 Concurrency and repetition
 --------------------------
@@ -161,8 +166,9 @@ TRIVY_UPDATE_OPT_OUTS: Mapping[str, Tuple[Tuple[str, ...], Tuple[str, str]]] = {
 
 #: grype's own opt-out of its database update: ``GRYPE_DB_AUTO_UPDATE`` and its
 #: config key ``db.auto-update``, read in that order as viper reads them. Set to
-#: false, grype itself downloads nothing at scan time; ASH's update replaced that
-#: download, so the setting applies to ASH's update too, as trivy's does above.
+#: false, grype itself downloads nothing at scan time. Unlike trivy's, it does not
+#: block ``grype db update``, so ASH only reports it (one notice per process) and
+#: updates anyway.
 GRYPE_UPDATE_OPT_OUT: Tuple[Tuple[str, ...], Tuple[str, str]] = (
     ("GRYPE_DB_AUTO_UPDATE",),
     ("db", "auto-update"),
@@ -186,6 +192,9 @@ _prepared_lock = threading.Lock()
 #: once when the database is current.
 _prepared: Dict[Tuple[str, str, bool, bool, str, str], None] = {}
 _PREPARED_LIMIT = 1024
+#: The grype update settings already said once in this process (see
+#: ``_say_grype_auto_update_once``), under ``_prepared_lock``.
+_grype_notices: set = set()
 
 #: The Go ``os.TempDir`` fallback on Unix when ``TMPDIR`` is unset.
 _GO_UNIX_TEMP_DIR = "/tmp"  # nosec B108 - Go's own constant, read, never written
@@ -351,9 +360,10 @@ def trivy_update_opt_outs(
 def grype_update_opt_outs(
     env: Mapping[str, str], config_file: Optional[Union[str, Path]]
 ) -> Dict[str, str]:
-    """Whether the operator's settings turn grype's database update off, and how.
+    """Whether the operator's settings turn grype's OWN database update off, and how.
 
-    Keyed as ``trivy_update_opt_outs`` is (``database`` only; grype has one
+    Read for the one notice the refresh gives (``prepare_content_db`` updates
+    either way). Keyed as ``trivy_update_opt_outs`` is (``database`` only; grype has one
     database), naming the setting. Read as viper reads it for grype:
     ``GRYPE_DB_AUTO_UPDATE`` when set to a non-empty value, else ``db.auto-update``
     in ``config_file``, the operator's grype config the update is given. The
@@ -517,9 +527,9 @@ def prepare_content_db(
             value and leave a fragment the downstream whole-spelling
             redaction misses.
 
-    An update the operator's settings turn off (trivy's skip settings, grype's
-    ``GRYPE_DB_AUTO_UPDATE=false``) is not run, with a warning; see "The operator's
-    opt-out" above.
+    An update the operator's trivy skip settings turn off is not run, with a
+    warning. grype's ``GRYPE_DB_AUTO_UPDATE=false`` does not leave the update out:
+    it is run and the setting is said once; see "The operator's opt-out" above.
 
     Raises:
         ScannerError: The tool is missing, failed, or timed out.
@@ -562,35 +572,31 @@ def prepare_content_db(
             *(["Java database"] if java else []),
             *(["checks bundle"] if checks else []),
         ]
-    opt_outs = (
-        trivy_update_opt_outs(env, operator_config)
-        if tool == "trivy"
-        else grype_update_opt_outs(env, operator_config)
-    )
-    skipped = {what: setting for what, setting in opt_outs.items() if what in wanted}
+    if tool == "grype":
+        # trivy's skip settings make `--download-db-only` fail, so they have to be
+        # honored. grype's setting only turns off grype's own update during a
+        # scan, and `grype db update` runs fine beside it. Many CI images and team
+        # environment files set it globally just to skip grype's check per scan,
+        # and ASH refreshed anyway before it read the setting as an opt-out: a
+        # database that nothing then refreshed passed its bound in about five days
+        # and the default `fail` policy refused every scan after it. The update
+        # runs; the setting is said once.
+        setting = grype_update_opt_outs(env, operator_config).get("database")
+        if setting is not None:
+            _say_grype_auto_update_once(setting, cache)
+        skipped: Dict[str, str] = {}
+    else:
+        opt_outs = trivy_update_opt_outs(env, operator_config)
+        skipped = {
+            what: setting for what, setting in opt_outs.items() if what in wanted
+        }
     for what, setting in skipped.items():
-        line = (
+        ASH_LOGGER.warning(
             f"ASH did not update {tool}'s {what} in {cache.as_posix()} before the "
             f"scan: the operator's {setting} turns {tool}'s own update off, and ASH "
             f"honors it. {tool} reads what is already in the cache; the scan-time "
             f"staleness check still holds {tool}'s vulnerability database to its bound."
         )
-        if tool == "grype":
-            # trivy's skip settings make `--download-db-only` fail, so they have to
-            # be honored. grype's setting only turns off grype's own update during
-            # a scan; reading it as an opt-out of ASH's refresh is ASH's own
-            # policy, and a CI image or team env file that sets it globally to
-            # skip an update check per scan now gets no refresh at all, so once the
-            # cached database passes its bound the default `fail` policy refuses
-            # the scan. Said at the level of that failure, with the way out, not
-            # as a warning among the scan's others.
-            ASH_LOGGER.error(
-                f"{line} With GRYPE_DB_AUTO_UPDATE=false (or db.auto-update: false) "
-                "set, nothing refreshes grype's database for ASH: unset it for the "
-                "scan, or run `grype db update` yourself before the bound is passed."
-            )
-        else:
-            ASH_LOGGER.warning(line)
     if any(what not in skipped for what in wanted):
         program = executable or find_executable(tool)
         if not program:
@@ -624,6 +630,23 @@ def prepare_content_db(
                 shutil.rmtree(workdir, ignore_errors=True)
     if scan_id is not None:
         _remember_prepared(key)
+
+
+def _say_grype_auto_update_once(setting: str, cache: Path) -> None:
+    """Say, once per process and setting, that grype's own update setting does
+    not keep ASH's refresh off: the scan runs against a read-only cache, so ASH
+    updates the database for it. An offline scan updates nothing."""
+    with _prepared_lock:
+        if setting in _grype_notices:
+            return
+        _grype_notices.add(setting)
+    ASH_LOGGER.warning(
+        f"The operator's {setting} turns grype's own database update off, which "
+        "ASH does not read as a request to leave its own refresh out: ASH still "
+        f"updates grype's database in {cache.as_posix()} before the scan, because "
+        "the scanner cannot update it itself. To keep ASH off the database "
+        "registry, run the scan offline."
+    )
 
 
 def _commands(
@@ -768,6 +791,7 @@ def forget_prepared() -> None:
     """Forget which scans were prepared. For tests."""
     with _prepared_lock:
         _prepared.clear()
+        _grype_notices.clear()
 
 
 def prepared_count() -> int:
