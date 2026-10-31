@@ -1062,8 +1062,11 @@ class TestScannerReasonsInTheWorkspace:
     output-formats.md says its ``scanner_results`` carry the same two fields. So a
     rolled-up SKIPPED or MISSING row names, for each project at that status, the
     project and its reason: ``<project>: <reason>``, joined with ``; `` in
-    workspace-file order. Each project's entry in the ``workspace`` block keeps its
-    own reasons in ``scanner_reasons``.
+    workspace-file order. Each project's own reasons travel in-process on its
+    ``WorkspaceProjectResult.scanner_reasons``, the map the rollup reads; the
+    written ``workspace`` block does not carry that map (the field is excluded
+    from the dump, since the rolled-up row is the public surface), so the tests
+    read it from the run's payload and check the written entry omits it.
     """
 
     def test_each_project_entry_keeps_its_scanners_reasons(self, tmp_path):
@@ -1076,13 +1079,16 @@ class TestScannerReasonsInTheWorkspace:
                 "grype": _skipped("excluded from this run (--exclude-scanners)"),
             },
         }
-        _run(tmp_path, plan)
+        outcome = _run(tmp_path, plan)
 
-        project = _written(tmp_path)["workspace"]["projects"][0]
-        assert project.get("scanner_reasons") == {
+        entry = outcome.payload.projects[0]
+        assert entry.scanner_reasons == {
             "cfn-nag": "its tool cfn_nag_scan was not found on PATH",
             "grype": "excluded from this run (--exclude-scanners)",
-        }, project
+        }, entry
+        # The map is in-process only; the written entry omits it by design.
+        project = _written(tmp_path)["workspace"]["projects"][0]
+        assert "scanner_reasons" not in project, project
 
     def test_an_error_row_lists_the_error_its_report_recorded(self, tmp_path):
         """An ERROR scanner says why, from the first error its reports recorded.
@@ -1116,11 +1122,12 @@ class TestScannerReasonsInTheWorkspace:
                 "grype": {"source": {"scanner_name": "grype", "status": "ERROR"}},
             },
         }
-        _run(tmp_path, plan)
+        outcome = _run(tmp_path, plan)
 
         written = _written(tmp_path)
-        project = written["workspace"]["projects"][0]
-        assert project.get("scanner_reasons") == {"bandit": constructor_error}, project
+        entry = outcome.payload.projects[0]
+        assert entry.scanner_reasons == {"bandit": constructor_error}, entry
+        assert "scanner_reasons" not in written["workspace"]["projects"][0]
         # The rollup keeps its reason fields for SKIPPED and MISSING rows.
         row = written["scanner_results"]["bandit"]
         assert row["status"] == "ERROR", row
@@ -1155,10 +1162,12 @@ class TestScannerReasonsInTheWorkspace:
                 }
             },
         }
-        _run(tmp_path, plan)
+        outcome = _run(tmp_path, plan)
 
+        entry = outcome.payload.projects[0]
+        assert entry.scanner_reasons == {"bandit": message}, entry
         project = _written(tmp_path)["workspace"]["projects"][0]
-        assert project.get("scanner_reasons") == {"bandit": message}, project
+        assert "scanner_reasons" not in project, project
 
     def test_a_listed_error_carries_no_environment_value(self, tmp_path, monkeypatch):
         """Listed redacted with the project config's environment values.
@@ -1197,12 +1206,15 @@ class TestScannerReasonsInTheWorkspace:
                 }
             },
         }
-        _run(tmp_path, plan)
+        outcome = _run(tmp_path, plan)
 
-        project = _written(tmp_path)["workspace"]["projects"][0]
-        reason = (project.get("scanner_reasons") or {}).get("bandit", "")
-        assert "could not load" in reason, project
+        entry = outcome.payload.projects[0]
+        reason = (entry.scanner_reasons or {}).get("bandit", "")
+        assert "could not load" in reason, entry
         assert "ENVCANARY-listed-error" not in reason, reason
+        # Nothing written carries the value either: the per-project map is not
+        # dumped, and the rollup names no reason for an ERROR row.
+        assert "ENVCANARY-listed-error" not in json.dumps(_written(tmp_path))
 
     def test_a_rolled_up_missing_row_names_each_project_and_its_reason(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
@@ -1227,7 +1239,7 @@ class TestScannerReasonsInTheWorkspace:
         """MISSING in one project and SKIPPED in another rolls up MISSING.
 
         The SKIPPED project's reason is not a reason the scanner is MISSING, so
-        it is not on the row; it stays on that project's own entry.
+        it is not on the row; it stays on that project's own in-process entry.
         """
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
         FakeOrchestrator.behaviour["api"] = {
@@ -1240,17 +1252,18 @@ class TestScannerReasonsInTheWorkspace:
             "sarif": _sarif(count=0),
             "scanner_results": {"grype": _missing("no grype on PATH")},
         }
-        _run(tmp_path, plan)
+        outcome = _run(tmp_path, plan)
 
         written = _written(tmp_path)
         row = written["scanner_results"]["grype"]
         assert row["status"] == "MISSING", row
         assert row.get("missing_reason") == "web: no grype on PATH", row
         assert row.get("skipped_reason") is None, row
-        api = written["workspace"]["projects"][0]
-        assert api.get("scanner_reasons") == {
+        api = next(p for p in outcome.payload.projects if p.project == "api")
+        assert api.scanner_reasons == {
             "grype": "excluded from this run (--exclude-scanners)"
         }, api
+        assert "scanner_reasons" not in written["workspace"]["projects"][0]
 
     def test_a_rolled_up_skipped_row_names_each_project_and_its_reason(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
