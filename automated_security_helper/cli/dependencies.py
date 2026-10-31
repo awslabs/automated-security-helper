@@ -309,6 +309,28 @@ def _bin_path_under_home(bin_path: str, home: Path, pure: type = PurePath) -> Pa
     return home.joinpath(*pure(bin_path).parts[1:])
 
 
+def _bin_directory_problem(directory: Path) -> Optional[str]:
+    """Why ``directory`` cannot be made as ``mkdir(parents=True)`` would make it,
+    read without making anything, or None when nothing in the way is found.
+
+    Looks at the nearest part of the path that exists: it has to be a directory
+    this user can write to and enter. A regular file or a dangling link there, a
+    file as a parent, or a parent this user cannot write to is what the late
+    ``mkdir`` would refuse, found before any plugin is built.
+    """
+    probe = directory
+    while not os.path.lexists(probe):
+        parent = probe.parent
+        if parent == probe:
+            break
+        probe = parent
+    if not probe.is_dir():
+        return f"{probe} is not a directory"
+    if not os.access(probe, os.W_OK | os.X_OK):
+        return f"{probe} is not writable"
+    return None
+
+
 def _canonical_tool_names(
     tool_resolution: dict[str, str], known: Iterable[str], strict: bool = True
 ) -> dict[str, str]:
@@ -1077,6 +1099,20 @@ def install_dependencies(
     # refusal of this command's own.
     absolute_bin_path = Path(os.path.abspath(target_bin_path))
     set_environ("ASH_BIN_PATH", str(absolute_bin_path))
+
+    # Checked here, nothing made: a bin directory that cannot be made is a
+    # refusal before any plugin is built. Building bandit, checkov, semgrep and
+    # the jupyter converter probes their version with `uv tool run ... --version`,
+    # so with the check only at the mkdir below every build and probe ran, and
+    # downloaded, before a --bin-path that could never be made was refused.
+    problem = _bin_directory_problem(absolute_bin_path)
+    if problem is not None:
+        print(
+            f"[red]The bin directory {escape(str(target_bin_path))} cannot be "
+            f"created: {escape(problem)}. Name a directory with --bin-path "
+            "(or ASH_BIN_PATH) that can be made.[/red]"
+        )
+        raise typer.Exit(EXIT_INVALID_CONFIG)
 
     console.print(
         Panel(

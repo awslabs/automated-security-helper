@@ -188,6 +188,75 @@ def test_a_bin_path_that_is_a_file_is_a_refusal_not_a_traceback(
 # test_dependencies_bin_path_under_tilde_needs_a_usable_home.py.
 
 
+class _Built(list):
+    watch: list
+
+
+@pytest.fixture
+def building_scanner(quiet_machine, monkeypatch):
+    """One scanner that declares no name, so a ``--tool`` run builds it to learn
+    the name, as bandit and checkov are built before their version probe runs.
+    ``built`` holds, for each build, whether the bin directory existed then."""
+    built = _Built()
+    built.watch = []
+
+    class Building:
+        def __init__(self, **_kwargs):
+            built.append(any(path.exists() for path in built.watch))
+            self.config = SimpleNamespace(name="builds-a-probe")
+            self.command = "builds-a-probe"
+
+        def get_installation_commands(self, platform_name, arch):
+            return []
+
+    monkeypatch.setattr(dependencies, "load_plugins", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        dependencies,
+        "ash_plugin_manager",
+        SimpleNamespace(
+            plugin_modules=lambda kind: [Building] if kind == "scanner" else []
+        ),
+    )
+    monkeypatch.setattr(dependencies, "_report_and_exit", lambda *_a, **_k: 0)
+    return built
+
+
+def test_an_unmakable_bin_path_is_refused_before_any_plugin_is_built(
+    building_scanner, tmp_path
+):
+    """The bin directory was only tried at the mkdir after the plugins were
+    built, so every build and version probe ran, and downloaded, before a path
+    that could never be made was refused."""
+    occupied = tmp_path / "occupied"
+    occupied.write_text("a file\n", encoding="utf-8")
+
+    result = runner.invoke(
+        dependencies_app,
+        ["--bin-path", str(occupied / "bin"), "--tool", "builds-a-probe"],
+    )
+
+    assert result.exit_code == EXIT_INVALID_CONFIG, result.output
+    assert "cannot be created" in _flat(result.output), result.output
+    assert building_scanner == [], building_scanner
+
+
+def test_a_usable_bin_path_is_still_made_after_the_plugins_are_built(
+    building_scanner, tmp_path
+):
+    """The control: the check reads the path and makes nothing, so the directory
+    does not exist while the plugins are built and exists after."""
+    bin_dir = tmp_path / "fresh" / "bin"
+    building_scanner.watch.append(bin_dir)
+
+    result = runner.invoke(
+        dependencies_app, ["--bin-path", str(bin_dir), "--tool", "builds-a-probe"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert building_scanner == [False], building_scanner
+    assert bin_dir.is_dir()
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX reads the backslash")
 @pytest.mark.parametrize("bin_path", ["~\\tools", "~ash-no-such-user-xq9/tools"])
 def test_a_tilde_user_bin_path_posix_cannot_expand_is_refused(
