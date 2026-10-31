@@ -611,6 +611,34 @@ def test_the_case_probe_reads_the_output_filesystem_and_leaves_nothing(tmp_path)
     assert archive_converter._filesystem_folds_case(None) is True
 
 
+def test_the_case_probe_is_written_beside_an_existing_extraction_directory_never_in_it(
+    tmp_path, monkeypatch
+):
+    """The zip and tar routes make the extraction directory before the members are
+    inspected, so a probe written into the nearest existing directory landed inside
+    it, and a probe a failed removal left there was a file the scanners read as part
+    of the archive. The probe goes to the directory's parent, the results
+    directory, whether the extraction directory exists or not."""
+    results = tmp_path / "results"
+    extraction = results / "a.zip"
+    extraction.mkdir(parents=True)
+    probed: List[Path] = []
+    real_open = open
+
+    def recording_open(path, *args, **kwargs):
+        probed.append(Path(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(archive_converter, "open", recording_open, raising=False)
+
+    archive_converter._filesystem_folds_case(extraction)
+    archive_converter._filesystem_folds_case(results / "b.zip")
+
+    assert [p.parent for p in probed] == [results, results]
+    assert list(extraction.iterdir()) == []
+    assert not any(p.exists() for p in probed)
+
+
 def test_a_member_under_a_directory_spelled_like_a_file_is_extracted_where_case_counts(
     test_plugin_context, tmp_path, monkeypatch
 ):
