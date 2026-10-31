@@ -428,9 +428,15 @@ def _present_per_project_artifacts(
     return [entry for entry in entries if entry["project"] not in missing]
 
 
-def _remove_previous_workspace_reports(reports_dir: Path, selection) -> None:
+def _remove_previous_workspace_reports(
+    reports_dir: Path, selection, unbuilt_file_names: Iterable[str] = ()
+) -> None:
     """Remove the workspace-level files of every reporter in *selection* that an
     earlier run into this output directory left in *reports_dir*.
+
+    *unbuilt_file_names* are the report files of the reporters that could not be
+    built this run, named from their classes (:func:`_declared_file_name`): their
+    earlier file stayed beside a manifest saying they could not be constructed.
 
     Nothing clears ``reports/`` before this step, so a file a previous run wrote
     for a reporter that this run skips, that raises, or that returns nothing
@@ -447,6 +453,8 @@ def _remove_previous_workspace_reports(reports_dir: Path, selection) -> None:
     for instance, _behaviour, _skipped in selection:
         for name in reporter_file_names(instance):
             _remove_previous_file(reports_dir, name)
+    for name in unbuilt_file_names:
+        _remove_previous_file(reports_dir, name)
     _remove_previous_file(reports_dir, MANIFEST_FILENAME)
 
 
@@ -1148,7 +1156,16 @@ def emit_workspace_reports(
     refuse_linked_report_paths(reports_dir, _workspace_report_file_names(selection))
     # After the refusals, so nothing is removed on a run that writes nothing, and
     # before any reporter writes, so a previous run's file never outlives it.
-    _remove_previous_workspace_reports(reports_dir, selection)
+    # A per-project reporter writes in each project's own reports/, not here.
+    _remove_previous_workspace_reports(
+        reports_dir,
+        selection,
+        unbuilt_file_names=[
+            failure.file_name
+            for failure in construction_failures.values()
+            if failure.behaviour is not ReporterWorkspaceBehaviour.PER_PROJECT
+        ],
+    )
 
     # Which projects this run scanned to completion: what the caller holds, or
     # else read once from the results file on the first per-project reporter

@@ -546,6 +546,21 @@ class TestAnUnbuildableReporterFailsOnlyWhatItOwed:
         assert "fake-unconstructible" in outcome.failed_reporters
         assert "fake-merged" in outcome.workspace_artifacts
 
+    def test_a_reporter_that_cannot_be_built_leaves_no_earlier_file(self, workspace):
+        """The earlier run's report stayed beside a manifest saying the reporter
+        could not be constructed, and read as this run's."""
+        _, output_dir, _ = workspace
+        reports = output_dir / REPORTS_DIR_NAME
+        reports.mkdir(parents=True, exist_ok=True)
+        stale = reports / "ash.unconstructible.txt"
+        stale.write_text("from an earlier run", encoding="utf-8")
+
+        outcome = _emit(workspace, FakeUnconstructibleReporter, FakeMergedReporter)
+
+        assert not stale.exists()
+        assert "fake-unconstructible" in outcome.failed_reporters
+        assert (reports / "ash.merged.txt").is_file()
+
     def test_a_requested_reporter_that_cannot_be_built_still_fails(self, workspace):
         """The control: asked for by name, the missing report is the step's."""
         _, output_dir, _ = workspace
