@@ -546,6 +546,7 @@ class ConvertPhase(EnginePhase):
         python_based_plugins_only: bool,
         row_keys: Dict[int, str] | None = None,
         dependency_answers: Dict[int, bool] | None = None,
+        filter_failures: Dict[int, str] | None = None,
     ) -> None:
         """Write a ``converter_results`` row for each converter the filter dropped.
 
@@ -565,9 +566,17 @@ class ConvertPhase(EnginePhase):
         dependency check gave, by ``id``; an instance it does not name is read
         from its ``dependencies_satisfied`` attribute, which a converter that
         refuses the assignment never carries.
+
+        ``filter_failures`` is what ``filter_enabled_plugins`` recorded for each
+        instance whose own enabled or Python-only check raised, by ``id``
+        (already redacted). Such an instance was dropped without any question
+        answered, so its row is a failure that says which check raised, and it
+        says nothing about the converter's tool unless a dependency answer was
+        recorded for it.
         """
         row_keys = row_keys or {}
         dependency_answers = dependency_answers or {}
+        filter_failures = filter_failures or {}
         # Identity, not membership. A converter instance is a pydantic model, whose
         # __eq__ compares field values, so `instance in filtered_instances` would
         # report a dropped converter as surviving whenever another instance of the
@@ -582,60 +591,60 @@ class ConvertPhase(EnginePhase):
             row_key = row_keys.get(id(plugin_instance), display_name)
             enabled = section_enabled(getattr(plugin_instance, "config", None))
             declined_by_python_only = False
-            python_only_check_failure: str | None = None
             if python_based_plugins_only:
                 try:
                     declined_by_python_only = not plugin_instance.is_python_only()
-                except Exception as e:  # noqa: BLE001 -- plugin code
+                except Exception:
                     # is_python_only is plugin-supplied, so the exception set is
-                    # open. An unanswerable question is not an exclusion, and
-                    # the pre-filter loop skipped this converter's dependency
-                    # check on the same answer (_answers_python_only), so its
-                    # row must not read as a missing tool either: it is the
-                    # failure it is, recorded below.
+                    # open. An unanswerable question is not an exclusion, and the
+                    # pre-filter loop skipped this converter's dependency check on
+                    # the same answer (_answers_python_only). The text of what it
+                    # raised is not read here: the filter recorded it, redacted,
+                    # in ``filter_failures``, which is read below.
                     declined_by_python_only = False
-                    run_config = getattr(self.plugin_context, "config", None)
-                    python_only_check_failure = _failure_text(
-                        e,
-                        _redaction_values_or(
-                            plugin_instance,
-                            run_config,
-                            config_environment_values(run_config),
-                        ),
-                    )
-            # A check that never ran says nothing about the tool, so True here is
-            # "not asked", not a claim: a disabled converter's (the loop above
-            # skips it), a non-Python converter's on a Python-only run (skipped
-            # the same way), and one whose is_python_only() raised (skipped too).
+            raised = filter_failures.get(id(plugin_instance))
+            # The pre-filter loop asks the dependency question of an enabled
+            # converter that the Python-only filter keeps, and of no other. A
+            # converter the config turned off, one a Python-only run declined, and
+            # one whose Python-only or enabled check raised (it is skipped there
+            # too) never had its check run, so True here is "not asked", not a
+            # claim about its tool.
             if id(plugin_instance) in dependency_answers:
                 checked = dependency_answers[id(plugin_instance)]
             else:
                 checked = bool(
                     getattr(plugin_instance, "dependencies_satisfied", False)
                 )
-            dependencies_satisfied = (
+            not_asked = (
                 not enabled
                 or declined_by_python_only
-                or python_only_check_failure is not None
-                or checked
+                or (
+                    raised is not None and id(plugin_instance) not in dependency_answers
+                )
             )
+            dependencies_satisfied = not_asked or checked
 
             drop_is_explained = (
                 not enabled or declined_by_python_only or not dependencies_satisfied
             )
             failure = None
-            if python_only_check_failure is not None:
+            if raised is not None:
+                # The filter recorded the exception its own check raised, so the
+                # drop has a cause that can be named. Recorded as a failure: a
+                # converter that could not say whether a Python-only run wants it
+                # may have held files the scanners then never saw.
                 failure = (
-                    f"its is_python_only() check raised {python_only_check_failure}"
+                    "dropped by the filter: its enabled or is_python_only() check "
+                    f"raised {raised}"
                 )
             elif not drop_is_explained:
                 # Dropped although every predicate this method can evaluate says it
-                # should have survived, which leaves one cause: the instance's own
-                # enabled or dependency check raised inside filter_enabled_plugins,
-                # which logs at debug and drops it. Recorded as a failure rather
-                # than left as a row that reads "ran and found nothing to convert",
-                # because the whole point of these rows is that a converter which
-                # did not run says so.
+                # should have survived, and the filter recorded no exception. The
+                # filter and these predicates disagree (an answer that changes
+                # between two calls). Recorded as a failure rather than left as a
+                # row that reads "ran and found nothing to convert", because the
+                # whole point of these rows is that a converter which did not run
+                # says so.
                 failure = (
                     "dropped by the enabled/dependency filter, although its own "
                     "dependency check reported satisfied"
@@ -839,12 +848,16 @@ class ConvertPhase(EnginePhase):
         # error opening it aborted the whole phase. A converter survives only
         # with the one dependency answer above True.
         filtered_instances = []
+        # What the filter recorded for an instance whose own check raised, so its
+        # row can name the check instead of guessing a cause.
+        filter_failures: Dict[int, str] = {}
         for plugin_instance in all_converter_instances:
             admitted = self.filter_enabled_plugins(
                 plugin_instances=[plugin_instance],
                 plugin_context=self.plugin_context,
                 python_only=python_based_plugins_only,
                 check_dependencies=False,
+                failures=filter_failures,
             )
             if admitted and dependency_answers.get(id(plugin_instance)) is True:
                 filtered_instances.extend(admitted)
@@ -864,6 +877,7 @@ class ConvertPhase(EnginePhase):
             python_based_plugins_only=python_based_plugins_only,
             row_keys=row_keys,
             dependency_answers=dependency_answers,
+            filter_failures=filter_failures,
         )
 
         enabled_converters = [inst.__class__ for inst in filtered_instances]

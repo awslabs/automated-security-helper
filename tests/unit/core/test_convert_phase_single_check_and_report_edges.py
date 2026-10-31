@@ -251,6 +251,89 @@ class TestAConstructorFailureIsKeyedLikeABuiltConverter:
         assert results.converter_results["built-fine"].converted_paths == ["a"]
 
 
+def _python_only(converter_class, *, answer, attribute_default=None):
+    """*converter_class* with its ``is_python_only()`` answering *answer* (an
+    exception instance is raised), and optionally a class-level
+    ``dependencies_satisfied`` that nothing sets when no check runs."""
+
+    def is_python_only(self):
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    namespace: dict = {"is_python_only": is_python_only}
+    if attribute_default is not None:
+        namespace["__annotations__"] = {"dependencies_satisfied": bool}
+        namespace["dependencies_satisfied"] = attribute_default
+    return type(f"{converter_class.__name__}PyOnly", (converter_class,), namespace)
+
+
+def _run_python_only(plugin_context, plugins):
+    phase, agg = _build(plugin_context, plugins)
+    return phase.execute(aggregated_results=agg, python_based_plugins_only=True)
+
+
+class TestAPythonOnlyRunNamesWhyItLeftAConverterOut:
+    def test_a_python_only_check_that_raises_is_a_named_failure(self, plugin_context):
+        base = _converter("py-only-raises", paths=["converted/a.py"])
+        unsure = _python_only(base, answer=RuntimeError("cannot say"))
+
+        results = _run_python_only(plugin_context, [unsure])
+
+        row = results.converter_results["py-only-raises"]
+        # Red at the base: "dropped by the enabled/dependency filter, although its
+        # own dependency check reported satisfied", a check that never ran.
+        assert row.failure is not None
+        assert "is_python_only()" in row.failure
+        assert "RuntimeError: cannot say" in row.failure
+        assert "reported satisfied" not in row.failure
+        assert base.checks == 0
+        # Nothing asked about its tool, so the row says nothing about it.
+        assert row.dependencies_satisfied is True
+        assert row.dependency_unavailable_reason is None
+        assert row.excluded is False
+        assert [name for name, _ in _incomplete(results)] == ["py-only-raises"]
+
+    def test_a_converter_a_python_only_run_declined_says_nothing_of_its_tool(
+        self, plugin_context
+    ):
+        # Nothing sets the attribute of a converter whose check never runs; here
+        # it starts False, as it does for a converter that is not derived from
+        # ConverterPluginBase.
+        base = _converter("not-python", answer=False)
+        declined = _python_only(base, answer=False, attribute_default=False)
+
+        results = _run_python_only(plugin_context, [declined])
+
+        row = results.converter_results["not-python"]
+        # Red at the base: dependencies_satisfied False with a reason naming an
+        # ash.log message that does not exist, on a row that is also excluded.
+        assert base.checks == 0
+        assert row.excluded is True
+        assert row.dependencies_satisfied is True
+        assert row.dependency_unavailable_reason is None
+        assert row.failure is None
+        assert _incomplete(results) == []
+
+    def test_the_control_a_python_converter_with_no_tool_is_still_missing(
+        self, plugin_context
+    ):
+        gone = _python_only(_converter("py-no-tool", answer=False), answer=True)
+
+        results = _run_python_only(plugin_context, [gone])
+
+        row = results.converter_results["py-no-tool"]
+        assert row.dependencies_satisfied is False
+        assert row.excluded is False
+        assert row.failure is None
+        assert [name for name, _ in _incomplete(results)] == ["py-no-tool"]
+
+
+def _incomplete(results):
+    """``(name, reason)`` for each row the completeness gate counts."""
+    return [(row.name, row.reason) for row in incomplete_converters(results)]
+
+
 class TestAConvertThatReturnsAnotherSequence:
     @pytest.mark.parametrize(
         ("result", "expected"),
