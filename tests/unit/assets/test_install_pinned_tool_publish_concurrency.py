@@ -61,6 +61,15 @@ def _staged(tmp_path: Path, text: bytes) -> Path:
     return staged
 
 
+def _kept_directories(third_party: Path) -> "list[Path]":
+    """The publish work directories in ``third_party``, kept or not."""
+    return [
+        p
+        for p in third_party.iterdir()
+        if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
+    ]
+
+
 def _other_publish_wins(monkeypatch, final: Path, text: bytes) -> None:
     """Just before this call's rename into place, another publish gets there."""
     real = os.replace
@@ -141,26 +150,13 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
         self, tmp_path, monkeypatch, capsys
     ):
         third_party, final = self._old_entry(tmp_path)
-        real = os.replace
-
-        def replace(src, dst, *args, **kwargs):
-            if Path(dst) == final and Path(src).name == "incoming":
-                raise OSError(errno.ENOSPC, "No space left on device")
-            if Path(dst) == final and Path(src).name == "old":
-                raise OSError(errno.EACCES, "Permission denied")
-            return real(src, dst, *args, **kwargs)
-
-        monkeypatch.setattr(os, "replace", replace)
+        self._keep_the_old_entry(monkeypatch, final)
 
         with pytest.raises(PermissionError):
             installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
 
         assert not final.exists()
-        kept = [
-            p
-            for p in third_party.iterdir()
-            if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
-        ]
+        kept = _kept_directories(third_party)
         assert len(kept) == 1, "the work directory holding the old entry was deleted"
         assert (kept[0] / "old" / "LICENSE").read_bytes() == b"old\n"
         assert str(kept[0] / "old") in capsys.readouterr().err
@@ -185,11 +181,7 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
             self._keep_the_old_entry(patch, final)
             with pytest.raises(PermissionError):
                 installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
-        kept = [
-            p
-            for p in third_party.iterdir()
-            if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
-        ]
+        kept = _kept_directories(third_party)
         assert len(kept) == 1, "the work directory holding the old entry was deleted"
         return third_party, kept[0]
 
@@ -245,11 +237,7 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
         assert (first / "old" / "LICENSE").read_bytes() == b"old\n"
         marker = first / installer._PUBLISH_KEPT_MARKER
         assert marker.read_text(encoding="utf-8").strip() == "demo"
-        assert [
-            p
-            for p in third_party.iterdir()
-            if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
-        ] == [first]
+        assert _kept_directories(third_party) == [first]
 
     def test_a_work_directory_without_the_marker_is_left_alone(self, tmp_path):
         """Control: another publish's work directory that is still in use."""
@@ -334,11 +322,7 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
             installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
 
         assert raised.value.errno == errno.ENOSPC
-        kept = [
-            p
-            for p in third_party.iterdir()
-            if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
-        ]
+        kept = _kept_directories(third_party)
         assert len(kept) == 1, "the work directory holding the old entry was deleted"
         assert {p.name: p.read_bytes() for p in (kept[0] / "old").iterdir()} == {
             "LICENSE": b"old\n",
@@ -391,11 +375,7 @@ class TestAFailedRestoreDoesNotLoseTheOldEntry:
 
         assert asked, "the check for an entry at the name never ran"
 
-        kept = [
-            p
-            for p in third_party.iterdir()
-            if p.name.startswith(installer._PUBLISH_WORK_PREFIX)
-        ]
+        kept = _kept_directories(third_party)
         assert len(kept) == 1, "the work directory holding the old entry was deleted"
         assert (kept[0] / "old" / "LICENSE").read_bytes() == b"old\n"
         assert str(kept[0] / "old") in capsys.readouterr().err

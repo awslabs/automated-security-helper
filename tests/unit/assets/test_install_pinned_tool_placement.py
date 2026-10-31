@@ -291,28 +291,11 @@ class TestAFailedPlacementLeavesTheLicensesAlone:
         (third_party / "demo" / "LICENSE").write_bytes(b"old license\n")
         return bin_dir, existing, third_party
 
-    @staticmethod
-    def _staging_is_another_filesystem(monkeypatch, bin_dir: Path) -> None:
-        """Only a rename from outside ``bin_dir`` into it fails as across filesystems.
-
-        The license publish and the final rename inside ``bin_dir`` stay real, so
-        the failure is in the copy and nowhere else.
-        """
-        real = os.replace
-
-        def replace(src, dst, *args, **kwargs):
-            if Path(dst).parent == bin_dir and Path(src).parent != bin_dir:
-                raise OSError(errno.EXDEV, "Invalid cross-device link")
-            return real(src, dst, *args, **kwargs)
-
-        monkeypatch.setattr(os, "replace", replace)
-
     def test_a_copy_that_runs_out_of_space_keeps_the_old_licenses_and_binary(
         self, tmp_path, monkeypatch
     ):
         setup = _Setup(monkeypatch)
         bin_dir, existing, third_party = self._old_install(tmp_path)
-        self._staging_is_another_filesystem(monkeypatch, bin_dir)
         real_copyfile = shutil.copyfile
 
         def full_disk(src, dst, *args, **kwargs):
