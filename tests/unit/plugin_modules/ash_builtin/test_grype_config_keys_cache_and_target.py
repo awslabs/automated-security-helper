@@ -217,7 +217,11 @@ def test_a_config_under_an_unsearchable_directory_is_judged_missing_not_raised(
 
     configured = [a.value for a in scanner.args.extra_args if a.key == "--config"]
     assert (locked / "grype.yaml").as_posix() not in configured
-    assert "does not exist" in caplog.text
+    # The config-file message in full, as the blank-config test names it: this
+    # module runs offline, and the offline cache check also says a database
+    # directory "does not exist", so the short phrase alone is met without the
+    # config file having been judged missing.
+    assert "Configured grype config file does not exist" in caplog.text
 
 
 # --- the offline cache check --------------------------------------------------------
