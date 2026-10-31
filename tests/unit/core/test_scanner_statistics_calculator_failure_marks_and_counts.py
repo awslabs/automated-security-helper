@@ -325,6 +325,21 @@ class TestAMappingOfMappingsIsNotAScanner:
 
         assert set(stats) == {"bandit"}, sorted(stats)
 
+    def test_a_plugins_entry_with_a_status_word_of_its_own_is_not_a_scanner(self):
+        """A ``status`` key alone does not make a report: the plugin's
+        ``{"upload": {"status": "ok"}}`` carries one that is no scanner's status,
+        and read as a report it became the phantom ERROR row again."""
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(
+            _model(
+                {
+                    "bandit": {"source": _report("bandit")},
+                    "sbom-meta": {"upload": {"status": "ok"}},
+                }
+            )
+        )
+
+        assert set(stats) == {"bandit"}, sorted(stats)
+
     def test_a_report_naming_no_scanner_still_names_one(self):
         """Control: a results file written before ``scanner_name`` existed carries
         the status alone, and its entry is a scanner as before."""

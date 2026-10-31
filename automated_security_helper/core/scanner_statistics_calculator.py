@@ -359,18 +359,27 @@ class ScannerStatisticsCalculator:
     def _is_report_shaped(report: Any) -> bool:
         """True when *report* has the shape ``ScanResultProcessor`` writes per target.
 
-        A mapping that carries a ``status`` or a ``scanner_name`` key. Every
-        serialized ``ScanResultsContainer`` has at least one: the constructor
-        is given the name, and the executor and the factories assign the
-        status; a results file written before ``scanner_name`` existed carries
-        the status, and is read as the scanner it is filed under, as before. A
-        plugin's free-form entry (``{"summary": {"files": 10}}`` under a key of
-        its own) has neither. Counted as a scanner, it became an ERROR row (no
-        status can be taken from it) that tripped the completeness gate.
+        A mapping that carries a ``scanner_name`` key, or a ``status`` that is one
+        of the ``ScannerStatus`` values. Every serialized ``ScanResultsContainer``
+        has at least one: the constructor is given the name, and the executor and
+        the factories assign the status; a results file written before
+        ``scanner_name`` existed carries the status, and is read as the scanner it
+        is filed under, as before. A plugin's free-form entry
+        (``{"summary": {"files": 10}}`` under a key of its own) has neither.
+        Counted as a scanner, it became an ERROR row (no status can be taken from
+        it) that tripped the completeness gate. A ``status`` key alone is not
+        enough: a plugin's own ``{"upload": {"status": "ok"}}`` carries one that is
+        no scanner's, and was the same phantom row.
         """
-        return isinstance(report, dict) and (
-            "status" in report or "scanner_name" in report
-        )
+        if not isinstance(report, dict):
+            return False
+        if "scanner_name" in report:
+            return True
+        status = report.get("status")
+        status = getattr(status, "value", status)
+        return isinstance(status, str) and status.upper() in {
+            known.value for known in ScannerStatus
+        }
 
     @staticmethod
     def _own_reports(
