@@ -48,6 +48,7 @@ from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
     ScanRegistryEntry,
 )
+from tests.utils.module_binding_stand_ins import OsWith
 
 pytestmark = pytest.mark.unit
 
@@ -598,12 +599,16 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         assert (elsewhere / "keep.txt").exists()
 
     @pytest.mark.parametrize(
-        ("reparse_tag", "left_in_place"),
-        [(0xA0000003, True), (0x9000001A, False)],
-        ids=["mount_point", "cloud_files_placeholder"],
+        ("reparse_fields", "left_in_place"),
+        [
+            ({"st_reparse_tag": 0xA0000003}, True),
+            ({"st_reparse_tag": 0x9000001A}, False),
+            ({}, False),
+        ],
+        ids=["mount_point", "cloud_files_placeholder", "flag_without_a_tag"],
     )
     def test_the_removal_asks_the_shared_helper_where_the_python_has_no_isjunction(
-        self, registry, tmp_path, reparse_tag, left_in_place
+        self, registry, tmp_path, reparse_fields, left_in_place
     ):
         """Before Python 3.12 there is no ``os.path.isjunction``: the shared
         helper reads the file attributes and the reparse tag of the path itself
@@ -611,20 +616,33 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         False). The flag alone is not a junction: a cloud-files placeholder or a
         projected directory is a reparse point with another tag, and a real
         directory to remove, so only the mount-point tag leaves the directory in
-        place. The module no longer keeps a copy of that rule of its own, so the
-        fake ``os`` handed to the helper decides both cases."""
+        place. A flag with no tag attribute at all is no junction either. The
+        module no longer keeps a copy of that rule of its own, so the fake
+        ``os`` handed to the helper decides the cases. It delegates every other
+        attribute and every other path to the real ``os``, and replaces only
+        ``lstat`` for the output directory and ``path`` without ``isjunction``."""
         import stat
 
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
         output = _output_of(entry)
         registry.get_scan.return_value = entry
-        older_python = SimpleNamespace(
-            path=SimpleNamespace(),
-            lstat=lambda path: SimpleNamespace(
+        real_lstat = os.lstat
+
+        def lstat(path):
+            if Path(path).name != output.name:
+                return real_lstat(path)
+            return SimpleNamespace(
                 st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT,
-                st_reparse_tag=reparse_tag,
-            ),
-        )
+                **reparse_fields,
+            )
+
+        class PathWithoutIsjunction:
+            def __getattr__(self, name):
+                if name == "isjunction":
+                    raise AttributeError(name)
+                return getattr(os.path, name)
+
+        older_python = OsWith(path=PathWithoutIsjunction(), lstat=lstat)
 
         with _use(registry), patch(f"{_LINKS_MODULE}.os", older_python):
             result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
