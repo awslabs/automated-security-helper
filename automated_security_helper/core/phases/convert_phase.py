@@ -269,13 +269,20 @@ def _unproductive_reason(row: Any) -> str | None:
 
     The row's ``failure``; else the archives it refused whole over an extraction
     limit (a loss the completeness gate counts too); else the count of its failed
-    inputs that are not accepted (the gate's count); else, for a converter that
-    was not turned off, the reason its tool was unavailable. The refusal was left
-    out, so a run whose only converter refused an archive logged the bare "No
-    files were converted by any converter plugins" beside a gate that fails the
-    run on that very row. So was the last, for a run whose only converter had
-    been dropped for a missing tool.
+    inputs that are not accepted (the gate's count); else the reason its tool was
+    unavailable. The refusal was left out, so a run whose only converter refused
+    an archive logged the bare "No files were converted by any converter
+    plugins" beside a gate that fails the run on that very row. So was the last,
+    for a run whose only converter had been dropped for a missing tool.
+
+    None for a row marked ``excluded``, whatever else it carries: the run was
+    never meant to use that converter (the config turned it off, or the run
+    declined it), and the completeness gate skips such a row first. A turned-off
+    converter whose constructor raised carries a ``failure`` and is excluded, so
+    reading the failure first listed it as a converter that "did not start".
     """
+    if getattr(row, "excluded", False):
+        return None
     failure = getattr(row, "failure", None)
     if failure:
         return str(failure)
@@ -285,10 +292,7 @@ def _unproductive_reason(row: Any) -> str | None:
     unaccepted = _unaccepted_failed_inputs(row)
     if unaccepted:
         return f"{len(unaccepted)} could not be converted"
-    if (
-        not getattr(row, "excluded", False)
-        and getattr(row, "dependencies_satisfied", True) is False
-    ):
+    if getattr(row, "dependencies_satisfied", True) is False:
         return str(
             getattr(row, "dependency_unavailable_reason", None)
             or "its dependencies are unavailable"

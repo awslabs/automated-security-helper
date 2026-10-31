@@ -334,6 +334,61 @@ def _incomplete(results):
     return [(row.name, row.reason) for row in incomplete_converters(results)]
 
 
+class _Unconstructable:
+    def __init__(self, **kwargs):
+        raise ValueError("plugin options are malformed")
+
+
+@pytest.fixture
+def turned_off_unconstructable(plugin_context, monkeypatch):
+    """The config turns off the one converter whose constructor raises."""
+
+    def get_plugin_config(self, plugin_type=None, plugin_name=None, **_):
+        if "Unconstructable" in str(plugin_name):
+            return {"name": plugin_name, "enabled": False}
+        return None
+
+    monkeypatch.setattr(
+        type(plugin_context.config), "get_plugin_config", get_plugin_config
+    )
+
+
+class TestATurnedOffConverterThatCouldNotBeBuiltIsNotUnfinished:
+    def test_the_phase_says_conversion_is_off_not_that_it_did_not_start(
+        self, plugin_context, turned_off_unconstructable, caplog
+    ):
+        with caplog.at_level(logging.WARNING):
+            results = _run(plugin_context, [_Unconstructable])
+
+        row = results.converter_results["_Unconstructable"]
+        assert row.excluded is True and row.failure
+        # Red at the base: "No converter ran, and at least one did not start",
+        # the wording the change set out to avoid for a choice the config made.
+        assert "No enabled converter plugins found" in caplog.text
+        assert "did not start" not in caplog.text
+        assert incomplete_converters(results) == []
+
+    def test_the_closing_summary_does_not_list_it(
+        self, plugin_context, turned_off_unconstructable, caplog
+    ):
+        with caplog.at_level(logging.WARNING):
+            _run(plugin_context, [_Unconstructable, _converter("finds-nothing")])
+
+        # Red at the base: "at least one converter did not finish ...
+        # _Unconstructable (ValueError ...)".
+        assert "No files were converted by any converter plugins" in caplog.text
+        assert "did not finish" not in caplog.text
+
+    def test_the_control_an_enabled_one_that_could_not_be_built_still_is(
+        self, plugin_context, caplog
+    ):
+        with caplog.at_level(logging.WARNING):
+            results = _run(plugin_context, [_Unconstructable])
+
+        assert results.converter_results["_Unconstructable"].excluded is False
+        assert "No converter ran, and at least one did not start" in caplog.text
+
+
 class TestAConvertThatReturnsAnotherSequence:
     @pytest.mark.parametrize(
         ("result", "expected"),
