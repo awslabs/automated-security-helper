@@ -10,6 +10,7 @@ that had children as one ASH could not stop.
 import os
 import signal
 import subprocess  # nosec B404 - the module under test wraps subprocess
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -106,13 +107,22 @@ def test_not_as_init_nothing_is_reaped_and_the_group_read_stands():
 
 
 @skip_on_windows
-def test_a_killed_group_of_zombies_is_not_recorded_as_a_refused_stop():
+@pytest.mark.parametrize(
+    "settle",
+    [0.0, 2.0],
+    ids=["no-settle-so-the-survivor-read-reaps", "long-settle-so-the-settle-reaps"],
+)
+def test_a_killed_group_of_zombies_is_not_recorded_as_a_refused_stop(settle):
     """At the base the group of zombies kept existing and _note_stop_refused ran.
 
     A member is still running when the stop begins, so the read before the
     kill finds the group and the SIGKILL is sent; the kill leaves behind the
-    exited child this process, as init, has yet to reap, and it is that
-    survivor read after the kill that this test exercises."""
+    exited child this process, as init, has yet to reap. Two reads can reap
+    it, and each is pinned alone: with the settle at 0.0 its loop is skipped
+    and the survivor read after the kill is the one that reaps; with a long
+    settle the loop reaps it at once, ends, and the run takes a fraction of
+    the bound, which a loop that waited out the bound on a group of zombies
+    would not."""
     process = _reaped_child(_NO_SUCH_PID)
     zombies: set = set()
     alive = [True]
@@ -146,12 +156,16 @@ def test_a_killed_group_of_zombies_is_not_recorded_as_a_refused_stop():
             side_effect=lambda pgid: sorted(zombies),
         ),
         patch.object(subprocess_utils.os, "waitpid", side_effect=reap),
+        patch.object(subprocess_utils, "_KILLED_GROUP_SETTLE_SECONDS", settle),
         patch.object(subprocess_utils, "_note_stop_refused") as refused,
     ):
+        began = time.monotonic()
         subprocess_utils._stop_tree(process, grace=0)
+        took = time.monotonic() - began
     assert sent == [signal.SIGKILL], sent
     refused.assert_not_called()
-    assert zombies == set(), "the survivor read after the kill reaped the orphan"
+    assert zombies == set(), "the orphan was not reaped by a group read"
+    assert took < max(settle, 1.0) / 2, f"ending the group took {took:.2f}s"
 
 
 @skip_on_windows
