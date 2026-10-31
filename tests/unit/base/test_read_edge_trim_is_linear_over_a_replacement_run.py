@@ -29,7 +29,11 @@ def test_a_replacement_run_behind_the_last_escape_is_trimmed_quickly():
     nothing and the fallback runs. At the base its unanchored search took over
     a second at 20,000 characters on the host that measured it; the fix answers
     in milliseconds. The bound is loose so a loaded runner passes."""
-    text = "kept line\n\x1b" + "�" * 60000 + "x"
+    # Named by its code point, so a tool that rewrites the file cannot swap the
+    # character for a look-alike and leave the run unexercised.
+    replacement = chr(0xFFFD)
+    assert replacement.encode("utf-8") == b"\xef\xbf\xbd"
+    text = "kept line\n\x1b" + replacement * 60000 + "x"
 
     started = time.perf_counter()
     trimmed = trimmed_at_read_edge(text, ())

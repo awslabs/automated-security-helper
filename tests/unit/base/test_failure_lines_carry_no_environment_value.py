@@ -2551,7 +2551,7 @@ def test_the_read_edge_trim_stays_fast_on_junk_runs():
         value = "JUNKSECRET-776611"
         # A read-sized run of replacement characters, as the whole tail and
         # mid-text (mid-text junk is never walked; only the tail is).
-        fffd = "�" * (_STDERR_LOG_READ_LIMIT - 1000)
+        fffd = chr(0xFFFD) * (_STDERR_LOG_READ_LIMIT - 1000)
         assert trimmed_at_read_edge("a" * 1000 + fffd, [value]) == "a" * 1000
         assert trimmed_at_read_edge("a" * 500 + fffd + "b", [value]).endswith("b")
         # A read filled with color codes, as the tail and before a fragment.
