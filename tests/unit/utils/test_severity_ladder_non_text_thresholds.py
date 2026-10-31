@@ -228,6 +228,19 @@ def test_the_dropped_threshold_warning_without_a_name_is_once_per_type(dropped_l
     assert warnings[0].startswith("Scanner severity threshold ")
 
 
+def test_both_threshold_warnings_are_logged_without_markup(dropped_log):
+    """Both warnings carry text a plugin chose, so neither asks the log to read
+    it as markup."""
+    config = SimpleNamespace(global_settings=SimpleNamespace(severity_threshold="LOW"))
+
+    severity_fails_threshold("HIGH", "bogus")
+    resolve_scanner_threshold(5, config)
+
+    records = [r for r in dropped_log.records if r.levelname == "WARNING"]
+    assert len(records) == 2
+    assert [getattr(r, "markup", None) for r in records] == [False, False]
+
+
 @pytest.mark.parametrize("value", [None, "", "high", "bogus"], ids=repr)
 def test_a_scanner_threshold_that_is_unset_or_text_logs_no_drop(dropped_log, value):
     config = SimpleNamespace(global_settings=SimpleNamespace(severity_threshold="LOW"))

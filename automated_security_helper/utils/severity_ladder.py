@@ -601,7 +601,8 @@ def _warn_off_table_threshold(threshold: object) -> None:
     _ash_logger().warning(
         f"Severity threshold {_threshold_for_log(threshold)} is not one of "
         f"{', '.join(SEVERITY_THRESHOLDS)} (case-sensitive); it gates like "
-        "CRITICAL, so only critical findings fail against it"
+        "CRITICAL, so only critical findings fail against it",
+        extra={"markup": False},
     )
 
 
