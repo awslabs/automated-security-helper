@@ -3922,6 +3922,7 @@ async def mcp_get_scan_progress(
     Returns:
         Dictionary with scan progress information
     """
+    from automated_security_helper.cli.mcp.sandbox import caller_is_remote
     from automated_security_helper.core.resource_management.error_handling import (
         validate_scan_id,
     )
@@ -3954,9 +3955,14 @@ async def mcp_get_scan_progress(
                 if linked is not None:
                     return linked
 
-        # Check scan progress using the scan management function
+        # Check scan progress using the scan management function. The entry
+        # records the tools a cancel could not end with their process ids; the
+        # read keeps them out of what a remote caller is told, by the same
+        # request-scoped predicate the scan's own response uses.
         progress_info = await check_scan_progress(
-            scan_id, session_id=_scan_owner(session_id)
+            scan_id,
+            session_id=_scan_owner(session_id),
+            name_process_ids=not caller_is_remote(session_id),
         )
 
         # Add timestamp and operation to the response for consistency
