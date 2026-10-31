@@ -120,19 +120,23 @@ def _suggested_ignore_paths(message: str) -> list:
     return config["global_settings"]["ignore_paths"]
 
 
-def test_the_real_warning_through_the_active_filter_keeps_its_command(caplog):
+def test_the_real_warning_through_the_active_filter_keeps_its_command(capture):
     """The warning ASH writes, not a copy of its shape: captured from
     warn_about_scanned_output_dir and passed through the active filter, so a change
     to how the warning builds its command (its quoting, ``ensure_ascii``) is read
-    here as the Windows console would show it."""
+    here as the Windows console would show it.
+
+    Captured through the unit tests' ``capture`` fixture: ASH's logger does not
+    propagate, so plain ``caplog`` sees the warning only while the logger still
+    holds pytest's handler, which an earlier test in the process can have cleared."""
     from automated_security_helper.utils.scan_output_dirs import (
         warn_about_scanned_output_dir,
     )
 
     relative = "café dir/.ash/ash_output"
-    with caplog.at_level(logging.WARNING):
-        warn_about_scanned_output_dir(relative, 2)
-    [captured] = caplog.records
+    warn_about_scanned_output_dir(relative, 2)
+    assert len(capture.records) == 1, capture.records
+    [captured] = capture.records
     # A console that is known to write only ASCII, whatever host the test is on.
     windows_filter = WindowsSafeFilter(writes=None)
     windows_filter._active = True
