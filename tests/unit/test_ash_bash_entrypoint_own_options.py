@@ -93,7 +93,9 @@ _SCRUBBED_ENV = (
 
 def _executable(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    # surrogateescape writes back the bytes of a path the operating system gave that
+    # are not UTF-8, as os.fsdecode read them; ordinary text is written as UTF-8.
+    path.write_text(text, encoding="utf-8", errors="surrogateescape")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
     return path
 
@@ -205,6 +207,14 @@ def _keeps_stdin(options: List[str]) -> bool:
     )
 
 
+def _python_script(directory: Path, interpreter: str) -> Path:
+    """A script named `python` in *directory* that runs *interpreter* by its own path,
+    quoted for the shell."""
+    return _executable(
+        directory / "python", f'#!/bin/sh\nexec {shlex.quote(interpreter)} "$@"\n'
+    )
+
+
 @pytest.fixture
 def suite_python(tmp_path: Path) -> Path:
     """A directory holding one `python`: the interpreter running the suite, which is
@@ -224,10 +234,7 @@ def suite_python(tmp_path: Path) -> Path:
     dependencies, and the three tests below failed with an import error. The script
     names /bin/sh, not /bin/bash: the module's skip guard looks bash up on PATH, so a
     script that named its own bash would fail where the guard passed."""
-    return _executable(
-        tmp_path / "suite-python" / "python",
-        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n',
-    ).parent
+    return _python_script(tmp_path / "suite-python", sys.executable).parent
 
 
 def test_the_suite_python_keeps_the_suites_own_environment(suite_python):
@@ -259,6 +266,18 @@ def test_the_suite_python_script_names_an_interpreter_the_module_checked_for(
     assert first_line.startswith("#!"), first_line
     interpreter = first_line[2:].strip()
     assert interpreter in ("/bin/sh", shutil.which("bash")), first_line
+
+
+def test_the_suite_python_script_keeps_an_interpreter_path_that_is_not_utf8(tmp_path):
+    """A path the operating system gave can hold bytes that are not UTF-8, which
+    Python reads with surrogate escapes (os.fsdecode). Writing the script as plain
+    UTF-8 raised UnicodeEncodeError for such an interpreter path, where a link to it
+    accepted any bytes; the script now holds the path's own bytes."""
+    odd = b"/opt/py\xff/bin/python".decode("utf-8", errors="surrogateescape")
+
+    script = _python_script(tmp_path / "odd", odd)
+
+    assert script.read_bytes().endswith(b"exec '/opt/py\xff/bin/python' \"$@\"\n")
 
 
 def _dirs(tmp_path: Path):
