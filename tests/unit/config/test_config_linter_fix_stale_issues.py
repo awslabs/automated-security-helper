@@ -325,6 +325,60 @@ def test_the_fresh_lint_reads_the_chain_the_callers_lint_read(tmp_path):
     assert "name" not in yaml.safe_load(fixed_content)["scanners"]["bandit"]
 
 
+def test_an_entry_the_fresh_lint_raises_but_the_operator_did_not_confirm_is_kept(
+    tmp_path,
+):
+    """The fresh lint can raise more than was confirmed: a second expired entry
+    appeared after the prompt. It is matched on its own id and entry, and no
+    given issue names it, so exactly the confirmed entry is removed."""
+    config_path = tmp_path / ".ash.yaml"
+    first = {
+        "path": "src/one.py",
+        "rule_id": "B101",
+        "reason": "old",
+        "expiration": "2020-01-01",
+    }
+    second = {
+        "path": "src/two.py",
+        "rule_id": "B102",
+        "reason": "old",
+        "expiration": "2020-01-01",
+    }
+    _write(config_path, [first])
+    confirmed = ConfigLinter.lint(config_path).fixable_issues
+    assert [i.category for i in confirmed] == [LintCategory.SUPPRESSION_EXPIRED]
+    _write(config_path, [first, second])
+    assert len(ConfigLinter.lint(config_path).fixable_issues) == 2
+
+    fixed_content, fixed_issues = ConfigLinter.fix(config_path, confirmed)
+
+    assert len(fixed_issues) == 1
+    remaining = yaml.safe_load(fixed_content)["global_settings"]["suppressions"]
+    assert remaining == [second]
+
+
+def test_one_confirmed_copy_of_a_duplicated_entry_removes_one_copy(tmp_path):
+    """Two identical expired entries carry one id and raise two fresh issues;
+    the confirmed list names one of them, and each given issue uses one fresh
+    issue, so one copy is removed and the other stays."""
+    config_path = tmp_path / ".ash.yaml"
+    duplicate = {
+        "path": "src/twice.py",
+        "rule_id": "B101",
+        "reason": "copied",
+        "expiration": "2020-01-01",
+    }
+    _write(config_path, [dict(duplicate), dict(duplicate)])
+    issues = ConfigLinter.lint(config_path).fixable_issues
+    assert len(issues) == 2
+
+    fixed_content, fixed_issues = ConfigLinter.fix(config_path, issues[:1])
+
+    assert len(fixed_issues) == 1
+    remaining = yaml.safe_load(fixed_content)["global_settings"]["suppressions"]
+    assert remaining == [duplicate]
+
+
 def test_an_issue_the_file_still_raises_is_applied(tmp_path):
     """The control: nothing changed, so the earlier issue is applied as before."""
     config_path = tmp_path / ".ash.yaml"
