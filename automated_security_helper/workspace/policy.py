@@ -221,9 +221,11 @@ class ProjectPolicy:
     ignore_paths: tuple[IgnorePathWithReason, ...]
     policy_scanners: tuple[str, ...]
     policy_scanners_gate: bool
+    # Required, and ahead of the defaulted fields: an empty default read as "the
+    # project this run did not scan" in the cross-project read, silently.
+    project_prefix: str
     package_paths_applied: tuple[int, ...] = ()
     package_paths_dropped: tuple[int, ...] = ()
-    project_prefix: str = ""
 
 
 def _refuse(message: str) -> WorkspaceDefinitionError:
@@ -1087,6 +1089,10 @@ def refuse_package_paths_naming_no_project(
     Raises:
         WorkspaceDefinitionError: Exit code 4, listing each such entry.
     """
+    # Read twice below (the positions, then the prefixes this run scanned); a
+    # generator would be empty the second time and every prefix would read as
+    # skipped, which is the outcome this function exists to prevent.
+    resolved = tuple(resolved)
     applied: set[int] = set()
     dropped: set[int] = set()
     for project_policy in resolved:

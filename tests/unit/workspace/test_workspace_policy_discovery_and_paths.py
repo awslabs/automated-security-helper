@@ -30,6 +30,7 @@ from automated_security_helper.core.exceptions import (
 )
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.workspace.policy import (
+    ProjectPolicy,
     discover_workspace_policy_file,
     load_workspace_policy,
     policy_for_project,
@@ -401,6 +402,48 @@ class TestAPackagePathNamingNoProjectIsRefusedAcrossTheProjects:
         assert not [
             record for record in caplog.records if "skips" in record.getMessage()
         ]
+
+    def test_a_one_pass_iterable_of_projects_reads_the_same_as_a_list(self, caplog):
+        """The projects are read twice (the entry positions, then the prefixes
+        this run scanned). Handed a generator, the second read saw nothing, so
+        every prefix read as skipped and the entry that names a copy in a
+        scanned project was logged as inert instead of refused."""
+        policy = WorkspacePolicyConfig(
+            suppressions=[
+                AshSuppression(
+                    path="api/**/*.js",
+                    reason="vendored copy",
+                    package_path="web/node_modules/left-pad",
+                )
+            ]
+        )
+        resolved = self._resolved(policy, "api", "web")
+
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(WorkspaceDefinitionError) as excinfo:
+                refuse_package_paths_naming_no_project(
+                    policy,
+                    (project_policy for project_policy in resolved),
+                    every_project_prefix=["api", "web"],
+                )
+
+        assert "suppression entry 1" in str(excinfo.value)
+        assert not [
+            record for record in caplog.records if "skips" in record.getMessage()
+        ]
+
+    def test_a_project_policy_without_its_prefix_cannot_be_built(self):
+        """An empty default for the prefix read as "not scanned" with nothing
+        to say so; the prefix is required."""
+        with pytest.raises(TypeError, match="project_prefix"):
+            ProjectPolicy(
+                effective_threshold=None,
+                threshold_tightened=False,
+                suppressions=(),
+                ignore_paths=(),
+                policy_scanners=(),
+                policy_scanners_gate=False,
+            )
 
     def test_the_project_policy_carries_the_prefix_it_was_pushed_down_into(self):
         (api,) = self._resolved(self._policy("node_modules/left-pad"), "apps\\api")
