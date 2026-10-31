@@ -147,6 +147,27 @@ def test_a_keyboard_interrupt_still_ends_the_scan(plugin_context):
         )
 
 
+def test_a_keyboard_interrupt_still_ends_the_scan_at_the_scanner_handler(
+    plugin_context, monkeypatch
+):
+    """Control for the outer handler: it catches ``(Exception, SystemExit)`` and
+    is the handler most likely to be widened, so the interrupt is pinned here
+    as well as at the per-target one."""
+    executor = _executor(plugin_context)
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(executor, "_execute_scanner", interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        executor._safe_execute_scanner(
+            "shape-tool",
+            _scanner(plugin_context, KeyboardInterrupt()),
+            _targets(plugin_context),
+        )
+
+
 def _reasons(row) -> str:
     return " ".join(str(error) for error in row.errors)
 
@@ -196,6 +217,37 @@ def test_an_exit_message_quoting_an_environment_value_is_redacted(
         "shape-tool", _scanner(plugin_context, SystemExit(3)), _targets(plugin_context)
     )
     assert "the scanner called sys.exit(3)" in _reasons(plain), plain.errors
+
+
+def test_the_scanner_handler_redacts_an_environment_value_from_the_exit(
+    plugin_context, monkeypatch, caplog
+):
+    """The outer handler writes the exit into its own reason, its failure dict and
+    its ERROR log line. A value the configuration read from the environment, quoted
+    in the exit's message, must be redacted from all three there as well."""
+    plugin_context.config._environment_values = [ENV_CANARY]
+    executor = _executor(plugin_context)
+    monkeypatch.setattr(
+        executor,
+        "_execute_scanner",
+        lambda *a, **k: (_ for _ in ()).throw(
+            SystemExit(f"token {ENV_CANARY} refused")
+        ),
+    )
+
+    (container,), succeeded = executor._safe_execute_scanner(
+        "shape-tool",
+        _scanner(plugin_context, SystemExit(0)),
+        _targets(plugin_context),
+    )
+
+    assert succeeded is False
+    reasons = _reasons(container)
+    assert "the scanner called sys.exit(" in reasons, container.errors
+    assert ENV_CANARY not in reasons, container.errors
+    assert ENV_CANARY not in str(container.raw_results), container.raw_results
+    assert "Unexpected error in scanner shape-tool" in caplog.text
+    assert ENV_CANARY not in caplog.text
 
 
 def test_a_failure_containers_reason_names_the_exit_too(plugin_context, monkeypatch):
