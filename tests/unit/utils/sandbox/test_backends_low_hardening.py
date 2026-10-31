@@ -294,6 +294,41 @@ def test_a_cache_whose_filesystem_refuses_an_overlay_is_mounted_read_only(
         plan.run_cleanup()
 
 
+def test_only_the_caches_on_a_refusing_filesystem_get_a_private_directory(
+    layout, monkeypatch
+):
+    """Two caches, one on a filesystem that refuses an overlay and one that takes
+    it: the refusing one is mounted read-only and its variable gets a private
+    directory; the other keeps its overlay and its variable keeps its value, so
+    the tool goes on writing into the overlay, which is discarded with the spawn.
+    """
+    taking = layout.tmp / "uv-cache"
+    taking.mkdir()
+    refusing = layout.tmp / "other-cache"
+    refusing.mkdir()
+    backend = _bwrap(overlay=True)
+    monkeypatch.setattr(backend, "_overlay_over", lambda real: real != _real(refusing))
+    policy = _policy(
+        layout,
+        cache=(taking, refusing),
+        cache_env=("UV_CACHE_DIR", "OTHER_CACHE_DIR"),
+        env_names=("OTHER_CACHE_DIR",),
+    )
+    env = {"UV_CACHE_DIR": str(taking), "OTHER_CACHE_DIR": str(refusing)}
+
+    plan = backend.plan(["/bin/true"], env, policy)
+    try:
+        assert _real(taking) in _mounts(plan.argv, "--overlay-src")
+        assert _real(refusing) in _mounts(plan.argv, "--ro-bind")
+        assert plan.env["UV_CACHE_DIR"] == str(taking)
+        private = Path(plan.env["OTHER_CACHE_DIR"])
+        assert private.is_dir()
+        assert _real(layout.results) in _real(private).parents
+        assert len(plan.private_dirs) == 1
+    finally:
+        plan.run_cleanup()
+
+
 @pytest.mark.parametrize(
     "raised",
     [OSError(2, "bwrap is gone"), subprocess.TimeoutExpired(["bwrap"], 20)],

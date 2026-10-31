@@ -75,7 +75,7 @@ def _with_socket_filter(argv: Sequence[str]) -> List[str]:
 
 
 def _private_caches(
-    policy: SandboxPolicy, child_env: Dict[str, str]
+    policy: SandboxPolicy, child_env: Dict[str, str], overlaid: Sequence[Path] = ()
 ) -> Tuple[List[Callable[[], None]], List[Path]]:
     """Give the tools that must write a cache a private one.
 
@@ -89,15 +89,29 @@ def _private_caches(
     nothing cached. A cache that is only read, such as a scanner's database,
     is not redirected and stays read-only.
 
+    bwrap calls this too when some of the caches, not all, took an overlay (a
+    cache on a filesystem that refuses to be an overlay's lower layer is mounted
+    read-only; see BwrapBackend._overlay_over). ``overlaid`` names the caches,
+    resolved, that got one: a variable whose value in ``child_env`` names a path
+    on or under one of them is left alone, since what the tool writes there is the
+    overlay's and goes with it, and only the variables for the read-only caches
+    are redirected. A variable with no value in ``child_env`` names a cache this
+    function cannot place, so it is redirected as before.
+
     Returns the cleanup step that removes the directory and, for
     ``SpawnPlan.private_dirs``, the directory itself, so the spawn's sweep of the
     results directory passes it over (both empty when nothing is redirected).
     """
-    if not policy.cache_env:
+    redirected = [
+        name
+        for name in policy.cache_env
+        if not _names_a_path_under(child_env.get(name), overlaid)
+    ]
+    if not redirected:
         return [], []
     root = Path(tempfile.mkdtemp(prefix=".sandbox-cache-", dir=policy.results_dir))
     try:
-        for name in policy.cache_env:
+        for name in redirected:
             # npm reads npm_config_* without regard to case, so a NPM_CONFIG_CACHE
             # passed through from the parent would compete with the redirect.
             for key in [
@@ -114,6 +128,15 @@ def _private_caches(
         shutil.rmtree(root, ignore_errors=True)
         raise
     return [lambda: shutil.rmtree(root, ignore_errors=True)], [root]
+
+
+def _names_a_path_under(value: Optional[str], roots: Sequence[Path]) -> bool:
+    """Whether ``value``, a variable's value, names a path at or under one of
+    ``roots`` (resolved paths) once resolved itself; False for no value."""
+    if not value or not roots:
+        return False
+    named = _real(Path(value))
+    return any(named == root or root in named.parents for root in roots)
 
 
 @dataclass
@@ -632,10 +655,15 @@ class BwrapBackend(SandboxBackend):
         for p in policy.read_only:
             add(p, _RO)
         caches_read_only = not self._overlay
+        # The caches that did take an overlay, so that _private_caches redirects
+        # only the variables of the read-only ones when the two kinds meet in one
+        # plan (one cache on a filesystem that refuses, the others not).
+        overlaid: List[Path] = []
         for p in policy.cache:
             real = _real(p)
             if self._overlay and self._overlay_over(real):
                 add(p, _CACHE)
+                overlaid.append(real)
             else:
                 caches_read_only = True
                 add(p, _RO)
@@ -790,7 +818,7 @@ class BwrapBackend(SandboxBackend):
         cleanup: List[Callable[[], None]] = []
         private_dirs: List[Path] = []
         if caches_read_only:
-            cleanup, private_dirs = _private_caches(policy, child_env)
+            cleanup, private_dirs = _private_caches(policy, child_env, overlaid)
         return SpawnPlan(
             argv=cmd, env=child_env, cleanup=cleanup, private_dirs=private_dirs
         )
