@@ -275,6 +275,10 @@ class TestAFileTheSameInstructionRunsIsCommands:
             "RUN tee /tmp/i.sh <<'EOF' >/dev/null && sh /tmp/i.sh jq",
             "RUN install -D -m 0755 /dev/stdin /tmp/i.sh <<'EOF' && /tmp/i.sh jq",
             "RUN dd of=/tmp/i.sh <<'EOF' && sh /tmp/i.sh jq",
+            # The script reaches the shell down a pipe, not as one of its words.
+            "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh | sh -s jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh | bash -s -- jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && cat < /tmp/i.sh | sh -s jq",
         ],
     )
     def test_a_positional_parameter_in_a_script_the_run_executes_is_refused(
@@ -295,6 +299,11 @@ class TestAFileTheSameInstructionRunsIsCommands:
             "RUN cat > /tmp/i.sh <<'EOF' && chmod +x /tmp/i.sh",
             "RUN cat > /tmp/i.sh <<'EOF' && sh /tmp/other.sh",
             "RUN cat > /tmp/i.sh <<'EOF' && echo done",
+            # A pipe that carries another file, or that no shell ends, runs none of it.
+            "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/other.sh | sh -s jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh | wc -l",
+            # `||` starts a new pipeline: the shell reads nothing from the cat.
+            "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh || sh -s jq",
         ],
     )
     def test_a_script_that_is_only_written_stays_a_file_body(
@@ -342,6 +351,16 @@ class TestAFileTheSameInstructionRunsIsCommands:
             ("cat > /x <<'EOF' && sh /y", [("EOF", True)]),
             ("cat > /x <<'EOF' && chmod +x /x", [("EOF", True)]),
             ("cat > /x <<'EOF' && cat /x", [("EOF", True)]),
+            # A shell piped the file runs it, however it is spelled to the shell.
+            ("cat > /x <<'EOF' && cat /x | sh -s jq", [("EOF", False)]),
+            ("cat > /x <<'EOF' && cat /x | bash -s -- jq", [("EOF", False)]),
+            ("cat > /x <<'EOF' && cat /x | tee /y | sh -s jq", [("EOF", False)]),
+            ("cat > /x <<'EOF' && sh -s jq < /x", [("EOF", False)]),
+            ("cat > /x <<'EOF' && source <(cat /x) jq", [("EOF", False)]),
+            ("cat > /x <<'EOF' && cat /y | sh -s jq", [("EOF", True)]),
+            ("cat > /x <<'EOF' && cat /x | wc -l", [("EOF", True)]),
+            ("cat > /x <<'EOF' && cat /x || sh -s jq", [("EOF", True)]),
+            ("cat > /x <<'EOF' && cat /x; sh -s jq", [("EOF", True)]),
             # Each marker is judged by its own file: bash reads B, no file is named, so
             # A's stays a file; and only B's file (/b) is the one sh runs.
             ("cat > /a <<'A'; bash <<'B'", [("A", True), ("B", False)]),

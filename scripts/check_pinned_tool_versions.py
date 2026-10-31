@@ -1441,8 +1441,9 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
     (``<<EOF``, not ``<<'EOF'`` or ``<<\\EOF``) has the build shell expand the body as
     it is written, so what lands in the file is whatever the RUN's variables were; that
     body is read as commands too. So is the body of a file the same instruction goes on
-    to run (``cat > x.sh <<'EOF' && sh x.sh jq``, ``... && chmod +x x.sh && x.sh``): its
-    caller is on the line, so a ``"$@"`` in it is the caller's package, installed now.
+    to run (``cat > x.sh <<'EOF' && sh x.sh jq``, ``... && chmod +x x.sh && x.sh``,
+    ``... && cat x.sh | sh -s jq``): its caller is on the line, so a ``"$@"`` in it is
+    the caller's package, installed now.
     """
     cleaned = _ARITHMETIC.sub(" ", line)
     segments: list[tuple[int, int, str]] = []  # (start, stop, what ended the command)
@@ -1484,12 +1485,7 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
         # A file the same instruction runs is not kept for later: its body is the
         # commands of this build, whatever the marker.
         runs_it = bool(written) and _runs_a_file(
-            [
-                cleaned[begin:end]
-                for index, (begin, end, _) in enumerate(segments)
-                if index not in sinks
-            ],
-            written,
+            _other_pipelines(cleaned, segments, sinks), written
         )
         is_file = writes and copies and not shell and quoted and not runs_it
         markers.append((name, is_file))
@@ -1519,29 +1515,57 @@ def _written_files(command: str, words: list[str]) -> set[str]:
     return files
 
 
-def _runs_a_file(commands: list[str], files: set[str]) -> bool:
-    """Whether one of the commands runs one of the files, by its name or its path.
+def _other_pipelines(
+    cleaned: str, segments: list[tuple[int, int, str]], sinks: list[int]
+) -> list[list[str]]:
+    """The commands of a line that do not take a here-document, grouped by pipeline.
+
+    A pipeline is the run of commands joined by a single ``|``; ``&&``, ``||`` and ``;``
+    start a new one. The commands that read the body (``sinks``) are left out.
+    """
+    pipelines: list[list[str]] = []
+    piped_on = False
+    for index, (begin, end, ender) in enumerate(segments):
+        if index in sinks:
+            piped_on = False
+            continue
+        if piped_on and pipelines:
+            pipelines[-1].append(cleaned[begin:end])
+        else:
+            pipelines.append([cleaned[begin:end]])
+        piped_on = ender == "|"
+    return pipelines
+
+
+def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
+    """Whether a command of the pipelines runs one of the files, by its name or path.
 
     A file is run when it is the program (``x.sh``, ``./x.sh``, ``sudo /tmp/x.sh``), or
     when a shell, ``.`` or ``source`` has its name among the words (``sh x.sh``,
-    ``bash -e /tmp/x.sh jq``, ``. x.sh``), or inside a ``-c`` script (``sh -c
-    'chmod +x x.sh && x.sh'``). The names are matched
-    without their directory, so a different directory is taken for the same file: the
-    body is then read as commands, which is the side of caution.
+    ``bash -e /tmp/x.sh jq``, ``. x.sh``, ``source <(cat x.sh)``), or inside a ``-c``
+    script (``sh -c 'chmod +x x.sh && x.sh'``), or when the shell is piped the commands
+    before it in the same pipeline and one of them names the file (``cat x.sh | sh -s
+    jq``). The names are matched without their directory, so a different directory is
+    taken for the same file: the body is then read as commands, which is the side of
+    caution.
     """
     wanted = {path.rsplit("/", 1)[-1] for path in files} - {""}
-    for command in commands:
-        words = [w.strip("'\"") for w in _REDIRECT_WORD.sub(" ", command).split()]
-        program = _program(words)
-        if program in wanted:
-            return True
-        if program in _SHELLS or program in {".", "source"}:
-            if any(word.rsplit("/", 1)[-1] in wanted for word in words):
+    for pipeline in pipelines:
+        fed: list[str] = []  # the words of the commands piped into this one
+        for command in pipeline:
+            words = [w.strip("'\"") for w in _REDIRECT_WORD.sub(" ", command).split()]
+            program = _program(words)
+            if program in wanted:
                 return True
-            # A script given to the shell as a string names the file somewhere in it.
-            script = words[words.index("-c") + 1 :] if "-c" in words else []
-            if any(name in word for word in script for name in wanted):
-                return True
+            if program in _SHELLS or program in {".", "source"}:
+                named = (w.strip("()").rsplit("/", 1)[-1] for w in words + fed)
+                if any(name in wanted for name in named):
+                    return True
+                # A script given as a string names the file somewhere in it.
+                script = words[words.index("-c") + 1 :] if "-c" in words else []
+                if any(name in word for word in script for name in wanted):
+                    return True
+            fed.extend(words)
     return False
 
 
