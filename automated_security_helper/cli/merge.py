@@ -2339,12 +2339,21 @@ def apply_aggregated_suppressions(
     suppressed. Left in place, the flag changed nothing on a sharded scan while
     its help text promised every finding regardless of suppression status; a
     scan run with the flag attaches none of them, so lifting them is what makes
-    the two commands answer alike on the suppressions. Not on the ignore paths: a
-    shard's ignore path dropped the result from the shard's SARIF rather than
-    attaching a suppression, so the merge has nothing to lift there, and a scan
-    run with the flag keeps results the sharded run under the flag cannot bring
-    back. ``verify_verdict_settings_agree`` therefore still refuses shards that
-    disagree on their ignore paths under the flag. The output-directory exclusion is not applied here in
+    the two commands answer alike on the suppressions. Not on the ignore paths
+    the operator supplied: a shard's ignore path dropped the result from the
+    shard's SARIF rather than attaching a suppression, so the merge has nothing
+    to lift there, and a scan run with the flag keeps results the sharded run
+    under the flag cannot bring back. An ignore path a delivered tree's own
+    config supplied (``client_supplied``) is the exception: the shard kept the
+    finding under it as a marked, suppressed result, and the lift removes that
+    suppression like the rest (``_warn_ignore_paths_the_flag_cannot_lift``
+    leaves those paths out of its list).
+    ``verify_verdict_settings_agree`` still refuses shards that disagree on their
+    ignore paths under the flag, the client-supplied entries included: it
+    compares the recorded list as written, the ``client_supplied`` mark is not
+    part of what it reads (``_as_written``), and the shards of one scan share one
+    delivered config, so a disagreement there is refused rather than guessed at.
+    The output-directory exclusion is not applied here in
     either case -- each shard already dropped its own output-directory results,
     as the comment at the call site says.
 
@@ -2858,11 +2867,14 @@ class ShardSettingsDisagreeError(ASHConfigValidationError):
 #: ``--ignore-suppressions``: the suppression pass that reads them is skipped and
 #: the shards' own suppressions are lifted, so two shards that disagree on them
 #: still get one exit code. ``global_settings.ignore_paths`` is not among them:
-#: a shard's ignore path does not attach a suppression, it drops the result from
-#: the shard's SARIF (``apply_suppressions_to_sarif``), and a dropped result is
-#: not in the merge to lift. Two shards that disagree on their ignore paths hand
-#: the merge two different sets of findings, so they are refused under the flag
-#: as without it.
+#: an ignore path the operator supplied does not attach a suppression, it drops
+#: the result from the shard's SARIF (``apply_suppressions_to_sarif``), and a
+#: dropped result is not in the merge to lift. Two shards that disagree on their
+#: ignore paths hand the merge two different sets of findings, so they are
+#: refused under the flag as without it. The list is compared as written, so a
+#: client-supplied entry (kept by its shard as a suppressed result the flag
+#: lifts) is compared too: the mark is not part of what is read, and shards of
+#: one scan share one delivered config.
 _SUPPRESSION_SETTINGS = frozenset({"global_settings.suppressions"})
 
 
@@ -2884,9 +2896,14 @@ def verify_verdict_settings_agree(
     that reads it and lifts the suppressions the shards attached, so it cannot
     move the merged exit code, and refusing on it would deny the operator the
     one flag that exists to take the suppressions out of it. The ignore-path
-    setting IS still compared under the flag: a shard's ignore path dropped
-    results from the shard's SARIF, nothing lifts a dropped result, so shards
-    that disagree on it produced different findings. A shard that recorded no configuration
+    setting IS still compared under the flag: an ignore path the operator
+    supplied dropped results from the shard's SARIF, nothing lifts a dropped
+    result, so shards that disagree on it produced different findings. The
+    comparison does not tell a client-supplied entry (whose finding the shard
+    kept as a suppressed result, lifted by the flag) from the others, so shards
+    that disagree only on those are refused too; they share one delivered
+    config in a scan, and a refusal is the safe answer to a disagreement there.
+    A shard that recorded no configuration
     at all is left out: it has no value to disagree with, and
     ``merge_shard_results`` refuses it, naming it as one with no scan configuration.
 

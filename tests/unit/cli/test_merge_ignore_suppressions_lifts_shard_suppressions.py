@@ -27,6 +27,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.cli.merge import (
+    RESULTS_FILE_NAME,
     apply_aggregated_suppressions,
     lift_ash_suppressions,
     merge_shard_results,
@@ -51,7 +52,9 @@ from tests.unit.cli.merge_shard_support import (
     as_loaded,
     build_shard,
     build_shards,
+    write_shards,
 )
+from tests.unit.cli.test_merge import TestMergeCli as _MergeCli
 
 pytestmark = pytest.mark.unit
 
@@ -540,6 +543,42 @@ def test_the_merged_row_alone_does_not_keep_a_displaced_acceptance(tmp_path):
     )
 
     assert lifted.used_suppressions == set()
+
+
+def test_the_command_keeps_an_acceptance_another_shards_failure_displaced(tmp_path):
+    """The same displacement as the two tests above, driven through
+    ``merge_command`` (the real ``ash merge``), which is the one caller that
+    passes the shards' ids: dropping the keyword there, or the ``if
+    ignore_suppressions`` that feeds it, would leave those tests green and make the
+    command clear an acceptance its own shard recorded. The shard's matched id goes
+    with the rest of the record, as the flag promises."""
+    shards = build_shards(2)
+    shards[0].converter_results["jupyter"] = ConverterStatusInfo(
+        failed_inputs=[_accepted(ACCEPTED_INPUT, ACCEPTANCE_ID)]
+    )
+    shards[1].converter_results["jupyter"] = ConverterStatusInfo(
+        failed_inputs=[
+            FailedInputInfo(
+                path=ACCEPTED_INPUT, reason="nbconvert crashed", kind="tool"
+            )
+        ]
+    )
+    shards[0].used_suppressions = {ACCEPTANCE_ID, SHARD_MATCHED}
+    paths = write_shards(tmp_path / "artifacts", shards)
+    output_dir = tmp_path / "merged"
+    args = [argument for path in paths for argument in ("--results", path)]
+    args += ["--output-dir", str(output_dir), "--output-formats", "sarif"]
+    args += ["--ignore-suppressions"]
+
+    result = _MergeCli()._invoke(args)
+
+    merged_file = output_dir / RESULTS_FILE_NAME
+    assert merged_file.is_file(), result.output
+    written = AshAggregatedResults.model_validate_json(
+        merged_file.read_text(encoding="utf-8")
+    )
+    assert ACCEPTANCE_ID in written.used_suppressions
+    assert SHARD_MATCHED not in written.used_suppressions
 
 
 def test_a_record_a_suppression_did_not_accept_keeps_nothing(tmp_path):
