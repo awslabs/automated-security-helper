@@ -336,7 +336,10 @@ class SessionBoundary:
     that need a session refuse it, saying the session expired
     (``HttpCaller.session_expired``). Left issued, the session's next scan
     would run with the bound profile and the delivered source gone and nothing
-    said to the client.
+    said to the client. A session whose stream opens while the sweep runs is
+    not ended even if the sweep removed its workspace first: the open streams
+    are read again when the result is applied
+    (``_end_what_the_sweep_removed``).
     """
 
     def __init__(
@@ -459,13 +462,31 @@ class SessionBoundary:
         and nothing said to the client. Forgotten here, the request carries no
         identity and the tools that need a session refuse it, as for an id the
         app never issued, and ``HttpCaller.session_expired`` lets the refusal
-        say what happened. A session with an open stream is never removed by
-        the sweep, so none is forgotten with its stream open.
+        say what happened.
+
+        A session with an open stream is not forgotten, so none is ended with
+        its stream open. The sweep keeps the sessions whose stream was open when
+        it began, but a stream can open while its worker runs, after the worker
+        last read the workspace's age and before this method applies the result.
+        The open streams are read again here, at the moment of the apply, and
+        such a session stays issued: its workspace was already removed under it,
+        so an empty marked one is put back (:func:`_put_back_a_swept_workspace`),
+        which a later sweep ages and removes once the stream has closed, and the
+        session is ended then. The bound profile and delivered source went with
+        the removed workspace and are not restored.
         """
         if self.mode != MODE_STATEFUL:
             return
         for session_id in removed:
             if session_id not in self._issued:
+                continue
+            if session_id in self._open_streams or self._stream_holds.get(session_id):
+                _logger().warning(
+                    f"MCP session {session_id}: its event stream opened while the "
+                    "workspace sweep ran, so the session is kept although its "
+                    "workspace was removed"
+                )
+                _put_back_a_swept_workspace(session_id)
                 continue
             self._issued.discard(session_id)
             self._expired[session_id] = None
@@ -741,6 +762,35 @@ def _sweep_keeping_open_streams(ttl_seconds: float, open_streams: FrozenSet[str]
     for session_id in open_streams:
         touch_session_workspace(session_id)
     return sweep_stale_workspaces(ttl_seconds, in_use=open_streams)
+
+
+def _put_back_a_swept_workspace(session_id: str) -> None:
+    """Re-create the empty, marked workspace of a session kept after the sweep.
+
+    For a stateful session whose event stream opened while the sweep ran, so
+    that the sweep removed its workspace and the boundary kept the session. The
+    new directory is fresh and carries the session marker, so the next sweep
+    ages and removes it like any other, and ends the session once its stream has
+    closed. A path that is a symlink is left alone, as the sweep and the touch
+    leave one. A failure is logged and does not fail the request that set the
+    sweep off.
+    """
+    from automated_security_helper.cli.mcp.session_paths import (
+        mark_session_workspace,
+        session_directory,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        resolve_workspace_root,
+    )
+
+    try:
+        sandbox = session_directory(resolve_workspace_root(), session_id)
+        if not sandbox.is_symlink():
+            mark_session_workspace(sandbox)
+    except (OSError, ValueError, RuntimeError) as exc:
+        _logger().warning(
+            f"MCP session {session_id}: could not put its workspace back: {exc}"
+        )
 
 
 def _logger() -> ASHLogger:
