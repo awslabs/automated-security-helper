@@ -100,6 +100,15 @@ def _observed(plugin_context, plugins, progress=None):
     return results, events, progress
 
 
+def _messages_with(caplog, phrase: str) -> List[str]:
+    """The captured records whose message holds *phrase*, each as its own text."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if phrase in record.getMessage()
+    ]
+
+
 def _descriptions(progress: MagicMock) -> List[str]:
     return [
         str(call.kwargs.get("description", ""))
@@ -572,8 +581,12 @@ class TestNoConverterRanSaysWhy:
 
         # Red at the base: "No enabled converter plugins found".
         assert "No enabled converter plugins found" not in caplog.text
-        assert "No converter ran, and at least one did not start" in caplog.text
-        assert "tool-missing" in caplog.text
+        # The converter is named in the summary line itself, not in some other
+        # record of the run.
+        (summary,) = _messages_with(
+            caplog, "No converter ran, and at least one did not start"
+        )
+        assert "tool-missing" in summary
 
     def test_the_control_with_nothing_registered_keeps_the_old_words(
         self, plugin_context, caplog
@@ -594,8 +607,8 @@ class TestNoConverterRanSaysWhy:
 
         # Red at the base: the bare "No files were converted by any converter
         # plugins", beside a gate that fails the run on the dropped converter.
-        assert "at least one converter did not finish" in caplog.text
-        assert "tool-gone" in caplog.text
+        (summary,) = _messages_with(caplog, "at least one converter did not finish")
+        assert "tool-gone" in summary
 
 
 class TestAConverterThatRaisedEndsForItsSubscribers:
