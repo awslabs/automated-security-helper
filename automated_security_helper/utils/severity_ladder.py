@@ -490,10 +490,18 @@ def severity_fails_threshold(severity: str, threshold: Optional[str]) -> bool:
     """
     if not threshold:
         return False
-    if threshold not in _THRESHOLD_MIN_RANK:
+    # A value that is not text (a number, a boolean, a list from an external
+    # section) names no rung and gates like any other unrecognised value. It is
+    # not looked up in the table: a list is unhashable, and the warning below
+    # describes it without reading it as text.
+    on_the_ladder = isinstance(threshold, str) and threshold in _THRESHOLD_MIN_RANK
+    if not on_the_ladder:
         _warn_off_table_threshold(threshold)
     rank = _SEVERITY_RANK.get(severity.upper(), _UNKNOWN_SEVERITY_RANK)
-    return rank >= _THRESHOLD_MIN_RANK.get(threshold, _UNKNOWN_THRESHOLD_MIN_RANK)
+    minimum = (
+        _THRESHOLD_MIN_RANK[threshold] if on_the_ladder else _UNKNOWN_THRESHOLD_MIN_RANK
+    )
+    return rank >= minimum
 
 
 #: The shape of a threshold worth quoting in the log: a ladder-like word (letters,
@@ -503,9 +511,10 @@ def severity_fails_threshold(severity: str, threshold: Optional[str]) -> bool:
 _QUOTABLE_THRESHOLD = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
 
 
-def _threshold_for_log(threshold: str) -> str:
+def _threshold_for_log(threshold: object) -> str:
     """*threshold* as the off-table warning shows it: quoted when it is a
-    ladder-shaped word, else described by its length.
+    ladder-shaped word, else described by its length (or, for a value that is
+    not text, by its type).
 
     The value is whatever an external plugin or caller passed straight through;
     a configuration that pointed the threshold at an environment variable would
@@ -513,12 +522,14 @@ def _threshold_for_log(threshold: str) -> str:
     or a case slip, which a ladder-shaped word shows in full; anything else is
     not the ladder's business to print.
     """
+    if not isinstance(threshold, str):
+        return f"a value of type {type(threshold).__name__} (not shown: not text)"
     if _QUOTABLE_THRESHOLD.match(threshold):
         return repr(threshold)
     return f"a {len(threshold)}-character value (not shown: not a ladder-shaped word)"
 
 
-def _warn_off_table_threshold(threshold: str) -> None:
+def _warn_off_table_threshold(threshold: object) -> None:
     """Log once per process that *threshold* is off the ladder and gates like CRITICAL.
 
     Every configured route normalizes at its edge (``normalize_threshold``, the
@@ -529,9 +540,12 @@ def _warn_off_table_threshold(threshold: str) -> None:
     and the ladder, and says the matching is case-sensitive, which is the usual
     cause.
     """
-    if threshold in _WARNED_OFF_TABLE:
+    # The dedupe key is the text itself, or the type's name for a value that is
+    # not text (a list cannot be a set member).
+    key = threshold if isinstance(threshold, str) else f"<{type(threshold).__name__}>"
+    if key in _WARNED_OFF_TABLE:
         return
-    _WARNED_OFF_TABLE.add(threshold)
+    _WARNED_OFF_TABLE.add(key)
     _ash_logger().warning(
         f"Severity threshold {_threshold_for_log(threshold)} is not one of "
         f"{', '.join(SEVERITY_THRESHOLDS)} (case-sensitive); it gates like "
@@ -633,7 +647,9 @@ def resolve_scanner_threshold(
     A global threshold that is not a string (None, or a test's mock config, neither
     of which a validated config holds) is read as no config at all: it cannot reach
     the ladder as an unrecognised value, and None, which turns the gate off, is
-    never returned.
+    never returned. A scanner threshold that is not a string (a number, a boolean
+    or a list in an external section) is read as unset in the same way: returned
+    as given, a falsy one (0, False, an empty list) would turn the gate off.
 
     Both values are free text at this edge (an external plugin's section; a config
     built without validation), so both are normalized once here
@@ -644,11 +660,15 @@ def resolve_scanner_threshold(
     A non-blank value off the ladder is returned as written, from either side: the
     summary row shows it, and the ladder grades it at its unrecognised rank.
     """
-    if scanner_threshold is not None:
+    # Only text can be a threshold: a number, a boolean or a list from an external
+    # section is read as unset, like the global value below. Returned as given it
+    # could be falsy (0, False, []), which turns the gate off, or reach the ladder
+    # as a value it cannot rank.
+    if isinstance(scanner_threshold, str):
         normalized = normalize_threshold(scanner_threshold)
         if normalized is not None:
             return normalized, "config"
-        if str(scanner_threshold).strip():
+        if scanner_threshold.strip():
             return scanner_threshold, "config"
     global_settings = getattr(ash_config, "global_settings", None)
     if global_settings is not None and hasattr(global_settings, "severity_threshold"):
