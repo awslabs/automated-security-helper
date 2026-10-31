@@ -93,6 +93,52 @@ def test_the_reports_checks_look_in_the_scans_reports_directory(scanned_root):
     assert checked == [scanned_root / ".ash" / "ash_output" / "reports"], checked
 
 
+def test_a_file_a_reporter_writes_beside_its_report_lands_where_the_checks_looked(
+    scanned_root, monkeypatch
+):
+    """The text reporter writes no file of its own, so a test that ran it could
+    not tell the reports/ directory the name check looked in from the one the
+    reporter wrote to. This reporter declares a companion file and writes it
+    through ``context.output_dir``; the check is recorded, and the file is found
+    where the check looked, not under the directory given."""
+    from automated_security_helper.cli import report as report_module
+    from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+        text_reporter,
+    )
+
+    def declares(self):
+        return ("extra.txt",)
+
+    def writes_beside_its_report(self, model):
+        reports = Path(self.context.output_dir) / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "extra.txt").write_text("companion\n", encoding="utf-8")
+        return "the report\n"
+
+    monkeypatch.setattr(
+        text_reporter.TextReporter, "companion_file_names", declares, raising=False
+    )
+    monkeypatch.setattr(text_reporter.TextReporter, "report", writes_beside_its_report)
+    checked: list = []
+    real = report_module.refuse_report_names_outside
+
+    def recording(report_dir, names, companions=()):
+        checked.append((Path(report_dir), list(companions)))
+        return real(report_dir, names, companions)
+
+    monkeypatch.setattr(report_module, "refuse_report_names_outside", recording)
+
+    result = CliRunner().invoke(
+        app, ["report", "--format", "text", "--output-dir", str(scanned_root)]
+    )
+
+    assert result.exit_code == 0, result.output
+    reports = scanned_root / ".ash" / "ash_output" / "reports"
+    assert checked == [(reports, [("text", "extra.txt")])], checked
+    assert (reports / "extra.txt").read_text(encoding="utf-8") == "companion\n"
+    assert not (scanned_root / "reports").exists()
+
+
 def test_a_plain_output_directory_is_still_used_as_given(tmp_path):
     """The one-candidate shape: the results sit directly in --output-dir."""
     output = tmp_path / "out"
