@@ -145,16 +145,21 @@ def test_a_failed_read_of_the_bundled_config_is_not_cached(
 ):
     """One transient read error must not turn the redaction refusal off for the
     rest of the process: the known names stay, and the next call reads the file
-    again (here one that adds a profile, which proves the read happened)."""
-    extra = tmp_path / "ferret-config.yaml"
-    extra.write_text(
-        "profiles:\n  extra-redaction:\n    redaction:\n      enabled: true\n",
-        encoding="utf-8",
-    )
+    again (here one that adds a profile, which proves the read happened).
 
-    with patch.object(ferret_scanner, "DEFAULT_FERRET_CONFIG", tmp_path / "missing"):
+    One path throughout: the file is missing for the first call and written for
+    the second. A read keyed by the path would pass a test that named two
+    different paths, while a failure cached for the real bundled path stayed
+    cached for the process."""
+    bundled = tmp_path / "ferret-config.yaml"
+
+    with patch.object(ferret_scanner, "DEFAULT_FERRET_CONFIG", bundled):
+        assert not bundled.exists()
         assert bundled_redaction_profiles() == {"redaction", "secure-redaction"}
-    with patch.object(ferret_scanner, "DEFAULT_FERRET_CONFIG", extra):
+        bundled.write_text(
+            "profiles:\n  extra-redaction:\n    redaction:\n      enabled: true\n",
+            encoding="utf-8",
+        )
         assert "extra-redaction" in bundled_redaction_profiles()
         assert {"redaction", "secure-redaction"} <= bundled_redaction_profiles()
 
