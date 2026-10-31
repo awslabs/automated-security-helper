@@ -90,6 +90,22 @@ def _outcome_counter(data: Dict[str, Any]) -> Optional[str]:
     return _OUTCOME_COUNTERS.get(status.upper())
 
 
+def _records_a_breakdown(severity_counts: Any) -> bool:
+    """Whether *severity_counts* names at least one bucket with a usable count.
+
+    An object that is empty, or holds only keys the summary has no bucket for
+    and values that are not counts, records no breakdown: the row's
+    ``finding_count`` is then the only record of what the scanner found, as it
+    is for a row with no ``severity_counts`` at all.
+    """
+    return isinstance(severity_counts, dict) and any(
+        str(severity).lower() in _SEVERITY_KEYS
+        and isinstance(value, int)
+        and not isinstance(value, bool)
+        for severity, value in severity_counts.items()
+    )
+
+
 def _total_of(counts: Dict[str, Any]) -> int:
     """``total`` by the one rule: the non-suppressed buckets of *counts*."""
     return sum(_count(counts.get(bucket)) for bucket in _COUNTED_SEVERITY_KEYS)
@@ -104,10 +120,12 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
     statuses. The summary of a filtered view is derived from this rather than
     copied from the whole scan's stats.
 
-    A scanner's ``total`` is its non-suppressed buckets when it records
-    ``severity_counts`` (the rule SummaryStats.total follows), else its
-    ``finding_count``: a per-target file written before the metrics pass can
-    carry a finding_count that counted suppressed findings too.
+    A scanner's ``total`` is its non-suppressed buckets when it records a
+    breakdown, a ``severity_counts`` object naming at least one usable bucket
+    (the rule SummaryStats.total follows), else its ``finding_count``: a
+    per-target file written before the metrics pass can carry a finding_count
+    that counted suppressed findings too, and an empty ``severity_counts``
+    object records nothing beside a count of 4.
 
     ``actionable`` is None, not 0, when a scanner that ran (PASSED or FAILED)
     records no ``actionable_finding_count``: a count the entries do not carry is
@@ -131,7 +149,7 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
             continue
         severity_counts = data.get("severity_counts")
         own_counts: Dict[str, int] = {}
-        if isinstance(severity_counts, dict):
+        if _records_a_breakdown(severity_counts):
             for severity, value in severity_counts.items():
                 bucket = str(severity).lower()
                 if bucket in counts:
@@ -164,7 +182,7 @@ def _rows_without_a_breakdown(scanner_results: Dict[str, Any]) -> bool:
     """
     return any(
         isinstance(data, dict)
-        and not isinstance(data.get("severity_counts"), dict)
+        and not _records_a_breakdown(data.get("severity_counts"))
         and _count(data.get("finding_count")) > 0
         for data in scanner_results.values()
     )

@@ -647,6 +647,34 @@ class TestTotalFollowsOneRule:
         assert by_severity["high"] is None
         assert by_severity["suppressed"] is None
 
+    @pytest.mark.parametrize(
+        "severity_counts",
+        [
+            pytest.param({}, id="an-empty-bucket-object"),
+            pytest.param({"high": "4"}, id="a-bucket-whose-value-is-not-a-count"),
+            pytest.param({"weird": 4}, id="a-key-the-summary-has-no-bucket-for"),
+        ],
+    )
+    def test_a_row_with_no_usable_bucket_keeps_its_finding_count(
+        self, severity_counts
+    ):
+        results = _results(with_summary_stats=False)
+        results["raw_results"]["scanner_results"] = {
+            "bandit": {
+                "status": "PASSED",
+                "finding_count": 4,
+                "severity_counts": severity_counts,
+            }
+        }
+
+        by_severity = filter_summary(results)["findings_summary"]["by_severity"]
+
+        # A breakdown that names no bucket records nothing beside a count of
+        # 4: the row reads like one with no breakdown, not as a clean scan.
+        assert by_severity["total"] == 4
+        assert by_severity["high"] is None
+        assert by_severity["suppressed"] is None
+
     def test_one_row_without_buckets_makes_the_derived_buckets_unknown(self):
         results = _results(with_summary_stats=False)
         results["raw_results"]["scanner_results"]["trivy"] = {
