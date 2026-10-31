@@ -412,6 +412,28 @@ def test_a_pidfd_pin_of_a_gone_process_sends_nothing(pidfd_refused):
     assert calls == [("returned", (False,))]
 
 
+def test_a_pinned_process_whose_parent_changed_before_the_signal_is_left_alone(
+    monkeypatch,
+):
+    """The number was reused between the first read of the parent and the pin:
+    the parent is read again with the process pinned, and a parent outside the
+    tree means the process is not the scanner's. Nothing is sent, and the
+    descriptor of the pin is closed."""
+    calls: List[Tuple[str, tuple]] = []
+    fake_os = _Recording(os, {"kill", "close"}, calls)
+    fake_os.pidfd_open = lambda pid: calls.append(("pidfd_open", (pid,))) or 42
+    monkeypatch.setattr(landlock_exec, "os", fake_os)
+    monkeypatch.setattr(
+        landlock_exec, "signal", _Recording(signal, {"pidfd_send_signal"}, calls)
+    )
+    parents = iter([ME, 1])
+    monkeypatch.setattr(landlock_exec, "_parent_pid", lambda pid: next(parents))
+
+    assert landlock_exec._kill_descendant(4242, {ME}) is False
+
+    assert calls == [("pidfd_open", (4242,)), ("close", (42,))]
+
+
 def test_a_descendant_that_is_gone_is_skipped_in_silence(procfs, capsys):
     """The common case, a pid that exited between the listing and the kill, says
     nothing."""
