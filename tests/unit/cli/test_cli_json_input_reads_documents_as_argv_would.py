@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from unittest.mock import patch
-from urllib.parse import quote
 
 import pytest
 from typer.testing import CliRunner
@@ -131,12 +130,21 @@ def test_a_relative_path_after_the_file_prefix_names_the_file(
     assert mock_run.call_args.kwargs["offline"] is True
 
 
+def _uri_with_host(path: Path, host: str) -> str:
+    """The file URI of *path* with *host* as its authority: ``file://localhost/tmp/x``
+    on POSIX, ``file://localhost/C:/dir/x`` on Windows.
+
+    Built from ``as_uri`` so that the colon of a drive letter stays a colon, as
+    RFC 8089 writes it. ``urllib.parse.quote`` turns it into ``%3A``, which
+    ``url2pathname`` on Windows does not read as a drive: the path came out as
+    ``\\C:\\dir\\x`` and the file was not found."""
+    return path.as_uri().replace("file://", f"file://{host}", 1)
+
+
 def test_a_file_uri_with_the_local_host_names_the_file(tmp_path):
     path = _document(tmp_path, {"offline": True})
 
-    # `file://localhost/tmp/x` on POSIX, `file://localhost/C:/dir/x` on Windows.
-    uri = "file://localhost/" + quote(path.as_posix().lstrip("/"))
-    result, mock_run = _scan(["--cli-json-input", uri])
+    result, mock_run = _scan(["--cli-json-input", _uri_with_host(path, "localhost")])
 
     assert result.exit_code == 0, result.output
     assert mock_run.call_args.kwargs["offline"] is True
@@ -149,8 +157,7 @@ def test_a_file_uri_host_is_compared_without_regard_to_case(tmp_path, host):
     refused as unreadable."""
     path = _document(tmp_path, {"offline": True})
 
-    uri = f"file://{host}/" + quote(path.as_posix().lstrip("/"))
-    result, mock_run = _scan(["--cli-json-input", uri])
+    result, mock_run = _scan(["--cli-json-input", _uri_with_host(path, host)])
 
     assert result.exit_code == 0, result.output
     assert mock_run.call_args.kwargs["offline"] is True
@@ -223,7 +230,7 @@ def test_a_file_uri_with_a_null_byte_is_the_unreadable_refusal(
     names a file that does not exist; it is refused the same way."""
     monkeypatch.chdir(tmp_path)
     source = (
-        "file://localhost/" + quote(tmp_path.as_posix().lstrip("/")) + "/a%00b.json"
+        _uri_with_host(tmp_path, "localhost") + "/a%00b.json"
         if form == "uri"
         else "file://a%00b.json"
     )
