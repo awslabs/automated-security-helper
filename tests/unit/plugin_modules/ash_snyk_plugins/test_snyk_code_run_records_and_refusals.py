@@ -260,8 +260,13 @@ def test_a_refused_target_records_its_own_end_time(context):
     ):
         scanner.scan(target=context.work_dir, target_type="converted")
 
+    # Two readings of a coarse clock can be equal, so the source's end time is
+    # told apart by identity, and the converted target's own end by not
+    # preceding its start.
     assert scanner.end_time is not None
-    assert scanner.end_time > after_the_source
+    assert scanner.end_time is not after_the_source
+    assert scanner.start_time is not None
+    assert scanner.end_time >= scanner.start_time
 
 
 def test_a_converted_target_refused_for_its_tree_exclusions_records_its_own_run(
