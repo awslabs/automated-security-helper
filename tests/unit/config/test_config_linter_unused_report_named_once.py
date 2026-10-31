@@ -99,8 +99,10 @@ def test_the_age_read_names_the_report_from_the_given_config(tmp_path):
 def test_the_command_hands_the_config_lint_read_to_the_age_read_and_the_fixer(
     tmp_path, monkeypatch
 ):
-    """Red at the base: the command called both with the output directory
-    alone, so each resolved the chain again."""
+    """Red at the base for two reasons: the command called both with the output
+    directory alone, so each resolved the chain again (the merged configuration
+    lint read is not handed on), and it named no report file to either, so each
+    looked one up by name (the file lint listed from is not handed on)."""
     config = tmp_path / ".ashrc.yaml"
     config.write_text("project_name: demo\n", encoding="utf-8")
     merged = dict(NAMED_BY_A_BASE)
