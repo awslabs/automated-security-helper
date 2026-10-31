@@ -446,13 +446,13 @@ async def _report_lost_scan(
     ctx: Context, scan_id: str, progress_info: dict, connection_alive: bool
 ) -> bool:
     """Tell the client the registry stopped answering for ``scan_id``."""
-    message = raw_controls_on_one_line(
+    message = (
         f"Scan {scan_id} is no longer tracked by the server: "
         f"{progress_info.get('error', 'Unknown error')}"
     )
     return await _safe_send(
         connection_alive,
-        lambda: ctx.error(message),
+        lambda: ctx.error(raw_controls_on_one_line(message)),
         "Failed to send lost-scan error",
     )
 
