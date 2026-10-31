@@ -79,8 +79,9 @@ input is opened first and judged through the open descriptor (``_read_admitted``
 its shape by ``fstat``, its place by the descriptor's own path where the platform
 names one (Linux), else by its name tied to the open file by identity. So a file
 swapped for a link or a FIFO between the scanner's check and the copy is refused
-rather than read through its new shape, and one that cannot be opened is a raised
-failure (``InputUnreadable``), never a copy silently missing a file.
+(``InputRefused``) rather than read through its new shape, and one that cannot be
+opened is a raised failure too (``InputUnreadable``): neither is ever a copy
+silently missing a file the tool would read in place.
 """
 
 from __future__ import annotations
@@ -168,18 +169,34 @@ _MAX_LINK_ALIAS_MANIFESTS = 10000
 #: Why a file the package manager would read is not handed to it.
 LINK_LEAVES_TREE = "link leaves the scanned tree"
 NOT_A_REGULAR_FILE = "not a regular file"
+#: The two reasons only the copy can give, once it holds the file open.
+OPENED_FILE_NOT_IN_TREE = (
+    "the file it opened is outside the scanned tree or was removed"
+)
+CHANGED_WHILE_READ = "it changed while it was being read"
 
 
 class InputUnreadable(OSError):
     """An input the package manager would read could not be read for the copy.
 
     Raised by ``_read_admitted`` for an open failure (EACCES, EIO, a file gone
-    between the listing and the copy). A REFUSED input, one that resolves outside
-    the tree or is not a regular file, answers None instead: the scanner has
-    already recorded it through ``refused_inputs``. An unreadable one had passed
-    that check, so before this the copy silently lacked a file yarn would have
-    read in place, and the audit ran on part of the workspace with nothing
+    between the listing and the copy). The scanner's check (``refused_inputs``)
+    had passed it, so before this the copy silently lacked a file yarn would
+    have read in place, and the audit ran on part of the workspace with nothing
     recorded. The scanner's scan loop records the raise as that audit's failure.
+    """
+
+
+class InputRefused(ValueError):
+    """An input the scanner admitted was refused when the copy opened it.
+
+    Raised by ``_read_admitted`` when the open file is not a regular file, lies
+    outside the scanned tree, or is not the file the name still points at: the
+    file was swapped, or removed, after the scanner's check (``refused_inputs``)
+    passed it. Answering None here left the copy without a file the tool reads
+    in place, so yarn audited a partial workspace with nothing recorded. The
+    package is refused instead, with the file and the reason; the scan loop
+    records the raise as that audit's failure.
     """
 
 
@@ -933,8 +950,13 @@ def _descriptor_within(fd: int, roots: Iterable[Path]) -> Optional[bool]:
     return any(is_within(Path(opened_path), Path(root)) for root in roots)
 
 
-def _read_admitted(path: Path, roots: Iterable[Path]) -> Optional[bytes]:
-    """The bytes of ``path`` when it may be handed to the tool, else None.
+def _input_refused(path: Path, reason: str) -> InputRefused:
+    """The refusal ``_read_admitted`` raises, naming the file and the reason."""
+    return InputRefused(f"{path}: {reason}; the package was not audited")
+
+
+def _read_admitted(path: Path, roots: Iterable[Path]) -> bytes:
+    """The bytes of ``path`` when it may be handed to the tool; else it raises.
 
     The file is opened FIRST and judged through the open descriptor: a regular
     file by ``fstat``; inside a root by the descriptor's own path where the
@@ -947,9 +969,10 @@ def _read_admitted(path: Path, roots: Iterable[Path]) -> Optional[bytes]:
     caught by the check on the new object and a swap after it by the identity
     compare (a double swap between those name reads is not; the descriptor
     path closes it where it exists). A file that cannot be OPENED raises
-    ``InputUnreadable``: it passed the scanner's check, so dropping it would
-    hand the tool a copy missing a file it reads in place, with nothing
-    recorded. Where the platform has ``O_NONBLOCK``
+    ``InputUnreadable``, and one the open file shows not to be admissible
+    raises ``InputRefused`` with the reason: both passed the scanner's check,
+    so dropping either would hand the tool a copy missing a file it reads in
+    place, with nothing recorded. Where the platform has ``O_NONBLOCK``
     it keeps the open of a FIFO from waiting for a writer, and it is cleared
     before the read. Windows has no ``O_NONBLOCK``, so the open there is plain
     and nothing is cleared: its ``os.set_blocking`` (3.12 and later) accepts
@@ -974,19 +997,20 @@ def _read_admitted(path: Path, roots: Iterable[Path]) -> Optional[bytes]:
     try:
         opened = os.fstat(fd)
         if not stat.S_ISREG(opened.st_mode):
-            return None
+            raise _input_refused(path, NOT_A_REGULAR_FILE)
         inside = _descriptor_within(fd, roots)
         if inside is False:
-            return None
+            raise _input_refused(path, OPENED_FILE_NOT_IN_TREE)
         if inside is None:
-            if input_refusal(path, roots) is not None:
-                return None
+            refusal = input_refusal(path, roots)
+            if refusal is not None:
+                raise _input_refused(path, refusal)
             try:
                 named = os.stat(path)
             except OSError:
-                return None
+                raise _input_refused(path, CHANGED_WHILE_READ) from None
             if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
-                return None
+                raise _input_refused(path, CHANGED_WHILE_READ)
         if nonblocking:
             os.set_blocking(fd, True)
         with os.fdopen(fd, "rb") as handle:
@@ -1009,21 +1033,20 @@ def _copy_inputs(
 ) -> None:
     """Each input that stays in the tree, at its place below ``project``.
 
-    Read through ``_read_admitted`` (a refused input is skipped, as the scanner
-    has already recorded it; one that cannot be read raises ``InputUnreadable``
-    to the scan loop, which records it) and written through fs_guard
-    (``_write_copy``), which makes the parents and refuses a link on the way,
-    with ``private`` as the guarded root.
+    Read through ``_read_admitted`` (one that cannot be read raises
+    ``InputUnreadable``, and one refused on opening it ``InputRefused``, to the
+    scan loop, which records it; the copy is never left without a file the
+    tool would read in place) and written through fs_guard (``_write_copy``),
+    which makes the parents and refuses a link on the way, with ``private`` as
+    the guarded root.
 
     pnpm's copy always ends up with a ``pnpm-workspace.yaml`` (``_pnpm_workspace_copy``):
-    the repository's, reduced, when it has one that was admitted, else the
-    default, so the copy is its own workspace root whatever the repository holds.
+    the repository's, reduced, when it has one, else the default, so the copy is
+    its own workspace root whatever the repository holds.
     """
     workspace_written = False
     for source in package_manager_inputs(binary, package_dir, skip=skip, roots=roots):
         data = _read_admitted(source, roots)
-        if data is None:
-            continue
         target = project / source.relative_to(package_dir)
         if source.name == "package.json":
             _copy_manifest(

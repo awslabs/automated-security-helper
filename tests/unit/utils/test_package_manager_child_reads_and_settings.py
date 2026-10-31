@@ -138,6 +138,71 @@ class TestAnUnreadableInput:
             (package / "package.json").chmod(0o644)
 
 
+class TestAnInputRefusedWhenTheCopyOpensIt:
+    """The scanner's check admitted the package; the open file is then found
+    not to be admissible. The copy raised nothing and left the file out, so the
+    tool audited a package missing a file it reads in place, and nothing was
+    recorded. The raise reaches the scan loop, which records the audit as
+    failed (``the audit raised InputRefused``)."""
+
+    def test_a_file_that_is_not_regular_when_opened_is_refused(self, tmp_path):
+        package = _package(tmp_path / "repo" / "web", "package-lock.json")
+        lockfile = package / "package-lock.json"
+        lockfile.unlink()
+        os.mkfifo(lockfile)
+
+        with pytest.raises(
+            package_manager_child.InputRefused,
+            match=f"package-lock.json: {package_manager_child.NOT_A_REGULAR_FILE}",
+        ):
+            _copy("npm", package, tmp_path)
+
+    def test_a_file_the_descriptor_places_outside_the_tree_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        """The descriptor's own place is outside every root (hooked here, as the
+        by-name check is unreachable once the descriptor judges): the open file
+        is not copied and the refusal names the lockfile."""
+        package = _package(tmp_path / "repo" / "web", "package-lock.json")
+        lockfile = package / "package-lock.json"
+        monkeypatch.setattr(
+            package_manager_child,
+            "_descriptor_within",
+            lambda fd, roots: os.fstat(fd).st_ino != lockfile.stat().st_ino,
+        )
+
+        with pytest.raises(
+            package_manager_child.InputRefused,
+            match=f"package-lock.json: {package_manager_child.OPENED_FILE_NOT_IN_TREE}",
+        ):
+            _copy("npm", package, tmp_path)
+
+    def test_a_platform_without_descriptor_paths_judges_the_name(
+        self, tmp_path, monkeypatch
+    ):
+        """Where no descriptor path exists the name is judged, tied to the open
+        file by identity: a lockfile that is a link out of the tree is refused
+        with that reason."""
+        package = _package(tmp_path / "repo" / "web", "package-lock.json")
+        lockfile = package / "package-lock.json"
+        outside = tmp_path / "elsewhere" / "package-lock.json"
+        outside.parent.mkdir()
+        outside.write_text(MARKER, encoding="utf-8")
+        lockfile.unlink()
+        os.symlink(outside, lockfile)
+        monkeypatch.setattr(
+            package_manager_child, "_descriptor_within", lambda fd, roots: None
+        )
+
+        with pytest.raises(
+            package_manager_child.InputRefused,
+            match=f"package-lock.json: {LINK_LEAVES_TREE}",
+        ) as refused:
+            _copy("npm", package, tmp_path)
+
+        assert MARKER not in str(refused.value)
+
+
 class TestTheOpenedFileIsJudged:
     @pytest.mark.skipif(
         not os.path.islink("/proc/self/fd/0"), reason="no descriptor paths here"
@@ -255,11 +320,11 @@ class TestPnpmWorkspaceSettings:
         assert yaml.safe_load(copied["pnpm-workspace.yaml"]) == {"packages": ["."]}
         assert set(copied) == {"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"}
 
-    def test_a_refused_workspace_file_still_leaves_the_copy_a_default_one(
-        self, tmp_path
-    ):
-        """A workspace file the scanner refuses (a link out of the tree) is
-        skipped by the copy, which then holds the default file, not none."""
+    def test_a_refused_workspace_file_is_raised_like_any_other_input(self, tmp_path):
+        """A workspace file that is a link out of the tree is refused, never
+        skipped: the scanner refuses the package before the copy, and a copy
+        made without that check raises the refusal rather than holding a
+        default file in its place and auditing on."""
         package = _package(tmp_path / "repo" / "web", "pnpm-lock.yaml")
         outside = tmp_path / "elsewhere" / "pnpm-workspace.yaml"
         outside.parent.mkdir()
@@ -268,10 +333,12 @@ class TestPnpmWorkspaceSettings:
         )
         os.symlink(outside, package / "pnpm-workspace.yaml")
 
-        copied = _copy("pnpm", package, tmp_path)
+        with pytest.raises(
+            package_manager_child.InputRefused, match="pnpm-workspace.yaml"
+        ) as refused:
+            _copy("pnpm", package, tmp_path)
 
-        assert yaml.safe_load(copied["pnpm-workspace.yaml"]) == {"packages": ["."]}
-        assert b"registry.example" not in copied["pnpm-workspace.yaml"]
+        assert "registry.example" not in str(refused.value)
 
     @pytest.mark.parametrize(
         ("binary", "lockfile"),
@@ -316,12 +383,14 @@ class TestAnInputSwappedAroundItsOpen:
         outside.write_text(MARKER, encoding="utf-8")
         return package, package / "package-lock.json", outside
 
-    def test_swapped_for_an_outside_link_before_its_open_is_left_out(
+    def test_swapped_for_an_outside_link_before_its_open_is_refused(
         self, tmp_path, monkeypatch
     ):
         """The open follows the new link to the outside file, which is judged by
-        where it IS: outside every root, so it is not copied and the lockfile's
-        name is absent from the copy."""
+        where it IS: outside every root, so it is not copied. The package is
+        refused with the lockfile named, not copied without it: a copy missing
+        the lockfile was audited as a package with none, with nothing
+        recorded."""
         package, lockfile, outside = self._package_and_outside(tmp_path)
         real_open = os.open
         swapped = []
@@ -335,11 +404,13 @@ class TestAnInputSwappedAroundItsOpen:
 
         monkeypatch.setattr(os, "open", swap_then_open)
 
-        copied = _copy("npm", package, tmp_path)
+        with pytest.raises(
+            package_manager_child.InputRefused, match="package-lock.json"
+        ) as refused:
+            _copy("npm", package, tmp_path)
 
         assert swapped, "the lockfile was never opened, so the swap was not exercised"
-        assert all(MARKER.encode() not in data for data in copied.values()), copied
-        assert "package-lock.json" not in copied
+        assert MARKER not in str(refused.value)
 
     @pytest.mark.skipif(
         not os.path.islink("/proc/self/fd/0"), reason="no descriptor paths here"
