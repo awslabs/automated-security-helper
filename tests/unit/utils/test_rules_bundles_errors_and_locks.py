@@ -269,8 +269,12 @@ class TestReplacingTheOldBundle:
             return real_replace(src, dst, *args, **kwargs)
 
         monkeypatch.setattr(os, "replace", _replace)
-        with pytest.raises(PermissionError):
+        # The installer turns the OSError from the move into its documented
+        # refusal and keeps the original error as the cause.
+        with pytest.raises(RulesBundleUnavailable) as refused:
             _install(rules, bundle, archive, [])
+        assert isinstance(refused.value.__cause__, PermissionError)
+        assert "moved aside" in str(refused.value)
         assert _leftovers(rules) == []
         assert final.is_dir(), "the old bundle stays where it was"
 
