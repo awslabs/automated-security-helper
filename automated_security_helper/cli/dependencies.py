@@ -312,13 +312,19 @@ def _bin_path_under_home(bin_path: str, home: Path, pure: type = PurePath) -> Pa
 
 
 def _bin_directory_problem(directory: Path) -> Optional[str]:
-    """Why ``directory`` cannot be made as ``mkdir(parents=True)`` would make it,
-    read without making anything, or None when nothing in the way is found.
+    """Why ``directory`` cannot be made as ``mkdir(parents=True, exist_ok=True)``
+    would make it, read without making anything, or None when nothing in the way
+    is found.
 
-    Looks at the nearest part of the path that exists: it has to be a directory
-    this user can write to and enter. A regular file or a dangling link there, a
-    file as a parent, or a parent this user cannot write to is what the late
-    ``mkdir`` would refuse, found before any plugin is built.
+    Looks at the nearest part of the path that exists. A regular file or a
+    dangling link there, or a file as a parent, is what the late ``mkdir`` would
+    refuse. When that nearest part is a parent, something has to be created in
+    it, so this user has to be able to write to it and enter it. When it is
+    ``directory`` itself nothing is created, and ``mkdir`` with ``exist_ok``
+    accepts a directory that is already there however its mode reads: the shipped
+    image hands the bin directory back to root, read-only to the user that runs
+    it, with every pinned binary already in it, and a run that finds them
+    present writes nothing there.
     """
     probe = directory
     while not os.path.lexists(probe):
@@ -328,7 +334,7 @@ def _bin_directory_problem(directory: Path) -> Optional[str]:
         probe = parent
     if not probe.is_dir():
         return f"{probe} is not a directory"
-    if not os.access(probe, os.W_OK | os.X_OK):
+    if probe != directory and not os.access(probe, os.W_OK | os.X_OK):
         return f"{probe} is not writable"
     return None
 

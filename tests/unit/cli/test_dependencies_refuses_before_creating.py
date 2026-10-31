@@ -183,6 +183,55 @@ def test_a_bin_path_that_is_a_file_is_a_refusal_not_a_traceback(
     assert "cannot be created" in _flat(result.output), result.output
 
 
+# A mode is read by os.access only for a user the mode applies to: root ignores it,
+# and on Windows os.access reports a directory writable whatever its attributes
+# say. The two tests below need a mode to mean something, so neither runs there.
+_MODE_MEANS_NOTHING = sys.platform == "win32" or os.geteuid() == 0
+
+
+@pytest.mark.skipif(_MODE_MEANS_NOTHING, reason="the mode must apply to this user")
+def test_an_existing_bin_directory_this_user_cannot_write_is_accepted(
+    quiet_machine, tmp_path
+):
+    """The shipped image hands the bin directory back to root, read-only to the
+    user that runs it, with every pinned binary already in it. The late mkdir
+    (exist_ok) accepts a directory that is there however its mode reads; the
+    early check refused it, exit 3, before anything was looked at."""
+    handed_back = tmp_path / "handed-back"
+    handed_back.mkdir()
+    handed_back.chmod(0o500)
+    try:
+        result = runner.invoke(
+            dependencies_app, ["--bin-path", str(handed_back), "--tool", "sarif"]
+        )
+    finally:
+        handed_back.chmod(0o700)
+
+    assert result.exit_code == 0, result.output
+    assert "cannot be created" not in _flat(result.output), result.output
+
+
+@pytest.mark.skipif(_MODE_MEANS_NOTHING, reason="the mode must apply to this user")
+def test_a_missing_bin_directory_under_a_parent_this_user_cannot_write_is_refused(
+    quiet_machine, tmp_path
+):
+    """The control: where something has to be created the writability still
+    counts, and nothing is created."""
+    sealed = tmp_path / "sealed"
+    sealed.mkdir()
+    sealed.chmod(0o500)
+    try:
+        result = runner.invoke(
+            dependencies_app, ["--bin-path", str(sealed / "bin"), "--tool", "sarif"]
+        )
+    finally:
+        sealed.chmod(0o700)
+
+    assert result.exit_code == EXIT_INVALID_CONFIG, result.output
+    assert "cannot be created" in _flat(result.output), result.output
+    assert not (sealed / "bin").exists()
+
+
 # A bin path under "~" with no usable home is refused: pinned, with both HOME and
 # USERPROFILE emptied and a mkdir guard, in
 # test_dependencies_bin_path_under_tilde_needs_a_usable_home.py.
