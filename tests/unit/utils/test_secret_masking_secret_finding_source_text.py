@@ -180,7 +180,10 @@ class TestASecretFindingsOwnSourceText:
         assert replacement.insertedContent.text == MASKED_LINE + "\n"
 
     def test_a_fenced_block_in_the_message_is_masked(self):
-        """The flat model reads the first fenced block as the finding's code."""
+        """The flat model reads the first fenced block as the finding's code. The
+        info string is a line of the block like any other and is masked with it,
+        on purpose: it is text the scanner wrote after the fence and can hold
+        anything."""
         model = _results(
             _result(
                 "SECRET-KEYWORD",
@@ -196,10 +199,11 @@ class TestASecretFindingsOwnSourceText:
         mask_secrets_in_results(model)
 
         text = _first(model).message.root.text
-        assert VALUE not in text
-        assert text.startswith("Secret of type 'Keyword' detected\n\n```")
-        assert ASSIGN_LINE.rstrip("\n") not in text
-        assert MASKED_LINE in text
+        assert text == (
+            "Secret of type 'Keyword' detected\n\n```"
+            + (MASKED_LINE + "\n") * 2
+            + "```"
+        )
 
     def test_every_fenced_block_in_the_message_is_masked(self):
         """The flat model reads the first fenced block as the finding's code, but
@@ -465,9 +469,7 @@ class TestAnOverlappingFindingsSourceText:
         mask_secrets_in_results(model)
 
         text = model.sarif.runs[0].results[1].message.root.text
-        assert VALUE not in text
-        assert text.startswith("import\n\n```")
-        assert MASKED_LINE in text
+        assert text == "import\n\n```" + (MASKED_LINE + "\n") * 2 + "```"
 
     def test_a_fenced_block_away_from_every_reported_line_is_kept(self):
         """Control."""
