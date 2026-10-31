@@ -3,7 +3,7 @@
 
 """The content database refresh takes one lock per cache and honors the operator.
 
-Five properties of utils/content_db_refresh.py, each pinned by one test:
+Properties of utils/content_db_refresh.py that nothing else pins, several tests each:
 
 - the refresh lock for a cache is the same file before and after the cache is
   created, even when the cache's parent does not exist yet either, so two first
@@ -37,6 +37,7 @@ import pytest
 
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils import content_db_refresh as refresh
+from tests.utils.content_db_opt_out_env import TOOL_UPDATE_OPT_OUT_ENV
 
 pytestmark = pytest.mark.unit
 
@@ -45,12 +46,7 @@ pytestmark = pytest.mark.unit
 def _isolated(monkeypatch, tmp_path):
     # The refresh's work directory lands under tmp_path, not the system's.
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    monkeypatch.delenv("GRYPE_DB_AUTO_UPDATE", raising=False)
-    for name in (
-        "TRIVY_SKIP_DB_UPDATE",
-        "TRIVY_SKIP_UPDATE",
-        "TRIVY_SKIP_JAVA_DB_UPDATE",
-    ):
+    for name in TOOL_UPDATE_OPT_OUT_ENV:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(refresh, "find_executable", lambda tool: f"/opt/bin/{tool}")
     monkeypatch.setattr(
@@ -159,12 +155,15 @@ def test_the_lock_file_is_the_same_before_and_after_the_cache_exists(tmp_path):
     os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
     reason="a lock file's mode is read on POSIX, by a caller it binds",
 )
-def test_a_lock_file_this_account_cannot_write_keeps_the_lock_in_the_cache(tmp_path):
+def test_a_lock_file_this_account_cannot_write_keeps_the_lock_in_the_cache(
+    tmp_path, captured
+):
     """A shared cache's lock file left by another account (mode 0644, read-only for
     this one) is still the lock: ``exclusive_lock`` opens it read-only and ``flock``
     takes it, so the two accounts' updates serialize. Sent to a per-account lock in
     the temporary directory instead, the second account ran its update into the
-    shared cache while the first's was still writing it."""
+    shared cache while the first's was still writing it. The refresh itself runs
+    under that lock: the command is reached, not only the path computed."""
     cache = tmp_path / "shared-cache"
     cache.mkdir()
     lock = cache / ".ash-grype-update.lock"
@@ -172,6 +171,8 @@ def test_a_lock_file_this_account_cannot_write_keeps_the_lock_in_the_cache(tmp_p
     lock.chmod(0o444)
     try:
         assert refresh.update_lock_path("grype", cache) == lock
+        _prepare("grype", cache, tmp_path)
+        assert [what for _argv, _env, what in captured] == ["grype database"]
     finally:
         lock.chmod(0o644)
 

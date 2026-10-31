@@ -36,24 +36,15 @@ from automated_security_helper.utils.sandbox.scope import (
     active_scope,
     sandbox_scope,
 )
+from tests.utils.content_db_opt_out_env import TOOL_UPDATE_OPT_OUT_ENV
 from tests.utils.helpers import importing_this_checkout
-
-
-#: The tools' own opt-outs of their database updates, which the refresh honors;
-#: cleared so a developer's or a CI shell cannot change what these tests see
-#: (GRYPE_DB_AUTO_UPDATE=false is a common grype-caching recipe, and read as it
-#: is, it left every grype refresh here out, so the grype cases saw no call).
-_TOOL_UPDATE_OPT_OUT_ENV = (
-    "TRIVY_SKIP_DB_UPDATE",
-    "TRIVY_SKIP_UPDATE",
-    "TRIVY_SKIP_JAVA_DB_UPDATE",
-    "GRYPE_DB_AUTO_UPDATE",
-)
 
 
 @pytest.fixture(autouse=True)
 def _fresh_memo(monkeypatch):
-    for name in _TOOL_UPDATE_OPT_OUT_ENV:
+    # The tools' own database update settings, cleared so a developer's or a CI
+    # shell's cannot change what these tests see (tests/utils/content_db_opt_out_env).
+    for name in TOOL_UPDATE_OPT_OUT_ENV:
         monkeypatch.delenv(name, raising=False)
     refresh.forget_prepared()
     yield
