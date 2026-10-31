@@ -222,9 +222,13 @@ def test_the_refused_count_is_reset_per_target(context):
 
     with patch.object(
         SnykCodeScanner, "_run_subprocess", autospec=True, side_effect=exit_three
-    ):
+    ) as run:
         scanner.scan(target=context.work_dir, target_type="converted")
 
+    # The second scan reached the tool: an early return would leave the counters
+    # at their reset values and pass the assertions below without the reset
+    # having been tested against a run.
+    assert run.call_count == 1
     # SKIPPED: nothing of this target was refused, whatever the first one's count.
     assert scanner.targets_attempted == 0
     assert scanner.targets_failed == 0
