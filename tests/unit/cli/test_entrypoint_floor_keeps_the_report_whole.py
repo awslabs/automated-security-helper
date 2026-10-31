@@ -20,6 +20,7 @@ import sys
 
 import pytest
 import typer
+from typer import core as typer_core
 
 from automated_security_helper.cli import entrypoint
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
@@ -745,27 +746,55 @@ def test_an_interrupted_command_under_a_module_app_exits_130_silently(
     assert output.out + output.err == ""
 
 
-def test_an_app_with_no_arguments_prints_its_help_under_a_module_app(
-    monkeypatch, capsys
-):
-    """typer's NoArgsIsHelpError is a usage error that prints nothing itself,
-    and typer's Rich printer skips it too; the branch writes the help to
-    stderr, as the class's own show() does, and exits with ASH's usage
-    code, as the root group does."""
-    app = typer.Typer()
+def _app_that_shows_its_help_without_arguments(**options) -> typer.Typer:
+    app = typer.Typer(**options)
 
     @app.command(no_args_is_help=True)
     def run():
         raise AssertionError("the command is not reached when the help is shown")
 
+    return app
+
+
+def test_an_app_in_plain_markup_mode_gets_its_help_on_stderr_under_a_module_app(
+    monkeypatch, capsys
+):
+    """In the plain markup mode typer prints nothing itself: the help is the
+    message of NoArgsIsHelpError, so the branch writes it to stderr, as the
+    class's own show() does, and exits with ASH's usage code, as the root
+    group does."""
     monkeypatch.setattr(sys, "argv", ["prog"])
 
     with pytest.raises(SystemExit) as exit_info:
-        entrypoint.run_module_app(app)
+        entrypoint.run_module_app(
+            _app_that_shows_its_help_without_arguments(rich_markup_mode=None)
+        )
 
     assert exit_info.value.code == ASH_EXIT_USAGE_ERROR
     output = capsys.readouterr()
-    assert "Usage" in output.out + output.err, output
+    assert "Usage" in output.err, output
+    assert "Usage" not in output.out, output
+
+
+@pytest.mark.skipif(
+    typer_core.DEFAULT_MARKUP_MODE is None,
+    reason="without rich, typer's default markup mode is the plain one",
+)
+def test_an_app_in_the_default_markup_mode_gets_its_help_once_under_a_module_app(
+    monkeypatch, capsys
+):
+    """In typer's default Rich mode the help is printed to stdout while the
+    error is built and the error's message is empty, so the branch writes
+    nothing: no blank line follows a help that was already shown."""
+    monkeypatch.setattr(sys, "argv", ["prog"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        entrypoint.run_module_app(_app_that_shows_its_help_without_arguments())
+
+    assert exit_info.value.code == ASH_EXIT_USAGE_ERROR
+    output = capsys.readouterr()
+    assert output.out.count("Usage") == 1, output
+    assert output.err == "", output
 
 
 def test_a_commands_click_error_under_a_module_app_is_one_line(monkeypatch, capsys):

@@ -826,9 +826,10 @@ def _run_module_app(app: Callable[..., Any]) -> None:
     click's standalone handling prints a usage error itself and exits with its
     code, 2; outside it the error is raised to here, where ASH prints it as
     cli/main.py does for the root group and exits ASH_EXIT_USAGE_ERROR. typer's
-    NoArgsIsHelpError prints the help instead, written here because typer's
-    Rich printer skips that class. A command's ``typer.Exit`` comes back as its
-    code, and Abort (an end of input at a prompt) exits 1 with its one word. A
+    NoArgsIsHelpError prints the help instead: typer's Rich mode prints it when
+    the error is built, and in the plain markup mode it is written here, from
+    the error's message. A command's ``typer.Exit`` comes back as its code, and
+    Abort (an end of input at a prompt) exits 1 with its one word. A
     KeyboardInterrupt never reaches here as itself: typer turns it into
     ``Exit(130)``, which comes back as 130 with nothing printed. Outside
     standalone mode click returns a command's own return value through the same
@@ -852,18 +853,22 @@ def _run_module_app(app: Callable[..., Any]) -> None:
         exc.exit_code = ASH_EXIT_USAGE_ERROR
         shown = _shown_usage_error(exc)
         if shown is exc:
-            # typer's NoArgsIsHelpError: its message is the help text, which
-            # _shown_usage_error leaves to the caller. typer's Rich printer
-            # returns without printing for this class, so the help is written
-            # here, to stderr as the class's own show() writes it.
-            from automated_security_helper.utils.terminal_text import (
-                shown_not_obeyed,
-            )
+            # typer's NoArgsIsHelpError, which _shown_usage_error leaves to
+            # the caller. In typer's Rich markup mode (the default) the help
+            # was printed while the error was built and the message is empty,
+            # so nothing is written here. In the plain markup mode the help is
+            # the message and nothing else prints it, so it is written here, to
+            # stderr as the class's own show() writes it.
+            message = exc.format_message()
+            if message:
+                from automated_security_helper.utils.terminal_text import (
+                    shown_not_obeyed,
+                )
 
-            _emit(
-                str(shown_not_obeyed(exc.format_message())) + "\n",
-                getattr(sys, "stderr", None),
-            )
+                _emit(
+                    str(shown_not_obeyed(message)) + "\n",
+                    getattr(sys, "stderr", None),
+                )
             raise SystemExit(exc.exit_code) from None
         raise SystemExit(getattr(shown, "exit_code", ASH_EXIT_USAGE_ERROR)) from None
     except Abort:
