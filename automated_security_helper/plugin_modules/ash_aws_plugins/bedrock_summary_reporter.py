@@ -172,8 +172,11 @@ _AFTER_ANSWER = "ash-report-continues"
 
 #: An "&" or "<" with the backslashes before it: an odd number of them escapes
 #: the character, which CommonMark then renders as that character, so writing
-#: an entity after the backslash would render the entity's text instead.
-_HTML_CHARACTER = re.compile(r"(\\*)([&<])")
+#: an entity after the backslash would render the entity's text instead. The
+#: lookbehind starts a match only at the first backslash of a run: without it a
+#: long run of backslashes that no "&" or "<" follows is scanned again from
+#: every position in it, which takes time quadratic in the run.
+_HTML_CHARACTER = re.compile(r"(?<!\\)(\\*)([&<])")
 
 
 def _html_as_text(text: str) -> str:
