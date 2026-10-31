@@ -23,9 +23,57 @@ An individual test or fixture that sets the IDs itself, or patches
 ``subprocess_utils.get_host_uid``, runs after this fixture and wins.
 """
 
+import io
+import os
+
 import pytest
 
 from automated_security_helper.utils import subprocess_utils
+
+
+class _Pipe:
+    def __init__(self, text: str = "") -> None:
+        self._stream = io.StringIO(text)
+
+    def readline(self) -> str:
+        return self._stream.readline()
+
+
+class _RuntimeStandIn:
+    """A container runtime that runs until stopped; its second poll calls ``on_poll``.
+
+    Bounded: it raises past 300 polls, so a planted signal that never took effect
+    fails loudly. Its pid is this process's own, so a die-now record that a test
+    never arms could not reach a process the test does not own.
+    """
+
+    def __init__(self, on_poll=None, stdout: str = "", stderr: str = "") -> None:
+        self.stdout = _Pipe(stdout)
+        self.stderr = _Pipe(stderr)
+        self.returncode = None
+        self.pid = os.getpid()
+        self.polls = 0
+        self.on_poll = on_poll
+        self.killed = False
+
+    def kill(self):
+        self.killed = True
+
+    def poll(self):
+        self.polls += 1
+        if self.polls > 300:
+            raise RuntimeError(
+                "polled past the bound: the planted signal never took effect"
+            )
+        if self.polls == 2 and self.on_poll is not None:
+            self.on_poll()
+        return self.returncode
+
+
+@pytest.fixture
+def runtime_stand_in():
+    """The stand-in runtime class, shared by the tests that run the wait loop."""
+    return _RuntimeStandIn
 
 
 @pytest.fixture(autouse=True)

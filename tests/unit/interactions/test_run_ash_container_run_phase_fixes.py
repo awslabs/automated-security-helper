@@ -15,17 +15,21 @@
   as its key, and the output kept on a result hides the run's carried values.
 * ``--no-build`` neither refuses a revision derived from the install nor runs the
   stock image when ``--custom-containerfile`` names the custom one.
+* ``--min-severity`` reaches a workspace scan inside the container, as the value
+  of a ``MinSeverity`` member, and the default minimum is not forwarded.
+
+The stand-in runtime these tests drive the wait loop with is the
+``runtime_stand_in`` fixture in this directory's ``conftest.py``.
 """
 
 from __future__ import annotations
 
-import io
-import os
 import subprocess
 from typing import List
 
 import pytest
 
+from automated_security_helper.core.cancellation import CancelEvent, cancel_scope
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.interactions.run_ash_container import (
     run_cmd_direct as _real_run_cmd_direct,
@@ -51,6 +55,8 @@ pytestmark = pytest.mark.unit
         pytest.param('sudo "a b"', ["sudo", '"a', 'b"'], id="quotes-are-text"),
         pytest.param("sudo\x0bwrap", ["sudo\x0bwrap"], id="vertical-tab-is-a-word"),
         pytest.param(" sudo\t-E \n", ["sudo", "-E"], id="ifs-only"),
+        pytest.param("sudo\r", ["sudo\r"], id="carriage-return-is-a-word"),
+        pytest.param(" \t\n", [], id="only-separators-is-no-prefix"),
     ],
 )
 def test_the_wrapper_is_split_as_the_shell_wrappers_split_it(monkeypatch, value, words):
@@ -85,46 +91,17 @@ def test_an_extends_entry_holding_a_nul_is_refused_not_raised(tmp_path, monkeypa
 # ---------------------------------------------------------------------------
 
 
-class _Pipe:
-    def __init__(self, text: str = "") -> None:
-        self._stream = io.StringIO(text)
-
-    def readline(self) -> str:
-        return self._stream.readline()
+def _relayed_exit():
+    raise SystemExit(143)
 
 
-class _Runtime:
-    """A runtime that runs until stopped; its second poll calls ``on_poll``."""
-
-    def __init__(self, on_poll=None, stdout: str = "", stderr: str = "") -> None:
-        self.stdout = _Pipe(stdout)
-        self.stderr = _Pipe(stderr)
-        self.returncode = None
-        self.pid = os.getpid()
-        self.polls = 0
-        self.on_poll = on_poll
-        self.killed = False
-
-    def kill(self):
-        self.killed = True
-
-    def poll(self):
-        self.polls += 1
-        if self.polls > 300:
-            raise RuntimeError("polled past the bound")
-        if self.polls == 2 and self.on_poll is not None:
-            self.on_poll()
-        return self.returncode
-
-
-def test_an_exit_raised_while_the_runtime_runs_stops_it_first(monkeypatch):
+def test_an_exit_raised_while_the_runtime_runs_stops_it_first(
+    monkeypatch, runtime_stand_in
+):
     """A SIGTERM relayed as SystemExit by the run step's wrapper: the runtime
-    received nothing, so it is stopped as the cancel path stops it."""
-
-    def relayed_exit():
-        raise SystemExit(143)
-
-    runtime = _Runtime(on_poll=relayed_exit)
+    received nothing, so it is stopped as the cancel path stops it. Once it has
+    ended, nothing is recorded as left running."""
+    runtime = runtime_stand_in(on_poll=_relayed_exit)
     monkeypatch.setattr(
         subprocess_utils, "create_process_with_pipes", lambda **kw: runtime
     )
@@ -133,14 +110,56 @@ def test_an_exit_raised_while_the_runtime_runs_stops_it_first(monkeypatch):
     def stop(process, **kwargs):
         stops.append(kwargs)
         process.returncode = -15
+        return True
 
     monkeypatch.setattr(rac, "_stop_after_interrupt", stop)
+    event = CancelEvent()
+
+    with cancel_scope(event):
+        with pytest.raises(SystemExit) as exited:
+            rac.run_cmd_direct(["runtime", "run", "scan"])
+
+    assert exited.value.code == 143
+    assert stops == [{"child_got_the_interrupt": False}]
+    assert event.could_not_stop_records() == ()
+    assert runtime.killed is False
+
+
+def test_an_exit_the_stop_could_not_finish_is_recorded_on_the_scans_event(
+    monkeypatch, runtime_stand_in
+):
+    """The kill was refused, so the runtime may outlive the exit: the scan's
+    event names it for the exit line, and the exit is re-raised unchanged."""
+    runtime = runtime_stand_in(on_poll=_relayed_exit)
+    monkeypatch.setattr(
+        subprocess_utils, "create_process_with_pipes", lambda **kw: runtime
+    )
+    monkeypatch.setattr(rac, "_stop_after_interrupt", lambda process, **kw: False)
+    event = CancelEvent()
+
+    with cancel_scope(event):
+        with pytest.raises(SystemExit) as exited:
+            rac.run_cmd_direct(["runtime", "run", "scan"])
+
+    assert exited.value.code == 143
+    assert event.could_not_stop_records() == (("container runtime", runtime.pid),)
+
+
+def test_an_exit_the_stop_could_not_finish_with_no_scan_is_still_raised(
+    monkeypatch, runtime_stand_in
+):
+    """Control: with no cancel scope there is no event to tell, and the exit is
+    raised as it was."""
+    runtime = runtime_stand_in(on_poll=_relayed_exit)
+    monkeypatch.setattr(
+        subprocess_utils, "create_process_with_pipes", lambda **kw: runtime
+    )
+    monkeypatch.setattr(rac, "_stop_after_interrupt", lambda process, **kw: False)
 
     with pytest.raises(SystemExit) as exited:
         rac.run_cmd_direct(["runtime", "run", "scan"])
 
     assert exited.value.code == 143
-    assert stops == [{"child_got_the_interrupt": False}]
 
 
 @pytest.mark.parametrize(
@@ -150,7 +169,9 @@ def test_an_exit_raised_while_the_runtime_runs_stops_it_first(monkeypatch):
         pytest.param(KeyboardInterrupt, id="a-sigint-then-a-sigterm"),
     ],
 )
-def test_a_second_exit_inside_the_stop_still_kills_the_runtime(monkeypatch, first):
+def test_a_second_exit_inside_the_stop_still_kills_the_runtime(
+    monkeypatch, first, runtime_stand_in
+):
     """A CI cancel sends SIGTERM again (or SIGINT, then SIGTERM) while ASH waits
     out the runtime's grace. The second signal reaches the wait as a SystemExit,
     which the wait does not handle, so the exit unwound with the runtime still
@@ -159,7 +180,7 @@ def test_a_second_exit_inside_the_stop_still_kills_the_runtime(monkeypatch, firs
     def first_signal():
         raise first()
 
-    runtime = _Runtime(on_poll=first_signal)
+    runtime = runtime_stand_in(on_poll=first_signal)
     monkeypatch.setattr(
         subprocess_utils, "create_process_with_pipes", lambda **kw: runtime
     )
@@ -176,13 +197,11 @@ def test_a_second_exit_inside_the_stop_still_kills_the_runtime(monkeypatch, firs
     assert runtime.killed is True
 
 
-def test_a_stop_that_ends_normally_does_not_kill_the_runtime(monkeypatch):
+def test_a_stop_that_ends_normally_does_not_kill_the_runtime(
+    monkeypatch, runtime_stand_in
+):
     """Control: a runtime that stopped in its grace is left as it is."""
-
-    def relayed_exit():
-        raise SystemExit(143)
-
-    runtime = _Runtime(on_poll=relayed_exit)
+    runtime = runtime_stand_in(on_poll=_relayed_exit)
     monkeypatch.setattr(
         subprocess_utils, "create_process_with_pipes", lambda **kw: runtime
     )
@@ -194,7 +213,9 @@ def test_a_stop_that_ends_normally_does_not_kill_the_runtime(monkeypatch):
     assert runtime.killed is False
 
 
-def test_the_reader_drains_the_pipe_after_a_failed_console_write(monkeypatch):
+def test_the_reader_drains_the_pipe_after_a_failed_console_write(
+    monkeypatch, runtime_stand_in
+):
     class BrokenConsole:
         def __init__(self, *args, **kwargs) -> None:
             pass
@@ -202,7 +223,7 @@ def test_the_reader_drains_the_pipe_after_a_failed_console_write(monkeypatch):
         def write(self, text):
             raise OSError("console gone")
 
-    runtime = _Runtime(stdout="one\ntwo\nthree\n")
+    runtime = runtime_stand_in(stdout="one\ntwo\nthree\n")
     runtime.returncode = 0
     monkeypatch.setattr(
         subprocess_utils, "create_process_with_pipes", lambda **kw: runtime
