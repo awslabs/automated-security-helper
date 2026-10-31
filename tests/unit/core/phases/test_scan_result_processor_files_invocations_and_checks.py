@@ -213,7 +213,9 @@ class TestWhatTheSarifCarries:
             target_type="source",
             raw_results=_sarif(),
             exit_code=2,
-            duration=1.5,
+            # Not end - start (1.5 s): the container's own field is what reaches
+            # the SARIF, and a duration computed from the timestamps would read 1.5.
+            duration=2.25,
             start_time=datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
             end_time=datetime(2026, 1, 1, 10, 0, 1, 500000, tzinfo=timezone.utc),
         )
@@ -229,7 +231,7 @@ class TestWhatTheSarifCarries:
         )
 
         assert invocation["exit_code"] == 2, invocation
-        assert invocation["duration"] == 1.5, invocation
+        assert invocation["duration"] == 2.25, invocation
 
     def test_results_with_no_sarif_report_adopt_the_scanners_findings(self, tmp_path):
         """``sarif`` is optional on the results model; with None there, the

@@ -238,6 +238,87 @@ class TestARecordedReferenceUnderAnotherSpelling:
         )
 
 
+_SUMMARY_KEY_OF_STATUS = {
+    "PASSED": "passed_scanners",
+    "FAILED": "failed_scanners",
+    "SKIPPED": "skipped_scanners",
+    "MISSING": "missing_scanners",
+    "ERROR": "error_scanners",
+}
+
+
+def _a_model_that_grades(status: str) -> AshAggregatedResults:
+    """One scanner, ``tool``, built from real reports so that ``status`` is what
+    ``get_scanner_status`` answers for it."""
+    if status == "PASSED":
+        return _model(
+            {"tool": {"source": _report("tool", targets_attempted=2, targets_failed=0)}}
+        )
+    if status == "FAILED":
+        model = _model({"tool": {"source": _report("tool")}})
+        model.sarif = _sarif("tool", ["error"])
+        return model
+    if status == "MISSING":
+        return _model({"tool": {"source": _report("tool", status="MISSING")}})
+    if status == "ERROR":
+        return _model(
+            {
+                "tool": {
+                    "source": _report(
+                        "tool", status="ERROR", targets_attempted=2, targets_failed=2
+                    )
+                }
+            }
+        )
+    if status == "SKIPPED":
+        return _model(
+            {
+                "tool": {
+                    "source": _report(
+                        "tool", status="SKIPPED", targets_attempted=0, targets_failed=0
+                    )
+                }
+            }
+        )
+    raise AssertionError(status)
+
+
+class TestTheSummaryCountsAScannerAsItsStatusReadsIt:
+    """The summary and ``get_scanner_status`` branch on the same flags in the same
+    order. The cases below are not hand-picked flag sets: each is a model built from
+    reports, graded by ``get_scanner_status``, and the summary must count the
+    scanner under that status and no other."""
+
+    @pytest.mark.parametrize(
+        "status", ["PASSED", "FAILED", "MISSING", "ERROR", "SKIPPED"]
+    )
+    def test_the_scanner_is_counted_under_the_status_it_reads(self, status):
+        model = _a_model_that_grades(status)
+
+        assert ScannerStatisticsCalculator.get_scanner_status(model, "tool") == status
+
+        summary = ScannerStatisticsCalculator.get_summary_statistics(model)
+
+        assert summary["total_scanners"] == 1
+        for read_status, key in _SUMMARY_KEY_OF_STATUS.items():
+            assert summary[key] == (1 if read_status == status else 0), (
+                status,
+                key,
+                summary,
+            )
+
+    def test_an_error_beside_findings_is_an_error_in_both(self):
+        """error outranks findings in both readers: an ERROR report with a SARIF
+        result is ERROR, not FAILED."""
+        model = _a_model_that_grades("ERROR")
+        model.sarif = _sarif("tool", ["error"])
+
+        assert ScannerStatisticsCalculator.get_scanner_status(model, "tool") == "ERROR"
+        summary = ScannerStatisticsCalculator.get_summary_statistics(model)
+        assert summary["error_scanners"] == 1
+        assert summary["failed_scanners"] == 0
+
+
 class TestSummaryStatisticsFollowTheStatus:
     def _summary(self, **flags):
         row = {

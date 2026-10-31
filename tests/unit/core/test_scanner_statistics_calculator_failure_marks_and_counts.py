@@ -160,6 +160,10 @@ class TestAnExceptionIsAFailuresMarkEverywhere:
         )
 
         assert error is False
+        # The docstring says FAILED: no error flag alone would also be PASSED.
+        assert (
+            ScannerStatisticsCalculator.get_scanner_status(model, "cdk-nag") == "FAILED"
+        )
 
 
 class TestACrashedTreeBesideACleanSourceIsAnError:
