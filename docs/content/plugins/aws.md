@@ -186,9 +186,10 @@ needs no IAM permission. The Security Hub reporter calls it in its pre-flight ch
 
 Uploads one object per scan to `<key_prefix>ash-report-<generated_at>.json` (in workspace
 mode `<key_prefix><project>/ash-report-<generated_at>.json`), or `.yaml` with
-`file_format: yaml`. `key_prefix` is used as a directory: a value written without its
-trailing slash gets one, so `scans/repo` and `scans/repo/` both place the object under
-`scans/repo/`, and a prefix is never fused with the file name. The object holds the scan summary: the report metadata and summary
+`file_format: yaml`. `key_prefix` is used as written: the object name follows it directly,
+so `scans/repo/` places the object under `scans/repo/` and `scans/repo-` writes
+`scans/repo-ash-report-<generated_at>.json`. End the prefix with `/` to use it as a
+directory; ASH warns once per run about a prefix that does not. The object holds the scan summary: the report metadata and summary
 counts, each scanner's and converter's status and finding counts, and the resolved ASH
 configuration, which includes your suppressions and ignore paths. In the configuration and
 the metadata, a value or key a config file read from the environment is the reference the

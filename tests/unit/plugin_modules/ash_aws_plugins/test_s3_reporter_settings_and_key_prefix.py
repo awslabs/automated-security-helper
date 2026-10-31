@@ -1,14 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What the S3 reporter reads from the environment, refuses, and names its key.
+"""What the S3 reporter reads from the environment and refuses.
 
 Each test failed at the base: an empty AWS_REGION hid AWS_DEFAULT_REGION and an
 empty bucket or profile passed the ``is None`` checks into boto3; a blank
 profile from a config file reached boto3.Session as a profile named ""; a failed
-dependency check was logged at WARNING, which --quiet hides; a workspace's
-unified results were uploaded as one more object; and a key_prefix written
-without its trailing slash fused with the file name.
+dependency check was logged at WARNING, which --quiet hides; and a workspace's
+unified results were uploaded as one more object. The object name a
+``key_prefix`` gives is in ``test_s3_reporter_key_prefix_is_used_as_written.py``.
 
 No test here calls AWS: boto3 is patched out of the module and the clients are
 MagicMocks.
@@ -164,28 +164,3 @@ def test_a_workspaces_unified_results_are_not_uploaded(mock_boto3, context):
     mock_boto3.Session.assert_not_called()
     assert _logged_levels(reporter) == [logging.ERROR]
     assert "workspace" in reporter._plugin_log.call_args[0][0]
-
-
-@pytest.mark.parametrize(
-    "key_prefix, expected_start",
-    [
-        ("ash-reports", "ash-reports/ash-report-"),
-        ("ash-reports/", "ash-reports/ash-report-"),
-        ("team/ash", "team/ash/ash-report-"),
-        ("", "ash-report-"),
-    ],
-)
-@patch(f"{S3}.boto3")
-def test_a_key_prefix_is_joined_to_the_file_name_with_a_slash(
-    mock_boto3, context, key_prefix, expected_start
-):
-    s3 = MagicMock()
-    mock_boto3.Session.return_value.client.return_value = s3
-    reporter = _reporter(context, key_prefix=key_prefix)
-
-    result = reporter.report(_model())
-
-    assert result is not None
-    key = s3.put_object.call_args.kwargs["Key"]
-    assert key.startswith(expected_start), key
-    assert "//" not in key

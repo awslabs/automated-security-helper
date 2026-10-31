@@ -11,7 +11,7 @@ import boto3
 import botocore.exceptions
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.options import ReporterOptionsBase, _warn_once
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
@@ -79,9 +79,10 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
         str,
         Field(
             description=(
-                "Prefix for S3 object keys, used as a directory: a prefix written "
-                "without its trailing slash gets one, so 'scans/repo' and "
-                "'scans/repo/' both place the object under scans/repo/"
+                "Prefix for S3 object keys, used as written: the object name "
+                "follows it directly, so end it with '/' to place the report in a "
+                "directory. A prefix that does not end in '/' is warned about "
+                "once per run"
             ),
         ),
     ] = "ash-reports/"
@@ -154,9 +155,11 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
 
     The key is ``f"{key_prefix}[{project}/]ash-report-{timestamp}.{ext}"``, as
     documented in ``docs/content/plugins/aws.md``, where ``key_prefix`` is the
-    option with a ``/`` appended if it did not end in one: the prefix is a
-    directory, never fused with the file name (a prefix such as ``scans/repo-``
-    therefore writes under ``scans/repo-/``). ``timestamp`` used to be
+    option as written: a prefix such as ``scans/repo-`` writes
+    ``scans/repo-ash-report-...``, the name it has always had, so the
+    notifications, lifecycle rules and queries an operator matches against the
+    object names keep matching. A prefix that does not end in ``/`` is warned
+    about once per run, because the name runs on from it. ``timestamp`` used to be
     read only from ``model.metadata.summary_stats.start``, and that field is
     **not set yet** when a reporter runs: ``ScanExecutionEngine.execute_phases``
     assigns it in a ``finally`` block that runs *after* ``ReportPhase``. So every
@@ -330,11 +333,21 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         file_extension = "json" if self.config.options.file_format == "json" else "yaml"
         project = getattr(model.metadata, "workspace_project", None)
         project_segment = f"{project}/" if isinstance(project, str) and project else ""
-        # A prefix written without its trailing slash ("ash-reports") is still a
-        # prefix: joined with one, so it does not fuse with the file name.
+        # The prefix is used as written, so the object name stays the one an
+        # operator's notifications, lifecycle rules and queries already match. A
+        # prefix that does not end in "/" runs on into the file name, which may be
+        # meant ("scans/repo-"), so it is named once per run and left alone. The
+        # warning does not quote it: a configured option can come from the
+        # environment, and the warning goes to the console and ash.log.
         key_prefix = self.config.options.key_prefix
         if key_prefix and not key_prefix.endswith("/"):
-            key_prefix = f"{key_prefix}/"
+            _warn_once(
+                "reporters.s3.options.key_prefix",
+                key_prefix,
+                "The s3 reporter's key_prefix does not end in '/', so the object "
+                "name runs on from it: <key_prefix>ash-report-<time>.<extension>. "
+                "End the prefix with '/' to place the report in a directory.",
+            )
         s3_key = f"{key_prefix}{project_segment}ash-report-{timestamp}.{file_extension}"
 
         # Format the results based on the specified format. to_simple_dict()
