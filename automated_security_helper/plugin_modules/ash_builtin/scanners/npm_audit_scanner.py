@@ -1956,14 +1956,22 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         segment stay one advisory. With no ``source`` there is nothing to tell
         them apart by, and the id stays the segment.
 
-        ``titles`` is what decides "shared by advisories of different titles",
-        and it has to cover every advisory that can meet under one rule: the
-        rules of a report are kept by id, so two packages behind one collection
-        URL, or one package in two lockfiles, are one rule unless their ids
-        differ, and the second advisory's result then read the first one's
-        score. The conversion hands in the titles of its whole report (and
+        A URL that ends in a slash names a collection, never one advisory, so
+        its advisories always carry the ``source``, whatever else is in the
+        report. The id of such an advisory is decided by the advisory alone:
+        left to its siblings, the same advisory read ``advisories`` in a scan
+        where it was the only one behind the URL and ``advisories-7`` in a scan
+        where another sat beside it, and a suppression written for one stopped
+        matching in the other. For any other shared segment, ``titles`` is
+        what decides "shared by advisories of different titles", and it has to
+        cover every advisory that can meet under one rule: the rules of a
+        report are kept by id, so two packages behind one such URL, or one
+        package in two lockfiles, are one rule unless their ids differ, and the
+        second advisory's result then read the first one's score. The
+        conversion hands in the titles of its whole report (and
         ``_convert_per_lockfile`` those of every lockfile's report); left out,
-        they come from ``entries`` alone.
+        they come from ``entries`` alone. That sibling rule is the one place an
+        id still depends on the other advisories of the scan.
         """
         ids = [cls._advisory_id(pkg, via) for pkg, via in entries]
         if titles is None:
@@ -1972,10 +1980,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         for (pkg, via), rule_id in zip(entries, ids):
             source = via.get("source")
             if (
-                len(titles.get(rule_id, ())) > 1
-                and cls._url_segment(via)
+                cls._url_segment(via)
                 and source is not None
                 and source != ""
+                and (
+                    str(via.get("url")).endswith("/")
+                    or len(titles.get(rule_id, ())) > 1
+                )
             ):
                 told_apart.append(f"{rule_id}-{source}")
             else:

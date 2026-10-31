@@ -2615,9 +2615,12 @@
   `npm-<package>` whatever the advisory, so two of them on one package folded into one
   result and the second one's severity, CWE and CVSS were dropped. Where the tool
   gives an advisory id (npm's `source`, or the id of a yarn or pnpm record) the rule
-  id is now `npm-<package>-<id>`, and advisories of different titles that sit behind
-  one collection URL take the same `-<id>` ending after the URL's last segment. Both
-  advisories now show as results. A suppression whose `rule_id` names the old id
+  id is now `npm-<package>-<id>`. An advisory behind a collection URL, one that ends
+  in a slash, always takes the same `-<id>` ending after the URL's last segment, so its
+  rule id does not change with the other advisories in the scan. Advisories of
+  different titles that share any other URL segment take it too, and for those the
+  ending is only added while both are in the scan. Both advisories now show as
+  results. A suppression whose `rule_id` names the old id
   (`npm-left-pad`) no longer matches, so the finding it hid is reported again until
   the suppression names the new id, which the finding shows. A package whose name ends
   in `-<number>` and another package's advisory id can spell the same rule id; that is

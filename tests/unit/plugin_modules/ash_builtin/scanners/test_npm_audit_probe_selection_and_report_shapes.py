@@ -729,9 +729,10 @@ def test_the_rule_id_is_the_urls_last_segment_or_the_packages_own_id():
     id is assumed, because a word-shape rule (a segment with no digit is not an
     id, say) would misfile real GHSA ids, so ``_advisory_id`` alone gives every
     advisory from such a URL the id ``advisories``. That choice is asserted here
-    so a change of it is a seen change, not a quiet one. The conversion tells
-    two advisories of different titles behind one segment apart by the tool's
-    own id (``TestTheNpmConversion``), so they do not fold into one result."""
+    so a change of it is a seen change, not a quiet one. The conversion adds the
+    tool's own id to the segment of a URL that ends in a slash, and to a segment
+    shared by advisories of different titles (``TestTheNpmConversion``), so
+    advisories behind one collection do not fold into one result."""
     assert NpmAuditScanner._advisory_id("lodash", {"url": "///"}) == "npm-lodash"
     assert NpmAuditScanner._advisory_id("lodash", {"url": ""}) == "npm-lodash"
     assert NpmAuditScanner._advisory_id("lodash", {"url": "", "source": 42}) == (
@@ -1106,6 +1107,89 @@ class TestTheNpmConversion:
         assert sorted(r.ruleId for r in sarif.runs[0].results) == [
             "advisories-1065",
             "advisories-1066",
+        ]
+
+    def test_an_advisory_behind_a_collection_url_has_one_id_alone_or_beside_another(
+        self, scanner, monkeypatch
+    ):
+        """The id of an advisory behind a URL that ends in a slash came from
+        its siblings: alone in a scan it read ``advisories``, and beside
+        another advisory of that URL it read ``advisories-7``. Fixing the
+        other advisory, or dropping a lockfile from the scan, then changed the
+        id a suppression had been written against, and the finding came back.
+        The source is always part of the id for such a URL."""
+        _unknown_versions(monkeypatch)
+        collection = "https://registry.example/advisories/"
+        seven = _via(
+            "<0.2.4",
+            url=collection,
+            source=7,
+            title="Prototype Pollution",
+        )
+        eight = _via(
+            ">=1.0.0 <1.2.6",
+            url=collection,
+            source=8,
+            title="Regular Expression DoS",
+            severity="low",
+        )
+
+        alone = scanner._convert_npm_audit_to_sarif(_npm_report([seven]), "/fake")
+        beside = scanner._convert_npm_audit_to_sarif(
+            _npm_report([seven, eight]), "/fake"
+        )
+
+        assert [rule.id for rule in alone.runs[0].tool.driver.rules] == ["advisories-7"]
+        assert [r.ruleId for r in alone.runs[0].results] == ["advisories-7"]
+        assert sorted(rule.id for rule in beside.runs[0].tool.driver.rules) == [
+            "advisories-7",
+            "advisories-8",
+        ]
+
+    def test_a_yarn_record_behind_a_collection_url_has_one_id_alone_or_beside_another(
+        self, scanner
+    ):
+        def record(record_id, title):
+            return {
+                "package": "lodash",
+                "id": record_id,
+                "title": title,
+                "url": "https://registry.example/advisories/",
+                "severity": "high",
+                "cvss": {},
+                "cwe": [],
+                "vulnerable_versions": "<4.17.12",
+                "patched_versions": None,
+                "versions": {},
+                "paths_key": "dependents",
+            }
+
+        alone, beside = {}, {}
+        scanner._add_yarn_results([record(1065, "Prototype Pollution")], alone, [])
+        scanner._add_yarn_results(
+            [record(1065, "Prototype Pollution"), record(1066, "Command Injection")],
+            beside,
+            [],
+        )
+
+        assert sorted(alone) == ["advisories-1065"]
+        assert sorted(beside) == ["advisories-1065", "advisories-1066"]
+
+    def test_a_url_that_names_one_advisory_keeps_its_segment_as_the_id(self):
+        """Control: the source joins the id only for a URL that names a
+        collection, or when advisories of different titles share a segment. An
+        advisory behind its own URL is the segment, alone or with its source
+        given, and so is an advisory with no source behind a collection."""
+        collection = "https://registry.example/advisories/"
+
+        ids = NpmAuditScanner._advisory_ids
+
+        assert ids([("minimist", _via("<0.2.4", source=7))]) == ["GHSA-xvch-5gv4-984h"]
+        assert ids([("minimist", _via("<0.2.4", url=collection, source=None))]) == [
+            "advisories"
+        ]
+        assert ids([("minimist", _via("<0.2.4", url=collection, source=7))]) == [
+            "advisories-7"
         ]
 
     def test_a_yarn_record_without_a_url_gets_a_rule_with_no_help_uri(self, scanner):
