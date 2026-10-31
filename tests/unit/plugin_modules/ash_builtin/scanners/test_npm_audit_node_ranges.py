@@ -338,6 +338,93 @@ def test_a_node_that_is_not_a_path_does_not_fail_the_conversion(scanner, nodes):
     assert [r.ruleId for r in report.runs[0].results] == ["GHSA-xvch-5gv4-984h"]
 
 
+def _uri(result) -> str:
+    location = result.locations[0].model_dump(by_alias=True, exclude_none=True)
+    return location["physicalLocation"]["artifactLocation"]["uri"]
+
+
+def _with_dependent(document, nodes):
+    """Add ``mkdirp``, which is vulnerable only through ``minimist``."""
+    document["vulnerabilities"]["mkdirp"] = {
+        "name": "mkdirp",
+        "severity": "critical",
+        "isDirect": False,
+        "via": ["minimist"],
+        "effects": [],
+        "range": "*",
+        "nodes": list(nodes),
+        "fixAvailable": True,
+    }
+    return document
+
+
+_NOT_A_PATH = [
+    pytest.param({"path": "node_modules/mkdirp"}, id="a-dict"),
+    pytest.param(["node_modules/mkdirp"], id="a-list"),
+]
+
+
+@pytest.mark.parametrize("item", _NOT_A_PATH)
+def test_a_transitive_entry_leaves_out_a_node_that_is_not_a_path(scanner, item):
+    """The advisory loop left such an item out, but the arm for an entry
+    vulnerable only through a dependency read the raw ``nodes``: the item was
+    turned into text and became the result URI, with no warning
+    (``node_modules/{'path': 'mkdirp'}/package.json``). With the item left out
+    and no path left, the entry is reported by package name, as one that lists
+    no node is."""
+    document = _with_dependent(
+        _report(["node_modules/minimist"], ranges=("<2.0.0",)), [item]
+    )
+
+    report = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
+
+    (transitive,) = [
+        r for r in report.runs[0].results if r.ruleId == "npm-audit-transitive-mkdirp"
+    ]
+    assert _uri(transitive) == "node_modules/mkdirp/package.json"
+
+
+def test_a_transitive_entry_keeps_the_path_listed_beside_one_that_is_not(scanner):
+    document = _with_dependent(
+        _report(["node_modules/minimist"], ranges=("<2.0.0",)),
+        [{"path": "node_modules/mkdirp"}, "node_modules/mkdirp"],
+    )
+
+    report = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
+
+    assert [
+        _uri(r)
+        for r in report.runs[0].results
+        if r.ruleId == "npm-audit-transitive-mkdirp"
+    ] == ["node_modules/mkdirp/package.json"]
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        pytest.param({"path": "node_modules/minimist"}, id="a-dict"),
+        pytest.param(["node_modules/minimist"], id="a-list"),
+    ],
+)
+def test_a_root_reference_names_no_node_that_is_not_a_path(scanner, item):
+    """The references a dependent carries to its root's results are placed as
+    those results are. The root's own results leave an item that is not a path
+    out, so a reference to one pointed at a result that never existed (and its
+    URI was the item's text)."""
+    document = _with_dependent(
+        _report([item, "node_modules/minimist"], ranges=("<2.0.0",)),
+        ["node_modules/mkdirp"],
+    )
+
+    report = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
+
+    (transitive,) = [
+        r for r in report.runs[0].results if r.ruleId == "npm-audit-transitive-mkdirp"
+    ]
+    refs = transitive.properties.model_extra["root_advisories"]
+    assert [ref["uri"] for ref in refs] == ["node_modules/minimist/package.json"], refs
+
+
 def test_an_unknown_version_keeps_the_advisory_once_per_copy(scanner, monkeypatch):
     """Control: with no installed version the answer is uncertain, so the
     advisory is still reported on the copy. Once: the two via entries are one

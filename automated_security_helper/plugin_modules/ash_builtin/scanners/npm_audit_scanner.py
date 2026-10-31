@@ -1727,9 +1727,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
         A copy is in the set only when every ranged advisory answers False for
         it; an uncertain pairing (no version, an unreadable range) keeps it out.
-        Empty when the entry lists no copy or no advisory with a range.
+        Empty when the entry lists no copy or no advisory with a range. An item
+        of ``nodes`` that is not a path is not a copy (``_entry_nodes``).
         """
-        nodes = vuln_info.get("nodes") or []
+        nodes = [
+            node for node in vuln_info.get("nodes") or [] if isinstance(node, str)
+        ]
         advisories = [
             via for via in via_items if isinstance(via, dict) and via.get("range")
         ]
@@ -1797,8 +1800,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         return disagreeing
 
     @staticmethod
-    def _entry_nodes(pkg_name: str, vuln_info: Dict[str, Any]) -> List[Any]:
-        """The installed-copy paths an entry's advisories are reported against,
+    def _entry_nodes(
+        pkg_name: str, vuln_info: Dict[str, Any], warn: bool = True
+    ) -> List[Any]:
+        """The installed-copy paths an entry's results are reported against,
         or ``[None]`` for the package by name when npm lists none.
 
         An item of ``nodes`` that is not a path (a report npm did not write: a
@@ -1806,10 +1811,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         range exclusion keeps its copies in a set, so an item that cannot be
         hashed raised ``TypeError`` there and failed the whole conversion as a
         scanner error, where the neighbouring guards skip a malformed ``via``.
+        Every reader of an entry's copies goes through here (the entry's own
+        advisories, its transitive result, and the root references other
+        entries carry to it), so an item that is not a path is never turned
+        into a result URI or a lockfile key. ``warn`` is off for the readers
+        that visit an entry the conversion loop has already named.
         """
         nodes = vuln_info.get("nodes") or []
         usable = [node for node in nodes if isinstance(node, str)]
-        if len(usable) != len(nodes):
+        if warn and len(usable) != len(nodes):
             ASH_LOGGER.warning(
                 f"npm-audit: ignoring {len(nodes) - len(usable)} item(s) of the "
                 f"nodes of {pkg_name} that are not a path",
@@ -1986,8 +1996,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 # while this root's advisory was live, and a chain whose every
                 # root had no node could not be reached by any advisory
                 # suppression. A null ``nodes`` raised here (iterating None)
-                # and failed the whole conversion.
-                for node_path in info.get("nodes") or [None]:
+                # and failed the whole conversion. An item that is not a path
+                # is left out as the root's own results leave it out
+                # (``_entry_nodes``): the conversion loop has already named it.
+                for node_path in self._entry_nodes(name, info, warn=False):
                     pkg_location, identity = self._node_place(
                         name, node_path, lock_rel, lock_index
                     )
@@ -2367,9 +2379,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         lock_index,
                     )
                     transitive_copies = (
-                        dependency_only
-                        if has_dict_via
-                        else vuln_info.get("nodes") or [None]
+                        dependency_only if has_dict_via else entry_nodes
                     )
                     for node_path in transitive_copies:
                         pkg_location, identity = self._node_place(
