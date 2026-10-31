@@ -52,6 +52,7 @@ from typing import (
     Callable,
     Dict,
     FrozenSet,
+    Generator,
     Iterable,
     Iterator,
     List,
@@ -400,7 +401,7 @@ def _below(relative: str, name: str) -> str:
 
 def _walk_descriptors(
     root: Path, refuse: "Callable[[str, str, OSError], None]"
-) -> Iterator[Tuple[str, int, Dict[str, os.stat_result], List[str]]]:
+) -> Generator[Tuple[str, int, Dict[str, os.stat_result], List[str]], None, None]:
     """Walk ``root`` top-down through directory descriptors, never following a link.
 
     For each directory reached this yields ``(relative, dir_fd, statuses,
@@ -1356,7 +1357,12 @@ def open_for_atomic_write(
     relative = path.relative_to(anchor).parts if anchor is not None else ()
     dir_fd: Optional[int] = None
     if anchor is not None and _HAS_DIR_FD:
-        dir_fd = _open_dir_beneath(anchor, relative[:-1], path, identity_of=guard[0])
+        dir_fd = _open_dir_beneath(
+            anchor,
+            relative[:-1],
+            path,
+            identity_of=guard[0] if guard is not None else None,
+        )
     # After the directory is open (and created, when it was missing): its own
     # filesystem's name limit is asked through the descriptor, where asking the
     # spelled path before it existed fell back to the ceiling.
@@ -1493,7 +1499,12 @@ def open_for_write(
             flags |= os.O_APPEND if append else os.O_TRUNC
         return os.fdopen(os.open(path, flags, mode), open_mode, **text)
     relative = path.relative_to(anchor).parts
-    dir_fd = _open_dir_beneath(anchor, relative[:-1], path, identity_of=guard[0])
+    dir_fd = _open_dir_beneath(
+        anchor,
+        relative[:-1],
+        path,
+        identity_of=guard[0] if guard is not None else None,
+    )
     try:
         name = relative[-1]
         if _is_link(name, dir_fd):

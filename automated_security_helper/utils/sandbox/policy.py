@@ -1808,8 +1808,10 @@ def build_scanner_policy(
         "UV_CACHE_DIR" if os.environ.get("UV_CACHE_DIR") else "XDG_CACHE_HOME",
     )
     cache = _existing(
-        [uv_cache]
-        + _screened_declared_paths(declared_cache, scanner_name, "cache_paths")
+        [
+            uv_cache,
+            *_screened_declared_paths(declared_cache, scanner_name, "cache_paths"),
+        ]
     )
 
     refuse_symlinked_output_dir(source_dir, output_dir)

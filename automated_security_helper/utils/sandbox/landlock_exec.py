@@ -454,7 +454,7 @@ def _parse_policy(text: str) -> Dict[str, Any]:
         if key not in policy:
             fail(f"--policy lacks the key {key!r}")
     for key, value in list(policy.items()):
-        wanted = _POLICY_KEYS.get(key)
+        wanted: Any = _POLICY_KEYS.get(key)
         if wanted is None:
             fail(f"--policy holds the unknown key {key!r}")
         if value is None and key not in _REQUIRED_POLICY_KEYS:
@@ -665,7 +665,7 @@ def _kill_descendant(pid: int, tree: Set[int]) -> bool:
             if e.errno == errno.ESRCH:
                 return False
             # Refused, not gone: the kill goes by number below.
-    if fd is not None:
+    if fd is not None and pidfd_send_signal is not None:
         try:
             # Read again with the process pinned: a reuse between the first read
             # and the open would otherwise have pinned the new process.
