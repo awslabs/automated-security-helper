@@ -45,6 +45,7 @@ from automated_security_helper.core.resource_management.scan_tracking import (
     ScannerProgress,
     ScanProgress,
     create_scan_progress_from_files,
+    empty_severity_counts,
     find_scanner_result_files,
     get_scan_progress_info,
     get_scan_results_with_error_handling,
@@ -454,6 +455,40 @@ class TestTheAggregatedDocumentIsReadAsLeniblyAsItsModel:
         assert source.finding_count == 3
         assert source.severity_counts["unknown"] == 3
         assert sum(progress.severity_counts.values()) == 3
+
+    def test_a_zero_finding_row_with_an_empty_breakdown_keeps_every_bucket(
+        self, tmp_path
+    ):
+        """The shape the results writer dumps for an errored scanner: no
+        findings, a zero count and an empty ``severity_counts`` object. The
+        scanner reads the same seven buckets, ``unknown`` included, as one
+        with findings and as the per-target view, not the six the progress
+        constructor starts with."""
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out, self._bandit(status="ERROR", finding_count=0, severity_counts={})
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        source = progress.scanners["bandit"]["source"]
+        assert set(source.severity_counts) == set(empty_severity_counts())
+        assert source.severity_counts["unknown"] == 0
+        assert source.finding_count == 0
+
+    def test_a_row_with_no_breakdown_and_no_count_keeps_every_bucket_too(
+        self, tmp_path
+    ):
+        """The control for the same fall-through: no ``severity_counts`` key and
+        no ``finding_count`` at all."""
+        out = tmp_path / "ash_output"
+        _write_aggregated(out, self._bandit(status="PASSED"))
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        source = progress.scanners["bandit"]["source"]
+        assert set(source.severity_counts) == set(empty_severity_counts())
+        assert source.severity_counts["unknown"] == 0
 
     def test_a_recorded_count_beside_short_buckets_grades_the_rest_unknown(
         self, tmp_path

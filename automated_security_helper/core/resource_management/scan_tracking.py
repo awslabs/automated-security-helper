@@ -1469,6 +1469,12 @@ def _add_aggregated_scanner_progress(
         elif recorded_count:
             source_progress.severity_counts = empty_severity_counts()
             source_progress.severity_counts[UNKNOWN_SEVERITY] = recorded_count
+        else:
+            # Nothing recorded and nothing found: every scanner reads the same
+            # full set of buckets, unknown included, as the per-target view
+            # gives a scanner with no findings. The constructor's default has
+            # no unknown bucket.
+            source_progress.severity_counts = empty_severity_counts()
 
         # The status is the constructor's and no end_time is set: the document
         # records how long a scanner took (the duration above), not when it ended,
