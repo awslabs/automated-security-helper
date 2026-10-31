@@ -148,21 +148,31 @@ def _one_medium_finding_model(project: "str | None") -> AshAggregatedResults:
 
 
 def _assert_rows_grade_by_another_gate(
-    emitter: ReportContentEmitter, model: AshAggregatedResults, project_gate: str
+    emitter: ReportContentEmitter,
+    model: AshAggregatedResults,
+    project_gate: str,
+    *,
+    rows_failed: bool,
 ) -> None:
     """The fixture's precondition: the scanner rows do not grade at the project's gate.
 
     The scanner rows count by the scanner resolver, which with the merged file's
     missing ash_config answers ASH's default for every project. A test of the
     headline's recount is only meaningful while that answer differs from the gate
-    the project recorded, so the precondition is stated as that difference and not
-    as a disagreement between a row and the headline.
+    the project recorded, so the precondition is stated as that difference, for
+    each scanner the rows name, and as what the rows then show: a FAILED row
+    holding the fixture's one finding as actionable when *rows_failed*, and no
+    FAILED row and no actionable count when not.
     """
-    assert emitter.get_scanner_results(), "the fixture must exercise the scanner rows"
-    resolved, _source = ScannerStatisticsCalculator.get_scanner_threshold_info(
-        model, "bandit"
-    )
-    assert resolved != project_gate, resolved
+    rows = emitter.get_scanner_results()
+    assert rows, "the fixture must exercise the scanner rows"
+    for row in rows:
+        resolved, _source = ScannerStatisticsCalculator.get_scanner_threshold_info(
+            model, row["scanner_name"]
+        )
+        assert resolved != project_gate, (row["scanner_name"], resolved)
+    assert any(row["status"] == "FAILED" for row in rows) is rows_failed, rows
+    assert sum(row["actionable"] for row in rows) == int(rows_failed), rows
 
 
 def _one_bandit_finding_model(
@@ -296,6 +306,25 @@ class TestAWorkspaceHeadlineGradesAsTheProjectOutcomeDid:
         assert summary["actionable"] == 1, summary
         assert summary["title"] == "Review required", summary
 
+    def test_an_unrecorded_policy_gate_counts_the_finding(self, tmp_path):
+        """A results file from before the policy gate was recorded holds None.
+
+        The emitter leaves a policy finding out only when the gate is explicitly
+        off (``is False``), so an older file fails closed and the finding counts;
+        a regression to a falsy test would read None as off.
+        """
+        model = _one_bandit_finding_model("warning", "svc", origin="workspace-policy")
+        model.workspace = _workspace(
+            tmp_path, _project("svc", policy_scanners_gate=None)
+        )
+
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        summary = emitter.get_scan_summary()
+
+        assert summary["actionable"] == 1, summary
+        assert summary["policy_not_gating"] == 0, summary
+        assert summary["title"] == "Review required", summary
+
     def test_a_policy_tag_without_the_origin_is_actionable(self, tmp_path):
         """The outcome reads the origin alone; a tag does not leave a finding out."""
         model = _one_bandit_finding_model("warning", "svc", tags=["workspace-policy"])
@@ -408,7 +437,7 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
         """
         model.scanner_results["bandit"] = ScannerTargetStatusInfo(duration=1.0)
         emitter = ReportContentEmitter(model, human_presentation=True)
-        _assert_rows_grade_by_another_gate(emitter, model, "ALL")
+        _assert_rows_grade_by_another_gate(emitter, model, "ALL", rows_failed=False)
         assert emitter.get_scan_summary()["actionable"] == 1
 
     def test_the_title_follows_the_recount_when_a_project_gate_is_stricter(
@@ -429,7 +458,7 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
         )
         model.scanner_results["bandit"] = ScannerTargetStatusInfo(duration=1.0)
         emitter = ReportContentEmitter(model, human_presentation=True)
-        _assert_rows_grade_by_another_gate(emitter, model, "HIGH")
+        _assert_rows_grade_by_another_gate(emitter, model, "HIGH", rows_failed=True)
 
         summary = emitter.get_scan_summary()
 
@@ -462,7 +491,7 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
             }
         }
         emitter = ReportContentEmitter(model, human_presentation=True)
-        _assert_rows_grade_by_another_gate(emitter, model, "HIGH")
+        _assert_rows_grade_by_another_gate(emitter, model, "HIGH", rows_failed=True)
 
         summary = emitter.get_scan_summary()
 
