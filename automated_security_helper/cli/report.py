@@ -288,6 +288,17 @@ def _print_error(template: str, *values: object) -> None:
     console.print(template, highlight=False)
 
 
+def _print_debug_trace(error: BaseException) -> None:
+    """With ``--debug``, the frames of *error* on stderr, after its one-line error.
+
+    Each pydantic error in the chain is described, not quoted, and the
+    exception's text is shown the way _print_error shows it.
+    """
+    ash_console(stderr=True, soft_wrap=True, markup=False).print(
+        shown_not_obeyed(traceback_text(error))
+    )
+
+
 def _exists(path: Path) -> bool:
     """Whether *path* exists, with a path the user may not reach read as present.
 
@@ -1110,6 +1121,8 @@ def report_command(
             report_format,
             e,
         )
+        if debug:
+            _print_debug_trace(e)
         raise typer.Exit(1)
 
     # Generate the report
@@ -1199,9 +1212,5 @@ def report_command(
     except Exception as e:
         _print_error("[red]Error generating report: {}[/red]", e)
         if debug:
-            # The frames, with each pydantic error described, not quoted, and the
-            # exception's text again, so shown the way _print_error shows it.
-            ash_console(stderr=True, soft_wrap=True, markup=False).print(
-                shown_not_obeyed(traceback_text(e))
-            )
+            _print_debug_trace(e)
         raise typer.Exit(1)

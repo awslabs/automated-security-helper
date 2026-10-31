@@ -400,6 +400,36 @@ def test_a_reporter_that_cannot_be_built_is_a_failed_run_not_a_mistyped_format(
     assert "the client library is missing" in result.output, result.output
 
 
+@pytest.mark.parametrize(
+    ("flags", "shows_frames"),
+    [([], False), (["--debug"], True)],
+    ids=["default", "debug"],
+)
+def test_debug_shows_the_frames_of_a_reporter_that_cannot_be_built(
+    tmp_path, monkeypatch, flags, shows_frames
+):
+    """The handler for a failed report prints the frames under --debug; the one
+    for a reporter that could not be built printed its one line alone."""
+    from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+        text_reporter,
+    )
+
+    results = _write_results(tmp_path / "out")
+
+    def refusing(self, *args, **kwargs):
+        raise RuntimeError("the client library is missing")
+
+    monkeypatch.setattr(text_reporter.TextReporter, "__init__", refusing)
+
+    result = _report("--format", "text", "--output-dir", str(results.parent), *flags)
+
+    assert result.exit_code == 1, result.output
+    assert "could not be built" in result.output, result.output
+    assert ("Traceback (most recent call last)" in result.output) is shows_frames, (
+        result.output
+    )
+
+
 def test_a_reporter_is_built_once_from_its_section(tmp_path, monkeypatch):
     """The reporter was built twice, first from its defaults before the results
     were read, so a reporter whose default build raises but whose configured
