@@ -984,6 +984,45 @@ def test_the_row_records_exit_code_one_for_a_run_with_findings(
     assert row.exit_code == 1
 
 
+@pytest.mark.parametrize(
+    "level, status",
+    [
+        pytest.param("note", ScannerStatus.PASSED, id="below-the-threshold"),
+        pytest.param("error", ScannerStatus.FAILED, id="control-at-the-threshold"),
+    ],
+)
+@pytest.mark.unit
+def test_a_finding_below_the_threshold_is_reported_and_does_not_fail_the_row(
+    level,
+    status,
+    snyk_on_path,
+    populated_source,
+    subprocess_double,
+    plugin_context,
+    monkeypatch,
+):
+    """``severity_threshold`` is applied by ASH after the scan, to the severity snyk
+    gave each finding. With the threshold at HIGH, a ``note`` finding reaches the
+    report and is counted, and does not fail the row; the control, an ``error``
+    finding, does. Passed to snyk as a flag, the threshold dropped the first
+    before ASH saw it (``test_severity_threshold_is_not_passed_to_snyk``)."""
+    scanner = SnykCodeScanner(
+        context=plugin_context,
+        config=SnykCodeScannerConfig(
+            options=SnykCodeScannerConfigOptions(severity_threshold="HIGH")
+        ),
+    )
+    subprocess_double.side_effect = writes_sarif(
+        snyk_code_document([("javascript/HttpToHttps", level, "app.js", 1)]),
+        exit_code=1,
+    )
+
+    row = _executor_row(scanner, plugin_context, monkeypatch)
+
+    assert row.finding_count == 1, row.finding_count
+    assert row.status == status, (level, row.status)
+
+
 @pytest.mark.unit
 def test_the_exit_code_of_each_target_is_its_own(
     scanner, snyk_on_path, populated_source, subprocess_double, plugin_context
