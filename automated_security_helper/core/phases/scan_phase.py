@@ -1472,44 +1472,22 @@ class ScanPhase(EnginePhase):
                                     + f"{self._shard_assignment.shard_index} of "
                                     f"{self._shard_assignment.shard_count})"
                                 )
-                            # The same line, and the same text, as
-                            # _record_scanner_not_selected writes for the other
-                            # selections, so ash.log says what the row says.
-                            ASH_LOGGER.info(
-                                f"Scanner {display_name} excluded from execution: "
-                                f"{excluded_reason}"
+                            # The one recorder every selection that leaves a
+                            # scanner out goes through: the log line, the
+                            # tracker's "excluded" state, the guarded write of
+                            # the container (a refused write used to escape to
+                            # the loop's own except and the row was then
+                            # recorded MISSING, "left filtering with no status",
+                            # over a scanner the operator excluded), the SKIPPED
+                            # row and the excluded name. A hand copy of it here
+                            # drifted and never set the tracker's state.
+                            # Not added to completed scanners: it did not run.
+                            aggregated_results = self._record_scanner_not_selected(
+                                display_name,
+                                excluded_reason,
+                                aggregated_results,
+                                excluded_scanner_names,
                             )
-
-                            # Create a ScanResultsContainer with excluded=True
-                            results_container = ScanResultsContainer.for_excluded(
-                                display_name, reason=excluded_reason
-                            )
-
-                            # Guarded like the other recorders for a scanner that
-                            # does not run: a refused write of this container used
-                            # to escape to the loop's own except and the row was
-                            # then recorded MISSING ("left filtering with no
-                            # status") over a scanner the operator excluded.
-                            aggregated_results = self._write_results_guarded(
-                                display_name, results_container, aggregated_results
-                            )
-
-                            # Do NOT add to completed scanners - this scanner was excluded and didn't run
-                            # self._completed_scanners.append(plugin_instance)
-
-                            aggregated_results.scanner_results[display_name] = (
-                                ScannerTargetStatusInfo(
-                                    status=ScannerStatus.SKIPPED,
-                                    excluded=True,
-                                    dependencies_satisfied=True,
-                                    skipped_reason=excluded_reason,
-                                )
-                            )
-                            # Tracked as excluded for the enablement validation
-                            # once its row is written, as in
-                            # _record_scanner_not_selected: appended first, a
-                            # raise before the row left it counted as excluded.
-                            excluded_scanner_names.append(display_name)
 
                             continue
 

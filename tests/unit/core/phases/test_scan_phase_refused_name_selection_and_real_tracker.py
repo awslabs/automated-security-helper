@@ -290,6 +290,35 @@ class TestTheFixesHoldAgainstTheRealTracker:
         assert row.status == ScannerStatus.SKIPPED
         assert row.excluded is True
 
+    def test_an_operator_excluded_scanner_is_tracked_with_the_reason_it_was_left_out(
+        self, mock_plugin_context, mock_progress_display
+    ):
+        """The exclusion goes through the recorder every other selection uses, so
+        the tracker holds the reason the filtering wrote. Red at the base: the
+        exclusion block was a hand copy of that recorder and never set the
+        tracker's state, so the enablement pass at the end of the phase wrote its
+        generic "excluded by configuration" for a scanner the operator excluded
+        by name, and the log, the row and the tracker told three stories."""
+        phase = ScanPhase(
+            plugin_context=mock_plugin_context,
+            plugins=[_make_scanner_class("bandit"), _make_scanner_class("semgrep")],
+            progress_display=mock_progress_display,
+        )
+
+        results = phase._execute_phase(
+            aggregated_results=AshAggregatedResults(),
+            excluded_scanners=["bandit"],
+            parallel=False,
+        )
+
+        state = phase.validation_manager.scanner_states["bandit"]
+        assert state.enablement_status == "excluded"
+        assert state.enablement_reason.startswith("Scanner excluded during filtering:")
+        assert results.scanner_results["bandit"].excluded is True
+        # Control: the scanner that was not excluded is not tracked as excluded.
+        other = phase.validation_manager.scanner_states["semgrep"]
+        assert other.enablement_status != "excluded"
+
 
 class TestTheLoaderRecordsTheKeyTheScanPhaseReads:
     def test_a_lost_builtin_package_is_recorded_under_the_prefix(self, monkeypatch):
