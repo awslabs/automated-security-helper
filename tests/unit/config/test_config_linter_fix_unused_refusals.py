@@ -69,7 +69,7 @@ def test_the_same_report_comments_out_an_entry_it_lists(tmp_path):
     assert "# - path: src/a.py" in fixed_content
 
 
-def test_a_config_that_does_not_parse_is_returned_unchanged(tmp_path):
+def test_a_config_that_does_not_parse_has_no_content_returned(tmp_path):
     """Red at the base: the YAML parser's error escaped."""
     config_path, report = _write(tmp_path, "project_name: [unclosed\n")
     report.write_text(GOOD_REPORT, encoding="utf-8")
