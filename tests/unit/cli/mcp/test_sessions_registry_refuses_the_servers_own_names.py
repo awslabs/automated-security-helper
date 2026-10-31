@@ -79,6 +79,14 @@ def warnings(monkeypatch) -> List[str]:
         # every trailing period with their own words (session_paths
         # validated_path_component), before the reserved-name check is reached.
         (PRESENCE_LOCK_NAME + ".", "must not end with '[.]'"),
+        # The same Windows spellings of the two registry directories, and the
+        # trailing space Windows drops as well (outside the character class, so
+        # refused by the class before the reserved check is reached).
+        (STDIO_SERVERS_DIR + ".", "must not end with '[.]'"),
+        (SCAN_PRESENCE_DIR + ".", "must not end with '[.]'"),
+        (PRESENCE_LOCK_NAME + " ", "may contain only"),
+        (STDIO_SERVERS_DIR + " ", "may contain only"),
+        (SCAN_PRESENCE_DIR + ". ", "may contain only"),
     ],
 )
 def test_a_name_the_server_keeps_for_itself_is_refused(tmp_path, name, refusal) -> None:
@@ -87,6 +95,28 @@ def test_a_name_the_server_keeps_for_itself_is_refused(tmp_path, name, refusal) 
     with pytest.raises(ValueError, match=refusal):
         registry.session_for(name)
     assert name not in registry
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        STDIO_SERVERS_DIR + ".",
+        STDIO_SERVERS_DIR + " ",
+        SCAN_PRESENCE_DIR + ".",
+        SCAN_PRESENCE_DIR.upper() + ". ",
+        PRESENCE_LOCK_NAME + " ",
+    ],
+)
+def test_the_reserved_check_reads_a_name_as_windows_opens_it(name) -> None:
+    """The refusals above catch these spellings at the path-component rules, which
+    run first. The reserved-name check is its own gate, used where an id is not
+    validated as a component (the sweep, a name read off disk), and Windows
+    opens each of these as the reserved name itself."""
+    from automated_security_helper.cli.mcp.session_identity import (
+        is_reserved_session_id,
+    )
+
+    assert is_reserved_session_id(name), name
 
 
 def test_the_stdio_session_and_an_ordinary_id_are_admitted(tmp_path) -> None:
