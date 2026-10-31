@@ -32,6 +32,7 @@ from automated_security_helper.cli.merge import (
     merge_shard_results,
 )
 from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
     ConverterStatusInfo,
     FailedInputInfo,
 )
@@ -365,6 +366,60 @@ def test_the_unused_reporter_reads_the_merged_file_as_not_evaluated(tmp_path):
     )
 
     report = json.loads(UnusedSuppressionsReporter(context=reporting).report(merged))
+
+    assert report["unused_suppressions"] == []
+    assert report["summary"]["evaluated"] is False
+
+
+def _written_and_reloaded(merged) -> tuple[dict, AshAggregatedResults]:
+    """The merged results as ``ash merge`` writes them, and as a later
+    ``ash report`` reads the file back: the same ``model_dump_json`` call the
+    command makes, parsed once as JSON and once as the model."""
+    written = merged.model_dump_json(indent=2)
+    return json.loads(written), AshAggregatedResults.model_validate_json(written)
+
+
+def test_the_written_results_file_records_the_lift(tmp_path):
+    """The field is read by a command that never sees the merge's context, so it
+    has to be in the file, not only on the object the merge held: the unit tests
+    above read the object. The control is the same merge without the flag, whose
+    file carries no such key."""
+    flagged_file, flagged = _written_and_reloaded(
+        _merged(tmp_path, ignore_suppressions=True)
+    )
+    plain_file, plain = _written_and_reloaded(
+        _merged(tmp_path, ignore_suppressions=False)
+    )
+
+    assert flagged_file["metadata"]["suppressions_ignored"] is True
+    assert flagged.metadata.suppressions_ignored is True
+    assert not plain_file["metadata"].get("suppressions_ignored")
+    assert not getattr(plain.metadata, "suppressions_ignored", None)
+
+
+def test_the_unused_reporter_reads_the_reloaded_file_as_not_evaluated(tmp_path):
+    """The reporter driven over the file read back, not over the object the merge
+    held. A write that dropped the field would leave the used-suppression record
+    empty and the flag unrecorded, so every configured entry would read as unused
+    and ``ash config lint --fix-unused`` would comment all of them out."""
+    model = _results_as_the_shards_left_them()
+    model.ash_config.global_settings.suppressions = [
+        AshSuppression(path="src/bandit_0.py", rule_id="RULE-0", reason="one"),
+        AshSuppression(path="src/other.py", rule_id="RULE-9", reason="two"),
+    ]
+    merged = apply_aggregated_suppressions(
+        model, _context(tmp_path, model.ash_config, ignore_suppressions=True)
+    )
+    _, reloaded = _written_and_reloaded(merged)
+    reporting = PluginContext(
+        source_dir=tmp_path,
+        output_dir=tmp_path / "report",
+        work_dir=tmp_path / "work",
+        config=reloaded.ash_config,
+        ignore_suppressions=False,
+    )
+
+    report = json.loads(UnusedSuppressionsReporter(context=reporting).report(reloaded))
 
     assert report["unused_suppressions"] == []
     assert report["summary"]["evaluated"] is False
