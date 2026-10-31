@@ -38,7 +38,13 @@ pytestmark = [
 ]
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "waitid"), reason="this build of Python has no os.waitid"
+)
 class TestTheDieNowFallbackKillsOnlyALiveChild:
+    """These stand ``os.waitid`` in and read ``os.P_PID``, which CPython leaves
+    out on macOS; the build with no ``waitid`` is covered by the next class."""
+
     def test_a_reaped_pid_is_not_killed(self, monkeypatch):
         killed = []
         monkeypatch.setattr(
