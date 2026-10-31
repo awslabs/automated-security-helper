@@ -95,6 +95,17 @@ STAGING_DIR_NAME = HELD_DIR_NAME + ".partial"
 #: removes a leftover.
 DISCARDING_DIR_NAME = HELD_DIR_NAME + ".discarding"
 
+#: How many names a discard tries to move the held set to: DISCARDING_DIR_NAME,
+#: then DISCARDING_DIR_NAME.2 and on. A leftover at the first name that cannot be
+#: removed no longer makes the rename fail, and with it the discard delete in place.
+_DISCARDING_NAMES = 9
+
+#: Written beside the held set by a discard that has to delete it in place (every
+#: rename refused) and removed when that delete has finished. While it exists the
+#: held set is half-deleted and is not the last complete results, so a set aside
+#: removes it instead of trusting it.
+INCOMPLETE_DISCARD_MARKER_NAME = HELD_DIR_NAME + ".incomplete"
+
 #: Left beside the results a restore put back. Its text is for a person reading
 #: the directory; code checks only that it exists.
 RESTORED_MARKER_NAME = ".ash_previous_results_restored"
@@ -193,6 +204,8 @@ class PreviousResults:
             return
         # A discard that stopped partway left its half-deleted set: finished here.
         self._remove_discarding_leftover()
+        # And one that deleted in place left the held set half deleted.
+        self._finish_incomplete_discard()
         if self._real_dir(self.restoring):
             # A restore stopped halfway, or a directory of that name that outlived
             # a completed scan (its discard failed) or that a scanned repository
@@ -268,13 +281,16 @@ class PreviousResults:
         leftover's name is never taken for the held set, so leaving it costs
         only the space it holds.
         """
-        try:
-            _remove(self.output_dir / DISCARDING_DIR_NAME)
-        except OSError as e:
-            ASH_LOGGER.warning(
-                f"Could not remove {self.output_dir / DISCARDING_DIR_NAME}, left by a "
-                f"discard that stopped partway: {e}; it is left in place"
-            )
+        for leftover in self._discarding_paths():
+            if not _exists(leftover):
+                continue
+            try:
+                _remove(leftover)
+            except OSError as e:
+                ASH_LOGGER.warning(
+                    f"Could not remove {leftover}, left by a discard that stopped "
+                    f"partway: {e}; it is left in place"
+                )
 
     def _put_back(self, staging: Path) -> None:
         """Move what staging holds back to the top level, then remove staging.
@@ -319,24 +335,86 @@ class PreviousResults:
         """
         if self._output_dir_is_a_link():
             return
-        discarding = self.output_dir / DISCARDING_DIR_NAME
         self._remove_discarding_leftover()
+        moved_to = None
         if self._real_dir(self.held):
+            # The first free name: a leftover that could not be removed holds
+            # DISCARDING_DIR_NAME, and a rename onto it is refused, which used
+            # to send the discard into deleting the held set in place.
+            for target in self._discarding_paths():
+                if _exists(target):
+                    continue
+                try:
+                    self.held.rename(target)
+                except OSError:
+                    continue
+                moved_to = target
+                break
+            if moved_to is None:
+                # Every rename was refused: the held set is deleted in place,
+                # which can end partway. The marker says so first, so the next
+                # set aside removes what is left instead of taking it for the
+                # last complete results. A marker that cannot be written leaves
+                # the held set whole and raises.
+                self._mark_discard_incomplete()
+        # Every removal is tried, and the first refusal is raised after the rest:
+        # a refusal on the held set or the set being discarded is this call's
+        # own failure. A leftover of an earlier discard was handled above, best
+        # effort, and is not one.
+        failure = None
+        for path in (self.held, self.restoring, moved_to):
+            if path is None or not _exists(path):
+                continue
             try:
-                self.held.rename(discarding)
-            except OSError:
-                # Deleted in place then; the rename is a precaution, not the
-                # discard itself.
-                pass
-        # The held set before the leftover: when the rename above was refused
-        # because the leftover is still there, the held set is deleted in place
-        # first, so a leftover that cannot be removed does not shield it (the
-        # next set aside would take it for the last complete results).
-        for path in (self.held, self.restoring, discarding):
-            if _exists(path):
                 _remove(path)
-        _remove(self.output_dir / STAGING_DIR_NAME)
+            except OSError as e:
+                failure = failure or e
+        try:
+            _remove(self.output_dir / STAGING_DIR_NAME)
+        except OSError as e:
+            failure = failure or e
+        if failure is not None:
+            raise failure
+        _remove(self.output_dir / INCOMPLETE_DISCARD_MARKER_NAME)
         self._remove_marker()
+
+    def _discarding_paths(self) -> list[Path]:
+        """The names a discard moves the held set to, in the order it tries them."""
+        return [
+            self.output_dir / DISCARDING_DIR_NAME,
+            *(
+                self.output_dir / f"{DISCARDING_DIR_NAME}.{index}"
+                for index in range(2, _DISCARDING_NAMES + 1)
+            ),
+        ]
+
+    def _mark_discard_incomplete(self) -> None:
+        """Write the marker that says the held set is being deleted in place."""
+        marker = self.output_dir / INCOMPLETE_DISCARD_MARKER_NAME
+        if _exists(marker):
+            _remove(marker)
+        # Not at the top: fs_guard imports the sandbox package.
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+        with open_for_write(marker, mode=0o644, exclusive=True) as handle:
+            handle.write(
+                "A discard of the previous results stopped while deleting them in "
+                "place. The next scan here removes what is left.\n"
+            )
+
+    def _finish_incomplete_discard(self) -> None:
+        """Remove the half-deleted held set a discard that deleted in place left.
+
+        It is not the last complete results. A removal that is refused raises
+        (OSError), as set_aside's other removals do: the held set must not be
+        taken for complete results, so the set aside does not continue.
+        """
+        marker = self.output_dir / INCOMPLETE_DISCARD_MARKER_NAME
+        if not _exists(marker):
+            return
+        if _exists(self.held):
+            _remove(self.held)
+        _remove(marker)
 
     def restore(self) -> None:
         """The new scan ended without results: put the previous ones back.

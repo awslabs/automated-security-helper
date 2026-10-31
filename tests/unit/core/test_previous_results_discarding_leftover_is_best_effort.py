@@ -82,15 +82,16 @@ def test_a_discard_goes_on_past_a_leftover_it_cannot_remove(tmp_path, monkeypatc
     (leftover / "stuck").write_text("x", encoding="utf-8")
     attempts = _refuse_removing(monkeypatch, leftover)
 
-    # The held set cannot be renamed over the leftover and is deleted in place;
-    # the leftover's own removal raises again in the final sweep, which is the
-    # discard's own failure and is the caller's to log (settle_previous_results
-    # never raises). What this pins is that the HELD set is gone first.
-    with pytest.raises(PermissionError):
-        PreviousResults(output).discard()
+    # The held set cannot be renamed over the leftover, so it is moved to the
+    # next free name and deleted from there. The leftover is an earlier
+    # discard's, not this one's: its refusal is logged and is not this
+    # discard's failure, so nothing is raised.
+    PreviousResults(output).discard()
 
-    assert attempts[0] == leftover
+    assert attempts == [leftover]
     assert not held.exists()
+    assert leftover.is_dir()
+    assert not (output / f"{DISCARDING_DIR_NAME}.2").exists()
 
 
 def test_the_control_removes_a_removable_leftover(tmp_path):
