@@ -96,14 +96,18 @@ def _flatten_object(
                 result[new_prefix] = True
                 continue
 
-            # A non-empty container is walked; a scalar, an empty container, or a
-            # list of scalars is a field in its own right and is recorded, so its
-            # loss in aggregation is reported. (An empty container and a list of
-            # scalars used to fall through both branches and were never recorded.)
+            # Every field is recorded under its own path, a container as well as
+            # a scalar, so its loss in aggregation is reported and one field has
+            # one name: an empty ``locations`` and a filled one are both
+            # ``...locations``. A container recorded only when empty read as
+            # missing when aggregation filled it (or dropped it empty), though
+            # the field was there on both sides. A non-empty container is then
+            # walked for the fields it holds. (An empty container and a list of
+            # scalars used to fall through both branches and were never
+            # recorded; a list of scalars is also recorded as ``name[]``, below.)
+            result[new_prefix] = True
             if isinstance(value, (dict, list)) and value:
                 _flatten_object(value, new_prefix, result, excluded_result)
-            else:
-                result[new_prefix] = True
     elif isinstance(obj, list):
         # For lists, use [] notation instead of specific indices. Every element
         # is walked: the paths carry no index, so the fields of every element
