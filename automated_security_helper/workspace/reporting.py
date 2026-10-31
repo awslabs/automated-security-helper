@@ -1055,7 +1055,7 @@ def unsupported_reporter_names(
     python_based_plugins_only: bool = False,
     reporter_classes: Optional[Sequence[type]] = None,
     plugin_modules: Sequence[str] = (),
-    unreadable: Optional[Dict[str, str]] = None,
+    declarations: Optional[List[Tuple[str, Optional[str]]]] = None,
 ) -> Tuple[str, ...]:
     """Enabled reporters that declare they cannot work in workspace mode.
 
@@ -1085,11 +1085,15 @@ def unsupported_reporter_names(
     exit 2.
 
     Args:
-        unreadable: Filled in place, when given, with the name and declared text
-            of each returned reporter whose ``workspace_behaviour`` ASH could not
-            read (a typo or a wrong type), the way the manifest words it. Such a
-            reporter is returned as unsupported, but it made no claim: the
-            caller words its refusal as a declaration to fix.
+        declarations: Appended to, when given, with one ``(name, declared text)``
+            pair per returned reporter, in the order of the returned names. The
+            text is the ``workspace_behaviour`` ASH could not read (a typo or a
+            wrong type), the way the manifest words it, or ``None`` for a
+            reporter that truly declares ``UNSUPPORTED``. An unreadable reporter
+            is returned as unsupported, but it made no claim: the caller words
+            its refusal as a declaration to fix. A pair per reporter, not a
+            mapping by name, because two reporters can share a configured name
+            and then one pair is a claim and the other a typo.
 
     Returns:
         The configured names, in registry order. Empty is the normal case: no
@@ -1117,24 +1121,26 @@ def unsupported_reporter_names(
         name = _reporter_name(instance)
         names.append(name)
         declaration = _unreadable_declaration(instance.__class__)
-        if unreadable is not None and declaration is not None:
-            unreadable[name] = declaration
+        if declarations is not None:
+            declarations.append((name, declaration))
     return tuple(names)
 
 
 def unsupported_reporters_refusal(
-    names: Sequence[str], unreadable: Mapping[str, str]
+    declarations: Sequence[Tuple[str, Optional[str]]],
 ) -> str:
-    """The text that refuses a run because *names* are enabled and unsupported.
+    """The text that refuses a run over enabled reporters that are unsupported.
 
-    A reporter that truly declares ``UNSUPPORTED`` is worded as before. One whose
-    declaration ASH could not read (*unreadable*, from
-    :func:`unsupported_reporter_names`) made no such claim: its text quotes the
-    declaration and says to fix it, as the manifest entry does for the same
-    reporter, rather than telling the operator it "declares that it cannot".
+    *declarations* is the ``(name, declared text)`` pairs that
+    :func:`unsupported_reporter_names` fills in. A reporter that truly declares
+    ``UNSUPPORTED`` (text ``None``) is worded as before. One whose declaration ASH
+    could not read made no such claim: its text quotes the declaration and says to
+    fix it, as the manifest entry does for the same reporter, rather than telling
+    the operator it "declares that it cannot". Each pair is worded on its own, so
+    two reporters sharing a name keep what each of them declared.
     """
-    declared = [name for name in names if name not in unreadable]
-    garbled = [f"{name} ({unreadable[name]})" for name in names if name in unreadable]
+    declared = [name for name, text in declarations if text is None]
+    garbled = [f"{name} ({text})" for name, text in declarations if text is not None]
     sentences: List[str] = []
     if declared:
         sentences.append(

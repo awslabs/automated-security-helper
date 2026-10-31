@@ -18,6 +18,11 @@ import json
 
 import pytest
 
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
+)
 from automated_security_helper.core.exceptions import WorkspaceDefinitionError
 from automated_security_helper.workspace.execution import (
     ProjectScanSettings,
@@ -33,6 +38,29 @@ from tests.unit.workspace.test_workspace_reporting_manifest_fidelity import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+class _SharedNameConfig(ReporterPluginConfigBase):
+    # The configured name of FakeBadBehaviourReporter, on purpose.
+    name: str = "fake-bad-behaviour"
+    extension: str = "sharedname.txt"
+    enabled: bool = True
+
+
+class FakeUnsupportedReporterSharingTheBadOnesName(
+    ReporterPluginBase[_SharedNameConfig]
+):
+    """Truly declares UNSUPPORTED, under the configured name of a typo'd one."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.UNSUPPORTED
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _SharedNameConfig()
+        return super().model_post_init(context)
+
+    def report(self, model) -> str:  # pragma: no cover - must never be reached
+        raise AssertionError("an UNSUPPORTED reporter must not be invoked")
 
 
 def _refusal(tmp_path, *reporter_classes) -> str:
@@ -86,3 +114,23 @@ def test_both_kinds_in_one_run_are_each_worded_as_what_they_are(tmp_path):
 
     assert "fake-unsupported declare that they cannot produce" in text, text
     assert "fake-bad-behaviour ('sideways')" in text, text
+
+
+def test_two_reporters_sharing_a_name_are_each_worded_as_what_they_declared(
+    tmp_path,
+):
+    """A typo'd declaration and a real one under one configured name.
+
+    The two are told apart by reporter and not by name: the real claim is kept
+    and worded as one, and the typo is quoted as a declaration to fix.
+    """
+    text = _refusal(
+        tmp_path,
+        FakeBadBehaviourReporter,
+        FakeUnsupportedReporterSharingTheBadOnesName,
+    )
+
+    assert text.count("fake-bad-behaviour") == 2, text
+    assert "fake-bad-behaviour declare that they cannot produce" in text, text
+    assert "fake-bad-behaviour ('sideways')" in text, text
+    assert "Disable them, narrow --output-format" in text, text
