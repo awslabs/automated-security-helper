@@ -362,6 +362,60 @@ def test_a_link_the_sweep_cannot_remove_is_refused_not_passed_over(tmp_path, cap
 
 
 @pytest.mark.parametrize("walk", ["descriptors", "by-name"])
+def test_a_readable_but_unsearchable_directory_is_refused_once_not_once_per_entry(
+    tmp_path, caplog, monkeypatch, walk
+):
+    """Search permission belongs to the directory, so the lstat of every entry in
+    it fails the same way. One warning and one stored error for the directory,
+    naming its first entry, not one per entry (a scanner's directory of 100,000
+    files was 100,000 log lines)."""
+    root = tmp_path / "results"
+    locked = root / "locked"
+    locked.mkdir(parents=True)
+    for index in range(30):
+        (locked / f"entry-{index}").write_text("x")
+    locked.chmod(0o600)
+    if walk == "by-name":
+        monkeypatch.delattr(os, "fwalk")
+    try:
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            with pytest.raises(PermissionError) as refused:
+                fs_guard.sweep_writable([root])
+    finally:
+        locked.chmod(0o700)
+
+    assert len(_warnings(caplog, "Could not examine")) == 1, [
+        record.getMessage() for record in caplog.records
+    ]
+    assert "; and " not in str(refused.value), str(refused.value)
+
+
+def test_refusals_past_the_warning_limit_are_counted_and_said_once(
+    tmp_path, caplog, monkeypatch
+):
+    monkeypatch.setattr(fs_guard, "_SWEEP_WARNING_LIMIT", 2)
+    root = tmp_path / "results"
+    locked = [root / f"locked-{index}" for index in range(5)]
+    for directory in locked:
+        directory.mkdir(parents=True)
+        directory.chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            with pytest.raises(PermissionError) as refused:
+                fs_guard.sweep_writable([root])
+    finally:
+        for directory in locked:
+            directory.chmod(0o700)
+
+    assert len(_warnings(caplog, "Could not list")) == 2
+    assert len(_warnings(caplog, "Scanner sandbox: 3 more refusal(s)")) == 1, [
+        record.getMessage() for record in caplog.records
+    ]
+    text = str(refused.value)
+    assert "and 4 more" in text and "first 2" in text, text
+
+
+@pytest.mark.parametrize("walk", ["descriptors", "by-name"])
 def test_a_failed_removal_names_the_entry_by_its_path_below_the_root(
     tmp_path, caplog, monkeypatch, walk
 ):

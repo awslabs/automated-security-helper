@@ -402,6 +402,12 @@ _REFUSE_LIST = "list"
 _REFUSE_EXAMINE = "examine"
 _REFUSE_DESCEND = "sweep below"
 
+#: How many refusals one sweep logs in full. A scanner's results directory can
+#: hold tens of thousands of directories it made unlistable; past this limit a
+#: refusal is counted (the sweep still raises, with the count) and one line says
+#: how many were not logged one by one.
+_SWEEP_WARNING_LIMIT = 50
+
 
 def _below(relative: str, name: str) -> str:
     """``name``'s path relative to the root, given its directory's."""
@@ -474,6 +480,12 @@ def _walk_descriptor(
             # and refuses their lstat (EACCES): a link there would otherwise be
             # passed over, the hole the sweep and the pre-check exist to close.
             refuse(_REFUSE_EXAMINE, _below(relative, name), error)
+            if error.errno == errno.EACCES:
+                # Search permission belongs to the directory, so every other
+                # entry fails the same way: one refusal for the directory (it
+                # names the first entry), not one warning per entry, which for
+                # a scanner's directory of 100,000 files was 100,000 lines.
+                break
             continue
         statuses[name] = status
         if stat.S_ISDIR(status.st_mode):
@@ -580,6 +592,11 @@ def _sweep_tree(
     skipped = _relative_skips(root, skip)
 
     def refuse(what: str, relative: str, error: OSError) -> None:
+        if len(collected) >= _SWEEP_WARNING_LIMIT:
+            # Counted for the exception, not logged one by one; the end of the
+            # sweep says how many were not (_say_unlogged_refusals).
+            collected.append(OSError(_errno_of(error), ""))
+            return
         shown = _sweep_warning(
             f"Could not {what} {relative} under {root}: {error}",
             f"Could not {what} an entry of a scanner's results directory; it is not "
@@ -605,6 +622,9 @@ def _sweep_tree(
             else:
                 os.unlink(name, dir_fd=dir_fd)
         except OSError as e:
+            if len(collected) >= _SWEEP_WARNING_LIMIT:
+                collected.append(OSError(_errno_of(e), ""))
+                return 0
             shown = _sweep_warning(
                 f"Could not remove {relative} under {root}: {e}",
                 "Could not remove an entry a scanner left in its results "
@@ -639,6 +659,7 @@ def _sweep_tree(
                         if _below(relative, name) not in skipped
                     ]
     if refusals is None and collected:
+        _say_unlogged_refusals(collected)
         raise _sweep_refused(collected) from None
     return removed
 
@@ -682,6 +703,13 @@ def _sweep_by_name(
                 continue
             except OSError as error:
                 refuse(_REFUSE_EXAMINE, _below(relative, name), error)
+                if error.errno == errno.EACCES:
+                    # As in the descriptor walk: the directory is not
+                    # searchable, so one refusal stands for all its entries,
+                    # and for the subdirectories os.walk would then refuse to
+                    # enter one by one.
+                    dirnames.clear()
+                    break
                 continue
             if not _is_special(mode):
                 continue
@@ -709,18 +737,33 @@ def _sweep_refused(refusals: List[OSError]) -> OSError:
     """One OSError for a sweep's refusals, saying no more than their warnings did.
 
     The first refusal's errno (so EACCES is a PermissionError, as before) and its
-    logged line, with the others counted: each was logged in full as it was met,
+    logged line, with the others counted: each was logged in full as it was met
+    (the first ``_SWEEP_WARNING_LIMIT`` of them, then counted and said once),
     so the exception, which travels into ash.log, the scanner's row and its
     results file, repeats nothing and names nothing the warnings kept back. The
     caller raises it ``from None``: the OSErrors the walk met carry the raw paths.
     """
     first = refusals[0]
-    more = (
-        ""
-        if len(refusals) == 1
-        else f"; and {len(refusals) - 1} more, each logged as a warning"
-    )
+    if len(refusals) == 1:
+        more = ""
+    elif len(refusals) <= _SWEEP_WARNING_LIMIT:
+        more = f"; and {len(refusals) - 1} more, each logged as a warning"
+    else:
+        more = (
+            f"; and {len(refusals) - 1} more, the first {_SWEEP_WARNING_LIMIT} "
+            "logged as warnings"
+        )
     return OSError(first.errno, f"{first.strerror}{more}")
+
+
+def _say_unlogged_refusals(refusals: List[OSError]) -> None:
+    """Log once how many refusals past the warning limit were counted only."""
+    unlogged = len(refusals) - _SWEEP_WARNING_LIMIT
+    if unlogged > 0:
+        ASH_LOGGER.warning(
+            f"Scanner sandbox: {unlogged} more refusal(s) under a scanner's "
+            "results directory were counted but not logged one by one"
+        )
 
 
 def _is_special(mode: int) -> bool:
@@ -916,6 +959,7 @@ def sweep_writable(
             "scanner left in its results directory"
         )
     if refusals:
+        _say_unlogged_refusals(refusals)
         raise _sweep_refused(refusals) from None
     return removed
 
