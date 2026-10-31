@@ -7,7 +7,11 @@ a stop that is waiting out a tool's grace.
 * ``_kill_recorded_groups`` falls back from ``killpg`` to ``os.kill`` on the
   recorded id, for a child recorded before its setsid. A group id left recorded
   after its child was reaped is a pid another process can hold by now, and the
-  fallback kill landed on it. The fallback now asks ``waitpid(WNOHANG)`` first.
+  fallback kill landed on it. The fallback now asks ``waitid(WNOWAIT)`` first,
+  which leaves an exited child unreaped for the ``Popen`` that owns it (a reap
+  here made that ``Popen`` read a lost wait, ECHILD, as a return code of 0 when
+  this process is its container's init); a build with no ``waitid`` asks
+  ``waitpid(WNOHANG)``.
 * A stop a timeout began (SIGTERM sent, grace being waited out, SIGKILL to
   follow) is not a signal, so a first Ctrl-C found neither latch set and chained
   the default handler, which raised KeyboardInterrupt inside the grace wait and
@@ -42,6 +46,91 @@ class TestTheDieNowFallbackKillsOnlyALiveChild:
         )
         monkeypatch.setattr(os, "kill", lambda pid, sig: killed.append((pid, sig)))
 
+        def not_our_child(idtype, pid, flags):
+            raise ChildProcessError
+
+        def never_reap(pid, flags):
+            raise AssertionError("the probe must not reap with waitpid")
+
+        monkeypatch.setattr(os, "waitid", not_our_child)
+        monkeypatch.setattr(os, "waitpid", never_reap)
+        monkeypatch.setattr(cancellation, "_TOOL_GROUPS", (424242,))
+        monkeypatch.setattr(cancellation, "_TOOL_PIDS", ())
+
+        cancellation._kill_recorded_groups()
+
+        # Red at the base: the fallback killed whatever held the pid.
+        assert killed == []
+
+    def test_an_exited_child_is_not_killed_and_not_reaped(self, monkeypatch):
+        """``waitid`` answering a result: the child had exited. Its pid may be
+        free for reuse once its owner reaps it, so the fallback kill must not
+        follow, and the probe must leave the child for that owner to reap: a
+        reap here left the owner a wait that failed with ECHILD, read as a
+        return code of 0."""
+        killed = []
+        seen = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: (_ for _ in ()).throw(ProcessLookupError())
+        )
+        monkeypatch.setattr(os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+        def exited(idtype, pid, flags):
+            seen.append((idtype, pid, flags))
+            return object()
+
+        def never_reap(pid, flags):
+            raise AssertionError("the probe must not reap with waitpid")
+
+        monkeypatch.setattr(os, "waitid", exited)
+        monkeypatch.setattr(os, "waitpid", never_reap)
+        monkeypatch.setattr(cancellation, "_TOOL_GROUPS", (424242,))
+        monkeypatch.setattr(cancellation, "_TOOL_PIDS", ())
+
+        cancellation._kill_recorded_groups()
+
+        assert killed == []
+        # Red at the base: waitid was never asked, waitpid reaped the child.
+        wanted = os.WEXITED | os.WNOHANG | os.WNOWAIT
+        assert seen == [(os.P_PID, 424242, wanted)]
+
+    def test_a_live_child_that_leads_no_group_is_still_killed(self, monkeypatch):
+        """The control: the fallback the launcher child relies on still fires."""
+        killed = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: (_ for _ in ()).throw(ProcessLookupError())
+        )
+        monkeypatch.setattr(os, "kill", lambda pid, sig: killed.append((pid, sig)))
+        monkeypatch.setattr(os, "waitid", lambda idtype, pid, flags: None)
+        monkeypatch.setattr(
+            os,
+            "waitpid",
+            lambda pid, flags: (_ for _ in ()).throw(
+                AssertionError("the probe must not reap with waitpid")
+            ),
+        )
+        monkeypatch.setattr(cancellation, "_TOOL_GROUPS", (424242,))
+        monkeypatch.setattr(cancellation, "_TOOL_PIDS", ())
+
+        cancellation._kill_recorded_groups()
+
+        assert killed == [(424242, signal.SIGKILL)]
+
+
+class TestWithoutWaitidTheProbeFallsBackToWaitpid:
+    """A build with no ``os.waitid`` (CPython leaves it out on macOS)."""
+
+    @pytest.fixture(autouse=True)
+    def _no_waitid(self, monkeypatch):
+        monkeypatch.delattr(os, "waitid", raising=False)
+
+    def test_a_reaped_pid_is_not_killed(self, monkeypatch):
+        killed = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: (_ for _ in ()).throw(ProcessLookupError())
+        )
+        monkeypatch.setattr(os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
         def not_our_child(pid, flags):
             raise ChildProcessError
 
@@ -51,7 +140,6 @@ class TestTheDieNowFallbackKillsOnlyALiveChild:
 
         cancellation._kill_recorded_groups()
 
-        # Red at the base: the fallback killed whatever held the pid.
         assert killed == []
 
     def test_a_child_the_probe_reaped_is_not_killed(self, monkeypatch):
@@ -59,20 +147,26 @@ class TestTheDieNowFallbackKillsOnlyALiveChild:
         probe reaped it. Its pid is free for reuse from that moment, so the
         fallback kill must not follow."""
         killed = []
+        seen_flags = []
         monkeypatch.setattr(
             os, "killpg", lambda pgid, sig: (_ for _ in ()).throw(ProcessLookupError())
         )
         monkeypatch.setattr(os, "kill", lambda pid, sig: killed.append((pid, sig)))
-        monkeypatch.setattr(os, "waitpid", lambda pid, flags: (pid, 0))
+
+        def reaped(pid, flags):
+            seen_flags.append(flags)
+            return (pid, 0)
+
+        monkeypatch.setattr(os, "waitpid", reaped)
         monkeypatch.setattr(cancellation, "_TOOL_GROUPS", (424242,))
         monkeypatch.setattr(cancellation, "_TOOL_PIDS", ())
 
         cancellation._kill_recorded_groups()
 
         assert killed == []
+        assert seen_flags == [os.WNOHANG]
 
     def test_a_live_child_that_leads_no_group_is_still_killed(self, monkeypatch):
-        """The control: the fallback the launcher child relies on still fires."""
         killed = []
         monkeypatch.setattr(
             os, "killpg", lambda pgid, sig: (_ for _ in ()).throw(ProcessLookupError())

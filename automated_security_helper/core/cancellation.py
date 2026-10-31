@@ -591,13 +591,28 @@ def _remove_die_now_cleanups() -> None:
 def _is_live_child(pid: int) -> bool:
     """Whether *pid* is a child of this process that has not exited.
 
-    ``waitpid(pid, WNOHANG)`` answers in one syscall: ``(0, 0)`` for a running
-    child, the pid for one that exited (it is reaped here, which the die-now
-    path can afford: the process is about to die), and ECHILD for a pid that
-    is not this process's child, which is what a reaped child's pid becomes
-    once another process holds it. Anything else, including a platform with
-    no ``WNOHANG``, reads as not a live child, so no signal is sent on a guess.
+    ``waitid(P_PID, pid, WEXITED | WNOHANG | WNOWAIT)`` answers in one syscall:
+    ``None`` for a running child, a result for one that exited, and ECHILD for
+    a pid that is not this process's child, which is what a reaped child's pid
+    becomes once another process holds it. ``WNOWAIT`` leaves an exited child
+    unreaped, so the exit status stays for the ``Popen`` that owns it. Reaping
+    it here with ``waitpid`` left that ``Popen`` a later wait that failed with
+    ECHILD, which it reads as a return code of 0 (a failed tool reads as
+    success), and that is what happens when this process is its container's
+    init and the signal it sent itself was dropped.
+
+    A platform with no ``waitid`` (CPython leaves it out on macOS) asks
+    ``waitpid(pid, WNOHANG)`` instead, which does reap an exited child. Anything
+    else, including a platform with neither, reads as not a live child, so no
+    signal is sent on a guess.
     """
+    waitid = getattr(os, "waitid", None)
+    if waitid is not None:
+        try:
+            exited = waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except OSError:
+            return False
+        return exited is None
     flag = getattr(os, "WNOHANG", None)
     if flag is None:
         return False
