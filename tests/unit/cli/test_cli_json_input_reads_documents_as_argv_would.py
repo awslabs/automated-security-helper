@@ -4,10 +4,11 @@
 """``--cli-json-input`` reads every document shape a tool writes, and refuses as argv does.
 
 A byte order mark on a file or on stdin is dropped; stdin is read as UTF-8 and
-a read that fails is the usage refusal the file branch gives; the text after
-file:// is a path, relative or absolute, percent-decoded, never a host, a query
-or a fragment; a name with a null byte is the cannot-read refusal; a document
-nested too deeply, an infinite
+a read that fails is the usage refusal the file branch gives; a ``file:///`` or
+``file://localhost/`` URI is percent-decoded as a URI is, and any other text after
+file:// is a path exactly as written, as the AWS CLI reads it, never a host, a
+query or a fragment; a name with a null byte is the cannot-read refusal; a
+document nested too deeply, an infinite
 number for an integer, a number for a true/false parameter and a fraction for
 an integer are refusals, not tracebacks or silent truncation; the skeleton
 leaves a parameter with an environment variable null; --help and
@@ -135,6 +136,20 @@ def test_a_file_uri_with_the_local_host_names_the_file(tmp_path):
     assert mock_run.call_args.kwargs["offline"] is True
 
 
+@pytest.mark.parametrize("host", ["LOCALHOST", "LocalHost"])
+def test_a_file_uri_host_is_compared_without_regard_to_case(tmp_path, host):
+    """A host name is case-insensitive (RFC 8089), so ``file://LOCALHOST/...`` is
+    the local-host URI; it was taken for a relative path ``LOCALHOST/...`` and
+    refused as unreadable."""
+    path = _document(tmp_path, {"offline": True})
+
+    uri = f"file://{host}/" + quote(path.as_posix().lstrip("/"))
+    result, mock_run = _scan(["--cli-json-input", uri])
+
+    assert result.exit_code == 0, result.output
+    assert mock_run.call_args.kwargs["offline"] is True
+
+
 def test_a_hash_in_the_file_name_stays_in_it(tmp_path):
     """Parsed as a URI, the name was cut at the ``#`` (a fragment), so a file named
     ``a#1.json`` was looked for as ``a``."""
@@ -161,20 +176,59 @@ def test_a_null_byte_in_the_file_name_is_the_cannot_read_refusal():
 @pytest.mark.parametrize(
     ("uri", "path"),
     [
-        ("file://C:\\dir\\pa%20rams.json", "C:\\dir\\pa rams.json"),
+        ("file://C:\\dir\\params.json", "C:\\dir\\params.json"),
         ("file://c:/dir/params.json", "c:/dir/params.json"),
+        ("file://C:\\dir\\pa%20rams.json", "C:\\dir\\pa%20rams.json"),
     ],
-    ids=["backslashes", "slashes"],
+    ids=["backslashes", "slashes", "percent-kept"],
 )
 def test_a_file_uri_with_a_drive_letter_names_the_drive_not_a_host(uri, path):
     """`file://C:\\dir\\params.json`, the two-slash spelling a Windows path is
     pasted into, puts the drive letter where a URI's host goes (with backslashes
     the whole path, since no "/" ends the authority); it was refused as a remote
     host, and every Windows caller of the file:// form was turned away. The
-    drive letter starts the path, which is read as written, percent-decoded."""
+    drive letter starts the path, which is read as written: it is not a URI, so a
+    ``%20`` in it stays a ``%20``, as the AWS CLI reads it."""
     from automated_security_helper.cli.json_input import _document_path
 
     assert _document_path(uri) == path
+
+
+def test_a_percent_in_a_relative_name_stays_in_it(tmp_path, monkeypatch):
+    """Only a URI (``file:///`` or ``file://localhost/``) is percent-decoded. The
+    relative form is a path as written, so ``a%20b.json`` names the file with a
+    ``%`` in its name; it was decoded to ``a b.json`` and not found."""
+    _document(tmp_path, {"offline": True}, name="a%20b.json")
+    monkeypatch.chdir(tmp_path)
+
+    result, mock_run = _scan(["--cli-json-input", "file://a%20b.json"])
+
+    assert result.exit_code == 0, result.output
+    assert mock_run.call_args.kwargs["offline"] is True
+
+
+@pytest.mark.parametrize("form", ["uri", "relative"])
+def test_a_file_uri_with_a_null_byte_is_the_unreadable_refusal(
+    tmp_path, monkeypatch, form
+):
+    """``%00`` in a URI decodes to a null byte, which ``read_text`` refuses with a
+    ValueError the handler did not catch: a traceback and exit 1, where a file that
+    cannot be read is the usage refusal. The relative form is not decoded, so it
+    names a file that does not exist; it is refused the same way."""
+    monkeypatch.chdir(tmp_path)
+    source = (
+        "file://localhost/" + quote(tmp_path.as_posix().lstrip("/")) + "/a%00b.json"
+        if form == "uri"
+        else "file://a%00b.json"
+    )
+
+    result, mock_run = _scan(["--cli-json-input", source])
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert not mock_run.called
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "cannotread" in _flat(result.output)
+    assert "Traceback" not in result.output
 
 
 def test_a_document_nested_too_deeply_is_refused_not_a_traceback(tmp_path, monkeypatch):

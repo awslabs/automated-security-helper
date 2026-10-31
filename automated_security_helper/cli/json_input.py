@@ -49,7 +49,6 @@ import warnings
 from enum import Enum
 from pathlib import Path, PurePath
 from typing import Any
-from urllib.parse import unquote
 from urllib.request import url2pathname
 
 import typer
@@ -306,30 +305,36 @@ def _refused(message: str, ctx: Context) -> DocumentRefused:
 def _document_path(source: str) -> str:
     """The file *source* names: a path as given, or the file a ``file://`` names.
 
-    Read as the AWS CLI reads ``file://``: the text after the prefix is a path,
-    relative (``file://params.json``, ``file://./params.json``) or absolute,
-    percent-decoded. A ``file:///...`` or ``file://localhost/...`` URI's path is
-    made a local one with ``url2pathname``, so on Windows ``/C:/dir/params.json``
-    is a drive path and a URI a tool wrote is read as the file it names. A drive
-    letter right after the two slashes (``file://C:\\dir\\params.json``, the
-    spelling a Windows path is pasted into) is a path too.
+    Two spellings follow the prefix, each with one rule.
 
-    Nothing after the prefix is parsed as a URI's host, query or fragment:
-    ``file://share.example/params.json`` names the relative path
-    ``share.example/params.json``, which is refused when it cannot be read, and a
-    ``#`` or a tab in a file's name stays in it. Parsing the text as a URI refused
-    every relative form as a remote host, cut the name at a ``#``, and dropped a
-    tab or a newline from it, so a file was looked up under a name it does not
-    have.
+    A URI, ``file:///...`` or ``file://localhost/...``, is read as RFC 8089 writes
+    it: its path is percent-decoded and made a local one with ``url2pathname``,
+    so a URI a tool wrote names the file it means, and on Windows
+    ``/C:/dir/params.json`` is a drive path.
+
+    Anything else after the prefix is a path exactly as written, as the AWS CLI
+    reads ``file://``: relative (``file://params.json``, ``file://./params.json``)
+    or absolute, a drive letter included (``file://C:\\dir\\params.json``, the
+    spelling a Windows path is pasted into). It is not percent-decoded, so a
+    ``%`` in a file's name stays a ``%``, and it is not parsed as a URI's host,
+    query or fragment: ``file://share.example/params.json`` names the relative
+    path ``share.example/params.json``, which is refused when it cannot be read,
+    and a ``#`` or a tab in a file's name stays in it.
+
+    ``url2pathname`` can raise on a URI it cannot make a local path from (an
+    OSError on Windows); the caller reads the path inside the handler that
+    refuses a file that cannot be read.
     """
     if not source.startswith(_FILE_URI_PREFIX):
         return source
     rest = source[len(_FILE_URI_PREFIX) :]
-    if rest.startswith("localhost/"):
+    # A host name is compared without regard to case (RFC 8089), so
+    # ``file://LOCALHOST/...`` is the same URI as ``file://localhost/...``.
+    if rest[: len("localhost/")].lower() == "localhost/":
         rest = rest[len("localhost") :]
     if rest.startswith("/"):
         return url2pathname(rest)
-    return unquote(rest)
+    return rest
 
 
 def _read_stdin(ctx: Context) -> str:
@@ -358,15 +363,19 @@ def _read_document(source: str, ctx: Context) -> dict[str, Any]:
         label = "stdin"
         text = _read_stdin(ctx)
     else:
-        path = _document_path(source)
+        path = source
         label = path
         try:
+            # The path is made inside the handler: a file:// URI with a null byte
+            # in it (``%00``) or one the platform cannot turn into a path is the
+            # refusal below, not a traceback. A null byte in the name also makes
+            # read_text raise a ValueError, which is why that is caught too.
+            path = _document_path(source)
+            label = path
             # utf-8-sig: a document a Windows editor or PowerShell 5 saved starts
             # with a byte order mark, which json.loads refuses as text.
             text = Path(path).read_text(encoding="utf-8-sig")
         except (OSError, ValueError) as exc:
-            # ValueError covers a text that is not UTF-8 and a name with a null
-            # byte (file://a%00b), which the file system refuses before it opens.
             # The message names the file, so an OSError's own copy of it is dropped.
             reason = (
                 os_error_without_named_file(exc, path)
