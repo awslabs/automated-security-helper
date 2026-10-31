@@ -547,6 +547,39 @@ class TestALocalFailureIsTheDocumentedRefusal:
             _install(tmp_path, bundle, archive, [])
         assert _contents(tmp_path / "rules") == []
 
+    def test_the_real_wait_on_a_held_lock_ends_in_the_shape_the_installer_reads(
+        self, tmp_path, bundle_zip
+    ):
+        """The control for the stubbed cases around it. The installer tells a held
+        lock from a kernel timeout by the TimeoutError's missing errno, so this
+        runs file_lock's own wait against a lock really held on another
+        descriptor and reads what the installer does with what it raises."""
+        fcntl = pytest.importorskip("fcntl")
+        from automated_security_helper.utils import file_lock
+
+        archive, bundle = bundle_zip
+        rules = tmp_path / "rules"
+        rules.mkdir()
+        real = file_lock.exclusive_lock
+        holder = os.open(rules / INSTALL_LOCK, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            with (
+                patch(
+                    "automated_security_helper.utils.file_lock.exclusive_lock",
+                    lambda path: real(path, timeout=0.2),
+                ),
+                pytest.raises(
+                    RulesBundleUnavailable, match="another ASH process"
+                ) as refused,
+            ):
+                _install(tmp_path, bundle, archive, [])
+        finally:
+            os.close(holder)
+        cause = refused.value.__cause__
+        assert isinstance(cause, TimeoutError) and cause.errno is None, repr(cause)
+        assert _contents(rules) == []
+
     def test_a_kernel_timeout_opening_the_lock_is_not_another_install(
         self, tmp_path, bundle_zip
     ):
