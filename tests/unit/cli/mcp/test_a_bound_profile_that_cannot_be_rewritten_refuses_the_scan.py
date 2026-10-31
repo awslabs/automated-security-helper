@@ -365,7 +365,10 @@ async def test_run_ash_scan_answers_the_hold_as_busy_not_as_an_internal_error(
 
     assert response["success"] is False, response
     assert response["error_type"] == "session_workspace_busy", response
-    assert "exit_code" not in response, response
+    # Every refusal of the tool carries the code the CLI would exit with for it.
+    # A hold is retried, so it is the internal-refusal code, not a config's.
+    assert response["exit_code"] == 1, response
+    assert response["exit_code_meaning"], response
 
 
 def test_the_scan_runner_records_the_hold_instead_of_leaving_the_entry_pending(

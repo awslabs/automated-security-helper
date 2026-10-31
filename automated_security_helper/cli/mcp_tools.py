@@ -5630,7 +5630,6 @@ def _answer_get_config(
             ProfileRegistryError,
         )
         from automated_security_helper.cli.mcp.sessions import (
-            SESSION_WORKSPACE_BUSY,
             SessionWorkspaceBusyError,
         )
 
@@ -5641,13 +5640,17 @@ def _answer_get_config(
         except SessionWorkspaceBusyError as exc:
             # The file is gone and another request holds the session's
             # workspace (its removal), so it is not written again under that
-            # removal: the hold's own refusal, as select_profile answers it.
-            return {
-                "success": False,
-                "error": raw_controls_on_one_line(str(exc)),
-                "error_type": SESSION_WORKSPACE_BUSY,
-                "operation": "get_config",
-            }
+            # removal: the hold's own refusal, as select_profile answers it,
+            # with the exit code every refusal of this tool carries.
+            return with_exit_code(
+                {
+                    "success": False,
+                    "error": raw_controls_on_one_line(str(exc)),
+                    "error_type": exc.error_type,
+                    "operation": "get_config",
+                },
+                REFUSED_INTERNAL_EXIT_CODE,
+            )
     # The selected config's chain, handed out by the load itself (chain_out),
     # so this tool never reverse-engineers how the load's file lists were put
     # together: a subtraction over files_read dropped the first copy of a

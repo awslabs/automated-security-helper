@@ -111,10 +111,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     ProfileRegistryError,
     resolve_session_config_path,
 )
-from automated_security_helper.cli.mcp.sessions import (
-    SESSION_WORKSPACE_BUSY,
-    SessionWorkspaceBusyError,
-)
+from automated_security_helper.cli.mcp.sessions import SessionWorkspaceBusyError
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
 from automated_security_helper.cli.mcp.sandbox import (
     caller_is_remote,
@@ -820,11 +817,17 @@ async def run_ash_scan(
                 # under that removal: the hold's own refusal, as select_profile
                 # answers it, and the scan is asked for again once it ends.
                 await _tell_client_error(ctx, raw_controls_on_one_line(str(exc)))
-                return {
-                    "success": False,
-                    "error": raw_controls_on_one_line(str(exc)),
-                    "error_type": SESSION_WORKSPACE_BUSY,
-                }
+                # Exit 1, as every other refusal of this tool that is neither a
+                # config nor a target nor a usage fault: the same call is sent
+                # again once the hold ends.
+                return with_exit_code(
+                    {
+                        "success": False,
+                        "error": raw_controls_on_one_line(str(exc)),
+                        "error_type": exc.error_type,
+                    },
+                    REFUSED_INTERNAL_EXIT_CODE,
+                )
             if config_path is not None:
                 await _tell_client(
                     ctx,
