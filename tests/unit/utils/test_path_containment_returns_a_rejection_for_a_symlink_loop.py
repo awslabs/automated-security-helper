@@ -20,9 +20,11 @@ kernel answers with ``ELOOP`` for a loop whatever the interpreter did.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
+from automated_security_helper.utils import path_containment
 from automated_security_helper.utils.path_containment import (
     PathContainmentViolation,
     validate_contained_path,
@@ -79,6 +81,79 @@ def test_a_root_that_is_itself_the_symlink_loop_is_rejected(tmp_path):
     assert result.error is not None
     assert result.error.violation is PathContainmentViolation.SYMLINK
     assert "root" in result.error.message
+
+
+@pytest.fixture(params=["raises", "keeps_the_loop"])
+def interpreter_shape(request, monkeypatch):
+    """Stand in for the interpreter's own answer to a loop, on every version.
+
+    The tests above meet a real loop, and what ``Path.resolve`` does with it
+    depends on the version running them: 3.10-3.12 raise ``RuntimeError``, which
+    the ``except`` clause answers, and 3.13 raises nothing and keeps the loop in
+    the answer, which only ``_is_a_loop`` answers. Each run therefore exercised
+    one of the two and passed without touching the other. Here ``resolve`` is
+    replaced for any path with a ``loop`` component, so both answers are met on
+    every version; the loop on disk stays real, since ``_is_a_loop`` asks the
+    kernel."""
+    shape = request.param
+
+    class Stubbed(type(Path())):
+        def resolve(self, strict=False):
+            if "loop" in self.parts:
+                if shape == "raises":
+                    raise RuntimeError(f"Symlink loop from {self}")
+                return self
+            return super().resolve(strict=strict)
+
+    monkeypatch.setattr(path_containment, "Path", Stubbed)
+    return shape
+
+
+def test_a_candidate_through_a_loop_is_rejected_whatever_resolve_does(
+    tmp_path, interpreter_shape
+):
+    root = tmp_path / "ws"
+    root.mkdir()
+    _loop(root)
+
+    result = validate_contained_path("loop/sub", root)
+
+    assert not result.ok
+    assert result.error.violation is PathContainmentViolation.SYMLINK
+    assert "cannot be resolved" in result.error.message
+
+
+def test_a_root_through_a_loop_is_rejected_whatever_resolve_does(
+    tmp_path, interpreter_shape
+):
+    _loop(tmp_path)
+
+    result = validate_contained_path("project", tmp_path / "loop" / "ws")
+
+    assert not result.ok
+    assert result.error.violation is PathContainmentViolation.SYMLINK
+    assert "root" in result.error.message
+
+
+def test_a_root_that_is_the_loop_is_rejected_whatever_resolve_does(
+    tmp_path, interpreter_shape
+):
+    loop = _loop(tmp_path)
+
+    result = validate_contained_path(".", loop)
+
+    assert not result.ok
+    assert result.error.violation is PathContainmentViolation.SYMLINK
+    assert "root" in result.error.message
+
+
+def test_control_a_plain_candidate_is_accepted_under_either_shape(
+    tmp_path, interpreter_shape
+):
+    root = tmp_path / "ws"
+    (root / "project").mkdir(parents=True)
+
+    assert validate_contained_path("project", root).ok
 
 
 def test_control_a_plain_candidate_is_still_accepted(tmp_path):
