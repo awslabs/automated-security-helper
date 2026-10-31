@@ -1325,7 +1325,10 @@ _XARGS_STDIN_FILE = re.compile(
     r"(?<!<)<<<|(?<![<>])<(?![<&])(?!\s*/dev/null(?![\w/.-]))"
 )
 # xargs reading its words from a file: ``-a list``, ``-ra list``, ``--arg-file=list``.
-_XARGS_ARG_FILE = re.compile(r"\s(?:-[0-9A-Za-z]*a|--arg-file(?![\w-]))")
+# In a short-option cluster the ``a`` counts only after options that take no value
+# (``-0``, ``-o``, ``-p``, ``-r``, ``-t``, ``-x``): in ``-Iarg`` the rest of the cluster
+# is the replace string, and in ``-Ea`` the end-of-file string.
+_XARGS_ARG_FILE = re.compile(r"\s(?:-[0oprtx]*a|--arg-file(?![\w-]))")
 
 # Tag parts of a base image that name a variant of the image, not a Debian suite.
 _IMAGE_VARIANTS = frozenset({"slim", "alpine"})

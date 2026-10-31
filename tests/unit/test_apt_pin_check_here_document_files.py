@@ -1016,6 +1016,11 @@ class TestXargsWordsThatAreNotInTheDockerfile:
             ("xargs -r -a packages.txt apt-get install -y", "a file named by its -a"),
             ("xargs -ra packages.txt apt-get install -y", "a file named by its -a"),
             ("xargs --arg-file=packages.txt apt-get install -y", "a file named by"),
+            ("xargs -0a packages.txt apt-get install -y", "a file named by its -a"),
+            ("xargs -xra packages.txt apt-get install -y", "a file named by its -a"),
+            # An `a` inside the replace string or the end-of-file string is no -a.
+            ("echo curl | xargs -Iarg apt-get install -y arg=1.2", "a pipe"),
+            ("echo curl | xargs -Ea apt-get install -y", "a pipe"),
             ("cat packages.txt | xargs apt-get install -y", "a pipe"),
             ("cat packages.txt | sort | xargs -r apt-get install -y", "a pipe"),
             ("echo curl | xargs apt-get install -y", "a pipe"),
@@ -1038,6 +1043,8 @@ class TestXargsWordsThatAreNotInTheDockerfile:
         [
             f"xargs apt-get install -y {CURL}",
             f"xargs -n 1 apt-get install -y {CURL}",
+            f"xargs -Ea apt-get install -y {CURL}",
+            f"xargs -Iarg apt-get install -y {CURL}",
             f"xargs apt-get install -y {CURL} < /dev/null",
             f"false || xargs apt-get install -y {CURL}",
             f"cat /etc/hosts | wc -l; xargs apt-get install -y {CURL}",
