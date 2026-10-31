@@ -601,11 +601,19 @@ def test_a_settings_derived_network_need_is_granted_when_trusted_config_names_it
     )
 
 
-def test_detect_secrets_verification_from_the_repository_gets_no_network(tmp_path):
+def test_detect_secrets_verification_from_the_repository_gets_no_network(
+    tmp_path, monkeypatch
+):
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
         DetectSecretsScanner,
     )
+
+    # The later step asks for a network, which holds only online: offline mode
+    # removes the verification filter whatever its source, so a run with
+    # ASH_OFFLINE set (an offline-built image) would fail it for a reason
+    # unrelated to the sandbox rule under test.
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
 
     source = _repo(
         tmp_path,
