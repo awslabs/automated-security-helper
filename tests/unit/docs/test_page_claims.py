@@ -21413,3 +21413,33 @@ def test_a_scanners_dependency_probe_runs_only_inside_the_sandbox(
         assert left == [], (left, _output_tail(result))
     else:
         assert left, _output_tail(result)
+
+
+_PLUGIN_MODULE_RULE_SENTENCE = (
+    "From a config file inside the scanned tree or any git checkout, only ASH's own "
+    "plugin modules and installed modules outside the tree and outside every git "
+    "checkout are imported (see What each tier may set)"
+)
+
+
+@pytest.mark.unit
+def test_the_sandbox_page_states_the_plugin_module_rule_as_the_code_keeps_it() -> None:
+    """scanner-sandbox.md (Plugin modules), trust-model.md (What each tier may set).
+
+    The rule the code keeps is in the docstring of ``config/plugin_module_trust.py``:
+    an entry a repository-written config adds is kept only if its module is installed
+    outside the scanned tree and outside every git checkout. The sandbox page named
+    only the tree, which reads as if a module installed inside some other checkout
+    were allowed. The page now carries both halves and the exception for ASH's own
+    plugin modules, as the trust page does, and the trust page's row is pinned
+    beside it so the two cannot drift apart.
+
+    That the code drops a module installed inside a checkout is held by
+    test_a_home_directory_checkout_makes_every_config_under_it_repository_tier.
+    """
+    assert_on_page(_SANDBOX_HOW_TO, _PLUGIN_MODULE_RULE_SENTENCE)
+    assert_on_page(
+        TRUST_MODEL,
+        "Only ASH's own plugin modules and modules installed outside every git "
+        "checkout and the scanned directory.",
+    )
