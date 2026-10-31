@@ -455,6 +455,51 @@ class TestTheAggregatedDocumentIsReadAsLeniblyAsItsModel:
         assert source.severity_counts["unknown"] == 3
         assert sum(progress.severity_counts.values()) == 3
 
+    def test_a_recorded_count_beside_short_buckets_grades_the_rest_unknown(
+        self, tmp_path
+    ):
+        """Seven findings recorded and two in the buckets: the count stays and
+        the five the buckets do not show land under ``unknown``, as in the
+        per-target file, so a finding is not in the total and in no bucket."""
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            self._bandit(
+                status="FAILED",
+                finding_count=7,
+                severity_counts={"high": 1, "low": 1},
+            ),
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        source = progress.scanners["bandit"]["source"]
+        assert source.finding_count == 7
+        assert source.severity_counts["high"] == 1
+        assert source.severity_counts["low"] == 1
+        assert source.severity_counts["unknown"] == 5
+        assert progress.total_findings == 7
+
+    def test_buckets_that_account_for_the_recorded_count_add_no_unknown(self, tmp_path):
+        """The aggregated count leaves the suppressed bucket out, so a suppressed
+        finding is not a gap between the count and the buckets."""
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            self._bandit(
+                status="FAILED",
+                finding_count=2,
+                severity_counts={"high": 1, "low": 1, "suppressed": 3},
+            ),
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        source = progress.scanners["bandit"]["source"]
+        assert source.finding_count == 2
+        assert source.severity_counts["suppressed"] == 3
+        assert source.severity_counts["unknown"] == 0
+
     def test_a_scanner_carries_the_duration_the_document_recorded(self, tmp_path):
         out = tmp_path / "ash_output"
         _write_aggregated(

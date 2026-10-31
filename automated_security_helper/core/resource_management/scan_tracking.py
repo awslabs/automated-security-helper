@@ -1446,11 +1446,17 @@ def _add_aggregated_scanner_progress(
             counts = empty_severity_counts()
             for severity, value in recorded_counts.items():
                 counts[severity if severity in counts else UNKNOWN_SEVERITY] += value
-            source_progress.severity_counts = counts
+            graded = sum(
+                value for bucket, value in counts.items() if bucket != "suppressed"
+            )
             if recorded_count is None:
-                source_progress.finding_count = sum(
-                    value for bucket, value in counts.items() if bucket != "suppressed"
-                )
+                source_progress.finding_count = graded
+            elif recorded_count > graded:
+                # The recorded count is the non-suppressed total, so what the
+                # buckets do not show is in the count and in no bucket; it goes
+                # under unknown, as the per-target file puts it.
+                counts[UNKNOWN_SEVERITY] += recorded_count - graded
+            source_progress.severity_counts = counts
         elif scanner_findings:
             source_progress.update_findings(scanner_findings)
             # A recorded count the results do not account for stays the count
