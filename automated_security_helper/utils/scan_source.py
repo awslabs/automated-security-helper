@@ -41,10 +41,13 @@ different directories:
   wrapper started, or a hand-written ``docker run -v "$PWD:/src"``. These mount
   the directory at ``/src`` or set ``ASH_ACTUAL_SOURCE_DIR``, like the launcher,
   but pass no ``ASH_SCAN_SOURCE``, and git in the container cannot tell a nested
-  clone's mount from a repository's root.
+  clone's mount from a repository's root. A directory below ``/src`` is judged
+  as the mount is, so a CI job whose working directory is ``/src/app`` is taken
+  for one of these and records none.
 
-The ASH image run any other way (as a CI job image, for example) scans its own
-directory and records it as a scan on a host would.
+The ASH image run any other way (as a CI job image whose working directory is not
+at or below ``/src``, for example) scans its own directory and records it as a
+scan on a host would.
 """
 
 from __future__ import annotations
@@ -1108,7 +1111,8 @@ def why_no_scan_source(source_dir: Path | str, environ: Mapping[str, str]) -> st
 #: and its receipt's ``archive_skipped`` name them.
 NO_SCAN_SOURCE_CASES = (
     "the legacy ./ash or Invoke-ASH wrapper, or another run of the ASH image with "
-    "the directory at /src or ASH_ACTUAL_SOURCE_DIR set and no ASH_SCAN_SOURCE, "
+    "the directory at or below /src or ASH_ACTUAL_SOURCE_DIR set and no "
+    "ASH_SCAN_SOURCE, "
     "started the scan; the directory is in a submodule, in a clone nested in "
     "another repository, or in a repository under an enclosing one; it is in a "
     "linked worktree, and the repository's git directory holds a FIFO or a "
