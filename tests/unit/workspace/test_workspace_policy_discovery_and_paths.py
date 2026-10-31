@@ -254,7 +254,11 @@ class TestAPackagePathNamingNoProjectIsRefusedAcrossTheProjects:
         assert "names no project's package copy" in message
 
     def test_a_delivered_files_value_is_not_shown_in_the_refusal(self):
-        policy = self._policy("node_modules/left-pad")
+        """The refusal's header quotes two illustrative values of its own
+        (``api/node_modules/left-pad`` and ``node_modules/left-pad``), so the
+        client's value here is one that text does not hold; the first cut of this
+        test used the header's own example and read it as a leak."""
+        policy = self._policy("node_modules/acme-widget")
         resolved = self._resolved(policy, "api", "web", quote_values=False)
 
         with pytest.raises(WorkspaceDefinitionError) as excinfo:
@@ -266,7 +270,7 @@ class TestAPackagePathNamingNoProjectIsRefusedAcrossTheProjects:
             )
 
         message = str(excinfo.value)
-        assert "left-pad" not in message
+        assert "acme-widget" not in message
         assert "suppression entry 1" in message
         assert "an MCP client supplied the file" in message
 
