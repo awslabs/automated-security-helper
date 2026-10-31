@@ -793,8 +793,9 @@ def _say_unlogged_refusals(refusals: List[OSError]) -> None:
     unlogged = len(refusals) - _SWEEP_WARNING_LIMIT
     if unlogged > 0:
         ASH_LOGGER.warning(
-            f"Scanner sandbox: {unlogged} more refusal(s) under a scanner's "
-            "results directory were counted but not logged one by one"
+            f"Scanner sandbox: {unlogged} more refusal(s) in a scanner's results "
+            "directories (an entry, a directory, or a root) were counted but not "
+            "logged one by one"
         )
 
 
