@@ -350,6 +350,43 @@ class TestTheAggregatedDocumentIsReadAsLeniblyAsItsModel:
         assert info["findings_summary"]["critical"] == 1
         assert info["findings_summary"]["suppressed"] == 1
 
+    def test_a_recorded_count_beyond_the_matched_results_keeps_the_rest_unknown(
+        self, tmp_path
+    ):
+        """Three findings recorded, one SARIF result naming the scanner. The
+        per-target path keeps the recorded 3 and grades the two the results do
+        not show as unknown; the registry's poll replaced the 3 with the 1 the
+        results gave, so the scan's total fell when its file was aggregated."""
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "sarif": {
+                    "runs": [
+                        {
+                            "tool": {"driver": {"name": "ASH"}},
+                            "results": [
+                                {
+                                    "ruleId": "B105",
+                                    "level": "error",
+                                    "properties": {"scanner_name": "bandit"},
+                                }
+                            ],
+                        }
+                    ]
+                },
+                "scanner_results": {"bandit": {"status": "FAILED", "finding_count": 3}},
+            },
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        source = progress.scanners["bandit"]["source"]
+        assert source.finding_count == 3
+        assert source.severity_counts["critical"] == 1
+        assert source.severity_counts["unknown"] == 2
+        assert progress.total_findings == 3
+
     def test_a_recorded_count_is_not_overwritten_by_results_that_matched_nothing(
         self, tmp_path
     ):

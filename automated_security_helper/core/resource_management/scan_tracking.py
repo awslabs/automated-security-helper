@@ -1425,6 +1425,13 @@ def _add_aggregated_scanner_progress(
                 )
         elif scanner_findings:
             source_progress.update_findings(scanner_findings)
+            # A recorded count the results do not account for stays the count
+            # (the per-target path keeps it too) with the rest under unknown;
+            # a count below the results is the results' to raise.
+            unmatched = (recorded_count or 0) - source_progress.finding_count
+            if unmatched > 0:
+                source_progress.finding_count += unmatched
+                source_progress.severity_counts[UNKNOWN_SEVERITY] += unmatched
         elif recorded_count:
             source_progress.severity_counts = empty_severity_counts()
             source_progress.severity_counts[UNKNOWN_SEVERITY] = recorded_count
