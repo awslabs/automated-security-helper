@@ -474,6 +474,21 @@ class TestAResourceLevelCredentialFinding:
 
         assert _context(model, 1) == RESOURCE_MASKED + "Outputs: {}\n"
 
+    def test_a_snippet_with_a_measured_extent_bounds_the_range(self):
+        """Control: a region with no column whose endLine equals its startLine but
+        whose snippet shows three lines (the lines are counted by line feeds, so
+        the snippet can be placed) covers those three lines. The range does not
+        run to the end of the file, and the line after the snippet stays raw."""
+        finding = self._credential_finding(end=3)
+        region = finding["locations"][0]["physicalLocation"]["region"]
+        region["snippet"] = {"text": "".join(RESOURCE_LINES[:3])}
+        model = _results(finding, _neighbor("template.yaml", 6, 3, RESOURCE_LINES))
+
+        mask_secrets_in_results(model)
+
+        masked_lines = RESOURCE_MASKED.splitlines(keepends=True)
+        assert _context(model, 1) == "".join(masked_lines[:3]) + RESOURCE_LINES[3]
+
     @pytest.mark.parametrize(
         "snippet_break", ["\f", "\v", "\x85", chr(0x2028), chr(0x2029)]
     )
