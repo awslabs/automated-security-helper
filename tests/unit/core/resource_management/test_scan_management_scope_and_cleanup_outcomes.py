@@ -133,10 +133,23 @@ class TestTheHelpersPassTheSessionThrough:
         registry.cleanup_scan.assert_called_once_with("scan-1", session_id="s1")
 
     def test_cleanup_old_scans_lists_and_cleans_for_the_session(self, registry):
-        registry.list_scans.return_value = []
-        with _use(registry):
-            asyncio.run(cleanup_old_scans(session_id="s1"))
+        """One old scan is listed, so the cleaning half runs: the per-scan
+        cleanup is handed the session too. With an empty listing nothing was
+        cleaned, and a bulk cleanup that listed for the session and then
+        cleaned unscoped would have passed."""
+        registry.list_scans.return_value = [
+            {
+                "scan_id": "old-scan",
+                "status": "completed",
+                "end_time": "2000-01-01T00:00:00",
+            }
+        ]
+        cleanup = AsyncMock(return_value={"success": True})
+        with _use(registry), patch(f"{_MODULE}.cleanup_scan_resources", cleanup):
+            result = asyncio.run(cleanup_old_scans(session_id="s1"))
         registry.list_scans.assert_called_once_with(session_id="s1")
+        cleanup.assert_awaited_once_with("old-scan", False, session_id="s1")
+        assert result["cleaned_up_scans"] == ["old-scan"]
 
 
 class TestCancelScanRace:
@@ -256,14 +269,11 @@ class TestCleanupOldScansCountsAConcurrentRemovalApart:
             "error": "Scan gone-scan not found",
         }
 
-        with (
-            _use(registry),
-            patch(
-                f"{_MODULE}.cleanup_scan_resources", AsyncMock(return_value=not_found)
-            ),
-        ):
+        cleanup = AsyncMock(return_value=not_found)
+        with _use(registry), patch(f"{_MODULE}.cleanup_scan_resources", cleanup):
             result = asyncio.run(cleanup_old_scans(max_age_hours=24))
 
+        cleanup.assert_awaited_once_with("gone-scan", False)
         assert result["success"] is True
         assert result["failed_count"] == 0
         assert result["failed_cleanups"] == []
