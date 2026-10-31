@@ -131,6 +131,7 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import json
+import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -687,6 +688,16 @@ def _is_python_only(instance: ReporterPluginBase, name: str) -> bool:
         return False
 
 
+#: The members' values as an operator writes them, for the message that names them.
+_BEHAVIOUR_VALUES = ", ".join(member.value for member in ReporterWorkspaceBehaviour)
+
+#: Declarations already reported as unreadable, per reporter class (weakly held,
+#: so a class that goes away takes its entry with it).
+_UNREADABLE_DECLARATIONS_TOLD: "weakref.WeakKeyDictionary[type, set]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
 def _declared_behaviour(reporter_class: type, name: str) -> ReporterWorkspaceBehaviour:
     """The behaviour *reporter_class* declares, as a member of the enum.
 
@@ -697,22 +708,54 @@ def _declared_behaviour(reporter_class: type, name: str) -> ReporterWorkspaceBeh
     reporter to handle a shape it has not said it handles, and a declaration ASH
     cannot read says nothing. Before this, a string reached ``behaviour.value``
     in the manifest entry and took the whole report step down.
+
+    A declaration that cannot be read is an ERROR once per class and declaration:
+    the pre-scan check, the report step and a failed construction each ask, and
+    three identical errors for one typo read as three faults.
     """
     declared = getattr(
         reporter_class, "workspace_behaviour", ReporterWorkspaceBehaviour.PER_PROJECT
     )
+    behaviour = _behaviour_from_declaration(declared)
+    if behaviour is not None:
+        return behaviour
+    message = (
+        f"Reporter {name} declares workspace_behaviour {declared!r}, which is not "
+        f"one of {_BEHAVIOUR_VALUES}; it is treated as unsupported in workspace "
+        f"mode until the declaration is fixed."
+    )
+    try:
+        told = _UNREADABLE_DECLARATIONS_TOLD.setdefault(reporter_class, set())
+        first = repr(declared) not in told
+        told.add(repr(declared))
+    except TypeError:  # a class that cannot be weakly referenced: say it every time
+        first = True
+    if first:
+        ASH_LOGGER.error(message)
+    else:
+        ASH_LOGGER.debug(message)
+    return ReporterWorkspaceBehaviour.UNSUPPORTED
+
+
+def _behaviour_from_declaration(declared: Any) -> Optional[ReporterWorkspaceBehaviour]:
+    """The enum member *declared* names, or ``None`` when it names none."""
     if isinstance(declared, ReporterWorkspaceBehaviour):
         return declared
     if isinstance(declared, str):
         for member in ReporterWorkspaceBehaviour:
             if declared == member.value or declared.lower() == member.name.lower():
                 return member
-    ASH_LOGGER.error(
-        f"Reporter {name} declares workspace_behaviour {declared!r}, which is not "
-        f"a ReporterWorkspaceBehaviour; it is treated as unsupported in workspace "
-        f"mode until the declaration is fixed."
+    return None
+
+
+def _unreadable_declaration(reporter_class: type) -> Optional[str]:
+    """The text of a ``workspace_behaviour`` ASH cannot read, or ``None`` if it can."""
+    declared = getattr(
+        reporter_class, "workspace_behaviour", ReporterWorkspaceBehaviour.PER_PROJECT
     )
-    return ReporterWorkspaceBehaviour.UNSUPPORTED
+    if _behaviour_from_declaration(declared) is not None:
+        return None
+    return repr(declared)
 
 
 def _selected_reporters(
@@ -1297,6 +1340,20 @@ def emit_workspace_reports(
 
         if behaviour is ReporterWorkspaceBehaviour.UNSUPPORTED:
             unsupported.append(key)
+            unreadable = _unreadable_declaration(instance.__class__)
+            if unreadable is not None:
+                # Not a claim the reporter made: its declaration is a typo or a
+                # wrong type, and the way out is to fix it, not to disable it.
+                entry["error"] = (
+                    f"the reporter's workspace_behaviour declaration {unreadable} "
+                    f"is not one of {_BEHAVIOUR_VALUES}; fix the declaration, or "
+                    f"disable the reporter"
+                )
+                ASH_LOGGER.error(
+                    f"Reporter {name}: {entry['error']}. No report was produced "
+                    f"for it, and the workspace run will not report success."
+                )
+                continue
             entry["error"] = (
                 "the reporter declares that it cannot produce a correct artefact "
                 "in workspace mode; disable it or scan the projects separately"

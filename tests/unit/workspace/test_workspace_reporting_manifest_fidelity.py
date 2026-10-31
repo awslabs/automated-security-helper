@@ -457,3 +457,43 @@ class TestADeclarationIsReadAsTheEnum:
         assert (output_dir / REPORTS_DIR_NAME / "ash.merged.txt").is_file()
         entry = _manifest(output_dir)["reporters"]["fake-bad-behaviour"]
         assert entry["behaviour"] == ReporterWorkspaceBehaviour.UNSUPPORTED.value
+
+    def test_the_manifest_names_the_declaration_not_a_claim_the_reporter_made(
+        self, workspace
+    ):
+        """An unreadable declaration is a typo to fix, so the entry says that,
+        and does not say the reporter declared itself unable to work."""
+        _, output_dir, _ = workspace
+
+        _emit(workspace, FakeBadBehaviourReporter)
+
+        error = _manifest(output_dir)["reporters"]["fake-bad-behaviour"]["error"]
+        assert "'sideways'" in error, error
+        assert "per-project" in error, error
+        assert "fix the declaration" in error, error
+        assert "declares that it cannot produce" not in error, error
+
+    def test_an_unreadable_declaration_is_an_error_once_however_often_it_is_read(
+        self, caplog
+    ):
+        import logging
+
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        class FreshBadBehaviourReporter(FakeBadBehaviourReporter):
+            workspace_behaviour = "sideways-once"  # type: ignore[assignment]
+
+        caplog.set_level(logging.DEBUG, logger=ASH_LOGGER.name)
+
+        for _ in range(3):
+            behaviour = reporting._declared_behaviour(
+                FreshBadBehaviourReporter, "fake-bad-behaviour"
+            )
+            assert behaviour is ReporterWorkspaceBehaviour.UNSUPPORTED
+
+        errors = [
+            r
+            for r in caplog.records
+            if r.levelno >= logging.ERROR and "sideways-once" in r.getMessage()
+        ]
+        assert len(errors) == 1, caplog.text
