@@ -88,7 +88,18 @@ class BoundProfileUnavailableError(ProfileRegistryError, RuntimeError):
     bound profile whose registered copy is missing (``_resolve_session_config``
     in ``cli/mcp/workspace.py``), so the raise lands in that handler rather than
     in a tool's catch-all.
+
+    ``workspace_unwritable`` says which of the two causes it is: False when the
+    profile is no longer registered (the caller's config to fix: bind a registered
+    profile), True when the profile is still registered and the session's
+    workspace could not be written (the server's failure, for its operator; the
+    writer's error is the chained cause). Every answer that tells the two apart
+    reads this, not whether a cause happens to be chained.
     """
+
+    def __init__(self, message: str, *, workspace_unwritable: bool = False) -> None:
+        super().__init__(message)
+        self.workspace_unwritable = workspace_unwritable
 
 
 class SessionIdentityRequiredError(RuntimeError):
@@ -1134,7 +1145,8 @@ def _rematerialize_binding(sid: str) -> Tuple[Optional[str], Optional[str]]:
             raise BoundProfileUnavailableError(
                 f"this session's bound profile {profile_name!r} could not be "
                 "written to the session's workspace again, so the scan cannot "
-                f"run under it: {error_text(exc)}"
+                f"run under it: {error_text(exc)}",
+                workspace_unwritable=True,
             ) from exc
         with _session_lock:
             if _session_state.get(sid) is state:

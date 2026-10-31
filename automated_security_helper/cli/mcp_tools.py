@@ -980,18 +980,19 @@ def _bound_profile_unavailable(error: Exception, operation: str) -> Dict[str, An
     ``run_ash_scan`` answers it (``bound_profile_unavailable``) and never as
     that file's load failure.
 
-    The two causes are told apart by the error's chained cause, as
-    ``run_ash_scan`` tells them: none when the profile is no longer registered,
-    which is a config refusal, exit code 3; the writer's error (an OSError, or
-    the sandbox's RuntimeError) when the session's workspace cannot be
-    written, which is the server's failure and not the caller's config: exit
-    code 1, the category of the cause, and a warning in the server log for the
-    operator, who is the one that can act on a workspace permission. Answered
-    as a config refusal, an unwritable workspace read as the caller's own
-    fault and left nothing in the log.
+    The two causes are told apart by the error's ``workspace_unwritable``
+    (``BoundProfileUnavailableError``), as ``run_ash_scan`` tells them: False
+    when the profile is no longer registered, which is a config refusal, exit
+    code 3; True when the session's workspace cannot be written (the writer's
+    error, an OSError or the sandbox's RuntimeError, is the chained cause),
+    which is the server's failure and not the caller's config: exit code 1, the
+    category of the cause, and a warning in the server log for the operator,
+    who is the one that can act on a workspace permission. Answered as a config
+    refusal, an unwritable workspace read as the caller's own fault and left
+    nothing in the log. An error that is not a ``BoundProfileUnavailableError``
+    is the first kind.
     """
-    cause = error.__cause__
-    if cause is None:
+    if not getattr(error, "workspace_unwritable", False):
         return with_exit_code(
             {
                 "success": False,
@@ -1013,7 +1014,7 @@ def _bound_profile_unavailable(error: Exception, operation: str) -> Dict[str, An
             "error_type": "bound_profile_unavailable",
             "error_category": (
                 ErrorCategory.PERMISSION_DENIED.value
-                if isinstance(cause, PermissionError)
+                if isinstance(error.__cause__, PermissionError)
                 else ErrorCategory.UNEXPECTED_ERROR.value
             ),
             "operation": operation,
