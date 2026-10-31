@@ -528,6 +528,44 @@ class TestVulnerabilityIdsAreTheSharedFindingIds:
         ]
         assert first_ash != second_ash
 
+    def test_those_two_findings_still_share_the_scanners_rule_identifier(
+        self, reporter
+    ):
+        """GitLab merges vulnerabilities that share a location and any one
+        identifier other than CWE. Two hits of one rule at one line share the
+        scanner's rule identifier and the location, so their distinct ids do not
+        by themselves keep both in GitLab."""
+        model = _model(
+            _result("B105", "password = 'first'"),
+            _result("B105", "password = 'second'"),
+        )
+
+        first, second = json.loads(reporter.report(model))["vulnerabilities"]
+
+        def rule_identifiers(vuln):
+            return [i for i in vuln["identifiers"] if i["type"] == "bandit-rule"]
+
+        assert rule_identifiers(first) == rule_identifiers(second) != []
+        assert first["location"] == second["location"]
+
+    def test_findings_with_no_scanner_name_are_told_apart_by_their_ids_alone(
+        self, reporter
+    ):
+        """With no scanner name there is no rule identifier, so the ids are the
+        only identifiers the two vulnerabilities carry and they differ."""
+        results = [
+            _result("B105", "password = 'first'"),
+            _result("B105", "password = 'second'"),
+        ]
+        for result in results:
+            result.properties = None
+
+        first, second = json.loads(reporter.report(_model(*results)))["vulnerabilities"]
+
+        assert [i["type"] for i in first["identifiers"]] == ["ash-finding-id"]
+        assert [i["type"] for i in second["identifiers"]] == ["ash-finding-id"]
+        assert first["identifiers"] != second["identifiers"]
+
     def test_the_id_is_the_flattened_findings_id(self, reporter):
         model = _model(_result("B105", "hardcoded password string"))
 

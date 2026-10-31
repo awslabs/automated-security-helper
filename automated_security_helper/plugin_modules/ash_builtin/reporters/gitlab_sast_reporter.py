@@ -212,12 +212,20 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
 
         The legacy id hashes the rule, the file and the line, so two distinct
         findings of one rule at one line (a flattening this could not pair them
-        with) shared the ``id`` and the ASH finding-id identifier, and GitLab,
-        which deduplicates on either, kept one. The shared ids carry an occurrence
-        counter for such pairs (``utils/finding_identity``), as the OCSF report's
-        fallback uids do; this is the same counter for this report's fallback.
-        The first finding keeps the legacy id as it was, so an id that never
-        collided does not change between two pipelines of the same tree.
+        with) shared the ``id`` and the ASH finding-id identifier, and the report
+        listed two vulnerabilities under one id. The shared ids carry an
+        occurrence counter for such pairs (``utils/finding_identity``), as the
+        OCSF report's fallback uids do; this is the same counter for this
+        report's fallback. The first finding keeps the legacy id as it was, so an
+        id that never collided does not change between two pipelines of the same
+        tree.
+
+        The distinct ids do not make GitLab keep both vulnerabilities in every
+        case. It merges two vulnerabilities that share a location and any one
+        identifier other than CWE, and two hits of one rule at one line also
+        share the scanner's rule identifier (``<scanner>-rule``). The ids keep
+        apart the findings that carry no rule identifier, a result with no rule
+        id or one with no scanner name.
         """
         identifier = vuln["id"]
         count = seen.get(identifier, 0)
