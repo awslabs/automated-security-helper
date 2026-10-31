@@ -389,7 +389,59 @@ def test_refuse_links_below_refuses_a_directory_it_cannot_list(locked_tree):
         fs_guard.refuse_links_below(root)
 
     assert "locked" in str(refused.value)
-    assert isinstance(refused.value.__cause__, PermissionError)
+    # Not chained: the walk's own error carries the full path in ``filename``,
+    # which the sweep's refusals drop for the same reason (the tests below).
+    assert refused.value.__cause__ is None
+
+
+def test_refuse_links_below_hides_an_env_read_value(tmp_path, caplog):
+    """The pre-check names the directory it could not list, and a tool can name a
+    directory after an option it was given: the warning and the raised exception
+    are redacted with the caller's values, as the sweep's are, and nothing is
+    chained that would carry the path in ``filename``."""
+    value = "PRECHECKSECRET-9921"
+    root = tmp_path / "results"
+    locked = root / f"dir-{value}"
+    locked.mkdir(parents=True)
+    locked.chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            with pytest.raises(PermissionError) as refused:
+                fs_guard.refuse_links_below(root, (value,))
+    finally:
+        locked.chmod(0o700)
+
+    lines = _warnings(caplog, "Could not list")
+    assert lines, [record.getMessage() for record in caplog.records]
+    assert not any(value in line for line in lines), lines
+    assert value not in str(refused.value), str(refused.value)
+    assert refused.value.__cause__ is None
+    assert refused.value.__suppress_context__
+
+
+def test_refuse_links_below_is_value_free_when_the_values_could_not_be_read(
+    tmp_path, caplog
+):
+    value = "PRECHECKSECRET-9922"
+    root = tmp_path / "results"
+    locked = root / f"dir-{value}"
+    locked.mkdir(parents=True)
+    locked.chmod(0o000)
+    try:
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            with pytest.raises(PermissionError) as refused:
+                fs_guard.refuse_links_below(root, values_unread=True)
+    finally:
+        locked.chmod(0o700)
+
+    lines = _warnings(caplog, "Could not list")
+    assert lines, [record.getMessage() for record in caplog.records]
+    assert all(value not in line for line in lines), lines
+    text = str(refused.value)
+    assert value not in text, text
+    assert str(root) not in text, text
+    assert "redaction values could not be read" in text, text
+    assert refused.value.__cause__ is None
 
 
 def test_refuse_links_below_refuses_a_root_it_cannot_check(tmp_path, monkeypatch):

@@ -740,7 +740,12 @@ def _too_deep(root: Path, dirpath: Union[str, bytes], dirnames: List[str]) -> No
         )
 
 
-def refuse_links_below(root: Union[str, Path]) -> None:
+def refuse_links_below(
+    root: Union[str, Path],
+    values: Iterable[str] = (),
+    *,
+    values_unread: bool = False,
+) -> None:
     """Raise for the first symlink, or file another name refers to, below ``root``.
 
     For a sandboxed scanner's results directory before the scanner runs: the sweep
@@ -755,9 +760,12 @@ def refuse_links_below(root: Union[str, Path]) -> None:
     ``Path.is_dir``, which since Python 3.14 reads every OSError as False and would
     pass a root the process cannot check over in silence. A directory below
     ``root`` that cannot be opened or listed, and an entry that cannot be examined
-    (a directory readable but not searchable), are refused too, as the OSError
-    the walk met: skipped, a link there would be neither refused here nor removed
-    by the sweep.
+    (a directory readable but not searchable), are refused too: skipped, a link
+    there would be neither refused here nor removed by the sweep. That refusal is
+    redacted as the sweep's are (``sweep_writable``): ``values`` are the caller's
+    env-read values, ``values_unread`` says it could not read them, the line is
+    logged as a warning, and the OSError raised carries the same line, with the
+    walk's own error not chained, since its ``filename`` is the full path.
     """
     root = Path(os.path.abspath(root))
     if not hasattr(os, "fwalk"):
@@ -775,12 +783,22 @@ def refuse_links_below(root: Union[str, Path]) -> None:
             "cannot be checked",
         )
 
+    shown_values = tuple(values)
+
     def refuse(what: str, relative: str, error: OSError) -> None:
-        raise OSError(
-            _errno_of(error),
-            f"could not {what} {relative} under {root} ({error}), so a link below "
+        # Redacted and logged as the sweep's refusals are, and raised from the
+        # logged line alone: a directory can be named after an option value, and
+        # the OS error chained here carries the full path in its ``filename``.
+        shown = _sweep_warning(
+            f"Could not {what} {relative} under {root} ({error}), so a link below "
             "it could not be refused",
-        ) from error
+            f"Could not {what} an entry of a scanner's results directory, so a "
+            "link below it could not be refused; it is not named because the "
+            "plugin's redaction values could not be read",
+            shown_values,
+            values_unread,
+        )
+        raise OSError(_errno_of(error), shown) from None
 
     # closing(): the raises below leave the walk early, and its open directory
     # descriptors are then closed here rather than when the generator is
