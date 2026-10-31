@@ -468,6 +468,15 @@ def display_metrics_table(
                     )
                     break
                 except Exception as notice_error:
+                    # A closed stream raises ValueError, not OSError, and fails
+                    # every later notice alike: said once, as the others are.
+                    if isinstance(notice_error, ValueError) and "closed file" in str(
+                        notice_error
+                    ):
+                        ASH_LOGGER.warning(
+                            f"Could not write a notice to the console: {notice_error}"
+                        )
+                        break
                     # The raw text: the console handler shows every record once
                     # (utils/log.py console_text), so a value shown here was
                     # shown twice and its escapes printed doubled.

@@ -161,3 +161,33 @@ class TestTheDisplay:
         assert printed == ["later"] * 3, printed
         assert "later notice" in capsys.readouterr().out
         assert any("print_coverage_shortfalls" in line for line in warnings), warnings
+
+    def test_a_closed_stream_ends_the_notices_with_one_warning(self, monkeypatch):
+        """Red at the base: a closed stream raises ValueError, which was read as a
+        printer's own failure, so each of the four notices warned in turn."""
+        attempted = []
+
+        def _closed(model, console):
+            attempted.append("first")
+            raise ValueError("I/O operation on closed file.")
+
+        def _later(model, console):
+            attempted.append("later")
+
+        monkeypatch.setattr(metrics_table, "print_coverage_shortfalls", _closed)
+        monkeypatch.setattr(metrics_table, "print_inputs_not_scanned", _later)
+        monkeypatch.setattr(metrics_table, "print_stale_content_databases", _later)
+        monkeypatch.setattr(metrics_table, "print_converter_refusals", _later)
+        warnings = []
+        monkeypatch.setattr(
+            metrics_table.ASH_LOGGER,
+            "warning",
+            lambda message, *args, **kwargs: warnings.append(str(message)),
+        )
+
+        display_metrics_table(AshAggregatedResults(), use_color=False)
+
+        assert attempted == ["first"], attempted
+        notice_warnings = [line for line in warnings if "notice" in line]
+        assert len(notice_warnings) == 1, warnings
+        assert notice_warnings[0].startswith("Could not write a notice to the console")
