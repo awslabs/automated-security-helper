@@ -55,14 +55,45 @@ def test_both_names_carry_the_same_schema(results_schema):
     assert properties["mime_type"] == properties["mime-type"]
 
 
-def test_a_model_without_the_python_name_load_keeps_the_alias_alone(results_schema):
-    """A model that loads by alias only is described as before: no Python name
-    is admitted where the load would refuse it."""
-    for name, definition in results_schema["$defs"].items():
-        properties = definition.get("properties", {})
-        if "bom-ref" in properties:
-            continue
-        assert "bom_ref" not in properties, name
+def _cyclonedx_models() -> dict:
+    """Every model the CycloneDX module defines, by class name."""
+    import inspect
+
+    import automated_security_helper.schemas.cyclonedx_bom_1_6_schema as module
+
+    return {
+        name: cls
+        for name, cls in vars(module).items()
+        if inspect.isclass(cls)
+        and issubclass(cls, BaseModel)
+        and cls.__module__ == module.__name__
+    }
+
+
+def test_every_aliased_cyclonedx_model_is_described_as_its_load_reads_it(
+    results_schema,
+):
+    """The Python name sits in a model's properties exactly when the model loads
+    by it (``validate_by_name``): read per model and per aliased field from the
+    models themselves, so a model that loads by alias only is described by the
+    alias alone and one that loads by either name by both.
+
+    The loop used to skip every definition that holds ``bom-ref``, which are the
+    models it claimed to check, so nothing but the synthetic control below was
+    tested. The count and the named pair keep this loop from reading nothing."""
+    checked: list = []
+    for name, cls in _cyclonedx_models().items():
+        properties = results_schema["$defs"].get(name, {}).get("properties", {})
+        loads_by_name = bool(cls.model_config.get("validate_by_name"))
+        for field_name, info in cls.model_fields.items():
+            alias = info.serialization_alias or info.alias
+            if not alias or alias == field_name or alias not in properties:
+                continue
+            checked.append((name, field_name))
+            assert (field_name in properties) == loads_by_name, (name, field_name)
+    assert ("Component", "bom_ref") in checked, checked
+    assert ("Component", "mime_type") in checked, checked
+    assert len(checked) >= 5, checked
 
 
 class _ByEitherName(BaseModel):

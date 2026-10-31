@@ -16,6 +16,9 @@ is kept as written.
 
 from __future__ import annotations
 
+import json
+import re
+
 import pytest
 from pydantic import ValidationError
 
@@ -72,9 +75,15 @@ def test_an_integer_value_is_kept_as_an_integer(model, field, required):
     """A BOM that writes ``1`` is re-emitted with ``1``, not ``1.0``."""
     loaded = model.model_validate({**required, field: 1})
     assert type(getattr(loaded, field)) is int
-    assert loaded.model_dump(mode="json", exclude_none=True)[field] == 1
-    assert '"' + field + '":1' in loaded.model_dump_json(exclude_none=True)
-    reread = model.model_validate_json(loaded.model_dump_json(exclude_none=True))
+    # ``== 1`` and the substring ``"confidence":1`` are both true of ``1.0``, so
+    # the type is what is compared, on the dumped value and on the JSON text.
+    dumped = loaded.model_dump(mode="json", exclude_none=True)[field]
+    assert type(dumped) is int and dumped == 1
+    text = loaded.model_dump_json(exclude_none=True)
+    written = json.loads(text)[field]
+    assert type(written) is int and written == 1
+    assert re.search(rf'"{field}":1(?![0-9.])', text), text
+    reread = model.model_validate_json(text)
     assert type(getattr(reread, field)) is int
 
 
