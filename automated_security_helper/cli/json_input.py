@@ -86,6 +86,15 @@ from typer.models import TyperPath
 CLI_JSON_INPUT_FLAG = "--cli-json-input"
 GENERATE_CLI_SKELETON_FLAG = "--generate-cli-skeleton"
 _FILE_URI_PREFIX = "file://"
+
+#: The characters of a URI's path that ``url2pathname`` reads as something else
+#: from Python 3.14 on: it splits the URI it is given, so it drops a query (``?``)
+#: and a fragment (``#``) and the splitter removes a tab and the line breaks.
+#: Earlier versions only percent-decode. Escaped before the path is handed over,
+#: each stays in the file's name on every version.
+_URI_PATH_ESCAPES = str.maketrans(
+    {"#": "%23", "?": "%3F", "\t": "%09", "\r": "%0D", "\n": "%0A"}
+)
 _HELP_PANEL = "Structured input"
 
 #: A string literal as repr writes one, in either quote.
@@ -311,7 +320,9 @@ def _document_path(source: str) -> str:
     A URI, ``file:///...`` or ``file://localhost/...``, is read as RFC 8089 writes
     it: its path is percent-decoded and made a local one with ``url2pathname``,
     so a URI a tool wrote names the file it means, and on Windows
-    ``/C:/dir/params.json`` is a drive path.
+    ``/C:/dir/params.json`` is a drive path. A ``#`` or a ``?`` in it stays in the
+    file's name, on every Python version: from 3.14 ``url2pathname`` would
+    otherwise end the path there, as a fragment or a query.
 
     Anything else after the prefix is a path exactly as written, as the AWS CLI
     reads ``file://``: relative (``file://params.json``, ``file://./params.json``)
@@ -334,7 +345,7 @@ def _document_path(source: str) -> str:
     if rest[: len("localhost/")].lower() == "localhost/":
         rest = rest[len("localhost") :]
     if rest.startswith("/"):
-        return url2pathname(rest)
+        return url2pathname(rest.translate(_URI_PATH_ESCAPES))
     return rest
 
 

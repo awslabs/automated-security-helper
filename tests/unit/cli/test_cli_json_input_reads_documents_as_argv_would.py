@@ -18,6 +18,7 @@ leaves a parameter with an environment variable null; --help and
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -172,6 +173,21 @@ def test_a_hash_in_the_file_name_stays_in_it(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert mock_run.call_args.kwargs["offline"] is True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX path; these names are not valid")
+@pytest.mark.parametrize(
+    "name",
+    ["a#1.json", "a?1.json", "a\t1.json", "a\n1.json"],
+    ids=["hash", "question-mark", "tab", "newline"],
+)
+def test_a_mark_that_splits_a_url_stays_in_a_file_uri_path(name):
+    """From Python 3.14 ``url2pathname`` splits the URI it is given, so it cut the
+    name at a ``#`` or a ``?`` and dropped a tab or a line break: ``file:///d/a#1.json``
+    named ``/d/a``. The path is read the same on every version."""
+    from automated_security_helper.cli.json_input import _document_path
+
+    assert _document_path("file:///d/" + name) == "/d/" + name
 
 
 def test_a_null_byte_in_the_file_name_is_the_cannot_read_refusal():
