@@ -114,6 +114,7 @@ def _run(
     before_raise=None,
     with_clean_scanner: bool = False,
     raise_once: bool = False,
+    raise_times: int | None = None,
 ):
     """Run one scanner over source and converted; the processor raises on one target.
 
@@ -121,7 +122,10 @@ def _run(
     tuple of names), the failure record filed for it and the fresh row the handler
     falls back to included, so ``seen`` shows the record's target; with
     ``raise_once`` it raises on the FIRST container of each failing target only, so
-    the refiled row is merged. ``before_raise`` is called with the container before
+    the refiled row is merged; with ``raise_times=n`` on the first ``n`` containers
+    of each (``raise_times=2``: the original and the refiled row raise, the fresh row
+    is merged). The containers the processor accepted are on ``executor.merged``.
+    ``before_raise`` is called with the container before
     each raise. The events the executor sends are collected on ``executor.events``
     as ``(event_type, kwargs)`` pairs. ``with_clean_scanner`` queues a second
     scanner, ``clean-tool``, after ``shape-tool``, over the source target only, so
@@ -130,8 +134,10 @@ def _run(
     scanner's turn is over.
     """
     seen: list = []
+    merged: list = []
     events: list = []
-    raised: set = set()
+    raised: dict = {}
+    limit = 1 if raise_once else raise_times
     failing = (
         {failing_target}
         if isinstance(failing_target, str)
@@ -140,13 +146,13 @@ def _run(
 
     def process(container, aggregated):
         seen.append(container)
-        if container.target_type in failing and not (
-            raise_once and container.target_type in raised
-        ):
-            raised.add(container.target_type)
+        target = container.target_type
+        if target in failing and (limit is None or raised.get(target, 0) < limit):
+            raised[target] = raised.get(target, 0) + 1
             if before_raise is not None:
                 before_raise(container)
             raise RuntimeError("the report could not be read")
+        merged.append(container)
         return aggregated
 
     def notify(event_type, **kwargs):
@@ -176,6 +182,7 @@ def _run(
     else:
         executor.run_sequential(AshAggregatedResults())
     executor.events = events
+    executor.merged = merged
     return seen, executor
 
 
@@ -416,6 +423,37 @@ class TestARefiledRowReachesTheReport:
         assert fresh.scanner_name == "shape-tool"
         assert fresh.target_type == "converted"
         assert fresh.status == ScannerStatus.ERROR
+        assert fresh.raw_results["status"] == "failed"
+
+    @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+    def test_a_fresh_row_the_processor_accepts_is_the_one_merged(
+        self, plugin_context, tmp_path, parallel
+    ):
+        """The claim of the module: after the refiled row raises again, the target
+        still has a row in the results. Every other test has the fresh row raise as
+        well, so none shows it merged. With the processor raising on the original
+        and the refiled row only, the fresh row is the container that reaches it."""
+        seen, executor = _run(
+            plugin_context,
+            tmp_path,
+            failing_target="converted",
+            parallel=parallel,
+            raise_times=2,
+        )
+
+        assert [c.target_type for c in seen] == [
+            "source",
+            "converted",
+            "converted",
+            "converted",
+        ]
+        fresh = seen[3]
+        assert fresh is not seen[1], "a fresh row follows the second raise"
+        assert len(executor.merged) == 2, executor.merged
+        assert executor.merged[0] is seen[0]
+        assert executor.merged[1] is fresh
+        assert fresh.status == ScannerStatus.ERROR
+        assert fresh.target_type == "converted"
         assert fresh.raw_results["status"] == "failed"
 
     @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
