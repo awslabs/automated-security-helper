@@ -231,11 +231,20 @@ class ScannerProgress:
         """
         Update finding counts based on a list of findings.
 
+        The count is the non-suppressed findings, SummaryStats' ``total``: a
+        finding whose severity is ``suppressed`` is in the ``suppressed``
+        bucket beside the count and not in it, as the recorded counts of the
+        per-target and aggregated documents are read.
+
         Args:
             findings: List of finding dictionaries
         """
-        self.finding_count = len(findings)
         self.severity_counts = extract_findings_summary(findings)
+        self.finding_count = sum(
+            value
+            for bucket, value in self.severity_counts.items()
+            if bucket != "suppressed"
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -1334,14 +1343,23 @@ def _add_aggregated_scanner_progress(
     containers, not the entries in them, so an entry that is not an object is
     rejected here with its scanner named.
     """
+    from automated_security_helper.utils.sarif_utils import is_result_suppressed
+
     findings = []
 
-    # The findings of the SARIF, each with the scanner that reported it.
+    # The findings of the SARIF, each with the scanner that reported it. A
+    # result with a suppression in effect is graded ``suppressed``, as the
+    # completed view grades it (_completed_findings_summary): it is in that
+    # bucket and not in its severity or in the count.
     for run, result in _sarif_run_results(results.get("sarif")):
         findings.append(
             {
                 "id": result.get("ruleId", "unknown"),
-                "severity": result_severity(result),
+                "severity": (
+                    "suppressed"
+                    if is_result_suppressed(result)
+                    else result_severity(result)
+                ),
                 # The scanner the result names, as every other reader of the
                 # aggregated SARIF attributes it (sarif_utils). The run's tool is
                 # the fallback only: ASH writes one run for all its scanners, so

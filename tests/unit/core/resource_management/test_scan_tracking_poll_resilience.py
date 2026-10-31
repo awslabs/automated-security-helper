@@ -303,6 +303,53 @@ class TestTheAggregatedDocumentIsReadAsLeniblyAsItsModel:
         assert source.finding_count == 1
         assert source.severity_counts["critical"] == 1
 
+    def test_a_suppressed_sarif_result_is_in_its_bucket_and_not_in_the_count(
+        self, tmp_path
+    ):
+        """Two bandit results, one with a suppression in effect. The completed
+        view grades the suppressed one as ``suppressed`` and leaves it out of
+        the count; the registry's progress counted it in the count and under
+        its severity, so the same scan read 2 critical in one view and 1
+        critical beside 1 suppressed in the other."""
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "sarif": {
+                    "runs": [
+                        {
+                            "tool": {"driver": {"name": "ASH"}},
+                            "results": [
+                                {
+                                    "ruleId": "B105",
+                                    "level": "error",
+                                    "properties": {"scanner_name": "bandit"},
+                                },
+                                {
+                                    "ruleId": "B106",
+                                    "level": "error",
+                                    "properties": {"scanner_name": "bandit"},
+                                    "suppressions": [{"kind": "inSource"}],
+                                },
+                            ],
+                        }
+                    ]
+                },
+                "scanner_results": {"bandit": {"status": "FAILED"}},
+            },
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+        info = get_scan_progress_info(out)
+
+        source = progress.scanners["bandit"]["source"]
+        assert source.finding_count == 1
+        assert source.severity_counts["critical"] == 1
+        assert source.severity_counts["suppressed"] == 1
+        assert progress.total_findings == info["findings_count"] == 1
+        assert info["findings_summary"]["critical"] == 1
+        assert info["findings_summary"]["suppressed"] == 1
+
     def test_a_recorded_count_is_not_overwritten_by_results_that_matched_nothing(
         self, tmp_path
     ):
