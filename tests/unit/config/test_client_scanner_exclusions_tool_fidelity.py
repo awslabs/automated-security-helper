@@ -175,17 +175,55 @@ def test_an_empty_plain_expiry_field_makes_the_file_unreadable():
     before the date check), so the entry applied and its findings were marked
     suppressed. An empty field now makes the file unreadable like any other
     field that is not a date. A line with no ``exp:`` field at all, and a YAML
-    ``expired_at`` left empty (trivy's zero time), are unchanged."""
+    ``expired_at`` left null (trivy's zero time), are unchanged. A YAML
+    ``expired_at: ''`` is a quoted empty scalar, which trivy's decoder fails on
+    as it fails any other text that is not a time, so that file is unreadable
+    too."""
     today = date(2026, 1, 1)
     with pytest.raises(ValueError, match="not a YYYY-MM-DD date"):
         parse_trivy_ignore_file("CVE-1 exp:\nCVE-2\n", yaml_format=False, today=today)
     assert parse_trivy_ignore_file("CVE-2\n", yaml_format=False, today=today) == [
         ("CVE-2", ())
     ]
-    document = yaml.safe_dump({"vulnerabilities": [{"id": "CVE-3", "expired_at": ""}]})
-    assert parse_trivy_ignore_file(document, yaml_format=True, today=today) == [
-        ("CVE-3", ())
+    quoted_empty = yaml.safe_dump(
+        {"vulnerabilities": [{"id": "CVE-3", "expired_at": ""}]}
+    )
+    assert "expired_at: ''" in quoted_empty
+    with pytest.raises(ValueError, match="not a YYYY-MM-DD date"):
+        parse_trivy_ignore_file(quoted_empty, yaml_format=True, today=today)
+    null_field = "vulnerabilities:\n  - id: CVE-4\n    expired_at:\n"
+    assert yaml.safe_load(null_field)["vulnerabilities"][0]["expired_at"] is None
+    assert parse_trivy_ignore_file(null_field, yaml_format=True, today=today) == [
+        ("CVE-4", ())
     ]
+
+
+@pytest.mark.parametrize("field", ["2099-01-01x", "2099-01-011", "2099-1-1", "soon"])
+def test_a_yaml_expiry_string_is_read_whole_not_cut_at_ten_characters(field):
+    """A string ``expired_at`` is read as a date or a timestamp, not by its
+    first ten characters: cut there, ``2099-01-01x`` read as a date in the
+    future, so the entry applied where trivy fails the file. A string holding a
+    date, or a date with a time, and the date and datetime objects a bare YAML
+    value loads as, are still cut to their day."""
+    today = date(2026, 1, 1)
+    document = yaml.safe_dump(
+        {"vulnerabilities": [{"id": "CVE-1", "expired_at": field}]}
+    )
+    with pytest.raises(ValueError, match="not a YYYY-MM-DD date"):
+        parse_trivy_ignore_file(document, yaml_format=True, today=today)
+
+    kept_forms = (
+        "'2099-01-01'",
+        "'2099-01-01T00:00:00Z'",
+        "2099-01-01",
+        "2099-01-01T00:00:00Z",
+    )
+    for kept in kept_forms:
+        assert parse_trivy_ignore_file(
+            f"vulnerabilities:\n  - id: CVE-2\n    expired_at: {kept}\n",
+            yaml_format=True,
+            today=today,
+        ) == [("CVE-2", ())]
 
 
 @pytest.mark.parametrize(

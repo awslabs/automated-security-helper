@@ -2322,6 +2322,13 @@ def parse_trivy_ignore_file(
 
 _PLAIN_EXPIRY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 
+#: A YAML ``expired_at`` written as a string: a date, or a date followed by a
+#: time of day and an optional zone.
+_YAML_EXPIRY = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
+    r"(?:[Tt ][0-9]{2}:[0-9]{2}[0-9:.]*(?:[Zz]|[+-][0-9]{2}(?::?[0-9]{2})?)?)?\Z"
+)
+
 
 def _expired(value: Any, today: date, whole_field: bool = False) -> bool:
     """Whether a trivy ignore entry with this expiry no longer applies on ``today``.
@@ -2340,11 +2347,13 @@ def _expired(value: Any, today: date, whole_field: bool = False) -> bool:
             date it could not read; ``_entry_expired`` reads a client entry's
             unreadable expiration as expired, the same side.
     """
-    # A plain line's ``exp:`` with nothing after it is a field trivy fails to
-    # parse, which is not the same as a line with no field (None): it falls
-    # through to the date check below. A YAML ``expired_at`` left empty is the
-    # zero time trivy reads as no expiry.
-    if value is None or (not value and not whole_field):
+    # Only a field that is absent, or a YAML ``expired_at:`` left null (the zero
+    # time trivy reads as no expiry), is no expiry (None). A plain line's
+    # ``exp:`` with nothing after it, and a YAML ``expired_at: ''`` (a quoted
+    # empty scalar, which trivy's decoder fails on), are fields trivy cannot
+    # parse: they fall through to the date check below and make the file
+    # unreadable.
+    if value is None:
         return False
     text = str(value)
     try:
@@ -2356,7 +2365,11 @@ def _expired(value: Any, today: date, whole_field: bool = False) -> bool:
             if _PLAIN_EXPIRY.match(text) is None:
                 raise ValueError(text)
         else:
-            # A YAML date or timestamp object is its first ten characters.
+            # A YAML date or timestamp object is its first ten characters. A
+            # string is cut the same way only once it is a date or a
+            # timestamp, so ``2099-01-01x`` is not read as a date either.
+            if isinstance(value, str) and _YAML_EXPIRY.match(text) is None:
+                raise ValueError(text)
             text = text[:10]
         return date.fromisoformat(text) <= today
     except ValueError as exc:
