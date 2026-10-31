@@ -4937,6 +4937,22 @@ def _sandbox_modes_requested(opts: ScanOptions) -> List[str]:
     )
 
 
+def _names_the_output_directorys_own_results(opts: ScanOptions) -> bool:
+    """Whether ``existing_results`` is the file a ``--use-existing`` run reads.
+
+    The scan inside a container or a shell reads one file, the output
+    directory's own ``ash_aggregated_results.json``, whatever path the caller
+    named, so only that path is a request for the file the inner run read. The
+    two are compared resolved, so the file spelled through a link or a relative
+    path counts.
+    """
+    if not opts.existing_results:
+        return False
+    named = Path(opts.existing_results).resolve()
+    own = (Path(opts.output_dir) / "ash_aggregated_results.json").resolve()
+    return named == own
+
+
 def _refuse_restored_results(
     output_dir: Path, where: str, logger, *, kept_on_purpose: bool = False
 ) -> None:
@@ -5534,11 +5550,15 @@ def _run_container_mode(
 
     _refuse_links_left_in_reports(opts)
     _refuse_an_inner_run_that_was_refused(opts, outer_run_id)
+    # Kept on purpose only when the caller named the file the inner run reads. A
+    # path outside the output directory is not read by the container (it reads
+    # the directory's own file), so a restore marker beside that file still
+    # means the results are an earlier scan's put back.
     _refuse_restored_results(
         opts.output_dir,
         "the container",
         logger,
-        kept_on_purpose=bool(opts.existing_results),
+        kept_on_purpose=_names_the_output_directorys_own_results(opts),
     )
 
     output_file = opts.output_dir / "ash_aggregated_results.json"

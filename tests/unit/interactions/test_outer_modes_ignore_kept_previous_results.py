@@ -207,3 +207,55 @@ def test_the_container_host_exit_code_after_an_inner_crash(tmp_path):
             )
 
     assert exited.value.code != 0
+
+
+def _put_back_results(output: Path) -> None:
+    """The output directory a scan that kept its earlier results left behind."""
+    _seed(output, {"ash_aggregated_results.json": _results_json(STALE)})
+    (output / RESTORED_MARKER_NAME).write_text("restored\n", encoding="utf-8")
+
+
+def test_a_results_file_elsewhere_does_not_vouch_for_the_put_back_results(tmp_path):
+    """The scan inside the container reads the output directory's own results
+    file whatever path the caller named, so a caller naming another file did not
+    ask for the file the marker describes. The put-back earlier scan was read
+    back as this run's."""
+    opts = _opts(tmp_path)
+    output = opts.output_dir
+    _put_back_results(output)
+    elsewhere = tmp_path / "elsewhere" / "r.json"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text(_results_json("the file the caller named"), encoding="utf-8")
+    opts.existing_results = str(elsewhere)
+    logger = MagicMock()
+
+    def inner(*args, **kwargs):
+        return create_completed_process(args=[], returncode=0, stdout="", stderr="")
+
+    with patch.object(module, "run_ash_container", side_effect=inner):
+        with pytest.raises(SystemExit) as exited:
+            _run_container_mode(opts, logger)
+
+    assert exited.value.code == 1
+    assert "put back" in str(logger.error.call_args_list)
+    assert (output / RESTORED_MARKER_NAME).exists()
+
+
+def test_only_the_output_directorys_own_file_is_a_request_for_it(tmp_path):
+    """Control: the file the inner run reads, spelled directly or through the
+    directory's parent, is the request the marker steps aside for."""
+    opts = _opts(tmp_path)
+    own = opts.output_dir / "ash_aggregated_results.json"
+    opts.output_dir.mkdir()
+
+    opts.existing_results = str(own)
+    assert module._names_the_output_directorys_own_results(opts)
+
+    opts.existing_results = str(opts.output_dir / ".." / "out" / own.name)
+    assert module._names_the_output_directorys_own_results(opts)
+
+    opts.existing_results = str(tmp_path / "elsewhere" / own.name)
+    assert not module._names_the_output_directorys_own_results(opts)
+
+    opts.existing_results = None
+    assert not module._names_the_output_directorys_own_results(opts)
