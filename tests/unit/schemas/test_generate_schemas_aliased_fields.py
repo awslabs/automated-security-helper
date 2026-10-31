@@ -70,6 +70,39 @@ def _cyclonedx_models() -> dict:
     }
 
 
+def _definition_properties(results_schema: dict, module_name: str, name: str) -> dict:
+    """The properties of a model's definition in the results schema.
+
+    A class name the SARIF models share (``Attachment``, ``Level``, ``State``,
+    ``Tool``, ``Version``) is committed under the module-qualified key, so the
+    plain class name alone finds nothing for those five. The qualified key is
+    tried first, because a plain key then belongs to the other module's class."""
+    qualified = f"{module_name.replace('.', '__')}__{name}"
+    for key in (qualified, name):
+        if key in results_schema["$defs"]:
+            return results_schema["$defs"][key].get("properties", {})
+    return {}
+
+
+def test_every_cyclonedx_definition_key_names_a_class_of_the_module(results_schema):
+    """A module-qualified definition whose class was renamed is no longer found
+    by the lookup above, which would skip it silently; this fails instead."""
+    import inspect
+
+    import automated_security_helper.schemas.cyclonedx_bom_1_6_schema as module
+
+    prefix = module.__name__.replace(".", "__") + "__"
+    class_names = {
+        name
+        for name, cls in vars(module).items()
+        if inspect.isclass(cls) and cls.__module__ == module.__name__
+    }
+    qualified = [key for key in results_schema["$defs"] if key.startswith(prefix)]
+    assert len(qualified) >= 5, qualified
+    for key in qualified:
+        assert key[len(prefix) :] in class_names, key
+
+
 def test_every_aliased_cyclonedx_model_is_described_as_its_load_reads_it(
     results_schema,
 ):
@@ -80,10 +113,12 @@ def test_every_aliased_cyclonedx_model_is_described_as_its_load_reads_it(
 
     The loop used to skip every definition that holds ``bom-ref``, which are the
     models it claimed to check, so nothing but the synthetic control below was
-    tested. The count and the named pair keep this loop from reading nothing."""
+    tested. The count and the named pairs keep this loop from reading nothing.
+    ``Level`` carries an aliased ``bom-ref`` and sits under the module-qualified
+    key, so it is named too: a lookup by the plain class name skipped it."""
     checked: list = []
     for name, cls in _cyclonedx_models().items():
-        properties = results_schema["$defs"].get(name, {}).get("properties", {})
+        properties = _definition_properties(results_schema, cls.__module__, name)
         loads_by_name = bool(cls.model_config.get("validate_by_name"))
         for field_name, info in cls.model_fields.items():
             alias = info.serialization_alias or info.alias
@@ -93,7 +128,8 @@ def test_every_aliased_cyclonedx_model_is_described_as_its_load_reads_it(
             assert (field_name in properties) == loads_by_name, (name, field_name)
     assert ("Component", "bom_ref") in checked, checked
     assert ("Component", "mime_type") in checked, checked
-    assert len(checked) >= 5, checked
+    assert ("Level", "bom_ref") in checked, checked
+    assert len(checked) >= 6, checked
 
 
 class _ByEitherName(BaseModel):
