@@ -25,15 +25,49 @@ pytestmark = [
 
 
 def _long_name(length: int) -> str:
+    """A name of exactly ``length`` bytes ending in ``.out``."""
+    if length < len(".out"):
+        raise ValueError(f"a name ending in .out is at least 4 bytes, not {length}")
     return "n" * (length - len(".out")) + ".out"
 
 
+def _longest_unshortened_name() -> int:
+    """The longest target name whose staging name is not shortened: NAME_MAX less
+    the fixed part of a staging name (a dot, then ``.<pid>.<32 hex digits>.tmp``),
+    read from a real staging name, so it holds for a pid of any length."""
+    fixed = len(os.fsencode(fs_guard._staging_name("x"))) - len("x")
+    return fs_guard._NAME_MAX - fixed
+
+
 def test_a_staging_name_fits_name_max_whatever_the_target_name():
-    for length in (1, 200, 209, 210, 220, 255):
+    for length in (4, 200, 209, 210, 220, 255):
         staging = fs_guard._staging_name(_long_name(length))
         assert len(os.fsencode(staging)) <= fs_guard._NAME_MAX, (length, staging)
         assert staging.startswith(".") and staging.endswith(".tmp"), staging
         assert f".{os.getpid()}." in staging, staging
+
+
+@pytest.mark.parametrize("offset", [-1, 0, 1])
+def test_the_staging_name_is_shortened_exactly_when_it_would_pass_name_max(offset):
+    """The boundary is computed from the pid in use, not a pair of lengths that
+    straddle it for one pid width only: one byte under and exactly at the longest
+    name that fits keep it whole, one byte over loses its last byte."""
+    name = _long_name(_longest_unshortened_name() + offset)
+
+    staging = fs_guard._staging_name(name)
+
+    if offset <= 0:
+        assert staging.startswith(f".{name}."), staging
+        assert len(os.fsencode(staging)) == fs_guard._NAME_MAX + offset
+    else:
+        assert not staging.startswith(f".{name}."), staging
+        assert staging.startswith(f".{name[:-1]}."), staging
+        assert len(os.fsencode(staging)) == fs_guard._NAME_MAX
+
+
+def test_a_name_shorter_than_its_extension_is_not_a_test_input():
+    with pytest.raises(ValueError):
+        _long_name(1)
 
 
 def test_a_short_target_name_keeps_the_whole_name_in_its_staging_name():
