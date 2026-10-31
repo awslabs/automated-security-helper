@@ -261,8 +261,10 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         mp.setattr(os, "getcwd", lambda: native_cwd)
         mp.setattr(pathlib.Path, "mkdir", mkdir_below_the_real_cwd)
         # The calls fs_guard.open_for_atomic_write makes by name on its abspath'd
-        # target and the staging file beside it; each reaches the real cwd.
-        for name in ("open", "stat", "lstat", "unlink", "remove", "chmod"):
+        # target and the staging file beside it, and the writability read
+        # ``os.access`` that ``dependencies install`` makes on the nearest
+        # existing parent of its bin directory; each reaches the real cwd.
+        for name in ("open", "stat", "lstat", "unlink", "remove", "chmod", "access"):
             mp.setattr(os, name, one_path(getattr(os, name)))
         for name in ("replace", "rename"):
             mp.setattr(os, name, two_paths(getattr(os, name)))
