@@ -399,19 +399,22 @@ def test_a_member_under_a_file_member_is_refused_alone(
 def test_a_member_written_where_earlier_members_are_extracted_below_is_refused_alone(
     test_plugin_context, monkeypatch, kind
 ):
-    """The reverse order: ``a/b.js`` and then a file named ``a``. The later member
-    cannot be written where the directory stands (IsADirectoryError failed the
-    whole archive before); it is refused alone and ``a/b.js`` is scanned."""
+    """The reverse order: ``a.js/b.js`` and then a file named ``a.js``. The later
+    member cannot be written where the directory stands (IsADirectoryError failed
+    the whole archive before); it is refused alone and ``a.js/b.js`` is scanned.
+    Both names are scannable: a member the scan does not read is left out before
+    its path is compared with the others, so a name like ``a`` would never reach
+    the check this test pins."""
     maker = _zip if kind == "zip" else _tar
     archive = maker(
         Path(test_plugin_context.source_dir) / f"a.{kind}",
-        [("a/b.js", b"b\n"), ("a", b"a\n"), ("ok.js", b"ok\n")],
+        [("a.js/b.js", b"b\n"), ("a.js", b"a\n"), ("ok.js", b"ok\n")],
     )
 
     converter, _, files = _convert(test_plugin_context, monkeypatch, archive)
 
-    assert files == {"a/b.js": b"b\n", "ok.js": b"ok\n"}
+    assert files == {"a.js/b.js": b"b\n", "ok.js": b"ok\n"}
     assert converter.failed_inputs == []
     (refused,) = converter.refused_inputs
-    assert (refused.path, refused.member) == (f"a.{kind}", "a")
+    assert (refused.path, refused.member) == (f"a.{kind}", "a.js")
     assert "below its path" in refused.reason, refused.reason
