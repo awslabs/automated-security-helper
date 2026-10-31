@@ -517,6 +517,9 @@ def _git_entry_is_plain(entry: Path) -> bool:
     dropped (as ``_registered_worktree`` reads a ``gitdir`` record). Stripping
     the rest read ``gitdir: /x `` as ``/x`` while git opens ``/x `` (trailing
     space), so the directory checked was not the one git would wait in. A
+    relative record is followed link by link (``_git_dir_named_by``), as git
+    opens it: ``link/../admin`` names the parent of the link's target, not the
+    parent of the link. A
     record without the exact prefix is one git refuses ("invalid gitfile
     format"), so git starts on nothing through it; it counts as not plain, the
     side that errs toward nested, as ``_marks_a_checkout`` counts it. A gitfile
@@ -573,10 +576,14 @@ def _git_dir_named_by(gitfile: Path, base: Path) -> Optional[Path]:
     """The git dir the gitfile *gitfile* names, parsed as git parses it, or None.
 
     The exact prefix ``gitdir: `` then everything after it with only trailing
-    carriage returns and newlines dropped, joined under *base* unless absolute.
-    None when the record cannot be read, lacks the prefix or names nothing: git
-    starts on nothing through it (``_git_entry_is_plain`` counts that as not
-    plain).
+    carriage returns and newlines dropped, joined under *base* unless absolute
+    and followed link by link, as git opens it (``read_gitfile_gently`` resolves
+    the joined path): a ``..`` after a link steps to the parent of what the link
+    names, where collapsing the text would step to the parent of the link, and a
+    different directory would be checked from the one git waits in. None when the
+    record cannot be read, lacks the prefix, names nothing or cannot be followed
+    (a NUL in it): git starts on nothing through it, or what it would open cannot
+    be told (``_git_entry_is_plain`` counts that as not plain).
     """
     record = _read_gitdir_record(gitfile)
     if record is None:
@@ -585,9 +592,12 @@ def _git_dir_named_by(gitfile: Path, base: Path) -> Optional[Path]:
     if not text.startswith(_GITFILE_RECORD_PREFIX):
         return None
     named = text[len(_GITFILE_RECORD_PREFIX) :]
-    if not named:
+    if not named or "\x00" in named:
         return None
-    return Path(os.path.normpath(os.path.join(base, named)))
+    try:
+        return Path(os.path.realpath(os.path.join(base, named)))
+    except (OSError, ValueError):
+        return None
 
 
 def _common_dir_named(git_dir: Path) -> Optional[Path]:
