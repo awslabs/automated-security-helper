@@ -280,7 +280,23 @@ def test_the_new_module_level_function_logs_to_the_root_logger(registered_level)
     with patch.object(logging, "log") as root_log:
         logging.zz_rootlevel("to root", "extra")
 
-    root_log.assert_called_once_with(9, "to root", "extra")
+    # The wrapper asks for its own frame to be skipped, so the record names the
+    # caller of logging.zz_rootlevel(): one frame on Python 3.11 and later, two
+    # before, on top of the stacklevel of 1 a caller gets by default.
+    stacklevel = 2 if sys.version_info >= (3, 11) else 3
+    root_log.assert_called_once_with(9, "to root", "extra", stacklevel=stacklevel)
+
+
+def test_a_stacklevel_given_to_the_module_level_function_is_added_to(
+    registered_level,
+):
+    registered_level("ZZ_ROOTSTACK", 9)
+
+    with patch.object(logging, "log") as root_log:
+        logging.zz_rootstack("to root", stacklevel=3)
+
+    wrapper_frames = 1 if sys.version_info >= (3, 11) else 2
+    root_log.assert_called_once_with(9, "to root", stacklevel=3 + wrapper_frames)
 
 
 def test_a_custom_method_name_is_honored(registered_level):
