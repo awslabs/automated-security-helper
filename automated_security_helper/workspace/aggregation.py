@@ -600,6 +600,30 @@ def _declared_base(table: Mapping[str, Any], base_id: Any) -> Any:
     return joined
 
 
+def _relative_base(table: Mapping[str, Any], base_id: Any) -> Optional[str]:
+    """The directory *table* declares for *base_id* under the project root, or None.
+
+    Only a base with a relative ``uri`` and no ``uriBaseId`` of its own is one:
+    an absolute base is :func:`_declared_base`'s, a chained one is followed there,
+    and the project root and an id the run does not declare are the root itself.
+    A leading ``./`` and trailing separators are dropped, so ``./`` and ``.`` (the
+    root written out) answer None and ``src/`` answers ``src``.
+    """
+    if not base_id or base_id == PROJECT_ROOT_URI_BASE_ID:
+        return None
+    entry = table.get(str(base_id))
+    if not isinstance(entry, Mapping) or entry.get("uriBaseId"):
+        return None
+    uri = entry.get("uri")
+    if not isinstance(uri, str) or _absolute_base(uri) is not None:
+        return None
+    text = uri.strip()
+    while text.startswith("./"):
+        text = text[2:]
+    text = text.strip("/")
+    return None if text in ("", ".") else text
+
+
 def rebase_run_for_project(
     run: Mapping[str, Any], project: ProjectPlan
 ) -> tuple[Dict[str, Any], int]:
@@ -696,6 +720,14 @@ def rebase_run_for_project(
                         placed = None
                     elif anchored is not NOT_ABSOLUTE:
                         placed = anchored
+                else:
+                    # A base the run declares with a relative uri and no parent
+                    # of its own is a directory under the project root, and the
+                    # file is that directory plus the uri; read as the root
+                    # itself, the directory was dropped from the path.
+                    relative_base = _relative_base(table, artifact.get("uriBaseId"))
+                    if relative_base is not None:
+                        placed = _join_under_base(relative_base, str(uri))
             elif reduced is None:
                 # Absolute and outside the project. Left exactly as the scanner
                 # wrote it, and deliberately NOT anchored: an artifactLocation
