@@ -2840,7 +2840,8 @@ class SarifReport(RecordModel):
         merge that folded ``runs[0]`` alone dropped the findings of every later
         run from the summary, the reports and the exit code while the scanner's
         own row still counted them. Each incoming run's tool joins this report's
-        ``extensions`` and its results and invocations are appended to the first
+        ``extensions``, its taxonomies join (or are unioned into) the first run's
+        ``taxonomies``, and its results and invocations are appended to the first
         run. A report whose own ``runs`` list is empty adopts the first incoming
         run's tool and properties, then takes its results and invocations the
         same way as every other run, so nothing is added twice.
@@ -2942,6 +2943,12 @@ class SarifReport(RecordModel):
                 # that referenced them.
                 for extension in report_tool.extensions or []:
                     _fold_tool_component(self_run, extension, include_rules)
+            # A kept taxon reference names its taxonomy (CWE, say) by name or
+            # guid once its index is dropped, and the run it now sits in has to
+            # carry that taxonomy. Folded whatever the driver and rule flags say:
+            # the copied results keep their taxa either way.
+            for taxonomy in report_run.taxonomies or []:
+                _fold_taxonomy(self_run, taxonomy)
         else:
             # Adopt the incoming run's tool, properties and the rest, with its
             # results and invocations left out: the common tail below adds them
@@ -3285,6 +3292,44 @@ def _fold_tool_component(
         self_run.tool.extensions.append(component.model_copy(deep=True))
     elif include_rules:
         _union_rules(existing_extension, component.rules)
+
+
+def _same_taxonomy(existing: "ToolComponent", incoming: "ToolComponent") -> bool:
+    """Whether two taxonomies are the same one: equal guids when both carry one,
+    otherwise the same name, fullName and organization."""
+    if existing.guid is not None and incoming.guid is not None:
+        return existing.guid == incoming.guid
+    return _same_tool_component(existing, incoming)
+
+
+def _fold_taxonomy(self_run: "Run", taxonomy: "ToolComponent") -> None:
+    """Add *taxonomy* to *self_run*'s ``taxonomies``, or union its taxa into the
+    one it names.
+
+    A taxon reference of a merged result names its taxonomy by ``name`` or
+    ``guid`` (its ``index`` into the incoming run's ``taxonomies`` is dropped),
+    so the run the result lands in has to hold that taxonomy with the taxon in
+    it. A copy, so the aggregate does not alias the report it was built from.
+    """
+    if self_run.taxonomies is None:
+        self_run.taxonomies = []
+    existing = next(
+        (item for item in self_run.taxonomies if _same_taxonomy(item, taxonomy)),
+        None,
+    )
+    if existing is None:
+        self_run.taxonomies.append(taxonomy.model_copy(deep=True))
+        return
+    incoming_taxa = taxonomy.taxa or []
+    if not incoming_taxa:
+        return
+    if existing.taxa is None:
+        existing.taxa = []
+    known_taxon_ids = {taxon.id for taxon in existing.taxa}
+    for taxon in incoming_taxa:
+        if taxon.id not in known_taxon_ids:
+            existing.taxa.append(taxon.model_copy(deep=True))
+            known_taxon_ids.add(taxon.id)
 
 
 def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") -> None:

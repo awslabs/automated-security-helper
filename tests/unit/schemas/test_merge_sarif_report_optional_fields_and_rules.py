@@ -1621,6 +1621,73 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         assert taxon.toolComponent.name == "CWE"
         assert taxon.toolComponent.index in (None, -1)
 
+    def test_the_taxonomy_a_kept_taxon_names_is_carried_into_the_aggregate(self):
+        """The kept taxon reference names ``CWE`` once its index is dropped, so
+        the run it lands in has to hold a ``CWE`` taxonomy with the taxon in it;
+        a name checked against nothing in the merged run was the gap. The
+        aggregate holds a copy, not the incoming object."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            taxa=[{"index": 1, "toolComponent": {"index": 0}}],
+                        )
+                    ],
+                    taxonomies=[
+                        {"name": "CWE", "taxa": [{"id": "CWE-1"}, {"id": "CWE-79"}]}
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        run = aggregated.runs[0]
+        taxon = run.results[0].taxa[0].root
+        assert taxon.toolComponent.name == "CWE"
+        assert [item.name for item in run.taxonomies] == ["CWE"]
+        assert [item.id for item in run.taxonomies[0].taxa] == ["CWE-1", "CWE-79"]
+        assert run.taxonomies[0] is not incoming.runs[0].taxonomies[0]
+
+    def test_a_taxonomy_both_runs_carry_is_listed_once_with_both_runs_taxa(self):
+        """The same taxonomy by name, in the aggregate and in the incoming run,
+        is one entry holding the taxa of both, each id once; a taxonomy of
+        another name joins beside it, and merging the same report again adds
+        nothing."""
+        aggregated = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "aggregate",
+                    [],
+                    taxonomies=[{"name": "CWE", "taxa": [{"id": "CWE-1"}]}],
+                )
+            ]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [],
+                    taxonomies=[
+                        {"name": "CWE", "taxa": [{"id": "CWE-1"}, {"id": "CWE-79"}]},
+                        {"name": "OWASP", "taxa": [{"id": "A01"}]},
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+        aggregated.merge_sarif_report(incoming)
+
+        taxonomies = aggregated.runs[0].taxonomies
+        assert [item.name for item in taxonomies] == ["CWE", "OWASP"]
+        assert [item.id for item in taxonomies[0].taxa] == ["CWE-1", "CWE-79"]
+        assert [item.id for item in taxonomies[1].taxa] == ["A01"]
+
     def test_a_taxon_naming_nothing_by_id_or_guid_is_dropped(self):
         """An index past the end of the named taxonomy leaves the reference
         with neither an id nor a guid once the indices are dropped; it names no taxon,
