@@ -52,6 +52,13 @@ target's own anchor when it has one. A link in a parent of a hop's target is
 therefore examined before anything under it is, and a relative target is taken
 from where the link is, not from where the caller spelled it.
 
+A target is collapsed by text before its names are walked, as the caller's own
+spelling is: a ``..`` steps back over the name in front of it and never opens
+it, so ``sub\\lnk\\..\\z`` names ``sub\\z`` and ``lnk`` is not examined, which is
+how Win32 reads such a spelling. Only a ``..`` left at the front of a relative
+target goes up from the directory the link is in, and that directory holds no
+link, so the step there is the same by text and on disk.
+
 Nothing here decides a refusal's wording or its platform gate; the callers do
 (``_running_on_windows`` in the sandbox, ``_on_windows`` in the loader).
 """
@@ -227,8 +234,13 @@ def _split_target(directory: str, target: str) -> Tuple[str, List[str]]:
     A relative target starts at ``directory``, the one the link is in. A target
     with an anchor starts there: a drive and a root, a root alone (on the
     volume the link is on, as the OS takes it), or a drive alone.
+
+    The target is collapsed by text first (``os.path.normpath``), so a ``..``
+    after a name is a step back over that name, never a step up from wherever
+    walking the name would have led. What is left of ``..`` is at the front of a
+    relative target, or nowhere.
     """
-    parsed = Path(target)
+    parsed = Path(os.path.normpath(target))
     parts = list(parsed.parts)
     if not parsed.anchor:
         return directory, parts
@@ -250,8 +262,9 @@ def _walk_names(
     walked next, in place of the link, from the directory the link is in (or
     from the target's anchor): so a relative target is taken from where the
     link is, and a link in a parent of the target is examined before anything
-    under it is. A ``..`` goes up from the prefix reached, which is a real
-    directory, so it is not a lexical step over a name that was never opened.
+    under it is. A target arrives collapsed by text (:func:`_split_target`), so
+    a ``..`` met here is one left at the front of a relative target, and it
+    goes up from the prefix reached, which is a real directory.
 
     Returns the prefix reached when every name was walked and none was unsafe;
     ``(None, None)`` when a name is not there (nothing below it is there

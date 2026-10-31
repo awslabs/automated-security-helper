@@ -528,3 +528,88 @@ class TestARelativeHopIsTakenFromTheDirectoryItWasReachedIn:
             )
         ]
         assert through_a_link == []
+
+
+class TestAStepBackInsideATargetIsTakenByText:
+    """A ``..`` inside a link's target is collapsed by text, as the caller's own
+    spelling is, and not walked up from wherever a link in front of it led.
+
+    ``cfg`` is a link to ``sub/lnk/../z``. By text that is ``sub/z``, and ``lnk``
+    is never examined. The walk followed ``lnk`` to a directory elsewhere and
+    went up from there, looked for ``z`` beside it, found nothing, and passed a
+    path whose collapsed spelling is a link to a share. The module reads
+    spellings the way Win32 does, so a Linux run discriminates through the text
+    of the targets only: the links here are made with ``symlink_to`` and read
+    back by ``os.readlink`` unresolved.
+    """
+
+    @staticmethod
+    def _tree(tmp_path: Path, *, share: bool) -> Path:
+        root = tmp_path / "d"
+        (root / "sub").mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere" / "deep"
+        elsewhere.mkdir(parents=True)
+        (root / "sub" / "lnk").symlink_to(elsewhere)
+        if share:
+            (root / "sub" / "z").symlink_to("\\\\server\\share")
+        else:
+            (root / "sub" / "z").mkdir()
+        (root / "cfg").symlink_to(os.path.join("sub", "lnk", "..", "z"))
+        return root
+
+    def test_a_share_behind_a_step_back_over_a_link_is_found(self, tmp_path):
+        """Red at the base: the walk went up from the link's destination, so it
+        looked for ``z`` in ``elsewhere``, found nothing, and answered None."""
+        root = self._tree(tmp_path, share=True)
+
+        found = link_chain.first_unsafe_link(str(root / "cfg"))
+
+        assert found is not None
+        assert found.component == str(root / "cfg")
+        assert found.is_last is True
+        assert found.reaches_a_share is True
+
+    def test_the_chain_reading_collapses_the_target_the_same_way(self, tmp_path):
+        """Red at the base: the chain answered False (local) for the same tree."""
+        root = self._tree(tmp_path, share=True)
+
+        assert link_chain.link_chain_names_a_windows_share(str(root / "cfg")) is True
+
+    def test_a_link_stepped_back_over_in_a_target_is_not_opened(self, tmp_path):
+        """``lnk`` is a link to a share here, and a target that steps back over it
+        never opens it, so a local ``z`` leaves the path local. Red at the base
+        the other way: the walk went into ``lnk`` and refused a local path."""
+        root = self._tree(tmp_path, share=False)
+        (root / "sub" / "lnk").unlink()
+        (root / "sub" / "lnk").symlink_to("\\\\server\\share")
+
+        assert link_chain.first_unsafe_link(str(root / "cfg")) is None
+        assert link_chain.link_chain_names_a_windows_share(str(root / "cfg")) is False
+
+    def test_a_missing_name_stepped_back_over_in_a_target_hides_nothing(self, tmp_path):
+        """Red at the base: ``missing/../x`` ended the walk at ``missing`` with
+        nothing judged, and ``x``, a link to a share, was never read."""
+        root = tmp_path / "d"
+        root.mkdir()
+        (root / "x").symlink_to("\\\\server\\share")
+        (root / "cfg").symlink_to(os.path.join("missing", "..", "x"))
+
+        found = link_chain.first_unsafe_link(str(root / "cfg"))
+
+        assert found is not None
+        assert found.reaches_a_share is True
+
+    def test_a_step_up_at_the_front_of_a_target_still_goes_up_from_the_link(
+        self, tmp_path
+    ):
+        """Control: a leading ``..`` is taken from the directory the link is in."""
+        (tmp_path / "vendor").mkdir()
+        (tmp_path / "vendor" / "cfg.yaml").symlink_to("\\\\server\\share")
+        dot_ash = tmp_path / ".ash"
+        dot_ash.mkdir()
+        (dot_ash / "ash.yaml").symlink_to(os.path.join("..", "vendor", "cfg.yaml"))
+
+        found = link_chain.first_unsafe_link(str(dot_ash / "ash.yaml"))
+
+        assert found is not None
+        assert found.reaches_a_share is True
