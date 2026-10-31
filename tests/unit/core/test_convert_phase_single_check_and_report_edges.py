@@ -307,6 +307,35 @@ def _python_only(converter_class, *, answer, attribute_default=None):
     return type(f"{converter_class.__name__}PyOnly", (converter_class,), namespace)
 
 
+class _EnabledThatCannotBeTested(str):
+    """The text ``true``, which the shared reading of ``enabled`` takes as on (it
+    reads text by its spelling), and whose truth value raises, which is how the
+    filter reads it (``not config.enabled``). The two readings of one attribute
+    differ, so the pre-filter loop sees an enabled converter, answers its
+    dependency question, and the filter then drops it on the raise."""
+
+    __slots__ = ()
+
+    def __bool__(self):
+        raise RuntimeError("enabled cannot say")
+
+
+def _enabled_cannot_be_tested(converter_class):
+    """*converter_class* whose config carries an ``enabled`` that raises when the
+    filter tests it. Set after construction, so nothing built it on the raise."""
+
+    def model_post_init(self, context):
+        super(subclass, self).model_post_init(context)
+        self.config.enabled = _EnabledThatCannotBeTested("true")
+
+    subclass = type(
+        f"{converter_class.__name__}EnabledRaises",
+        (converter_class,),
+        {"model_post_init": model_post_init},
+    )
+    return subclass
+
+
 def _run_python_only(plugin_context, plugins):
     phase, agg = _build(plugin_context, plugins)
     return phase.execute(aggregated_results=agg, python_based_plugins_only=True)
@@ -320,8 +349,9 @@ class TestAPythonOnlyRunNamesWhyItLeftAConverterOut:
         results = _run_python_only(plugin_context, [unsure])
 
         row = results.converter_results["py-only-raises"]
-        # Red at the base: "dropped by the enabled/dependency filter, although its
-        # own dependency check reported satisfied", a check that never ran.
+        # A control at the base, which already named this check in the row. What
+        # the row says now comes from the exception the filter recorded, and the
+        # next test is the one that is red at the base.
         assert row.failure is not None
         assert "is_python_only()" in row.failure
         assert "RuntimeError: cannot say" in row.failure
@@ -332,6 +362,30 @@ class TestAPythonOnlyRunNamesWhyItLeftAConverterOut:
         assert row.dependency_unavailable_reason is None
         assert row.excluded is False
         assert [name for name, _ in _incomplete(results)] == ["py-only-raises"]
+
+    def test_an_enabled_check_that_raises_is_a_named_failure(self, plugin_context):
+        present = _converter("enabled-raises", answer=True, paths=["converted/a.py"])
+        unsure = _enabled_cannot_be_tested(present)
+
+        results = _run(plugin_context, [unsure])
+
+        row = results.converter_results["enabled-raises"]
+        # Red at the base: "dropped by the enabled/dependency filter, although its
+        # own dependency check reported satisfied". The dependency check did run
+        # and answer True, so that sentence was true of the check and said nothing
+        # of the one that raised.
+        assert row.failure is not None
+        assert "enabled or is_python_only() check raised" in row.failure
+        assert "RuntimeError: enabled cannot say" in row.failure
+        assert "reported satisfied" not in row.failure
+        # The dependency question was asked once and answered, so the row keeps
+        # that answer; the drop does not rewrite it.
+        assert present.checks == 1
+        assert row.dependencies_satisfied is True
+        assert row.dependency_unavailable_reason is None
+        assert row.excluded is False
+        assert row.converted_paths == []
+        assert [name for name, _ in _incomplete(results)] == ["enabled-raises"]
 
     def test_a_converter_a_python_only_run_declined_says_nothing_of_its_tool(
         self, plugin_context
@@ -345,8 +399,9 @@ class TestAPythonOnlyRunNamesWhyItLeftAConverterOut:
         results = _run_python_only(plugin_context, [declined])
 
         row = results.converter_results["not-python"]
-        # Red at the base: dependencies_satisfied False with a reason naming an
-        # ash.log message that does not exist, on a row that is also excluded.
+        # A control at the base, which already wrote a satisfied row with no
+        # reason for a converter the run declined. It holds here so the failure
+        # a raised check now records is not also written for a declined one.
         assert base.checks == 0
         assert row.excluded is True
         assert row.dependencies_satisfied is True
