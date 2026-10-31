@@ -141,6 +141,25 @@ def test_pre_releases_of_one_version_order_by_their_number():
     assert compare_versions("2.4.5-rc2", "2.4.5-rc2") == 0
 
 
+def test_pre_release_labels_are_not_ranked_against_each_other_the_number_decides():
+    """``parse_version`` keeps the numbers of a label and drops its words (the
+    docstring says labels are not ranked: the bounds are release numbers), so a
+    ``beta`` with a higher number sorts above an ``rc`` with a lower one, dotted
+    or not. This pins that reading so a change to it is a decision."""
+    assert parse_version("1.0.0-rc.1") == (1, 0, 0, -1, 1)
+    assert parse_version("1.0.0-beta.2") == (1, 0, 0, -1, 2)
+    assert compare_versions("1.0.0-beta.2", "1.0.0-rc.1") == 1
+    assert compare_versions("2.4.5-beta2", "2.4.5-rc1") == 1
+    assert compare_versions("2.4.5-beta1", "2.4.5-rc1") == 0
+
+
+def test_a_two_part_version_reads_as_the_release_with_a_zero_patch():
+    assert parse_version("2.4") == (2, 4, 0)
+    assert compare_versions("2.4", "2.4.0") == 0
+    assert compare_versions("2.4", "2.4.1") == -1
+    assert compare_versions("2.4-rc1", "2.4") == -1
+
+
 def test_build_metadata_ranks_with_its_release():
     assert parse_version("1.2.3+build7") == (1, 2, 3, 0)
     assert compare_versions("1.2.3+build7", "1.2.3") == 0
