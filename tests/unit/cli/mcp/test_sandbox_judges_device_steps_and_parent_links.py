@@ -231,7 +231,7 @@ class TestALinkInAParentComponentIsJudged:
 def test_the_components_run_from_the_anchor_down():
     """The expectations are spelled through ``Path``: the components carry the
     OS's own separator, so on Windows ``/a/b/c`` walks as ``\\a``, ``\\a\\b``,
-    ``\\a\\b\\c`` (an earlier shape compared against POSIX text and read red there)."""
+    ``\\a\\b\\c``."""
     components = sandbox._components_down_to("/a/b/c")
     assert components == [str(Path(p)) for p in ("/a", "/a/b", "/a/b/c")]
     assert sandbox._components_down_to("rel/x") == [
