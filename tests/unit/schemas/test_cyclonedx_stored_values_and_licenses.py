@@ -288,15 +288,6 @@ def test_a_license_expression_is_typed_and_keeps_its_bom_ref():
 LOGGER = "automated_security_helper.utils.log.ASH_LOGGER"
 
 
-@pytest.fixture(autouse=True)
-def _fresh_license_warnings(monkeypatch):
-    """Each test starts with no license entry shape warned about yet: the
-    module warns once per shape per process, and the tests below count calls."""
-    import automated_security_helper.schemas.cyclonedx_bom_1_6_schema as module
-
-    monkeypatch.setattr(module, "_LICENSE_ENTRY_SHAPES_WARNED", set())
-
-
 @pytest.mark.parametrize(
     "entries",
     [
@@ -334,20 +325,54 @@ def test_a_stray_entry_leaves_its_neighbors_typed_and_warns_once():
     assert "an object with the keys license" in message
 
 
-def test_the_same_entry_shape_warns_once_per_process():
-    """A BOM with thousands of components carrying the same stray entry, or a
-    results file loaded again, repeats no warning; a new shape warns again."""
-    stray = {"license": {"id": "MIT"}, "expression": "MIT"}
+STRAY = {"license": {"id": "MIT"}, "expression": "MIT"}
+
+#: Two components carrying the same two stray shapes: an object with two keys
+#: (three times) and a bare string.
+BOM_WITH_STRAY_ENTRIES = {
+    "bomFormat": "CycloneDX",
+    "specVersion": "1.6",
+    "components": [
+        {"type": "library", "name": "a", "licenses": [STRAY, STRAY]},
+        {"type": "library", "name": "b", "licenses": [STRAY, "MIT"]},
+    ],
+}
+
+
+def test_the_same_entry_shape_warns_once_per_load():
+    """A BOM with thousands of components carrying the same stray entry repeats
+    no warning within the load, and a new shape warns again."""
     with patch(LOGGER) as logger:
-        LicenseChoice.model_validate([stray, stray, {"license": {"id": "MIT"}}])
-        LicenseChoice.model_validate([stray])
-        Component.model_validate(
-            {"type": "library", "name": "lib", "licenses": [stray, "MIT"]}
-        )
+        CycloneDXReport.model_validate(BOM_WITH_STRAY_ENTRIES)
     assert logger.warning.call_count == 2
     first, second = (call.args[0] for call in logger.warning.call_args_list)
     assert "an object with the keys expression, license" in first
     assert "a value of type str" in second
+
+
+def test_a_later_load_in_the_same_process_warns_for_its_own_entries():
+    """The MCP server loads a BOM per project in one process: a shape seen in
+    the first BOM must not silence the second BOM's stray entries."""
+    with patch(LOGGER) as first:
+        CycloneDXReport.model_validate(BOM_WITH_STRAY_ENTRIES)
+    with patch(LOGGER) as second:
+        CycloneDXReport.model_validate(BOM_WITH_STRAY_ENTRIES)
+        CycloneDXReport.model_validate_json(json.dumps(BOM_WITH_STRAY_ENTRIES))
+    assert first.warning.call_count == 2
+    assert second.warning.call_count == 4
+
+
+def test_a_list_validated_outside_a_load_deduplicates_within_itself_only():
+    """No warning state outlives a validation that is not part of a BOM load."""
+    with patch(LOGGER) as logger:
+        LicenseChoice.model_validate([STRAY, STRAY, {"license": {"id": "MIT"}}])
+    assert logger.warning.call_count == 1
+    with patch(LOGGER) as again:
+        LicenseChoice.model_validate([STRAY])
+        Component.model_validate(
+            {"type": "library", "name": "lib", "licenses": [STRAY, "MIT"]}
+        )
+    assert again.warning.call_count == 3
 
 
 def test_control_a_well_formed_list_warns_nothing():

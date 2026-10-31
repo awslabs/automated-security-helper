@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, List, Literal, Optional, Union
@@ -370,22 +371,29 @@ class LicenseChoice(RootModel):
 
     @model_validator(mode="after")
     def _warn_about_entries_kept_as_written(self) -> "LicenseChoice":
-        # Once per entry shape per process. A validator runs on every load of a
-        # results file and on every model built in code, a BOM can carry
-        # thousands of components with the same stray entry, and a smart-mode
-        # union (Metadata.tools, say) can validate one list more than once, so a
-        # warning per entry per validation repeated one line without end. The
-        # shape (the entry's keys, or its type) is what an operator can search
-        # a BOM for; the list has no view of the component that carries it.
+        # Once per entry shape per BOM load. A validator runs on every
+        # component, a BOM can carry thousands of components with the same
+        # stray entry, and a smart-mode union (Metadata.tools, say) can
+        # validate one list more than once, so a warning per entry per
+        # validation repeated one line without end. The shape (the entry's
+        # keys, or its type) is what an operator can search a BOM for; the list
+        # has no view of the component that carries it. The shapes seen are
+        # kept for one load of a CycloneDXReport and dropped with it, so a
+        # long-running server that loads a BOM per project warns again for the
+        # next BOM instead of going quiet after the first. A list validated
+        # outside a load deduplicates within itself.
         from automated_security_helper.utils.log import ASH_LOGGER
 
+        seen = _LICENSE_SHAPES_WARNED.get()
+        if seen is None:
+            seen = set()
         for index, entry in enumerate(self.root):
             if isinstance(entry, (LicenseEntry, LicenseExpression)):
                 continue
             shape = _license_entry_shape(entry)
-            if shape in _LICENSE_ENTRY_SHAPES_WARNED:
+            if shape in seen:
                 continue
-            _LICENSE_ENTRY_SHAPES_WARNED.add(shape)
+            seen.add(shape)
             ASH_LOGGER.warning(
                 f"License entry {index} of a CycloneDX license list is {shape}, "
                 "which fits neither license form (a license, or an SPDX "
@@ -395,9 +403,11 @@ class LicenseChoice(RootModel):
         return self
 
 
-#: The shapes of license entries already warned about in this process
-#: (LicenseChoice._warn_about_entries_kept_as_written).
-_LICENSE_ENTRY_SHAPES_WARNED: set = set()
+#: The shapes of license entries already warned about in the CycloneDXReport
+#: being validated (LicenseChoice._warn_about_entries_kept_as_written), or None
+#: outside a load. A ContextVar, so loads on different threads or tasks of one
+#: server never share it.
+_LICENSE_SHAPES_WARNED: ContextVar = ContextVar("_LICENSE_SHAPES_WARNED", default=None)
 
 
 def _license_entry_shape(entry: Any) -> str:
@@ -5240,6 +5250,19 @@ class CycloneDXReport(BaseModel):
         description="Enveloped signature in [JSON Signature Format (JSF)](https://cyberphone.github.io/doc/security/jsf.html).",
         title="Signature",
     )
+
+    # Not from the codegen: one load of a BOM is the scope of the license-shape
+    # warnings (LicenseChoice._warn_about_entries_kept_as_written).
+    @model_validator(mode="wrap")
+    @classmethod
+    def _one_load_warns_once_per_license_shape(
+        cls, data: Any, handler: Any
+    ) -> "CycloneDXReport":
+        token = _LICENSE_SHAPES_WARNED.set(set())
+        try:
+            return handler(data)
+        finally:
+            _LICENSE_SHAPES_WARNED.reset(token)
 
 
 LicenseEntry.model_rebuild()
