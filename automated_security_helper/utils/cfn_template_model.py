@@ -1034,7 +1034,7 @@ def _structure_says_template(text: str) -> bool:
         return isinstance(document, Mapping) and isinstance(
             document.get("Resources"), Mapping
         )
-    return _has_top_level_resources(text)
+    return _resources_in_a_non_sequence_document(text)
 
 
 def _could_be_a_template(text: str) -> bool:
@@ -1233,6 +1233,15 @@ def _has_top_level_resources(text: str) -> bool:
     """
     if _root_is_a_sequence(text):
         return False
+    return _resources_in_a_non_sequence_document(text)
+
+
+def _resources_in_a_non_sequence_document(text: str) -> bool:
+    """:func:`_has_top_level_resources` for text already known not to be a sequence.
+
+    The read that follows the root check: a caller that has made that check itself
+    (:func:`_structure_says_template`) asks here, so the root is not read twice.
+    """
     loader = None
     try:
         loader = _StructureLoader(text)
