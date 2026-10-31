@@ -546,8 +546,11 @@ class ScanPhase(EnginePhase):
 
         The name followed by the scanner's class in parentheses, so the row cannot
         replace the first holder's row, which is keyed by the name alone. The
-        qualifier is plain characters only, because the row's name is a directory
-        in the results tree. ``#N`` is added while the name is already a row, so
+        qualifier keeps the class path's letters, digits, dots, underscores and
+        hyphens and writes any other character as an underscore, so that it adds
+        no path separator or other character a directory name could not carry:
+        the row is keyed by this name, and the row's results directory takes its
+        name from the same key. ``#N`` is added while the name is already a row, so
         two later holders of one name get two rows. Both recorders for a later
         holder (the ERROR row of a name that is refused and the SKIPPED row of one
         the operator did not select) name the row here, so the two cannot differ

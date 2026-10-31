@@ -628,8 +628,8 @@ class ScanExecutionEngine:
         renamed was refused for an exclusion naming its declared name, or let
         through an allowlist naming it, while the phase ran or left out the
         scanner by the configured name alone. The exclusion list wins, as it
-        does in ScanPhase; an allowlist that was given and names the scanner
-        none of them leaves it out too, and so does a configured section that
+        does in ScanPhase; an allowlist that was given and does not name it
+        leaves it out too, and so does a configured section that
         disables the scanner (ScanPhase records such a scanner SKIPPED,
         "disabled in the configuration"). An empty allowlist means every
         scanner. *section* is the configured section when the caller has read
