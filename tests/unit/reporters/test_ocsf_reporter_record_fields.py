@@ -25,6 +25,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporte
     _FINDING_UID_NAMESPACE,
     ACTIVITY_NAME,
     CONVERSION_SHORTFALL_LABEL,
+    DEGRADED_FINDING_LABEL,
     OcsfReporter,
     _fallback_identities,
 )
@@ -407,6 +408,38 @@ class TestTheFallbackRecordKeepsWhatItCanRead:
         assert finding.severity_id == SeverityId.integer_5
         assert finding.vulnerabilities[0].severity == "CRITICAL"
         assert "workspace_project:api" in (finding.metadata.labels or [])
+
+    def test_a_degraded_record_keeps_the_uid_of_its_whole_record(
+        self, reporter, monkeypatch
+    ):
+        """The uid carried a ``|fallback`` suffix, so a finding that degraded in
+        one run and built whole in the next was two records in a SIEM for good.
+        The degraded label tells the two records apart; the uid is the finding's
+        own."""
+        model = AshAggregatedResults()
+        model.sarif.runs[0].results = [
+            Result(ruleId="R1", level=Level.error, message=Message(text="a"))
+        ]
+
+        def finding_records(document: str) -> list:
+            return [
+                record
+                for record in json.loads(document)
+                if CONVERSION_SHORTFALL_LABEL
+                not in (record["metadata"].get("labels") or [])
+            ]
+
+        (whole,) = finding_records(reporter.report(model))
+
+        def explode(*args, **kwargs):
+            raise RuntimeError("status failed")
+
+        monkeypatch.setattr(reporter, "_determine_status_from_suppressions", explode)
+        (degraded,) = finding_records(reporter.report(model))
+
+        assert DEGRADED_FINDING_LABEL in degraded["metadata"]["labels"]
+        assert DEGRADED_FINDING_LABEL not in (whole["metadata"].get("labels") or [])
+        assert degraded["finding_info"]["uid"] == whole["finding_info"]["uid"]
 
 
 class TestTheShortfallRecordCannotCostTheFindings:

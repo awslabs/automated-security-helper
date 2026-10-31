@@ -860,10 +860,14 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                     severity=fallback_severity,
                 )
 
+                # The uid is the finding's own, the one a whole record would
+                # carry: the degraded label above tells the two apart. A suffix
+                # on the uid made a finding that degraded in one run and built
+                # whole in the next two records in a SIEM for good, and every
+                # record of it a Create.
                 fallback_finding_info = FindingInfo(
                     uid=_finding_uid(
-                        f"{shared_id or identity or _identity_key(result, rule_id)}"
-                        "|fallback"
+                        shared_id or identity or _identity_key(result, rule_id)
                     ),
                     title=f"Error processing finding {rule_id}",
                     desc="An error occurred while processing this security finding",
