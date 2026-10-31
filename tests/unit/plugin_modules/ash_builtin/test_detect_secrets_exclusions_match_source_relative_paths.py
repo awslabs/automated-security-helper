@@ -270,3 +270,31 @@ def test_ignore_paths_apply_to_a_relative_source_directory(tmp_path, monkeypatch
     )
 
     assert _relative_scan_paths(seen, tmp_path / "src") == ["keep.py"]
+
+
+def test_an_ignore_path_for_a_source_file_does_not_drop_a_converted_file(
+    tmp_path, monkeypatch
+):
+    """The anchor of an ignore path is the source directory for a converted file
+    too, as it was before the relative-path fix. Anchored at the work directory it
+    was scanned from, a converted file ``config.py`` (an archive member) read as
+    ``config.py`` and an ignore path written for the source file ``config.py``
+    dropped it as well."""
+    context = _context(tmp_path)
+    work = Path(context.work_dir)
+    _write(work, "config.py")
+    _write(work, "keep.py")
+    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+    seen = _record_worker(scanner, monkeypatch)
+
+    scanner.scan(
+        target=work,
+        target_type="converted",
+        global_ignore_paths=[IgnorePathWithReason(path="config.py", reason="source")],
+    )
+
+    assert seen, "the worker was not reached"
+    assert sorted(Path(item).name for item in seen["scan_paths"]) == [
+        "config.py",
+        "keep.py",
+    ]

@@ -2756,17 +2756,25 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     ignore_path_matches as path_matches_pattern,
                 )
 
-                # Each path relative to the scan root, as the ignore paths are
-                # written (_root_relative): a prefix cut from a resolved source
-                # directory left a relative, symlinked or Windows source
-                # directory's paths uncut, and then no ignore path matched.
+                # Each path relative to the SOURCE directory, as the ignore paths
+                # are written (_root_relative): a prefix cut from a resolved
+                # source directory left a relative, symlinked or Windows source
+                # directory's paths uncut, and then no ignore path matched. A
+                # converted file keeps the source directory as its anchor too
+                # (not the work directory it is scanned from): it reads
+                # `.ash/ash_output/converted/x` when the output sits in the tree,
+                # as it always did, so an ignore path written for the source
+                # file `x` does not also drop an archive member extracted to the
+                # same relative name. The baseline's patterns above are the
+                # exception, written for the files the baseline names.
+                ignore_root = Path(self.context.source_dir)
                 original_count = len(scannable)
                 scannable = [
                     file_path
                     for file_path in scannable
                     if not any(
                         path_matches_pattern(
-                            self._root_relative(file_path, scan_root),
+                            self._root_relative(file_path, ignore_root),
                             ignore_path.path,
                         )
                         for ignore_path in global_ignore_paths
