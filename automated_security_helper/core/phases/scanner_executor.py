@@ -2903,9 +2903,11 @@ class ScannerExecutor:
                 # means the scanner starts: sent from here it meant "queued",
                 # every scanner at once, and a scanner the cancel took off the
                 # queue announced a start it never made. Subscribers are
-                # therefore called from worker threads for this event,
-                # concurrently and under no lock; SCAN_COMPLETE and ERROR are
-                # announced on the recording thread as each future is read.
+                # therefore called from worker threads for this event, and for
+                # ERROR, which the handlers that catch a scanner's failure send
+                # on the thread that ran it, concurrently and under no lock;
+                # only SCAN_COMPLETE is announced on the recording thread, as
+                # each future is read.
                 # Run in a copy of this thread's context, which carries the
                 # scanned-tree scope (utils/subprocess_utils.scanning_tree) and
                 # the scan's cancel event (core/cancellation.py) into the
