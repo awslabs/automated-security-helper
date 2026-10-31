@@ -1148,8 +1148,8 @@ ASH_EXIT_CODES: Dict[int, str] = {
 #: one side of a pair names the other side's opposite too, so the words an operator
 #: reaches for to turn offline mode on work as the words for turning it off do.
 #: Anything else is unrecognized, and is said so once.
-_OFFLINE_OFFLINE_VALUES = ("YES", "TRUE", "1", "ON", "Y")
-_ONLINE_OFFLINE_VALUES = ("", "NO", "FALSE", "0", "OFF", "N")
+_ASH_OFFLINE_ON_VALUES = ("YES", "TRUE", "1", "ON", "Y")
+_ASH_OFFLINE_OFF_VALUES = ("", "NO", "FALSE", "0", "OFF", "N")
 
 
 def is_offline_mode() -> bool:
@@ -1165,9 +1165,9 @@ def is_offline_mode() -> bool:
     """
     raw = os.environ.get("ASH_OFFLINE")
     value = str(raw if raw is not None else "NO").strip().upper()
-    if value in _OFFLINE_OFFLINE_VALUES:
+    if value in _ASH_OFFLINE_ON_VALUES:
         return True
-    if value not in _ONLINE_OFFLINE_VALUES:
+    if value not in _ASH_OFFLINE_OFF_VALUES:
         warn_relative_value_once(
             "ASH_OFFLINE",
             str(raw),
