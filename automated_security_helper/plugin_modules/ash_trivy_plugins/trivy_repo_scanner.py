@@ -403,8 +403,11 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 f"--timeout={trivy_timeout(self._effective_scan_timeout())}",
                 # Each link leaving the target (trivy follows no link), and each
                 # path the global ignore paths ignore.
-                *self._link_skip_args(
-                    target, global_ignore_paths, reserved=operator_skips.reserved
+                *self._ashs_skip_args(
+                    target,
+                    global_ignore_paths,
+                    operator_skips,
+                    target_type=target_type,
                 ),
                 *output_dir_args,
             ]

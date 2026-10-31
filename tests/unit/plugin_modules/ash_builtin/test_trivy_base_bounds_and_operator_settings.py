@@ -2057,8 +2057,71 @@ def test_an_operator_list_that_does_not_fit_is_left_to_trivy_not_cut_by_the_left
 
     assert _skip_tokens(argv) == [], argv
     assert not _operator_warnings(messages), messages
-    (links_warning,) = [m for m in messages if "ignored path(s)" in m]
-    assert links_warning.startswith("40 ignored path(s)"), links_warning
+    (deferred_warning,) = [m for m in messages if "ignored path(s)" in m]
+    _assert_the_warning_blames_the_operators_list(deferred_warning)
+
+
+def _assert_the_warning_blames_the_operators_list(warning: str) -> None:
+    """The ignored paths are left out because the operator's own list is too long
+    to pass as arguments. The warning used to say the arguments of the ignored
+    paths would exceed the size the OS starts a program with, which is not why
+    they were left out."""
+    assert "lists the operator set are too long" in warning, warning
+    assert "trivy reads the whole lists itself" in warning, warning
+    assert "the OS starts a program with" not in warning, warning
+
+
+def _count_the_ignored_path_walks(monkeypatch) -> list[str]:
+    """Replace the two walks of the ignored paths with ones that record a call."""
+    walks: list[str] = []
+
+    def _files(*args, **kwargs):
+        walks.append("files")
+        return _ignored_files(40)
+
+    def _dirs(*args, **kwargs):
+        walks.append("dirs")
+        return []
+
+    monkeypatch.setattr(trivy_base, "trivy_skip_files", _files)
+    monkeypatch.setattr(trivy_base, "trivy_skip_dirs", _dirs)
+    return walks
+
+
+def test_an_operator_list_left_to_trivy_does_not_walk_the_ignored_paths(
+    tmp_path, monkeypatch
+):
+    """The links were given a budget of nothing and still walked the tree for
+    tokens that could not be kept. When the operator's list is left to trivy no
+    token of ASH's is built, so the walk is not run."""
+    scanner = _builtin_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": f"{_SHORT_ENTRY},{_LONG_ENTRY}"}
+    _leave_room_for_one_ignored_file_after_the_short_entry(monkeypatch)
+    walks = _count_the_ignored_path_walks(monkeypatch)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        argv, _, _ = scanner._execute_scan(
+            Path(scanner.context.source_dir), "source", []
+        )
+
+    assert walks == [], walks
+    assert _skip_tokens(argv) == [], argv
+    assert len([m for m in messages if "ignored path(s)" in m]) == 1, messages
+
+
+def test_control_a_list_that_fits_still_walks_the_ignored_paths(tmp_path, monkeypatch):
+    """The walk is skipped only when the list is left to trivy: a list that fits
+    beside the links is carried and the tree is walked as before."""
+    scanner = _builtin_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": _SHORT_ENTRY}
+    _leave_room_for_one_ignored_file_after_the_short_entry(monkeypatch)
+    walks = _count_the_ignored_path_walks(monkeypatch)
+
+    argv, _, _ = scanner._execute_scan(Path(scanner.context.source_dir), "source", [])
+
+    assert set(walks) == {"dirs", "files"}, walks
+    assert f"--skip-dirs={_SHORT_ENTRY}" in argv, argv
 
 
 def test_trivy_repo_also_leaves_an_operator_list_that_does_not_fit_to_trivy(
@@ -2071,6 +2134,7 @@ def test_trivy_repo_also_leaves_an_operator_list_that_does_not_fit_to_trivy(
     scanner.extra_env = {"TRIVY_SKIP_DIRS": f"{_SHORT_ENTRY},{_LONG_ENTRY}"}
     scanner.dependencies_satisfied = True
     _leave_room_for_one_ignored_file_after_the_short_entry(monkeypatch)
+    walks = _count_the_ignored_path_walks(monkeypatch)
     report = {
         "version": "2.1.0",
         "runs": [{"tool": {"driver": {"name": "Trivy", "rules": []}}, "results": []}],
@@ -2097,6 +2161,9 @@ def test_trivy_repo_also_leaves_an_operator_list_that_does_not_fit_to_trivy(
     assert argv, "the double was not run"
     assert _skip_tokens(argv) == [], argv
     assert not _operator_warnings(messages), messages
+    assert walks == [], walks
+    (deferred_warning,) = [m for m in messages if "ignored path(s)" in m]
+    _assert_the_warning_blames_the_operators_list(deferred_warning)
 
 
 def test_control_a_list_that_fits_beside_the_short_entry_alone_is_still_given(

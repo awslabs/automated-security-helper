@@ -296,7 +296,10 @@ class _OperatorSkips(NamedTuple):
     first of them is (its source, the variable or the config file key, and its
     position there), ``line_breaks`` lists the entries left out for holding a line
     break (flag, source, position) and ``reserved`` is the part of the budget the
-    links must leave alone.
+    links must leave alone. ``defer_to_trivy`` is set when the entries do not all
+    fit and ASH has no skip flag of its own: the whole list is left to trivy, so
+    the callers build no skip token for the links and ignored paths at all
+    (``_ashs_skip_args``).
     """
 
     tokens: List[str]
@@ -304,6 +307,7 @@ class _OperatorSkips(NamedTuple):
     first_dropped: Optional[Tuple[str, int]]
     line_breaks: List[Tuple[str, str, int]]
     reserved: int
+    defer_to_trivy: bool = False
 
 
 def skip_args_budget(environment: Mapping[str, str]) -> int:
@@ -1170,6 +1174,53 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             )
         return kept
 
+    def _ashs_skip_args(
+        self,
+        target: Path | str,
+        global_ignore_paths: Optional[List[IgnorePathWithReason]],
+        operator_skips: _OperatorSkips,
+        *,
+        target_type: Optional[str] = None,
+    ) -> List[str]:
+        """ASH's skip tokens for the links and ignored paths, or none when the
+        operator's own list is left to trivy.
+
+        ``_link_skip_args`` with the share the operator's entries leave
+        (``_OperatorSkips.reserved``). When the plan defers to trivy
+        (``_OperatorSkips.defer_to_trivy``: the operator's list does not fit and ASH
+        has no skip flag of its own) the links get no share at all, so the tree is
+        not walked for tokens that could not be kept, and the one warning names the
+        cause, the operator's list, where the size of the OS argument list alone
+        would have been blamed. The argv is the same either way: no skip token of
+        ASH's, and trivy reads its own list from the variable or the config file.
+        trivy reads the ignored paths and ASH drops their findings after the scan.
+        """
+        if not operator_skips.defer_to_trivy:
+            return self._link_skip_args(
+                target, global_ignore_paths, reserved=operator_skips.reserved
+            )
+        refusal = f"operator-skip:deferred:{target_type}:{Path(target).as_posix()}"
+        if refusal not in self._warned_inputs:
+            self._warned_inputs.add(refusal)
+            scan = f"the {target_type} scan" if target_type else "this scan"
+            one = operator_skips.over_budget == 1
+            noun = "entry does" if one else "entries do"
+            where = ""
+            if operator_skips.first_dropped is not None:
+                source, position = operator_skips.first_dropped
+                where = f", from entry {position} of {source} on"
+            self._plugin_log(
+                "The skip-dirs and skip-files lists the operator set are too long "
+                f"to give trivy as arguments ({operator_skips.over_budget} {noun} "
+                f"not fit{where}), so trivy reads the whole lists itself and "
+                f"ASH adds no --skip-dirs or --skip-files for {scan}. trivy reads "
+                f"the ignored path(s) under {Path(target).as_posix()}, and ASH "
+                "drops their findings after the scan.",
+                level=logging.WARNING,
+                target_type=target_type,
+            )
+        return []
+
     def _output_dir_skip_args(
         self, target: Path | str, target_type: Optional[str] = None
     ) -> List[str]:
@@ -1354,7 +1405,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         ``_operator_skip_args`` then gives nothing back, and trivy reads the
         operator's whole list itself from the variable or the config file. A flag
         of ASH's own would replace that list, and the few bytes the sizing left
-        over would decide whether the tail of the list applies.
+        over would decide whether the tail of the list applies. The plan says so
+        in ``defer_to_trivy``, and ``_ashs_skip_args`` builds no token and walks no
+        tree then.
         """
         used = _skip_tokens_size(final_args)
         budget = skip_args_budget(self._scan_environment())
@@ -1386,11 +1439,19 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                     continue
                 used += size
                 tokens.append(token)
-        if over_budget and not _carries_skip_flag(final_args):
+        defer_to_trivy = bool(over_budget) and not _carries_skip_flag(final_args)
+        if defer_to_trivy:
             reserved = budget
         else:
             reserved = _skip_tokens_size([*final_args, *tokens])
-        return _OperatorSkips(tokens, over_budget, first_dropped, line_breaks, reserved)
+        return _OperatorSkips(
+            tokens,
+            over_budget,
+            first_dropped,
+            line_breaks,
+            reserved,
+            defer_to_trivy,
+        )
 
     def _trivy_input_file(
         self,

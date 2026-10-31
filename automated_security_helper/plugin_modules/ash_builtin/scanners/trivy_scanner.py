@@ -506,8 +506,11 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # tokens have a fallback when left out, the operator's have none.
         operator_skips = self._operator_skip_plan(extra)
         extra.extend(
-            self._link_skip_args(
-                target, global_ignore_paths, reserved=operator_skips.reserved
+            self._ashs_skip_args(
+                target,
+                global_ignore_paths,
+                operator_skips,
+                target_type=target_type,
             )
         )
         # The operator's own skip lists, which ASH's skip flags would otherwise
