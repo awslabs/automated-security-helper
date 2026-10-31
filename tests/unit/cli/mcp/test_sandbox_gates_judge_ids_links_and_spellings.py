@@ -632,11 +632,20 @@ class TestWindowsRefusesBeforeResolving:
         assert validate_scan_target_in_sandbox(target, session_id=None) is None
 
 
-def test_off_windows_nothing_is_refused_before_resolving(tmp_path):
-    """Control: on POSIX resolving opens nothing, and a linked target is judged resolved."""
-    real = tmp_path / "real"
-    real.mkdir()
+def test_off_windows_nothing_is_refused_before_resolving(tmp_path, monkeypatch):
+    """Control: on POSIX resolving opens nothing, so nothing is refused first.
+
+    The platform check is set to False here, not left to the host, and the
+    cases are the ones the Windows check refuses: a link to a share and a share
+    spelling. A local link, which the Windows walk also answers None for, would
+    pass whether or not the platform check ran.
+    """
+    monkeypatch.setattr(sandbox, "_running_on_windows", lambda: False)
     link = tmp_path / "link"
-    link.symlink_to(real)
+    link.symlink_to("\\\\server\\share")
 
     assert sandbox._refusal_before_resolving("Scan target", link) is None
+    assert (
+        sandbox._refusal_before_resolving("Scan target", "\\\\server\\share\\tree")
+        is None
+    )

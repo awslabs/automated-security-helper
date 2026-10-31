@@ -80,7 +80,11 @@ class TestALinkInAParentComponentIsJudged:
         )
 
         assert refusal is not None
-        assert "component" in str(refusal)
+        # The word "component" alone proves nothing: the refusal repeats the
+        # caller's path, whose temporary directory name can hold it. The wording
+        # for a parent differs from the one for the path itself.
+        assert "Its component" in str(refusal)
+        assert "It is a link" not in str(refusal)
         assert "leads to a network share" in str(refusal)
 
     def test_a_parent_that_links_to_a_local_directory_is_followed(self, tmp_path):
@@ -145,7 +149,8 @@ class TestALinkInAParentComponentIsJudged:
         )
 
         assert refusal is not None
-        assert "component" in str(refusal)
+        assert "Its component" in str(refusal)
+        assert "The path cannot be examined" not in str(refusal)
         assert "cannot be examined" in str(refusal)
         assert str(granted / "mid" / "repo") not in examined
 
@@ -165,7 +170,8 @@ class TestALinkInAParentComponentIsJudged:
         )
 
         assert refusal is not None
-        assert "component" in str(refusal)
+        assert "Its component" in str(refusal)
+        assert "It is a link" not in str(refusal)
         assert "leads to a network share" in str(refusal)
 
     def test_a_share_link_reached_by_stepping_back_is_the_last_component(
