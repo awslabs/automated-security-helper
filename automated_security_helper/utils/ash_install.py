@@ -271,7 +271,7 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
     return located
 
 
-def _project_directories_of(module_file: Path, root_package: str) -> set:
+def _project_directories_of(module_file: Path, root_package: str) -> set[Path]:
     """The directories a project providing ``root_package`` installs from.
 
     ``module_file`` is a module inside the package. The package directory is
@@ -295,7 +295,9 @@ def _project_directories_of(module_file: Path, root_package: str) -> set:
     return accepted
 
 
-def _declares_this_module(project_dir: Path, module_file: Path, accepted: set) -> bool:
+def _declares_this_module(
+    project_dir: Path, module_file: Path, accepted: set[Path]
+) -> bool:
     """Whether a recorded install directory belongs to the project providing
     ``module_file``: one of the project's install directories (``accepted``,
     from :func:`_project_directories_of`), or a directory INSIDE the project
@@ -362,7 +364,7 @@ def _same_named(name: str) -> List[Any]:
         return []
 
 
-def _ships_this_module(dist: Any, here: Path, accepted: set) -> bool:
+def _ships_this_module(dist: Any, here: Path, accepted: set[Path]) -> bool:
     """Whether ``dist`` is the distribution this very module was installed from.
 
     True for a non-editable install whose RECORD lists this file at this path,

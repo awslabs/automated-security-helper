@@ -8,7 +8,7 @@ import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal, TYPE_CHECKING
+from typing import Annotated, Any, Callable, Literal, TYPE_CHECKING, overload
 
 import boto3
 import botocore.session
@@ -1922,6 +1922,18 @@ def _truncate(value: str, limit: int) -> str:
     if len(value) <= limit:
         return value
     return value[: limit - 3] + "..."
+
+
+@overload
+def _as_stored(value: str) -> str: ...
+
+
+@overload
+def _as_stored(value: None) -> None: ...
+
+
+@overload
+def _as_stored(value: str | None) -> str | None: ...
 
 
 def _as_stored(value: str | None) -> str | None:

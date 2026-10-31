@@ -1607,7 +1607,9 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     # The batch index is bound as a default at definition time,
                     # not read from the loop variable when the closure runs
                     # (flake8-bugbear B023), so the closure carries its own batch.
-                    def lint_alone(position: int, argument: str, batch_index=index):
+                    def lint_alone(
+                        position: int, argument: str, batch_index: int = index
+                    ) -> Tuple[Optional[str], Optional[SarifReport], Dict[str, Any]]:
                         return self._lint_once(
                             [argument],
                             results_dir.joinpath(

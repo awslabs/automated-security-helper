@@ -675,7 +675,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         return True
 
     @staticmethod
-    def _config_file_values(config_file: str) -> dict:
+    def _config_file_values(config_file: str) -> dict[str, Any]:
         """The operator's checkov config file as a mapping, or {} when it cannot
         be read as one.
 

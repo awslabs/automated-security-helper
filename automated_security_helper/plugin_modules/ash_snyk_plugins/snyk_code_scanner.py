@@ -1028,7 +1028,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         copied = ignored = refused = 0
         honor_gitignore = honors_ignore_files(getattr(self.context, "config", None))
 
-        def _not_copied(shown: object, why: object) -> None:
+        def _not_copied(shown: str | Path, why: object) -> None:
             # Logged, and recorded: snyk never evaluates a file left out here, so
             # a run that goes on grades ERROR naming it, not PASSED over it
             # (PluginBase.unevaluated_targets).

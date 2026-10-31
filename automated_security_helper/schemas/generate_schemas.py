@@ -25,7 +25,7 @@ ENV_REFERENCE_JSON_PATTERN = r"^(!ENV )?\$\{\w+(:.*)?\}$"
 #: such as ``global_settings.severity_threshold`` cannot hold one, so the load
 #: reads the field with its default and warns (AshAggregatedResults
 #: .validate_ash_config, config/recorded_config.py).
-def _reference_schema(description: str) -> dict:
+def _reference_schema(description: str) -> dict[str, Any]:
     """The schema of an environment reference, described as ``description``
     says. Both reference schemas are built here so their type and pattern
     cannot drift apart; only the description differs."""
@@ -142,7 +142,7 @@ class ConfigFileJsonSchema(GenerateJsonSchema):
 _CONFIG_PACKAGE = "automated_security_helper.config"
 
 
-def _stored_config_bases() -> tuple:
+def _stored_config_bases() -> tuple[type, ...]:
     """The base classes of stored-configuration models that live outside the
     config package: plugin sections and their options, and ignore-path entries.
     Imported on use, because the config package imports this module's siblings.

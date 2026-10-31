@@ -279,9 +279,11 @@ def discover_templates(
             # could not build, or that is nested deeper than ASH reads, is a
             # failed target, as cfn-nag counts the same file; a file that is not
             # YAML or JSON at all is not a template.
-            reason = unevaluable_template_reason(path, scan_root, text=text)
-            if reason is not None:
-                result.unmodelable.append((path, reason))
+            unmodelable_reason = unevaluable_template_reason(
+                path, scan_root, text=text
+            )
+            if unmodelable_reason is not None:
+                result.unmodelable.append((path, unmodelable_reason))
                 continue
             # A file neither parser reads but that could be a damaged template
             # is named, as cfn-nag names it: left at TRACE, a template with a

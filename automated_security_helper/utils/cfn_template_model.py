@@ -761,7 +761,7 @@ def is_template_candidate(name: str | Path) -> bool:
     return Path(name).name.lower().endswith(CFN_CANDIDATE_SUFFIXES)
 
 
-def active_global_ignore_paths(context: "PluginContext") -> list:
+def active_global_ignore_paths(context: "PluginContext") -> list[Any]:
     """The global ignore paths a scan drops files for, read from the context.
 
     For a caller that was given no list (a ``nothing_to_scan_reason``): the

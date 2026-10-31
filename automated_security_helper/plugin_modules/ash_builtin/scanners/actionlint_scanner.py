@@ -984,7 +984,7 @@ def _command_word(path: str) -> str:
 
 
 def build_sarif(
-    payload: Any, exit_code: int, uri_base: Optional[Path] = None
+    payload: Any, exit_code: Optional[int], uri_base: Optional[Path] = None
 ) -> Dict[str, Any]:
     """Convert actionlint's ``ACTIONLINT_FORMAT`` output into a SARIF 2.1.0 dict.
 
