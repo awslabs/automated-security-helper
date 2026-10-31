@@ -71,6 +71,24 @@ class TestReadingThePolicyFile:
 
         assert policy.workspace.max_severity_threshold == "HIGH"
 
+    @pytest.mark.parametrize(
+        ("mark", "label"), [(b"", "without a mark"), (b"\xef\xbb\xbf", "with a mark")]
+    )
+    def test_a_decode_error_names_the_offset_in_the_file(self, tmp_path, mark, label):
+        """``utf-8-sig`` drops a leading byte order mark before it decodes, so the
+        offset it reported for a bad byte was 3 short of the file's own when the
+        file started with one: an editor's byte 17 was named 14."""
+        body = b"workspace: {}\n"
+        path = tmp_path / "ash-workspace.yaml"
+        path.write_bytes(mark + body + b"\xff\n")
+
+        with pytest.raises(WorkspaceDefinitionError) as excinfo:
+            load_workspace_policy(path)
+
+        assert f"(not UTF-8 at byte offset {len(mark) + len(body)})" in str(
+            excinfo.value
+        ), label
+
     def test_the_format_is_the_named_paths_suffix(self, tmp_path):
         """A ``.yaml`` name that links to a ``.json`` file is read as YAML."""
         target = tmp_path / "data.json"

@@ -114,6 +114,7 @@ Failure modes and known limitations
 
 from __future__ import annotations
 
+import codecs
 import json
 import os
 import stat
@@ -405,6 +406,34 @@ def normalise_scanner_name(name: str) -> str:
     return reduced_plugin_name(stripped) or ascii_lower(stripped).replace("-", "_")
 
 
+def _counted_from_the_start(
+    path: Path, error: UnicodeDecodeError
+) -> UnicodeDecodeError:
+    """*error* with its offsets counted from the first byte of the file at *path*.
+
+    ``utf-8-sig`` drops a leading byte order mark before it decodes, so the
+    offset it reports is that of the bad byte in what follows the mark: 3 short of
+    the offset an editor shows when the file starts with one. The file's first
+    bytes are read again to tell, and an unreadable file keeps the offset as it
+    is.
+    """
+    try:
+        with path.open("rb") as handle:
+            marked = handle.read(len(codecs.BOM_UTF8)) == codecs.BOM_UTF8
+    except OSError:
+        return error
+    if not marked:
+        return error
+    shift = len(codecs.BOM_UTF8)
+    return UnicodeDecodeError(
+        error.encoding,
+        codecs.BOM_UTF8 + bytes(error.object),
+        error.start + shift,
+        error.end + shift,
+        error.reason,
+    )
+
+
 def _read_policy_document(path: Path, named: Path, quote_values: bool) -> object:
     """Parse the policy file at ``path``, refusing anything unreadable.
 
@@ -441,7 +470,7 @@ def _read_policy_document(path: Path, named: Path, quote_values: bool) -> object
     except UnicodeDecodeError as exc:
         # The decoder's message prints the byte's value; parse_error_kind gives
         # its offset and nothing from the file.
-        undecoded = parse_error_kind(exc)
+        undecoded = parse_error_kind(_counted_from_the_start(path, exc))
     if undecoded:
         # Outside the handler, so the decoder's error is not its context.
         raise _refuse(f"{label} could not be parsed {undecoded}")
