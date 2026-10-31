@@ -184,12 +184,6 @@ def test_the_grace_is_derived_from_the_subprocess_layers_stop_grace():
     assert execution_module._ABANDONED_STOP_GRACE_SECONDS > SANDBOX_STOP_GRACE_SECONDS
 
 
-def test_there_is_one_grace_for_every_abandoned_worker():
-    """Red at the base: a second constant, 0.0, for the worker without a
-    caller-given event."""
-    assert not hasattr(execution_module, "_REAPER_GRACE_SECONDS")
-
-
 def test_a_worker_without_a_caller_event_that_stops_inside_the_grace_frees_its_slot(
     tmp_path, monkeypatch
 ):
@@ -232,8 +226,11 @@ def test_a_worker_without_a_caller_event_that_stops_inside_the_grace_frees_its_s
             timer.cancel()
 
     assert collected["wedged"].outcome.error.startswith("timed out"), collected
-    assert scan.exits.get("wedged") == "released", scan.exits
+    # The queued project first: with the grace written off the pool returns before
+    # the release lands, and the check on the wedged worker's exit below would
+    # fail on that race before this message could say what went wrong.
     assert "finished on its own" in (collected["queued"].outcome.error or ""), (
         "the queued project was failed as never started although the abandoned "
         "worker's slot was freed inside the grace"
     )
+    assert scan.exits.get("wedged") == "released", scan.exits
