@@ -411,9 +411,12 @@ class TestWhichPackageManagersTheCheckNeeds:
         assert scanner.dependency_unavailable_reason is None
 
     def _counting_walk(self, monkeypatch):
-        """Every ``_package_manifests`` call as ``(args, kwargs)``: a refactor
-        to a keyword call would read as no walk at all were only ``args``
-        recorded."""
+        """Every ``_package_manifests`` call as ``(args, kwargs)``. Each call is
+        recorded whatever its shape, so the empty-list check below sees a walk
+        made by keyword as well as a positional one. The record keeps the
+        arguments too, so the one-walk test pins how the walk is called: a
+        refactor from ``("source",)`` to a keyword call changes the record and
+        fails that test, where counting calls alone would let it pass."""
         walks = []
         real_walk = NpmAuditScanner._package_manifests
 
