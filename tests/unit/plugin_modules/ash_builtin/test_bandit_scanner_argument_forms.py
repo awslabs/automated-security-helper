@@ -639,6 +639,11 @@ def test_a_verified_path_binary_reports_its_own_version(tmp_path, monkeypatch):
 
 
 def test_a_path_binary_with_no_version_answer_keeps_the_probes(tmp_path, monkeypatch):
+    # The deferred probe answers a fixed version, so the control does not
+    # depend on whether this environment has bandit installed.
+    monkeypatch.setattr(
+        BanditScanner, "_get_uv_tool_version", lambda self, tool, package: "9.9.9"
+    )
     source = _tree(tmp_path, ["app.py"])
     scanner = _scanner(source, tmp_path)
     # What the probe answers for a scanner nothing else touched: the control the
@@ -646,7 +651,7 @@ def test_a_path_binary_with_no_version_answer_keeps_the_probes(tmp_path, monkeyp
     control = _scanner(source, tmp_path)
     control.resolve_deferred_tool_version()
     expected = control.tool_version
-    assert expected is not None
+    assert expected == "9.9.9"
     binary = str(tmp_path / "bandit")
     monkeypatch.setattr(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
