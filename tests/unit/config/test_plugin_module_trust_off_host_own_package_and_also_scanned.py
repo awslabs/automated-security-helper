@@ -126,12 +126,14 @@ def _confine_rootless(module: str, trusted_modules: list) -> AshConfig:
 
 def test_a_rootless_client_config_keeps_a_module_inside_a_trusted_off_host_package():
     """The judged path keeps a name whose package the trusted list names; the
-    rootless arm refused every name the list did not spell exactly."""
+    rootless arm refused every name the list did not spell exactly. The package
+    itself is not among the kept names, so it is added after them, as the
+    judged path adds the operator's off-host package a list leaves out."""
     submodule = AWS_PLUGINS + ".s3_reporter"
 
     config = _confine_rootless(submodule, [AWS_PLUGINS])
 
-    assert config.ash_plugin_modules == [submodule]
+    assert config.ash_plugin_modules == [submodule, AWS_PLUGINS]
 
 
 def test_a_rootless_client_config_may_not_add_a_module_inside_an_untrusted_package():
