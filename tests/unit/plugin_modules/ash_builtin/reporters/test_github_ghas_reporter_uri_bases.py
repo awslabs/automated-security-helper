@@ -7,8 +7,11 @@ A location keeps its ``uriBaseId`` when its run is not rebased below a workspace
 root. The table the emitted run declares was written for a one-run document
 only, so a multi-run document whose runs name no project referred to base ids it
 never declared, and GitHub read those URIs against the repository root. The
-table is now the merge of the unrebased runs' tables; two runs declaring one key
-differently cannot share it, and the document is refused.
+table is now the merge of the unrebased runs' tables, cut to the bases a result
+refers to and the bases those are anchored to (a base nothing uses is left out,
+so the merge keeps a base only from a run whose result is located below it);
+two runs declaring one such key differently cannot share it, and the document
+is refused.
 """
 
 import json
@@ -47,8 +50,8 @@ def reporter(test_plugin_context):
     return GHASReporter(context=test_plugin_context)
 
 
-def _run(rule_id: str, bases: dict) -> Run:
-    """A run whose one result is located below the base id SRCROOT."""
+def _run(rule_id: str, bases: dict, base: str = "SRCROOT") -> Run:
+    """A run whose one result is located below the base id *base*."""
     return Run(
         tool=Tool(driver=ToolComponent(name="ASH")),
         results=[
@@ -60,7 +63,7 @@ def _run(rule_id: str, bases: dict) -> Run:
                     Location(
                         physicalLocation=PhysicalLocation(
                             artifactLocation=ArtifactLocation(
-                                uri="src/a.py", uriBaseId="SRCROOT"
+                                uri="src/a.py", uriBaseId=base
                             ),
                             region=Region(startLine=1),
                         )
@@ -99,7 +102,7 @@ class TestMultiRunBaseIds:
     def test_the_bases_of_different_runs_are_merged(self, reporter):
         runs = [
             _run("R1", {"SRCROOT": "file:///repo/"}),
-            _run("R2", {"OTHER": "file:///other/"}),
+            _run("R2", {"OTHER": "file:///other/"}, base="OTHER"),
         ]
 
         doc = json.loads(reporter.report(_model(*runs)))["runs"][0]
