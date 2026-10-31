@@ -1009,6 +1009,30 @@ def _resolve_override_key(
     return resolved
 
 
+def _session_config_refusal(error: Exception, operation: str) -> Dict[str, Any]:
+    """The workspace tools' answer when the session's config cannot be resolved.
+
+    A config refusal, exit 3, for every error of ``_resolve_session_config``
+    except one: a bound profile that is still registered but whose file could
+    not be written to the session's workspace again
+    (``BoundProfileUnavailableError.workspace_unwritable``). That is the
+    server's failure and not the caller's config, so it is answered as the
+    scan tools answer it (``_bound_profile_unavailable``): exit 1, the
+    category of the writer's error, and a warning in the server log for the
+    operator. As a config refusal an unwritable workspace read as the caller's
+    own fault and left nothing in the log.
+    """
+    if getattr(error, "workspace_unwritable", False):
+        from automated_security_helper.cli.mcp_tools import _bound_profile_unavailable
+
+        return _bound_profile_unavailable(error, operation)
+    return _error_response(
+        error,
+        operation,
+        exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+    )
+
+
 def _resolve_session_config(
     session_id: Optional[str],
     profile: Optional[str],
@@ -2265,11 +2289,7 @@ async def mcp_resolve_workspace(
         OSError,
         RuntimeError,
     ) as exc:
-        return _error_response(
-            exc,
-            "resolve_workspace",
-            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
-        )
+        return _session_config_refusal(exc, "resolve_workspace")
 
     try:
         config_overrides = _gate_client_overrides(
@@ -2416,11 +2436,7 @@ async def _scan_workspace(
         OSError,
         RuntimeError,
     ) as exc:
-        return _error_response(
-            exc,
-            "scan_workspace",
-            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
-        )
+        return _session_config_refusal(exc, "scan_workspace")
 
     try:
         config_overrides = _gate_client_overrides(
