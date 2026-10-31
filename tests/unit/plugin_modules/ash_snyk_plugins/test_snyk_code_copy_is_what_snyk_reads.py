@@ -234,9 +234,11 @@ def test_the_sweep_never_removes_the_scanned_source_or_the_output_directory(
     source = temp_root / "ash-snyk-code-project"
     output = temp_root / "ash-snyk-code-out"
     _write(source, "app.js")
-    # Every directory the scan touches exists before the backdate, so nothing the
-    # scan creates refreshes a mtime the sweep reads. The default scan timeout
-    # (1800 s, base/options.py) is the sweep's age bound; 7200 s is past it.
+    # Both directories are backdated past the sweep's age bound (the default scan
+    # timeout, 1800 s, base/options.py; 7200 s is past it). Whatever the scan
+    # creates under the output directory may refresh its mtime before the sweep
+    # reads it, so the surviving directory alone does not show that ``keep`` held
+    # it: the spy below does.
     (output / "converted").mkdir(parents=True)
     then = time.time() - 7200
     os.utime(source, (then, then))
@@ -248,11 +250,27 @@ def test_the_sweep_never_removes_the_scanned_source_or_the_output_directory(
         config=get_default_config(),
     )
 
+    swept: List[dict] = []
+    real_sweep = snyk_code_scanner._sweep_abandoned_copies
+
+    def spy(*args, **kwargs):
+        swept.append(kwargs)
+        return real_sweep(*args, **kwargs)
+
+    monkeypatch.setattr(snyk_code_scanner, "_sweep_abandoned_copies", spy)
+
     _scan(context)
 
     assert (source / "app.js").exists(), "the sweep removed the scanned source"
     assert output.is_dir(), "the sweep removed the output directory"
     assert tested["runs"] == 1
+    # What protects the scan's own directories is ``keep``; a scan that left the
+    # output directory out of it would still pass the checks above whenever the
+    # scan's own files had made the directory too new to sweep.
+    assert len(swept) == 1, swept
+    kept = {Path(os.path.realpath(path)) for path in swept[0]["keep"]}
+    assert Path(os.path.realpath(source)) in kept, kept
+    assert Path(os.path.realpath(output)) in kept, kept
 
 
 @pytest.mark.skipif(
