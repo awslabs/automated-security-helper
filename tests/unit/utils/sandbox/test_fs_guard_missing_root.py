@@ -96,8 +96,24 @@ def test_the_tree_sweep_itself_reads_a_missing_root_as_empty(tmp_path):
 def test_the_os_walk_fallback_agrees_on_a_missing_root(tmp_path, monkeypatch):
     """Called on the tree sweep directly, so the os.walk branch is reached:
     through sweep_writable the missing root is passed over before it."""
-    monkeypatch.delattr(os, "fwalk")
     missing = tmp_path / "results"
+    walked = []
+    real_walk = os.walk
+
+    def recording_walk(top, *args, **kwargs):
+        walked.append(os.fspath(top))
+        return real_walk(top, *args, **kwargs)
+
+    monkeypatch.setattr(os, "walk", recording_walk)
+
+    # The control: with fwalk present the descriptor walk answers and os.walk is
+    # not called, so an empty record below means the fallback did not run, and a
+    # filled one that it did (a missing root yields nothing on either branch).
+    assert fs_guard._sweep_tree(missing) == 0
+    assert walked == []
+
+    monkeypatch.delattr(os, "fwalk")
 
     assert fs_guard._sweep_tree(missing) == 0
+    assert walked == [os.fspath(missing)], "the os.walk fallback ran"
     assert fs_guard.sweep_writable([missing]) == 0

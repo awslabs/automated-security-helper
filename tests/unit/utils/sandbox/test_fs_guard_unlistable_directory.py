@@ -49,6 +49,21 @@ def _warnings(caplog, head):
     ]
 
 
+def _record_os_walk(monkeypatch):
+    """Wrap os.walk; return the list of roots it was called with. Taking
+    ``os.fwalk`` away selects the by-name branch, but a test only measures that
+    branch if it can say os.walk ran (and, on the descriptor leg, that it did not)."""
+    walked = []
+    real_walk = os.walk
+
+    def recording(top, *args, **kwargs):
+        walked.append(os.fspath(top))
+        return real_walk(top, *args, **kwargs)
+
+    monkeypatch.setattr(os, "walk", recording)
+    return walked
+
+
 @pytest.fixture
 def locked_tree(tmp_path):
     """A results directory holding a subdirectory that cannot be listed, with a
@@ -315,9 +330,12 @@ def test_the_os_walk_fallback_refuses_a_directory_it_cannot_list(
     unopenable directory the same way; it is given the same refusal."""
     root, _locked = locked_tree
     monkeypatch.delattr(os, "fwalk")
+    walked = _record_os_walk(monkeypatch)
 
     with pytest.raises(PermissionError):
         fs_guard.sweep_writable([root])
+
+    assert walked == [os.fspath(root)], "the os.walk branch ran"
 
 
 def test_the_os_walk_fallback_records_a_failed_removal_sweeps_on_and_refuses(
@@ -348,11 +366,13 @@ def test_the_os_walk_fallback_records_a_failed_removal_sweeps_on_and_refuses(
 
     monkeypatch.delattr(os, "fwalk")
     monkeypatch.setattr(os, "unlink", failing_unlink)
+    walked = _record_os_walk(monkeypatch)
 
     with caplog.at_level(logging.WARNING, logger="ash"):
         with pytest.raises(PermissionError) as refused:
             fs_guard.sweep_writable([root], (value,))
 
+    assert walked == [os.fspath(root)], "the os.walk branch ran"
     (failed_name,) = failed
     other_name = names[1] if failed_name == names[0] else names[0]
     assert not os.path.lexists(root / other_name), "the sweep must continue past it"
@@ -404,6 +424,7 @@ def test_a_readable_but_unsearchable_directory_is_refused_once_not_once_per_entr
     locked.chmod(0o600)
     if walk == "by-name":
         monkeypatch.delattr(os, "fwalk")
+    walked = _record_os_walk(monkeypatch)
     try:
         with caplog.at_level(logging.WARNING, logger="ash"):
             with pytest.raises(PermissionError) as refused:
@@ -411,6 +432,7 @@ def test_a_readable_but_unsearchable_directory_is_refused_once_not_once_per_entr
     finally:
         locked.chmod(0o700)
 
+    assert bool(walked) == (walk == "by-name"), (walk, walked)
     assert len(_warnings(caplog, "Could not examine")) == 1, [
         record.getMessage() for record in caplog.records
     ]
@@ -456,12 +478,15 @@ def test_a_failed_removal_names_the_entry_by_its_path_below_the_root(
     (root / "a").chmod(0o555)
     if walk == "by-name":
         monkeypatch.delattr(os, "fwalk")
+    walked = _record_os_walk(monkeypatch)
     try:
         with caplog.at_level(logging.WARNING, logger="ash"):
             with pytest.raises(PermissionError) as refused:
                 fs_guard.sweep_writable([root])
     finally:
         (root / "a").chmod(0o755)
+
+    assert bool(walked) == (walk == "by-name"), (walk, walked)
 
     (line,) = _warnings(caplog, "Could not remove")
     assert line.startswith("Could not remove a/cache under "), line
@@ -477,9 +502,11 @@ def test_a_directory_removed_during_the_walk_is_not_a_refusal(tmp_path, monkeypa
     (root / "gone").mkdir(parents=True)
     (root / "zzz-link").symlink_to(tmp_path)
     real_open = os.open
+    vanished = []
 
     def vanishing_open(path, flags, *args, **kwargs):
         if os.fspath(path) == "gone" and kwargs.get("dir_fd") is not None:
+            vanished.append(os.fspath(path))
             raise FileNotFoundError(2, "No such file or directory", "gone")
         return real_open(path, flags, *args, **kwargs)
 
@@ -487,6 +514,9 @@ def test_a_directory_removed_during_the_walk_is_not_a_refusal(tmp_path, monkeypa
 
     removed = fs_guard.sweep_writable([root])
 
+    assert vanished == ["gone"], (
+        "the walk opened the directory and was told it was gone"
+    )
     assert removed == 1
     assert not os.path.lexists(root / "zzz-link")
 

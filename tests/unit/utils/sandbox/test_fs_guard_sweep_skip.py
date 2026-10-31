@@ -95,10 +95,19 @@ def test_a_nested_named_directory_is_passed_over(tmp_path):
 @pytest.mark.skipif(not hasattr(os, "fwalk"), reason="the os.walk branch is taken")
 def test_the_os_walk_fallback_passes_over_the_same_directory(tmp_path, monkeypatch):
     monkeypatch.delattr(os, "fwalk")
+    walked = []
+    real_walk = os.walk
+
+    def recording_walk(top, *args, **kwargs):
+        walked.append(os.fspath(top))
+        return real_walk(top, *args, **kwargs)
+
+    monkeypatch.setattr(os, "walk", recording_walk)
     root, private = _tree(tmp_path)
 
     removed = fs_guard.sweep_writable([root], skip=[private])
 
+    assert walked == [os.fspath(root)], "the os.walk fallback ran"
     assert removed == 1
     assert not os.path.lexists(root / "escape")
     assert os.path.lexists(private / "uv_cache_dir" / "entry")
