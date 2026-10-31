@@ -3206,6 +3206,10 @@ class ConfigLinter:
         except (ValueError, IndexError):
             return None
 
+    # The three breaks a config file's text is written with. A fixed file keeps
+    # the first one it holds (``_generate_config_content``).
+    _FILE_LINE_BREAK = re.compile("\r\n|\n|\r")
+
     @classmethod
     def _generate_config_content(
         cls,
@@ -3218,15 +3222,23 @@ class ConfigLinter:
         A ``.json`` file gets JSON back, without the comment JSON cannot hold:
         writing YAML into it left a file the loader could not parse, so a scan
         fell back to the default configuration.
+
+        The content ends every line with the break the file's own text starts
+        with (LF when it holds none), as ``fix_unused_suppressions`` keeps it.
+        The YAML dump and the JSON dump write LF, so a CRLF file used to come
+        back with LF, and with a stray CR at the end of its schema comment,
+        where the text was split on LF alone.
         """
+        found = cls._FILE_LINE_BREAK.search(raw_content)
+        line_break = found.group(0) if found else "\n"
         if is_json_file(config_path):
-            return json.dumps(config_data, indent=2) + "\n"
+            return (json.dumps(config_data, indent=2) + "\n").replace("\n", line_break)
         config_strings = []
 
         # Preserve the schema reference if it exists in the original file. A
         # leading byte order mark is not whitespace to ``strip``, so it hid the
         # first line's comment and the default reference replaced it.
-        for line in raw_content.removeprefix(chr(0xFEFF)).split("\n"):
+        for line in cls._FILE_LINE_BREAK.split(raw_content.removeprefix(chr(0xFEFF))):
             stripped = line.strip()
             if stripped.startswith("#") and "schema" in stripped.lower():
                 config_strings.append(line)
@@ -3253,4 +3265,4 @@ class ConfigLinter:
             )
         )
 
-        return "\n".join(config_strings)
+        return "\n".join(config_strings).replace("\n", line_break)
