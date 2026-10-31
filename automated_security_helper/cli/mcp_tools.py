@@ -3480,10 +3480,6 @@ async def _run_scan(
         caller sets runner_done whatever happens here.
         """
         try:
-            from automated_security_helper.cli.mcp.sandbox import (
-                transport_is_networked,
-            )
-
             # The event's records, then any the ScanCancelled that ended the
             # scan carries and the event does not: a raise site may build the
             # exception with its own pairs (scanner_executor's union of a
@@ -3495,8 +3491,13 @@ async def _run_scan(
                     records = records + (record,)
             if not records:
                 return
+            # Named by the caller the scan was started for, as a workspace scan
+            # names them (caller_is_remote), not by the transport alone: the
+            # transport misses a remote caller on a transport the operator did
+            # not mark as networked, and that caller would be handed the
+            # server's process ids by get_scan_progress.
             if registry.record_cancel_outcome(
-                scan_id, records, name_process_ids=not transport_is_networked()
+                scan_id, records, name_process_ids=not remote_client
             ):
                 named = ", ".join(f"{tool} (pid {pid})" for tool, pid in records)
                 _logger.warning(
