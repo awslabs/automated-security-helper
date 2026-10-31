@@ -86,7 +86,10 @@ def test_a_deferred_text_write_lands_after_the_held_tail():
     """A text write deferred during a byte write that left a tail held lands
     after that tail, not ahead of it."""
     raw = io.BytesIO()
-    target = io.TextIOWrapper(raw, encoding="utf-8", write_through=True)
+    # newline="\n": the deferred text lands through this text layer, whose
+    # default newline mode writes os.linesep (\r\n on Windows), while the byte
+    # writes reach raw as they are; the test compares raw bytes.
+    target = io.TextIOWrapper(raw, encoding="utf-8", newline="\n", write_through=True)
     wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
     wrap.buffer.write(b"caf\xc3")
     # What a signal handler's write inside that byte write does: deferred.
@@ -158,7 +161,8 @@ def test_the_held_tail_lands_ahead_of_every_deferred_item():
     before the deferred items, byte items included: emitted only before the first
     deferred text item, the tail landed after the deferred bytes before it."""
     raw = io.BytesIO()
-    target = io.TextIOWrapper(raw, encoding="utf-8", write_through=True)
+    # newline="\n" for the same reason as in the deferred-text test above.
+    target = io.TextIOWrapper(raw, encoding="utf-8", newline="\n", write_through=True)
     wrap = css.CommandSafeStream(lambda: target, check_buffer=True)
     wrap.buffer.write(b"caf\xc3")
     # A signal handler's byte write and text write inside that byte write.

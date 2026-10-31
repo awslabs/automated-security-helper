@@ -348,10 +348,13 @@ def test_unquarantine_names_the_file_alone_and_reports_a_nonzero_exit(
 
     monkeypatch.setattr(du.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(du, "run_command", fake_run)
+    target = Path("/opt/ash/bin/tool")
     with caplog.at_level(logging.WARNING):
-        du.unquarantine_macos_binary(Path("/opt/ash/bin/tool"))
+        du.unquarantine_macos_binary(target)
     assert "-r" not in seen["args"]
-    assert seen["args"][-1] == "/opt/ash/bin/tool"
+    # str(target), not the literal: the path's spelling is the host's
+    # (backslashes on Windows, where the faked Darwin call still runs).
+    assert seen["args"][-1] == str(target)
     assert "exited 1" in caplog.text and "Operation not permitted" in caplog.text
 
 
