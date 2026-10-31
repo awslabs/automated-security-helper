@@ -597,6 +597,97 @@ def test_the_last_operator_file_to_write_an_entry_governs_it(tmp_path):
     assert config._client_scanner_exclusions == []
 
 
+def test_a_pattern_a_later_operator_file_leaves_out_is_no_longer_the_operators(
+    tmp_path,
+):
+    """The chain replaces a list whole, so an operator who retires ``vendor``
+    writes ``excluded_paths`` again without it in a later file. The earlier
+    file's unexpired ``vendor`` was still read as the operator's, and a client's
+    copy of it was respelled as that entry and kept, reviving what the last
+    word had deleted. Now the later file's list is the whole of what the
+    operator excludes, and the client's copy is moved out and recorded."""
+    config = AshConfig()
+    config.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="vendor", reason="client says"),
+    ]
+    earlier = _bandit_excluded(
+        {"path": "vendor", "reason": "op1", "expiration": "2099-01-01"}
+    )
+    later = _bandit_excluded({"path": "other", "reason": "op2"})
+
+    _strip_chain(config, [earlier, later], {}, tmp_path)
+
+    assert config.scanners.bandit.options.excluded_paths == []
+    assert [item.pattern for item in config._client_scanner_exclusions] == ["vendor"]
+
+
+def test_an_entry_a_later_operator_file_appends_leaves_the_earlier_entries(tmp_path):
+    """An append operation adds to the list, so the earlier file's ``vendor``
+    stays the operator's: only a file that writes the option whole takes the
+    earlier entries away."""
+    config = AshConfig()
+    config.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="vendor", reason="client says"),
+    ]
+    earlier = _bandit_excluded(
+        {"path": "vendor", "reason": "op1", "expiration": "2099-01-01"}
+    )
+    later = {
+        "patch": [
+            {
+                "op": "add",
+                "path": "/scanners/bandit/options/excluded_paths/-",
+                "value": {"path": "other", "reason": "op2"},
+            }
+        ]
+    }
+
+    _strip_chain(config, [earlier, later], {}, tmp_path)
+
+    kept = config.scanners.bandit.options.excluded_paths
+    assert [(entry.path, entry.reason) for entry in kept] == [("vendor", "op1")]
+    assert config._client_scanner_exclusions == []
+
+
+def test_a_later_operator_file_silent_on_the_option_leaves_earlier_entries(tmp_path):
+    """A later file whose bandit section holds other options writes nothing at
+    the option, so the earlier file's entry stays the operator's."""
+    config = AshConfig()
+    config.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="vendor", reason="client says"),
+    ]
+    earlier = _bandit_excluded(
+        {"path": "vendor", "reason": "op1", "expiration": "2099-01-01"}
+    )
+    later = {"scanners": {"bandit": {"options": {"severity_threshold": "HIGH"}}}}
+
+    _strip_chain(config, [earlier, later], {}, tmp_path)
+
+    kept = config.scanners.bandit.options.excluded_paths
+    assert [(entry.path, entry.reason) for entry in kept] == [("vendor", "op1")]
+    assert config._client_scanner_exclusions == []
+
+
+def test_an_ignore_file_a_later_operator_file_replaces_is_no_longer_the_operators(
+    tmp_path,
+):
+    """The same replacement for the trivy ignore file, a scalar: the earlier
+    file's ``a.trivyignore`` is not the operator's once a later file sets
+    another, so a delivered option naming it is replaced by the later file's."""
+    config = AshConfig()
+    options = config.scanners.trivy.options
+    options.ignore_file = str(tmp_path / "op0" / "a.trivyignore")
+    earlier = {"scanners": {"trivy": {"options": {"ignore_file": "a.trivyignore"}}}}
+    later = {"scanners": {"trivy": {"options": {"ignore_file": "b.trivyignore"}}}}
+    delivered = {
+        "scanners": {"trivy": {"options": {"ignore_file": options.ignore_file}}}
+    }
+
+    _strip_chain(config, [earlier, later], delivered, tmp_path)
+
+    assert options.ignore_file == str(tmp_path / "op1" / "b.trivyignore")
+
+
 def test_the_last_operator_file_to_set_an_ignore_file_anchors_it_at_its_directory(
     tmp_path,
 ):

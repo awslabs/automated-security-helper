@@ -1771,7 +1771,16 @@ def _operator_entries(
     if isinstance(read, dict):
         take(_get(read.get("options") or {}, spec.option), None)
     for path, document in operator_documents:
-        for value in _document_values(document, spec, read_key):
+        for value, whole in _document_writes(document, spec, read_key):
+            if whole:
+                # The chain replaces a list whole, so a file that writes the
+                # option takes away every entry an earlier file gave it: a
+                # pattern this file left out is no longer the operator's, and
+                # a client's copy of it is the client's again, not the earlier
+                # file's entry respelled and kept.
+                for key in written_by_a_file:
+                    found.pop(key, None)
+                written_by_a_file.clear()
             take(value, Path(path).parent, from_a_file=True)
     return found
 
@@ -1780,6 +1789,24 @@ def _document_values(
     document: Any, spec: ScannerExclusionOption, read_key: Optional[str] = None
 ) -> List[Any]:
     """The values one chain file writes at ``spec``'s option, in the file's order.
+
+    See ``_document_writes``, which also says which of them write the option
+    whole.
+    """
+    return [value for value, _ in _document_writes(document, spec, read_key)]
+
+
+def _document_writes(
+    document: Any, spec: ScannerExclusionOption, read_key: Optional[str] = None
+) -> List[Tuple[Any, bool]]:
+    """Each value one chain file writes at ``spec``'s option, in the file's order, with whether it writes the option whole.
+
+    A value written whole replaces the option (a section or an ``options``
+    object that holds the option, or an operation at the option itself); an
+    operation that appends or sets one entry (its pointer ends in ``-`` or an
+    index) adds to what earlier files gave the option, and a section that does
+    not hold the option at all writes nothing. The value of such a section is
+    returned as None, not whole.
 
     Each value under the one ``scanners`` section the scanner reads, then each
     value a ``patch`` operation of the file writes there
@@ -1857,11 +1884,19 @@ def _document_values(
             read_key
         )
 
-    def option_of_section(section: Any) -> List[Any]:
-        options = _options_of(section) if isinstance(section, dict) else None
-        return [_get(options, spec.option)] if isinstance(options, dict) else []
+    def holds_the_option(options: Dict[Any, Any]) -> bool:
+        from automated_security_helper.config.config_sources import _resolve_dict_key
 
-    values: List[Any] = []
+        return _resolve_dict_key(options, spec.option) in options
+
+    def option_of(options: Dict[Any, Any]) -> Tuple[Any, bool]:
+        return _get(options, spec.option), holds_the_option(options)
+
+    def option_of_section(section: Any) -> List[Tuple[Any, bool]]:
+        options = _options_of(section) if isinstance(section, dict) else None
+        return [option_of(options)] if isinstance(options, dict) else []
+
+    values: List[Tuple[Any, bool]] = []
     if isinstance(scanners, dict):
         for key, section in scanners.items():
             if is_read(key):
@@ -1880,12 +1915,17 @@ def _document_values(
             continue
         if len(segments) == 3 and segments[2] == "options":
             if isinstance(value, dict):
-                values.append(_get(value, spec.option))
+                values.append(option_of(value))
             continue
         located = exclusion_option_at(segments)
         if located is None or located[0] != spec:
             continue
-        values.append([value] if located[1] and not isinstance(value, list) else value)
+        values.append(
+            (
+                [value] if located[1] and not isinstance(value, list) else value,
+                not located[1],
+            )
+        )
     return values
 
 
