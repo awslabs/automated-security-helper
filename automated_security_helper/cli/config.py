@@ -2157,6 +2157,12 @@ def _apply_fixes(
     return False
 
 
+def _entries_of(fixed_issues: List[Any]) -> List[tuple]:
+    """The entries a fix comments out, as (place, message) pairs, to compare
+    what was shown at a prompt with what is written after it."""
+    return sorted((str(issue.path), str(issue.message)) for issue in fixed_issues)
+
+
 def _apply_unused_fixes(
     config_path: Path,
     output_dir,
@@ -2253,10 +2259,22 @@ def _apply_unused_fixes(
         # Computed again from the file as it is now: the text computed before
         # the prompt was written after it, over any edit made while the prompt
         # waited (an edit that made the list uneditable is refused the same way).
+        approved = _entries_of(fixed_issues)
         fixed_content, fixed_issues, _ = compute_fix()
         if not fixed_issues or fixed_content is None:
             secho("✅ No unused suppressions to comment out.", fg=typer.colors.GREEN)
             return False
+        # The text is the new one, but what was approved is the list shown above.
+        # A file that changed while the prompt waited and now comments out other
+        # entries is not what the operator said yes to: nothing is written.
+        if _entries_of(fixed_issues) != approved:
+            secho(
+                "\n❌ The config changed while the prompt was open, and the "
+                "unused suppressions to comment out are no longer the ones "
+                f"shown. {config_path} is unchanged; run the command again.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
 
     # Bytes: fixed_content is the file's own text with its line endings (read as
     # bytes by fix_unused_suppressions), and text mode would turn the "\n" of a
