@@ -11,9 +11,7 @@
   applied without error and the walk goes on to the ops after it; and the walk
   starts from the trusted base merged with the document's own fields, so a
   ``test`` of a value the document itself sets passes here as it passes in the
-  load. The walk that marks which entries are the operator's reads the other
-  way (``over_report=False``): it stops at the first op that fails, so an
-  entry the load never applied is not counted as the operator's.
+  load.
 * ``trusted_default_config`` reads ``ASH_CONFIG`` once, through
   ``get_default_config`` and its ``views`` carry, and takes the built-in
   defaults when that chain names a file under the MCP workspace root. It judges
@@ -131,76 +129,6 @@ def test_a_passing_test_op_does_not_end_the_per_op_walk():
     assert seen.get("sandbox", {}).get("extra_read_paths") == ["/etc"], seen
 
 
-def test_the_strict_walk_stops_at_the_first_op_that_fails():
-    """Marking which entries are the operator's reads the same walk with
-    ``over_report=False``: it keeps the ops before a failed op and drops that op
-    and every op after it, where the default walk reads on."""
-    document = {
-        "patch": [
-            {"op": "add", "path": "/sandbox/extra_read_paths", "value": ["/first"]},
-            {"op": "test", "path": "/project_name", "value": "not-the-base-name"},
-            {"op": "add", "path": "/sandbox/extra_write_paths", "value": ["/after"]},
-        ]
-    }
-
-    strict = _with_own_patch(document, AshConfig(), over_report=False)
-    reading_on = _with_own_patch(document, AshConfig())
-
-    assert strict.get("sandbox", {}).get("extra_read_paths") == ["/first"], strict
-    assert "/after" not in strict.get("sandbox", {}).get("extra_write_paths", []), (
-        strict
-    )
-    assert reading_on.get("sandbox", {}).get("extra_write_paths") == ["/after"], (
-        reading_on
-    )
-
-
-def _suppression() -> dict:
-    return {"path": "app.py", "reason": "a suppression under test"}
-
-
-def _marks_after(tmp_path: Path, test_value: str) -> list:
-    """``client_supplied`` of the one suppression a delivered file supplies,
-    when an operator file's patch adds the same entry behind a ``test`` op."""
-    config = AshConfig.model_validate(
-        {"global_settings": {"suppressions": [_suppression()]}}
-    )
-    operator = tmp_path / "operator.yaml"
-    delivered = tmp_path / "delivered.yaml"
-    documents = {
-        operator: {
-            "patch": [
-                {"op": "test", "path": "/project_name", "value": test_value},
-                {
-                    "op": "add",
-                    "path": "/global_settings/suppressions/-",
-                    "value": _suppression(),
-                },
-            ]
-        },
-        delivered: {"global_settings": {"suppressions": [_suppression()]}},
-    }
-
-    marked = ccp._mark_client_supplied(
-        config, documents, AshConfig(), lambda path: path == delivered
-    )
-
-    return [s.client_supplied for s in marked.global_settings.suppressions]
-
-
-def test_an_entry_behind_a_failed_test_op_is_marked_client_supplied(
-    tmp_path: Path,
-):
-    """The operator's patch tests a value that does not hold, so the load never
-    applies the entry it adds after the test. A delivered file that supplies
-    the same entry is the client's and is marked."""
-    assert _marks_after(tmp_path, "not-the-base-name") == [True]
-
-
-def test_control_an_entry_behind_a_passing_test_op_is_the_operators(tmp_path: Path):
-    assert _marks_after(tmp_path, AshConfig().project_name) == [False]
-
-
 def test_a_test_op_of_the_documents_own_value_passes_as_the_load_applies_it():
     """The walk starts from the base merged with the document's own fields, as
     the load patches the merged chain: a ``test`` of a value the delivered
@@ -219,6 +147,58 @@ def test_a_test_op_of_the_documents_own_value_passes_as_the_load_applies_it():
     seen = _with_own_patch(document, AshConfig())
 
     assert seen.get("sandbox", {}).get("extra_read_paths") == ["/etc"], seen
+
+
+def _ignore_path() -> dict:
+    return {"path": "vendor/", "reason": "vendored code"}
+
+
+def _ignore_path_marks(tmp_path: Path, operator_patch: list) -> list:
+    """``client_supplied`` of the one ignore path in a resolved config, when a
+    non-client file of the chain carries ``operator_patch`` and a delivered file
+    supplies nothing."""
+    config = AshConfig.model_validate(
+        {"global_settings": {"ignore_paths": [_ignore_path()]}}
+    )
+    operator = tmp_path / "operator.yaml"
+    delivered = tmp_path / "delivered.yaml"
+    documents = {operator: {"patch": operator_patch}, delivered: {}}
+
+    marked = ccp._mark_client_supplied(
+        config, documents, AshConfig(), lambda path: path == delivered
+    )
+
+    return [p.client_supplied for p in marked.global_settings.ignore_paths]
+
+
+def test_an_operator_entry_after_a_test_op_that_fails_here_stays_the_operators(
+    tmp_path: Path,
+):
+    """A config that resolved had every op of the operator file's patch apply:
+    the load stops at the first op that fails. The walk here starts without the
+    bases the file extends, so a ``test`` of a value one of them sets fails here
+    and passed in the load. The ignore path the operator's patch adds after it is
+    still the operator's, so it keeps skipping scanning; ending the walk at the
+    test would mark it as the client's."""
+    marks = _ignore_path_marks(
+        tmp_path,
+        [
+            {"op": "test", "path": "/project_name", "value": "a-name-a-base-sets"},
+            {
+                "op": "add",
+                "path": "/global_settings/ignore_paths/-",
+                "value": _ignore_path(),
+            },
+        ],
+    )
+
+    assert marks == [False]
+
+
+def test_control_an_entry_no_operator_patch_adds_is_marked_client_supplied(
+    tmp_path: Path,
+):
+    assert _ignore_path_marks(tmp_path, []) == [True]
 
 
 def test_the_trusted_default_config_is_read_once(tmp_path: Path, monkeypatch):

@@ -835,17 +835,8 @@ def _as_reached(path: Path, names: Optional[Mapping[Path, Sequence[Path]]]) -> P
     return Path(reached[0]) if reached else path
 
 
-def _with_own_patch(
-    document: Any, base: AshConfig, *, over_report: bool = True
-) -> Any:
+def _with_own_patch(document: Any, base: AshConfig) -> Any:
     """``document`` with its own ``patch`` ops applied, over the trusted ``base``.
-
-    ``over_report`` picks which way a failed op errs. The default reads on past
-    a failed op (below), which suits the restrict-only check: it only adds
-    refusals. Marking which entries are the operator's has the opposite need:
-    an entry counted as the operator's when the load never applied it grows the
-    operator's set, so ``over_report=False`` applies the whole patch or stops
-    at the first op that fails and keeps only what came before it.
 
     So the restrict-only check sees a sandbox setting or plugin module a ``patch``
     op asks for, as well as one written out. Applied over ``base`` because an op
@@ -892,9 +883,7 @@ def _with_own_patch(
         try:
             current = _apply_patch(current, [op], where).document
         except ASHConfigSourceError:
-            if over_report:
-                continue
-            break
+            continue
     return current
 
 
@@ -1374,6 +1363,12 @@ def _mark_client_supplied(
     chain, with that file's own ``patch`` ops applied, or in the trusted ``base``;
     every other entry is marked ``client_supplied``, so an entry whose source is
     unknown counts as the client's.
+
+    The patch is read on past an op that fails here. A config that resolved had
+    every op of every file's patch apply, since the load stops at the first op
+    that fails; the walk here starts without the bases the file extends, so a
+    ``test`` that passed there can fail here. Ending the walk at it would drop
+    the operator's entries after it, and they would be marked as the client's.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
     from automated_security_helper.config.runtime_patch import _walk
@@ -1387,7 +1382,7 @@ def _mark_client_supplied(
     models = {"suppressions": AshSuppression, "ignore_paths": IgnorePathWithReason}
     operators: Dict[str, List[Dict[str, Any]]] = {field: [] for field in models}
     sources: List[Any] = [
-        _with_own_patch(document, base, over_report=False)
+        _with_own_patch(document, base)
         for path, document in documents.items()
         if not delivered(path)
     ]
