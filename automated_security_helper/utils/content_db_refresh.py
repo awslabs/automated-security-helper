@@ -504,6 +504,12 @@ def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
     or a device another account left at the lock's name. ``exclusive_lock`` does
     not follow a link and refuses anything but a regular file, whatever its mode,
     so such a name is no lock; the caller takes the next one down.
+
+    The checks here read modes and file types, not what the filesystem will do with
+    the open. A shared temporary lock that passes them and is refused when taken
+    (a descriptor open for reading alone cannot take a lock on a network mount) is
+    not a reason to end the scan either: ``_refresh_lock`` takes the lock named
+    for this account in its place.
     """
     cache = Path(cache_dir)
     probe = cache
@@ -515,12 +521,22 @@ def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
     # regular file at the cache's path, so that case takes the temporary lock.
     if probe.is_dir() and os.access(probe, os.W_OK) and _lock_is_openable(lock):
         return lock
-    digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
-    shared = Path(tempfile.gettempdir()) / f"ash-{tool}-update-{digest}.lock"
+    shared, account = _temporary_locks(tool, cache)
     if _lock_is_openable(shared):
         return shared
+    return account
+
+
+def _temporary_locks(tool: str, cache: Path) -> Tuple[Path, Path]:
+    """The two locks in the temporary directory for ``cache``: the shared one,
+    named for the cache alone, and the one named for this account as well."""
+    digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
     account = str(os.getuid()) if hasattr(os, "getuid") else getpass.getuser()
-    return Path(tempfile.gettempdir()) / f"ash-{tool}-update-{digest}-{account}.lock"
+    temporary = Path(tempfile.gettempdir())
+    return (
+        temporary / f"ash-{tool}-update-{digest}.lock",
+        temporary / f"ash-{tool}-update-{digest}-{account}.lock",
+    )
 
 
 def _lock_is_openable(lock: Path) -> bool:
@@ -528,11 +544,17 @@ def _lock_is_openable(lock: Path) -> bool:
     regular file this account can read.
 
     Its read-write open needs read and write permission and its read-only fallback
-    needs read permission, so a regular file this account can read is always
-    openable and one it cannot read never is (a write-only file fails both opens).
-    The name is looked at without following a link, because the open does not
-    follow one: a link (dangling or to a readable file) and a FIFO, socket or
+    needs read permission, so a regular file this account can read is almost
+    always openable and one it cannot read never is (a write-only file fails both
+    opens). The name is looked at without following a link, because the open does
+    not follow one: a link (dangling or to a readable file) and a FIFO, socket or
     device are refused whatever their mode, so none of them is openable.
+
+    "Almost": this reads the file's mode, not what the filesystem will do with an
+    open. A read-only descriptor on a network mount cannot take the lock (``EBADF``
+    from ``flock``), and an open can be refused for a reason the mode does not
+    show. ``_refresh_lock`` takes the lock named for this account when the shared
+    temporary one is refused after this said yes.
     """
     try:
         mode = os.lstat(lock).st_mode
@@ -543,8 +565,20 @@ def _lock_is_openable(lock: Path) -> bool:
     return stat.S_ISREG(mode) and os.access(lock, os.R_OK)
 
 
+def _lock_refused(tool: str, lock: Path, exc: OSError) -> ScannerError:
+    """The ``ScannerError`` for a lock ``exclusive_lock`` could not take."""
+    return ScannerError(
+        f"the {tool} database update could not take its lock "
+        f"{lock.as_posix()} ({exc}). Make that file and its directory "
+        "usable by this account, or wait for the update that holds it, "
+        "and run ASH again."
+    )
+
+
 @contextlib.contextmanager
-def _refresh_lock(tool: str, lock: Path) -> Iterator[None]:
+def _refresh_lock(
+    tool: str, lock: Path, *, fallback: Optional[Path] = None
+) -> Iterator[None]:
     """Hold ``exclusive_lock`` on ``lock`` for the block, and word its refusals.
 
     What ``exclusive_lock`` raises while taking the lock (a lock file or directory
@@ -553,17 +587,30 @@ def _refresh_lock(tool: str, lock: Path) -> Iterator[None]:
     failed scanner, instead of an ``OSError`` or ``TimeoutError`` that ends the
     scan. Only the taking is worded here: whatever the block raises passes
     through as it is.
+
+    ``fallback`` is the lock to take instead when ``lock`` is refused for a reason
+    other than a holder: the shared temporary lock, whose name any account can
+    have left, passes the mode check in ``_lock_is_openable`` and can still be
+    refused by the filesystem, and the lock named for this account, which this
+    account made itself, is then what the refresh takes, as it did before the
+    shared name existed. A holder that has kept ``lock`` past the bound is not a
+    refusal to route around: another update is running, and taking a second name
+    would let this refresh run beside it instead of after it.
     """
     with contextlib.ExitStack() as held:
         try:
             held.enter_context(exclusive_lock(lock))
         except OSError as exc:  # TimeoutError is one
-            raise ScannerError(
-                f"the {tool} database update could not take its lock "
-                f"{lock.as_posix()} ({exc}). Make that file and its directory "
-                "usable by this account, or wait for the update that holds it, "
-                "and run ASH again."
-            ) from exc
+            if fallback is None or isinstance(exc, TimeoutError):
+                raise _lock_refused(tool, lock, exc) from exc
+            ASH_LOGGER.debug(
+                f"the {tool} database update could not take {lock.as_posix()} "
+                f"({exc}); taking {fallback.as_posix()}"
+            )
+            try:
+                held.enter_context(exclusive_lock(fallback))
+            except OSError as second:
+                raise _lock_refused(tool, fallback, second) from second
         yield
 
 
@@ -694,7 +741,9 @@ def prepare_content_db(
                 f"{tool} is not installed, so its database cannot be updated"
             )
         lock = update_lock_path(tool, cache)
-        with _refresh_lock(tool, lock), outside_scanner_sandbox():
+        shared, account = _temporary_locks(tool, cache)
+        fallback = account if lock == shared else None
+        with _refresh_lock(tool, lock, fallback=fallback), outside_scanner_sandbox():
             workdir = Path(tempfile.mkdtemp(prefix=f"ash-{tool}-refresh-"))
             try:
                 # Placed by the same rule as checkov's scans, inside this block so

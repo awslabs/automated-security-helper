@@ -24,7 +24,8 @@ database download, and failing a scan for that would be worse than the
 cross-process race it guards against. The lock file is created if missing and never
 removed: removing it while another process waits on it would let a third process
 lock a new file of the same name. It is opened for writing when this account may
-write it, and read-only when it may not (:func:`_open_lock_file`): on a network
+write it, and read-only, without asking to create it, when it may not
+(:func:`_open_lock_file`): on a network
 mount (NFS, CIFS) ``flock`` is emulated with byte-range locks, and an exclusive
 one needs a descriptor open for writing, so a read-only open made the lock raise
 ``EBADF`` there and every tool database refresh on a network home failed; a lock
@@ -110,6 +111,16 @@ def _open_lock_file(path: Path) -> int:
     serialized rather than failing. A link at the name is not followed where the
     platform can refuse one (``O_NOFOLLOW``).
 
+    The read-only open does not ask to create the file. Only the read-write open
+    does, and a refusal of it can come from the create itself: on Linux with
+    ``fs.protected_regular`` set, an ``O_CREAT`` open of another account's
+    regular file in a sticky, world-writable directory (the temporary directory)
+    is refused whatever the access mode, though a plain read-only open of the
+    same file succeeds. Repeating the create in the fallback made such a file
+    unusable as a lock for the second account. When the name does not exist
+    there is nothing to open read-only, and the read-write open's own refusal is
+    the error raised.
+
     Opened without blocking (``O_NONBLOCK``, where it exists) and refused unless
     what was opened is a regular file. Opening a FIFO blocks until its other end
     is opened, so a FIFO planted at the name (the read-only fallback reaches it
@@ -119,11 +130,14 @@ def _open_lock_file(path: Path) -> int:
     the name is refused the same way. The flag is left on the descriptor, which
     is only ever locked and closed, never read or written.
     """
-    common = os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    common = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        fd = os.open(path, os.O_RDWR | common, 0o644)
-    except PermissionError:
-        fd = os.open(path, os.O_RDONLY | common, 0o644)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | common, 0o644)
+    except PermissionError as refused:
+        try:
+            fd = os.open(path, os.O_RDONLY | common)
+        except FileNotFoundError:
+            raise refused from None
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise OSError(

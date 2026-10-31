@@ -11,7 +11,9 @@ is opened read-write first. It is opened read-only only when that open is
 refused: a lock file another account created in a shared cache (mode 0644) is
 readable where it is not writable, and on a local filesystem ``flock`` takes an
 exclusive lock on a read-only descriptor, so the second account's update is
-serialized rather than failing with ``PermissionError``.
+serialized rather than failing with ``PermissionError``. The read-only open does not
+ask to create the file: a kernel can refuse the create alone (see
+``_refuse_every_create``).
 """
 
 from __future__ import annotations
@@ -103,6 +105,73 @@ def test_a_lock_file_this_account_cannot_write_is_opened_read_only_and_locked(
     writing, reading = _opens_of(opened, lock_file)
     assert writing & os.O_ACCMODE == os.O_RDWR
     assert reading & os.O_ACCMODE == os.O_RDONLY
+
+
+def _refuse_every_create(monkeypatch, lock_file, opened):
+    """Stand in for a kernel that refuses an open that asks to create ``lock_file``.
+
+    Linux with ``fs.protected_regular`` set refuses an ``O_CREAT`` open of another
+    account's regular file in a sticky, world-writable directory, whatever the
+    access mode, and the test cannot make a file this user does not own, so the
+    refusal is simulated: an open of ``lock_file`` with ``O_CREAT`` raises
+    ``PermissionError``, and one without it goes through. Every open of the file is
+    recorded in ``opened`` as its flags."""
+    real_open = os.open
+
+    def protected(path, flags, *args, **kwargs):
+        if os.fspath(path) == os.fspath(lock_file):
+            opened.append(flags)
+            if flags & os.O_CREAT:
+                raise PermissionError(
+                    errno.EACCES, "Permission denied", os.fspath(path)
+                )
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(file_lock.os, "open", protected)
+
+
+def test_the_read_only_fallback_does_not_ask_to_create_the_lock_file(
+    tmp_path, monkeypatch
+):
+    """When the read-write open is refused for the create itself, the fallback has to
+    leave the create out, or the second account's open is refused the same way and
+    the file cannot be a lock for it. The lock file exists here, so the read-only
+    open without ``O_CREAT`` succeeds and the lock is taken."""
+    lock_file = tmp_path / "shared" / ".lock"
+    lock_file.parent.mkdir()
+    lock_file.touch()
+    opened = []
+    _refuse_every_create(monkeypatch, lock_file, opened)
+
+    entered = False
+    with file_lock.exclusive_lock(lock_file):
+        entered = True
+
+    assert entered
+    writing, reading = opened
+    assert writing & os.O_CREAT
+    assert writing & os.O_ACCMODE == os.O_RDWR
+    assert reading & os.O_ACCMODE == os.O_RDONLY
+    assert not reading & os.O_CREAT
+
+
+def test_control_a_refused_create_of_a_missing_lock_file_raises_that_refusal(
+    tmp_path, monkeypatch
+):
+    """Nothing exists to open read-only, so the error is the create's own
+    ``PermissionError`` and no lock file appears, not the ``FileNotFoundError`` of
+    the read-only open that was tried after it."""
+    lock_file = tmp_path / "shared" / ".lock"
+    opened = []
+    _refuse_every_create(monkeypatch, lock_file, opened)
+
+    with pytest.raises(PermissionError) as raised:
+        with file_lock.exclusive_lock(lock_file):
+            pass
+
+    assert raised.value.errno == errno.EACCES
+    assert not lock_file.exists()
+    assert [flags & os.O_ACCMODE for flags in opened] == [os.O_RDWR, os.O_RDONLY]
 
 
 def test_control_a_refusal_other_than_permission_propagates(tmp_path, monkeypatch):

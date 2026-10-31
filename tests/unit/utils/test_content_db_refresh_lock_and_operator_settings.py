@@ -329,6 +329,89 @@ def test_a_shared_temp_lock_that_is_not_a_regular_file_sends_the_caller_to_its_o
     assert [what for _argv, _env, what in captured] == ["grype database"]
 
 
+def _blocked_cache(tmp_path):
+    """A cache that cannot be written (a regular file where its parent should be), so
+    the refresh leaves it for the temporary-directory locks."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("")
+    return blocker / "db"
+
+
+def test_a_shared_temp_lock_the_filesystem_refuses_sends_the_refresh_to_its_own(
+    tmp_path, monkeypatch, captured
+):
+    """The shared temporary lock is a regular file this account can read, which is
+    all ``_lock_is_openable`` can see, and the open still refuses it (the create
+    refused where a kernel guards another account's files in the temporary
+    directory, or a descriptor open for reading alone refused by a network mount).
+    The refresh takes the lock named for this account and runs, as it did before
+    the shared name existed, rather than ending in a failed scanner. The probe is
+    left real so the test shows the path it picked."""
+    cache = _blocked_cache(tmp_path)
+    _lock, shared, own = _lock_names(cache)
+    shared.write_text("")
+    opened = []
+    real_open = file_lock._open_lock_file
+
+    def _open(path):
+        opened.append(path)
+        if path == shared:
+            raise PermissionError(errno.EACCES, "Permission denied", os.fspath(path))
+        return real_open(path)
+
+    monkeypatch.setattr(file_lock, "_open_lock_file", _open)
+    assert refresh.update_lock_path("grype", cache) == shared
+    _prepare("grype", cache, tmp_path)
+    assert opened == [shared, own]
+    assert [what for _argv, _env, what in captured] == ["grype database"]
+
+
+def test_control_a_holder_of_the_shared_temp_lock_is_waited_for_not_routed_around(
+    tmp_path, monkeypatch, captured
+):
+    """A holder that kept the shared lock past the bound is another update still
+    running. The refresh reports it as it always did and does not take the lock
+    named for this account, which would let it run beside that update."""
+    cache = _blocked_cache(tmp_path)
+    _lock, shared, _own = _lock_names(cache)
+    opened = []
+
+    def _open(path):
+        opened.append(path)
+        raise TimeoutError("Another process has held the lock.")
+
+    monkeypatch.setattr(file_lock, "_open_lock_file", _open)
+    with pytest.raises(ScannerError, match="could not take its lock") as raised:
+        _prepare("grype", cache, tmp_path)
+    assert shared.as_posix() in str(raised.value)
+    assert opened == [shared]
+    assert captured == []
+
+
+def test_a_shared_temp_lock_and_the_account_lock_both_refused_name_the_last(
+    tmp_path, monkeypatch, captured
+):
+    """When the fallback is refused too, nothing is left to take: the error is the
+    ``ScannerError`` the scanners turn into a failed scanner, naming the lock last
+    tried and carrying its refusal."""
+    cache = _blocked_cache(tmp_path)
+    _lock, shared, own = _lock_names(cache)
+    refusals = {
+        shared: PermissionError(errno.EACCES, "Permission denied"),
+        own: OSError(errno.EROFS, "Read-only file system"),
+    }
+
+    def _open(path):
+        raise refusals[path]
+
+    monkeypatch.setattr(file_lock, "_open_lock_file", _open)
+    with pytest.raises(ScannerError, match="could not take its lock") as raised:
+        _prepare("grype", cache, tmp_path)
+    assert own.as_posix() in str(raised.value)
+    assert raised.value.__cause__ is refusals[own]
+    assert captured == []
+
+
 @pytest.mark.parametrize(
     "refusal",
     [
