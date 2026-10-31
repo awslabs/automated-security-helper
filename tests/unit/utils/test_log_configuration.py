@@ -41,16 +41,9 @@ from tests.utils.windows_console import windows_logging_kept_in_the_test
 
 pytestmark = pytest.mark.unit
 
-CI_INDICATORS = [
-    "CI",
-    "GITHUB_ACTIONS",
-    "AZURE_PIPELINES",
-    "JENKINS_URL",
-    "BUILDKITE",
-    "CIRCLECI",
-    "TRAVIS",
-    "APPVEYOR",
-]
+# Every variable the product reads as a CI runner (CI beside its marker list), so
+# a fixture that clears them cannot fall behind the list the product reads.
+CI_INDICATORS = ["CI", *log_module._CI_RUNNER_MARKERS]
 
 
 class FakeStream:
@@ -373,6 +366,24 @@ def test_any_ci_indicator_forces_the_encoding_issue_verdict(on_windows, indicato
     on_windows.setenv(indicator, "1")
 
     assert _detect_encoding_issues() is True
+
+
+@pytest.fixture
+def every_runner_name_set(monkeypatch):
+    """The environment of a host that names a CI runner by every variable the
+    product reads. A test takes it before ``on_windows`` in its arguments, so that
+    fixture starts from this environment."""
+    monkeypatch.setenv("CI", "true")
+    for name in log_module._CI_RUNNER_MARKERS:
+        monkeypatch.setenv(name, "1")
+
+
+def test_the_windows_fixture_clears_every_runner_name_the_product_reads(
+    every_runner_name_set, on_windows
+):
+    on_windows.setattr(sys, "stdout", FakeStream(encoding="utf-8"))
+
+    assert _detect_encoding_issues() is False
 
 
 @pytest.mark.parametrize(
