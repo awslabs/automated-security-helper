@@ -234,6 +234,52 @@ class TestGetUvToolCommandMemo:
             get_uv_tool_command("bandit")
         assert spawn.call_count == 2, spawn.call_args_list
 
+    def test_a_miss_in_one_scope_does_not_stop_another_scope_on_the_same_backend(
+        self, spawn, monkeypatch, tmp_path
+    ):
+        """The policy a probe runs under is built per scope (the scanner's name
+        decides its network), so a neighbor on one backend whose policy allows
+        what the first scope's denied probes for itself."""
+        from automated_security_helper.utils.sandbox import scope as sandbox_scope
+
+        monkeypatch.setattr(
+            uv_tool_runner, "find_executable", lambda name: "/usr/bin/bandit"
+        )
+        denied = _scope_of(tmp_path, "zz-backend")
+        allowed = _scope_of(tmp_path, "zz-backend")
+        allowed.scanner_name = "yy-scanner"
+        with sandbox_scope.sandbox_scope(denied):
+            get_uv_tool_command("bandit", from_spec="bandit[toml]")
+        spawn.return_value = subprocess.CompletedProcess([], 0, "1.7.0\n", "")
+        with sandbox_scope.sandbox_scope(allowed):
+            command = get_uv_tool_command("bandit", from_spec="bandit[toml]")
+        assert spawn.call_count == 2, spawn.call_args_list
+        assert command == ["uv", "tool", "run", "--from", "bandit[toml]", "bandit"]
+
+    def test_a_collected_scopes_miss_is_not_served_to_a_later_scope(
+        self, spawn, monkeypatch, tmp_path
+    ):
+        """The memo holds a weak reference to its scope: once the scope is
+        gone its entry is dropped, so an id the interpreter hands to a later
+        scope cannot read as that scope's miss."""
+        import gc
+
+        from automated_security_helper.utils.sandbox import scope as sandbox_scope
+
+        monkeypatch.setattr(
+            uv_tool_runner, "find_executable", lambda name: "/usr/bin/bandit"
+        )
+        gone = _scope_of(tmp_path, "zz-backend")
+        with sandbox_scope.sandbox_scope(gone):
+            get_uv_tool_command("bandit")
+        assert len(uv_tool_runner._uv_scoped_probe_misses) == 1
+        del gone
+        gc.collect()
+        with sandbox_scope.sandbox_scope(_scope_of(tmp_path, "zz-backend")):
+            get_uv_tool_command("bandit")
+        assert spawn.call_count == 2, spawn.call_args_list
+        assert len(uv_tool_runner._uv_scoped_probe_misses) == 1
+
     def test_a_from_spec_probe_gets_the_environment_building_budget(self, spawn):
         """Resolving a spec with extras and a constraint on a cold cache builds
         an environment; under the bare name's 5 s budget that probe was killed

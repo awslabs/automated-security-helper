@@ -2960,13 +2960,47 @@ _uv_command_binary: Dict[str, str] = {}
 # and runs only its own tree-scoped lookups. Cleared with the other lookups.
 _uv_probe_answers: Dict[str, bool] = {}
 #: The probes that exited non-zero inside a sandbox scope, keyed by the probe's
-#: own key and the scope's backend (``_probe_scope_key``). That exit is the
-#: wrapper's view of the filesystem and network, not uv's answer about the tool,
-#: so it is not in ``_uv_probe_answers`` and no caller outside the scope reads
-#: it; inside the scope it spares each later lookup the same spawn, a ``--from``
+#: own key and the identity of the scope they ran in, each with a weak
+#: reference to that scope. That exit is the wrapper's view of the filesystem
+#: and network, and the policy behind that view is built per scope (the
+#: scanner's name decides its network, its requirements and read paths decide
+#: the rest), so one scope's miss is not another's even on one backend. It is
+#: not in ``_uv_probe_answers`` and no caller outside the scope reads it;
+#: inside the scope it spares each later lookup the same spawn, a ``--from``
 #: probe being up to ``_UV_TOOL_VERSION_PROBE_TIMEOUT`` long. Guarded by
 #: ``_uv_tool_runner_cache_lock``; cleared with the caches.
-_uv_scoped_probe_misses: set[str] = set()
+_uv_scoped_probe_misses: Dict[str, Any] = {}
+
+
+def _scoped_miss_known(miss_key: str, scope: Any) -> bool:
+    """Whether this very scope already missed this probe (lock held).
+
+    The key carries the scope's id and the entry its weak reference, so an id
+    that a collected scope left behind and a new scope took over reads as no
+    miss: the entry is dropped and the probe runs.
+    """
+    reference = _uv_scoped_probe_misses.get(miss_key)
+    if reference is None:
+        return False
+    if reference() is scope:
+        return True
+    _uv_scoped_probe_misses.pop(miss_key, None)
+    return False
+
+
+def _remember_scoped_miss(miss_key: str, scope: Any) -> None:
+    """Remember that this scope missed this probe (lock held).
+
+    Entries of scopes that are gone are dropped as a new one is added, so the
+    memo does not outlive the scans it served.
+    """
+    try:
+        reference = _weakref.ref(scope)
+    except TypeError:
+        return
+    for stale in [k for k, r in _uv_scoped_probe_misses.items() if r() is None]:
+        _uv_scoped_probe_misses.pop(stale, None)
+    _uv_scoped_probe_misses[miss_key] = reference
 #: The retry window a timed-out ``get_uv_tool_command`` probe opened for its key:
 #: the monotonic time until which the uv probe is skipped for that key. Guarded
 #: by ``_uv_tool_runner_cache_lock``; cleared with the caches.
@@ -3664,20 +3698,19 @@ def get_uv_tool_command(
         # whether that miss is already known (see _uv_scoped_probe_misses).
         scoped_miss_key: Optional[str] = None
         scoped_miss = False
+        miss_scope = _probe_share_key()
         if uv_path is not None:
             probe_offline = offline or is_checking_only()
             probe_key = (
                 f"{tool_name}::{from_spec or ''}::offline={int(probe_offline)}"
                 f"::{uv_path}"
             )
-            scope_key = _probe_scope_key()
-            if scope_key is not None:
-                scoped_miss_key = f"{probe_key}::scope={scope_key!r}"
+            if miss_scope is not None:
+                scoped_miss_key = f"{probe_key}::scope={id(miss_scope)}"
             with _uv_tool_runner_cache_lock:
                 remembered_probe = _uv_probe_answers.get(probe_key)
-                scoped_miss = (
-                    scoped_miss_key is not None
-                    and scoped_miss_key in _uv_scoped_probe_misses
+                scoped_miss = scoped_miss_key is not None and _scoped_miss_known(
+                    scoped_miss_key, miss_scope
                 )
             if remembered_probe is not None:
                 # The same question was answered for another scanned tree in
@@ -3743,7 +3776,7 @@ def get_uv_tool_command(
                 # though: the wrapper's view of the filesystem and network
                 # decides what the probe could reach there (as uv_availability
                 # and get_tool_version already read it), so remembered it
-                # would serve one backend's refusal to every caller on the
+                # would serve one scope's refusal to every caller on the
                 # host for the rest of the process. It counts as a probe that
                 # did not answer: this call falls back to the PATH binary and
                 # nothing is remembered. A success is uv's own, in any scope.
@@ -3765,13 +3798,14 @@ def get_uv_tool_command(
                     and scoped_miss_key is not None
                     and not is_checking_only()
                 ):
-                    # The scope's own miss: remembered under the scope's key
+                    # The scope's own miss: remembered for that scope object
                     # only, so each later lookup in it takes the PATH binary
                     # without starting the probe again, and no caller outside
-                    # the scope is told what its wrapper could not reach.
+                    # the scope, a neighbor on the same backend included, is
+                    # told what this scope's policy could not reach.
                     with _uv_tool_runner_cache_lock:
                         if _lookup_generation == generation:
-                            _uv_scoped_probe_misses.add(scoped_miss_key)
+                            _remember_scoped_miss(scoped_miss_key, miss_scope)
             except subprocess.TimeoutExpired:
                 with _uv_tool_runner_cache_lock:
                     _uv_command_probe_windows[cache_key] = (
