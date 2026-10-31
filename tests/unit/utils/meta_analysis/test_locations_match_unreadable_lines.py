@@ -22,6 +22,9 @@ from automated_security_helper.utils.meta_analysis.locations_match import (
     _line_number,
     locations_match,
 )
+from automated_security_helper.utils.meta_analysis.sarif_analysis import (
+    validate_sarif_aggregation,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -77,6 +80,86 @@ def test_an_absent_line_still_matches_at_file_level():
     for location in (no_region, empty_region, null_lines):
         assert locations_match(location, _sarif()) is True
         assert locations_match(_sarif(), location) is True
+
+
+def test_two_locations_that_spell_an_unreadable_line_alike_are_one_location():
+    # A finding and its unchanged copy both carry the line as the scanner wrote
+    # it. Each side was refused for its own unreadable line, so the pair was lost
+    # while the exact-match check read the same two as equal.
+    assert locations_match(_sarif(start="abc", end=None), _sarif(start="abc", end=None))
+    assert locations_match(_sarif(start=10.5, end=10.5), _sarif(start=10.5, end=10.5))
+
+
+def test_two_locations_that_spell_an_unreadable_line_apart_are_two_locations():
+    assert not locations_match(
+        _sarif(start="abc", end=None), _sarif(start="xyz", end=None)
+    )
+    assert not locations_match(
+        _sarif(start="abc", end=None), _sarif(start="abc", end=7)
+    )
+
+
+def test_an_unreadable_line_beside_a_location_with_no_line_matches_at_file_level():
+    # The copy lost its region: the finding is there, its line is the lost field.
+    region_none = {
+        "physicalLocation": {"artifactLocation": {"uri": "a.py"}, "region": None}
+    }
+    unreadable = _sarif(start="abc", end=None)
+
+    assert locations_match(unreadable, region_none) is True
+    assert locations_match(region_none, unreadable) is True
+    # A readable line on the other side is still refused.
+    assert locations_match(unreadable, _sarif()) is False
+
+
+def _report(region):
+    return {
+        "runs": [
+            {
+                "results": [
+                    {
+                        "ruleId": "B101",
+                        "message": {"text": "assert used"},
+                        "locations": [
+                            {
+                                "physicalLocation": {
+                                    "artifactLocation": {"uri": "a.py"},
+                                    "region": region,
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+
+
+def test_a_copy_that_keeps_an_unreadable_line_is_a_matched_finding():
+    original = _report({"startLine": "abc"})
+    result = validate_sarif_aggregation(
+        {"bandit": original}, _report({"startLine": "abc"})
+    )
+
+    assert result["summary"]["total_findings"] == 1
+    assert result["summary"]["matched_findings"] == 1
+    assert result["unmatched_results"] == {}
+    assert result["summary"]["critical_missing_fields"] == 0
+
+
+def test_a_copy_that_lost_its_region_is_a_matched_finding_with_a_lost_line():
+    result = validate_sarif_aggregation(
+        {"bandit": _report({"startLine": "abc"})}, _report(None)
+    )
+
+    assert result["summary"]["matched_findings"] == 1
+    assert result["unmatched_results"] == {}
+    lost = [
+        field["path"]
+        for fields in result["missing_fields"]["bandit"].values()
+        for field in fields
+    ]
+    assert any(path.endswith("region.startLine") for path in lost), lost
 
 
 @pytest.fixture

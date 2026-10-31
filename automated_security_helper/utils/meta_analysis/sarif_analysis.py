@@ -446,10 +446,11 @@ def _locations_equal(
 ) -> bool:
     """Whether two ``extract_location_info`` dicts name one file and one line
     range: the same file once the URIs are read as paths, and equal start and
-    end lines once digit strings are read as the integers they spell."""
+    end lines once digit strings are read as the integers they spell. Lines that
+    read as no line are equal only when they are spelled alike."""
     from automated_security_helper.utils.meta_analysis.locations_match import (
-        _line_number,
         file_paths_match,
+        lines_equal,
     )
 
     file_one, file_two = location_info.get("file_path"), other.get("file_path")
@@ -462,7 +463,7 @@ def _locations_equal(
     ):
         return False
     return all(
-        _line_number(location_info.get(key)) == _line_number(other.get(key))
+        lines_equal(location_info.get(key), other.get(key))
         for key in ("start_line", "end_line")
     )
 

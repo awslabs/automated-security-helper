@@ -17,8 +17,12 @@ def locations_match(loc1: Dict, loc2: Dict, scan_root: Optional[str] = None) -> 
     as digit strings, or as floats of a whole value, are read as the integers they
     spell. Both forms reach this function from scanner reports and raised
     TypeError out of the whole aggregation check. A line that is stated and
-    reads as no line (a fraction, text) makes the locations incompatible: read as
-    an absent line it matched every line in the file.
+    reads as no line (a fraction, text) makes the locations incompatible with one
+    that states a readable line: read as an absent line it matched every line in
+    the file. Two locations that both state such a line match when they spell
+    their lines alike (a finding and its unchanged copy), and one beside a
+    location with no line at all matches at file level, the lost line then being
+    a lost field and not a lost finding.
 
     Args:
         loc1: First location (can be SARIF format or simple format)
@@ -56,7 +60,19 @@ def locations_match(loc1: Dict, loc2: Dict, scan_root: Optional[str] = None) -> 
 
     # A line that is stated and reads as no line (``10.5``, ``"abc"``) is not an
     # absent one: absent matches at file level, and this would match any line.
-    if _has_unreadable_line(loc1) or _has_unreadable_line(loc2):
+    unreadable1 = _has_unreadable_line(loc1)
+    unreadable2 = _has_unreadable_line(loc2)
+    if unreadable1 and unreadable2:
+        # Neither side names a line this module can place, so the two are the
+        # same location only when they spell the same lines: a finding and its
+        # unchanged copy both carrying ``startLine: "abc"`` are one finding.
+        return _raw_line_range(loc1) == _raw_line_range(loc2)
+    if (unreadable1 and _has_readable_line(loc2)) or (
+        unreadable2 and _has_readable_line(loc1)
+    ):
+        # A line on one side is no line on the other: the unreadable one would
+        # match it by being read as absent. A side with no line at all is not
+        # refused: the finding is there and its lost line is a lost field.
         return False
 
     # Extract line ranges
@@ -308,6 +324,23 @@ def _has_unreadable_line(location: Dict) -> bool:
         value is not None and _line_number(value) is None
         for value in _raw_line_range(location)
     )
+
+
+def _has_readable_line(location: Dict) -> bool:
+    """Whether the location states a line that reads as a line number."""
+    return any(_line_number(value) is not None for value in _raw_line_range(location))
+
+
+def lines_equal(first, second) -> bool:
+    """Whether two stated lines are the same line: the same number once read, or,
+    when neither reads as a number, the same spelling (absent equals absent).
+
+    Two lines that both read as no line were equal whatever they said, so
+    ``"abc"`` was the line ``"xyz"`` and the line that was not stated at all."""
+    number_one, number_two = _line_number(first), _line_number(second)
+    if number_one is None and number_two is None:
+        return first == second
+    return number_one == number_two
 
 
 def _extract_line_range(location: Dict) -> tuple:
