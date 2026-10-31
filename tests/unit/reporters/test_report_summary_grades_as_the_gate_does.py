@@ -310,6 +310,39 @@ class TestAWorkspaceHeadlineGradesAsTheProjectOutcomeDid:
         assert summary["actionable"] == 1, summary
 
 
+class TestAScannersGateIsResolvedOncePerScanner:
+    def test_the_resolver_runs_once_however_many_times_findings_are_graded(
+        self, monkeypatch
+    ):
+        """The summary, the hotspots, the cards and the detailed findings each
+        grade every finding; the resolver dumps the whole scanners section per
+        call, so it is asked once for a scanner and the answer is kept.
+
+        RED at the base: one resolver call for every finding graded.
+        """
+        # Built first: constructing the emitter reads the scanners' metrics,
+        # which ask the resolver too, and only the grading is counted here.
+        emitter = ReportContentEmitter(_one_bandit_finding_model("note", "svc"))
+        calls = []
+        real = ScannerStatisticsCalculator.get_scanner_threshold_info
+
+        def counting(model, scanner_name):
+            calls.append(scanner_name)
+            return real(model, scanner_name)
+
+        monkeypatch.setattr(
+            ScannerStatisticsCalculator,
+            "get_scanner_threshold_info",
+            staticmethod(counting),
+        )
+
+        for _ in range(3):
+            emitter.is_finding_actionable(_vuln(scanner="bandit"))
+        emitter.is_finding_actionable(_vuln(scanner="semgrep"))
+
+        assert calls == ["bandit", "semgrep"], calls
+
+
 class TestAWorkspaceFindingIsGradedByItsProjectsGate:
     @pytest.fixture
     def model(self, tmp_path) -> AshAggregatedResults:

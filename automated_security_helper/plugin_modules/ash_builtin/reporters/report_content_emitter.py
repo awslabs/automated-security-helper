@@ -169,6 +169,8 @@ class ReportContentEmitter:
         # threshold the scan read from an environment variable is listed at the
         # strictest gate), read once for the same reason.
         self._project_scanner_thresholds = workspace_project_scanner_thresholds(model)
+        # The gate each (project, scanner) pair resolves to, filled on first use.
+        self._threshold_cache: Dict[tuple, str] = {}
         # The projects whose policy-scanner findings were reported and left out
         # of the outcome (policy_scanners_gate explicitly off). The JUnit report
         # reads the same table, so the reports and the exit code grade alike.
@@ -561,34 +563,50 @@ class ReportContentEmitter:
         ):
             return False
 
-        # The gate the finding's own outcome used. In a workspace the merged
-        # results carry no ash_config, so the scanner resolver answers ASH's
-        # default for every project; each project's record carries the gate
-        # threshold its outcome was judged against, and a finding attributed to
-        # a project is graded by that, as the project's outcome and the exit
-        # code graded it. A single-directory scan reads the scanner's threshold
-        # from the recorded configuration, as before. Within a project the
-        # scanner's own recorded gate comes first, then the project's gate: the
-        # order the project's outcome and the merged JUnit report resolve them
-        # in, so a scanner the project tightened, relaxed or withheld is graded
-        # here as it was there.
-        threshold = None
-        if vuln.workspace_project:
-            threshold = self._project_scanner_thresholds.get(
-                vuln.workspace_project, {}
-            ).get(scanner_name)
-            if threshold is None:
-                threshold = self._project_thresholds.get(vuln.workspace_project)
-        if threshold is None:
-            threshold, _ = ScannerStatisticsCalculator.get_scanner_threshold_info(
-                self.model, scanner_name
-            )
+        threshold = self._threshold_for(vuln.workspace_project, scanner_name)
 
         # Get the severity of the finding
         severity = vuln.severity or "UNKNOWN"
 
         # Determine if the finding is actionable based on the threshold
         return self._is_severity_actionable(severity, threshold)
+
+    def _threshold_for(self, project: str | None, scanner_name: str) -> str:
+        """The gate a finding of *scanner_name* in *project* is graded by.
+
+        The gate the finding's own outcome used. In a workspace the merged
+        results carry no ash_config, so the scanner resolver answers ASH's
+        default for every project; each project's record carries the gate
+        threshold its outcome was judged against, and a finding attributed to
+        a project is graded by that, as the project's outcome and the exit
+        code graded it. A single-directory scan reads the scanner's threshold
+        from the recorded configuration, as before. Within a project the
+        scanner's own recorded gate comes first, then the project's gate: the
+        order the project's outcome and the merged JUnit report resolve them
+        in, so a scanner the project tightened, relaxed or withheld is graded
+        here as it was there.
+
+        Answered once per (project, scanner): the resolver dumps the whole
+        scanners section on every call, and the summary, the hotspots, the
+        cards and the detailed findings each grade every finding. The recorded
+        tables are read once at construction, so the pair is all the answer
+        depends on.
+        """
+        key = (project, scanner_name)
+        if key not in self._threshold_cache:
+            threshold = None
+            if project:
+                threshold = self._project_scanner_thresholds.get(project, {}).get(
+                    scanner_name
+                )
+                if threshold is None:
+                    threshold = self._project_thresholds.get(project)
+            if threshold is None:
+                threshold, _ = ScannerStatisticsCalculator.get_scanner_threshold_info(
+                    self.model, scanner_name
+                )
+            self._threshold_cache[key] = threshold
+        return self._threshold_cache[key]
 
     @staticmethod
     def _is_policy_origin_finding(vuln: FlatVulnerability) -> bool:
