@@ -24,12 +24,14 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from markdown_it import MarkdownIt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "docs_versions.py"
@@ -1005,18 +1007,88 @@ def _real_template(target: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+# The docs_dir of mkdocs.yml. install_refs.py renders only the target files under it
+# (README.md and the like are not on the site), and pinned_pages selects the same.
+DOCS_DIR = "docs/content"
+SITE_TARGETS = [
+    target for target in REAL_TARGETS if Path(target).is_relative_to(DOCS_DIR)
+]
+
+_MARKDOWN = MarkdownIt("commonmark").enable("table")
+_TEXT_FENCE = re.compile(
+    r'<pre><code class="language-text">(.*?)</code></pre>', re.DOTALL
+)
+
+
+def _built_text(markdown: str, *, commands_only: bool) -> str:
+    """A rendered page as check_published reads it: Markdown to HTML, then page_text.
+
+    The site converts Markdown with Python-Markdown and Material's highlighter; this
+    uses markdown-it-py, which every install has, and gives the same elements the
+    check reads: a list item is an `li` and not a `- ` line, an inline span is a
+    `code` element of its own, and a table is a `table`. The highlighter wraps a
+    `text` sample in the `div` that page_text drops for main, so the sample is
+    wrapped the same way here.
+    """
+    html = _MARKDOWN.render(markdown)
+    html = _TEXT_FENCE.sub(r'<div class="language-text highlight">\1</div>', html)
+    return dv.page_text(html.encode(), commands_only=commands_only)
+
+
 @pytest.mark.unit
-@pytest.mark.parametrize("target", REAL_TARGETS)
+def test_the_docs_dir_named_here_is_the_sites():
+    text = (REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+    match = re.search(r"^docs_dir:\s*[\"']?([^\"'\s#]+)", text, re.MULTILINE)
+    assert match and match.group(1) == DOCS_DIR, match
+
+
+@pytest.mark.unit
+def test_the_site_targets_leave_out_the_pages_the_build_skips():
+    """README.md and the example's README are version-pinned and have templates, but
+    the build never renders them, so the check never reads them."""
+    assert set(REAL_TARGETS) - set(SITE_TARGETS) == {
+        "README.md",
+        "examples/streamlit_ui/README.md",
+    }, SITE_TARGETS
+
+
+@pytest.mark.unit
+def test_the_built_text_is_what_the_check_reads():
+    """Red before: the test below read the Markdown, where a bullet is a `- ` line the
+    entry walk takes for a YAML list entry and an inline span shares a line with the
+    text around it; the build reads neither."""
+    markdown = (
+        "- a bullet\n\n"
+        "Run `git clone --branch v2.0.0 example.git` and see [docs](https://x.test/a).\n"
+    )
+    text = _built_text(markdown, commands_only=False)
+    assert "- a bullet" not in text, text
+    assert "\ngit clone --branch v2.0.0 example.git\n" in text, text
+
+
+@pytest.mark.unit
+def test_the_built_text_of_main_drops_a_text_sample():
+    markdown = "```text\nrev: v3.3.0\n```\n\n```bash\nrun it\n```\n"
+    assert "v3.3.0" in _built_text(markdown, commands_only=False)
+    assert "v3.3.0" not in _built_text(markdown, commands_only=True)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("target", SITE_TARGETS)
 def test_no_real_page_holds_a_pin_the_check_would_reject(target):
     """The check fails the docs build on a pin that no pattern accepts, and every
     other test feeds it a hand-written string. Render each real template the way the
-    site is built, for a release and for main, and require that nothing is rejected:
-    a third-party tag or an install form the patterns do not know would otherwise
-    fail the first build after the check landed, with no allowance to name it."""
+    site is built, for a release and for main, and read it the way check_published
+    does (the page as a reader sees it, commands only for main), and require that
+    nothing is rejected: a third-party tag or an install form the patterns do not know
+    would otherwise fail the first build after the check landed, with no allowance to
+    name it. Only the pages the build renders: see SITE_TARGETS."""
     manager = _manager()
     template = _real_template(target)
-    release = manager.render(template, "3.4.0")
-    main = manager.render_for_branch(template, "main", "3.4.0")
+    release = _built_text(manager.render(template, "3.4.0"), commands_only=False)
+    main = _built_text(
+        manager.render_for_branch(template, "main", "3.4.0"), commands_only=True
+    )
     assert dv.unrecognized_pin_problems(manager, release, f"3.4.0/{target}") == []
     assert dv.unrecognized_pin_problems(manager, main, f"main/{target}") == []
     assert manager.release_pins(release) <= {"3.4.0"}
@@ -1025,16 +1097,23 @@ def test_no_real_page_holds_a_pin_the_check_would_reject(target):
 @pytest.mark.unit
 def test_the_real_templates_hold_pins_and_the_check_can_fail_on_them():
     """The control for the test above: it read pins (a zero over no pins would pass
-    anything), and the same check does reject a planted pin in the same text."""
+    anything), and the same check does reject a planted pin in the same text. The
+    plant is a fenced block at the top of the page, so it reads as a code element
+    whatever the page ends with."""
     manager = _manager()
     rendered = {
         target: manager.render(_real_template(target), "3.4.0")
-        for target in REAL_TARGETS
+        for target in SITE_TARGETS
     }
-    pinned = [target for target, text in rendered.items() if manager.release_pins(text)]
-    assert len(pinned) > len(REAL_TARGETS) // 2, pinned
+    pinned = [
+        target
+        for target, text in rendered.items()
+        if manager.release_pins(_built_text(text, commands_only=False))
+    ]
+    assert len(pinned) > len(SITE_TARGETS) // 2, pinned
     for target in pinned:
-        planted = rendered[target] + f"\n- rev: v9.9.9\n  repo: {REPO_URL}\n"
+        plant = f"```yaml\n- rev: v9.9.9\n  repo: {REPO_URL}\n```\n\n"
+        planted = _built_text(plant + rendered[target], commands_only=False)
         problems = dv.unrecognized_pin_problems(manager, planted, target)
         assert len(problems) == 1, (target, problems)
 
