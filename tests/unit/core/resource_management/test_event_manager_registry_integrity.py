@@ -17,6 +17,8 @@ Each test is pinned against the behavior it replaced:
 * Cleanup errors grew without bound and counted toward the health status for
   the life of the process.
 * ``get_cleanup_errors`` with a negative limit returned all but the oldest.
+* ``get_cleanup_errors`` copied the list but handed out the stored error dicts,
+  so a caller's edit to a returned entry changed the manager's record.
 * The context managers unregistered by id on exit, removing a same-id
   subscription registered after their own was unregistered; the managed
   subscription's ``unregister`` control did not record that it ran; and
@@ -198,6 +200,22 @@ class TestCleanupErrorsAreBoundedAndExpire:
 
         with pytest.raises(ValueError):
             manager.get_cleanup_errors(limit=-1)
+
+    @pytest.mark.asyncio
+    async def test_editing_a_returned_error_does_not_reach_the_registry(self):
+        manager = EventSubscriptionManager()
+
+        def broken():
+            raise RuntimeError("boom")
+
+        await _register(manager, "sub", cleanup_func=broken)
+        await manager.unregister_subscription("sub")
+        stored = dict(manager.get_cleanup_errors()[0])
+
+        manager.get_cleanup_errors()[0]["error"] = "edited"
+        manager.get_cleanup_errors(limit=1)[0]["subscription_id"] = "edited"
+
+        assert manager.get_cleanup_errors() == [stored]
 
 
 class TestContextManagersRemoveOnlyTheirOwnRegistration:

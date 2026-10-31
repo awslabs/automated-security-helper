@@ -695,16 +695,17 @@ class EventSubscriptionManager:
                 return the rest).
 
         Returns:
-            List of cleanup error information
+            List of cleanup error information. The entries are copies: editing
+            one does not change what the manager stored.
         """
         if limit is not None and limit < 0:
             raise ValueError(f"limit must be zero or positive, not {limit}")
         self._drop_expired_cleanup_errors()
         if limit is None:
-            return self._cleanup_errors.copy()
+            return [dict(entry) for entry in self._cleanup_errors]
         if limit == 0:
             return []
-        return self._cleanup_errors[-limit:] if self._cleanup_errors else []
+        return [dict(entry) for entry in self._cleanup_errors[-limit:]]
 
     def clear_cleanup_errors(self) -> int:
         """Clear stored cleanup errors.
