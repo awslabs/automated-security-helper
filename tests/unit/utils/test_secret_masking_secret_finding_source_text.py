@@ -296,6 +296,40 @@ class TestASecretFindingsOwnSourceText:
         assert masked["Properties"]["Enabled"] is True
         assert PLAINTEXT not in json.dumps(masked)
 
+    def test_every_leaf_of_a_list_in_the_resource_is_masked(self):
+        """A plaintext credential often sits in a list: an ECS container's
+        environment is a list of name and value maps, its command a list of
+        strings."""
+        resource = {
+            "Type": "AWS::ECS::TaskDefinition",
+            "Properties": {
+                "ContainerDefinitions": [
+                    {
+                        "Environment": [{"Name": "DB_USER", "Value": PLAINTEXT}],
+                        "Command": ["--password", PLAINTEXT],
+                    }
+                ]
+            },
+        }
+        model = _results(
+            _result(
+                "AwsSolutions-ECS-1",
+                "template.yaml",
+                3,
+                "The task password must not be a plaintext string.",
+                "cdk-nag",
+                extra={"properties": {"cfn_resource": resource}},
+            )
+        )
+
+        mask_secrets_in_results(model)
+
+        masked = getattr(_first(model).properties, "cfn_resource")
+        container = masked["Properties"]["ContainerDefinitions"][0]
+        assert container["Environment"] == [{"Name": MASKED_LINE, "Value": MASKED_LINE}]
+        assert container["Command"] == [MASKED_LINE, MASKED_LINE]
+        assert PLAINTEXT not in json.dumps(masked)
+
     def test_a_fenced_block_with_no_closing_fence_is_masked_to_the_end(self):
         """A message cut short after its opening fence is still a code block to
         the reports."""
