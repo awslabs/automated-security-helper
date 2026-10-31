@@ -3236,7 +3236,16 @@ class ScanPhase(EnginePhase):
                     )
 
         except Exception as e:
-            error_msg = f"Error during result completeness validation: {error_text(e)}"
+            # Redacted with the config's environment values: the text goes to the
+            # log and the event, and an exception can quote a value the
+            # configuration read from the environment.
+            environment_values = config_environment_values(
+                getattr(self.plugin_context, "config", None)
+            )
+            error_msg = (
+                "Error during result completeness validation: "
+                f"{error_text(e, environment_values)}"
+            )
             ASH_LOGGER.error(error_msg)
 
             # Notify about validation error via event system
@@ -3246,7 +3255,7 @@ class ScanPhase(EnginePhase):
                 self.notify_event(
                     AshEventType.ERROR,
                     message=error_msg,
-                    exception=error_text(e),
+                    exception=error_text(e, environment_values),
                     phase="scan",
                     validation_checkpoint="result_completeness_validation",
                 )
