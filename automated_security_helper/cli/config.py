@@ -2076,22 +2076,18 @@ def lint(
             "these fixes by hand."
         )
 
+    # No hint for a file --fix refuses: the lint un-marks every issue the fixer
+    # would refuse that file for (``_clear_fixable_a_fixer_refuses``), and
+    # without --fix-unused it reads no unused-suppression issue, so such a file
+    # has no issue marked fixable and ``fixable_count`` is 0. The
+    # ``fix_refusal is None`` test keeps "Run with --fix" from being printed for a
+    # file --fix then refuses, whatever the linter marks.
     fixable_count = len(lint_result.fixable_issues)
-    if fixable_count and not fix and not fix_unused:
-        if fix_refusal is None:
-            secho(
-                f"\n💡 {fixable_count} issue(s) can be auto-fixed. Run with --fix to apply fixes.",
-                fg=typer.colors.YELLOW,
-            )
-        else:
-            # Not "Run with --fix": --fix refuses this file, so the hint said
-            # to run a command that then refused.
-            secho(
-                f"\n💡 {fixable_count} issue(s) are marked [auto-fixable], but --fix "
-                "does not rewrite this file (a TOML file, or one that reads the "
-                "environment): make the fixes by hand.",
-                fg=typer.colors.YELLOW,
-            )
+    if fixable_count and fix_refusal is None and not fix and not fix_unused:
+        secho(
+            f"\n💡 {fixable_count} issue(s) can be auto-fixed. Run with --fix to apply fixes.",
+            fg=typer.colors.YELLOW,
+        )
 
     # Apply fixes if requested. Declining a prompt stops the fixing and exits 0,
     # and a fix that refused to rewrite the file exits 1, unless the file is one
