@@ -29,6 +29,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    cast,
 )
 
 import yaml
@@ -1188,7 +1189,7 @@ class ConfigLinter:
                 return loader.construct_mapping(node, deep=True)
             if isinstance(node, yaml.SequenceNode):
                 return loader.construct_sequence(node, deep=True)
-            return loader.construct_scalar(node)
+            return loader.construct_scalar(cast(yaml.ScalarNode, node))
 
         # The empty prefix matches every tag. The loader's own constructors are
         # tried first, so only a tag it does not know reaches this one.
