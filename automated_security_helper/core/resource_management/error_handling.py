@@ -23,7 +23,11 @@ from typing import Dict, List, Optional, Any, Tuple, Union, cast
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
-from automated_security_helper.utils.directory_refusals import output_dir_refusal
+from automated_security_helper.utils.directory_refusals import (
+    REFUSED_CANNOT_BE_CREATED,
+    REFUSED_NOT_A_DIRECTORY,
+    output_dir_refusal,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -103,6 +107,33 @@ class ErrorCategory(Enum):
     UNEXPECTED_ERROR = "unexpected_error"
 
 
+def lookup_error_category(error: BaseException) -> Optional[ErrorCategory]:
+    """The category every route gives an error from looking a path up, or None.
+
+    One answer for one bad input, whichever function met it (``stat`` in
+    ``source_directory_error`` and ``validate_directory_path``, ``lstat`` in
+    ``safe_read_json_file``): a name nothing is at (not found, not a directory,
+    or a link loop on the way, which leads nowhere) is ``file_not_found``; a
+    string the system refuses as a path at all (an embedded NUL, a name past
+    ``NAME_MAX`` or ``PATH_MAX``) is ``invalid_path``; a refusal of permission
+    is ``permission_denied``. None for any other error, which each caller treats
+    as its own default. A NUL read ``invalid_path`` in one route and
+    ``unexpected_error`` in the other two before this.
+    """
+    if isinstance(error, ValueError):
+        return ErrorCategory.INVALID_PATH
+    if isinstance(error, (FileNotFoundError, NotADirectoryError)):
+        return ErrorCategory.FILE_NOT_FOUND
+    if isinstance(error, PermissionError):
+        return ErrorCategory.PERMISSION_DENIED
+    if isinstance(error, OSError):
+        if error.errno == errno.ELOOP:
+            return ErrorCategory.FILE_NOT_FOUND
+        if error.errno == errno.ENAMETOOLONG:
+            return ErrorCategory.INVALID_PATH
+    return None
+
+
 def safe_read_json_file(
     file_path: Union[str, Path], required: bool = True
 ) -> Tuple[Optional[Dict[str, Any]], Optional[MCPResourceError]]:
@@ -158,6 +189,33 @@ def safe_read_json_file(
                 return None, None
         except PermissionError as e:
             return None, _read_permission_error(path_obj, e)
+        except (ValueError, OSError) as e:
+            # The other ways a path can fail to be looked up, in the category
+            # every route gives them (``lookup_error_category``): a link loop on
+            # the way names nothing, and a NUL or a name past the limit is not
+            # a path. Anything else is still the generic handler's.
+            category = lookup_error_category(e)
+            if category is ErrorCategory.FILE_NOT_FOUND:
+                if not required:
+                    return None, None
+                return None, MCPResourceError(
+                    f"File not found: {path_obj}",
+                    context={
+                        "file_path": str(path_obj),
+                        "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+                    },
+                )
+            if category is ErrorCategory.INVALID_PATH:
+                return None, MCPResourceError(
+                    f"Invalid file path {path_obj}: {str(e)}",
+                    context={
+                        "file_path": str(path_obj),
+                        "error_category": ErrorCategory.INVALID_PATH.value,
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                    },
+                )
+            raise
 
         if stat.S_ISLNK(info.st_mode):
             error = MCPResourceError(
@@ -462,25 +520,35 @@ def validate_directory_path(
         # resolves against the working directory, as the caller means it.
         resolved = path_obj.resolve()
         mode: Optional[int] = os.stat(resolved).st_mode
-    except (FileNotFoundError, NotADirectoryError):
-        mode = None
     except RuntimeError:
         # Path.resolve's answer for a symlink loop before Python 3.13: a name
         # that leads nowhere.
         mode = None
-    except PermissionError as e:
-        return MCPResourceError(
-            f"Permission denied: Cannot read directory path {directory_path}: {str(e)}",
-            context={
-                "directory_path": str(directory_path),
-                "error_category": ErrorCategory.PERMISSION_DENIED.value,
-                "error_type": type(e).__name__,
-                "error_message": str(e),
-            },
-        )
-    except OSError as e:
-        if e.errno == errno.ELOOP:
+    except (ValueError, OSError) as e:
+        category = lookup_error_category(e)
+        if category is ErrorCategory.FILE_NOT_FOUND:
             mode = None
+        elif category is ErrorCategory.PERMISSION_DENIED:
+            return MCPResourceError(
+                f"Permission denied: Cannot read directory path {directory_path}: "
+                f"{str(e)}",
+                context={
+                    "directory_path": str(directory_path),
+                    "error_category": ErrorCategory.PERMISSION_DENIED.value,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+        elif category is ErrorCategory.INVALID_PATH:
+            return MCPResourceError(
+                f"Invalid directory path {directory_path}: {str(e)}",
+                context={
+                    "directory_path": str(directory_path),
+                    "error_category": ErrorCategory.INVALID_PATH.value,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
         else:
             return _unexpected_directory_error(directory_path, e)
     except Exception as e:
@@ -544,17 +612,14 @@ def source_directory_error(
     """
     try:
         status = os.stat(directory_path)
-    except (FileNotFoundError, NotADirectoryError):
-        problem, category = "does not exist", ErrorCategory.FILE_NOT_FOUND
-    except ValueError:
-        problem, category = "does not exist", ErrorCategory.INVALID_PATH
-    except OSError as error:
-        if error.errno == errno.ELOOP:
-            problem, category = "does not exist", ErrorCategory.FILE_NOT_FOUND
-        elif error.errno == errno.ENAMETOOLONG:
-            problem, category = "cannot be entered", ErrorCategory.INVALID_PATH
+    except (ValueError, OSError) as error:
+        category = lookup_error_category(error) or ErrorCategory.PERMISSION_DENIED
+        if isinstance(error, ValueError) or category is ErrorCategory.FILE_NOT_FOUND:
+            # An embedded NUL is worded as the CLI words it: nothing is there.
+            problem = "does not exist"
         else:
-            problem, category = "cannot be entered", ErrorCategory.PERMISSION_DENIED
+            # A name past the limit (invalid_path), or any other refusal.
+            problem = "cannot be entered"
     else:
         if not stat.S_ISDIR(status.st_mode):
             problem, category = "is not a directory", ErrorCategory.INVALID_PATH
@@ -599,15 +664,45 @@ def validate_output_directory_path(
         refusal,
         context={
             "directory_path": str(directory_path),
-            "error_category": _output_directory_refusal_category(directory_path).value,
+            "error_category": _output_directory_refusal_category(
+                directory_path, refusal
+            ).value,
         },
     )
 
 
+#: The errors that say a disk or a quota is full: no permission is missing.
+_OUT_OF_SPACE_ERRNOS = frozenset(
+    code for code in (errno.ENOSPC, getattr(errno, "EDQUOT", None)) if code is not None
+)
+
+
 def _output_directory_refusal_category(
     directory_path: Union[str, Path],
+    refusal: Optional[str] = None,
 ) -> ErrorCategory:
-    """The category of a refused output directory, from a stat of the path."""
+    """The category of a refused output directory.
+
+    From what the refusal says went wrong and the error behind it when it carries
+    that (``DirectoryRefusal``), so a full disk or quota (``ENOSPC``, ``EDQUOT``)
+    on a directory that exists is ``resource_exhausted``, not the
+    ``permission_denied`` a second look at the path gave. A refusal that is only
+    text is judged by a stat of the path, as before.
+    """
+    kind = getattr(refusal, "kind", None)
+    if kind is not None:
+        number = getattr(refusal, "error_number", None)
+        if number in _OUT_OF_SPACE_ERRNOS:
+            return ErrorCategory.RESOURCE_EXHAUSTED
+        if kind == REFUSED_NOT_A_DIRECTORY:
+            return ErrorCategory.INVALID_PATH
+        if kind == REFUSED_CANNOT_BE_CREATED:
+            # Refused for what is on the way to it, unless stat itself was
+            # refused permission.
+            if number in (errno.EACCES, errno.EPERM):
+                return ErrorCategory.PERMISSION_DENIED
+            return ErrorCategory.INVALID_PATH
+        return ErrorCategory.PERMISSION_DENIED
     try:
         mode = os.stat(directory_path).st_mode
     except PermissionError:
