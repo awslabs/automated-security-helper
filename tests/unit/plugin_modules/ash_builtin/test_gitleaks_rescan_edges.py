@@ -219,6 +219,33 @@ def test_names_past_the_limit_are_counted_as_unread(monkeypatch):
     assert unread == 7
 
 
+def test_a_name_repeated_on_many_lines_is_one_candidate_and_costs_the_cap_once(
+    monkeypatch,
+):
+    """gitleaks writes one fingerprint per finding, so a file with several
+    findings repeats its name on several lines. Each repeat counted against
+    the cap, and a long ignore file of repeats failed every scan as incomplete
+    with nothing left unread."""
+    monkeypatch.setattr(module, "MAX_IGNORE_CANDIDATES", 3)
+    data = b"".join(f"app/x.py:github-pat:{line}\n".encode() for line in range(1, 11))
+
+    files, unread = gitleaksignore_candidates(data)
+
+    assert files == ["app/x.py"]
+    assert unread == 0
+
+
+def test_distinct_names_still_fill_the_cap_beside_repeated_ones(monkeypatch):
+    monkeypatch.setattr(module, "MAX_IGNORE_CANDIDATES", 3)
+    names = ["app/x.py", "app/x.py", "app/y.py", "app/y.py", "app/z.py", "app/w.py"]
+    data = b"".join(f"{name}:github-pat:1\n".encode() for name in names)
+
+    files, unread = gitleaksignore_candidates(data)
+
+    assert files == ["app/x.py", "app/y.py", "app/z.py"]
+    assert unread == 1
+
+
 def test_names_the_limit_left_unread_fail_the_scan_as_incomplete(
     tmp_path, monkeypatch, caplog
 ):

@@ -376,12 +376,14 @@ def gitleaksignore_candidates(data: bytes) -> Tuple[List[str], int]:
     in the file), all from the scanned tree's own text and before the re-scan's
     deadline is set. A prefix no file can have is never made (longer than
     ``MAX_CANDIDATE_LENGTH``, or ending in a component longer than
-    ``MAX_NAME_LENGTH``), and reading stops when ``MAX_IGNORE_CANDIDATES`` names
-    or ``MAX_IGNORE_CANDIDATE_CHARS`` characters have been made. What is left,
+    ``MAX_NAME_LENGTH``), a name is returned once however many lines repeat it,
+    and reading stops when ``MAX_IGNORE_CANDIDATES`` distinct names or
+    ``MAX_IGNORE_CANDIDATE_CHARS`` characters have been made. What is left,
     counted by the colons of the lines not read, is the second value; the caller
     reports it as names not evaluated, so the scan fails as incomplete.
     """
     files: List[str] = []
+    seen: Set[str] = set()
     unread = 0
     characters = 0
     for raw in data.split(b"\n"):
@@ -420,6 +422,12 @@ def gitleaksignore_candidates(data: bytes) -> Tuple[List[str], int]:
             last = file_part[first_of_last:]
             if _name_length(last) > MAX_NAME_LENGTH:
                 continue
+            # A name already taken is one copy and one re-scan however many
+            # lines repeat it, so it costs the cap nothing. Fingerprints of one
+            # file repeat its name once per finding.
+            if file_part in seen:
+                continue
+            seen.add(file_part)
             files.append(file_part)
             characters += position
     return files, unread
