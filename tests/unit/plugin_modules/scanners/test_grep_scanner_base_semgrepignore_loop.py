@@ -96,7 +96,7 @@ def test_an_unresolvable_semgrepignore_leaves_the_scanner_constructed(
     monkeypatch.setattr(sandbox, "config_is_client_supplied", refuse_to_resolve)
 
     # Enabled on every platform: the default turns semgrep off on Windows, and a
-    # disabled scanner never asks about the file, so the stub would go unreached.
+    # disabled scanner never asks about the file, so the stub would never run.
     scanner = scanner_cls(
         context=test_plugin_context,
         config=config_cls(enabled=True, options=options_cls(offline=False)),
