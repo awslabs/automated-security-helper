@@ -1,5 +1,5 @@
 import csv
-import glob
+import fnmatch
 import json
 import os
 from pathlib import Path
@@ -158,24 +158,44 @@ def _is_derived_report(file_path: str) -> bool:
     return any(stem.startswith(f"{name}.") for name in AGGREGATE_SCANNER_NAMES)
 
 
-def _under_a_link(file_path: str, root: str) -> bool:
-    """Whether a directory on *file_path* below *root* is a symbolic link.
+def _find_sarif_files(
+    sarif_dir: str, top: str, recursive: bool
+) -> tuple[list[str], list[str]]:
+    """The ``*.sarif`` files below ``sarif_dir/top`` and the links not followed.
 
-    ``glob.glob(recursive=True)`` follows a linked directory, so a link in the
-    scan output tree (a leftover of a sandboxed scanner) led the analysis out of
-    the output directory and, when the link pointed at an ancestor, multiplied
-    the walk. The file itself is read under the guard, which refuses a link.
+    The tree is walked without following a symbolic link, so a link in the scan
+    output tree (a leftover of a sandboxed scanner) neither leads the analysis out
+    of the output directory nor, when it points at an ancestor, makes the walk
+    loop until the path is too long: ``glob.glob(recursive=True)`` follows a linked
+    directory and the result was filtered afterwards. A linked directory is
+    returned among the links, and *top* itself when it is one. A linked file is
+    returned among the files: it is read under the guard, which refuses it, so it
+    fails the run as an unreadable file does.
+
+    A name that starts with a dot is left out, as ``glob`` leaves it out, and the
+    files come back sorted: directory order varies by filesystem.
     """
-    try:
-        relative = Path(file_path).relative_to(root)
-    except ValueError:
-        return False
-    current = Path(root)
-    for part in relative.parts[:-1]:
-        current = current / part
-        if os.path.islink(current):
-            return True
-    return False
+    start = os.path.join(sarif_dir, top)
+    if os.path.islink(start):
+        return [], [start]
+    files: list[str] = []
+    links: list[str] = []
+    for current, dirnames, filenames in os.walk(start, followlinks=False):
+        dirnames[:] = sorted(name for name in dirnames if not name.startswith("."))
+        if recursive:
+            links.extend(
+                os.path.join(current, name)
+                for name in dirnames
+                if os.path.islink(os.path.join(current, name))
+            )
+        else:
+            dirnames[:] = []
+        files.extend(
+            os.path.join(current, name)
+            for name in filenames
+            if not name.startswith(".") and fnmatch.fnmatch(name, "*.sarif")
+        )
+    return sorted(files), sorted(links)
 
 
 def analyze_sarif_fields(
@@ -221,28 +241,23 @@ def analyze_sarif_fields(
     results_dict: Dict[str, Dict[str, bool]] = {}
     excluded_dict: Dict[str, Dict[str, bool]] = {}  # For tracking excluded fields
 
-    # Define the search patterns in the specified order. The directory is escaped,
-    # so its own name is not read as a pattern: one named with "[ab]" or "*"
-    # found a sibling's files and not its own.
-    searched_dir = glob.escape(str(sarif_dir))
-    search_patterns = [
-        os.path.join(searched_dir, "reports", "*.sarif"),
-        os.path.join(searched_dir, "scanners", "**", "*.sarif"),
-    ]
-
-    # Find all SARIF files in the specified patterns
-    all_sarif_files = []
-    for pattern in search_patterns:
-        # glob returns directory order, which varies by filesystem; sort so the
-        # JSON and CSV outputs list fields and scanners in the same order everywhere.
-        for found in sorted(glob.glob(pattern, recursive=True)):
-            if _under_a_link(found, str(sarif_dir)):
-                console.print(
-                    f"Skipping [cyan]{escape_markup(found)}[/cyan]: reached through "
-                    "a symbolic link"
-                )
-                continue
-            all_sarif_files.append(found)
+    # Find all SARIF files, in the specified order: reports/, then scanners/ at
+    # any depth. The directory is walked, not matched as a pattern, so its own name
+    # is not read as one: a directory named with "[ab]" or "*" found a sibling's
+    # files and not its own. Each list is sorted so the JSON and CSV outputs list
+    # fields and scanners in the same order everywhere. A symbolic link is
+    # reported and never entered; it counts against the run, as a linked file does.
+    all_sarif_files: list[str] = []
+    linked_paths: list[str] = []
+    for top, recursive in (("reports", False), ("scanners", True)):
+        found_files, found_links = _find_sarif_files(str(sarif_dir), top, recursive)
+        all_sarif_files.extend(found_files)
+        linked_paths.extend(found_links)
+    for linked in linked_paths:
+        console.print(
+            f"Skipping [cyan]{escape_markup(linked)}[/cyan]: a symbolic link, "
+            "not followed"
+        )
 
     if not all_sarif_files:
         console.print(
@@ -642,7 +657,15 @@ def analyze_sarif_fields(
             "file(s) could not be read and are not part of this analysis[/bold red]"
         )
 
-    if has_unexpected_missing_fields or failed_files:
+    # A linked directory is not part of the analysis either, for the same reason:
+    # a linked file already fails the run as an unreadable one.
+    if linked_paths:
+        console.print(
+            f"[bold red]WARNING: {len(linked_paths)} symbolic link(s) in the output "
+            "tree were not followed and are not part of this analysis[/bold red]"
+        )
+
+    if has_unexpected_missing_fields or failed_files or linked_paths:
         raise typer.Exit(code=1)
 
     return results_dict
