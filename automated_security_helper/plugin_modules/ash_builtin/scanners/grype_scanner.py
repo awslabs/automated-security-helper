@@ -150,11 +150,29 @@ def _name_grype_garbled(root: Path, uri: str, separators: Optional[str] = None) 
     grype writes the relative part of a path there with backslashes (see
     ``_attach_package_identity``). On other hosts a backslash is a character of a
     name and is never a separator.
+
+    A URI that begins with *root* itself (grype's Windows spelling, the scan root
+    followed by the backslashed relative path) keeps those leading components as
+    written, and only what follows them is read from the directory; walked from
+    *root* again, the root's own components named a directory that does not exist.
     """
     if _GRYPE_REPLACEMENT not in uri:
         return uri
     if separators is None:
         separators = "/\\" if os.sep == "\\" else "/"
+    # On Windows grype writes the scan root, then the relative path with backslashes
+    # ("D:/a/r/r/\\deploy\\..."; see ``_attach_package_identity``). The walk starts
+    # at *root*, so the root's own components are not walked again: they are kept as
+    # written, and only what follows them is read from the directory.
+    prefix = ""
+    fold = str.casefold if "\\" in separators else str
+    root_text = root.as_posix().rstrip("/")
+    spelled = uri.replace("\\", "/") if "\\" in separators else uri
+    if root_text and fold(spelled).startswith(fold(root_text) + "/"):
+        rest = uri[len(root_text) :]
+        relative = rest.lstrip(separators)
+        prefix = uri[: len(uri) - len(relative)]
+        uri = relative
     parts = re.split(f"([{re.escape(separators)}])", uri)
     current = root
     components: List[str] = []
@@ -186,7 +204,7 @@ def _name_grype_garbled(root: Path, uri: str, separators: Optional[str] = None) 
         components.append(component)
         if component:
             current = current / component
-    return "".join(components)
+    return prefix + "".join(components)
 
 
 def _lowercase_keys(document: Any) -> dict:

@@ -465,6 +465,30 @@ def test_a_backslash_separator_is_kept_in_place_when_asked_for(root):
     assert _name_grype_garbled(root, "a/b�", separators="/\\") == f"a/{garbled}"
 
 
+def test_a_uri_that_begins_with_the_scan_root_is_walked_from_what_follows_it(root):
+    """grype's Windows spelling is the scan root, then the relative path with
+    backslashes (``D:/a/r/r/\\deploy\\...``). Walked from the root again, the root's
+    own components named a directory that does not exist, so nothing matched and
+    the garbled name was left as it was. The shape is written here with the
+    separators the Windows host passes, so a POSIX host runs it too."""
+    make_tree(root, {b"deploy/b\xff": b"x\n"})
+    garbled = os.fsdecode(b"b\xff")
+    uri = f"{root.as_posix()}/\\deploy\\b�"
+
+    assert _name_grype_garbled(root, uri, separators="/\\") == (
+        f"{root.as_posix()}/\\deploy\\{garbled}"
+    )
+
+
+def test_control_a_uri_that_merely_looks_like_the_root_is_walked_whole(root):
+    """Only a URI that begins with the root's whole last component is cut there:
+    ``<root>-other`` is another directory's name."""
+    other = Path(f"{root.as_posix()}-other")
+    uri = f"{other.as_posix()}/\\deploy\\b�"
+
+    assert _name_grype_garbled(root, uri, separators="/\\") == uri
+
+
 # --- the dependency check -----------------------------------------------------------
 
 
