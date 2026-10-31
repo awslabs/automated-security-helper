@@ -355,12 +355,16 @@ _ENUM_FIELDS = frozenset(
 #: ``LogicalLocation.kind`` and ``Exception.kind`` are free text, and
 #: ``threadFlowLocation.state`` is a free-text map that can hold a secret; a
 #: result's and a suppression's ``kind``, and a suppression's ``state``, are told
-#: by the key their dict sits under instead (``_ENUM_KIND_PARENTS``).
+#: by the key their dict sits under instead (``_ENUM_KIND_PARENTS``,
+#: ``_ENUM_STATE_PARENTS``).
 _ENUM_KEYS = frozenset({"level", "columnKind", "importance", "roles"})
 #: The plain-JSON keys under which a dict's ``kind`` is a SARIF enum: a run's or
 #: an external property set's ``results`` (``Result.kind``) and a result's
 #: ``suppressions`` (``Suppression.kind``).
 _ENUM_KIND_PARENTS = frozenset({"results", "suppressions"})
+#: The plain-JSON keys under which a dict's ``state`` is a SARIF enum: a result's
+#: ``suppressions`` (``Suppression.state``).
+_ENUM_STATE_PARENTS = frozenset({"suppressions"})
 #: Fields under which nothing is masked by value: a tool's rule metadata,
 #: taxonomies and policies, a result's rule reference and every ``tags`` list.
 #: They describe or classify findings; a finding tagged ``secret`` whose tag was
@@ -435,7 +439,7 @@ def _is_skipped_key(key: str, parent: Optional[str] = None) -> bool:
         _is_skipped(key)
         or key in _ENUM_KEYS
         or (key == "kind" and parent in _ENUM_KIND_PARENTS)
-        or (key == "state" and parent == "suppressions")
+        or (key == "state" and parent in _ENUM_STATE_PARENTS)
     )
 
 
@@ -615,15 +619,17 @@ def _physical_locations_of(result: Any, related: bool = False) -> Iterable[Any]:
             yield physical
 
 
-def _uri_of(physical: Any, index: Optional["_SecretIndex"] = None) -> Any:
-    """The uri of a node's ``artifactLocation``: its own, or, given the index of
-    the report it belongs to, the one its artifact index resolved to
-    (``_resolve_artifact_uris``, ``_SecretIndex.resolved_uris``)."""
+def _uri_of(physical: Any, index: "_SecretIndex") -> Any:
+    """The uri of a node's ``artifactLocation``: its own, or the one its artifact
+    index resolved to in ``index``, the index of the report the node belongs to
+    (``_resolve_artifact_uris``, ``_SecretIndex.resolved_uris``). The index is
+    required: a read without it would miss every index-only location and place
+    nothing for it, the fail-open side."""
     location = getattr(physical, "artifactLocation", None)
     uri = getattr(location, "uri", None)
-    if uri is None and location is not None and index is not None:
+    if uri is None and location is not None:
         resolved = index.resolved_uris.get(id(location))
-        if resolved is not None and resolved[0] is location:
+        if resolved is not None:
             return resolved[1]
     return uri
 
@@ -634,9 +640,9 @@ def _resolve_artifact_uris(sarif_report: Any, index: "_SecretIndex") -> None:
     SARIF lets a location name its artifact through ``artifactLocation.index``
     into the run's ``artifacts`` array with no ``uri`` of its own. The maskings
     below read the URI (``_uri_of``), so such a location was neither indexed as
-    a secret location nor placed for masking. The URI (and ``uriBaseId``) the
-    artifact carries is recorded for the location in ``index.resolved_uris`` and
-    read from there, not written onto the location: the results are read, never
+    a secret location nor placed for masking. The URI the artifact carries is
+    recorded for the location in ``index.resolved_uris`` and read from there,
+    not written onto the location: the results are read, never
     changed, by the masker that only reads them (``source_snippet_masker``), and
     a location is left as the scanner wrote it. The map lives on the index of
     the one report, never in module state: maskings run on several threads at
@@ -656,7 +662,7 @@ def _resolve_artifact_uris_in(
     node: Any,
     artifacts: List[Any],
     seen: Set[int],
-    resolved: Dict[int, Tuple[Any, str, Any]],
+    resolved: Dict[int, Tuple[Any, str]],
 ) -> None:
     if isinstance(node, (str, Enum)) or id(node) in seen:
         return
@@ -673,10 +679,7 @@ def _resolve_artifact_uris_in(
                 location = getattr(artifacts[index], "location", None)
                 uri = getattr(location, "uri", None)
                 if isinstance(uri, str) and uri:
-                    base = getattr(node, "uriBaseId", None)
-                    if base is None:
-                        base = getattr(location, "uriBaseId", None)
-                    resolved[id(node)] = (node, uri, base)
+                    resolved[id(node)] = (node, uri)
             return
         for name in fields:
             _resolve_artifact_uris_in(
@@ -1206,13 +1209,14 @@ class _SecretIndex:
         #: masking takes the same range per location instead of reading it off
         #: snippet text, and the finding's own region is left as written.
         self.end_marks: List[Tuple[Any, List[Optional[int]], List[int]]] = []
-        #: id(artifact location) -> (the location, its artifact's uri, its
-        #: uriBaseId), for a location of this report that names its file by index
-        #: into the run's artifacts and carries no uri of its own
-        #: (``_resolve_artifact_uris``). ``_uri_of`` reads it in place of the
-        #: location's own uri, so the location is left as written. The location
-        #: is kept with its entry so its id is not reused while the map holds it.
-        self.resolved_uris: Dict[int, Tuple[Any, str, Any]] = {}
+        #: id(artifact location) -> (the location, its artifact's uri), for a
+        #: location of this report that names its file by index into the run's
+        #: artifacts and carries no uri of its own (``_resolve_artifact_uris``).
+        #: ``_uri_of`` reads it in place of the location's own uri, so the
+        #: location is left as written. The entry holds the location itself, so
+        #: its id cannot be freed and reused while the map holds it; the map is
+        #: keyed by id because the models are not hashable by identity.
+        self.resolved_uris: Dict[int, Tuple[Any, str]] = {}
         self._pattern: Optional[re.Pattern[str]] = None
 
     def add_values(self, values: Iterable[str]) -> None:

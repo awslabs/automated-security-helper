@@ -20,6 +20,7 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.secret_masking import (
     MASKED_LINE,
+    _SecretIndex,
     _index_secrets,
     _normalized_uri,
     _uri_of,
@@ -213,7 +214,30 @@ class TestAnArtifactNamedByIndex:
         assert _uri_of(_physical_of(first, 0), index_first) == "app.py"
         assert _uri_of(_physical_of(second, 0), index_second) == "other.py"
         assert _uri_of(_physical_of(first, 0), index_second) is None
-        assert _uri_of(_physical_of(first, 0)) is None
+        assert _uri_of(_physical_of(first, 0), _SecretIndex()) is None
+
+    def test_a_merged_report_still_places_its_index_only_locations(self):
+        """``ash merge`` folds a second log's runs into the first run: a folded
+        result's index is resolved into its uri at the fold (the aggregate run
+        has other artifacts), and the first run keeps its own artifacts, so the
+        index-only locations of both logs are placed after the merge."""
+        first = _results(
+            _result("B105", 5, HARDCODED + f"'{VALUE}'", artifact={"index": 0}),
+            _result("B404", 5, "import", snippet=SECRET_LINE),
+            artifacts=[{"location": {"uri": "app.py"}}],
+        )
+        second = _results(
+            _result("B105", 7, HARDCODED + f"'{VALUE}'", artifact={"index": 0}),
+            _result("B404", 7, "import", uri="other.py", snippet=SECRET_LINE),
+            artifacts=[{"location": {"uri": "other.py"}}],
+        )
+
+        first.sarif.merge_sarif_report(second.sarif)
+        mask_secrets_in_results(first)
+
+        assert len(first.sarif.runs) == 1
+        assert _snippet(first, 1) == MASKED_LINE + "\n"
+        assert _snippet(first, 3) == MASKED_LINE + "\n"
 
     def test_an_index_past_the_artifacts_is_left_alone(self):
         """Control: nothing is invented for an index the run does not have."""
