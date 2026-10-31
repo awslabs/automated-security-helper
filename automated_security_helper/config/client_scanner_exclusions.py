@@ -408,7 +408,10 @@ def bandit_would_skip(pattern: str, *, relative: str, absolute: str) -> bool:
         # An absolute "relative" path is the SARIF step's sign that it could
         # not place the finding under the source directory: no root is known.
         return False
-    path = _slashed(absolute)
+    # The path as bandit walks it, with no ``..`` part (the same reading the
+    # checkov kind takes), so the root cut from it is the scan root and not
+    # ``/s/x/..``.
+    path = _slashed(_as_walked(absolute))
     if not path.endswith("/" + below):
         return False
     root = path[: -(len(below) + 1)]

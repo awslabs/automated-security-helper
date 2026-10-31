@@ -428,6 +428,48 @@ def test_a_path_that_climbs_back_in_is_matched_as_the_file_it_names(
     )
 
 
+def test_the_bandit_kind_cuts_its_root_from_the_collapsed_absolute_path(monkeypatch):
+    """The checkov kind collapses the finding's absolute path before it cuts
+    candidates from it; the bandit kind cut the scan root from the spelling, so
+    for ``/s/x/../vendor/a.py`` the globs were anchored at ``/s/x/..``. The
+    answers agreed (the globs and the path carried the same spelling), but the
+    module's claim that every matcher reads the placed form was not true of
+    this one. The root handed to the glob builder is the scan root now."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        bandit_scanner,
+    )
+
+    anchors = []
+    real = bandit_scanner.bandit_excluded_path_globs
+
+    def record(anchor, pattern):
+        anchors.append(anchor)
+        return real(anchor, pattern)
+
+    monkeypatch.setattr(bandit_scanner, "bandit_excluded_path_globs", record)
+    entry = ClientScannerExclusion(
+        scanner="bandit",
+        option="excluded_paths",
+        kind="bandit",
+        pattern="vendor",
+        reason="r",
+    )
+    assert entry.hides(
+        relative="x/../vendor/a.py", absolute="/s/x/../vendor/a.py", rule_id=None
+    )
+    assert anchors == ["/s"]
+    unrelated = ClientScannerExclusion(
+        scanner="bandit",
+        option="excluded_paths",
+        kind="bandit",
+        pattern="x",
+        reason="r",
+    )
+    assert not unrelated.hides(
+        relative="x/../vendor/a.py", absolute="/s/x/../vendor/a.py", rule_id=None
+    )
+
+
 @pytest.mark.parametrize(
     ("scanner", "option", "kind", "pattern", "paths", "rule_id"),
     _UNANCHORED_ENTRIES,
