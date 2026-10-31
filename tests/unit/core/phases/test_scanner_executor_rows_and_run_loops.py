@@ -629,20 +629,24 @@ class TestTheRunLoops:
         """Set, the running siblings' tools stop; unset, the drain waited for
         each of them to run to its end."""
         event = threading.Event()
+        sibling_in_scan = threading.Event()
         waited = {}
 
         def _wait_for_the_event(plugin):
+            sibling_in_scan.set()
             started = time.monotonic()
             waited["set"] = event.wait(5)
             waited["seconds"] = time.monotonic() - started
 
         context = _context(tmp_path)
         # The sibling is in its scan, waiting, before the cancel lands: a
-        # cancel seen before it started would refuse its start instead.
+        # cancel seen before it started would refuse its start instead. The
+        # canceller waits for the sibling to say so (bounded), not for a fixed
+        # time that a loaded host can outrun.
         cancelling = _scanner(
             context,
             ScanCancelled("cancelled by a scanner"),
-            after_scan=lambda plugin: time.sleep(0.3),
+            after_scan=lambda plugin: sibling_in_scan.wait(5),
         )
         sibling = _scanner(context, _sarif(), after_scan=_wait_for_the_event)
         executor = _executor(
