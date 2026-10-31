@@ -240,10 +240,11 @@ _GLOB_SPECIAL = frozenset("*?[]{}\\")
 _SKIP_ARGS_BUDGET = 1_000_000
 
 #: The budget on Windows, where CreateProcess holds the whole command line to
-#: 32,767 characters and the rest of the argv needs its share. Nothing reaches it
-#: today: ``trivy_skip_dirs`` and ``trivy_skip_files`` return no values when
-#: ``os.sep`` is not ``/``, so no skip token is built there. It bounds the tokens
-#: should that change.
+#: 32,767 characters and the rest of the argv needs its share. ASH's own tokens for
+#: the ignored paths do not reach it today: ``trivy_skip_dirs`` and
+#: ``trivy_skip_files`` return no values when ``os.sep`` is not ``/``. The
+#: operator's skip entries do: ``_operator_skip_args`` holds them to it whenever
+#: ASH passes a skip flag of its own, its output-directory flag included.
 _WINDOWS_SKIP_ARGS_BUDGET = 30_000
 
 #: The least the budget is cut to, so a host with a very large environment still
@@ -254,9 +255,9 @@ _SKIP_ARGS_FLOOR = 16_384
 def skip_args_budget(environment: Mapping[str, str]) -> int:
     """How many bytes the skip tokens for the ignored paths may take on this host.
 
-    Windows: ``_WINDOWS_SKIP_ARGS_BUDGET`` (no skip token is built there today, see
-    its comment, so this branch bounds nothing yet). Elsewhere half of the host's
-    ARG_MAX
+    Windows: ``_WINDOWS_SKIP_ARGS_BUDGET`` (ASH's own tokens for the ignored paths
+    are not built there today, see its comment; the operator's skip entries are
+    held to it). Elsewhere half of the host's ARG_MAX
     (``os.sysconf``; about 2 MiB on Linux, about 1 MiB on macOS, where it covers
     the arguments, the environment and their pointers together) less the bytes
     ``environment`` takes, floored at ``_SKIP_ARGS_FLOOR`` and never above
@@ -1188,12 +1189,28 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         path (the reading ``_skip_dirs_value`` makes for ASH's own paths). The
         warning names the variable or key and the entry's position, never its
         text, which the environment or the operator's file chose.
+
+        Bounded with ASH's own skip tokens: together they take at most
+        ``skip_args_budget`` bytes, ``_link_skip_args`` having taken its share
+        first (they are in ``final_args``). A large generated list in the
+        operator's config file would otherwise be moved onto the command line
+        whole, past the size the OS starts a program with (Windows holds the whole
+        command line to 32,767 characters). The entries that do not fit are left
+        out, in order from the first that overflows, with one warning that counts
+        them; they do not apply to this scan.
         """
         if not any(
             argument.startswith(("--skip-dirs", "--skip-files"))
             for argument in final_args
         ):
             return []
+        used = sum(
+            len(os.fsencode(argument)) + 1
+            for argument in final_args
+            if argument.startswith(("--skip-dirs", "--skip-files"))
+        )
+        budget = skip_args_budget(self._scan_environment())
+        over_budget = 0
         tokens: List[str] = []
         for flag, variable, key in (
             ("--skip-dirs", "TRIVY_SKIP_DIRS", "skip-dirs"),
@@ -1218,8 +1235,26 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                         )
                     continue
                 token = f"{flag}={_csv_field(entry)}"
-                if token not in final_args and token not in tokens:
-                    tokens.append(token)
+                if token in final_args or token in tokens:
+                    continue
+                size = len(os.fsencode(token)) + 1
+                if over_budget or used + size > budget:
+                    over_budget += 1
+                    continue
+                used += size
+                tokens.append(token)
+        if over_budget:
+            refusal = "operator-skip:budget"
+            if refusal not in self._warned_inputs:
+                self._warned_inputs.add(refusal)
+                self._plugin_log(
+                    f"{over_budget} entr{'y' if over_budget == 1 else 'ies'} of the "
+                    "operator's skip-dirs and skip-files settings are not given to "
+                    "trivy as --skip-dirs or --skip-files: with ASH's own tokens "
+                    "they would exceed the size the OS starts a program with. "
+                    "Those entries do not apply to this scan.",
+                    level=logging.WARNING,
+                )
         return tokens
 
     def _trivy_input_file(

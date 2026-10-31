@@ -1664,3 +1664,48 @@ def test_an_entry_without_the_expected_fields_raises_instead_of_matching_nothing
     every result, with no sign that package identity had stopped working."""
     with pytest.raises(AttributeError):
         trivy_base._same_package(SimpleNamespace(key="node_modules/a"), "a", "1.0.0")
+
+
+# --- the operator's skip entries share the argument budget -------------------------
+
+
+def test_the_operators_skip_entries_are_held_to_what_is_left_of_the_budget(
+    tmp_path, monkeypatch
+):
+    """ASH's own tokens take their share first; the operator's entries, moved onto
+    the command line because ASH passes a skip flag of its own, take what is left.
+    A large generated list in the operator's file was passed whole, past the size
+    a program is started with."""
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "aaaa,bbbb,cccc,dddd"}
+    ashs_own = "--skip-dirs=x"
+    one_token = len("--skip-dirs=aaaa") + 1
+    # Room for ASH's token and exactly one of the operator's.
+    monkeypatch.setattr(
+        trivy_base,
+        "skip_args_budget",
+        lambda environment: len(ashs_own) + 1 + one_token,
+    )
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        tokens = scanner._operator_skip_args([ashs_own])
+
+    assert tokens == ["--skip-dirs=aaaa"], tokens
+    (warning,) = [m for m in messages if "exceed the size" in m]
+    assert warning.startswith("3 entries"), warning
+    assert "bbbb" not in warning and "dddd" not in warning
+
+
+def test_control_the_operators_skip_entries_all_fit_a_budget_that_holds_them(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "aaaa,bbbb"}
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        tokens = scanner._operator_skip_args(["--skip-dirs=x"])
+
+    assert tokens == ["--skip-dirs=aaaa", "--skip-dirs=bbbb"], tokens
+    assert not [m for m in messages if "exceed the size" in m], messages
