@@ -1,6 +1,7 @@
 """ScannerExecutor — owns scanner task lifecycle for ScanPhase."""
 
 import contextvars
+import math
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -253,23 +254,47 @@ def _finding_severity_level(severity: Any) -> str:
     is critical, 7.0 high, 4.0 medium, anything above zero low, and zero info.
     Read as stating nothing, a score of 9.8 counted MEDIUM and passed a HIGH or
     CRITICAL threshold. A number outside 0 to 10, or not a number, states
-    nothing.
+    nothing. A score written as text (``"9.8"``, which a tool that prints its
+    findings as strings writes) is the number it spells and reads the same way;
+    text that is not a finite number is a name, as before.
     """
     if isinstance(severity, str):
-        if not severity.strip():
+        word = severity.strip()
+        if not word:
             return "medium"
-        return _severity_level(severity) or "info"
+        score = _score_in_text(word)
+        if score is not None:
+            return _score_level(score)
+        return _severity_level(word) or "info"
     if isinstance(severity, (int, float)) and not isinstance(severity, bool):
-        if not 0 <= severity <= 10:
-            return "medium"
-        if severity >= 9.0:
-            return "critical"
-        if severity >= 7.0:
-            return "high"
-        if severity >= 4.0:
-            return "medium"
-        return "low" if severity > 0 else "info"
+        return _score_level(severity)
     return "medium"
+
+
+def _score_in_text(word: str) -> float | None:
+    """The finite number the text *word* spells, or None."""
+    try:
+        score = float(word)
+    except ValueError:
+        return None
+    return score if math.isfinite(score) else None
+
+
+def _score_level(score: float) -> str:
+    """The ScannerSeverityCount field a CVSS score counts under (its band).
+
+    A score outside 0 to 10, or not a number, states nothing: MEDIUM, as a
+    finding that states no severity is read.
+    """
+    if not 0 <= score <= 10:
+        return "medium"
+    if score >= 9.0:
+        return "critical"
+    if score >= 7.0:
+        return "high"
+    if score >= 4.0:
+        return "medium"
+    return "low" if score > 0 else "info"
 
 
 def _severity_counts_from_dict(raw_counts: Any) -> ScannerSeverityCount:

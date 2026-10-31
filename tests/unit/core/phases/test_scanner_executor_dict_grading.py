@@ -246,6 +246,42 @@ class TestAResultThatCannotBeReadIsThisRowsError:
         assert row.finding_count == 1
 
     @pytest.mark.parametrize(
+        "text,level",
+        [
+            ("9.8", "critical"),
+            (" 7.5 ", "high"),
+            ("4", "medium"),
+            ("0.1", "low"),
+            ("0", "info"),
+            ("11", "medium"),
+            ("-1", "medium"),
+        ],
+    )
+    def test_a_score_written_as_text_is_read_by_its_cvss_band(
+        self, plugin_context, text, level
+    ):
+        """A tool that prints its findings as strings writes ``"9.8"``; as a name
+        ASH cannot place it counted as info and passed a HIGH or CRITICAL threshold,
+        where the number 9.8 counted critical. A score outside 0 to 10 states
+        nothing, as a number outside it does."""
+        row = _row(plugin_context, {"findings": [{"severity": text}]})
+
+        assert getattr(row.severity_counts, level) == 1, row.severity_counts
+        assert row.severity_counts.total == 1
+        assert row.finding_count == 1
+
+    @pytest.mark.parametrize("text", ["abc", "nan", "inf", "-inf", "9.8.1"])
+    def test_text_that_is_not_a_finite_number_is_still_a_name(
+        self, plugin_context, text
+    ):
+        """Control: only a finite number is a score. The rest is a name ASH
+        cannot place, which counts as info as before."""
+        row = _row(plugin_context, {"findings": [{"severity": text}]})
+
+        assert row.severity_counts.info == 1, row.severity_counts
+        assert row.severity_counts.total == 1
+
+    @pytest.mark.parametrize(
         "name,level",
         [
             ("moderate", "medium"),
