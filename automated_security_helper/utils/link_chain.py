@@ -12,7 +12,9 @@ operator grant). The copies drifted in two ways: one read only the last componen
 of the path, so a link in a PARENT component was followed by ``os.lstat`` on the
 whole path and opened the share at the very check meant to prevent it; and their
 link tests differed, one counting every reparse point and the other only those
-that name another path. This module is the one reading both callers use.
+that name another path. This module is the one reading. The sandbox gates call
+it; the config loader keeps its copy of the older reading until it calls the
+functions here in its place.
 
 What it judges, from text and from ``os.lstat`` / ``os.readlink`` alone, which
 open a link's own entry and never what it names:

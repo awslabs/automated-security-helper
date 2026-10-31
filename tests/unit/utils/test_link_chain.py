@@ -2,15 +2,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The one Windows link-chain reading both callers use.
+"""The one Windows link-chain reading.
 
 ``cli/mcp/sandbox.py`` and ``config/config_sources.py`` each carried a copy of
 the reading that refuses a path whose resolution would open a network share.
 The copies differed in their link test (every reparse point, or only one that
 names another path) and in how much of the path they read (every component, or
-the last one). This module pins the shared reading: the stricter link test, the
-component walk on the lexically collapsed spelling, and the chain reading with
-its hop bound as a parameter.
+the last one). The sandbox gates call the shared reading; the config loader
+keeps its copy of the older one. This module pins the shared reading: the
+stricter link test, the component walk on the lexically collapsed spelling, and
+the chain reading with its hop bound as a parameter.
 
 Links are made with ``symlink_to``, whose target text ``os.readlink`` returns
 unresolved, so a Windows share spelling can be a target on any platform.
@@ -320,13 +321,90 @@ class TestAHopsTargetIsJudgedThroughItsParents:
         assert found.reaches_a_share is None
         assert len(reads) == 3
 
+    def test_a_link_in_a_hops_target_draws_on_the_same_budget(self, tmp_path):
+        """The test above has no link among the parents of a hop's target, so a
+        parent walk with a budget of its own would pass it. Here ``vendor`` is a
+        local link in the parent of ``ash.yaml``'s target: reading ``ash.yaml``
+        takes the only hop, and the read of ``vendor`` finds the budget spent. A
+        separate budget would answer local (False)."""
+        base = tmp_path.resolve()
+        real = base / "real"
+        real.mkdir()
+        (real / "cfg.yaml").write_text("x")
+        (base / "vendor").symlink_to(real)
+        dot_ash = base / ".ash"
+        dot_ash.mkdir()
+        (dot_ash / "ash.yaml").symlink_to(os.path.join("..", "vendor", "cfg.yaml"))
+
+        chain = link_chain.link_chain_names_a_windows_share
+        assert chain(str(dot_ash / "ash.yaml"), hops=1) is None
+        assert chain(str(dot_ash / "ash.yaml"), hops=2) is False
+        found = link_chain.first_unsafe_link(str(dot_ash / "ash.yaml"), hops=1)
+        assert found is not None
+        assert found.reaches_a_share is None
+        assert link_chain.first_unsafe_link(str(dot_ash / "ash.yaml"), hops=2) is None
+
+
+class TestTheCostOfAWalkIsOneReadPerLinkMet:
+    """Nested relative local links cost one read each, not a product.
+
+    ``l12 -> l11 -> ... -> l1 -> d0``, reached through ``.ash/ash.yaml ->
+    ../l12/cfg.yaml``, is thirteen links. A parent walk that read the links
+    above a link again for each of them cost ``2**k - 1`` reads, so six nested
+    local links spent the whole budget of forty and a local path was refused as
+    one whose link cannot be read. The walk keeps one prefix and reads each link
+    once as it meets it.
+    """
+
+    @staticmethod
+    def _tree(base: Path, depth: int) -> Path:
+        (base / "d0").mkdir()
+        (base / "d0" / "cfg.yaml").write_text("x")
+        previous = "d0"
+        for number in range(1, depth + 1):
+            (base / f"l{number}").symlink_to(previous)
+            previous = f"l{number}"
+        dot_ash = base / ".ash"
+        dot_ash.mkdir()
+        (dot_ash / "ash.yaml").symlink_to(os.path.join("..", previous, "cfg.yaml"))
+        return dot_ash / "ash.yaml"
+
+    def test_thirteen_nested_links_cost_thirteen_reads(self, tmp_path, monkeypatch):
+        entry = self._tree(tmp_path.resolve(), 12)
+        reads = []
+        real_readlink = os.readlink
+
+        def counting_readlink(path, *args, **kwargs):
+            reads.append(str(path))
+            return real_readlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "readlink", counting_readlink)
+
+        assert link_chain.first_unsafe_link(str(entry)) is None
+        assert len(reads) == 13, reads
+
+        reads.clear()
+        assert link_chain.link_chain_names_a_windows_share(str(entry)) is False
+        assert len(reads) == 13, reads
+
+    def test_the_bound_still_refuses_a_chain_longer_than_it(self, tmp_path):
+        """Control: with one hop fewer than the links, the last link is past the
+        budget and the chain is unjudged, never passed."""
+        entry = self._tree(tmp_path.resolve(), 12)
+
+        found = link_chain.first_unsafe_link(str(entry), hops=12)
+
+        assert found is not None
+        assert found.reaches_a_share is None
+        assert link_chain.link_chain_names_a_windows_share(str(entry), hops=12) is None
+        assert link_chain.link_chain_names_a_windows_share(str(entry), hops=13) is False
+
 
 class TestAComponentThatCannotBeExaminedIsRefused:
     """A component ``os.lstat`` refuses is not a local name. The first module
-    answered None for it (no unsafe link found), and the callers went on to
-    resolve the path, where the loader's own walk had refused an entry it could
-    not judge. The doubt is now the answer: the component is reported as
-    unexaminable, and both callers refuse it."""
+    answered None for it (no unsafe link found), and the caller went on to
+    resolve the path. The doubt is now the answer: the component is reported as
+    unexaminable, and the sandbox gate refuses it."""
 
     def test_a_component_that_cannot_be_examined_is_the_answer(
         self, tmp_path, monkeypatch
