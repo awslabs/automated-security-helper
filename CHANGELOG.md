@@ -1374,6 +1374,12 @@
   reached through a link the repository commits) gives the reason and names
   `--output-dir`, or `-OutputDir`, as the way to write elsewhere; a refusal of an
   output directory the operator gave does not.
+- **The Bedrock summary reporter's `top_p` must be from 0 to 1.** The option now has the
+  range Bedrock's Converse API documents, as `temperature` does. A configuration that set
+  `top_p` above 1, below 0 or to a value that is not a finite number used to load, and the
+  service refused every summary request that carried it; it is now refused when the
+  configuration is read, as a configuration error (exit 3). Set `top_p` to a value from 0
+  to 1, or remove it to use the default of 0.9.
 
 ### Behavior changes
 
