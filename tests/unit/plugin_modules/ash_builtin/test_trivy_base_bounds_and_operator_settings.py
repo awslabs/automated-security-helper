@@ -1417,3 +1417,105 @@ def test_control_a_readable_config_file_sets_the_scanners(tmp_path):
         "license",
         "misconfig",
     ]
+
+
+# --- the scanner set is read as trivy reads it -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "written",
+    ['"vuln misconfig"', '"vuln,misconfig"', '"vuln, misconfig"', "[vuln, misconfig]"],
+)
+def test_a_config_file_scanner_string_is_split_on_whitespace_and_commas(
+    tmp_path, written
+):
+    """trivy reads a list setting given as one string through the same conversion
+    for the config file as for the environment: on commas when the value holds
+    one, else on whitespace. Read on commas alone, ``"vuln misconfig"`` was one
+    unknown name, so the offline Terraform checks ran and the update gate and
+    staleness check saw no scanner."""
+    scanner = _repo_scanner(tmp_path, scanners=[])
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text(f"scan:\n  scanners: {written}\n", encoding="utf-8")
+
+    assert scanner._effective_scanners([f"--config={operator.as_posix()}"]) == [
+        "vuln",
+        "misconfig",
+    ]
+
+
+def test_a_config_file_list_string_with_a_comma_is_not_also_split_on_spaces(
+    tmp_path,
+):
+    """The config file and the environment share one rule: a value that holds a
+    comma is split on commas alone, so ``"vuln,misconfig secret"`` is ``vuln``
+    and one name with a space in it, in the file as in ``TRIVY_SCANNERS``. A
+    splitter that also cut on whitespace would read three scanners from the file
+    and two from the environment, and would turn the config file's
+    ``skip-dirs: "vendor,build dir"`` into skips of ``build`` and ``dir``."""
+    value = "vuln,misconfig secret"
+    from_env = _repo_scanner(tmp_path, scanners=[])
+    from_env.extra_env = {"TRIVY_SCANNERS": value}
+    from_file = _repo_scanner(tmp_path, scanners=[])
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        f'scan:\n  scanners: "{value}"\n  skip-dirs: "vendor,build dir"\n',
+        encoding="utf-8",
+    )
+    config_args = [f"--config={operator.as_posix()}"]
+
+    in_env = from_env._effective_scanners(EMPTY_CONFIG_ARGS)
+    in_file = from_file._effective_scanners(config_args)
+
+    assert in_file == ["vuln", "misconfig secret"]
+    assert in_env == in_file
+    assert from_file._config_file_list(config_args, "scan", "skip-dirs") == [
+        "vendor",
+        "build dir",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("spelling", "name"),
+    [
+        ("config", "misconfig"),
+        ("misconf", "misconfig"),
+        ("misconfiguration", "misconfig"),
+        ("vulnerability", "vuln"),
+    ],
+)
+def test_the_other_spellings_trivy_accepts_for_a_scanner_are_read_as_that_scanner(
+    tmp_path, spelling, name
+):
+    """trivy normalizes ``config`` (deprecated), ``misconf``, ``misconfiguration``
+    and ``vulnerability`` for ``--scanners``, ``TRIVY_SCANNERS`` and the config
+    file alike. A test on the canonical name missed all of them."""
+    scanner = _repo_scanner(tmp_path, scanners=[])
+    scanner.extra_env = {"TRIVY_SCANNERS": f"{spelling},secret"}
+    assert scanner._effective_scanners(EMPTY_CONFIG_ARGS) == [name, "secret"]
+
+    from_file = _repo_scanner(tmp_path, scanners=[])
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text(f"scan:\n  scanners: [{spelling}, secret]\n", encoding="utf-8")
+    assert from_file._effective_scanners([f"--config={operator.as_posix()}"]) == [
+        name,
+        "secret",
+    ]
+
+
+def test_offline_the_terraform_checks_are_left_out_of_a_set_written_with_config(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path, scanners=[], offline=True)
+    scanner.extra_env = {"TRIVY_SCANNERS": "vuln,config"}
+    _knows(monkeypatch)
+
+    with patch.object(scanner, "_plugin_log"):
+        args = scanner._offline_misconfig_args(EMPTY_CONFIG_ARGS)
+
+    assert _misconfig_flags(args) == [
+        "--misconfig-scanners=azure-arm,dockerfile,kubernetes"
+    ], args

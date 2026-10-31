@@ -182,6 +182,30 @@ _TERRAFORM_MISCONFIG_SCANNER = "terraform"
 #: trivy 0.75.0). See TrivyScannerBase._effective_scanners.
 _TRIVY_DEFAULT_SCANNERS = ("vuln", "secret")
 
+#: The other spellings trivy reads a scanner name in, and the name each means
+#: (``ValueNormalize`` of ``ScannersFlag`` in pkg/flag/scan_flags.go; ``config`` is
+#: the deprecated name of ``misconfig``). trivy applies it to ``--scanners``,
+#: ``TRIVY_SCANNERS`` and ``scan.scanners`` alike, so a membership test on
+#: ``_effective_scanners`` has to see the canonical name.
+_TRIVY_SCANNER_ALIASES = {
+    "vulnerability": "vuln",
+    "misconf": "misconfig",
+    "misconfiguration": "misconfig",
+    "config": "misconfig",
+}
+
+
+def _split_list_string(value: str) -> List[str]:
+    """``value`` split as trivy splits a list setting given as one string.
+
+    A value that holds a comma is split on commas alone, one with no comma on
+    whitespace; the two splits are never combined, and the entries are not trimmed
+    (trivy's own rule, see ``TrivyScannerBase._environment_list``). The environment
+    and the config file pass through the same conversion, so both use this.
+    """
+    return value.split(",") if "," in value else value.split()
+
+
 #: trivy's severities that ASH reports as the same name. trivy's fifth, UNKNOWN,
 #: is left to ASH's generic SARIF mapping.
 TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
@@ -850,18 +874,27 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         checks-bundle update read this rather than the option alone, so a trivy
         setting that turns ``misconfig`` on gets the same handling as the option.
         A config file that cannot be read or parsed counts as setting nothing.
+
+        Each name is returned as trivy reads it: ``config`` is ``misconfig``
+        (``_TRIVY_SCANNER_ALIASES``), so a set written with the old name is still
+        seen to turn the checks on.
         """
         options: Any = self.config.options  # type: ignore[union-attr]
         chosen = [name for name in (options.scanners or []) if name]
         if chosen:
-            return chosen
+            return self._canonical_scanners(chosen)
         from_env = self._environment_list("TRIVY_SCANNERS")
         if from_env:
-            return from_env
+            return self._canonical_scanners(from_env)
         names = self._config_file_list(final_args, "scan", "scanners")
         if names:
-            return names
+            return self._canonical_scanners(names)
         return list(_TRIVY_DEFAULT_SCANNERS)
+
+    @staticmethod
+    def _canonical_scanners(names: List[str]) -> List[str]:
+        """``names`` with each alias trivy accepts replaced by the name it means."""
+        return [_TRIVY_SCANNER_ALIASES.get(name, name) for name in names]
 
     def _scan_environment(self) -> Dict[str, str]:
         """The environment the scan runs with: the host's plus ``extra_env``."""
@@ -880,7 +913,8 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         (``content_database_probe_context``). Without that last step the offline
         dependency check, which runs before any scan, judged trivy's default
         scanners for a scan whose ``scan.scanners`` sends it elsewhere. trivy
-        reads a list setting as a YAML list or a comma-separated string. A file
+        reads a list setting as a YAML list or as one string split the way it
+        splits an environment variable (``_split_list_string``). A file
         that cannot be read or parsed, including one that is not UTF-8 (a
         ``UnicodeDecodeError`` is a ``ValueError``), counts as setting nothing.
         """
@@ -900,7 +934,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         table = document.get(section) if isinstance(document, dict) else None
         listed = table.get(key) if isinstance(table, dict) else None
         if isinstance(listed, str):
-            listed = listed.split(",")
+            listed = _split_list_string(listed)
         if not isinstance(listed, list):
             return []
         return [str(name).strip() for name in listed if str(name).strip()]
@@ -924,8 +958,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         value = self._scan_environment().get(name)
         if not value or not value.strip():
             return []
-        entries = value.split(",") if "," in value else value.split()
-        return [entry for entry in entries if entry]
+        return [entry for entry in _split_list_string(value) if entry]
 
     def _attach_trivy_severity(self, sarif_report: SarifReport) -> SarifReport:
         """Give each result trivy's own severity as its ASH severity.
