@@ -376,15 +376,19 @@ class TestAResourceLevelCredentialFinding:
         )
 
     def test_an_end_line_equal_to_the_start_line_does_not_bound_the_range(self):
-        """cdk-nag's wrapper writes endLine == startLine."""
+        """cdk-nag's wrapper writes endLine == startLine. The range runs to the end
+        of the file, not to the end of the resource block or of the snippet: a
+        line far after the resource is masked too."""
         model = _results(
             self._credential_finding(end=3),
             _neighbor("template.yaml", 6, 3, RESOURCE_LINES),
+            _neighbor("template.yaml", 40, 40, [FAR_LINE]),
         )
 
         mask_secrets_in_results(model)
 
         assert _context(model, 1) == RESOURCE_MASKED
+        assert _context(model, 2) == MASKED_LINE + "\n"
 
     @pytest.mark.parametrize("column", [None, 1])
     @pytest.mark.parametrize(
