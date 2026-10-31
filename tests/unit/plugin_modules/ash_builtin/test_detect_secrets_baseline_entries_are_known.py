@@ -275,6 +275,37 @@ def test_the_operators_baseline_entries_leave_the_report_and_a_new_secret_stays(
     assert _suppressed(report)["other.py"] == []
 
 
+@pytest.mark.parametrize("operator_named", [True, False], ids=["operator", "repo"])
+@pytest.mark.parametrize("mismatch", ["other_file", "other_type"])
+def test_a_baseline_entry_matches_only_its_own_file_and_type(
+    tmp_path, monkeypatch, operator_named, mismatch
+):
+    """A known candidate is keyed by file, hash and type. The baseline lists
+    the kept secret's hash, but under ``other.py`` or under another detector's
+    type, so the finding in ``settings.py`` is not known: it is reported, and
+    carries no suppression, whoever's baseline it is. A rule that matched on
+    the hash alone would drop it (operator) or mark it (repository)."""
+    entry = {
+        "type": SECRET_TYPE,
+        "hashed_secret": _hash(KEPT_SECRET),
+        "line_number": 1,
+        "is_secret": False,
+    }
+    if mismatch == "other_file":
+        entries = {"other.py": [entry]}
+    else:
+        entries = {"settings.py": [{**entry, "type": "Secret Keyword"}]}
+    scanner, source = _scanner_with_baseline(
+        tmp_path, monkeypatch, entries, operator_named=operator_named
+    )
+    _worker_returning(scanner, monkeypatch, {"settings.py": [(1, KEPT_SECRET)]})
+
+    report = scanner.scan(target=source, target_type="source")
+
+    assert _findings(report) == [("settings.py", 1)]
+    assert _suppressed(report)["settings.py"] == []
+
+
 @pytest.mark.parametrize("inside", [True, False], ids=["inside-the-tree", "outside"])
 def test_a_baseline_the_operator_names_inside_the_scanned_tree_only_marks(
     tmp_path, monkeypatch, inside
