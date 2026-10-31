@@ -16,7 +16,11 @@ from __future__ import annotations
 import pytest
 from pydantic import AliasChoices, AliasPath, BaseModel, ConfigDict, Field
 
-from automated_security_helper.utils.unknown_keys import known_keys, refuse_unknown_keys
+from automated_security_helper.utils.unknown_keys import (
+    _alias_keys,
+    known_keys,
+    refuse_unknown_keys,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -68,10 +72,6 @@ class _PathInChoicesByName(BaseModel):
     )
 
 
-class _IndexedPath(BaseModel):
-    first: str = Field(validation_alias=AliasPath(0, "first"))
-
-
 def test_the_first_key_of_an_alias_path_among_choices_is_a_known_key():
     keys = known_keys(_PathInChoices)
 
@@ -97,7 +97,12 @@ def test_the_field_name_is_also_known_when_the_model_populates_by_name():
 
 
 def test_a_path_that_starts_with_an_index_names_no_key():
-    assert known_keys(_IndexedPath) == set()
+    # pydantic refuses to build a model whose path starts with an index (the first
+    # item of an alias path must be a string), so the path is read on its own: a
+    # key is a name, and an index is not one.
+    assert _alias_keys(AliasPath(0, "first")) == set()
+    assert _alias_keys(AliasChoices("url", AliasPath(0, "first"))) == {"url"}
+    assert _alias_keys(AliasPath("first", 0)) == {"first"}
 
 
 def test_the_known_keys_are_what_the_model_accepts():
