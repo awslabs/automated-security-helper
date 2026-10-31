@@ -1139,6 +1139,9 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             if scanned:
                 self.targets_attempted = len(scanned)
             else:
+                where = (
+                    f"{self.command} scanned no file below {Path(target).as_posix()}"
+                )
                 # Lowercased, as every reason below is read: a capitalized spelling
                 # of this one would otherwise skip the exclude refusal and lowercase
                 # into the known list.
@@ -1160,7 +1163,6 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                     if not self._left_out_by_ash(str(entry.get("path", "")), target)
                 ]
                 if not_ignored:
-                    where = f"{self.command} scanned no file below {Path(target).as_posix()}"
                     # The operator is blamed only for a file one of the operator's
                     # own patterns can name (matched the way the tools match
                     # --exclude: against the file's name and each directory of its
@@ -1204,9 +1206,6 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 for entry in skipped:
                     if isinstance(entry, dict):
                         by_reason.setdefault(_skip_reason(entry), []).append(entry)
-                where = (
-                    f"{self.command} scanned no file below {Path(target).as_posix()}"
-                )
                 unparsed = [r for r in by_reason if r in UNPARSED_SKIP_REASONS]
                 if unparsed:
                     count = sum(len(by_reason[r]) for r in unparsed)
