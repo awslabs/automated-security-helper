@@ -872,6 +872,128 @@ def test_an_os_open_whose_flags_are_followed_to_read_only_names_is_not_found():
     assert write_sites(source, "probe.py") == []
 
 
+def _opens(source: str):
+    return [kind for _module, _function, kind in write_sites(source, "probe.py")]
+
+
+def test_a_lambda_takes_its_own_parameters():
+    """``flags`` in the lambda is its parameter, whatever the enclosing function binds
+    under that spelling: the lookup went past the lambda to the function's read-only
+    assignment and passed the call."""
+    source = (
+        "import os\n"
+        "def build(path):\n"
+        "    flags = os.O_RDONLY\n"
+        "    return lambda flags: os.open(path, flags)\n"
+    )
+
+    assert _opens(source) == ["os.open"]
+
+
+def test_control_a_lambda_reads_the_enclosing_functions_flags():
+    source = (
+        "import os\n"
+        "def build(path):\n"
+        "    flags = os.O_RDONLY\n"
+        "    return lambda: os.open(path, flags)\n"
+    )
+
+    assert _opens(source) == []
+
+
+@pytest.mark.parametrize(
+    "rebinding",
+    [
+        pytest.param("flags, extra = os.O_WRONLY, 0", id="tuple-unpacking"),
+        pytest.param("for flags in choices: pass", id="for-over-a-variable"),
+        pytest.param("with source() as flags: pass", id="with-as"),
+        pytest.param("(flags := compute())", id="walrus"),
+        pytest.param(
+            "try:\n        pass\n    except ImportError as flags:\n        pass",
+            id="except-as",
+        ),
+        pytest.param("from elsewhere import flags", id="import"),
+        pytest.param("import flags", id="import-module"),
+        pytest.param("def flags(): pass", id="def"),
+    ],
+)
+def test_a_store_the_reader_does_not_follow_leaves_the_flags_unreadable(rebinding):
+    """``flags`` is read from the one assignment the reader follows; a second store
+    it does not follow, whatever its form, leaves the value unreadable and the call
+    counted. An ``except ... as`` store was skipped without a word, so the call read
+    as the first assignment."""
+    source = (
+        "import os\n"
+        "def emit(path, choices, source, compute):\n"
+        "    flags = os.O_RDONLY\n"
+        f"    {rebinding}\n"
+        "    os.open(path, flags)\n"
+    )
+
+    assert _opens(source) == ["os.open"]
+
+
+def test_a_name_declared_global_is_not_the_value_assigned_in_this_function():
+    """``flags |= ...`` after ``global flags`` widens the module's value, which the
+    module's own assignment does not show; only the added flag was read."""
+    source = (
+        "import os\n"
+        "flags = os.O_RDONLY\n"
+        "def widen(path):\n"
+        "    global flags\n"
+        "    flags |= getattr(os, 'O_NOFOLLOW', 0)\n"
+        "    return os.open(path, flags)\n"
+    )
+
+    assert _opens(source) == ["os.open"]
+
+
+def test_a_module_name_another_function_assigns_through_global_is_unreadable():
+    """The module binds ``flags`` to a read, and ``enable_writes`` replaces it at run
+    time; ``look`` reads whatever is there then."""
+    source = (
+        "import os\n"
+        "flags = os.O_RDONLY\n"
+        "def enable_writes():\n"
+        "    global flags\n"
+        "    flags = os.O_WRONLY | os.O_CREAT\n"
+        "def look(path):\n"
+        "    return os.open(path, flags)\n"
+    )
+
+    assert _opens(source) == ["os.open"]
+
+
+def test_an_enclosing_name_an_inner_function_assigns_through_nonlocal_is_unreadable():
+    source = (
+        "import os\n"
+        "def outer(path):\n"
+        "    flags = os.O_RDONLY\n"
+        "    def widen():\n"
+        "        nonlocal flags\n"
+        "        flags = os.O_WRONLY | os.O_CREAT\n"
+        "    widen()\n"
+        "    return os.open(path, flags)\n"
+    )
+
+    assert _opens(source) == ["os.open"]
+
+
+def test_control_a_name_no_function_declares_global_stays_a_read():
+    source = (
+        "import os\n"
+        "flags = os.O_RDONLY\n"
+        "other = 0\n"
+        "def bump():\n"
+        "    global other\n"
+        "    other = 1\n"
+        "def look(path):\n"
+        "    return os.open(path, flags)\n"
+    )
+
+    assert _opens(source) == []
+
+
 def test_every_write_in_the_package_is_guarded_or_listed():
     found = _package_sites()
     listed = Counter()
