@@ -139,12 +139,31 @@ def _is_between_word_characters(line: str, index: int) -> bool:
     )
 
 
-#: Words that follow a string literal directly in the languages ASH reads
-#: (``"x"in env``, ``'a'if cond else 'b'``, ``'a'or 'b'``), and so tell a closing
-#: quote from an apostrophe: a word of prose never continues an apostrophe
-#: with one of these (``it's``, ``don't``, ``rock'n'roll``).
+#: Words that follow a string literal directly in common languages (Python,
+#: JavaScript, SQL and Visual Basic among them: ``"x"in env``,
+#: ``'a'if cond else 'b'``, ``'a'or 'b'``, ``"a"As Text``), and so tell a closing
+#: quote from an apostrophe: a word of prose rarely continues an apostrophe
+#: with one of these (``it's``, ``don't``, ``rock'n'roll``). They are compared
+#: without regard to case, since SQL and Visual Basic keywords are written in
+#: any (``'x'OR 1=1``, ``"a"And b``). The list is not every language's: a
+#: keyword missing from it leaves the quote read as an apostrophe.
 _WORDS_AFTER_A_STRING = frozenset(
-    {"in", "is", "or", "and", "not", "if", "else", "for", "of", "instanceof"}
+    {
+        "in",
+        "is",
+        "or",
+        "and",
+        "not",
+        "if",
+        "else",
+        "for",
+        "of",
+        "instanceof",
+        "as",
+        "then",
+        "unless",
+        "do",
+    }
 )
 #: The longest of them, so the walk to the end of a word stops there.
 _LONGEST_WORD_AFTER_A_STRING = max(map(len, _WORDS_AFTER_A_STRING))
@@ -153,9 +172,10 @@ _LONGEST_WORD_AFTER_A_STRING = max(map(len, _WORDS_AFTER_A_STRING))
 def _is_followed_by_what_follows_a_string(line: str, index: int) -> bool:
     """Whether the text after the quote at ``index`` can follow a string literal.
 
-    A keyword (``_WORDS_AFTER_A_STRING``) that ends at a non-word character or at
-    the end of the line, or a ``_``: the suffix of a user-defined literal
-    (``"abc"_s``). Called for a quote between two word characters, so
+    A keyword (``_WORDS_AFTER_A_STRING``, in any case) that ends at a non-word
+    character or at the end of the line, or a ``_``: the suffix of a
+    user-defined literal (``"abc"_s``). Called for a quote between two word
+    characters, so
     ``line[index + 1]`` exists; the walk is at most one character past the
     longest keyword, so the check is constant per quote.
     """
@@ -169,7 +189,7 @@ def _is_followed_by_what_follows_a_string(line: str, index: int) -> bool:
         and _is_word_character(line[end])
     ):
         end += 1
-    return line[start:end] in _WORDS_AFTER_A_STRING
+    return line[start:end].lower() in _WORDS_AFTER_A_STRING
 
 
 def _quoted_spans(line: str) -> List[Tuple[int, int]]:

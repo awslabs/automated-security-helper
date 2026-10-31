@@ -157,3 +157,66 @@ def test_a_string_closed_before_a_keyword_does_not_hide_a_directive(
     found = find_inline_suppressions(_write(tmp_path, line))
 
     assert [(item.line_number, item.rule_id) for item in found] == [(1, rule)]
+
+
+@pytest.mark.parametrize(
+    ("line", "rule"),
+    [
+        pytest.param(
+            "x = 'x'OR 1=1  # ash-ignore: R10 see 'notes'\n",
+            "R10",
+            id="sql-upper-case-or",
+        ),
+        pytest.param(
+            'y = "a"And b  # ash-ignore: R11 see "that"\n',
+            "R11",
+            id="vb-mixed-case-and",
+        ),
+        pytest.param(
+            "z = 'a'then b  # ash-ignore: R12 see 'notes'\n",
+            "R12",
+            id="then",
+        ),
+        pytest.param(
+            'w = "b"as c  # ash-ignore: R13 see "that"\n',
+            "R13",
+            id="as",
+        ),
+        pytest.param(
+            "v = 'c'unless d  # ash-ignore: R14 see 'notes'\n",
+            "R14",
+            id="unless",
+        ),
+        pytest.param(
+            'u = "d"do  # ash-ignore: R15 see "that"\n',
+            "R15",
+            id="do-at-the-end-of-the-code",
+        ),
+    ],
+)
+def test_a_closing_quote_glued_to_a_keyword_in_any_case_does_not_hide_a_directive(
+    tmp_path, line, rule
+):
+    """Red at the base: the keywords were compared in lower case and the list
+    lacked ``as``, ``then``, ``unless`` and ``do``, so the closing quote was read
+    as an apostrophe, the string stayed open until a quote in the directive's
+    reason, and the directive after it went unseen with no warning."""
+    found = find_inline_suppressions(_write(tmp_path, line))
+
+    assert [(item.line_number, item.rule_id) for item in found] == [(1, rule)]
+
+
+def test_a_keyword_in_any_case_ends_its_string():
+    from automated_security_helper.utils.suppression_matcher import _quoted_spans
+
+    assert _quoted_spans("'x'OR 1=1") == [(0, 3)]
+    assert _quoted_spans('"a"And b') == [(0, 3)]
+
+
+def test_a_name_that_only_starts_with_a_keyword_is_still_prose():
+    """The positive control: ``O'Dowd`` and ``l'asile`` continue past the
+    letters of ``do`` and ``as``, so neither quote closes anything."""
+    from automated_security_helper.utils.suppression_matcher import _quoted_spans
+
+    assert _quoted_spans("O'Dowd said 'hi'") == [(12, 16)]
+    assert _quoted_spans("l'asile and 'it'") == [(12, 16)]
