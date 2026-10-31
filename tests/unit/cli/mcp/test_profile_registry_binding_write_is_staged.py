@@ -31,6 +31,10 @@ from automated_security_helper.cli.mcp.profile_registry import (
     materialize_session_binding,
     materialize_session_config,
 )
+from automated_security_helper.cli.mcp.sandbox import (
+    CLIENT_CONFIG_DIR_NAME,
+    CONFIG_DIR_NAME,
+)
 from automated_security_helper.config.ash_config import AshConfig
 
 pytestmark = pytest.mark.unit
@@ -107,19 +111,28 @@ def test_a_failed_operator_move_leaves_no_client_copy_of_the_new_profile(
     moves: list = []
 
     def refuse_the_second_move(partial, target):
-        moves.append(Path(target).name)
+        # The directory as well as the name: both copies are called by the same
+        # file name, so the name alone cannot say which of them was moved.
+        moves.append((Path(target).parent.name, Path(target).name))
         if len(moves) == 2:
             raise PermissionError(errno.EACCES, "refused", str(target))
         return real_replace_staged(partial, target)
 
     monkeypatch.setattr(profile_registry, "_replace_staged", refuse_the_second_move)
 
+    # Another registered profile: with the same one in both calls the operator's
+    # copy would read the same bytes whether it was replaced or not.
     with pytest.raises(PermissionError):
         materialize_session_binding(
-            SESSION, registered, AshConfig(project_name="second-patch")
+            SESSION,
+            AshConfig(project_name="second-registered"),
+            AshConfig(project_name="second-patch"),
         )
 
-    assert len(moves) == 2, moves
+    assert [directory for directory, _ in moves] == [
+        CLIENT_CONFIG_DIR_NAME,
+        CONFIG_DIR_NAME,
+    ], moves
     assert not Path(config_path).exists(), "the new profile's client copy was kept"
     assert Path(trusted_path).read_bytes() == trusted_before
     _no_partial_left(Path(config_path).parent, Path(trusted_path).parent)
