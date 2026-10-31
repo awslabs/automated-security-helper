@@ -129,11 +129,13 @@ Known limitations
   two are one directory when the scanned tree is the repository's root.
 * A regular expression is bounded by running it in a child process that is
   killed at the deadline (``evaluated_within``): one worker process per
-  suppression pass, started at its first bounded search and reused (a fork of
+  suppression pass, started at its first search and reused (a fork of
   ASH's own process on Linux, a fresh interpreter elsewhere), and one more
   after each kill. A pass spends one ``scan_timeout`` over all of its
   searches, not one per finding, and does not search again an entry that ran
-  out (``EvaluationBudget``). The scan it was part of fails at the deadline.
+  out (``EvaluationBudget``). A scanner whose ``scan_timeout`` is null gives a
+  client's pattern the scanners' default instead of no deadline. The scan it
+  was part of fails at the deadline.
 
 Rejected alternatives
 ---------------------
@@ -489,7 +491,8 @@ class EvaluationBudget:
     balance is spent.
 
     The searches run in ONE child process the budget starts at its first
-    bounded evaluation and reuses for the rest (``_EvaluationWorker``): a
+    evaluation (a scanner left unbounded gets one too) and reuses for the rest
+    (``_EvaluationWorker``): a
     process per search cost a fork per finding on Linux and a fresh interpreter
     per finding where the start method is ``spawn`` (Windows, macOS), where a
     pass of many findings spent its ``scan_timeout`` on interpreter starts
