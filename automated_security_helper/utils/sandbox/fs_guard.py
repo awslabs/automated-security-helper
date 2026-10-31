@@ -1334,10 +1334,14 @@ def open_for_atomic_write(
     Outside every root the rename replaces whatever entry is at the name, a link
     included, without following it.
 
-    A regular file already at the name keeps its read, write and execute bits:
-    the staging file is given them before the rename, where a fresh file would
-    otherwise have replaced a 0o600 file with a 0o644 one. Its setuid, setgid and
-    sticky bits are not carried over. Outside every root, where no hard-link
+    A regular file already at the name that this process's user owns keeps its
+    read, write and execute bits: the staging file is given them before the
+    rename, where a fresh file would otherwise have replaced a 0o600 file with a
+    0o644 one. Its setuid, setgid and sticky bits are not carried over. A file
+    owned by another user lends nothing, since the new file is this process's
+    and a 0o600 mode copied onto it would lock that user out; nor does a platform
+    without an effective user id (Windows), and a filesystem that refuses the
+    mode change keeps the write. Outside every root, where no hard-link
     refusal runs, a file another name refers to is replaced and lends nothing:
     the new file keeps its umask-derived mode.
 
@@ -1391,6 +1395,10 @@ def open_for_atomic_write(
         return None if _is_link_status(status) else status
 
     def remove_staging() -> None:
+        # Runs while an exception is propagating: a removal that fails too (a
+        # read-only attribute on Windows, a permission change) must not replace
+        # the error that ended the write. The staging file then stays, which
+        # the unlink's own error would have said.
         try:
             if dir_fd is not None:
                 os.unlink(staging, dir_fd=dir_fd)
@@ -1398,6 +1406,8 @@ def open_for_atomic_write(
                 os.unlink(path.parent / staging)
         except FileNotFoundError:
             pass
+        except OSError:
+            ASH_LOGGER.debug("Could not remove a staging file after a failed write")
 
     try:
         existing = refuse_a_link_at_the_name()
@@ -1412,6 +1422,8 @@ def open_for_atomic_write(
                     and stat.S_ISREG(existing.st_mode)
                     and existing.st_nlink == 1
                     and hasattr(os, "fchmod")
+                    and hasattr(os, "geteuid")
+                    and existing.st_uid == os.geteuid()
                 ):
                     # The read, write and execute bits of the file being
                     # replaced, and only those: a setuid, setgid or sticky bit
@@ -1419,8 +1431,22 @@ def open_for_atomic_write(
                     # the results file. Below a root a file another name refers
                     # to was refused above; outside every root it is replaced
                     # and lends nothing: the new file keeps the umask-derived
-                    # mode it was created with.
-                    os.fchmod(fd, stat.S_IMODE(existing.st_mode) & 0o777)
+                    # mode it was created with. The same holds for a file owned
+                    # by another user: the new file is this process's, and a
+                    # 0o600 copied onto it would keep that user from reading the
+                    # results they could read before. Where the
+                    # platform has no effective user id (Windows) nothing is
+                    # copied: fchmod there only sets or clears read-only, which
+                    # would make the staging file impossible to rename over.
+                    # Best effort: a filesystem that refuses a mode change
+                    # (FUSE, SMB) keeps the write.
+                    try:
+                        os.fchmod(fd, stat.S_IMODE(existing.st_mode) & 0o777)
+                    except OSError:
+                        ASH_LOGGER.debug(
+                            "Could not copy the mode of the file being replaced; "
+                            "the new file keeps its default mode"
+                        )
                 handle = os.fdopen(fd, open_mode, **text)
             except BaseException:
                 os.close(fd)
