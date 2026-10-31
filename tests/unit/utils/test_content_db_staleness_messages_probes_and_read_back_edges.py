@@ -113,6 +113,26 @@ def test_grype_reads_absence_before_the_build_time(monkeypatch):
         staleness._built_from_grype(_grype_context(monkeypatch, status))
 
 
+def test_grype_reads_a_zero_time_as_no_build_time(monkeypatch, tmp_path):
+    """The unset time value is a non-empty string, so it passed the checks of a
+    build time: a database that is missing, with an error lacking the exact words
+    "does not exist", was graded stale (a grade that warn relaxes) instead of absent."""
+    zero = "0001-01-01T00:00:00Z"
+    missing = {"built": zero, "error": "", "path": str(tmp_path / "no" / "db")}
+    with pytest.raises(staleness.ContentDatabaseAbsent):
+        staleness._built_from_grype(_grype_context(monkeypatch, missing))
+    # A zero time beside a path that exists is a database of unknown age.
+    present = {"built": zero, "error": "", "path": str(tmp_path)}
+    with pytest.raises(ValueError) as raised:
+        staleness._built_from_grype(_grype_context(monkeypatch, present))
+    assert not isinstance(raised.value, staleness.ContentDatabaseAbsent)
+    # The control: a real build time with a path this process cannot see is a
+    # build time, as before.
+    real = {"built": "2026-10-01T00:00:00Z", "path": "/no/such/db"}
+    built, _ = staleness._built_from_grype(_grype_context(monkeypatch, real))
+    assert built.year == 2026
+
+
 def test_grypes_output_quoted_in_an_absence_error_has_no_control_characters(
     monkeypatch,
 ):

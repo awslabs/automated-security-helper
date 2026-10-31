@@ -162,6 +162,8 @@ OPT_OUT_HINT = (
     "`content_db_staleness: warn` in the ASH config."
 )
 _PROBE_TIMEOUT_SECONDS = 60
+#: How the unset time value of grype's own language is written in JSON (year 1).
+_ZERO_TIME_PREFIX = "0001-01-01"
 
 
 @dataclass
@@ -620,6 +622,11 @@ def _built_from_grype(ctx: ProbeContext) -> tuple[datetime, str]:
     built = status.get("built") if isinstance(status, dict) else None
     error = str(status.get("error") or "") if isinstance(status, dict) else ""
     path = status.get("path") if isinstance(status, dict) else None
+    if isinstance(built, str) and built.startswith(_ZERO_TIME_PREFIX):
+        # grype's unset time value (a status document for a database it could not
+        # read) is a non-empty string, so it passed the truthiness tests below
+        # as a build time and was graded stale instead of absent or unknown.
+        built = None
     # grype's own word of absence comes first, whatever ``built`` says: a
     # status document for a database that does not exist can still carry a
     # zero-time ``built``, which read as a build time graded merely stale,
