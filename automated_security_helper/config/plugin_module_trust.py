@@ -316,10 +316,10 @@ def _location_is_own(location: Path, own: Path, *, as_named: bool) -> bool:
     The one place the own-module test is written, so the two callers cannot
     drift in what they call a location of the package. It always asks where
     the location resolves (``is_within``). With ``as_named`` it also asks
-    whether the location sits there under the name its entry gave
-    (``sandbox_grants._named_within``), which a link the scanned repository
-    placed does not: such a link resolves into the package but is named in the
-    repository.
+    whether the location sits there under the name its entry gave, which a link
+    the scanned repository placed does not: such a link resolves into the
+    package but is named in the repository. That holds for a link to a
+    subdirectory and for a link to the package directory itself.
 
     ``refusal_reason`` passes ``as_named=True``: its exemption is for code the
     entry reaches as the installed package, never for a repository's link to
@@ -331,9 +331,22 @@ def _location_is_own(location: Path, own: Path, *, as_named: bool) -> bool:
         return False
     if not as_named:
         return True
-    from automated_security_helper.config.sandbox_grants import _named_within
+    from automated_security_helper.config.sandbox_grants import _as_named
 
-    return _named_within(location, [own])
+    # The closest unresolved parent that is the package directory decides, and
+    # it must be the directory itself. ``_named_within`` answers "is the package
+    # one of the location's parents", which a link to the whole package
+    # directory also satisfies (the check follows links), so an alias placed in
+    # a repository would read as the package. An exemption has to fail the other
+    # way: a link standing for the package is not the package.
+    named = _as_named(location)
+    for candidate in (named, *named.parents):
+        try:
+            if candidate.samefile(own):
+                return not candidate.is_symlink()
+        except OSError:
+            continue
+    return False
 
 
 def _spec_locations(spec: ModuleSpec) -> List[Path]:

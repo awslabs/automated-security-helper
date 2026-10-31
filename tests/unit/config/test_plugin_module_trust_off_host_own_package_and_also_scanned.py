@@ -45,6 +45,7 @@ pytestmark = pytest.mark.unit
 AWS_PLUGINS = "automated_security_helper.plugin_modules.ash_aws_plugins"
 OWN_BUILTIN = "automated_security_helper.plugin_modules.ash_builtin"
 LINKED = "linkedown_ash_plugins"
+ALIAS = "shadowown_ash_plugins"
 ALSO = "recalso_ash_plugins"
 RESULTS_MODULE = "resultsrepo_ash_plugins"
 SITE_MODULE = "siteonly_ash_plugins"
@@ -137,6 +138,34 @@ def test_the_own_module_helper_answers_both_spellings(tmp_path):
     assert not _location_is_own(repo / LINKED, own, as_named=True)
     assert not _location_is_own(tmp_path, own, as_named=False)
     assert not _location_is_own(tmp_path, own, as_named=True)
+
+
+def test_a_link_to_the_whole_package_directory_is_not_the_package_as_named(
+    tmp_path, monkeypatch
+):
+    """A link to the package directory itself resolves to the package and the
+    package is one of its unresolved parents, but it is a link the repository
+    placed, not the installed package: the exemption does not cover it, at the
+    link or at any level below it. A link to a subdirectory stays refused and
+    the real package stays exempt."""
+    own = Path(automated_security_helper.__file__).resolve().parent
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _symlink(repo / ALIAS, own)
+    monkeypatch.syspath_prepend(str(repo))
+    below = repo / ALIAS / "plugin_modules" / "ash_aws_plugins"
+
+    assert _location_is_own(repo / ALIAS, own, as_named=False)
+    assert not _location_is_own(repo / ALIAS, own, as_named=True)
+    assert not _location_is_own(below, own, as_named=True)
+    # The controls: the package itself, and a level below it, stay exempt.
+    assert _location_is_own(own, own, as_named=True)
+    assert _location_is_own(
+        own / "plugin_modules" / "ash_aws_plugins", own, as_named=True
+    )
+
+    reason = refusal_reason(ALIAS, repo)
+    assert reason is not None and "scanned tree" in reason, reason
 
 
 def test_a_module_inside_an_also_scanned_tree_is_refused(tmp_path, monkeypatch):
