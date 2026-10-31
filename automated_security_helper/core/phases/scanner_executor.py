@@ -183,18 +183,80 @@ _SEVERITY_COUNT_FIELDS = ("suppressed", "critical", "high", "medium", "low", "in
 _GRADED_LEVELS = frozenset({"ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"})
 
 
+#: Severity words a tool writes for a level ASH ranks under another name, where
+#: the rank is not in doubt: npm audit's and GitHub's ``moderate``, Red Hat's
+#: ``important``, SonarQube's ``blocker`` and the long form of ``info``. A word
+#: whose rank depends on the vendor (SonarQube's ``major`` and ``minor``, a
+#: priority such as ``P1``) is not here and counts as info, as any name ASH cannot
+#: place does.
+_SEVERITY_ALIASES = {
+    "moderate": "medium",
+    "important": "high",
+    "blocker": "critical",
+    "informational": "info",
+}
+
+
+def _severity_level(name: str) -> str | None:
+    """The ScannerSeverityCount field the severity word *name* names, or None.
+
+    Surrounding whitespace and case do not matter, and the aliases in
+    ``_SEVERITY_ALIASES`` name the level they stand for.
+    """
+    word = name.strip().lower()
+    word = _SEVERITY_ALIASES.get(word, word)
+    return word if word in _SEVERITY_COUNT_FIELDS else None
+
+
+def _finding_severity_level(severity: Any) -> str:
+    """The level one finding of a returned findings list counts under.
+
+    Two defaults, on purpose. A finding that states no severity (the key is
+    missing or null, the finding is not a mapping, the text is empty, or the
+    value is neither text nor a score) is read at the level SARIF gives a result
+    that states none, warning, so it is MEDIUM here as a level-less SARIF result
+    is above: counted in finding_count alone, such a finding never reached the
+    gate. A finding that states a name ASH cannot place counts as info, the
+    contract test_findings_list_increments_counts_per_severity pins: a tool's
+    own vocabulary is a claim the gate cannot rank, kept at the lowest level
+    rather than promoted above a finding that said nothing.
+
+    A number is a CVSS score and is read by its qualitative band: 9.0 and above
+    is critical, 7.0 high, 4.0 medium, anything above zero low, and zero info.
+    Read as stating nothing, a score of 9.8 counted MEDIUM and passed a HIGH or
+    CRITICAL threshold. A number outside 0 to 10, or not a number, states
+    nothing.
+    """
+    if isinstance(severity, str):
+        if not severity.strip():
+            return "medium"
+        return _severity_level(severity) or "info"
+    if isinstance(severity, (int, float)) and not isinstance(severity, bool):
+        if not 0 <= severity <= 10:
+            return "medium"
+        if severity >= 9.0:
+            return "critical"
+        if severity >= 7.0:
+            return "high"
+        if severity >= 4.0:
+            return "medium"
+        return "low" if severity > 0 else "info"
+    return "medium"
+
+
 def _severity_counts_from_dict(raw_counts: Any) -> ScannerSeverityCount:
     """``raw_counts``, a scanner's own ``severity_counts``, as a ScannerSeverityCount.
 
     Keys are matched to the model's fields by name whatever their case, so a
     count a tool writes under ``HIGH`` or ``High`` reaches the severity gate.
     Validated as before, such a key was kept as a pydantic extra and the field
-    stayed 0, and a result with high findings graded PASSED. A key that names no
-    field counts as info, as a findings-list entry whose severity ASH cannot
-    place does (the contract test_scanner_executor_lifecycle pins, "unknown
-    severities fall back to info"): a tool's own vocabulary (grype's
-    ``unknown`` and ``negligible``, npm audit's ``moderate``) is a claim the gate
-    cannot rank, kept at the lowest level and still counted, so the row's
+    stayed 0, and a result with high findings graded PASSED. A key that names a
+    level under another name (``_SEVERITY_ALIASES``: npm audit's ``moderate``)
+    counts there. A key that names no field counts as info, as a findings-list
+    entry whose severity ASH cannot place does (the contract
+    test_scanner_executor_lifecycle pins, "unknown severities fall back to
+    info"): a tool's own vocabulary (grype's ``unknown`` and ``negligible``) is a
+    claim the gate cannot rank, kept at the lowest level and still counted, so the row's
     finding_count holds every finding the tool counted. Left out, as before,
     those findings were in no count at all, and the two dict paths disagreed on
     one idea. ``total`` is the model's own sum, never a count of its own, and is
@@ -215,8 +277,7 @@ def _severity_counts_from_dict(raw_counts: Any) -> ScannerSeverityCount:
         name = key.strip().lower() if isinstance(key, str) else ""
         if name == "total" or not name:
             continue
-        if name not in _SEVERITY_COUNT_FIELDS:
-            name = "info"
+        name = _severity_level(name) or "info"
         if isinstance(value, bool) or not isinstance(value, (int, float, str)):
             raise ValueError(f"severity_counts[{key!r}] is not a count: {value!r}")
         # int() would truncate 0.9 to 0 (a finding gone) and raise OverflowError,
@@ -1931,44 +1992,17 @@ class ScannerExecutor:
                                     # and the row rolled up PASSED.
                                     counted = ScannerSeverityCount()
                                     for finding in raw_results["findings"]:
-                                        # Two defaults, on purpose. A finding that
-                                        # STATES NO severity (the key is missing or
-                                        # null, the finding is not a mapping, or the
-                                        # value is not text: a number is no name the
-                                        # ladder can read, so it states nothing) is
-                                        # read at the level SARIF gives a result that
-                                        # states none, warning, so it is MEDIUM here
-                                        # as a level-less SARIF result is above;
-                                        # counted in finding_count alone, as before,
-                                        # such a finding never reached the gate, and
-                                        # a non-text value read as info graded a
-                                        # CVSS 9.8 PASSED at MEDIUM. A finding that
-                                        # STATES a severity ASH cannot place (a name
-                                        # increment does not know) counts as info: that is
-                                        # the contract the lifecycle tests pin
-                                        # (test_findings_list_increments_counts_per_
-                                        # severity, "unknown severities fall back to
-                                        # info"), and a tool's own vocabulary is a
-                                        # claim this gate cannot rank, so it is kept
-                                        # at the lowest level rather than promoted
-                                        # above a finding that said nothing.
-                                        # increment raises ValueError for both.
-                                        severity = (
-                                            finding.get("severity")
-                                            if isinstance(finding, dict)
-                                            else None
+                                        # The level the finding's severity names
+                                        # (_finding_severity_level): MEDIUM for one
+                                        # that states none, info for a name ASH
+                                        # cannot place, a CVSS score by its band.
+                                        counted.increment(
+                                            _finding_severity_level(
+                                                finding.get("severity")
+                                                if isinstance(finding, dict)
+                                                else None
+                                            )
                                         )
-                                        if not isinstance(severity, str):
-                                            severity = "medium"
-                                        # Stripped, as the keys of a severity_counts
-                                        # dict are: increment lowercases the name
-                                        # but not its spaces, so " HIGH " counted
-                                        # as info and graded PASSED.
-                                        severity = severity.strip()
-                                        try:
-                                            counted.increment(severity)
-                                        except ValueError:
-                                            counted.increment("info")
                                     container.severity_counts = counted
                                     container.finding_count = len(
                                         raw_results["findings"]

@@ -130,18 +130,31 @@ class TestSeverityCountKeysAreMatchedByName:
         assert row.finding_count == 3
 
     def test_a_key_that_names_no_severity_counts_as_info(self):
-        """A tool's own vocabulary (grype's ``negligible``, npm audit's ``moderate``)
-        is counted at the lowest level, as a findings-list entry with an unknown
-        severity is, so finding_count holds every finding the tool counted; left
-        out, those findings were in no count at all. ``total`` is the model's own
-        sum and is dropped, whatever the tool wrote under it."""
+        """A tool's own vocabulary (grype's ``negligible``) is counted at the lowest
+        level, as a findings-list entry with an unknown severity is, so
+        finding_count holds every finding the tool counted; left out, those
+        findings were in no count at all. ``total`` is the model's own sum and is
+        dropped, whatever the tool wrote under it. A word whose rank is not in
+        doubt (npm audit's ``moderate``) is counted at that rank: counted as info
+        it passed a MEDIUM threshold over moderate findings."""
         counts = _severity_counts_from_dict(
             {"high": 1, "total": 7, "negligible": 3, "moderate": 2}
         )
 
         assert counts.high == 1
-        assert counts.info == 5
+        assert counts.info == 3
+        assert counts.medium == 2
         assert counts.total == 6
+
+    def test_the_aliases_name_the_level_they_stand_for_whatever_their_case(self):
+        counts = _severity_counts_from_dict(
+            {"Moderate": 1, " IMPORTANT ": 2, "Blocker": 3, "informational": 4}
+        )
+
+        assert counts.medium == 1
+        assert counts.high == 2
+        assert counts.critical == 3
+        assert counts.info == 4
 
     def test_a_value_under_an_unknown_key_is_still_a_count(self):
         with pytest.raises(ValueError):
@@ -168,15 +181,18 @@ class TestAResultThatCannotBeReadIsThisRowsError:
         assert row.status == ScannerStatus.ERROR
         assert "could not be graded" in _reason(row)
 
-    @pytest.mark.parametrize("value", [5, 9.8, None, ["high"]])
-    def test_a_finding_whose_severity_is_not_text_states_none(
+    @pytest.mark.parametrize(
+        "value", [None, ["high"], True, float("nan"), 11, -1, "", "  "]
+    )
+    def test_a_finding_whose_severity_states_none_is_read_as_medium(
         self, plugin_context, value
     ):
-        """A number, a null or a list under ``severity`` is no name the ladder can
-        read, so the finding states no severity and is read as one that omits the
-        key: MEDIUM, at the gate. Read as info it graded a CVSS 9.8 PASSED at a
-        MEDIUM threshold, the most lenient outcome for the shape ASH could read
-        least."""
+        """A null, a list, a boolean, a number outside 0 to 10 and an empty text
+        are no name or score the ladder can read, so the finding states no
+        severity and is read as one that omits the key: MEDIUM, at the gate. Read
+        as info it graded a finding PASSED at a MEDIUM threshold, the most lenient
+        outcome for the shape ASH could read least. An empty text was counted as
+        info while the same finding with no key was MEDIUM."""
         row = _row(plugin_context, {"findings": [{"severity": value}]})
 
         assert row.status == ScannerStatus.FAILED
@@ -184,7 +200,52 @@ class TestAResultThatCannotBeReadIsThisRowsError:
         assert row.severity_counts.info == 0
         assert row.finding_count == 1
 
-    @pytest.mark.parametrize("name", ["blocker", "P1", ""])
+    @pytest.mark.parametrize(
+        "score,level",
+        [
+            (10, "critical"),
+            (9.8, "critical"),
+            (9.0, "critical"),
+            (8.9, "high"),
+            (7.0, "high"),
+            (6.9, "medium"),
+            (5, "medium"),
+            (4.0, "medium"),
+            (3.9, "low"),
+            (0.1, "low"),
+            (0, "info"),
+        ],
+    )
+    def test_a_number_is_read_by_its_cvss_band(self, plugin_context, score, level):
+        """Red at the base for every score but 4.0 to 6.9: all were counted MEDIUM,
+        so a 9.8 passed a HIGH threshold and a 3.9 failed a MEDIUM one."""
+        row = _row(plugin_context, {"findings": [{"severity": score}]})
+
+        assert getattr(row.severity_counts, level) == 1, row.severity_counts
+        assert row.severity_counts.total == 1
+        assert row.finding_count == 1
+
+    @pytest.mark.parametrize(
+        "name,level",
+        [
+            ("moderate", "medium"),
+            ("Moderate", "medium"),
+            ("important", "high"),
+            ("blocker", "critical"),
+            ("Informational", "info"),
+        ],
+    )
+    def test_a_word_whose_rank_is_not_in_doubt_counts_at_that_rank(
+        self, plugin_context, name, level
+    ):
+        """npm audit and GitHub write ``moderate``, SonarQube ``blocker``: counted
+        as info, a moderate finding passed a MEDIUM threshold."""
+        row = _row(plugin_context, {"findings": [{"severity": name}]})
+
+        assert getattr(row.severity_counts, level) == 1, row.severity_counts
+        assert row.severity_counts.total == 1
+
+    @pytest.mark.parametrize("name", ["P1", "major", "bogus"])
     def test_a_finding_with_an_unknown_severity_name_counts_as_info(
         self, plugin_context, name
     ):
