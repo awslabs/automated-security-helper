@@ -73,6 +73,46 @@ def test_a_removal_that_keeps_failing_is_named_once(root, monkeypatch, caplog):
     assert sandbox.is_dir(), "the workspace was removed although the removal raised"
 
 
+def test_a_sweep_that_removes_the_session_makes_its_next_failure_new(
+    root, monkeypatch, caplog
+):
+    """The same case through the sweep itself. The test below calls the two
+    helpers and shows only that forgetting works; nothing there shows the sweep
+    forgets after a removal. A removal that fails twice is named once, the pass
+    that removes the session forgets it, and when the id is used again and its
+    removal fails again the warning comes again."""
+    sandbox = _aged_workspace(root, STUCK)
+    real_remove = sessions._remove_session_state
+    failing = {"now": True}
+
+    def removal(session_id: str) -> None:
+        if failing["now"]:
+            raise PermissionError(13, "Permission denied", str(sandbox))
+        real_remove(session_id)
+
+    monkeypatch.setattr(sessions, "_remove_session_state", removal)
+
+    with caplog.at_level(logging.WARNING):
+        sessions.sweep_stale_workspaces(1.0, now=time.time() + 3600)
+        sessions.sweep_stale_workspaces(1.0, now=time.time() + 3600)
+        assert len(_warnings_naming(caplog, STUCK)) == 1, caplog.text
+
+        failing["now"] = False
+        removed = sessions.sweep_stale_workspaces(1.0, now=time.time() + 3600)
+        assert removed == [STUCK], removed
+        assert not sandbox.exists(), "the removal that worked left the workspace"
+        assert STUCK not in sessions._sweep_failures_warned, (
+            "the pass that removed the session did not forget its failure"
+        )
+
+        # The id is used again and its removal fails again: a new failure.
+        sandbox = _aged_workspace(root, STUCK)
+        failing["now"] = True
+        sessions.sweep_stale_workspaces(1.0, now=time.time() + 3600)
+
+    assert len(_warnings_naming(caplog, STUCK)) == 2, caplog.text
+
+
 def test_a_removal_that_worked_makes_a_later_failure_new(root, caplog):
     with caplog.at_level(logging.WARNING):
         sessions._warn_sweep_failure_once(STUCK, "first")
