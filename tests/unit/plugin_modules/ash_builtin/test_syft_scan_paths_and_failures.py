@@ -134,7 +134,13 @@ def test_a_blank_config_file_names_no_file(tmp_path, caplog):
     commands: list[list[str]] = []
     _scan_with(scanner, {"returncode": 0}, MINIMAL_SBOM, commands=commands)
     (command,) = commands
-    assert command.count("--config") == 1, command
+    # Both spellings of the flag: the bare token and the ``--config=<path>`` form.
+    config_tokens = [
+        token
+        for token in command
+        if token == "--config" or token.startswith("--config=")
+    ]
+    assert len(config_tokens) == 1, command
     named = Path(_flag_value(command, "--config")).resolve()
     assert not named.is_relative_to(Path(scanner.context.source_dir).resolve())
 
