@@ -28,6 +28,10 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScannerConfig,
     TrivyRepoScannerConfigOptions,
 )
+from automated_security_helper.utils.content_db_staleness import (
+    ContentDatabaseAbsent,
+    _built_from_trivy,
+)
 
 PluginContext.model_rebuild(_types_namespace={"AshConfig": AshConfig})
 
@@ -65,13 +69,31 @@ def _scanner(tmp_path: Path) -> TrivyRepoScanner:
     )
 
 
-def test_the_real_probe_reads_an_empty_cache_as_a_missing_database(
-    tmp_path, monkeypatch
-):
+def _scanner_with_an_empty_cache(tmp_path, monkeypatch) -> TrivyRepoScanner:
     scanner = _scanner(tmp_path)
     empty_cache = tmp_path / "cache" / "empty"
     empty_cache.mkdir(parents=True)
     monkeypatch.setattr(TrivyRepoScanner, "_trivy_cache_dir", lambda self: empty_cache)
+    return scanner
+
+
+def test_the_real_probe_raises_the_missing_database_error_for_an_empty_cache(
+    tmp_path, monkeypatch
+):
+    """Every ``ValueError`` the probe builds says ``no vulnerability database`` once
+    the scanner wraps it, so the scanner-level test below cannot tell an empty cache
+    from a changed ``trivy version`` layout or a missing executable. The probe's own
+    ``ContentDatabaseAbsent`` can."""
+    scanner = _scanner_with_an_empty_cache(tmp_path, monkeypatch)
+
+    with pytest.raises(ContentDatabaseAbsent):
+        _built_from_trivy(scanner.content_database_probe_context())
+
+
+def test_the_real_probe_reads_an_empty_cache_as_a_missing_database(
+    tmp_path, monkeypatch
+):
+    scanner = _scanner_with_an_empty_cache(tmp_path, monkeypatch)
     messages: list[str] = []
 
     with patch.object(
@@ -80,4 +102,7 @@ def test_the_real_probe_reads_an_empty_cache_as_a_missing_database(
         assert scanner._offline_database_available() is False
 
     assert "no vulnerability database" in scanner.dependency_unavailable_reason
+    # The text only ContentDatabaseAbsent carries: the other ValueErrors of the
+    # probe (nothing printed, invalid JSON, an unreadable metadata file) do not.
+    assert "no trivy database was found" in scanner.dependency_unavailable_reason
     assert not [m for m in messages if "could not check" in m], messages
