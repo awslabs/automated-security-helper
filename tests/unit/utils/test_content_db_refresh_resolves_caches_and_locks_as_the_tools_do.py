@@ -13,8 +13,9 @@ Properties of ``utils/content_db_refresh.py`` that nothing else pins:
   and names Go's temporary-directory fallback as Go's os.TempDir does on each
   platform;
 - a dotted ``db.skip-update`` key beats the nested spelling, as viper reads it;
-- the refresh lock moves to a per-account temporary file when the cache's lock
-  file is not this account's to open, or the cache is not writable;
+- a read-only lock file another account left in the cache stays the lock, and the
+  refresh lock moves to a temporary file named for the cache when the cache is not
+  writable;
 - the prepared-scan memory is bounded;
 - a refresh's output is decoded with replacement, and a failed refresh whose
   stderr is only whitespace reports its stdout.
@@ -22,6 +23,7 @@ Properties of ``utils/content_db_refresh.py`` that nothing else pins:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import stat
 import tempfile
@@ -85,7 +87,13 @@ def test_a_dotted_config_key_beats_the_nested_spelling(tmp_path):
     not hasattr(os, "getuid") or os.getuid() == 0,
     reason="file modes do not bind root",
 )
-def test_a_lock_file_another_account_left_moves_the_lock_to_a_temp_file(tmp_path):
+def test_a_read_only_lock_file_another_account_left_stays_the_cache_lock(tmp_path):
+    """``exclusive_lock`` opens a lock file it may not write for reading alone and
+    ``flock`` still takes the exclusive lock, so a read-only lock file in the cache
+    is the lock: both accounts meet at it. This test used to expect the per-account
+    temporary lock, the behavior the lock rework replaced; the cases that do leave
+    the cache (a file this account cannot read, a name that is not a regular file)
+    are pinned in test_content_db_refresh_lock_and_operator_settings.py."""
     cache = tmp_path / "cache"
     cache.mkdir()
     foreign = cache / ".ash-grype-update.lock"
@@ -95,15 +103,19 @@ def test_a_lock_file_another_account_left_moves_the_lock_to_a_temp_file(tmp_path
         lock = refresh.update_lock_path("grype", cache)
     finally:
         foreign.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    assert lock.parent == Path(tempfile.gettempdir())
-    assert lock.name.endswith(f"-{os.getuid()}.lock")
+    assert lock == foreign
 
 
 @pytest.mark.skipif(
     not hasattr(os, "getuid") or os.getuid() == 0,
     reason="file modes do not bind root",
 )
-def test_the_temporary_lock_is_named_for_the_account(tmp_path):
+def test_the_temporary_lock_of_an_unwritable_cache_is_named_for_the_cache(tmp_path):
+    """The shared temporary name carries the cache's digest and no account, so two
+    accounts that cannot write one cache meet at one file. This test used to expect
+    the account in the name, which the lock rework moved to the last fallback (a
+    shared name this account cannot open), pinned in
+    test_content_db_refresh_lock_and_operator_settings.py."""
     cache = tmp_path / "cache"
     cache.mkdir()
     cache.chmod(stat.S_IRUSR | stat.S_IXUSR)
@@ -111,9 +123,9 @@ def test_the_temporary_lock_is_named_for_the_account(tmp_path):
         lock = refresh.update_lock_path("trivy", cache)
     finally:
         cache.chmod(stat.S_IRWXU)
+    digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
     assert lock.parent == Path(tempfile.gettempdir())
-    assert lock.name.startswith("ash-trivy-update-")
-    assert lock.name.endswith(f"-{os.getuid()}.lock")
+    assert lock.name == f"ash-trivy-update-{digest}.lock"
 
 
 def test_the_prepared_scan_memory_is_bounded():
