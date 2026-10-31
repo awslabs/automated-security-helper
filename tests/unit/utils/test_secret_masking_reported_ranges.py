@@ -147,13 +147,7 @@ class TestAKeyBlocksRangeOnLaterMaskings:
         block ends; with no END line in any snippet every later line is masked,
         as it was before the END line was kept on the finding. Only an END line
         an earlier masking wrote (the line then reads as masked) bounds it."""
-        key = _key_finding()
-        key["locations"][0]["physicalLocation"]["region"]["endLine"] = 12
-        model = _results(
-            key,
-            _neighbor("keys.py", 10, 10, [BEFORE_PEM] + PEM_LINES[:3]),
-            _neighbor("keys.py", 40, 40, [FAR_LINE]),
-        )
+        model = self._key_with_no_end_in_sight()
 
         mask_secrets_in_results(model)
 
@@ -253,8 +247,8 @@ class TestAKeyBlocksRangeOnLaterMaskings:
         assert _context(loaded, 2) == MASKED_LINE + "\n"
 
     def test_the_findings_browser_masks_the_body_of_a_begin_line_finding(self):
-        """A rule that is not a private-key rule is known to start a block only
-        from the BEGIN line, which the first masking replaced."""
+        """The same finding as above, with the END line shown by a neighbor's
+        snippet: the range stops at that END line and the line after it stays."""
         model = _results(
             _key_finding(rule_id="CUSTOM-1", tags=["secret"]),
             _neighbor("keys.py", 10, 10, [BEFORE_PEM] + PEM_LINES + [AFTER_PEM]),
