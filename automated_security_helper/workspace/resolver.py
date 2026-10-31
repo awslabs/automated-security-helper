@@ -377,7 +377,9 @@ def _disabled_scanner_pins(config: AshConfig) -> Dict[str, str]:
 
 
 def _record_pins_the_policy_turns_on(
-    projects: Sequence[ProjectPlan], disabled: Dict[str, Dict[str, str]]
+    projects: Sequence[ProjectPlan],
+    disabled: Dict[str, Dict[str, str]],
+    switched: Optional[Dict[str, List[str]]] = None,
 ) -> bool:
     """Record the pin of each disabled scanner that a project's policy switches on.
 
@@ -385,6 +387,10 @@ def _record_pins_the_policy_turns_on(
     The policy is applied after the pins are compared, so the pin of a scanner it
     adds was not in that comparison although the scan applies it. Returns whether
     any pin was added, so the caller compares the projects' pins again.
+
+    When *switched* is given it receives, by project key, the scanners whose pin
+    was recorded here, so a refusal can say the project's config has the scanner
+    off and the workspace policy is what turned it on.
     """
     recorded = False
     for project in projects:
@@ -397,6 +403,8 @@ def _record_pins_the_policy_turns_on(
                 and name not in project.scanner_pins
             ):
                 project.scanner_pins[name] = pin
+                if switched is not None:
+                    switched.setdefault(project.key, []).append(name)
                 recorded = True
     return recorded
 
@@ -1335,8 +1343,29 @@ def _resolve_project_config(
         ) from exc
 
 
+_SWITCHED_ON_BY_POLICY = "switched on by the workspace policy"
+
+
+def _required_by(
+    keys: Sequence[str], scanner: str, switched: Optional[Dict[str, List[str]]]
+) -> str:
+    """The projects holding a pin, each marked when the policy switched *scanner* on.
+
+    A project whose config has the scanner off and whose pin was recorded only
+    because the workspace policy requires the scanner would otherwise be named
+    as if it had asked for that version, with nothing to say where to look.
+    """
+    held = switched or {}
+    return ", ".join(
+        f"{key} ({_SWITCHED_ON_BY_POLICY})" if scanner in held.get(key, ()) else key
+        for key in sorted(keys)
+    )
+
+
 def _validate_scanner_pins(
-    definition: WorkspaceDefinition, projects: List[ProjectPlan]
+    definition: WorkspaceDefinition,
+    projects: List[ProjectPlan],
+    switched: Optional[Dict[str, List[str]]] = None,
 ) -> None:
     """Refuse a workspace whose projects demand irreconcilable tool versions.
 
@@ -1359,14 +1388,15 @@ def _validate_scanner_pins(
     problems: List[str] = []
     for scanner, by_pin in sorted(by_scanner.items()):
         before = len(problems)
-        _refuse_incompatible_pin_pairs(scanner, by_pin, problems)
+        _refuse_incompatible_pin_pairs(scanner, by_pin, problems, switched)
         if len(problems) == before and len(by_pin) > 2:
             # Every pair can be satisfied; that does not prove one version
             # satisfies three or more pins together (scanner_pins.compare_pin_set).
             together = compare_pin_set(sorted(by_pin))
             if together is not PinVerdict.COMPATIBLE:
                 listed = "; ".join(
-                    f"'{pin}' (required by {', '.join(sorted(by_pin[pin]))})"
+                    f"'{pin}' (required by "
+                    f"{_required_by(by_pin[pin], scanner, switched)})"
                     for pin in sorted(by_pin)
                 )
                 explanation = (
@@ -1391,7 +1421,10 @@ def _validate_scanner_pins(
 
 
 def _refuse_incompatible_pin_pairs(
-    scanner: str, by_pin: Dict[str, List[str]], problems: List[str]
+    scanner: str,
+    by_pin: Dict[str, List[str]],
+    problems: List[str],
+    switched: Optional[Dict[str, List[str]]] = None,
 ) -> None:
     """Append a problem for each pair of *scanner*'s pins no version satisfies."""
     for first_pin, second_pin in combinations(sorted(by_pin), 2):
@@ -1406,9 +1439,9 @@ def _refuse_incompatible_pin_pairs(
         problems.append(
             f"scanner '{scanner}': "
             f"'{first_pin}' (required by "
-            f"{', '.join(sorted(by_pin[first_pin]))}) and "
+            f"{_required_by(by_pin[first_pin], scanner, switched)}) and "
             f"'{second_pin}' (required by "
-            f"{', '.join(sorted(by_pin[second_pin]))}) -- {explanation}"
+            f"{_required_by(by_pin[second_pin], scanner, switched)}) -- {explanation}"
         )
 
 
@@ -2149,8 +2182,9 @@ def resolve_workspace(
     # A scanner the policy switches on keeps the pin of its off section, and the
     # comparisons above ran before the policy was known: the pairs a project's
     # sections may apply are held against the new pin as well.
-    if _record_pins_the_policy_turns_on(active, disabled_pins):
-        _validate_scanner_pins(definition, active)
+    switched_on: Dict[str, List[str]] = {}
+    if _record_pins_the_policy_turns_on(active, disabled_pins, switched_on):
+        _validate_scanner_pins(definition, active, switched_on)
         _validate_unresolved_pins(active, unresolved_pins)
 
     return WorkspacePlan(

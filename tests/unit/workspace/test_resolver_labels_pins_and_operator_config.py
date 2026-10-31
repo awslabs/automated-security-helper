@@ -566,6 +566,49 @@ class TestScannerSections:
         assert ">=2" in message
         assert ">=1,<2" in message
 
+    def test_a_clash_over_a_pin_the_policy_switched_on_names_the_policy(self, tmp_path):
+        """``api`` has bandit off in its config, so its pin is in the plan only
+        because the workspace policy requires bandit. The refusal named it like
+        a project that asked for that version, with no hint where the scanner
+        came from."""
+        api = _entry("api", policy_scanners=["bandit"])
+        web = _entry("web", scanner_pins={"bandit": ">=1,<2"})
+        switched: dict = {}
+
+        recorded = _record_pins_the_policy_turns_on(
+            [api, web], {"api": {"bandit": ">=2"}, "web": {}}, switched
+        )
+
+        assert recorded is True
+        assert switched == {"api": ["bandit"]}
+        with pytest.raises(WorkspaceDefinitionError) as excinfo:
+            _validate_scanner_pins(_definition(tmp_path), [api, web], switched)
+        message = str(excinfo.value)
+        assert "api (switched on by the workspace policy)" in message
+        assert "web (switched on by the workspace policy)" not in message
+        assert "web)" in message
+
+    def test_three_pins_that_clash_together_name_the_policy_too(self, tmp_path):
+        """The wording is the same when every pair is satisfiable and only the
+        three together are not."""
+        api = _entry("api", scanner_pins={"bandit": ">=1,<3"})
+        web = _entry("web", scanner_pins={"bandit": ">=2,<4"})
+        docs = _entry("docs", policy_scanners=["bandit"])
+        switched: dict = {}
+
+        _record_pins_the_policy_turns_on(
+            [api, web, docs], {"docs": {"bandit": "!=2.*"}}, switched
+        )
+
+        with pytest.raises(WorkspaceDefinitionError) as excinfo:
+            _validate_scanner_pins(_definition(tmp_path), [api, web, docs], switched)
+        message = str(excinfo.value)
+        assert "together" in message
+        assert "'!=2.*' (required by docs (switched on by the workspace policy))" in (
+            message
+        )
+        assert "'>=1,<3' (required by api)" in message
+
     def test_a_pin_the_policy_does_not_switch_on_stays_unrecorded(self):
         api = _entry("api", policy_scanners=["semgrep"])
         skipped = _entry(
