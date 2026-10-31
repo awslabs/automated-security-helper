@@ -232,11 +232,11 @@ def test_a_counter_keeps_its_counts_and_its_class():
     assert any(key is marker for key in given)
 
 
-class _Loose(tuple):
-    """A tuple subclass with a ``__dict__``, so an instance can carry an
-    attribute named like a NamedTuple's ``_fields`` without being one."""
-
-    __slots__ = ("__dict__",)
+class _Loose(tuple):  # noqa: SLOT001
+    """A tuple subclass with the ``__dict__`` a slotless subclass gets, so an
+    instance can carry an attribute named like a NamedTuple's ``_fields``
+    without being one. CPython refuses a non-empty ``__slots__`` on a tuple
+    subclass at class creation, so the lint's ask cannot be met here."""
 
 
 def test_a_tuple_subclass_with_an_instance_fields_attribute_is_rebuilt_as_itself():
