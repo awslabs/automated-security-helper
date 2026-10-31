@@ -26,6 +26,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporte
     ACTIVITY_NAME,
     CONVERSION_SHORTFALL_LABEL,
     OcsfReporter,
+    _fallback_identities,
 )
 from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     ActivityId,
@@ -34,6 +35,7 @@ from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     SeverityId,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
+    Kind,
     Level,
     Message,
     PropertyBag,
@@ -331,6 +333,56 @@ class TestFindingUidIsStableAcrossRuns:
             str(uuid.uuid5(_FINDING_UID_NAMESPACE, key))
             for key in ("drifted-row", flat[1].id)
         }
+
+
+class TestTheIdentityOfAResultWithNoSharedId:
+    @staticmethod
+    def _markdown_result(markdown: str) -> Result:
+        result = Result(ruleId="R1", level=Level.error)
+        result.message = Message.model_validate({"markdown": markdown})
+        return result
+
+    def test_messages_given_in_markdown_are_told_apart_at_one_site(self):
+        """Read as ``text`` alone, every markdown-only message was the same
+        empty part of the key, so two findings at one site shared an identity
+        and the second was numbered as a repeat of the first."""
+        first = self._markdown_result("first finding")
+        second = self._markdown_result("second finding")
+
+        both = _fallback_identities([first, second], [None, None])
+
+        assert "occurrence" not in both[0] and "occurrence" not in both[1]
+        assert both[0] != both[1]
+
+    def test_a_findings_identity_does_not_depend_on_a_sibling(self):
+        """With the sibling fixed (absent from the run) the other finding keeps
+        the identity it had beside it."""
+        first = self._markdown_result("first finding")
+        second = self._markdown_result("second finding")
+
+        beside = _fallback_identities([first, second], [None, None])
+        alone = _fallback_identities([second], [None])
+
+        assert alone[0] == beside[1]
+
+    def test_a_result_that_states_no_finding_takes_no_number(self):
+        """The array leaves such a result out, so it must not be counted among
+        the identical findings around it: the finding after it was numbered 2
+        instead of 1, and its uid changed when the rule stopped evaluating."""
+        finding = Result(ruleId="R1", level=Level.error, message=Message(text="m"))
+        not_applicable = Result(
+            ruleId="R1",
+            kind=Kind.notApplicable,
+            level=Level.none,
+            message=Message(text="m"),
+        )
+        twin = Result(ruleId="R1", level=Level.error, message=Message(text="m"))
+
+        with_it = _fallback_identities([finding, not_applicable, twin], [None] * 3)
+        without_it = _fallback_identities([finding, twin], [None, None])
+
+        assert with_it[1] is None
+        assert [with_it[0], with_it[2]] == without_it
 
 
 class TestTheFallbackRecordKeepsWhatItCanRead:

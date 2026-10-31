@@ -202,8 +202,11 @@ def _identity_key(result: Any, rule_id: str, message_text: Optional[str] = None)
     try:
         text = message_text
         if text is None:
-            root = getattr(getattr(result, "message", None), "root", None)
-            text = getattr(root, "text", None)
+            # The reading every report shares (text, else markdown, else the
+            # message string's id), so a message given in markdown or by id
+            # alone is told apart from another at the same site; read as
+            # ``text`` alone, every such message was the same empty part.
+            text = result_message_text(result, default="")
         parts.append(_identity_part(text))
     except Exception:  # noqa: BLE001 -- see the docstring
         parts.append("")
@@ -232,11 +235,16 @@ def _fallback_identities(
     two identical results in one run are two findings with two uids, as they are
     in every other report (the flattened id's occurrence counter), instead of one
     finding a SIEM sees twice and merges.
+
+    A result that states no finding (:func:`is_not_a_finding`) is left out of the
+    array, so it has no identity and takes no number: counted, it shifted the
+    occurrence number of every identical finding after it when a rule stopped
+    evaluating, and the uids of those findings changed with it.
     """
     seen: Dict[str, int] = {}
     identities: List[Optional[str]] = []
     for result, shared_id in zip(results, shared_ids):
-        if shared_id:
+        if shared_id or is_not_a_finding(result):
             identities.append(None)
             continue
         key = _identity_key(result, result_rule_id(result) or "Unknown Rule")
