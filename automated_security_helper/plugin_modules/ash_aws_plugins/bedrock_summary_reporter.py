@@ -588,6 +588,49 @@ def _exhaustion_text(
     return text + "*"
 
 
+def _with_earlier_errors(
+    outcome: CallOutcome,
+    primary_error: Optional[str],
+    run_model: Optional[str],
+    run_model_error: Optional[str],
+    values: Tuple[str, ...],
+) -> CallOutcome:
+    """*outcome*, a failure that ended the walk early, with why the models before
+    it failed, redacted with *values* when anything was added.
+
+    The walk ends on a failure no other model answers (no credentials, no
+    connection) with that failure's own text rather than the exhaustion text.
+    The exhaustion text keeps the configured model's error and, for a resumed
+    walk, the run's fallback model's; this keeps them too, so an operator whose
+    configured model was denied and whose fallback then lost its connection
+    sees both. Nothing is added when no earlier error is known.
+    """
+    earlier = []
+    reason = _error_reason(primary_error)
+    if reason:
+        earlier.append(f"The configured model's error: {reason}")
+    run_reason = _error_reason(run_model_error)
+    if run_model and run_reason:
+        earlier.append(
+            f"The run's fallback model {run_model} then failed: {run_reason}"
+        )
+    if not earlier:
+        return outcome
+    body = outcome.text.strip()
+    wrapped = len(body) > 1 and body.startswith("*") and body.endswith("*")
+    if wrapped:
+        body = body[1:-1]
+    text = body.rstrip(".") + ". " + ". ".join(r.rstrip(".") for r in earlier)
+    if wrapped:
+        text = f"*{text}*"
+    return CallOutcome(
+        text_without_values(text, values),
+        ok=outcome.ok,
+        model_specific=outcome.model_specific,
+        code=outcome.code,
+    )
+
+
 #: Snapshotted at import. The options read their defaults when they are built
 #: (default factories), so a value set after this module loaded is what an
 #: option holds; ``_redaction_values`` reads the environment again at report
@@ -2563,8 +2606,12 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     # No connection, no credentials, the service down: every
                     # later candidate fails the same way, so the walk ends here
                     # with the real error, not the generic exhaustion text
-                    # after calling the rest of the chain for nothing.
-                    return outcome
+                    # after calling the rest of the chain for nothing. The
+                    # earlier models' errors are added to it, as they are on
+                    # exhaustion.
+                    return _with_earlier_errors(
+                        outcome, primary_error, resume_after, resume_error, values
+                    )
                 if (
                     known_unavailable is not None
                     and outcome.code in _REFUSED_FOR_THE_RUN
