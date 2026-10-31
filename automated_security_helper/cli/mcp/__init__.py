@@ -1200,6 +1200,10 @@ def _run_uvicorn(
 ) -> None:
     """Run an ASGI app via uvicorn, blocking until shutdown.
 
+    Raises ``RuntimeError`` when uvicorn returns without the server having
+    started and no signal stopped it, which is how a failed application
+    startup ends; the failure itself is in the log.
+
     ``listen_socket`` is an already bound socket to serve on instead of binding
     ``host`` and ``port`` (see :func:`_bind_listen_socket`). Once the server
     listens on it, the line that names its address is logged as uvicorn logs it

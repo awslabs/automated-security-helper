@@ -156,7 +156,7 @@ async def _handle_scan_completed(
     connection_alive: bool,
     session_id: Optional[str] = None,
 ) -> bool:
-    """Emit completion progress + summary once the aggregated results file exists.
+    """Emit completion progress + summary once the registry reports the scan completed.
 
     Returns the (possibly updated) ``connection_alive`` flag.
 
@@ -514,8 +514,7 @@ async def _run_monitor_loop(
             await _handle_terminal_status(ctx, progress_info, connection_alive)
             return
 
-        # Blocking glob on the event loop. Deferred: see the note on the exists() call
-        # above -- same polling loop, same reason.
+        # Blocking glob on the event loop, once per pass of this polling loop.
         scanner_results = list(output_dir.glob("scanners/**/ASH.ScanResults.json"))  # noqa: ASYNC240
         total_scanners_estimate = _update_scanner_estimate(
             scanner_results, total_scanners_estimate
