@@ -145,19 +145,26 @@ def _is_filesystem_root(value: str) -> bool:
     return path.parent == path
 
 
-def expand_home(value: str) -> Optional[str]:
+def _names_the_home(value: str) -> bool:
+    """Whether *value* is ``~`` alone or starts ``~/`` (``~\\`` too on Windows)."""
+    separators = ("/", "\\") if os.name == "nt" else ("/",)
+    return value == "~" or value.startswith(tuple("~" + sep for sep in separators))
+
+
+def expand_home(value: str, *, warn: bool = True) -> Optional[str]:
     """``value`` with a leading ``~`` expanded to :func:`usable_home`.
 
     ``~`` alone and ``~/...`` (``~\\...`` too on Windows) need the home directory,
     and give None when there is no usable one: the caller decides whether that
     drops the value, refuses, or keeps it as written. Any other value, ``~user``
-    included, is returned as ``os.path.expanduser`` returns it.
+    included, is returned as ``os.path.expanduser`` returns it. ``warn=False``
+    gives None without the warning about the unusable home.
     """
-    separators = ("/", "\\") if os.name == "nt" else ("/",)
-    if value == "~" or value.startswith(tuple("~" + sep for sep in separators)):
+    if _names_the_home(value):
         home = usable_home()
         if home is None:
-            warn_if_home_unusable()
+            if warn:
+                warn_if_home_unusable()
             return None
         return str(home) + value[1:]
     return os.path.expanduser(value)
@@ -262,13 +269,8 @@ def ash_bin_path_from_environment(warn: bool = True) -> "str | None":
     value = os.environ.get("ASH_BIN_PATH")
     if value is None or is_blank_bin_path(value):
         return None
-    if value == "~" or value.startswith(("~/", "~\\")):
-        home = usable_home()
-        if home is None:
-            if warn:
-                warn_if_home_unusable()
-            return None
-        return str(home.joinpath(value[2:]))
+    if _names_the_home(value):
+        return expand_home(value, warn=warn)
     return value
 
 
