@@ -402,8 +402,13 @@ class TestEveryReporterIsAccountedFor:
         assert "fake-merged" in outcome.workspace_artifacts
 
     def test_a_reporter_whose_python_only_check_raises_is_excluded_not_fatal(
-        self, workspace
+        self, workspace, caplog
     ):
+        import logging
+
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        caplog.set_level(logging.WARNING, logger=ASH_LOGGER.name)
         _, output_dir, _ = workspace
         outcome = _emit(
             workspace, FakePythonOnlyRaisesReporter, python_based_plugins_only=True
@@ -412,6 +417,11 @@ class TestEveryReporterIsAccountedFor:
         entry = _manifest(output_dir)["reporters"]["fake-python-only-raises"]
         assert entry["skipped"] == SKIP_NOT_PYTHON_ONLY
         assert outcome.failed_reporters == {}
+        # The exclusion is said in the log, with the reporter's name and why.
+        assert "fake-python-only-raises" in caplog.text, caplog.text
+        assert "raised while reporting whether it is Python-only" in caplog.text, (
+            caplog.text
+        )
 
     def test_a_disabled_reporter_the_formats_excluded_is_not_considered(
         self, workspace
@@ -723,7 +733,14 @@ class TestFailuresAreRecordedNotRaised:
         assert "error" in entry
         assert entry["covers_projects"] is False
 
-    def test_an_error_carrying_an_environment_value_is_redacted(self, workspace):
+    def test_an_error_carrying_an_environment_value_is_redacted(
+        self, workspace, caplog
+    ):
+        import logging
+
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        caplog.set_level(logging.DEBUG, logger=ASH_LOGGER.name)
         _, output_dir, _ = workspace
         outcome = _emit(workspace, FakeRaisingReporter)
 
@@ -731,6 +748,11 @@ class TestFailuresAreRecordedNotRaised:
         assert CANARY not in entry["error"]
         assert CANARY not in outcome.failed_reporters["fake-raising"]
         assert "RuntimeError" in entry["error"]
+        # The log is a sink too: the error line and the debug traceback are both
+        # written, and neither may carry the value. The first assertion is the
+        # control that the failure was logged at all, so the second is not vacuous.
+        assert "failed at workspace level" in caplog.text, caplog.text
+        assert CANARY not in caplog.text, caplog.text
 
     def test_a_results_file_that_cannot_be_loaded_still_gets_a_manifest(
         self, workspace
