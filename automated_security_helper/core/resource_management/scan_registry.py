@@ -248,6 +248,11 @@ class ScanRegistryEntry:
         # holds the entry that would say so, so the fact is kept here, as
         # later_scan_ids keeps it for a scan of the very same directory.
         self.removed_nested_scan_ids: List[str] = []
+        # The output directory of each id in removed_nested_scan_ids, so that
+        # ScanRegistry._forget_removed_tree can drop the ids whose files a later
+        # removal deleted: an id kept after its files are gone refuses this
+        # scan's own removal for a scan that holds nothing.
+        self.removed_nested_scan_directories: Dict[str, Path] = {}
         # Whether remove_output_of_scan deleted this scan's output tree (its
         # remover reported the tree gone). A scan removed from the registry
         # after that left no files behind, so it holds nothing in the tree of an
@@ -795,6 +800,35 @@ class ScanRegistry:
                 continue
             if removed.scan_id not in other.removed_nested_scan_ids:
                 other.removed_nested_scan_ids.append(removed.scan_id)
+            other.removed_nested_scan_directories[removed.scan_id] = (
+                removed.canonical_output_directory
+            )
+
+    def _forget_removed_tree(self, tree: Path) -> None:
+        """Drop the removed nested scans whose files ``tree``'s deletion took.
+
+        Called with the lock held after ``remove_output_of_scan`` deleted the
+        output tree ``tree``. A nested scan recorded in
+        ``removed_nested_scan_ids`` kept its files in a directory that equals or
+        lies inside ``tree``; those files are gone now, so the record would only
+        refuse the enclosing scan's removal for a tree that holds nothing of
+        that scan. Records of nested scans outside ``tree`` are kept.
+        """
+        for other in self._registry.values():
+            gone = [
+                scan_id
+                for scan_id, directory in other.removed_nested_scan_directories.items()
+                if directory == tree or tree in directory.parents
+            ]
+            if not gone:
+                continue
+            other.removed_nested_scan_ids = [
+                scan_id
+                for scan_id in other.removed_nested_scan_ids
+                if scan_id not in gone
+            ]
+            for scan_id in gone:
+                del other.removed_nested_scan_directories[scan_id]
 
     def _forget_later_scan(self, removed: ScanRegistryEntry) -> None:
         """Drop ``removed`` from the earlier entries' ``later_scan_ids`` when its
@@ -1464,6 +1498,9 @@ class ScanRegistry:
                     # leaves no files in an enclosing scan's tree
                     # (_remember_nested_scan).
                     entry.output_removed = True
+                    # A nested scan's files that lay in the deleted tree are
+                    # gone too (_forget_removed_tree).
+                    self._forget_removed_tree(entry.canonical_output_directory)
             removal.set()
 
     def update_scan_status(
