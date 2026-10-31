@@ -113,6 +113,52 @@ class TestADeeplyNestedManifest:
 
         assert copied["package.json"] == (package / "package.json").read_bytes()
 
+    def test_an_escaped_spelling_of_the_key_is_refused_too(self, tmp_path):
+        """The refusal does not look for the key's bytes: an unparsable pnpm
+        manifest is refused whatever it holds, so the escaped spelling
+        (``auditCon\\u0066ig``, the same key to Node) is no way past it."""
+        depth = 50_000
+        nested = (
+            b'{"name": "deep", "pnpm": {"auditCon\\u0066ig": {}}, "a": '
+            + b"[" * depth
+            + b"]" * depth
+            + b"}"
+        )
+        package = _package(tmp_path / "repo" / "deep", "pnpm-lock.yaml", nested)
+
+        with pytest.raises(package_manager_child.SuppressionsNotLiftable):
+            _copy("pnpm", package, tmp_path, ignore_suppressions=True)
+
+    def test_a_parsable_manifest_spelling_the_key_escaped_loses_it_under_the_flag(
+        self, tmp_path
+    ):
+        """A manifest this parser reads decodes the escape, so the key goes
+        like the plain spelling does."""
+        raw = (
+            b'{"name": "esc", "pnpm": {"auditCon\\u0066ig": '
+            + json.dumps(AUDIT_CONFIG).encode()
+            + b"}}"
+        )
+        package = _package(tmp_path / "repo" / "esc", "pnpm-lock.yaml", raw)
+
+        copied = _copy("pnpm", package, tmp_path, ignore_suppressions=True)
+
+        written = json.loads(copied["package.json"])
+        assert "auditConfig" not in written.get("pnpm", {}), written
+        assert b"CVE-2026-0001" not in copied["package.json"]
+
+    def test_a_manifest_without_the_key_is_copied_unchanged_under_the_flag(
+        self, tmp_path
+    ):
+        """Control: a legitimate manifest that holds no ``pnpm.auditConfig`` is
+        not rewritten by the flag; only the key is lifted."""
+        raw = b'{"name":   "plain",\n  "version": "1.0.0"}\n'
+        package = _package(tmp_path / "repo" / "plain", "pnpm-lock.yaml", raw)
+
+        copied = _copy("pnpm", package, tmp_path, ignore_suppressions=True)
+
+        assert copied["package.json"] == raw
+
 
 class TestAManifestWithAnInvalidByte:
     def test_loses_its_audit_config_under_the_flag(self, tmp_path):
