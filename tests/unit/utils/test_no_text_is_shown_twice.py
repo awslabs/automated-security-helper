@@ -99,7 +99,8 @@ DOUBLING = frozenset({"shown_not_obeyed", "shown_on_one_line", "controls_shown"}
 #: for text whose values are shown already, keeping its lines or on one line (an
 #: MCP tool's error), JSON's escapes, the command breakers,
 #: the regex callbacks that write a matched character's escape (_layout_shown,
-#: _outside_ascii_shown), and shown_in_ascii, which puts text shown already in
+#: _outside_ascii_shown and its writable-aware maker _outside_ascii_shown_unless),
+#: and shown_in_ascii, which puts text shown already in
 #: ASCII for the Windows log filter. controls_escaped is sandbox_grants' own, read
 #: by name since it escapes with ascii(), which the check does not follow.
 NOT_DOUBLING = frozenset(
@@ -113,6 +114,7 @@ NOT_DOUBLING = frozenset(
         "escape_for",
         "_layout_shown",
         "_outside_ascii_shown",
+        "_outside_ascii_shown_unless",
         "controls_escaped",
         "shown_in_ascii",
     }
