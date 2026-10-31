@@ -138,7 +138,7 @@ _FORMAT_REASON_MESSAGES = {
 }
 
 
-def _entries_under(directory: Path) -> Optional[set]:
+def _entries_under(directory: Path) -> Optional[set[Path]]:
     """Every path under ``directory``, files and directories, as a set, or None
     when the listing did not complete.
 
@@ -151,7 +151,7 @@ def _entries_under(directory: Path) -> Optional[set]:
     ``rglob`` does not descend into a linked directory, so nothing outside the
     directory is ever listed, or later removed.
     """
-    entries: set = set()
+    entries: set[Path] = set()
     try:
         if not directory.exists():
             return entries
@@ -544,7 +544,7 @@ class ReportPhase(EnginePhase):
         # caller ran this without taking one) nothing new can be told from
         # what was there, and pre-existing entries stay. The files the
         # off-host reporters left are the record of what they sent, and stay.
-        kept = getattr(self, "_off_host_records", set())
+        kept: set[Path] = getattr(self, "_off_host_records", set())
         before = getattr(self, "_report_dir_before", None)
         after = _entries_under(report_dir) if before is not None else None
         appeared = (

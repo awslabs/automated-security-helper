@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 
 class ScannerError(Exception):
@@ -171,7 +171,7 @@ class ASHConfigUnsetVariableError(ASHConfigSourceError):
         self.config_file = config_file
         self.detail = message if detail is None else detail
 
-    def __reduce__(self):
+    def __reduce__(self) -> tuple[Any, ...]:
         # BaseException rebuilds an exception as ``cls(*args)``, and ``variable``
         # is required and keyword-only, so copy.copy, copy.deepcopy and pickle
         # (a worker process handing the error back) failed with a TypeError.
@@ -185,7 +185,7 @@ class ASHConfigUnsetVariableError(ASHConfigSourceError):
         )
 
 
-def _rebuild_unset_variable_error(cls, message, variable):
+def _rebuild_unset_variable_error(cls: Any, message: str, variable: str) -> Any:
     """``cls(message, variable=variable)``, for ``ASHConfigUnsetVariableError.__reduce__``."""
     return cls(message, variable=variable)
 

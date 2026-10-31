@@ -542,7 +542,10 @@ def install(
             # (an image layer rebuilt without ASH_THIRD_PARTY_DIR, an entry that
             # gained a file) used to return here and leave the directory as it was,
             # with no mode that repaired it.
-            if entry is None or _third_party_installed(entry, third_party_dir):
+            if entry is None or (
+                third_party_dir is not None
+                and _third_party_installed(entry, third_party_dir)
+            ):
                 print(
                     f"{asset.tool} {asset.version} is already at {final} and matches "
                     f"the pinned SHA256 {executable_digest.lower()}; not reinstalling",

@@ -174,7 +174,7 @@ def _removed_meanwhile_response(scan_id: str, why: str) -> Dict[str, Any]:
     )
 
 
-def _scoped(session_id: Optional[str]) -> Dict[str, str]:
+def _scoped(session_id: Optional[str]) -> Dict[str, Any]:
     """The registry keyword that scopes a lookup to ``session_id``, if one is given.
 
     An unscoped call passes nothing, so it reaches the registry's unscoped

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import platform
 import time
-from typing import Any, List, Literal, Mapping, Optional, Set, Tuple
+from typing import Any, Collection, List, Literal, Mapping, Optional, Set, Tuple
 
 
 from automated_security_helper.base.plugin_config import (
@@ -789,11 +789,12 @@ class ScanExecutionEngine:
             # defers that case.
             if self._init_enabled_scanners:
                 scanner_classes = list(self.plugins.get("scanner", []))
-                declared_names = [
+                selectable = [
                     self._selectable_scanner_name(plugin_class)
                     for plugin_class in scanner_classes
                 ]
-                if scanner_classes and all(name is not None for name in declared_names):
+                declared_names = [name for name in selectable if name is not None]
+                if scanner_classes and len(declared_names) == len(selectable):
                     refusal = community_scanner_refusal(
                         self._init_enabled_scanners, declared_names, scanner_classes
                     )
@@ -910,7 +911,10 @@ class ScanExecutionEngine:
         self._asharp_model = self._results
 
     def _stamp_scan_timing(
-        self, scan_start_time: datetime, scan_end_time: datetime, ordered_phases
+        self,
+        scan_start_time: datetime,
+        scan_end_time: datetime,
+        ordered_phases: Collection[str],
     ) -> float:
         """Record this run's start, end and duration on the results; return the duration.
 

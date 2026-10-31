@@ -1394,7 +1394,7 @@ def _remapped_module_reference_lists(
     # together or not at all.
     moved_lists: Dict[str, Any] = {}
     for attribute in ("_environment_references", "_displayed_environment_references"):
-        references = tuple(sources.get(attribute, None) or ())
+        references = tuple(sources.get(attribute) or ())
         if not references:
             continue
         rebuilt = []
@@ -1413,7 +1413,7 @@ def _remapped_module_reference_lists(
                     moved = replace(moved, resolved=piece, value=piece)
                 rebuilt.append(moved)
         moved_lists[attribute] = tuple(rebuilt)
-    rewrites = list(sources.get("_written_references", None) or [])
+    rewrites = list(sources.get("_written_references") or [])
     if rewrites:
         rebuilt_rewrites = []
         for rewrite in rewrites:

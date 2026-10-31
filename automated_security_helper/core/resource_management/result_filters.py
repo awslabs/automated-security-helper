@@ -1078,9 +1078,9 @@ def _scanner_row_at_severities(
     return data
 
 
-def _sarif_scanner_names(sarif: Dict[str, Any]) -> set:
+def _sarif_scanner_names(sarif: Dict[str, Any]) -> set[str]:
     """The lowercased ``properties.scanner_name`` values of *sarif*'s results."""
-    names: set = set()
+    names: set[str] = set()
     for run in sarif.get("runs") or []:
         for result in (run.get("results") or []) if isinstance(run, dict) else []:
             name = _sarif_scanner_name(result)
@@ -1133,7 +1133,7 @@ def _stats_of_sarif(
     }
 
 
-def _scanner_names_in(results: Dict[str, Any]) -> Optional[set]:
+def _scanner_names_in(results: Dict[str, Any]) -> Optional[set[str]]:
     """The lowercased scanner names *results* knows, or None when it names none.
 
     Read from ``scanner_results``, ``scanner_reports``, ``additional_reports``
@@ -1141,7 +1141,7 @@ def _scanner_names_in(results: Dict[str, Any]) -> Optional[set]:
     when the document has none of those: a filter against a document that
     cannot name its scanners is not checked.
     """
-    names: set = set()
+    names: set[str] = set()
     found_any = False
     raw = results.get("raw_results")
     raw = raw if isinstance(raw, dict) else {}

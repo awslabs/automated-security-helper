@@ -346,7 +346,7 @@ class EventSubscriptionManager:
         now = _utc_now()
         kept = []
         for error_info in self._cleanup_errors:
-            recorded = error_info.get("timestamp")
+            recorded: Any = error_info.get("timestamp")
             try:
                 when = datetime.fromisoformat(recorded)
             except (TypeError, ValueError):
