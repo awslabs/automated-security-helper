@@ -154,7 +154,11 @@ def test_the_html_report_shows_n_a_for_a_rate_it_cannot_give(tmp_path):
     )
 
     # The scanner header and the results table both.
-    assert "Match Rate: 0/1 (n/a)" in page
+    # "0/1 (n/a)" still said that none of one matched, where nothing was compared;
+    # the counts stay in the table beside it.
+    assert "Match Rate: n/a<" in page
+    assert "Match Rate: 0/1" not in page
+    assert "<td>0/1</td>" in page
     assert "<td>n/a</td>" in page
     assert "None" not in page.split("<h2>Scanner Results</h2>")[-1].split("</table>")[0]
 

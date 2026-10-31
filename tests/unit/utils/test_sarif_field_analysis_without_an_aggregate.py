@@ -119,7 +119,10 @@ def test_the_html_says_n_a_where_it_marked_every_field_missing(
     assert "<td class='missing'>No</td>" not in page
     assert "<td class='informational'>n/a</td>" in page
     assert "Fields in Aggregate: n/a" in page
-    assert "Match Rate: 0/2 (n/a)" in page
+    # With no aggregate nothing was compared, so the header gives no count of
+    # matches ("0/2" read as none of two matched); the table keeps the counts.
+    assert "Match Rate: n/a<" in page
+    assert "Match Rate: 0/2" not in page
 
 
 def test_the_html_still_marks_a_field_the_aggregate_lost(tmp_path, capsys, monkeypatch):

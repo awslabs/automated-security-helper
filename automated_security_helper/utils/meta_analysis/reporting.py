@@ -610,13 +610,17 @@ def generate_html_report(
     # set iteration, so its insertion order changes with PYTHONHASHSEED.
     for scanner, stats in sorted(validation_results["match_statistics"].items()):
         match_rate = _shown_match_rate(stats)
-        shown_rate = "n/a" if match_rate is None else f"{match_rate:.2%}"
+        # A rate the report cannot give is not a count of matches: "0/2 (n/a)"
+        # still said that none of two matched, where nothing was compared.
+        shown_rate = (
+            "n/a"
+            if match_rate is None
+            else f"{stats['matched_results']}/{stats['total_results']} ({match_rate:.2%})"
+        )
         html.append("    <div class='scanner'>")
         html.append("      <div class='scanner-header'>")
         html.append(f"        <h3>{_escaped(scanner)}</h3>")
-        html.append(
-            f"        <div>Match Rate: {stats['matched_results']}/{stats['total_results']} ({shown_rate})</div>"
-        )
+        html.append(f"        <div>Match Rate: {shown_rate}</div>")
         html.append("      </div>")
 
         # Add missing fields sections
