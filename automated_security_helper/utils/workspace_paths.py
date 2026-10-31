@@ -681,8 +681,10 @@ def _down_convert_unanchored(
             # it has to land on the prefix's character at that position, and
             # the leading has to match the text before it; when either fails,
             # no path under the prefix matches. (When both hold, the pattern's
-            # separator sits inside the project path, and that is refused below:
-            # the remainder would have to absorb the rest of the prefix.)
+            # separator sits inside the project path, and that is handled below:
+            # None when the remainder opens with another plain name, refused
+            # otherwise, because the remainder would have to absorb the rest of
+            # the prefix.)
             return None
         if width < len(joined) and rest and not _is_glob_component(rest[0]):
             # Both hold: the pattern's separator is the one inside the prefix, so
