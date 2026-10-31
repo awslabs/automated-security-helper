@@ -277,15 +277,15 @@ def test_the_debug_line_for_a_failed_run_shows_overrides_by_key(monkeypatch, cap
     assert "project_name" in out
 
 
-def test_the_output_kept_on_a_result_hides_the_runs_carried_values(monkeypatch):
+def test_the_output_kept_on_a_finished_run_hides_the_runs_carried_values(monkeypatch):
     carried = "carried-environment-value-4e9b"
 
     def completed(cmd_list, debug=False, env=None):
         return create_completed_process(
             args=list(cmd_list),
-            returncode=125,
+            returncode=0,
             stdout=f"scan log mentions {carried}\n",
-            stderr=f"mount failed for {carried}\n",
+            stderr=f"a warning about {carried}\n",
         )
 
     monkeypatch.setattr(rac, "run_cmd_direct", completed)
@@ -294,6 +294,30 @@ def test_the_output_kept_on_a_result_hides_the_runs_carried_values(monkeypatch):
         result = rac._execute_container(["docker", "run", "img", "ash"], debug=False)
 
     assert carried not in result.stdout, result.stdout
+    assert carried not in result.stderr, result.stderr
+    assert "a warning about" in result.stderr
+
+
+def test_the_output_kept_on_a_failed_run_hides_the_runs_carried_values(monkeypatch):
+    """run_cmd_direct checks the status, so a runtime that exits 125 arrives as a
+    CalledProcessError, whose output and stderr are what the caller prints."""
+    carried = "carried-environment-value-4e9b"
+
+    def fails(cmd_list, debug=False, env=None):
+        raise subprocess.CalledProcessError(
+            125,
+            list(cmd_list),
+            output=f"scan log mentions {carried}\n",
+            stderr=f"mount failed for {carried}\n",
+        )
+
+    monkeypatch.setattr(rac, "run_cmd_direct", fails)
+
+    with subprocess_utils._spawn_values((carried,)):
+        result = rac._execute_container(["docker", "run", "img", "ash"], debug=False)
+
+    assert isinstance(result, subprocess.CalledProcessError)
+    assert carried not in result.output, result.output
     assert carried not in result.stderr, result.stderr
     assert "mount failed" in result.stderr
 
