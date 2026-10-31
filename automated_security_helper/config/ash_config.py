@@ -4105,6 +4105,24 @@ def _write_checked(
     _sync_directory(target.parent)
 
 
+def _decoded_for_save(config_path: Path, earlier: bytes) -> str:
+    """The text of the file a save edits, or a refusal that leaves it untouched.
+
+    A file that is not UTF-8 raises UnicodeDecodeError, whose message prints the
+    byte's value. It is refused here, before any write, in the words the writer's
+    own guard uses (``unparsed_config_reason``), for the JSON and the YAML save
+    alike.
+    """
+    from automated_security_helper.config.config_sources import unparsed_config_reason
+
+    try:
+        return earlier.decode("utf-8")
+    except UnicodeDecodeError as e:
+        undecoded = unparsed_config_reason(config_path, e)
+    # Outside the handler, so the decoder's error is not its context.
+    raise _left_unchanged(undecoded, config_path)
+
+
 def add_suppression_to_config(config_path: Path, suppression: AshSuppression) -> bool:
     """Add a suppression to the suppressions list in an .ash.yaml config file.
 
@@ -4166,19 +4184,8 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
     eol = _line_ending(earlier)
     if is_json_file(config_path):
         json_text: Optional[str] = None
-        undecoded: Optional[str] = None
         if earlier is not None:
-            try:
-                # The decode sits inside a guard: a file that is not UTF-8
-                # raises UnicodeDecodeError, whose message prints the byte's
-                # value. Refused here, before any write, in the words
-                # the writer's own guard uses.
-                json_text = earlier.decode("utf-8")
-            except UnicodeDecodeError as e:
-                undecoded = unparsed_config_reason(config_path, e)
-        if undecoded is not None:
-            # Outside the handler, so the decoder's error is not its context.
-            raise _left_unchanged(undecoded, config_path)
+            json_text = _decoded_for_save(config_path, earlier)
         # A leading byte order mark, which the loader reads past (utf-8-sig)
         # and json.loads refuses: held apart and put back, as for YAML below.
         json_mark = ""
@@ -4212,17 +4219,13 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
         )
         return True
 
-    text = ""
+    # Decoded from the bytes as they are, so each line keeps its own ending.
+    text = _decoded_for_save(config_path, earlier)
     unparsed: Optional[str] = None
     try:
-        # The decode sits inside the guard: a file that is not UTF-8 raises
-        # UnicodeDecodeError, a ValueError, whose message prints the byte's
-        # value. _KeepsEnvReferences, because a config carrying the
-        # documented !ENV tag is valid here: the entry goes in as text, with
-        # the reference as written, and this load reads nothing from the
-        # environment. Decoded from the bytes as they are, so each line keeps
-        # its own ending.
-        text = earlier.decode("utf-8")
+        # _KeepsEnvReferences, because a config carrying the documented !ENV tag
+        # is valid here: the entry goes in as text, with the reference as
+        # written, and this load reads nothing from the environment.
         data = (
             yaml.load(text, Loader=_KeepsEnvReferences)  # nosec B506 - a SafeLoader
             or {}
