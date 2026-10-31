@@ -51,6 +51,23 @@ pytestmark = [
 ]
 
 
+def _settings_holder_above(path: Path, monkeypatch):
+    """The nearest directory above ``path`` holding a yarn settings file, with the
+    operator's real home counted.
+
+    ``_settings_file_ancestor`` leaves the operator's home out (the files there
+    are the operator's own, and yarn reads them wherever it runs). A test that
+    then fakes ``Path.home`` stops leaving the REAL home out, so a ``.npmrc`` or
+    ``.yarnrc`` in the real home above the run's temporary root passes every
+    candidate over and fails those tests for a reason none of them is about.
+    The guard that decides whether such a test can run therefore asks with the
+    home pointed at a directory that is no ancestor of ``path``.
+    """
+    with monkeypatch.context() as scope:
+        scope.setattr(Path, "home", classmethod(lambda cls: path / "no-home"))
+        return child_module._settings_file_ancestor(path)
+
+
 @pytest.fixture
 def trusted_copy_dirs(monkeypatch, tmp_path):
     """Stand down the two shared-directory checks on yarn's copy placement.
@@ -65,8 +82,10 @@ def trusted_copy_dirs(monkeypatch, tmp_path):
     # settings file above the run's temporary root (a checkout holding
     # .npmrc with --basetemp inside it, a TMPDIR under a home with .yarnrc)
     # would pass every candidate over for a reason no test here is about, so
-    # the run says so instead of failing those tests.
-    holder = child_module._settings_file_ancestor(tmp_path)
+    # the run says so instead of failing those tests. The real home counts
+    # here (``_settings_holder_above``), since the tests that fake the home
+    # would otherwise see its files as the repository's.
+    holder = _settings_holder_above(tmp_path, monkeypatch)
     if holder is not None:
         pytest.skip(
             f"{holder[1]} in {holder[0]}, above the test's temporary root, would "
@@ -368,9 +387,25 @@ class TestWhereYarnsCopyGoes:
 
         assert chosen == home / ".cache" / "ash", (chosen, passed_over)
 
+    def test_the_fixture_guard_counts_the_operators_real_home(
+        self, tmp_path, monkeypatch
+    ):
+        """The home holds ``.npmrc`` and the run's temporary root sits below it
+        (a TMPDIR under a home, as on a developer's machine): the guard names
+        the home, where ``_settings_file_ancestor`` alone, with that home as
+        ``Path.home``, leaves it out and finds nothing nearer."""
+        home = tmp_path / "me"
+        start = home / "scratch" / "run"
+        start.mkdir(parents=True)
+        (home / ".npmrc").write_text("registry=https://mine.example/\n")
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+        assert _settings_holder_above(start, monkeypatch) == (home, ".npmrc")
+        assert Path.home() == home, "the guard left the faked home in place"
+
     @pytest.mark.parametrize("home_through_the_link", [True, False])
     def test_a_home_spelled_through_a_link_is_still_the_home(
-        self, tmp_path, monkeypatch, home_through_the_link
+        self, tmp_path, monkeypatch, home_through_the_link, trusted_copy_dirs
     ):
         """``/home`` linking to ``/local/home`` is a common layout: ``HOME``
         carries one spelling and the cache path under it may carry the other.
