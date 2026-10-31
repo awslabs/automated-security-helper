@@ -338,18 +338,39 @@ def test_the_childs_own_path_is_searched_when_the_caller_gave_one(
 
 
 @POSIX_ONLY
-def test_the_terminal_probe_asks_every_standard_stream(monkeypatch):
+@pytest.mark.parametrize("terminal_fd", [0, 1, 2], ids=["stdin", "stdout", "stderr"])
+def test_the_terminal_probe_asks_every_standard_stream(monkeypatch, terminal_fd):
+    """Each stream in turn is the only one at the terminal, the other two
+    redirected (``< inputs``, ``> out.log``, ``2> err.log``): a probe that left
+    one of the three out would read "no terminal" for that case alone."""
     monkeypatch.setattr(spu.sys, "stdin", SimpleNamespace(fileno=lambda: 0))
     monkeypatch.setattr(spu.sys, "stdout", SimpleNamespace(fileno=lambda: 1))
     monkeypatch.setattr(spu.sys, "stderr", SimpleNamespace(fileno=lambda: 2))
 
     def tcgetpgrp(fd):
-        if fd == 0:
-            raise OSError(25, "not a tty")  # stdin redirected
+        if fd != terminal_fd:
+            raise OSError(25, "not a tty")  # redirected
         return os.getpgrp()
 
     monkeypatch.setattr(spu.os, "tcgetpgrp", tcgetpgrp)
     assert spu._child_got_the_terminals_interrupt() is True
+
+
+@POSIX_ONLY
+def test_the_terminal_probe_reads_no_terminal_when_every_stream_is_redirected(
+    monkeypatch,
+):
+    """The control for the case above: with all three redirected there is no
+    terminal to have sent the Ctrl-C, as in CI."""
+    monkeypatch.setattr(spu.sys, "stdin", SimpleNamespace(fileno=lambda: 0))
+    monkeypatch.setattr(spu.sys, "stdout", SimpleNamespace(fileno=lambda: 1))
+    monkeypatch.setattr(spu.sys, "stderr", SimpleNamespace(fileno=lambda: 2))
+
+    def tcgetpgrp(fd):
+        raise OSError(25, "not a tty")
+
+    monkeypatch.setattr(spu.os, "tcgetpgrp", tcgetpgrp)
+    assert spu._child_got_the_terminals_interrupt() is False
 
 
 @POSIX_ONLY
@@ -466,8 +487,15 @@ def test_an_interrupt_during_the_plain_stops_grace_still_kills(monkeypatch):
 @POSIX_ONLY
 def test_an_interrupt_during_the_tree_stops_grace_still_kills_the_group(monkeypatch):
     sent: List[Any] = []
-    monkeypatch.setattr(spu, "_group_exists", lambda pgid: True)
+    refused: List[Any] = []
+    # The group read that ending a tree makes is _group_survives, replaced here
+    # as the sibling modules replace it, with the post-kill wait and the refusal
+    # mark, so nothing reads the host's process table: patching the lower-level
+    # existence probe left the zombie-aware read, the wait and the mark real.
+    monkeypatch.setattr(spu, "_group_survives", lambda pgid: True)
     monkeypatch.setattr(spu, "_pid_names_a_live_process", lambda pid: False)
+    monkeypatch.setattr(spu, "_wait_after_kill", lambda process: None)
+    monkeypatch.setattr(spu, "_note_stop_refused", refused.append)
     monkeypatch.setattr(
         spu, "_signal_group", lambda pgid, signum: sent.append((pgid, signum)) or True
     )
@@ -478,8 +506,10 @@ def test_an_interrupt_during_the_tree_stops_grace_still_kills_the_group(monkeypa
     )
     with pytest.raises(KeyboardInterrupt):
         spu._stop_tree(_FakeChild(), grace=1.0)
-    assert (_FAKE_PID, signal.SIGTERM) in sent
-    assert (_FAKE_PID, signal.SIGKILL) in sent
+    # SIGTERM first, then the SIGKILL the interrupt escalates to, in the order
+    # the plain runner's case asserts: SIGKILL first would leave no grace.
+    assert sent == [(_FAKE_PID, signal.SIGTERM), (_FAKE_PID, signal.SIGKILL)], sent
+    assert refused == [], "an accepted kill was marked as refused"
 
 
 class _TimingOutPopen(_FakeChild):
@@ -627,6 +657,14 @@ def test_a_child_another_thread_reaped_reads_as_exited(monkeypatch):
     # The control: a child the kernel reads as running is running.
     monkeypatch.setattr(spu.os, "waitid", lambda *a, **k: None)
     assert spu._has_exited(_FakeChild()) is False
+    # And the other way: a result from the kernel is an exit the poll has not
+    # reaped yet (a zombie), so the child has ended. The control above could
+    # not fail on its own, since "running" is also what a read that never
+    # asked the kernel would answer.
+    monkeypatch.setattr(
+        spu.os, "waitid", lambda *a, **k: SimpleNamespace(si_pid=_FAKE_PID)
+    )
+    assert spu._has_exited(_FakeChild()) is True
 
 
 class _TimingOutOncePopen(_FakeChild):
@@ -671,6 +709,20 @@ def test_an_empty_stream_truncates_a_stale_log_and_creates_none(tmp_path):
     )
     assert clauses == []
     assert stale.read_text(encoding="utf-8") == ""
+    assert not (tmp_path / "Cls.stderr.log").exists()
+
+
+def test_an_empty_stream_with_no_log_to_truncate_creates_none(tmp_path):
+    """The other half: an empty text, with no log from an earlier run to
+    truncate, writes nothing and reports no failure."""
+    clauses = spu._write_stream_logs(
+        None,
+        tmp_path,
+        "Cls",
+        (("stdout", "write", ""), ("stderr", "both", "")),
+    )
+    assert clauses == []
+    assert not (tmp_path / "Cls.stdout.log").exists()
     assert not (tmp_path / "Cls.stderr.log").exists()
 
 
@@ -1071,9 +1123,18 @@ def test_a_watcher_whose_start_raised_is_not_joined(monkeypatch):
     """ash_thread built the watcher, start() raised: the run is unrecorded and
     the child is killed and reaped, and the finally does not join a thread that
     never started (that join raises, and would hide the code behind it)."""
-    monkeypatch.setattr(spu.subprocess, "Popen", _OneLinePopen)
+    children: List[_OneLinePopen] = []
+
+    def popen(args, **kwargs):
+        children.append(_OneLinePopen(args, **kwargs))
+        return children[-1]
+
+    monkeypatch.setattr(spu.subprocess, "Popen", popen)
     monkeypatch.setattr(spu, "_resolved_or_refused", lambda *a: None)
     monkeypatch.setattr(spu, "_prepare_spawn", lambda *a, **k: None)
+    # The fake pid leads no group: asked of the host, the probe's answer for a
+    # pid that is not a process depends on what the host is running.
+    monkeypatch.setattr(spu, "_leads_its_own_group", lambda process: False)
     made: List[threading.Thread] = []
 
     def thread_that_cannot_start(target, *args, **kwargs):
@@ -1091,7 +1152,11 @@ def test_a_watcher_whose_start_raised_is_not_joined(monkeypatch):
         code = spu.run_command_stream_output(["ash-u26-no-such-tool"])
     assert code == spu.UNRECORDED_RUN_RETURNCODE
     (thread,) = made
+    # A thread that never started is not alive whatever the run did, so that
+    # alone proves nothing: the child is what the run has to end and reap.
     assert not thread.is_alive()
+    (child,) = children
+    assert child.calls == ["kill", ("wait", None)], child.calls
 
 
 def test_a_streamed_run_starts_nothing_in_a_cancelled_scan(monkeypatch):
