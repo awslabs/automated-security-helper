@@ -512,9 +512,29 @@ def _parse_policy(text: str) -> Dict[str, Any]:
             for item in value:
                 if not os.path.isabs(item):
                     fail(f"--policy key {key!r} must name absolute paths, not {item!r}")
-        elif key == "cwd" and value and not os.path.isabs(value):
-            fail(f"--policy key 'cwd' must be an absolute path, not {value!r}")
+                _refuse_unusable_path(key, item)
+        elif key == "cwd" and value:
+            if not os.path.isabs(value):
+                fail(f"--policy key 'cwd' must be an absolute path, not {value!r}")
+            _refuse_unusable_path(key, value)
     return policy
+
+
+def _refuse_unusable_path(key: str, path: str) -> None:
+    """Exit 126 for a path the system calls cannot be given.
+
+    JSON admits a NUL (``\\u0000``) and a lone surrogate (``\\ud800``) in a string,
+    and ``os.path.isabs`` looks at the leading ``/`` only. Both make ``os.chdir``
+    and ``os.open`` raise ValueError or UnicodeEncodeError, not the OSError the
+    callers read, and out of ``main`` that is the interpreter's traceback and
+    exit 1, which scanners use for "findings found".
+    """
+    if "\0" in path:
+        fail(f"--policy key {key!r} must name paths without a NUL byte, not {path!r}")
+    try:
+        os.fsencode(path)
+    except UnicodeEncodeError:
+        fail(f"--policy key {key!r} must name paths the filesystem can hold: {path!r}")
 
 
 def _enter_policy_cwd(policy: Dict[str, Any]) -> None:
@@ -530,7 +550,9 @@ def _enter_policy_cwd(policy: Dict[str, Any]) -> None:
         return
     try:
         os.chdir(cwd)
-    except OSError as e:
+    except (OSError, ValueError) as e:
+        # ValueError: a value the system call cannot take (``_parse_policy`` has
+        # refused such a path already; this keeps the exit 126 if one gets here).
         fail(f"cannot change into the working directory {cwd}: {e}")
 
 

@@ -1139,3 +1139,51 @@ def test_the_socket_filter_route_reports_a_failed_exec_with_sigpipe_ignored(
 
     assert raised.value.code == 126
     assert _sigpipe_at_the_first_write(events) == signal.SIG_IGN
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("cwd", "/work/a\x00b"),
+        ("cwd", "/work/\ud800"),
+        ("read_only", ["/usr", "/data/a\x00b"]),
+        ("read_data", ["/data/\ud800"]),
+        ("writable", ["/out\x00"]),
+    ],
+)
+def test_a_policy_path_the_filesystem_cannot_be_given_is_refused(key, value, capsys):
+    """JSON admits a NUL and a lone surrogate in a string, and a path that starts
+    with ``/`` is absolute whatever follows: ``os.chdir`` and ``os.open`` raise
+    ValueError or UnicodeEncodeError for them, and out of ``main`` that is the
+    interpreter's traceback and exit 1, which scanners use for "findings found"."""
+    base = {"read_only": ["/usr"], "writable": ["/var/out"], "network": False}
+
+    with pytest.raises(SystemExit) as refused:
+        landlock_exec._parse_policy(json.dumps({**base, key: value}))
+
+    assert refused.value.code == 126
+    noted = capsys.readouterr().err
+    assert noted.startswith("ash-landlock: ") and key in noted
+    assert "Traceback" not in noted
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("embedded null byte"),
+        UnicodeEncodeError("utf-8", "\ud800", 0, 1, "surrogates not allowed"),
+    ],
+)
+def test_a_working_directory_the_system_call_rejects_for_its_value_exits_126(
+    error, monkeypatch, capsys
+):
+    def refuse(path):
+        raise error
+
+    monkeypatch.setattr(os, "chdir", refuse)
+
+    with pytest.raises(SystemExit) as raised:
+        landlock_exec._enter_policy_cwd({"cwd": "/work"})
+
+    assert raised.value.code == 126
+    assert "working directory" in capsys.readouterr().err
