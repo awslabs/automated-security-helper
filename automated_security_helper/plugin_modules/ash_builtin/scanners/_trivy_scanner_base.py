@@ -530,10 +530,17 @@ def _same_package(entry: Any, name: str | None, version: str | None) -> bool:
     The names have to match. The versions have to match when both the entry and
     the result state one; a lockfile entry without a version (a link, a
     workspace member) is matched by name alone.
+
+    ``entry`` is a ``utils.package_identity.NpmLockEntry``, whose ``name`` is the
+    package's own name (an npm alias is named by the lockfile's ``name`` field,
+    not by its ``node_modules`` path). The attributes are read plainly: an entry
+    that lacks one is a schema change and raises, where a default of ``None``
+    answered "no match" for every result and dropped ``package_path`` and the
+    per-copy split without a sign.
     """
-    if getattr(entry, "name", None) != name:
+    if entry.name != name:
         return False
-    entry_version = getattr(entry, "version", None)
+    entry_version = entry.version
     if entry_version is None or version is None:
         return True
     return entry_version == version

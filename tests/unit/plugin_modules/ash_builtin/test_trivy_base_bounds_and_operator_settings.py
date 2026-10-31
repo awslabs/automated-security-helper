@@ -51,6 +51,7 @@ Each test here pins one reading that went wrong before:
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -1519,3 +1520,57 @@ def test_offline_the_terraform_checks_are_left_out_of_a_set_written_with_config(
     assert _misconfig_flags(args) == [
         "--misconfig-scanners=azure-arm,dockerfile,kubernetes"
     ], args
+
+
+# --- which lockfile entry a result names -------------------------------------------
+
+
+def _lock_entries(tmp_path: Path, packages: dict) -> list:
+    from automated_security_helper.utils.package_identity import (
+        load_npm_lock_entries,
+    )
+
+    lockfile = tmp_path / "package-lock.json"
+    lockfile.write_text(
+        json.dumps({"lockfileVersion": 3, "packages": {"": {}, **packages}}, indent=2),
+        encoding="utf-8",
+    )
+    entries = load_npm_lock_entries(lockfile)
+    assert entries, "the lockfile should have been read"
+    return entries
+
+
+def test_a_scoped_package_entry_is_the_package_a_result_names(tmp_path):
+    (entry,) = _lock_entries(
+        tmp_path, {"node_modules/@scope/pkg": {"version": "1.0.0"}}
+    )
+    assert trivy_base._same_package(entry, "@scope/pkg", "1.0.0") is True
+    assert trivy_base._same_package(entry, "pkg", "1.0.0") is False
+    assert trivy_base._same_package(entry, "@scope/pkg", "2.0.0") is False
+
+
+def test_an_aliased_entry_is_named_by_the_package_it_installs(tmp_path):
+    """``node_modules/old-name`` installing ``real-name``: trivy reports the
+    package by its real name, which the lockfile's ``name`` field carries."""
+    (entry,) = _lock_entries(
+        tmp_path,
+        {"node_modules/old-name": {"name": "real-name", "version": "3.1.4"}},
+    )
+    assert trivy_base._same_package(entry, "real-name", "3.1.4") is True
+    assert trivy_base._same_package(entry, "old-name", "3.1.4") is False
+
+
+def test_a_versionless_link_entry_is_matched_by_name_alone(tmp_path):
+    (entry,) = _lock_entries(
+        tmp_path, {"node_modules/workspace-lib": {"resolved": "lib", "link": True}}
+    )
+    assert entry.version is None
+    assert trivy_base._same_package(entry, "workspace-lib", "9.9.9") is True
+    assert trivy_base._same_package(entry, "other-lib", None) is False
+
+
+def test_an_entry_without_the_expected_fields_raises_instead_of_matching_nothing():
+    """A default of ``None`` made a schema mismatch read as "not this package" for
+    every result, with no sign that package identity had stopped working."""
+    with pytest.raises(AttributeError):
+        trivy_base._same_package(SimpleNamespace(key="node_modules/a"), "a", "1.0.0")
