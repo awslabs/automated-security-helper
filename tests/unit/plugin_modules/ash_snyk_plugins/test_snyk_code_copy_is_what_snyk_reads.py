@@ -484,6 +484,9 @@ def test_a_run_with_an_uncopied_file_is_not_graded_passed(tmp_path, tested):
         [{"path": context.source_dir, "type": "source"}],
     )
 
-    assert container.status != ScannerStatus.PASSED, container.status
+    # ERROR, as the module docstring says: SKIPPED is the grade of a scan set that
+    # held nothing, and FAILED of findings, so neither stands in for a file that
+    # could not be copied.
+    assert container.status == ScannerStatus.ERROR, container.status
     errors: List[str] = [str(error) for error in container.errors or []]
     assert any("alias.js" in error for error in errors), errors
