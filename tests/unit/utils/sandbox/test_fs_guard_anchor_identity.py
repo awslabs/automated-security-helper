@@ -120,6 +120,35 @@ def test_nothing_below_a_root_matched_by_spelling_is_resolved(
     assert seen, "resolving an aliased spelling was not recorded"
 
 
+def test_roots_spelled_below_the_matched_root_are_not_resolved(tmp_path, monkeypatch):
+    """A scan registers the output directory and one results directory per
+    scanner below it. A write to the output directory's own file has the output
+    directory as its anchor by spelling; the other scanners' results directories
+    cannot beat it, so none of them is resolved (a realpath of each, and of every
+    ancestor above the anchor, cost a syscall per path component on every guarded
+    open)."""
+    outer = tmp_path / "out"
+    below = [outer / "scanners" / name for name in ("one", "two", "three")]
+    for directory in below:
+        directory.mkdir(parents=True)
+    seen = _recording_resolution(monkeypatch)
+
+    anchored = fs_guard._root_anchor(outer / "ash.log", [outer, *below])
+
+    assert anchored == (outer, outer)
+    assert seen == []
+
+    # The control, with the same recorders: a registered root that is NOT spelled
+    # below the matched one is still resolved, and still cannot win here.
+    unrelated = tmp_path / "elsewhere" / "out"
+    unrelated.mkdir(parents=True)
+
+    anchored = fs_guard._root_anchor(outer / "ash.log", [outer, *below, unrelated])
+
+    assert anchored == (outer, outer)
+    assert seen, "a root outside the matched one was not resolved"
+
+
 def test_an_anchor_that_no_longer_leads_to_the_root_is_refused(
     aliased_root, tmp_path, monkeypatch
 ):

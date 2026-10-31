@@ -291,7 +291,13 @@ def _root_anchor(path: Path, roots: Iterable[Path]) -> Optional[Tuple[Path, Path
     back at it (``out/sub/back -> out``): the outer spelling is the anchor and
     ``back`` is then a component the guard refuses, where taking the deeper one
     opened the planted link by name. Below a root matched by spelling nothing is
-    resolved at all, which is also what spares most writes the resolution.
+    resolved at all. Nor is a root spelled below that matched root (the other
+    scanners' results directories, in a scan): it could win only through a link
+    that points above the matched root, and the outer spelling is the anchor
+    there. What is resolved is every ancestor above the outermost matched root,
+    and each remaining root that is not spelled below it, one ``realpath`` each,
+    so a write through the root's own name with only roots below it registered
+    resolves nothing.
     """
     found: List[Tuple[Path, Path]] = []
     unmatched: List[Path] = []
@@ -300,6 +306,9 @@ def _root_anchor(path: Path, roots: Iterable[Path]) -> Optional[Tuple[Path, Path
             found.append((root, root))
         else:
             unmatched.append(root)
+    if found:
+        outermost_root = min(found, key=lambda pair: len(pair[1].parts))[1]
+        unmatched = [root for root in unmatched if outermost_root not in root.parents]
     if unmatched:
         above: List[Path] = list(path.parents)
         if found:
