@@ -424,11 +424,15 @@ def test_a_group_or_a_scanner_that_is_gone_is_passed_over(monkeypatch):
     def refused(pgid, sig):
         raise PermissionError(errno.EPERM, "Operation not permitted")
 
+    # The scanner's group reads as another's here (not the gone-process answer left
+    # in place above), so a call that went on past the refusal would signal the pid.
+    after_refusal = []
     monkeypatch.setattr(os, "killpg", refused)
-    monkeypatch.setattr(os, "kill", lambda pid, sig: kills.append((pid, sig)))
+    monkeypatch.setattr(os, "getpgid", lambda pid: 4300)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: after_refusal.append((pid, sig)))
     with pytest.raises(PermissionError):
         landlock_exec._signal_scanner(4242, signal.SIGTERM)
-    assert kills == [(4242, signal.SIGTERM)], "nothing more was sent after EPERM"
+    assert after_refusal == [], "nothing more was sent after EPERM"
 
 
 def test_dying_of_the_scanners_signal_turns_core_dumps_off_first(monkeypatch):
