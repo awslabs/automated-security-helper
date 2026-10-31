@@ -242,7 +242,7 @@ def is_blank_bin_path(value: "str | None") -> bool:
     return bool(parts) and not any(part.strip() for part in parts)
 
 
-def ash_bin_path_from_environment() -> "str | None":
+def ash_bin_path_from_environment(warn: bool = True) -> "str | None":
     """ASH_BIN_PATH as set, or None when it is unset or blank (is_blank_bin_path).
 
     The one reading of the variable. A value a shell left unexpanded (``~`` or
@@ -252,6 +252,12 @@ def ash_bin_path_from_environment() -> "str | None":
     which tool lookup does not search, so what the install put in the expanded
     directory was never found by a later scan. With no usable home the value
     names nowhere, and reads as unset.
+
+    ``warn=False`` reads the value without saying so when the home is unusable.
+    The module reads it that way while it is being imported, before the logging
+    that carries the warning is set up: a once-only warning raised then is spent
+    where nobody reads it, and the scan-time readers, which do warn, then stay
+    silent.
     """
     value = os.environ.get("ASH_BIN_PATH")
     if value is None or is_blank_bin_path(value):
@@ -259,7 +265,8 @@ def ash_bin_path_from_environment() -> "str | None":
     if value == "~" or value.startswith(("~/", "~\\")):
         home = usable_home()
         if home is None:
-            warn_if_home_unusable()
+            if warn:
+                warn_if_home_unusable()
             return None
         return str(home.joinpath(value[2:]))
     return value
@@ -271,8 +278,11 @@ def _bin_path_at_import() -> Optional[Path]:
     else None: ASH then has no bin directory, and tools are found through PATH
     alone. An empty or relative HOME gives no ``~/.ash/bin``, since it would name
     the filesystem root's or a directory under the working directory.
+
+    It warns about nothing: this runs while the module is imported, and the callers
+    that read the variable during a run warn about an unusable home themselves.
     """
-    from_environment = ash_bin_path_from_environment()
+    from_environment = ash_bin_path_from_environment(warn=False)
     return Path(from_environment) if from_environment else home_bin_path()
 
 
