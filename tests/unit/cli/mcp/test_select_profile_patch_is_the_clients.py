@@ -181,8 +181,17 @@ def _scan_outcome(target: Path, session: str) -> Any:
     output = target / ".ash" / "ash_output"
     output.mkdir(parents=True, exist_ok=True)
     registry = ScanRegistry()
+    # Registered for the session, as mcp_scan_directory registers a scan
+    # (session_id=_scan_owner(session_id)). The exemption for the scan's own copy
+    # of the session's profile asks the registry whether THIS session holds the
+    # scan (scan_management.session_holds_scan: another session's scan answers as
+    # an id never issued). A scan registered with no owner belongs to the stdio
+    # session, so the copy the scan loads read as the client's and the
+    # registered profile's grants were dropped.
     scan_id = registry.register_scan(
-        directory_path=str(target), output_directory=str(output)
+        directory_path=str(target),
+        output_directory=str(output),
+        session_id=session,
     )
     with (
         patch.object(ras, "_setup_logger", lambda opts: _QuietLogger()),
@@ -193,8 +202,7 @@ def _scan_outcome(target: Path, session: str) -> Any:
         # scan_management.session_holds_scan) reads the registry through
         # scan_management, not through mcp_tools' handle. With only the
         # handle patched, the scan registered in a registry the exemption
-        # never saw, so the copy the scan loads read as the client's and the
-        # registered profile's grants were dropped.
+        # never saw. Both handles are needed, and so is the owner above.
         patch.object(management, "get_scan_registry", return_value=registry),
     ):
         asyncio.run(
