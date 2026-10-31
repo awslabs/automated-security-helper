@@ -476,8 +476,8 @@ def install_rules_bundle(
     Raises:
         ToolNotProvisionableError: ``name`` is not a pinned bundle.
         ToolDownloadIntegrityError: the download does not match its pinned digest,
-            the files extracted from it do not match the pinned contents, or the
-            archive is unusable.
+            the server redirected it off https, the files extracted from it do not
+            match the pinned contents, or the archive is unusable.
         RulesBundleUnavailable: the bundle needs installing and the download
             failed, or the rules root cannot be written; the rules in place, if
             any, are left as they were. Also raised before anything is created or

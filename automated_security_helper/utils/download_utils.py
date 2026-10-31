@@ -458,10 +458,7 @@ def _download_verified(
                     + (f" (attempt {attempt}/{attempts})" if attempts > 1 else "")
                 )
                 try:
-                    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-                    with urllib.request.urlopen(  # nosec B310 - This url is evaluated for https scheme a few lines above
-                        url, timeout=_DOWNLOAD_SOCKET_TIMEOUT_SECONDS
-                    ) as response:
+                    with _open_url(url, _DOWNLOAD_SOCKET_TIMEOUT_SECONDS) as response:
                         _refuse_a_non_https_landing(url, response)
                         _copy_whole_body(response, temp_file, url)
                     break
@@ -521,24 +518,92 @@ def _download_verified(
     return dest_path, landed
 
 
+class InsecureRedirectError(ToolDownloadIntegrityError, ValueError):
+    """A download the server sent off https.
+
+    A transport that is not what the URL promised, so it is the integrity
+    failure callers already tell apart from a network one (never retried, and not
+    worded as an unreachable server). Also a ``ValueError``, as the refusal was
+    before it had a type of its own, so a caller that caught that still does.
+    """
+
+
+def _is_https(url: str) -> bool:
+    try:
+        return urllib.parse.urlsplit(url).scheme.lower() == "https"
+    except ValueError:
+        return False
+
+
+def _without_query(url: str) -> str:
+    """``url`` as ``scheme://host/path``, for a message: a signed download URL
+    carries its credential in the query string, and the user info is one too."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return "<unparseable URL>"
+    host = parts.netloc.rpartition("@")[2]
+    return f"{parts.scheme}://{host}{parts.path}"
+
+
+class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to an https URL, and refuse the others unrequested.
+
+    ``urlopen`` follows a redirect to plain http as readily as to https, and the
+    request to the cleartext URL goes out before anything looks at where the
+    response landed: the check on the final URL alone (``_refuse_a_non_https_landing``)
+    passed an https -> http -> https chain, whose middle request had already been
+    sent in the clear with whatever the URL carried. The Location is checked here,
+    before the request it names is made, at every hop.
+    """
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        location = headers.get("location") or headers.get("uri")
+        if location:
+            try:
+                target = urllib.parse.urljoin(req.full_url, location)
+            except ValueError:
+                target = location
+            if not _is_https(target):
+                close = getattr(fp, "close", None)
+                if callable(close):
+                    close()
+                raise InsecureRedirectError(
+                    f"Refusing {_without_query(req.full_url)}: the server answered "
+                    f"{code} {msg} and redirected the download to "
+                    f"{_without_query(target)}, which is not https"
+                )
+        return super().http_error_302(req, fp, code, msg, headers)
+
+    # urllib binds these names to its own http_error_302, so each has to be bound
+    # again here. 308 is an alias only from Python 3.11; binding it on every version
+    # keeps the scheme check on all of them.
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
+
+def _open_url(url: str, timeout: float):
+    """Open ``url`` with every redirect held to https (``_HttpsOnlyRedirects``)."""
+    opener = urllib.request.build_opener(_HttpsOnlyRedirects)
+    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+    return opener.open(url, timeout=timeout)  # nosec B310 - https is checked by the caller and at every redirect
+
+
 def _refuse_a_non_https_landing(url: str, response) -> None:
     """Refuse a response that arrived at a URL other than an https one.
 
-    The scheme check above covers the URL given; ``urlopen`` follows redirects,
-    and a server can send one to plain http, where the asset arrives unverified
-    by transport. The URL the response was read from is checked before a byte of
-    the body is taken, so such a download is refused rather than installed (an
-    unpinned download would otherwise have completed over http). A response that
-    cannot say where it came from (a test's stand-in) is taken as it is.
+    The redirect handler refuses a hop to plain http before its request is made;
+    this is the check behind it, on the URL the response says it was read from,
+    before a byte of the body is taken. A response that cannot say where it came
+    from (a stand-in that is not a real connection) is taken as it is.
     """
     get_url = getattr(response, "geturl", None)
     if not callable(get_url):
         return
     landed_at = get_url()
-    if isinstance(landed_at, str) and not landed_at.startswith("https://"):
-        raise ValueError(
-            f"Refusing {url}: the server redirected the download to {landed_at}, "
-            "which is not https"
+    if isinstance(landed_at, str) and not _is_https(landed_at):
+        raise InsecureRedirectError(
+            f"Refusing {_without_query(url)}: the server redirected the download "
+            f"to {_without_query(landed_at)}, which is not https"
         )
 
 
