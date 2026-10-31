@@ -27,7 +27,9 @@ command line or a profile.
 
 from __future__ import annotations
 
+import codecs
 import json
+import locale
 import logging
 import os
 import re
@@ -147,7 +149,7 @@ def test_exit_failure_reads_stdout_when_stderr_is_only_whitespace():
 
 
 def test_a_probe_whose_output_is_not_text_still_answers():
-    """A probe's stderr holding a byte no text codec decodes is a reason, not a
+    """A probe's stderr holding a byte UTF-8 does not decode is a reason, not a
     traceback out of the plan that asked (the per-filesystem overlay probe runs
     inside plan(), and a UnicodeDecodeError there would fail the spawn).
 
@@ -162,7 +164,11 @@ def test_a_probe_whose_output_is_not_text_still_answers():
 
     assert failure is not None
     assert failure.startswith("exit 3: refused ")
-    assert chr(0xFFFD) in failure
+    # 0x81 is undefined in UTF-8 and replaced there; a single-byte locale codec
+    # (ISO-8859-1) decodes it as U+0081 and nothing is replaced, which is not a
+    # failure of what is tested here.
+    if codecs.lookup(locale.getpreferredencoding(False)).name == "utf-8":
+        assert chr(0xFFFD) in failure
 
 
 def test_a_failed_root_export_is_tried_again(layout, monkeypatch):
@@ -832,7 +838,12 @@ def test_a_landlock_plan_that_raises_leaves_no_private_root(layout, monkeypatch)
 
 
 @POSIX
-def test_landlock_grants_the_scans_data_read_without_exec(layout, monkeypatch):
+def test_landlock_grants_a_read_path_outside_executable_read_without_exec(
+    layout, monkeypatch
+):
+    """The backend reads ``read_only`` and ``executable``: a read path that is not
+    executable (the scanned tree) is granted read alone, whatever ``scan_data``
+    says, so the policy here does not set it."""
     monkeypatch.setattr(tempfile, "tempdir", str(layout.tmp))
     source = layout.tmp / "src"
     source.mkdir()
@@ -843,7 +854,6 @@ def test_landlock_grants_the_scans_data_read_without_exec(layout, monkeypatch):
         layout,
         read_only=(layout.system, source),
         executable=(layout.system,),
-        scan_data=(source,),
         uv_tool_locks=(lock,),
     )
 
@@ -857,6 +867,38 @@ def test_landlock_grants_the_scans_data_read_without_exec(layout, monkeypatch):
         assert document["cwd"] == plan.env["TMPDIR"]
     finally:
         plan.run_cleanup()
+
+
+@POSIX
+def test_landlock_data_under_an_executable_root_stays_executable_through_it(
+    layout, monkeypatch
+):
+    """The limit the plan's comment names: rules add up, so a read path inside a
+    path granted read and exec is read-only in its own rule and executable through
+    the root's. A path under no executable root (the control) is not."""
+    monkeypatch.setattr(tempfile, "tempdir", str(layout.tmp))
+    nested = layout.system / "src"
+    nested.mkdir()
+    apart = layout.tmp / "apart"
+    apart.mkdir()
+    policy = _policy(
+        layout,
+        read_only=(layout.system, nested, apart),
+        executable=(layout.system,),
+    )
+
+    plan = LandlockBackend().plan(["/bin/true"], {}, policy)
+    try:
+        document = _landlock_document(plan)
+    finally:
+        plan.run_cleanup()
+
+    read_and_run = [Path(p) for p in document["read_only"]]
+    for data in (nested, apart):
+        assert _real(data).as_posix() in document["read_data"]
+        assert _real(data).as_posix() not in document["read_only"]
+    assert any(_real(nested).is_relative_to(p) for p in read_and_run)
+    assert not any(_real(apart).is_relative_to(p) for p in read_and_run)
 
 
 @POSIX
@@ -999,6 +1041,10 @@ def test_an_ssl_cert_file_set_after_startup_opens_nothing(layout, monkeypatch):
     pem = layout.home / "certs.pem"
     pem.write_text("")
     monkeypatch.setenv("SSL_CERT_FILE", str(pem))
+    # The condition, stated outright: ASH started with no SSL_CERT_FILE. The plan
+    # compares the spawn's value with this snapshot and never reads os.environ, so
+    # the setenv above is only the live value a scanner thread would have set.
+    monkeypatch.setattr(backends, "startup_environ", dict)
     policy = _policy(layout, system_trust_roots=True)
 
     plan = SandboxExecBackend().plan(["/bin/true"], {"SSL_CERT_FILE": str(pem)}, policy)
