@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
+    workspace_project_scanner_thresholds,
     workspace_project_thresholds,
 )
 from automated_security_helper.utils.severity_ladder import severity_fails_threshold
@@ -162,6 +163,10 @@ class ReportContentEmitter:
         # several times per finding (summary, hotspots, cards, detailed
         # findings), and the project list is scanned here instead of there.
         self._project_thresholds = workspace_project_thresholds(model)
+        # The per-scanner gates each project's outcome recorded (a scanner whose
+        # threshold the scan read from an environment variable is listed at the
+        # strictest gate), read once for the same reason.
+        self._project_scanner_thresholds = workspace_project_scanner_thresholds(model)
 
         # Get unified scanner metrics - always compute from the model to ensure consistency
         # The scanner_results in the model contain ScannerStatusInfo objects, not ScannerMetrics
@@ -543,10 +548,18 @@ class ReportContentEmitter:
         # threshold its outcome was judged against, and a finding attributed to
         # a project is graded by that, as the project's outcome and the exit
         # code graded it. A single-directory scan reads the scanner's threshold
-        # from the recorded configuration, as before.
+        # from the recorded configuration, as before. Within a project the
+        # scanner's own recorded gate comes first, then the project's gate: the
+        # order the project's outcome and the merged JUnit report resolve them
+        # in, so a scanner the project tightened, relaxed or withheld is graded
+        # here as it was there.
         threshold = None
         if vuln.workspace_project:
-            threshold = self._project_thresholds.get(vuln.workspace_project)
+            threshold = self._project_scanner_thresholds.get(
+                vuln.workspace_project, {}
+            ).get(scanner_name)
+            if threshold is None:
+                threshold = self._project_thresholds.get(vuln.workspace_project)
         if threshold is None:
             threshold, _ = ScannerStatisticsCalculator.get_scanner_threshold_info(
                 self.model, scanner_name
