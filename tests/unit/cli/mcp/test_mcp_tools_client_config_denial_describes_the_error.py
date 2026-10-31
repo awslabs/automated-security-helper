@@ -30,6 +30,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
 )
 from automated_security_helper.config import client_config_policy
+from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
 
@@ -110,7 +111,7 @@ def test_a_check_that_raises_describes_the_error(monkeypatch, caplog) -> None:
 
     monkeypatch.setattr(client_config_policy, "apply_client_config_rules", broken)
 
-    with caplog.at_level(logging.DEBUG):
+    with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
         response = mcp_tools._client_config_denial(
             str(source / "ash.yaml"), source, REMOTE, "scan_directory"
         )
@@ -124,7 +125,11 @@ def test_a_check_that_raises_describes_the_error(monkeypatch, caplog) -> None:
         response
     )
     assert QUOTED_INPUT not in response["error"], response
-    # The log line the module docstring names: described, never quoting.
+    # The log line the module docstring names: described, never quoting. The
+    # logger does not propagate to the root handler caplog installs, so the
+    # capture names it, and the line is asserted to be there: an absence read
+    # from a log that captured nothing proves nothing.
+    assert "Config policy check failed before the scan" in caplog.text, caplog.text
     assert QUOTED_INPUT not in caplog.text, caplog.text
 
 
@@ -141,7 +146,7 @@ def test_rules_that_cannot_be_read_describe_the_error(monkeypatch, caplog) -> No
 
     monkeypatch.setattr(mcp_tools, "_session_client_rules", unreadable)
 
-    with caplog.at_level(logging.DEBUG):
+    with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
         response = mcp_tools._client_config_denial(
             str(source / "ash.yaml"), source, REMOTE, "scan_directory"
         )
@@ -156,4 +161,5 @@ def test_rules_that_cannot_be_read_describe_the_error(monkeypatch, caplog) -> No
         response
     )
     assert QUOTED_INPUT not in response["error"], response
+    assert "Session config rules not read before the scan" in caplog.text, caplog.text
     assert QUOTED_INPUT not in caplog.text, caplog.text
