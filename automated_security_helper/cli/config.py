@@ -386,6 +386,23 @@ def _may_not_write(target: Path, before: os.stat_result | None) -> bool:
     return before is not None and not os.access(target, os.W_OK)
 
 
+def _owned_by_another_user(before: os.stat_result | None) -> bool:
+    """Whether the file exists and belongs to a user this process is not.
+
+    A rename makes a new file owned by this process, and handing the file back
+    to its owner needs the privilege to change an owner (root). Without it the
+    owner's chown is refused and swallowed (``_carry_file_identity``), so the
+    staged write left the file the editor's and its owner without write access
+    to their own config. Such a file is written in place, where the write is the
+    file's own permission's to allow or refuse and the owner is kept. Root is
+    not asked to: it can give the file back.
+    """
+    if before is None or not hasattr(os, "geteuid"):
+        return False
+    effective = os.geteuid()
+    return effective != 0 and before.st_uid != effective
+
+
 def _carry_file_identity(fd: int, before: os.stat_result | None) -> None:
     """Give the staging file at ``fd`` the replaced file's owner and mode.
 
@@ -445,7 +462,8 @@ def _write_config_text(config_path: Path, text: str) -> None:
     bits and owner and renamed over it (fs_guard.open_for_atomic_write, as
     utils/atomic_write.py writes); where staging or the rename is refused for
     the file's place (``_staged_write_falls_back``), or the file is one this
-    process may not write (``_may_not_write``), the in-place write is made.
+    process may not write (``_may_not_write``) or one owned by another user it
+    cannot give back to (``_owned_by_another_user``), the in-place write is made.
     """
     # Not at the top: fs_guard imports the sandbox package (atomic_write.py).
     from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
@@ -453,7 +471,7 @@ def _write_config_text(config_path: Path, text: str) -> None:
     target = _write_target(config_path)
     before = _stat_to_keep(target)
     try:
-        if _may_not_write(target, before):
+        if _may_not_write(target, before) or _owned_by_another_user(before):
             raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
         with open_for_atomic_write(target, encoding="utf-8") as handle:
             # Before the first byte: the staging file is created with the
@@ -475,7 +493,7 @@ def _write_config_bytes(config_path: Path, data: bytes) -> None:
     target = _write_target(config_path)
     before = _stat_to_keep(target)
     try:
-        if _may_not_write(target, before):
+        if _may_not_write(target, before) or _owned_by_another_user(before):
             raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
         with open_for_atomic_write(target, binary=True) as handle:
             # Before the first byte, as in _write_config_text.
