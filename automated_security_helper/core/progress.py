@@ -195,6 +195,12 @@ class LiveProgressDisplay:
         if isinstance(handler, LiveDisplayLogHandler) and (
             handler not in ASH_LOGGER.handlers
         ):
+            # Added as it is, not through run_handler as __init__ did. The
+            # handler already carries the mark and the run-scope filter that
+            # call put on it; run_handler would add a second filter for the
+            # scope active now, and a handler's filters must all accept, so a
+            # display restarted under another scope would drop every line. The
+            # display keeps the scope it was built under.
             ASH_LOGGER.addHandler(handler)
 
     def start(self):
