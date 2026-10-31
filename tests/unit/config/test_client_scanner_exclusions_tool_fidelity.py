@@ -382,6 +382,33 @@ def test_doublestar_runs_match_as_before(pattern, relative, excluded):
     assert glob_excludes(pattern, relative) is excluded
 
 
+@pytest.mark.parametrize(
+    ("pattern", "relative", "excluded"),
+    [
+        # The ``/`` of a trailing ``/**`` (or ``/``) anchors the pattern at the
+        # scan root, as any ``/`` inside a pattern does: the directory src at
+        # the top, not one at any depth.
+        ("src/**", "src/a.py", True),
+        ("src/**", "lib/src/a.py", False),
+        ("src/**/", "lib/src/a.py", False),
+        ("src/**/**", "lib/src/a.py", False),
+        ("build/**/", "build/x.py", True),
+        ("build/**/", "lib/build/x.py", False),
+        ("a/**/**", "x/a/b.py", False),
+        ("a/**/**", "a/b.py", True),
+        # No ``/`` outside the suffix, no anchor: the leading ``**/`` form and
+        # the bare directory name still reach any depth.
+        ("**/build/**", "lib/build/x.py", True),
+        ("build/", "lib/build/x.py", True),
+    ],
+)
+def test_a_trailing_doublestar_directory_keeps_its_anchor(pattern, relative, excluded):
+    """``src/**`` lost its anchor: the suffix was taken off before the test for a
+    ``/``, so the bare ``src`` that was left matched a ``src`` directory at any
+    depth and hid findings in ``lib/src/`` that the tool had reported."""
+    assert glob_excludes(pattern, relative) is excluded
+
+
 # ---------------------------------------------------------------------------
 # The move out of the options
 # ---------------------------------------------------------------------------

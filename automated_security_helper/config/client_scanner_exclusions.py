@@ -922,8 +922,11 @@ def glob_excludes(pattern: str, relative: str) -> bool:
     and the entry then hid findings in such a file, which the tool had scanned
     and reported). A trailing ``/**`` names everything inside the directory,
     as gitignore reads it, and is matched the same way, so ``src/**`` leaves a
-    file named ``src`` to its tool too. A match on a directory excludes every
-    file under it.
+    file named ``src`` to its tool too. The ``/`` of that suffix anchors the
+    pattern like any other: ``src/**`` is the directory ``src`` at the scan
+    root and leaves ``lib/src/a.py`` to its tool (it was unanchored before, the
+    suffix having been taken off ahead of the anchor test, and hid findings the
+    tool had reported). A match on a directory excludes every file under it.
 
     Before, ``fnmatch`` matched the pattern against every run of components, so
     ``*`` crossed ``/`` (``src/*.py`` took ``src/a/b.py``) and a ``/`` inside the
@@ -937,6 +940,10 @@ def glob_excludes(pattern: str, relative: str) -> bool:
         candidate = candidate[2:]
     directory_only = candidate.endswith("/")
     candidate = candidate.strip("/")
+    # Read before the trailing ``/**`` is taken off: ``src/**`` names a ``/``
+    # and anchors, as ``src/`` does not, and the bare ``src`` left behind has
+    # no ``/`` to show it.
+    names_a_slash = "/" in candidate
     while candidate.endswith("/**"):
         # ``src/**`` is everything inside the directory src, as gitignore reads
         # it, and not a file named src, so it is matched as ``src/`` is. As a
@@ -949,7 +956,7 @@ def glob_excludes(pattern: str, relative: str) -> bool:
         anchored = False
         while candidate.startswith("**/"):
             candidate = candidate[3:]
-    elif "/" in candidate:
+    elif names_a_slash:
         anchored = True
     if not candidate:
         return False
