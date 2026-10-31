@@ -1584,9 +1584,14 @@ def test_cdk_own_validation_plugins_entry_does_not_make_a_target_partly_evaluate
 
     assert scanner.targets_failed == 1
     assert scanner.targets_partly_evaluated == 0
+    # The per-template line is the not-evaluated one ("cdk-nag did not evaluate
+    # <file>: <reason>"), not the partly-evaluated one ("... did not evaluate every
+    # requested pack against <file>"). The wrapper's reason, quoted after the colon,
+    # itself says "not every requested pack evaluated this template", so the
+    # distinction is read on the line's own head, not on the words anywhere in it.
     assert any(
         r.message.startswith("cdk-nag did not evaluate ")
-        and "every requested" not in r.message
+        and "did not evaluate every requested pack against" not in r.message
         for r in caplog.records
     ), [r.message for r in caplog.records]
     assert any(
