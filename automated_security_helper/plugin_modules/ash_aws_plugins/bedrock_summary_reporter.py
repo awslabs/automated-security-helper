@@ -665,16 +665,24 @@ def _number_or_default(
     written there, not inside this helper."""
     if raw is None or raw.strip() == "":
         return parse(default)
+    # The options model is built several times per scan (the config, its dump,
+    # each plugin instance), so one refused value is warned about once. The key
+    # is the variable and its text; the message names the variable only.
+    shown = raw.strip()
     try:
-        value = parse(raw.strip())
+        value = parse(shown)
     except ValueError:
-        ASH_LOGGER.warning(
-            f"{name} is set but is not a number; using the default {default}"
+        _warn_once(
+            name,
+            shown,
+            f"{name} is set but is not a number; using the default {default}",
         )
         return parse(default)
     if isinstance(value, float) and not math.isfinite(value):
-        ASH_LOGGER.warning(
-            f"{name} is set but is not a finite number; using the default {default}"
+        _warn_once(
+            name,
+            shown,
+            f"{name} is set but is not a finite number; using the default {default}",
         )
         return parse(default)
     if (low is not None and value < low) or (high is not None and value > high):
@@ -685,9 +693,11 @@ def _number_or_default(
             if low is not None
             else f"at most {high}"
         )
-        ASH_LOGGER.warning(
+        _warn_once(
+            name,
+            shown,
             f"{name} is set but is outside the range Converse takes ({bounds}); "
-            f"using the default {default}"
+            f"using the default {default}",
         )
         return parse(default)
     return value
@@ -1893,7 +1903,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         if "technical_analysis" in included:
             report += "## Findings by severity\n\n"
             if opts.group_by_severity:
-                report += self._render_by_severity(findings, builder, client, opts)
+                report += self._render_by_severity(
+                    findings, builder, client, opts, included
+                )
             else:
                 report += (
                     self._render_flat_findings(
@@ -1995,7 +2007,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         builder: BedrockPromptBuilder,
         client: BedrockModelClient,
         opts: Any,
+        included: Optional[Set[str]] = None,
     ) -> str:
+        if not findings:
+            # A scan with nothing to analyze (a secrets-only scan, whose
+            # secret findings have their own section) still has the heading
+            # above: the section says so, as the flat layout's does.
+            return self._nothing_to_analyze(included) + "\n\n"
         severity_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for f in findings:
             severity_groups[self._finding_severity(f).lower()].append(f)
