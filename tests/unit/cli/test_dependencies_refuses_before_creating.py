@@ -571,12 +571,16 @@ def test_a_disabled_section_is_read_without_building_the_plugin():
 def test_no_color_reaches_the_panels_and_the_print_lines(
     quiet_machine, tmp_path, monkeypatch
 ):
-    """--no-color reached the logger only."""
+    """--no-color reached the logger only. The panels are written through
+    ``dependencies.console``, which the fixture replaces with a console that is
+    already without color; it is set to color here, so the assertion reaches the
+    command's own change and not the fixture's."""
     from automated_security_helper.utils.console import global_console
 
     shared = global_console()
     monkeypatch.setattr(shared, "no_color", False)
     monkeypatch.setattr(dependencies.err_console, "no_color", False)
+    monkeypatch.setattr(dependencies.console, "no_color", False)
 
     runner.invoke(
         dependencies_app,
@@ -585,3 +589,4 @@ def test_no_color_reaches_the_panels_and_the_print_lines(
 
     assert shared.no_color is True
     assert dependencies.err_console.no_color is True
+    assert dependencies.console.no_color is True
