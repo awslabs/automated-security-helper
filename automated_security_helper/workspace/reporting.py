@@ -504,13 +504,17 @@ def _construction_skip_reason(
     as ``reporter_matches_requested_formats`` matches them, by the configured
     name. ``--python-based-plugins-only`` asks the instance, so under that flag
     an unbuildable reporter counts as one the step would have run.
+
+    A reporter that sends findings off the host runs only when its section says
+    ``enabled: true`` (``off_host_reporter_refused``), so one with no section is
+    refused as one whose section does not say so: the built reporter is skipped
+    as disabled by the same rule (:func:`_selected_reporters`), and an unbuildable
+    one must not fail the run for a report the step would never have written.
     """
     enabled = True
     name: Any = None
     if config is not None:
-        enabled = section_enabled(config) and not off_host_reporter_refused(
-            reporter_class, config
-        )
+        enabled = section_enabled(config)
         name = (
             config.get("name")
             if isinstance(config, Mapping)
@@ -521,6 +525,8 @@ def _construction_skip_reason(
         field = (getattr(declared, "model_fields", None) or {}).get("enabled")
         if field is not None and getattr(field, "default", True) is False:
             enabled = False
+    if enabled and off_host_reporter_refused(reporter_class, config):
+        enabled = False
     if not enabled:
         return SKIP_DISABLED
     if isinstance(output_formats, str):

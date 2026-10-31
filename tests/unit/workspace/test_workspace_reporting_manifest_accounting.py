@@ -203,6 +203,48 @@ class FakeUnconstructibleOffReporter(ReporterPluginBase[_UnconstructibleOffConfi
         raise AssertionError("never constructed")
 
 
+class _OffHostConfig(ReporterPluginConfigBase):
+    name: str = "fake-off-host"
+    extension: str = "offhost.txt"
+    enabled: bool = True
+
+
+class FakeOffHostReporter(ReporterPluginBase[_OffHostConfig]):
+    """Sends findings off the host and ships enabled, with no section in the
+    default config (a plugin's reporter): it runs only if an operator's section
+    says ``enabled: true``, so the step never writes its report."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
+    sends_off_host = True
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _OffHostConfig()
+        return super().model_post_init(context)
+
+    def report(self, model) -> str:  # pragma: no cover - refused as off-host
+        raise AssertionError("an off-host reporter that is not enabled ran")
+
+
+class _OffHostUnbuildableConfig(ReporterPluginConfigBase):
+    name: str = "fake-off-host-unbuildable"
+    extension: str = "offhost-unbuildable.txt"
+    enabled: bool = True
+
+
+class FakeOffHostUnbuildableReporter(ReporterPluginBase[_OffHostUnbuildableConfig]):
+    """The same off-host reporter, whose constructor raises."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
+    sends_off_host = True
+
+    def model_post_init(self, context):
+        raise RuntimeError("cannot be built either way")
+
+    def report(self, model) -> str:  # pragma: no cover - never constructed
+        raise AssertionError("never constructed")
+
+
 class _NotPythonOnlyConfig(ReporterPluginConfigBase):
     name: str = "fake-python-only-raises"
     extension: str = "pyonly.txt"
@@ -431,6 +473,29 @@ class TestAnUnbuildableReporterFailsOnlyWhatItOwed:
         assert entry["skipped"] == SKIP_NOT_REQUESTED
         assert "fake-unconstructible" not in outcome.failed_reporters
         assert outcome.failed is False
+
+    def test_an_off_host_reporter_that_cannot_be_built_is_skipped_as_a_built_one_is(
+        self, workspace
+    ):
+        """A built off-host reporter with no enabled section is skipped as
+        disabled; the unbuildable one took the branch that never asked, so the
+        run failed for a report it would never have written."""
+        _, output_dir, _ = workspace
+        outcome = _emit(
+            workspace,
+            FakeOffHostReporter,
+            FakeOffHostUnbuildableReporter,
+            FakeMergedReporter,
+        )
+
+        reporters = _manifest(output_dir)["reporters"]
+        assert reporters["fake-off-host"]["skipped"] == SKIP_DISABLED
+        entry = reporters["fake-off-host-unbuildable"]
+        assert "could not be constructed" in entry["error"]
+        assert entry["skipped"] == SKIP_DISABLED
+        assert "fake-off-host-unbuildable" not in outcome.failed_reporters
+        assert outcome.failed is False
+        assert "fake-merged" in outcome.workspace_artifacts
 
     def test_a_requested_reporter_that_cannot_be_built_still_fails(self, workspace):
         """The control: asked for by name, the missing report is the step's."""
