@@ -66,6 +66,7 @@ Rejected alternatives
 from __future__ import annotations
 
 import copy
+import importlib
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -1203,6 +1204,8 @@ def _widenings(
     if modules and present:
         trusted_names = set(split_plugin_modules(base.ash_plugin_modules))
         refused: List[str] = []
+        # Once for the whole list, not once per name.
+        importlib.invalidate_caches()
         for name in split_plugin_modules(named):
             if name in trusted_names:
                 continue
@@ -1210,7 +1213,7 @@ def _widenings(
             if package is not None and package not in trusted_names:
                 refused.append(f"{name!r} ({OFF_HOST_PLUGIN_SENDS[package]})")
                 continue
-            reason = refusal_reason(name, scanned_root)
+            reason = refusal_reason(name, scanned_root, invalidate_caches=False)
             if reason is not None:
                 refused.append(f"{name!r} ({reason})")
         if refused:

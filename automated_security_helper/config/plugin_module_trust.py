@@ -481,8 +481,13 @@ def refusal_reason(
     any_checkout: bool = False,
     root_judged: bool = False,
     also_scanned: Sequence[Path] = (),
+    invalidate_caches: bool = True,
 ) -> Optional[str]:
     """Why ``name`` may not be imported for a config in the scanned tree, or None.
+
+    ``invalidate_caches`` drops the import system's caches before the lookup.
+    A caller that judges a list of names drops them once itself and passes
+    False, instead of once per name.
 
     Imports nothing that is not already imported, so a refused name runs no code.
     A None ``scanned_root`` (no scanned tree) leaves the membership test its
@@ -513,7 +518,8 @@ def refusal_reason(
     # (plugins.loader), so a long-lived process (the MCP server) finds a module
     # installed since the process started. This lookup does the same, or it
     # would refuse a module the scan then imports.
-    importlib.invalidate_caches()
+    if invalidate_caches:
+        importlib.invalidate_caches()
     own = _own_package_dir()
     parts = name.split(".")
     spec: Optional[ModuleSpec] = None
@@ -819,7 +825,12 @@ def confine_plugin_modules(
             and (
                 not _is_allowed_module_path(name)
                 or not _is_ash_own_module(name)
-                or off_host_package(name) is not None
+                # A name under an off-host package the trusted list names is
+                # kept, as the judged path below keeps it.
+                or (
+                    (package := off_host_package(name)) is not None
+                    and package not in trusted_names
+                )
             )
         ]
         if outside:
@@ -846,6 +857,9 @@ def confine_plugin_modules(
     original_entries = list(getattr(config, "ash_plugin_modules", []) or [])
     kept: List[str] = []
     refused: List[str] = []
+    # Once for the whole list: every name below is judged against the same
+    # import state, and the lookup of each would drop the caches again.
+    importlib.invalidate_caches()
     for name in split_plugin_modules(getattr(config, "ash_plugin_modules", [])):
         # Kept for the scan's namespace refusal, which imports nothing and
         # refuses the scan with exit 3.
@@ -873,6 +887,7 @@ def confine_plugin_modules(
             any_checkout=rootless,
             root_judged=root_judged,
             also_scanned=also_scanned,
+            invalidate_caches=False,
         )
         if reason is None:
             kept.append(name)

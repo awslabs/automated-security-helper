@@ -106,6 +106,41 @@ def test_a_rootless_client_config_keeps_an_off_host_package_the_trusted_list_nam
     assert config.ash_plugin_modules == [AWS_PLUGINS]
 
 
+def _confine_rootless(module: str, trusted_modules: list) -> AshConfig:
+    config = AshConfig.model_validate({"ash_plugin_modules": [module]})
+    confine_plugin_modules(
+        config,
+        AshConfig.model_validate({"ash_plugin_modules": trusted_modules}),
+        [],
+        None,
+        [],
+        no_scanned_tree=True,
+        untrusted=True,
+        checkout_membership=True,
+        mixed_membership=False,
+        given_root_membership=False,
+        undecided_membership=False,
+    )
+    return config
+
+
+def test_a_rootless_client_config_keeps_a_module_inside_a_trusted_off_host_package():
+    """The judged path keeps a name whose package the trusted list names; the
+    rootless arm refused every name the list did not spell exactly."""
+    submodule = AWS_PLUGINS + ".s3_reporter"
+
+    config = _confine_rootless(submodule, [AWS_PLUGINS])
+
+    assert config.ash_plugin_modules == [submodule]
+
+
+def test_a_rootless_client_config_may_not_add_a_module_inside_an_untrusted_package():
+    """The control: with the package absent from the trusted list the module
+    inside it is still refused."""
+    with pytest.raises(ASHConfigSourceError):
+        _confine_rootless(AWS_PLUGINS + ".s3_reporter", [])
+
+
 def test_an_in_tree_link_into_ashs_own_package_is_judged_where_it_sits(
     tmp_path, monkeypatch
 ):
