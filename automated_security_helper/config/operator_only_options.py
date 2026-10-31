@@ -288,31 +288,40 @@ def _scanner_options(config: "AshConfig", scanner: str) -> Any:
 def _typed_as_the_model_reads(options: Any, option: str, value: Any) -> Any:
     """*value* for *option* as the options model reads it (``"256"`` is 256).
 
-    The one coercion both callers use. The option's own field is read first
-    (lax, as a plugin's options are read at load; the field's annotation with
-    its constraints), which works for a model with other required fields or a
-    model-level check. A value that only the model's own validators accept (a
-    before-validator on the field that turns ``"256 MiB"`` into 256) fails
-    there, so the whole model is read once more over its current values with
-    this one replaced. A value neither reading accepts raises the first
-    reading's error, as the field alone did. A name the model declares no field
-    for is returned as given.
+    The one coercion both callers use. The whole model is read first, over its
+    current values with this one replaced, so the option goes through the
+    validators the load ran: a before-validator on the field that turns
+    ``"256 MiB"`` into 256, an after-validator that clamps. Reading only the
+    field's annotation first took any value the bare type accepts and skipped
+    them. Only a read that leaves the option in ``model_fields_set`` counts: a
+    field with an alias on a model that does not populate by name is not set by
+    its name, and the model would answer its default without an error.
+
+    When the whole model does not take the value (another field the model
+    cannot rebuild from its dump, a model-level check, a reference the
+    environment wrote that the model's validators refuse at a typed field, or
+    the aliased field above) the option's own field is read alone (lax, as a
+    plugin's options are read at load; the field's annotation with its
+    constraints), as it was before the whole model was read first. A value
+    neither reading accepts raises the field reading's error. A name the model
+    declares no field for is returned as given.
     """
     field = type(options).model_fields.get(option)
     if field is None:
         return value
+    try:
+        current = options.model_dump()
+        current[option] = value
+        validated = type(options).model_validate(current)
+    except Exception:  # noqa: BLE001 -- the field alone is read below instead
+        pass
+    else:
+        if option in validated.model_fields_set:
+            return getattr(validated, option)
     annotation: Any = field.annotation
     if field.metadata:
         annotation = Annotated[(annotation, *field.metadata)]
-    try:
-        return TypeAdapter(annotation).validate_python(value)
-    except (TypeError, ValueError) as field_error:
-        try:
-            current = options.model_dump()
-            current[option] = value
-            return getattr(type(options).model_validate(current), option)
-        except (AttributeError, TypeError, ValueError):
-            raise field_error from None
+    return TypeAdapter(annotation).validate_python(value)
 
 
 def _as_the_model_reads(options: Any, option: str, value: Any) -> Any:
@@ -910,15 +919,15 @@ def _set_scanner_option(options: Any, option: str, value: Any) -> None:
     A value a file outside the tree wrote is the document's: an environment
     reference (``!ENV``, ``${VAR}``) is a string there where the model holds a
     number, so compared raw it always differed and was stored as a string. The
-    value is read through the option's own field first (lax, as a plugin's
-    options are read at load; the field's annotation with its constraints), so
-    what is stored is the model's type and the comparison is like with like.
-    The one field, not the whole model: validating ``{option: value}`` as a
-    model raised for any options model with another required field, or a
-    model validator reading several fields, on a value the field accepts. A
-    value only the model's own validators accept is read through the whole
-    model second (:func:`_typed_as_the_model_reads`), so the write-back takes
-    what the load took. The trusted base's value is the model's already. A name
+    value is read through the options model, so what is stored is the model's
+    type and the comparison is like with like. The whole model is read over its
+    current values with this one replaced (:func:`_typed_as_the_model_reads`),
+    never ``{option: value}`` alone, which raised for any options model with
+    another required field, or a model validator reading several fields. The
+    model's validators run, so the write-back takes what the load took; when
+    the model does not take the value, the option's own field is read alone
+    (lax, as a plugin's options are read at load; the field's annotation with
+    its constraints). The trusted base's value is the model's already. A name
     the model declares no field for is set as given.
     """
     typed = _typed_as_the_model_reads(options, option, value)

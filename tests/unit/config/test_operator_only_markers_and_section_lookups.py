@@ -165,6 +165,66 @@ def test_a_value_only_the_models_validator_accepts_is_written_back_not_refused()
     assert _as_the_model_reads(options, "limit", "lots") == "lots"
 
 
+def test_the_models_validators_run_even_when_the_bare_type_accepts_the_value():
+    """The load ran the field's validators, so the write-back takes what they
+    answer. A value the bare type accepts used to be stored as it came, and a
+    clamping validator never ran on it."""
+    from pydantic import field_validator
+
+    from automated_security_helper.config.operator_only_options import (
+        _set_scanner_option,
+        _typed_as_the_model_reads,
+    )
+
+    class _Clamped(BaseModel):
+        limit: int = 1
+        ceiling: int
+
+        @field_validator("limit", mode="after")
+        @classmethod
+        def _within_a_hundred(cls, value):
+            return min(value, 100)
+
+    options = _Clamped(limit=1, ceiling=512)
+
+    assert _typed_as_the_model_reads(options, "limit", "500") == 100
+    _set_scanner_option(options, "limit", "500")
+    assert options.limit == 100 and isinstance(options.limit, int)
+    # The control: a value inside the clamp is stored as the model's type.
+    assert _typed_as_the_model_reads(options, "limit", "50") == 50
+
+
+def test_an_aliased_option_is_not_silently_answered_with_its_default():
+    """A field with an alias on a model that does not populate by name is not
+    set by its own name: reading the whole model over its dump answered the
+    default for a value only the model's validator accepts, with no error. The
+    answer is not trusted unless the option was set, so the field alone is read
+    and a value it refuses is refused."""
+    from pydantic import field_validator
+
+    from automated_security_helper.config.operator_only_options import (
+        _typed_as_the_model_reads,
+    )
+
+    class _Aliased(BaseModel):
+        limit: int = Field(default=1, alias="max-limit")
+        ceiling: int = 512
+
+        @field_validator("limit", mode="before")
+        @classmethod
+        def _mebibytes(cls, value):
+            if isinstance(value, str) and value.endswith(" MiB"):
+                return int(value.removesuffix(" MiB"))
+            return value
+
+    options = _Aliased(**{"max-limit": 1})
+
+    with pytest.raises(ValidationError):
+        _typed_as_the_model_reads(options, "limit", "256 MiB")
+    # The control: a value the bare type accepts is read as that type.
+    assert _typed_as_the_model_reads(options, "limit", "256") == 256
+
+
 def test_an_option_a_file_outside_the_tree_set_holds_that_files_value():
     """The chain document holds the limit a file outside the tree wrote; the
     configuration holds another value by the time the settle runs. That other
