@@ -491,10 +491,21 @@ class TestWhereYarnsCopyGoes:
         working directory is the resolved path, so it reads ``/scratch/.npmrc``,
         which any account can write. A walk of the path as written judged the
         home's ancestors and passed; the walk of the real path names the shared
-        directory."""
+        directory.
+
+        The chain below ``/scratch`` is made owner-only on purpose: ``mkdir`` gives
+        it the process umask, so under umask 002 ``me`` and ``cache`` came out
+        group-writable and the walk named ``cache``, the nearest such directory,
+        not ``scratch``. The setup runs under umask 002 to say so."""
         scratch = tmp_path / "scratch"
         cache = scratch / "me" / "cache"
-        cache.mkdir(parents=True)
+        previous = os.umask(0o002)
+        try:
+            cache.mkdir(parents=True)
+        finally:
+            os.umask(previous)
+        (scratch / "me").chmod(0o700)
+        cache.chmod(0o700)
         scratch.chmod(0o1777)
         home = tmp_path / "home"
         home.mkdir()
