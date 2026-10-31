@@ -669,11 +669,17 @@ class TestEventHandlerFailuresAreRedacted:
                 raise RuntimeError(f"cannot reach {ENV_VALUE}")
 
         phase.notify_event = boom
-        with caplog.at_level(logging.ERROR):
+        # Captured at DEBUG: a lower-level line (a traceback, a debug echo of the
+        # handler's error) that carried the value would otherwise pass unseen.
+        with caplog.at_level(logging.DEBUG):
             phase.execute(aggregated_results=agg)
 
         # Red at the base: str(event_error), quoted as written.
-        assert "Failed to notify converter" in caplog.text
+        assert any(
+            record.levelno == logging.ERROR
+            and "Failed to notify converter" in record.getMessage()
+            for record in caplog.records
+        )
         assert ENV_VALUE not in caplog.text
 
 
