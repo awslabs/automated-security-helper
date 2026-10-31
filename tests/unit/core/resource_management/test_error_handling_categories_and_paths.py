@@ -26,7 +26,6 @@ Each test here is pinned against the behavior it replaced:
 import errno
 import json
 import os
-from types import SimpleNamespace
 
 import pytest
 
@@ -47,6 +46,7 @@ from automated_security_helper.core.resource_management.exceptions import (
 )
 from automated_security_helper.utils.sandbox.fs_guard import writable_root
 from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
+from tests.utils.module_binding_stand_ins import ModuleWith, OsWith
 
 pytestmark = pytest.mark.unit
 
@@ -58,23 +58,6 @@ def _symlink_or_skip(link, target):
         os.symlink(target, link)
     except (OSError, NotImplementedError) as error:
         pytest.skip(f"symlinks cannot be made here: {error}")
-
-
-class _OsWith:
-    """The ``os`` module with some functions replaced, to stand in for one
-    module's own binding of ``os``.
-
-    ``monkeypatch.setattr(error_handling.os, "lstat", ...)`` replaces the
-    function on the shared module, for the whole process while the test runs
-    (pathlib, logging and pytest itself call it too). Replacing the binding a
-    module reads its ``os`` through reaches that module alone.
-    """
-
-    def __init__(self, **replacements):
-        self.__dict__.update(replacements)
-
-    def __getattr__(self, name):
-        return getattr(os, name)
 
 
 class TestSafeReadJsonFileNamesEachFailure:
@@ -97,11 +80,10 @@ class TestSafeReadJsonFileNamesEachFailure:
         def too_deep(text):
             raise RecursionError("maximum recursion depth exceeded")
 
-        monkeypatch.setattr(
-            error_handling,
-            "json",
-            SimpleNamespace(loads=too_deep, JSONDecodeError=json.JSONDecodeError),
-        )
+        # The module's own binding of json, delegating everything but loads to
+        # the real module: a bare namespace answered only the two attributes
+        # this path reads today, and failed on any other one it read later.
+        monkeypatch.setattr(error_handling, "json", ModuleWith(json, loads=too_deep))
 
         data, error = safe_read_json_file(path)
 
@@ -159,7 +141,7 @@ class TestSafeReadJsonFileNamesEachFailure:
                 return regular
             return real_lstat(path, *args, **kwargs)
 
-        monkeypatch.setattr(error_handling, "os", _OsWith(lstat=looks_regular))
+        monkeypatch.setattr(error_handling, "os", OsWith(lstat=looks_regular))
 
         data, error = safe_read_json_file(link)
 
@@ -187,7 +169,7 @@ class TestSafeReadJsonFileNamesEachFailure:
                 return regular
             return real_lstat(path, *args, **kwargs)
 
-        monkeypatch.setattr(error_handling, "os", _OsWith(lstat=looks_regular))
+        monkeypatch.setattr(error_handling, "os", OsWith(lstat=looks_regular))
 
         data, error = safe_read_json_file(directory)
 
@@ -265,7 +247,7 @@ class TestValidateDirectoryPathCategories:
                 raise PermissionError(errno.EACCES, "Permission denied", str(path))
             return real_stat(path, *args, **kwargs)
 
-        monkeypatch.setattr(error_handling, "os", _OsWith(stat=refused))
+        monkeypatch.setattr(error_handling, "os", OsWith(stat=refused))
 
         error = validate_directory_path(target)
 
@@ -308,8 +290,8 @@ class TestSourceDirectoryErrorOnPathsTheSystemRefuses:
         def too_long(path, *args, **kwargs):
             raise OSError(errno.ENAMETOOLONG, "File name too long", str(path))
 
-        monkeypatch.setattr(error_handling, "os", _OsWith(stat=too_long))
-        monkeypatch.setattr(directory_refusals, "os", _OsWith(stat=too_long))
+        monkeypatch.setattr(error_handling, "os", OsWith(stat=too_long))
+        monkeypatch.setattr(directory_refusals, "os", OsWith(stat=too_long))
 
         error = source_directory_error("x" * 5000)
 

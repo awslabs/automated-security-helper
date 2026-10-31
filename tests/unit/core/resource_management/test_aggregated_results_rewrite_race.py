@@ -57,6 +57,7 @@ from automated_security_helper.models.asharp_model import (
     ScannerTargetStatusInfo,
 )
 from automated_security_helper.utils.atomic_write import write_text_atomically
+from tests.utils.module_binding_stand_ins import OsWith
 
 pytestmark = pytest.mark.unit
 
@@ -215,21 +216,6 @@ def test_a_failed_atomic_write_keeps_the_old_file_and_removes_the_staging_file(
     assert sorted(p.name for p in tmp_path.iterdir()) == [target.name]
 
 
-class _OsWith:
-    """The ``os`` module with some functions replaced, for one module's binding.
-
-    Replacing ``error_handling.os`` reaches that module alone. Patching ``os.open``
-    itself would replace it for the whole process while the test runs, and pathlib,
-    logging and pytest call it too.
-    """
-
-    def __init__(self, **replacements) -> None:
-        self.__dict__.update(replacements)
-
-    def __getattr__(self, name):
-        return getattr(os, name)
-
-
 class _SharingViolationOnOpen:
     """Fail the first ``failures`` opens of one file the way Windows does mid-replace.
 
@@ -260,7 +246,7 @@ class _SharingViolationOnOpen:
 
     def installed(self):
         stack = contextlib.ExitStack()
-        stack.enter_context(patch.object(error_handling, "os", _OsWith(open=self)))
+        stack.enter_context(patch.object(error_handling, "os", OsWith(open=self)))
         stack.enter_context(
             patch.object(
                 error_handling, "time", SimpleNamespace(sleep=self.sleeps.append)
