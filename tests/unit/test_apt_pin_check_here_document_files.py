@@ -684,6 +684,65 @@ class TestOnlyACopierMakesTheBodyAFile:
         assert checker._heredoc_markers(line) == expected
 
 
+class TestXargsWordsThatAreNotInTheDockerfile:
+    """An xargs install is read only when its packages are arguments of the install.
+
+    ``xargs apt-get install -y < packages.txt`` and ``cat packages.txt | xargs apt-get
+    install -y`` install whatever the file or the pipe holds. The words are not in the
+    Dockerfile, so no pin can be read from them, and the install was read as one with no
+    packages: zero pins, no refusal, the check green.
+    """
+
+    REFUSED = r"Dockerfile:3 installs packages with apt-get through xargs, which reads"
+
+    @pytest.mark.parametrize(
+        ("run", "source"),
+        [
+            ("xargs apt-get install -y < /tmp/packages.txt", "a file or a here-string"),
+            ("xargs apt-get install -y </tmp/packages.txt", "a file or a here-string"),
+            ('xargs apt-get install -y <<< "curl git"', "a file or a here-string"),
+            ('xargs apt-get install -y <<<"curl"', "a file or a here-string"),
+            ("xargs -a packages.txt apt-get install -y", "a file named by its -a"),
+            ("xargs -r -a packages.txt apt-get install -y", "a file named by its -a"),
+            ("xargs -ra packages.txt apt-get install -y", "a file named by its -a"),
+            ("xargs --arg-file=packages.txt apt-get install -y", "a file named by"),
+            ("cat packages.txt | xargs apt-get install -y", "a pipe"),
+            ("cat packages.txt | sort | xargs -r apt-get install -y", "a pipe"),
+            ("echo curl | xargs apt-get install -y", "a pipe"),
+            ("cat packages.txt |& xargs apt-get install -y", "a pipe"),
+        ],
+    )
+    def test_words_read_from_a_file_a_here_string_or_a_pipe_are_refused(
+        self, tmp_path, run, source
+    ):
+        # Red before: nothing in the install's own words was a package, so it was read
+        # as an install of nothing and the check passed with no pin for what it installs.
+        body = f"RUN {run}\n"
+        with pytest.raises(
+            checker.PinEnumerationError, match=rf"{self.REFUSED} them from {source}"
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    @pytest.mark.parametrize(
+        "run",
+        [
+            f"xargs apt-get install -y {CURL}",
+            f"xargs -n 1 apt-get install -y {CURL}",
+            f"xargs apt-get install -y {CURL} < /dev/null",
+            f"false || xargs apt-get install -y {CURL}",
+            f"cat /etc/hosts | wc -l; xargs apt-get install -y {CURL}",
+            f"xargs apt-get install -y {CURL} 2>&1 | tee /var/log/apt.log",
+            f"cat /etc/hosts | apt-get install -y {CURL}",
+            f"apt-get install -y {CURL} < /etc/hosts",
+        ],
+    )
+    def test_packages_written_as_arguments_are_read_whatever_else_is_on_the_line(
+        self, tmp_path, run
+    ):
+        """Control: only an input xargs reads its words from is refused."""
+        assert _pins(tmp_path, f"RUN {run}\n") == {"curl": ("7.88.1-10+deb12u15", (3,))}
+
+
 class TestAPinWhoseVersionIsAnExpansion:
     UNREADABLE = (
         r"installs 'curl=\$\{CURL_VERSION\}' with apt-get, pinning the version "

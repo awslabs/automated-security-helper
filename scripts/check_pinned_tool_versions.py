@@ -81,7 +81,11 @@ that is not a script, a motd or a README that mentions ``apt-get install``, is s
 by putting ``# apt-pin-check: skip`` on a line of its own directly above its ``RUN``
 (blank lines and other comments between them are allowed). An option that takes its
 value as a separate word (``-t suite``, ``-o Name=value``) and a redirection are not
-packages. A Dockerfile that configures NodeSource without a major this script can
+packages. An install that xargs runs on words it reads from a here-document, a file
+(``< list``, ``-a list``), a here-string or a pipe is refused, because those words are
+not arguments of the install in the Dockerfile; packages written as arguments of the
+install (``xargs apt-get install -y curl=1.2``) are read like any other. A Dockerfile
+that configures NodeSource without a major this script can
 read, or with two different majors, is refused too, because the nodejs pin would be
 looked up in Debian's own nodejs or in the wrong NodeSource index.
 
@@ -1314,6 +1318,14 @@ _APT_PIN = re.compile(
 # that is known only when the build runs, which no index can be asked about.
 _APT_PIN_EXPANSION = re.compile(r"[a-z0-9][a-z0-9+.-]+=(?=\S*\$)\S+")
 _XARGS = re.compile(r"(?<![\w-])xargs(?![\w-])")
+# A file or a here-string given to a command as its input: ``< list``, ``<list``,
+# ``<<< "curl git"``. Not a here-document (``<<EOF``), a descriptor copy (``<&3``) or
+# ``< /dev/null``, which gives xargs no words.
+_XARGS_STDIN_FILE = re.compile(
+    r"(?<!<)<<<|(?<![<>])<(?![<&])(?!\s*/dev/null(?![\w/.-]))"
+)
+# xargs reading its words from a file: ``-a list``, ``-ra list``, ``--arg-file=list``.
+_XARGS_ARG_FILE = re.compile(r"\s(?:-[0-9A-Za-z]*a|--arg-file(?![\w-]))")
 
 # Tag parts of a base image that name a variant of the image, not a Debian suite.
 _IMAGE_VARIANTS = frozenset({"slim", "alpine"})
@@ -1698,29 +1710,41 @@ def _split_substitutions(text: str) -> list[str]:
     return found
 
 
-def _xargs_reads_a_here_document(shell: str, install: re.Match[str]) -> bool:
-    """Whether ``xargs`` runs this install with a here-document as its input.
+def _xargs_input(shell: str, install: re.Match[str]) -> str:
+    """What ``xargs`` reads the packages of this install from, or ``""`` if not xargs.
 
     ``xargs apt-get install -y <<EOF`` takes the words of the body as the packages. The
     body lines are joined to the instruction as commands of their own, so no package in
     them is an argument of the install and none can be read as one. The same holds when
     the here-document is opened by an earlier stage of the pipeline that feeds xargs
-    (``cat <<'EOF' | xargs apt-get install -y``), and when a redirection such as
-    ``2>&1`` comes between the install and the marker.
+    (``cat <<'EOF' | xargs apt-get install -y``), when a redirection such as ``2>&1``
+    comes between the install and the marker, and when xargs reads a file
+    (``< packages.txt``, ``-a packages.txt``), a here-string or a pipe: the words it
+    reads are not in the Dockerfile at all. Packages given as arguments of the install
+    (``xargs apt-get install -y curl=1.2``) are read like any install.
     """
     text = shell.replace("|&", "| ")
     ends = list(_COMMAND_END.finditer(text, 0, install.start()))
     own_start = ends[-1].end() if ends else 0
-    if not _XARGS.search(text, own_start, install.start()):
-        return False
+    runner = _XARGS.search(text, own_start, install.start())
+    if runner is None:
+        return ""
     # The pipeline xargs ends: step back over every stage a single ``|`` joins.
     first = len(ends)
     while first and ends[first - 1].group() == "|":
         first -= 1
     pipeline_start = ends[first - 1].end() if first else 0
     after = _COMMAND_END.search(text, install.end())
-    pipeline_end = after.start() if after else len(text)
-    return bool(_HEREDOC_MARKER.search(text, pipeline_start, pipeline_end))
+    stage_end = after.start() if after else len(text)
+    if _HEREDOC_MARKER.search(text, pipeline_start, stage_end):
+        return "a here-document"
+    if _XARGS_STDIN_FILE.search(text, own_start, stage_end):
+        return "a file or a here-string"
+    if _XARGS_ARG_FILE.search(text, runner.end(), install.start()):
+        return "a file named by its -a or --arg-file option"
+    if ends and ends[-1].group() == "|":
+        return "a pipe"
+    return ""
 
 
 def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
@@ -1738,11 +1762,11 @@ def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
         for shell in _split_substitutions(_block_text(block)):
             for match in _APT_INSTALL.finditer(shell):
                 where = f"{dockerfile.name}:{block[0][0]}"
-                if _xargs_reads_a_here_document(shell, match):
+                if source := _xargs_input(shell, match):
                     raise PinEnumerationError(
                         f"{where} installs packages with apt-get through xargs, which "
-                        "reads them from a here-document. The words of its body are "
-                        "not arguments this check can read. Spell each package as an "
+                        f"reads them from {source}. The words it reads are not "
+                        "arguments this check can read. Spell each package as an "
                         "argument of the install, as package=version."
                     )
                 for word in _install_words(match.group("args")):
