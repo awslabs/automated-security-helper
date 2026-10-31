@@ -1658,9 +1658,19 @@ def _overlaps_a_secret(result: Any, index: _SecretIndex) -> bool:
     )
 
 
+#: The most lines of reach a fenced block gives (``_fenced_block_reach``). Scanners
+#: quote a few lines around a finding (the findings browser shows five either
+#: side); a longer block is an example or a remediation, not a context quote. Left
+#: uncapped, a 40-line example gave every finding within 40 lines of a secret
+#: finding's line its code blocks masked, and so a message, and an ID, that had
+#: nothing to do with the secret.
+_MAX_FENCED_REACH = 10
+
+
 def _fenced_block_reach(text: str) -> int:
     """How many lines beyond a finding's own a fenced block in ``text`` can quote:
-    the lines of its longest block (the info string counts as one), less one."""
+    the lines of its longest block (the info string counts as one), less one, at
+    most ``_MAX_FENCED_REACH``."""
     reach = 0
     for fence in _CODE_FENCES:
         if fence not in text:
@@ -1668,7 +1678,7 @@ def _fenced_block_reach(text: str) -> int:
         parts = text.split(fence)
         for position in range(1, len(parts), 2):
             reach = max(reach, len(_split_lines(parts[position])) - 1)
-    return reach
+    return min(reach, _MAX_FENCED_REACH)
 
 
 def _fenced_block_could_quote_a_secret(result: Any, index: _SecretIndex) -> bool:

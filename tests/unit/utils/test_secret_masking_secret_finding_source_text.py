@@ -520,6 +520,38 @@ class TestAnOverlappingFindingsSourceText:
         text = model.sarif.runs[0].results[1].message.root.text
         assert text == "import\n\n" + block
 
+    def test_a_long_example_in_a_message_does_not_reach_a_distant_secret(self):
+        """A neighbor on line 20 whose message holds a 40-line example: the block
+        is no context quote of line 2 (eighteen lines away), so the message, and
+        with it the finding's ID, is left as written. Uncapped, the block's
+        reach of 40 lines took in line 2 and every block in the message was
+        masked."""
+        block = "```python\n" + "x = 1\n" * 40 + "```"
+        message = "import\n\n" + block
+        model = _results(
+            self._secret(),
+            _result("B404", "app.py", 20, message, "bandit"),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert model.sarif.runs[0].results[1].message.root.text == message
+
+    def test_a_long_example_in_a_message_still_reaches_a_near_secret(self):
+        """Control: the same message on line 9, seven lines from line 2, is within
+        the cap and is masked whole, as a block of several lines near the secret
+        always was."""
+        block = "```python\n" + "x = 1\n" * 40 + "```"
+        model = _results(
+            self._secret(),
+            _result("B404", "app.py", 9, "import\n\n" + block, "bandit"),
+        )
+
+        mask_secrets_in_results(model)
+
+        text = model.sarif.runs[0].results[1].message.root.text
+        assert text == "import\n\n```" + (MASKED_LINE + "\n") * 41 + "```"
+
     def test_a_snippet_with_more_lines_than_its_region_is_masked_whole(self):
         """A tool's properties.snippet can carry context lines above the region;
         numbered from the region's first line the secret line escapes the range,
