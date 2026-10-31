@@ -2829,6 +2829,43 @@ def test_validate_config_entry_types_hold_its_classifier_kinds():
     assert not field_names & set(validate.entry_types)
 
 
+@pytest.mark.unit
+def test_the_coverage_copy_of_a_remote_progress_read_is_explained(monkeypatch):
+    """The real get_scan_progress spreads the entry's coverage into its record,
+    and a remote read first passes that coverage through
+    ``_coverage_without_process_ids``. The helper takes the payload as a
+    parameter, which the reader cannot follow back to the entry, so the response
+    reads as one whose keys cannot all be read. UNREAD_RESPONSE_EXPLAINED names
+    the helper, so the check is silent about it and the entry is not listed as
+    one that explained nothing. The control removes the entry and expects the
+    finding: a check that never reports the site proves nothing by being quiet."""
+    package = _installed_package()
+
+    def run(table):
+        monkeypatch.setattr(dc, "UNREAD_RESPONSE_EXPLAINED", table)
+        notes: list[str] = []
+        dc.load_mcp_contract.cache_clear()
+        try:
+            found = dc.check_mcp_contract([], REPO_ROOT, notes=notes, package=package)
+            return found, notes
+        finally:
+            dc.load_mcp_contract.cache_clear()
+
+    table = dc.UNREAD_RESPONSE_EXPLAINED
+    entries = [entry for entry in table if entry[2] == "_coverage_without_process_ids"]
+    assert [entry[0] for entry in entries] == ["get_scan_progress"]
+
+    without = tuple(entry for entry in table if entry not in entries)
+    unexplained, _ = run(without)
+    named = _findings_about(unexplained, "get_scan_progress has a response ")
+    assert named
+    assert all("scan_registry.py" in finding for finding in named)
+
+    findings, notes = run(table)
+    assert not _findings_about(findings, "get_scan_progress has a response ")
+    assert not [note for note in notes if "_coverage_without_process_ids" in note]
+
+
 def _chain_server(levels: int) -> str:
     """A server whose tool calls a chain of helpers, each calling the next twice."""
     lines = [

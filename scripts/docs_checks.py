@@ -5958,6 +5958,21 @@ UNREAD_RESPONSE_EXPLAINED = (
             " dict literals the reader follows."
         ),
     ),
+    # The remote read copies the entry's stored coverage with the process ids
+    # of the tools a cancel could not end taken out of their reasons. The helper
+    # takes the payload as a parameter, which the reader cannot follow back to
+    # the entry; the copy adds no key of its own but could_not_stop.
+    (
+        "get_scan_progress",
+        "automated_security_helper/core/resource_management/scan_registry.py",
+        "_coverage_without_process_ids",
+        "def _coverage_without_process_ids(",
+        "2026-12-31",
+        (
+            "the payload is the entry's stored coverage, whose keys the response"
+            " already lists; the copy changes only the could_not_stop reasons."
+        ),
+    ),
 )
 
 
