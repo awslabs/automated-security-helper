@@ -395,6 +395,31 @@ def _sweep_warning(
     return shown
 
 
+def _record_refusal(
+    refusals: List[OSError],
+    error: OSError,
+    text: str,
+    value_free: str,
+    values: Iterable[str],
+    values_unread: bool,
+) -> None:
+    """Keep a sweep refusal for the exception raised at the end, and log it.
+
+    Every refusal of a sweep goes through here, whether the walk met it (a
+    directory it could not list, an entry it could not examine), a removal failed
+    or a whole root could not be checked, so the limit on logged lines is applied
+    in one place. The first ``_SWEEP_WARNING_LIMIT`` are logged by
+    ``_sweep_warning`` and kept with the line logged; every later one is kept as an
+    OSError with no text and not logged. ``_say_unlogged_refusals`` then says how
+    many were counted only, and that figure is exactly the number past the limit.
+    """
+    if len(refusals) >= _SWEEP_WARNING_LIMIT:
+        refusals.append(OSError(_errno_of(error), ""))
+        return
+    shown = _sweep_warning(text, value_free, values, values_unread)
+    refusals.append(OSError(_errno_of(error), shown))
+
+
 #: What the walks report through their ``refuse`` callback for a directory they
 #: could not open or list, an entry they could not examine, and a directory they
 #: did not enter because of the depth limit.
@@ -596,19 +621,15 @@ def _sweep_tree(
     skipped = _relative_skips(root, skip)
 
     def refuse(what: str, relative: str, error: OSError) -> None:
-        if len(collected) >= _SWEEP_WARNING_LIMIT:
-            # Counted for the exception, not logged one by one; the end of the
-            # sweep says how many were not (_say_unlogged_refusals).
-            collected.append(OSError(_errno_of(error), ""))
-            return
-        shown = _sweep_warning(
+        _record_refusal(
+            collected,
+            error,
             f"Could not {what} {relative} under {root}: {error}",
             f"Could not {what} an entry of a scanner's results directory; it is not "
             "named because the plugin's redaction values could not be read",
             values,
             values_unread,
         )
-        collected.append(OSError(_errno_of(error), shown))
 
     def remove(
         name: str, dir_fd: Optional[int], path: Union[str, Path], relative: str
@@ -626,10 +647,9 @@ def _sweep_tree(
             else:
                 os.unlink(name, dir_fd=dir_fd)
         except OSError as e:
-            if len(collected) >= _SWEEP_WARNING_LIMIT:
-                collected.append(OSError(_errno_of(e), ""))
-                return 0
-            shown = _sweep_warning(
+            _record_refusal(
+                collected,
+                e,
                 f"Could not remove {relative} under {root}: {e}",
                 "Could not remove an entry a scanner left in its results "
                 "directory; it is not named because the plugin's redaction "
@@ -637,7 +657,6 @@ def _sweep_tree(
                 values,
                 values_unread,
             )
-            collected.append(OSError(_errno_of(e), shown))
             return 0
         return 1
 
@@ -969,13 +988,9 @@ def sweep_writable(
             # over would leave whatever is there for a reader that opens paths by
             # name to follow, so it is refused as an unlistable directory is; the
             # other roots are still swept.
-            if len(refusals) >= _SWEEP_WARNING_LIMIT:
-                # Counted, not logged, as the tree walks count theirs: the
-                # figure _say_unlogged_refusals gives is the refusals past the
-                # limit, so each of them must be one that was not logged.
-                refusals.append(OSError(_errno_of(e), ""))
-                continue
-            shown = _sweep_warning(
+            _record_refusal(
+                refusals,
+                e,
                 f"Could not check or remove the root {root}: {e}",
                 "Could not check or remove a scanner's results directory root; it "
                 "is not named because the plugin's redaction values could not be "
@@ -983,7 +998,6 @@ def sweep_writable(
                 values,
                 values_unread,
             )
-            refusals.append(OSError(_errno_of(e), shown))
             continue
         removed += _sweep_tree(root, values, values_unread, refusals, skip)
     if removed:
