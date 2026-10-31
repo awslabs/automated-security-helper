@@ -299,3 +299,30 @@ class TestThePostScanChecks:
         assert any(
             "total=3" in line and "summary_stats total=5" in line for line in warnings
         ), warnings
+
+    def test_validate_metrics_is_quiet_for_a_model_whose_totals_agree(
+        self, tmp_path, monkeypatch
+    ):
+        """The control the mismatch test lacks. Both totals leave suppressed
+        findings out (the rows' finding_count and SummaryStats.total are the
+        non-suppressed sums), so a model with suppressed findings and agreeing
+        totals is consistent and logs nothing."""
+        warnings = []
+        monkeypatch.setattr(
+            scan_result_processor.ASH_LOGGER,
+            "warning",
+            lambda message, *args, **kwargs: warnings.append(str(message)),
+        )
+        model = AshAggregatedResults()
+        model.metadata.summary_stats.total = 3
+        model.metadata.summary_stats.suppressed = 4
+        model.scanner_results["found"] = ScannerTargetStatusInfo(
+            status=ScannerStatus.FAILED, finding_count=2, suppressed_finding_count=4
+        )
+        model.scanner_results["clean"] = ScannerTargetStatusInfo(
+            status=ScannerStatus.FAILED, finding_count=1
+        )
+
+        _processor(_context(tmp_path)).validate_metrics(model)
+
+        assert not any("Metrics inconsistency" in line for line in warnings), warnings
