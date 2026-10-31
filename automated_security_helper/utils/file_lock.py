@@ -45,6 +45,9 @@ holder may be downloading a tool's database.
 
 Failure modes
 -------------
+* A lock that a security module denies answers ``EACCES`` every time, as a held
+  lock does on CIFS. A run of ``EACCES`` answers alone is waited out for five
+  minutes, then ends in ``TimeoutError`` that names the permission error.
 * A filesystem that does not support the OS lock (some network mounts) raises
   ``OSError`` from the OS call. That propagates, rather than running unlocked. So
   does ``EBADF`` from a network mount for a lock file this account can only read:
@@ -89,6 +92,14 @@ _LOCK_POLL_SECONDS = 0.1
 #: CIFS, where the emulated byte-range lock reports a conflict as a permission
 #: error. ``EPERM`` and the rest are real refusals and are not waited out.
 _LOCK_HELD_ERRNOS = frozenset({errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES})
+
+#: How long a run of ``EACCES`` answers alone is waited out. ``EACCES`` is also what
+#: a Linux security module (AppArmor, SELinux) answers when it denies the ``lock``
+#: permission, and that answer never changes: waiting the whole of
+#: ``LOCK_TIMEOUT_SECONDS`` for it, then telling the operator another process holds
+#: the lock, hid the cause for half an hour. Held-by-someone answers
+#: (``EAGAIN``, ``EWOULDBLOCK``) are not counted here, and one of them ends the run.
+_PERMISSION_DENIED_WAIT_SECONDS = 300.0
 
 _registry_lock = threading.Lock()
 _thread_locks: Dict[str, threading.Lock] = {}
@@ -173,13 +184,17 @@ def _flock_within(fd: int, timeout: Optional[float], path: Path) -> None:
     repeated, so a holder that never releases ends in ``TimeoutError`` rather than
     a hang. "Held by someone else" is ``EWOULDBLOCK`` (``EAGAIN``) on a local
     filesystem and ``EACCES`` on CIFS, whose emulated byte-range lock answers a
-    conflict that way; both are waited out. Any other refusal propagates as it
-    is.
+    conflict that way; both are waited out. A run of ``EACCES`` answers with no
+    other answer between them is waited out for at most
+    ``_PERMISSION_DENIED_WAIT_SECONDS``: a security module that denies the lock
+    answers the same way every time, and the error says so rather than blaming
+    another process. Any other refusal propagates as it is.
     """
     if timeout is None:
         fcntl.flock(fd, fcntl.LOCK_EX)
         return
     deadline = time.monotonic() + timeout
+    denied_since: Optional[float] = None
     while True:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -187,11 +202,29 @@ def _flock_within(fd: int, timeout: Optional[float], path: Path) -> None:
         except OSError as refused:
             if refused.errno not in _LOCK_HELD_ERRNOS:
                 raise
-            if time.monotonic() >= deadline:
+            now = time.monotonic()
+            if refused.errno == errno.EACCES:
+                if denied_since is None:
+                    denied_since = now
+                denied_for = now - denied_since
+                if denied_for >= _PERMISSION_DENIED_WAIT_SECONDS and now < deadline:
+                    raise TimeoutError(
+                        f"Every request for the lock {path.as_posix()} was "
+                        f"refused with a permission error (EACCES) for "
+                        f"{denied_for:g} seconds. On a network mount that answer "
+                        "means another process holds the lock; anywhere else a "
+                        "security policy denies the lock to this process. If no "
+                        "process holds it, allow the lock permission for that "
+                        "file and run ASH again."
+                    ) from None
+            else:
+                denied_since = None
+            if now >= deadline:
+                last = errno.errorcode.get(refused.errno, str(refused.errno))
                 raise TimeoutError(
                     f"Another process has held the lock {path.as_posix()} for "
-                    f"{timeout:g} seconds. If that process is gone, remove the "
-                    "lock file and run ASH again."
+                    f"{timeout:g} seconds (the last answer was {last}). If that "
+                    "process is gone, remove the lock file and run ASH again."
                 ) from None
             time.sleep(_LOCK_POLL_SECONDS)
 
