@@ -277,6 +277,73 @@ def test_the_actionability_check_reads_the_scanners_own_threshold(tmp_path):
     assert ras._actionable_under_its_scanner_threshold(semgrep, results) is True
 
 
+def _results_whose_scanner_is_named_by_its_run(tmp_path, run_tool_name):
+    """One INFO result that carries no scanner name, in a run whose tool is
+    *run_tool_name*. bandit's own threshold is ALL (INFO is actionable); the
+    global one is LOW (INFO is not)."""
+    from automated_security_helper.schemas.sarif_schema_model import Result
+
+    finding = _finding("ignored", "none", "")
+    del finding["properties"]
+    results = _results_with_the_file_apart_from_the_model(
+        tmp_path,
+        in_model=[],
+        in_file=[],
+        scanner_thresholds={"bandit": "ALL"},
+    )
+    run = results.sarif.runs[0]
+    run.tool.driver.name = run_tool_name
+    run.results = [Result.model_validate(finding)]
+    return results
+
+
+def _metrics_counting_one_actionable_finding(monkeypatch):
+    """The scanner metrics' count: one actionable finding, which they attribute
+    to bandit from the scanner's own report rather than from the SARIF."""
+    from automated_security_helper.core.unified_metrics import ScannerMetrics
+
+    metric = ScannerMetrics(
+        scanner_name="bandit",
+        status="FAILED",
+        actionable=1,
+        targets_attempted=1,
+        targets_failed=0,
+    )
+    monkeypatch.setattr(
+        ras, "get_unified_scanner_metrics", lambda *_args, **_kwargs: [metric]
+    )
+
+
+def test_a_result_named_only_by_its_run_is_judged_by_that_scanners_threshold(
+    tmp_path, monkeypatch
+):
+    """The metrics counted the finding under bandit's ALL threshold. The
+    --min-severity re-check read the result's scanner from its own properties
+    alone, found none, judged it by the global LOW threshold, found it
+    non-actionable and zeroed the count at the default minimum: exit 0 over a
+    finding the summary table lists as failing."""
+    _metrics_counting_one_actionable_finding(monkeypatch)
+    results = _results_whose_scanner_is_named_by_its_run(tmp_path, "bandit")
+    opts = _opts(tmp_path, "low")
+
+    assert ras._gating_actionable_count(results, opts, False) == 1
+    assert (
+        ras._compute_exit_code(results, opts, report_sarif_written_this_run=False) == 2
+    )
+
+
+def test_a_result_named_by_a_run_with_no_threshold_of_its_own_is_still_judged_globally(
+    tmp_path, monkeypatch
+):
+    """Control: the run's tool has no threshold of its own, so the global LOW
+    one applies, INFO is not actionable and nothing qualifies."""
+    _metrics_counting_one_actionable_finding(monkeypatch)
+    results = _results_whose_scanner_is_named_by_its_run(tmp_path, "semgrep")
+    opts = _opts(tmp_path, "low")
+
+    assert ras._gating_actionable_count(results, opts, False) == 0
+
+
 # ---------------------------------------------------------------------------
 # A workspace plan with --mode nix enters the shell
 # ---------------------------------------------------------------------------

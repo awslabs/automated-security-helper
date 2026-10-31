@@ -2374,24 +2374,48 @@ def _scanner_threshold_lookup(results) -> Callable[[object], str]:
     return threshold_for
 
 
-def _result_scanner_name(result) -> Optional[str]:
-    """``properties.scanner_name`` of a SARIF result, model or JSON form."""
+def _run_tool_name(run) -> Optional[str]:
+    """The tool a SARIF run names as its driver, model or JSON form."""
+    tool = run.get("tool") if isinstance(run, dict) else getattr(run, "tool", None)
+    driver = (
+        tool.get("driver") if isinstance(tool, dict) else getattr(tool, "driver", None)
+    )
+    name = (
+        driver.get("name")
+        if isinstance(driver, dict)
+        else getattr(driver, "name", None)
+    )
+    return name if isinstance(name, str) and name else None
+
+
+def _result_scanner_name(result, run=None) -> Optional[str]:
+    """The scanner a SARIF result belongs to, model or JSON form.
+
+    ``properties.scanner_name`` when the result carries one, else the tool of
+    the *run* that holds it (``utils.sarif_utils`` reads a result's scanner the
+    same way for the client exclusions). A result named only by its run fell
+    to the global threshold, so a scanner the operator relaxed had its findings
+    counted as actionable by the scanner metrics and then judged non-actionable
+    here, and the run exited 0 over them.
+    """
     props = (
         result.get("properties")
         if isinstance(result, dict)
         else getattr(result, "properties", None)
     )
-    if props is None:
-        return None
-    name = (
-        props.get("scanner_name")
-        if isinstance(props, dict)
-        else getattr(props, "scanner_name", None)
-    )
-    return name if isinstance(name, str) else None
+    name = None
+    if props is not None:
+        name = (
+            props.get("scanner_name")
+            if isinstance(props, dict)
+            else getattr(props, "scanner_name", None)
+        )
+    if isinstance(name, str) and name:
+        return name
+    return _run_tool_name(run) if run is not None else None
 
 
-def _result_fails_its_scanner_threshold(result, threshold_for) -> bool:
+def _result_fails_its_scanner_threshold(result, threshold_for, run=None) -> bool:
     """Whether *result* (a SARIF ``Result`` or its JSON form) fails the gate of
     the scanner that reported it: the ONE actionability rule of the exit code.
 
@@ -2403,25 +2427,33 @@ def _result_fails_its_scanner_threshold(result, threshold_for) -> bool:
     Two readings (one upper-casing ``issue_severity`` against ``SEVERITIES`` and
     falling back to the level, one resolving the result) could disagree on a
     result with only a level or a non-standard ``issue_severity``.
+
+    *run* is the SARIF run that holds the result: it names the scanner of a
+    result that carries no ``scanner_name`` of its own.
     """
     return severity_fails_threshold(
-        _resolve_result_severity(result), threshold_for(_result_scanner_name(result))
+        _resolve_result_severity(result),
+        threshold_for(_result_scanner_name(result, run)),
     )
 
 
 def _actionable_under_its_scanner_threshold(
-    result, results, threshold_for: Optional[Callable[[object], str]] = None
+    result,
+    results,
+    threshold_for: Optional[Callable[[object], str]] = None,
+    run=None,
 ) -> bool:
     """Whether *result* fails the gate of the scanner that reported it.
 
     A result the scanner's threshold made non-actionable was not counted, so
     the ``--min-severity`` filter must not read it as the finding that keeps the
     count standing. *threshold_for* is the exit-code read's shared lookup; a
-    caller without one gets a fresh lookup over *results*.
+    caller without one gets a fresh lookup over *results*. *run* is the SARIF
+    run that holds the result.
     """
     if threshold_for is None:
         threshold_for = _scanner_threshold_lookup(results)
-    return _result_fails_its_scanner_threshold(result, threshold_for)
+    return _result_fails_its_scanner_threshold(result, threshold_for, run)
 
 
 # ---------------------------------------------------------------------------
@@ -7305,7 +7337,9 @@ def _gating_actionable_count(
                     # The one actionability rule, with the shared lookup: the
                     # same threshold and the same severity reading the
                     # --min-severity filter below applies to the model's results.
-                    if not _result_fails_its_scanner_threshold(r, threshold_for):
+                    if not _result_fails_its_scanner_threshold(
+                        r, threshold_for, sarif_run
+                    ):
                         continue
                     sarif_active += 1
                     # Rank as _severity_filters_finding ranks a model result:
@@ -7344,7 +7378,7 @@ def _gating_actionable_count(
                         if _severity_filters_finding(
                             result, min_sev_rank
                         ) and _actionable_under_its_scanner_threshold(
-                            result, results, threshold_for
+                            result, results, threshold_for, run
                         ):
                             has_qualifying = True
                             break
