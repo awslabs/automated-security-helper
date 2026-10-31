@@ -542,19 +542,22 @@ class TestShortfalls:
                 raise RuntimeError("cannot build")
             return original(self, result, metadata, current_time_ms, shared_id, **kw)
 
-        real_dumps = json.dumps
         dumps_calls = {"n": 0}
 
-        def dumps_failing_the_array(*args, **kwargs):
-            # The first dump is the findings array; the error response that
-            # follows it is written as usual.
-            dumps_calls["n"] += 1
-            if dumps_calls["n"] == 1:
-                raise TypeError("the array cannot be written")
-            return real_dumps(*args, **kwargs)
+        class _JsonFailingTheArray:
+            # Stands in for the reporter module's own `json` name only, so the
+            # logging machinery's json is untouched: the reporter's first dump
+            # is the findings array, the error response's dump follows it and
+            # is written as usual.
+            @staticmethod
+            def dumps(*args, **kwargs):
+                dumps_calls["n"] += 1
+                if dumps_calls["n"] == 1:
+                    raise TypeError("the array cannot be written")
+                return json.dumps(*args, **kwargs)
 
         monkeypatch.setattr(OcsfReporter, "_create_vulnerability_finding", flaky)
-        monkeypatch.setattr(ocsf_module.json, "dumps", dumps_failing_the_array)
+        monkeypatch.setattr(ocsf_module, "json", _JsonFailingTheArray)
         payload = json.loads(
             reporter.report(
                 _model(
