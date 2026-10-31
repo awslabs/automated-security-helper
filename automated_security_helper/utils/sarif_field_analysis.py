@@ -285,6 +285,13 @@ def analyze_sarif_fields(
     # with empty outputs, which reads as a clean analysis.
     failed_files: list[str] = []
 
+    # Whether an aggregate report was READ, which is not whether it contributed a
+    # field: an aggregate that parsed and holds no results names no field, so it
+    # never appears among the scanners below, and reading that as "no aggregate
+    # was analyzed" turned the worst outcome of aggregation (every result lost)
+    # into a warning and exit 0.
+    aggregate_loaded = False
+
     # Process each SARIF file
     with console.status("[bold green]Analyzing SARIF files..."):
         for file_path in sarif_files:
@@ -311,6 +318,8 @@ def analyze_sarif_fields(
 
                 # Flatten the SARIF results - now returns both included and excluded fields
                 included_fields, excluded_fields = flatten_sarif_results(sarif_data)
+                if scanner_name in AGGREGATE_SCANNER_NAMES:
+                    aggregate_loaded = True
 
                 # Update the results dictionary with included fields
                 for field_name in included_fields:
@@ -444,7 +453,6 @@ def analyze_sarif_fields(
     for scanners in results_dict.values():
         contributing_scanners.update(scanners.keys())
     contributing_scanners -= aggregate_scanners
-    aggregate_analyzed = bool(all_scanners & aggregate_scanners)
 
     # Sorted: all_scanners is a set, and this loop's order becomes the order of
     # the scanner sections in the HTML report.
@@ -578,7 +586,7 @@ def analyze_sarif_fields(
         # analyzed there is nothing to be missing from: every scanner field read
         # as unexpectedly missing when reports/ held no aggregate, or when it
         # could not be read, and the run failed with a judgment about fields.
-        if missing_count > 0 and aggregate_analyzed:
+        if missing_count > 0 and aggregate_loaded:
             has_unexpected_missing_fields = True
 
         # Share of this scanner's included fields that reach the aggregate.
@@ -607,7 +615,7 @@ def analyze_sarif_fields(
     # Print the scanner statistics table
     console.print(scanner_table)
 
-    if not aggregate_analyzed:
+    if not aggregate_loaded:
         console.print(
             "[bold yellow]WARNING: no aggregate report (reports/ash.sarif) was "
             "analyzed, so no field was checked against the aggregate[/bold yellow]"
