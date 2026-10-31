@@ -11,7 +11,9 @@ ConfigValidator and the environment record, which these tests are not about.
 
 from __future__ import annotations
 
+import errno
 import json
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -316,6 +318,76 @@ class TestUnusedReport:
 
         assert found == report
         assert stamp is not None
+
+    @staticmethod
+    def _refuse_stat_of(monkeypatch, refused):
+        """Make ``Path.stat`` fail with EACCES for the paths in ``refused``, as
+        the system does for a path below a directory the user cannot search."""
+        real_stat = Path.stat
+
+        def stat(self, *args, **kwargs):
+            if self in refused:
+                raise PermissionError(errno.EACCES, "Permission denied", str(self))
+            return real_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", stat)
+
+    def test_a_report_that_cannot_be_statted_is_no_report(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the base: ``report_path.exists()`` re-raises every error but
+        "not found" before Python 3.14, so ``lint --source-dir`` on a tree whose
+        output directory the user cannot search ended in a PermissionError
+        traceback where the lint used to carry on without a report."""
+        out = tmp_path / "out"
+        out.mkdir()
+        config_path = tmp_path / "ash.yaml"
+        config_path.write_text("project_name: demo\n", encoding="utf-8")
+        report = out / ConfigLinter.UNUSED_SUPPRESSIONS_REPORT
+        self._refuse_stat_of(monkeypatch, {report})
+
+        found, stamp = ConfigLinter.find_unused_report(config_path, out, {})
+
+        assert (found, stamp) == (None, None)
+
+    def test_the_lookup_goes_on_to_the_next_place_after_an_unreadable_one(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the base: the first place beside the config raised, so the
+        report in the second was never reached."""
+        root = tmp_path.resolve()
+        config_path = root / "ash.yaml"
+        config_path.write_text("project_name: demo\n", encoding="utf-8")
+        name = ConfigLinter.UNUSED_SUPPRESSIONS_REPORT
+        unreadable = root / ".ash" / "ash_output" / name
+        report = root / "ash_output" / name
+        report.parent.mkdir(parents=True)
+        report.write_text("{}", encoding="utf-8")
+        self._refuse_stat_of(monkeypatch, {unreadable})
+
+        found, stamp = ConfigLinter.find_unused_report(config_path, None, {})
+
+        assert found == report
+        assert stamp is not None
+
+    @pytest.mark.skipif(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="needs a directory this user cannot search",
+    )
+    def test_a_directory_the_user_cannot_search_holds_no_report(self, tmp_path):
+        """Red at the base on Python before 3.14: the same case as above, with
+        the system's own refusal in place of the stand-in."""
+        out = tmp_path / "out"
+        (out / "reports").mkdir(parents=True)
+        config_path = tmp_path / "ash.yaml"
+        config_path.write_text("project_name: demo\n", encoding="utf-8")
+        (out / "reports").chmod(0o000)
+        try:
+            found, stamp = ConfigLinter.find_unused_report(config_path, out, {})
+        finally:
+            (out / "reports").chmod(0o700)
+
+        assert (found, stamp) == (None, None)
 
 
 class TestReportAge:

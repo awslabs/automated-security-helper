@@ -2382,11 +2382,17 @@ class ConfigLinter:
 
         for search_dir in search_dirs:
             report_path = search_dir / report_name
-            if report_path.exists():
-                # Get the modification time of the report
+            # One stat answers both "is there a report" and "when was it
+            # written". ``Path.exists`` before Python 3.14 re-raises every
+            # error but "not found", so a directory the user cannot search
+            # ended the lint in a traceback; an unreadable path has no report
+            # to read, as for ``is_regular_file``.
+            try:
                 mtime = report_path.stat().st_mtime
-                report_timestamp = datetime.fromtimestamp(mtime)
-                return report_path, report_timestamp
+            except (OSError, ValueError):
+                continue
+            report_timestamp = datetime.fromtimestamp(mtime)
+            return report_path, report_timestamp
 
         return None, None
 
