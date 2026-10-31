@@ -1646,12 +1646,26 @@ class AshAggregatedResults(RecordModel):
             if isinstance(results, dict) and "severity_counts" in results:
                 continue
             if isinstance(results, list):
-                for finding in results:
+                for index, finding in enumerate(results):
                     if not isinstance(finding, dict):
                         continue
-                    flat_vulns.append(
-                        FlatVulnerability.from_additional_report(finding, scanner_name)
-                    )
+                    try:
+                        flat_vuln = FlatVulnerability.from_additional_report(
+                            finding, scanner_name
+                        )
+                    except (ValueError, TypeError) as error:
+                        # One plugin entry that does not read must not fail every
+                        # flat report. It is skipped and named by its scanner and
+                        # position only: its content can hold a secret.
+                        ASH_LOGGER.warning(
+                            f"Entry {index} of the additional report of scanner "
+                            f"{shown_on_one_line(str(scanner_name))} could not be "
+                            f"read ({type(error).__name__}), so it is left out of "
+                            "the flat findings",
+                            extra=NO_MARKUP,
+                        )
+                        continue
+                    flat_vulns.append(flat_vuln)
 
         project = getattr(self.metadata, "workspace_project", None)
         assign_identity_ids(
