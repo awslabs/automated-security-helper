@@ -30,7 +30,11 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.cli.mcp import sessions
-from automated_security_helper.cli.mcp.http_sessions import MODE_SSE, SessionBoundary
+from automated_security_helper.cli.mcp.http_sessions import (
+    MODE_SSE,
+    MODE_STATEFUL,
+    SessionBoundary,
+)
 from automated_security_helper.cli.mcp.session_paths import mark_session_workspace
 
 pytestmark = pytest.mark.unit
@@ -109,15 +113,23 @@ def test_the_boundary_sweeps_around_the_sessions_whose_streams_are_open(root) ->
     assert not idle.exists(), "the sweep kept a session nobody holds"
 
 
-def test_an_issued_session_with_no_open_stream_is_swept(root) -> None:
+@pytest.mark.parametrize("mode", [MODE_SSE, MODE_STATEFUL])
+def test_an_issued_session_with_no_open_stream_is_swept(root, mode) -> None:
     """Being issued keeps nothing by itself. A stateful session the SDK dropped
     for being idle stays issued for the life of the process, since nothing tells
     the boundary it ended; kept on that account, the tree of every client that
     disconnects without a DELETE stayed until shutdown. Only an open stream is
-    kept; the TTL covers the rest, as every request names its session."""
+    kept; the TTL covers the rest, as every request names its session. Run in
+    both modes that hold issued ids: the stateful one is the case the sentence
+    is about, and the sse one is the other server that keeps an issued set."""
     issued = _workspace(root, OPEN_STREAM)
     _age(issued, 7200)
-    boundary = SessionBoundary(_app, mode=MODE_SSE, session_workspace_ttl=60.0)
+    boundary = SessionBoundary(
+        _app,
+        mode=mode,
+        session_workspace_ttl=60.0,
+        endpoint_path="/mcp" if mode == MODE_STATEFUL else None,
+    )
     boundary._issued.add(OPEN_STREAM)
 
     asyncio.run(boundary._sweep_if_due())
