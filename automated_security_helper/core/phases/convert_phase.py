@@ -101,7 +101,9 @@ def _row_keys(converter_instances: List[Any], taken: set[str]) -> Dict[int, str]
     same object would file every converter under its long key and leave the
     earlier run's row under the short one, a stale failure included, for the
     completeness check and the reports. A row of an earlier run under a key
-    this run uses is overwritten, as it was before keys were made unique.
+    this run uses is overwritten, as it was before keys were made unique. A row
+    of an earlier run under a key this run does not use stays where it is, as
+    it did then, whatever it holds.
     """
     keys: Dict[int, str] = {}
     for plugin_instance in converter_instances:
@@ -792,9 +794,10 @@ class ConvertPhase(EnginePhase):
                 # Keyed on the name the class declares (the one a constructed
                 # instance's row carries), else on the class, with no instance to
                 # ask; a second class of the same name is told apart by its module.
-                # Qualified as a built converter's key is (module.Class), so the
-                # key of a converter does not change with whether another
-                # plugin's constructor raised.
+                # Qualified as a built converter's key is (module.Class). The key
+                # is chosen against the keys already claimed in this run, so a
+                # built converter's key can still differ from the one it would
+                # have had if another plugin's constructor had not raised first.
                 failed_name = _unused_key(
                     _constructor_failure_name(plugin_class),
                     keys_in_use,
