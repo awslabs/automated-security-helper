@@ -27,7 +27,7 @@ from types import SimpleNamespace
 from typing import List, Literal
 
 import pytest
-from pydantic import model_validator
+from pydantic import ValidationError, model_validator
 
 from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
@@ -122,6 +122,18 @@ class ToolNeedingConverter(ConverterPluginBase[PlainConfig]):
 
     dependencies_satisfied: bool = False
     dependency_unavailable_reason: str | None = "frobnicate is not installed"
+
+    def convert(self) -> List[Path]:
+        return []
+
+
+class CheckOverridingNeedyConverter(ConverterPluginBase[SectionNeedingConfig]):
+    """A converter whose model needs a section and whose dependency check is its
+    own, answering from a tool probe, as the archive and jupyter converters do: the
+    base's record of an unavailable fallback would never reach the phase."""
+
+    def validate_plugin_dependencies(self) -> bool:
+        return True
 
     def convert(self) -> List[Path]:
         return []
@@ -222,6 +234,70 @@ def test_a_converter_whose_model_builds_is_ready_and_configured_by_it(
     assert converter.config.enabled is True
     assert converter.dependencies_satisfied is True
     assert converter.dependency_unavailable_reason is None
+
+
+def test_a_check_overriding_converter_given_no_config_fails_to_build(
+    test_plugin_context,
+):
+    """A converter that answers its dependency check itself would have run on the
+    generic config: the phase reads the override's answer, never the fallback's
+    record. Its constructor raises the named error instead, naming the model and
+    the reason, so the phase files the failure under the converter's own name."""
+    with pytest.raises(ScannerError) as raised:
+        CheckOverridingNeedyConverter(context=test_plugin_context)
+
+    message = str(raised.value)
+    assert "CheckOverridingNeedyConverter" in message
+    assert "SectionNeedingConfig" in message
+    assert "cannot be built without a section" in message
+    assert isinstance(raised.value.__cause__, ValidationError)
+
+
+def test_a_check_overriding_converter_given_its_config_builds(test_plugin_context):
+    """The control: with the section the model needs, the same converter is built
+    and ready."""
+    converter = CheckOverridingNeedyConverter(
+        context=test_plugin_context, config=SectionNeedingConfig(section="s")
+    )
+
+    assert type(converter.config) is SectionNeedingConfig
+    assert converter.dependencies_satisfied is True
+    assert converter.dependency_unavailable_reason is None
+
+
+def test_configuring_an_unavailable_fallback_converter_makes_it_ready(
+    test_plugin_context,
+):
+    """Built without a section the converter is unavailable; given its config
+    afterwards it is ready, the fallback's record cleared. The record used to
+    stand after configure, so a converter configured late was still read as
+    unavailable for want of the section it had."""
+    converter = SectionNeedingConverter(context=test_plugin_context)
+    assert converter.dependencies_satisfied is False
+
+    converter.configure(SectionNeedingConfig(section="s"))
+
+    assert type(converter.config) is SectionNeedingConfig
+    assert converter.dependencies_satisfied is True
+    assert converter.dependency_unavailable_reason is None
+    assert converter.validate_plugin_dependencies() is True
+
+
+def test_configuring_a_converter_keeps_its_own_dependency_record(
+    test_plugin_context,
+):
+    """The control: a converter whose own check recorded a missing tool keeps that
+    record through configure; only the fallback's record is cleared. configure
+    with no config changes nothing either way."""
+    tool_needing = ToolNeedingConverter(context=test_plugin_context)
+    tool_needing.configure(PlainConfig())
+    assert tool_needing.dependencies_satisfied is False
+    assert tool_needing.dependency_unavailable_reason == "frobnicate is not installed"
+
+    needy = SectionNeedingConverter(context=test_plugin_context)
+    needy.configure(None)
+    assert needy.dependencies_satisfied is False
+    assert "cannot be built without a section" in needy.dependency_unavailable_reason
 
 
 def test_a_default_that_raises_something_other_than_validation_is_a_warning(
