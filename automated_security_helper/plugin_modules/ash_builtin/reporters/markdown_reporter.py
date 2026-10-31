@@ -119,12 +119,12 @@ def _reference_text(value) -> str:
     pieces: list[tuple[bool, str]] = []
 
     def add_plain(stretch: str) -> None:
-        stop = 0
+        taken = 0
         for match in _AUTO_REFERENCE.finditer(stretch):
-            pieces.append((False, stretch[stop : match.start()]))
+            pieces.append((False, stretch[taken : match.start()]))
             pieces.append((True, match.group()))
-            stop = match.end()
-        pieces.append((False, stretch[stop:]))
+            taken = match.end()
+        pieces.append((False, stretch[taken:]))
 
     end = 0
     for match in _ENV_REFERENCE.finditer(text):
