@@ -3398,7 +3398,11 @@ class TestProbeLocksAreNamespaced:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="bandit 1.9.4\n", stderr=""
             )
+            # Two specs of one tool, so that a key built from the package ("bandit"
+            # and the spec below) would tell them apart and a key built from the
+            # tool does not. Each spec has its own memo, so each takes the lock.
             runner.get_tool_version("bandit", "bandit")
+            runner.get_tool_version("bandit", "bandit[sarif,toml]>=1.7.8,<2.0.0")
             with patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
                 return_value=UV_PATH,
@@ -3410,7 +3414,8 @@ class TestProbeLocksAreNamespaced:
         # the same installed environment, and locking them apart reopened the
         # first-import race the lock exists to close. How many environments a
         # ``--from`` spec can name is ``_uv_from_spec``'s separate question.
-        assert "version::bandit" in seen
+        assert seen.count("version::bandit") == 2, seen
+        assert not any(key.startswith("version::bandit[") for key in seen), seen
         # The command probe's key goes on to name the environment it was made in.
         assert any(key.startswith("command::bandit::bandit::") for key in seen), seen
         # The collision the namespacing exists to prevent.
