@@ -898,6 +898,23 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
         "output_technical_file",
     )
 
+    def written_file_options(self) -> Tuple[str, ...]:
+        """The file options whose files this reporter writes with these settings.
+
+        ``output_file`` is written whenever ``output_markdown`` is on; each of
+        the other two only when its section is included and not excluded. An
+        option whose file is never written cannot clash with another.
+        """
+        if not self.output_markdown:
+            return ()
+        included = set(self.include_sections) - set(self.exclude_sections)
+        written = ["output_file"]
+        if "executive_summary" in included:
+            written.append("output_executive_file")
+        if "technical_analysis" in included:
+            written.append("output_technical_file")
+        return tuple(written)
+
     @model_validator(mode="after")
     def _file_options_name_distinct_files(self):
         """Two of the file options naming one file would have the later report
@@ -911,19 +928,24 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
         ``output_executive_file`` left at its default) cannot be repaired without
         guessing which report the operator meant, so that config is refused.
 
-        Names are compared as written: two spellings that one file system folds
-        to one file (a case-insensitive one) are not read as the same file here.
+        Only the options whose files are written are compared
+        (``written_file_options``), and names are compared case-folded: on a
+        case-insensitive file system ``Report.md`` and ``report.md`` are one
+        file, and the later report would overwrite the earlier one.
         """
         prefix = "reporters.bedrock-summary-reporter.options."
         taken: Dict[str, str] = {}
+        written = self.written_file_options()
         for option in self._FILE_NAME_OPTIONS:
+            if option not in written:
+                continue
             name = getattr(self, option)
-            earlier = taken.get(name)
+            earlier = taken.get(str(name).casefold())
             if earlier is None:
-                taken[name] = option
+                taken[str(name).casefold()] = option
                 continue
             default = type(self).model_fields[option].default
-            if default in taken:
+            if str(default).casefold() in taken:
                 raise ValueError(
                     f"{prefix}{option} and {prefix}{earlier} name the same file in "
                     f"the reports directory, and the default of {prefix}{option} is "
@@ -937,7 +959,7 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
                 "earlier one. Using the default instead.",
             )
             setattr(self, option, default)
-            taken[default] = option
+            taken[str(default).casefold()] = option
         return self
 
     include_code_snippets: Annotated[
@@ -1183,15 +1205,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         if isinstance(config, dict):
             config = BedrockSummaryReporterConfig.model_validate(config)
         opts = config.options
-        if not opts.output_markdown:
-            return ()
-        included = set(opts.include_sections) - set(opts.exclude_sections)
-        names = [opts.output_file]
-        if "executive_summary" in included:
-            names.append(opts.output_executive_file)
-        if "technical_analysis" in included:
-            names.append(opts.output_technical_file)
-        return tuple(names)
+        return tuple(getattr(opts, option) for option in opts.written_file_options())
 
     def _redaction_values(self) -> Tuple[str, ...]:
         """The values this reporter's lines are redacted with.
