@@ -33,6 +33,7 @@ or carried a value the command line cannot hold:
 from __future__ import annotations
 
 import fnmatch
+import inspect
 import logging
 import os
 import re
@@ -575,12 +576,19 @@ def test_a_configured_tool_version_is_used_as_written(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+# Read at import, before any test patches the verifier.
+_REAL_VERIFY_SIGNATURE = inspect.signature(pre_installed_tool.verify_pre_installed_tool)
+
+
 def _verifier(status: str, executable: str, detail: str, version: str | None):
     """A stand-in for ``verify_pre_installed_tool`` that records each call and
     answers the real verdict type, so a test proves the scanner asked it."""
     calls: list[tuple[tuple, dict]] = []
 
     def verify(*args, **kwargs):
+        # Bound to the real signature: a call the real verifier would refuse
+        # with a TypeError (a wrong keyword, a missing argument) fails here too.
+        _REAL_VERIFY_SIGNATURE.bind(*args, **kwargs)
         calls.append((args, kwargs))
         return PreInstalledToolVerdict(
             status=status,

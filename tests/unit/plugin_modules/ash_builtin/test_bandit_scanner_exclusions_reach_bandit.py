@@ -33,6 +33,7 @@ Each test here pins one way the exclusions, or the scan, used to fail:
 from __future__ import annotations
 
 import fnmatch
+import inspect
 import logging
 import os
 import sys
@@ -1045,6 +1046,10 @@ def test_an_operator_config_that_leaves_python_files_in_still_errors(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+# Read at import, before any test patches the verifier.
+_REAL_VERIFY_SIGNATURE = inspect.signature(pre_installed_tool.verify_pre_installed_tool)
+
+
 def _verifier(status: str, executable: str, detail: str):
     """A stand-in for ``verify_pre_installed_tool`` that records each call and
     answers the real verdict type. The scanner imports the verifier at call
@@ -1054,6 +1059,9 @@ def _verifier(status: str, executable: str, detail: str):
     calls: list[tuple[tuple, dict]] = []
 
     def verify(*args, **kwargs):
+        # Bound to the real signature: a call the real verifier would refuse
+        # with a TypeError (a wrong keyword, a missing argument) fails here too.
+        _REAL_VERIFY_SIGNATURE.bind(*args, **kwargs)
         calls.append((args, kwargs))
         # The requirement names the package the call asked about, as the real
         # verifier builds it, so a message built from the answer names the
