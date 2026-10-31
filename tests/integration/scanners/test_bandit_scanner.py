@@ -10,6 +10,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
     BanditScannerConfigOptions,
 )
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.integration
 
@@ -185,7 +186,9 @@ def test_bandit_scanner_scan_nonexistent_path(test_bandit_scanner):
     )
 
 
-def test_bandit_scanner_additional_formats(test_plugin_context, caplog):
+def test_bandit_scanner_additional_formats(
+    test_plugin_context, test_source_dir, caplog
+):
     """additional_formats adds no ``--format`` to the extra arguments, and the
     operator is told the formats are not produced.
 
@@ -194,8 +197,13 @@ def test_bandit_scanner_additional_formats(test_plugin_context, caplog):
     into bandit.sarif, and the scan failed reading it as SARIF. The one format in
     argv stays the base class's SARIF; without the warning ``html`` would just
     never appear.
+
+    The command the scan assembles is read, not the extra arguments' keys: a
+    key carries its value in this scanner (``--exclude=...``), so a
+    ``--format=html`` key, the short ``-f html`` or a format the base class
+    added while assembling the command all passed a check on the key ``--format``.
     """
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.WARNING, logger=ASH_LOGGER.name):
         scanner = BanditScanner(
             context=test_plugin_context,
             config=BanditScannerConfig(
@@ -207,7 +215,17 @@ def test_bandit_scanner_additional_formats(test_plugin_context, caplog):
         scanner._process_config_options()
 
     format_args = [arg.key for arg in scanner.args.extra_args]
-    assert "--format" not in format_args
+    assert not any(key.startswith(("--format", "-f")) for key in format_args)
+    argv, _, _ = scanner._execute_scan(test_source_dir, "source", [])
+    formats = []
+    for index, token in enumerate(str(arg) for arg in argv):
+        if token in ("--format", "-f"):
+            formats.append(str(argv[index + 1]))
+        elif token.startswith("--format="):
+            formats.append(token.split("=", 1)[1])
+        elif token.startswith("-f") and not token.startswith("--"):
+            formats.append(token[2:])
+    assert formats == ["sarif"], argv
     assert scanner.args.format_arg == "--format"
     assert scanner.args.format_arg_value == "sarif"
     told = [
