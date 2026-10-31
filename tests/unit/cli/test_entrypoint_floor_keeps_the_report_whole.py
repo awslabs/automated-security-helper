@@ -303,19 +303,46 @@ def test_the_floor_reports_after_a_hook_when_no_stream_exists(monkeypatch):
     assert len(raw) == 1 and "RuntimeError: boom" in raw[0]
 
 
-def test_typers_chained_hook_is_called_on_the_standard_traceback_path(monkeypatch):
+@pytest.mark.parametrize(
+    ("variable", "pretty"),
+    [
+        ("TYPER_STANDARD_TRACEBACK", True),
+        ("_TYPER_STANDARD_TRACEBACK", True),
+        (None, False),
+    ],
+    ids=["the variable", "the older variable", "pretty traceback off"],
+)
+def test_typers_chained_hook_is_called_on_the_standard_traceback_path(
+    monkeypatch, variable, pretty
+):
     """typer's hook, on its standard path, calls the hook installed before typer
-    was imported. ASH reports in typer's place, and dropped that call."""
+    was imported. ASH reports in typer's place, and dropped that call. Each case
+    changes one input from the pretty-path test below, which tags the exception
+    with a pretty config and sets no variable: the variable alone (either
+    spelling), or the config's switch alone."""
     import typer.main
+    from typer.models import DeveloperExceptionConfig
 
     calls: list = []
     reports: list = []
     monkeypatch.setattr(typer.main, "_original_except_hook", lambda *a: calls.append(a))
     monkeypatch.setattr(sys, "excepthook", typer.main.except_hook)
-    monkeypatch.setenv("TYPER_STANDARD_TRACEBACK", "1")
+    monkeypatch.delenv("TYPER_STANDARD_TRACEBACK", raising=False)
+    monkeypatch.delenv("_TYPER_STANDARD_TRACEBACK", raising=False)
+    if variable is not None:
+        monkeypatch.setenv(variable, "1")
     monkeypatch.setattr(entrypoint, "_ash_traceback", lambda *a: reports.append(a))
     monkeypatch.setattr(sys, "stderr", io.StringIO())
     error = _raised()
+    setattr(
+        error,
+        typer.main._typer_developer_exception_attr_name,
+        DeveloperExceptionConfig(
+            pretty_exceptions_enable=pretty,
+            pretty_exceptions_show_locals=False,
+            pretty_exceptions_short=True,
+        ),
+    )
 
     entrypoint._report_failure(error)
 
