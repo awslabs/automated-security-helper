@@ -3,7 +3,8 @@
 
 """The registry's directory comparison and its handling of a stopping runner.
 
-Five mechanisms, each pinned against the behavior it replaced:
+Each class pins one mechanism against the behavior it replaced. The first five
+are:
 
 * ``_canonical_directory`` caught OSError only. ``Path.resolve`` raises
   RuntimeError for a symlink loop on Python 3.10 to 3.12, and the comparison ran
@@ -22,6 +23,21 @@ Five mechanisms, each pinned against the behavior it replaced:
 * The coverage re-assessment of a finished entry closed without coverage ran
   with no guard on every poll, so a results set that made it raise failed every
   progress call for that scan from then on.
+
+The classes after them pin the rest of the same machinery:
+
+* The output of a scan is removed off the registry lock behind a per-entry mark,
+  a registration of the tree waits for it for a bounded time, and output trees
+  are compared as trees, not as names.
+* Which scans write within an output tree, and which later scans supersede an
+  earlier one's results: a scan claims the tree when it runs, never when it is
+  registered.
+* A results file can close a PENDING entry that no runner owns, and such an
+  entry is not reopened over another scan.
+* A finished scan whose output is gone, superseded or unreadable reports no
+  results, and an ended scan reports no running scanner.
+* A scanner tool that survived a cancel: the coverage payload names it by
+  basename, its pid is read with its start time, and a remote read names no pid.
 """
 
 import json
@@ -142,7 +158,14 @@ class TestCanonicalDirectorySurvivesAnUnresolvablePath:
         )
 
     def test_one_looping_historical_entry_does_not_break_registration(self, tmp_path):
-        """The high finding end to end: register, retarget, register again."""
+        """End to end: register, retarget, register again.
+
+        An entry's canonical directory is fixed at registration, so a
+        historical entry whose directory later becomes a loop is never
+        resolved again and a later registration does not meet the loop. (The
+        fallback for a path that cannot be resolved is pinned by the three
+        tests above; this one pins that registration does not re-resolve old
+        entries.)"""
         if not hasattr(os, "symlink"):
             pytest.skip("symlinks are not available on this platform")
         registry = ScanRegistry()
@@ -166,6 +189,7 @@ class TestCanonicalDirectorySurvivesAnUnresolvablePath:
 
         assert second != first
         assert registry.get_scan_count() == 2
+        assert registry.get_scan(first).canonical_directory == target.resolve()
 
 
 class TestDirectoryOccupancyIsFixedAtRegistration:
@@ -280,9 +304,8 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
     event-loop thread's get_scan, list_scans, cancel_scan and register_scan
     among them) for as long as the tree took to remove. The delete now runs off
     the lock behind a per-entry mark: a registration of the same output tree
-    waits on the mark (for a bounded time: see
-    TestARegistrationWaitsForARemovalForABoundedTime), a second removal is
-    refused, and nothing else waits.
+    waits on the mark (for a bounded time: see the bound tests at the end of
+    this class), a second removal is refused, and nothing else waits.
 
     The threaded tests release their remover in ``finally``, so an assertion
     that fails leaves no thread blocked for its 10 s timeout, and they read the
