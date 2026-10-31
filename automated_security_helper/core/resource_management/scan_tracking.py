@@ -1732,9 +1732,12 @@ def get_scan_progress_info(
 
     ``findings_count`` has one meaning in every state: the non-suppressed
     findings, SummaryStats' ``total``. For a completed scan it is
-    ``metadata.summary_stats.total`` when the document carries one, else the
-    SARIF results less the suppressed ones; counted as every SARIF result it
-    rose by the suppressed count the moment the scan completed.
+    ``metadata.summary_stats.total`` when the document carries one; with no
+    total, the buckets other than ``suppressed`` added up: the SARIF results
+    less the suppressed ones when the buckets were graded from them, and the
+    recorded buckets of the summary stats when they came from there. Counted as
+    every SARIF result it rose by the suppressed count the moment the scan
+    completed.
     ``findings_summary`` has one shape in every state: the severity buckets
     (``SEVERITY_BUCKETS`` and ``unknown``). For a completed scan they are
     ``metadata.summary_stats``' counts, or, with no summary stats, the SARIF
