@@ -232,6 +232,22 @@ def test_an_option_key_that_is_not_a_string_does_not_crash_the_validator():
         FerretScannerConfigOptions.validate_no_unsupported_options({"FORMAT": "json"})
 
 
+def test_the_validator_runs_through_model_validation_for_every_key_type():
+    """The direct calls above are the control: they reach the validator without
+    the model. Here the same keys go through ``model_validate``, which is how a
+    configuration reaches it: an unsupported key is refused as a validation error
+    naming it, and an integer key does not raise out of the validator as an
+    ``AttributeError`` (pydantic may accept it or refuse it with a validation
+    error of its own, either of which is its call and not this validator's)."""
+    with pytest.raises(ValidationError, match="Unsupported option 'FORMAT'"):
+        FerretScannerConfigOptions.model_validate({"FORMAT": "json"})
+
+    try:
+        FerretScannerConfigOptions.model_validate({1: "x", "checks": "all"})
+    except ValidationError:
+        pass
+
+
 @pytest.mark.parametrize(
     ("patterns", "word"),
     [
