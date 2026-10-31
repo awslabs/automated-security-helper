@@ -25,15 +25,18 @@ from pydantic import ValidationError
 
 from automated_security_helper.config import client_config_policy as ccp
 from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
+from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.config.resolve_config import (
     _own_grants_after_patch,
     _with_own_sandbox,
+    apply_config_overrides,
     reset_dropped_own_sandbox_warnings,
 )
 from automated_security_helper.config.sandbox_grants import (
     confine_sandbox_grants,
     scanned_trees,
 )
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.sandbox.policy import (
     CA_BUNDLE_ENV_NAMES,
@@ -103,6 +106,36 @@ def test_an_entry_that_starts_with_no_name_is_named_by_position_in_the_error(ent
 def test_a_string_or_a_mapping_is_not_a_list(shape):
     with pytest.raises(ValidationError):
         SandboxConfig(environment=shape)
+
+
+def test_the_documented_config_overrides_form_replaces_the_list():
+    """``--config-overrides 'sandbox.environment=[HTTPS_PROXY,SSL_CERT_FILE,MY_VAR]'``
+    is the one-run route the documentation gives; the list it writes replaces the
+    default, as a list in a file does."""
+    config = apply_config_overrides(
+        get_default_config(),
+        ["sandbox.environment=[HTTPS_PROXY,SSL_CERT_FILE,MY_VAR]"],
+    )
+
+    assert config.sandbox.environment == ["HTTPS_PROXY", "SSL_CERT_FILE", "MY_VAR"]
+
+
+@pytest.mark.parametrize(
+    "override, name",
+    [
+        ("sandbox.environment=[MY_VAR,GITHUB_TOKEN]", "GITHUB_TOKEN"),
+        ('sandbox.environment=["DB_PASSWORD=MARKER-value"]', "DB_PASSWORD"),
+    ],
+)
+def test_an_entry_the_sandbox_refuses_through_config_overrides_names_the_variable_only(
+    override, name
+):
+    with pytest.raises(ASHConfigValidationError) as refused:
+        apply_config_overrides(get_default_config(), [override])
+
+    text = f"{refused.value} {refused.value.validation_error}"
+    assert name in text, text
+    assert "MARKER" not in text, text
 
 
 def _confine(resolved: AshConfig, trusted: AshConfig) -> None:
