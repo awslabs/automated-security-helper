@@ -117,8 +117,10 @@ def test_root_relative_without_a_root_returns_the_path_as_given():
 
 
 def test_an_anchored_pattern_excludes_by_the_root_relative_path(tmp_path):
-    """The root's own path holds ``tests``, so a match against the absolute path
-    would exclude every file; against the relative path only ``tests/`` goes."""
+    """The root's own path has a ``tests-tree`` directory in it, which only a
+    match that is not anchored could reach. Against the absolute path the
+    anchored ``^tests/`` meets the leading slash and excludes nothing; against
+    the path relative to the root it removes ``tests/`` and keeps ``src/``."""
     root = tmp_path / "tests-tree" / "repo"
     files = [str(root / "src" / "app.py"), str(root / "tests" / "test_app.py")]
 

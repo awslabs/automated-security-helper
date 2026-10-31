@@ -109,7 +109,7 @@ MALFORMED = {
 
 
 def _scanned(seen: dict) -> set[str]:
-    """The names, relative to the source, of the files the worker was asked to scan."""
+    """The file names (no directories) of the files the worker was asked to scan."""
     return {Path(item).name for item in seen["scan_paths"]}
 
 
