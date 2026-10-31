@@ -49,8 +49,9 @@ import warnings
 
 
 # The SARIF `kind` values that assert a finding exists are `sarif_utils.FINDING_KINDS`,
-# shared with the other reporters. `fail` is handled earlier by the level
-# cascade; `open` and `review` reach the arm below.
+# shared with the other reporters (`fail`, `open` and `review`). The emit cascade
+# below gives all three the same arm: an actionable one is an <error>, typed by
+# its level, else `error` for `fail` and `note` for the other two.
 #
 # The other kinds (`pass`, `informational`) do not assert a finding. cdk-nag uses
 # `informational` for a COMPLIANT check (cdk_nag_wrapper._level_and_kind). They
