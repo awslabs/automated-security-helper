@@ -141,6 +141,16 @@ def test_a_rootless_client_config_may_not_add_a_module_inside_an_untrusted_packa
         _confine_rootless(AWS_PLUGINS + ".s3_reporter", [])
 
 
+def test_a_rootless_client_config_keeps_the_operators_off_host_package_it_leaves_out():
+    """With no working directory a client-supplied config that names only a
+    builtin package still loads the off-host package the trusted list names: a
+    reporter whose module is not imported never runs, so the list that leaves it
+    out would turn the operator's off-host reporters off."""
+    config = _confine_rootless(OWN_BUILTIN, [AWS_PLUGINS])
+
+    assert config.ash_plugin_modules == [OWN_BUILTIN, AWS_PLUGINS]
+
+
 def test_an_in_tree_link_into_ashs_own_package_is_judged_where_it_sits(
     tmp_path, monkeypatch
 ):

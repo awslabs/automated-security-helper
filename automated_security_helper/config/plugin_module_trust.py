@@ -810,6 +810,7 @@ def confine_plugin_modules(
     # load declared it does not have. Loop-invariant -- no entry changes it,
     # so it is computed once, not per name.
     root_judged = no_scanned_tree and (not rootless or given_root_membership)
+    rootless_checked = False
     if untrusted and rootless:
         # ASH's own modules keep the module docstring's exemption even here:
         # code inside the running package is already running, so refusing it
@@ -855,14 +856,22 @@ def confine_plugin_modules(
                 "--ash-plugin-modules, --config-overrides or a config "
                 "file of the operator's."
             )
-        return
+        if named_modules_only:
+            return
+        # Every name passed, so none is judged again below. The list goes on to
+        # the carry of the operator's off-host packages, which a config that
+        # leaves them out may not turn off with no working directory either.
+        rootless_checked = True
     original_entries = list(getattr(config, "ash_plugin_modules", []) or [])
-    kept: List[str] = []
+    listed = split_plugin_modules(getattr(config, "ash_plugin_modules", []))
+    kept: List[str] = list(listed) if rootless_checked else []
     refused: List[str] = []
     # Once for the whole list: every name below is judged against the same
     # import state, and the lookup of each would drop the caches again.
-    importlib.invalidate_caches()
-    for name in split_plugin_modules(getattr(config, "ash_plugin_modules", [])):
+    to_judge = [] if rootless_checked else listed
+    if not rootless_checked:
+        importlib.invalidate_caches()
+    for name in to_judge:
         # Kept for the scan's namespace refusal, which imports nothing and
         # refuses the scan with exit 3.
         if not _is_allowed_module_path(name):
