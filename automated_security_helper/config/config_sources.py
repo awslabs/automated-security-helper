@@ -297,6 +297,8 @@ from automated_security_helper.core.exceptions import (
 from automated_security_helper.utils.error_text import os_error_without_named_file
 from automated_security_helper.utils.link_chain import (
     LINK_HOPS,
+    UnsafeKind,
+    UnsafeLink,
     first_unsafe_link,
     names_a_windows_share,
 )
@@ -1581,6 +1583,18 @@ def _search_dir_not_permitted(search_dir: Path) -> ASHConfigInputNotPermittedErr
     )
 
 
+def _search_dir_unreadable(search_dir: Path) -> ASHConfigSourceError:
+    # A component ASH could not examine is not a share and not a refused link:
+    # nothing says where it leads. It is the unreadable-directory refusal the
+    # name lookup gives (`_name_exists`), not a permission refusal.
+    return ASHConfigSourceError(
+        f"Could not look for a config file at {search_dir.as_posix()}: a "
+        "directory on the way cannot be examined, so ASH cannot tell whether "
+        "one is there. Make the directory readable, or name a config file with "
+        "--config."
+    )
+
+
 def _on_windows() -> bool:
     return os.name == "nt"
 
@@ -1663,6 +1677,21 @@ def discovery_candidates(search_dir: Path) -> Iterator[Path]:
 _LINK_HOPS = LINK_HOPS
 
 
+def _unsafe_before_resolving(path: Path) -> Optional[UnsafeLink]:
+    """The reason resolving `path` on Windows must not be tried, or None.
+
+    The same reading as :func:`_refused_before_resolving`, with the reason kept
+    so that a caller can word a refusal by it. A spelling that names a share or
+    a device is a ``SHARE`` answer about the path itself; any other answer is
+    the walk's, and its ``kind`` tells a link that leads to a share or cannot be
+    read apart from a component that could not be examined at all.
+    """
+    text = os.fspath(path)
+    if names_a_windows_share(text):
+        return UnsafeLink(component=text, is_last=True, kind=UnsafeKind.SHARE)
+    return first_unsafe_link(text, hops=_LINK_HOPS)
+
+
 def _refused_before_resolving(path: Path) -> bool:
     """Whether resolving `path` on Windows could connect to a host, or cannot be ruled out.
 
@@ -1687,10 +1716,7 @@ def _refused_before_resolving(path: Path) -> bool:
     spelling would follow a link among its parents, and open the share at the
     check meant to prevent it.
     """
-    text = os.fspath(path)
-    if names_a_windows_share(text):
-        return True
-    return first_unsafe_link(text, hops=_LINK_HOPS) is not None
+    return _unsafe_before_resolving(path) is not None
 
 
 def _resolved_if_permitted(path: Path, permit: PermitBase) -> Optional[Path]:
@@ -1823,9 +1849,19 @@ def check_search_directory(
         ASHConfigInputNotPermittedError: when the directory names a share or a
             device, or a link on the way leads to one or cannot be read. The
             message names the directory as given.
+        ASHConfigSourceError: when a component of the directory cannot be
+            examined at all. Nothing says it is a link or where it leads, so
+            this is the unreadable-directory refusal (make the directory
+            readable), not a refusal of what the caller may read.
     """
-    if permit is not None and _on_windows() and _refused_before_resolving(search_dir):
-        raise _search_dir_not_permitted(search_dir)
+    if permit is None or not _on_windows():
+        return
+    unsafe = _unsafe_before_resolving(search_dir)
+    if unsafe is None:
+        return
+    if unsafe.unexaminable:
+        raise _search_dir_unreadable(search_dir)
+    raise _search_dir_not_permitted(search_dir)
 
 
 def _existing_candidates(
