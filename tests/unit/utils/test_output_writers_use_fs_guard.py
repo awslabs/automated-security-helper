@@ -222,13 +222,15 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     # cannot tell from a `Path.open` with a mode it cannot read.
     (_INSTALLER, "download", "Path.open"): (2, _INSTALLS),
     (_INSTALLER, "extract_member", "Path.open"): (4, _INSTALLS),
-    (_INSTALLER, "_prepare_executable", "os.replace"): (1, _INSTALLS),
     (_INSTALLER, "_prepare_executable", "shutil.copyfile"): (1, _INSTALLS),
     (_INSTALLER, "_commit_executable", "os.replace"): (1, _INSTALLS),
     (_INSTALLER, "_rename_or_copy", "os.replace"): (1, _INSTALLS),
     (_INSTALLER, "_rename_or_copy", "shutil.copytree"): (2, _INSTALLS),
     (_INSTALLER, "publish_third_party", "os.replace"): (1, _INSTALLS),
     (_INSTALLER, "publish_third_party", "shutil.copytree"): (1, _INSTALLS),
+    # The KEPT marker written into a license work directory that still holds the
+    # earlier entry, so a later publish of the same tool can remove it.
+    (_INSTALLER, "publish_third_party", "write_text"): (1, _INSTALLS),
     (_INSTALLER, "stage_third_party", "shutil.copyfile"): (1, _INSTALLS),
     (_INSTALLER, "stage_third_party", "write_text"): (1, _INSTALLS),
     (_INSTALLER, "verify_third_party", "write_text"): (1, _INSTALLS),
