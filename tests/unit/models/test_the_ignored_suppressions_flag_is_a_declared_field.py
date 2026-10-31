@@ -16,11 +16,13 @@ from what a normal run writes (never False), so a saved record survives a
 report-only run and an older results file reads as before.
 """
 
+import json
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+import automated_security_helper
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ReportMetadata,
@@ -58,9 +60,44 @@ def test_a_results_file_with_a_malformed_value_is_refused():
         ReportMetadata.model_validate({"suppressions_ignored": [True]})
 
 
+def _saved_metadata(directory: Path) -> dict:
+    return json.loads(
+        (directory / "ash_aggregated_results.json").read_text(encoding="utf-8")
+    )["metadata"]
+
+
+def test_a_normal_run_saves_no_key_for_it(tmp_path):
+    """Through the writer the engine uses, not the model dump alone."""
+    AshAggregatedResults().save_model(tmp_path)
+
+    assert "suppressions_ignored" not in _saved_metadata(tmp_path)
+
+
+def test_a_saved_true_survives_a_report_only_run(tmp_path):
+    """A file saved under --ignore-suppressions, loaded and saved again by a run
+    that does not set the flag, still says True."""
+    model = AshAggregatedResults()
+    model.metadata.suppressions_ignored = True
+    model.save_model(tmp_path)
+    assert _saved_metadata(tmp_path)["suppressions_ignored"] is True
+
+    loaded = AshAggregatedResults.load_model(tmp_path / "ash_aggregated_results.json")
+    assert loaded is not None
+    assert loaded.metadata.suppressions_ignored is True
+    again = tmp_path / "again"
+    again.mkdir()
+    loaded.save_model(again)
+
+    assert _saved_metadata(again)["suppressions_ignored"] is True
+
+
 def test_the_field_is_declared_in_the_committed_schema():
-    repo_root = Path(__file__).resolve().parents[3]
-    schema = (
-        repo_root / "automated_security_helper/schemas/AshAggregatedResults.json"
-    ).read_text(encoding="utf-8")
-    assert '"suppressions_ignored"' in schema
+    """Read from the package the code is imported from, and parsed: the name in
+    a description would not count, only the property of the metadata model."""
+    schema_file = Path(automated_security_helper.__file__).parent.joinpath(
+        "schemas", "AshAggregatedResults.json"
+    )
+    schema = json.loads(schema_file.read_text(encoding="utf-8"))
+
+    properties = schema["$defs"]["ReportMetadata"]["properties"]
+    assert "suppressions_ignored" in properties, sorted(properties)
