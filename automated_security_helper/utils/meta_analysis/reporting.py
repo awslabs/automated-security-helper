@@ -452,6 +452,7 @@ def generate_html_report(
     field_presence: Dict[str, Dict[str, Any]] = None,
     root: Optional[str] = None,
     sarif_dir: Optional[str] = None,
+    aggregate_analyzed: bool = True,
 ) -> None:
     """
     Generate a comprehensive HTML report showing SARIF field analysis and validation results.
@@ -467,6 +468,9 @@ def generate_html_report(
             follows no link at any component below it
         sarif_dir: The directory the analyzed SARIF files were read from, which
             the JQ example commands name; ``.ash/ash_output`` when not given
+        aggregate_analyzed: False when no aggregate report was read, so no field
+            was checked against one: the report then shows ``n/a``, not ``No``
+            (the missing style), for whether the aggregate has a field
     """
     sarif_dir = sarif_dir or DEFAULT_SARIF_DIR
     html = []
@@ -666,9 +670,10 @@ def generate_html_report(
     total_findings = summary["total_findings"]
     matched_findings = summary["matched_findings"]
     matched_share = matched_findings / total_findings if total_findings else 0.0
-    html.append(
-        f"        <div class='stat'>{matched_label}: {matched_findings} ({matched_share:.2%})</div>"
+    shown_matched = (
+        f"{matched_findings} ({matched_share:.2%})" if aggregate_analyzed else "n/a"
     )
+    html.append(f"        <div class='stat'>{matched_label}: {shown_matched}</div>")
     html.append("      </div>")
     html.append("      <div class='stats'>")
     html.append(
@@ -883,6 +888,10 @@ def generate_html_report(
 
         if info.get("intentionally_excluded", False):
             in_agg_text += " (Intentionally Excluded)"
+            in_agg_class = "informational"
+        if not aggregate_analyzed:
+            # Nothing was checked against an aggregate: not a missing field.
+            in_agg_text = "n/a"
             in_agg_class = "informational"
 
         html.append(f"        <td class='{in_agg_class}'>{in_agg_text}</td>")

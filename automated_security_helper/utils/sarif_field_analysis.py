@@ -503,8 +503,12 @@ def analyze_sarif_fields(
             1 for field in scanner_fields if field_presence[field]["in_aggregate"]
         )
 
-        # Calculate match rate
+        # Calculate match rate. With no aggregate read there is nothing a field
+        # could be matched against: no rate, which the report shows as n/a (a 0
+        # read as every field lost).
         match_rate = matched_fields / total_fields if total_fields > 0 else 0
+        if not aggregate_loaded:
+            match_rate = None
 
         # Add to validation results
         validation_results["match_statistics"][scanner] = {
@@ -532,6 +536,7 @@ def analyze_sarif_fields(
         field_presence,
         root=output_dir,
         sarif_dir=str(sarif_dir),
+        aggregate_analyzed=aggregate_loaded,
     )
     console.print(
         f"Wrote HTML report to [cyan]{escape_markup(html_report_path)}[/cyan]"
@@ -637,14 +642,16 @@ def analyze_sarif_fields(
             (in_aggregate_count / total_fields * 100) if total_fields > 0 else 0
         )
 
-        # Add row to table
+        # Add row to table. With no aggregate read, no field was checked against
+        # one: the two columns that say so are n/a, not a count of every field
+        # missing and 0.0% of them present.
         scanner_table.add_row(
             escape_markup(scanner),
             str(total_fields),
             str(unique_count),
-            str(missing_count),
+            str(missing_count) if aggregate_loaded else "n/a",
             str(excluded_count),
-            f"{in_aggregate_pct:.1f}%",
+            f"{in_aggregate_pct:.1f}%" if aggregate_loaded else "n/a",
         )
 
     # Print the scanner statistics table
