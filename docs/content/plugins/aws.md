@@ -219,7 +219,13 @@ assessment, recommendations, and a technical analysis, and writes them to
 `reports/ash.bedrock.summary.md`, `reports/bedrock-executive.md`, and
 `reports/bedrock-technical.md`. `output_file`, `output_executive_file`, and
 `output_technical_file` change those names, and must be plain file names in `reports/`:
-ASH does not write a file whose name leads anywhere else, and logs a warning. A test scan of a small project with one finding made six
+ASH does not write a file whose name leads anywhere else, and logs a warning. Two reports
+cannot share a file: when two of the three options name one file, the later option takes
+its default and ASH logs one warning, or refuses the configuration when that default is
+taken too. Names that differ only in letter case count as one file, since the file systems
+of macOS and Windows treat them so. Only reports that are written are compared, so a name
+for a section in `exclude_sections`, or any name with `output_markdown: false`, is left
+alone. A test scan of a small project with one finding made six
 Converse calls; more severity levels in the results mean more calls.
 
 The prompts contain the names of every scanner in the results, severity counts, and, for
