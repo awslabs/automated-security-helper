@@ -10,7 +10,12 @@ Four shapes the value's construction used to fail on:
   budget now counts the name's on-disk bytes (``os.fsencode``).
 - A link to a directory whose target leaves the tree got no ``--exclude``, while a
   link to a file did, although the plugin states ferret-scan's link handling was
-  never measured. The directory link is now excluded, itself and everything below.
+  never measured. The directory link is now excluded: the link itself and, as a
+  second pattern, its direct children. ferret-scan matches a pattern with the
+  standard library's ``filepath.Match``, where ``*`` does not cross a separator
+  and there is no ``**``, so no glob names a file nested deeper; whether its walk
+  descends a directory link at all is not measured, and the test pins the argv
+  only.
 - A link whose path is a prefix of another file's path refused the whole run on
   every ferret-scan line, although only 2.4.x matches a pattern as a substring.
   From 2.5.0 on the pattern is used; an unknown version keeps the refusal.
@@ -104,13 +109,12 @@ def test_an_ignored_file_whose_name_is_not_utf8_gets_a_pattern(mock_plugin_conte
     assert patterns == [os.fspath(undecodable)]
 
 
-def test_a_link_to_a_directory_leaving_the_tree_is_excluded_with_its_contents(
+def test_a_link_to_a_directory_leaving_the_tree_gets_the_link_and_its_children(
     mock_plugin_context, tmp_path
 ):
     outside = tmp_path / "elsewhere"
-    (outside / "sub").mkdir(parents=True)
+    outside.mkdir()
     (outside / "creds").write_text("outside\n", encoding="utf-8")
-    (outside / "sub" / "creds").write_text("outside, nested\n", encoding="utf-8")
     root = mock_plugin_context.source_dir
     (root / "real.txt").write_text("in the tree\n", encoding="utf-8")
     (root / "shared").symlink_to(outside, target_is_directory=True)
@@ -121,8 +125,10 @@ def test_a_link_to_a_directory_leaving_the_tree_is_excluded_with_its_contents(
     # The pair is the plugin's stated shape (ferret_scanner.py,
     # _link_exclude_patterns): the link itself, and the link with the separator and
     # ``*``, because whether ferret-scan descends a directory link was not
-    # measured. A file nested below the link gets no pattern of its own, so this
-    # pins the argv, not how deep ferret-scan's matcher reads the second pattern.
+    # measured. ferret-scan reads a pattern with ``filepath.Match``, where ``*``
+    # stops at a separator, so the second pattern names the link's direct children
+    # only and a file nested deeper has no pattern: this pins the argv, nothing
+    # about what ferret-scan then skips.
     assert argv is not None
     link = os.fspath(root / "shared")
     assert _excludes(argv) == [link, link + os.sep + "*"]
