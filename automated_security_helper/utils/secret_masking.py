@@ -812,27 +812,14 @@ def _rule_ids_described(sarif_report: Any) -> Set[str]:
     (``_describes_a_credential_in_code``).
     """
     found: Set[str] = set()
-    containers = list(getattr(sarif_report, "runs", None) or []) + list(
-        _external_properties_of(sarif_report)
-    )
-    for container in containers:
-        components: List[Any] = [
-            getattr(getattr(container, "tool", None), "driver", None),
-            getattr(container, "driver", None),
-        ]
-        components.extend(
-            getattr(getattr(container, "tool", None), "extensions", None) or []
-        )
-        components.extend(getattr(container, "extensions", None) or [])
-        for component in components:
-            for rule in getattr(component, "rules", None) or []:
-                texts = [getattr(rule, "name", None)]
-                for field in ("shortDescription", "fullDescription"):
-                    texts.append(_text_of(getattr(rule, field, None)))
-                if any(
-                    _describes_a_credential_in_code(text) for text in texts
-                ) and getattr(rule, "id", None):
-                    found.add(rule.id)
+    for rule in _rules_of(sarif_report):
+        texts = [getattr(rule, "name", None)]
+        for field in ("shortDescription", "fullDescription"):
+            texts.append(_text_of(getattr(rule, field, None)))
+        if any(_describes_a_credential_in_code(text) for text in texts) and getattr(
+            rule, "id", None
+        ):
+            found.add(rule.id)
     return found
 
 
