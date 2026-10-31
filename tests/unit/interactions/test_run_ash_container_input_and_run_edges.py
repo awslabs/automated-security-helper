@@ -186,6 +186,45 @@ def test_short_and_blank_lines_of_a_value_are_not_hidden_on_their_own():
     assert rac._value_lines(rac._value_lines((value,))) == rac._value_lines((value,))
 
 
+_PEM = (
+    "-----BEGIN PRIVATE KEY-----\n"
+    "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n"
+    "-----END PRIVATE KEY-----"
+)
+
+
+def test_a_pem_values_armor_lines_are_not_hidden_on_their_own():
+    """A report that describes a private key quotes the armor header; hiding
+    those lines anywhere in the stream blanked every such description. The key's
+    body is still hidden, line by line and whole."""
+    lines = rac._value_lines((_PEM,))
+
+    assert "-----BEGIN PRIVATE KEY-----" not in lines
+    assert "-----END PRIVATE KEY-----" not in lines
+    assert "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7" in lines
+    assert _PEM in lines
+    shown = rac._streamed_line(
+        "a finding: -----BEGIN PRIVATE KEY----- in a file", (_PEM,)
+    )
+    assert "BEGIN PRIVATE KEY" in shown
+
+
+def test_a_json_values_generic_key_lines_are_not_hidden_on_their_own():
+    value = (
+        "{\n"
+        '  "type": "service_account",\n'
+        '  "private_key_id": "0123456789abcdef0123456789abcdef01234567",\n'
+        '  "client_email": "svc@project.iam.gserviceaccount.com"\n'
+        "}"
+    )
+
+    lines = rac._value_lines((value,))
+
+    assert '"type": "service_account",' not in lines
+    assert '"private_key_id": "0123456789abcdef0123456789abcdef01234567",' in lines
+    assert '"client_email": "svc@project.iam.gserviceaccount.com"' in lines
+
+
 class _TextPipe:
     """A child's pipe as Popen opens it in text mode: universal newlines."""
 

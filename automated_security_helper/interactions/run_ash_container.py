@@ -689,13 +689,30 @@ def _streamed_line(
     return text_without_values(out, hidden_values, min_length=MIN_ANYWHERE_LENGTH)
 
 
+#: A line of a multi-line value that is the value's shape and carries none of it: a
+#: PEM armor or separator line, a line of punctuation alone, or a short JSON
+#: ``"key": scalar`` pair. Hidden on its own, one of these would be hidden
+#: wherever the report quotes the same words (the private-key header a finding
+#: describes, a JSON ``"type": "service_account"`` in an example).
+_STRUCTURE_LINE = re.compile(
+    r"""^(?:
+        -{3,}[^\n]*  # PEM armor, a rule line
+      | [\W_]+  # punctuation alone
+      | "[^"\n]{1,30}"\s*:\s*(?:"[^"\n]{0,24}"|true|false|null|-?\d{1,6})\s*,?
+    )$""",
+    re.VERBOSE,
+)
+
+
 def _value_lines(values: Tuple[str, ...]) -> Tuple[str, ...]:
     """``values`` with each one that holds a line break followed by its lines.
 
     Each line is stripped, and only a line long enough to be matched as a value
     of its own (``MIN_REDACTED_LENGTH``) is added: a brace or a blank line of a
-    multi-line value would otherwise hide every brace of the output. Nothing is
-    added twice, so the answer can be passed through again unchanged.
+    multi-line value would otherwise hide every brace of the output. A line that
+    is only the value's shape (``_STRUCTURE_LINE``) is left out for the same
+    reason. Nothing is added twice, so the answer can be passed through again
+    unchanged.
     """
     from automated_security_helper.utils.numeric_text import MIN_REDACTED_LENGTH
 
@@ -708,6 +725,8 @@ def _value_lines(values: Tuple[str, ...]) -> Tuple[str, ...]:
         if "\n" in value or "\r" in value:
             for part in value.splitlines():
                 part = part.strip()
+                if _STRUCTURE_LINE.fullmatch(part):
+                    continue
                 if len(part) >= MIN_REDACTED_LENGTH and part not in seen:
                     seen.add(part)
                     out.append(part)
