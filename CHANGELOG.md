@@ -8070,8 +8070,11 @@
   re-scanned, and the scan is reported as incomplete (exit 1). It reads at most
   100,000 names from the file, and one line of colons no longer makes a name for
   each colon: names no file can have are not built, and what is left unread makes
-  the scan incomplete. The counts in the warning and in the report are of real
-  files, not of every name a colon split makes. A `.gitleaksignore` that changed
+  the scan incomplete. A name repeated on several lines counts once, and a name
+  is measured in UTF-16 code units on Windows, as NTFS bounds it, and in bytes
+  elsewhere. The report gives the files not re-scanned, which are real files and
+  not every name a colon split makes, and the names left unread as two separate
+  counts. A `.gitleaksignore` that changed
   while gitleaks ran fails the scan, and so does an empty re-scan report or one
   with no run, where each used to read as no dropped findings. Results under an
   earlier run's `.ash/ash_output` are dropped even when `--output-dir` points
@@ -8114,6 +8117,19 @@
   scanned tree is handed over as written, so one generated in a repository as
   `.secrets.baseline` and moved out still skips every file of that name, the
   repository's own baseline included, until its `filename` is edited.
+
+  Two more changes to detect-secrets settings read from the repository's files.
+  When a configuration was also read from the repository's own files, the
+  operator's word list (`detect_secrets.filters.wordlist.should_exclude_secret`)
+  is confined: a `file_name` that resolves outside the directory of the file
+  that names it and outside the scanned tree is refused with a warning, and the
+  candidates its word list would have excluded are reported, unless the
+  operator's own configuration names the same absolute path. The global ignore
+  paths are matched against each file's path relative to the source directory,
+  as they are written, so a relative, linked or Windows source directory no
+  longer leaves every path uncut; a converted file keeps the source directory as
+  its anchor and reads `.ash/ash_output/converted/x` when the output sits in the
+  scanned tree.
 
 ### Reporting changes
 
