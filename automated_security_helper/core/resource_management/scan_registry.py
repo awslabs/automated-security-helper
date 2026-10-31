@@ -761,13 +761,19 @@ class ScanRegistry:
 
     def _another_scan_occupies(self, entry: ScanRegistryEntry) -> bool:
         """Whether another entry occupies ``entry``'s source directory or output
-        tree (the caller holds the lock)."""
+        tree (the caller holds the lock). The output tree is the one
+        ``register_scan`` asks about: the same directory, or one inside the
+        other, so a workspace project writing under ``<root>/projects/web``
+        occupies the tree of a scan of ``<root>``."""
         for other in self._registry.values():
             if other.scan_id == entry.scan_id:
                 continue
             if (
                 other.canonical_directory == entry.canonical_directory
-                or other.canonical_output_directory == entry.canonical_output_directory
+                or _shares_an_output_tree(
+                    other.canonical_output_directory,
+                    entry.canonical_output_directory,
+                )
             ) and other.occupies_its_directory():
                 return True
         return False
