@@ -58,6 +58,33 @@ def test_a_relative_config_env_is_anchored_to_ashs_working_directory(
     assert f"--config={chosen.as_posix()}" in args
 
 
+def test_a_relative_config_env_the_operator_lacks_is_never_read_from_the_tree(
+    tmp_path, monkeypatch
+):
+    """The operator's directory has no ``rules.toml`` and the scanned tree does.
+    The value is still anchored where the operator set it and passed as
+    ``--config``: gitleaks is handed a path that does not exist and fails on
+    it, which is the right outcome, where leaving the value to gitleaks would
+    have it read the tree's copy and run the repository's rules."""
+    operator_dir = tmp_path / "operator"
+    operator_dir.mkdir()
+    monkeypatch.chdir(operator_dir)
+    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
+    monkeypatch.setenv("GITLEAKS_CONFIG", "rules.toml")
+    scanner = _scanner(tmp_path)
+    source = scanner.context.source_dir
+    (source / "rules.toml").write_text('title = "repo"\n')
+
+    chosen = scanner._resolve_config_file()
+
+    assert chosen == Path(os.path.abspath("rules.toml"))
+    assert not chosen.exists()
+    args = scanner._build_arguments(source, tmp_path / "o.sarif")
+    configs = [a for a in args if a.startswith("--config")]
+    assert configs == [f"--config={chosen.as_posix()}"]
+    assert not any((source / "rules.toml").as_posix() in a for a in args)
+
+
 def _operator_home(tmp_path, monkeypatch) -> Path:
     """A home directory for ``~`` to expand to, on every platform's spelling."""
     home = tmp_path / "home"
