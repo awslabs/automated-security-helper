@@ -147,6 +147,40 @@ class TestManifestWithAByteOrderMark:
         assert copied == raw
 
 
+class TestAnUnparsableManifestBelowAYarnPackage:
+    def test_it_is_copied_as_it_is_under_ignore_suppressions(
+        self, tmp_path, trusted_copy_dirs
+    ):
+        """yarn's copy holds every ``package.json`` below the package, and a
+        parser's broken-input fixture or a template with ``{{deps}}`` is among
+        them. Under ``--ignore-suppressions`` one such file failed the whole
+        package's audit, with a message about ``pnpm.auditConfig``, a key yarn
+        never reads. The bytes are copied as they were."""
+        repo = tmp_path / "repo"
+        package = _yarn_package(repo)
+        broken = package / "packages" / "parser" / "fixtures" / "broken"
+        broken.mkdir(parents=True)
+        raw = b"{{deps}}\n"
+        (broken / "package.json").write_bytes(raw)
+        parent = tmp_path / "out"
+        parent.mkdir()
+
+        with package_manager_child(
+            "yarn",
+            package,
+            parent=parent,
+            scan_root=repo,
+            yarn_major=1,
+            ignore_suppressions=True,
+        ) as child:
+            copied = (
+                child.cwd / "packages/parser/fixtures/broken/package.json"
+            ).read_bytes()
+
+        assert child.cwd != package
+        assert copied == raw
+
+
 class TestSkipHoldingThePackage:
     def test_a_package_below_the_skipped_output_dir_keeps_its_members(self, tmp_path):
         """The converted work directory sits below ASH's output directory, which

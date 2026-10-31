@@ -201,10 +201,11 @@ class InputRefused(ValueError):
 
 
 class SuppressionsNotLiftable(ValueError):
-    """Under ``--ignore-suppressions`` a manifest could not be parsed, so its
-    ``pnpm.auditConfig`` could not be removed.
+    """Under ``--ignore-suppressions`` a pnpm package's manifest could not be
+    parsed, so its ``pnpm.auditConfig`` could not be removed.
 
-    The flag lifts every suppression. A manifest this interpreter cannot parse
+    Raised for pnpm only: npm and yarn read no such key. The flag lifts every
+    suppression. A manifest this interpreter cannot parse
     but the package manager can (nested past the recursion limit, say) kept its
     ignore lists in the copy, and pnpm applied them under the flag; the package
     is refused instead, with this reason, which the scan loop records.
@@ -508,15 +509,24 @@ def _write_copy(target: Path, data: bytes, private: Path) -> None:
 
 
 def _copy_manifest(
-    data: bytes, target: Path, *, ignore_suppressions: bool, private: Path
+    data: bytes,
+    target: Path,
+    *,
+    binary: str,
+    ignore_suppressions: bool,
+    private: Path,
 ) -> None:
     """Copy ``package.json``, without ``pnpm.auditConfig`` when suppressions are off.
 
     ``data`` is the manifest's bytes, read by ``_read_admitted``. Under
     ``--ignore-suppressions`` a manifest this parser cannot read is REFUSED
-    (``SuppressionsNotLiftable``), never copied as it is: the package manager
-    may still parse it, ignore lists included, and the flag's promise is that
-    nothing is suppressed.
+    for pnpm (``SuppressionsNotLiftable``), never copied as it is: pnpm may
+    still parse it, ignore lists included, and the flag's promise is that
+    nothing is suppressed. Only pnpm reads ``pnpm.auditConfig``, so for npm and
+    yarn there is nothing to lift: yarn's copy holds every ``package.json``
+    below the package, a parser's broken-input fixture or a template with
+    ``{{deps}}`` among them, and refusing the package for one of those failed
+    the audit of a workspace pnpm never reads.
     """
     if not ignore_suppressions:
         _write_copy(target, data, private)
@@ -539,7 +549,11 @@ def _copy_manifest(
         # included: copying the bytes as they were kept the repository's
         # ignore lists under the flag that lifts them. The package is refused
         # with the reason instead; the scan loop records it as the audit's
-        # failure, and the scan fails closed.
+        # failure, and the scan fails closed. npm and yarn read no
+        # ``pnpm.auditConfig``, so their copy is the bytes as they were.
+        if binary != "pnpm":
+            _write_copy(target, data, private)
+            return
         raise SuppressionsNotLiftable(
             f"{target.name} could not be parsed ({type(error).__name__}: {error}), "
             "so its pnpm.auditConfig cannot be removed under "
@@ -1052,6 +1066,7 @@ def _copy_inputs(
             _copy_manifest(
                 data,
                 target,
+                binary=binary,
                 ignore_suppressions=ignore_suppressions,
                 private=private,
             )

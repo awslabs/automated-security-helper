@@ -72,11 +72,13 @@ def _copy(binary: str, package: Path, tmp_path: Path, **options) -> dict:
 class TestADeeplyNestedManifest:
     """json.loads refuses it with RecursionError; V8's parser does not."""
 
-    def _nested(self, tmp_path: Path, **keys) -> Path:
+    def _nested(
+        self, tmp_path: Path, lockfile: str = "package-lock.json", **keys
+    ) -> Path:
         depth = 50_000
         body = json.dumps({"name": "deep", **keys})[1:-1].encode()
         nested = b"{" + body + b', "a": ' + b"[" * depth + b"]" * depth + b"}"
-        return _package(tmp_path / "repo" / "deep", "package-lock.json", nested)
+        return _package(tmp_path / "repo" / "deep", lockfile, nested)
 
     def test_is_handed_to_the_tool_as_it_is_without_the_flag(self, tmp_path):
         """Control: with suppressions in force the copy keeps the bytes."""
@@ -91,12 +93,25 @@ class TestADeeplyNestedManifest:
         parsed what this interpreter could not and applied the repository's
         ignore lists under the flag that lifts them. The package is refused
         with the reason; the scan loop records it."""
-        package = self._nested(tmp_path, pnpm={"auditConfig": AUDIT_CONFIG})
+        package = self._nested(
+            tmp_path, "pnpm-lock.yaml", pnpm={"auditConfig": AUDIT_CONFIG}
+        )
 
         with pytest.raises(
             package_manager_child.SuppressionsNotLiftable, match="auditConfig"
         ):
-            _copy("npm", package, tmp_path, ignore_suppressions=True)
+            _copy("pnpm", package, tmp_path, ignore_suppressions=True)
+
+    def test_is_copied_as_it_is_for_npm_under_ignore_suppressions(self, tmp_path):
+        """npm reads no ``pnpm.auditConfig``, so a manifest this parser cannot
+        read has no suppression to lift for it. The refusal was raised for every
+        tool, and one unparsable ``package.json`` failed an npm audit that the
+        key could not affect."""
+        package = self._nested(tmp_path, pnpm={"auditConfig": AUDIT_CONFIG})
+
+        copied = _copy("npm", package, tmp_path, ignore_suppressions=True)
+
+        assert copied["package.json"] == (package / "package.json").read_bytes()
 
 
 class TestAManifestWithAnInvalidByte:
