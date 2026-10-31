@@ -75,6 +75,26 @@ def _hash(secret: str) -> str:
     return PotentialSecret.hash_secret(secret)
 
 
+@pytest.fixture(autouse=True)
+def _checkouts_below_the_temporary_directory(monkeypatch, tmp_path):
+    """Let the trust rules see only the git checkouts at or below ``tmp_path``.
+
+    They walk EVERY checkout at or above the scanned directory, not the nearest
+    (``path_trust._checkouts_holding``), so a temporary directory placed inside
+    a work tree (a pytest base temp under a clone) would make the operator's
+    baseline in ``tmp_path`` the repository's and flip the trusted cases here.
+    The checkouts these tests are about are the ones they make."""
+    from automated_security_helper.config import path_trust
+    from automated_security_helper.config.sandbox_grants import is_within
+
+    real = path_trust._checkouts_holding
+    monkeypatch.setattr(
+        path_trust,
+        "_checkouts_holding",
+        lambda scan_root: [c for c in real(scan_root) if is_within(c, tmp_path)],
+    )
+
+
 def _context(tmp_path: Path) -> PluginContext:
     context = PluginContext(
         source_dir=tmp_path / "src",

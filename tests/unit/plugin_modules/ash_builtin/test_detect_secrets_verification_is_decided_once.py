@@ -69,6 +69,25 @@ def test_entries_of_no_known_shape_enable_nothing():
     assert DetectSecretsScanner._verifies([MODULE_SPELLING]) is False
 
 
+def _checkouts_below(monkeypatch, root: Path) -> None:
+    """Let the trust rules see only the git checkouts at or below ``root``.
+
+    They walk every checkout at or above the scanned directory
+    (``path_trust._checkouts_holding``), not the nearest, so a temporary
+    directory placed inside a work tree would make the operator's baseline in
+    ``root`` the repository's. Nothing in these cases is about a checkout above
+    the temporary directory."""
+    from automated_security_helper.config import path_trust
+    from automated_security_helper.config.sandbox_grants import is_within
+
+    real = path_trust._checkouts_holding
+    monkeypatch.setattr(
+        path_trust,
+        "_checkouts_holding",
+        lambda scan_root: [c for c in real(scan_root) if is_within(c, root)],
+    )
+
+
 @pytest.mark.parametrize(
     ("case", "expected"),
     [
@@ -102,8 +121,10 @@ def test_sandbox_requirements_and_the_worker_decision_agree(
         DetectSecretsScanSettings,
     )
     from automated_security_helper.utils import subprocess_utils
+    from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
 
     monkeypatch.chdir(tmp_path)
+    _checkouts_below(monkeypatch, tmp_path)
     monkeypatch.setattr(
         DetectSecretsScanner, "_scanner_offline", lambda self: case == "offline"
     )
@@ -147,9 +168,11 @@ def test_sandbox_requirements_and_the_worker_decision_agree(
         "precondition: the settings' source decides whether verification is on"
     )
     requests: list[dict] = []
+    environments: list[dict] = []
 
-    def record(*, command, **_kwargs):
+    def record(*, command, **kwargs):
         requests.append(json.loads(Path(command[-2]).read_text(encoding="utf-8")))
+        environments.append(dict(kwargs["env"]))
         Path(command[-1]).write_text("[]", encoding="utf-8")
         return {"returncode": 0, "timed_out": False, "stdout": "", "stderr": ""}
 
@@ -162,5 +185,8 @@ def test_sandbox_requirements_and_the_worker_decision_agree(
     filters = request["settings"].get("filters_used", [])
     assert scanner.sandbox_requirements.network is expected
     assert request["verify"] is expected
+    # The worker's environment states the same answer: "1" refuses HTTP when
+    # verification is refused, "0" lets it through when it is allowed.
+    assert environments[0][REFUSE_HTTP_ENV] == ("0" if expected else "1")
     assert DetectSecretsScanner._verifies(filters) is expected
     assert scanner.sandbox_requirements.network is request["verify"]

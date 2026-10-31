@@ -57,14 +57,35 @@ def _baseline_text() -> str:
     )
 
 
+@pytest.fixture(autouse=True)
+def _checkouts_below_the_temporary_directory(monkeypatch, tmp_path):
+    """Let the trust rules see only the git checkouts at or below ``tmp_path``.
+
+    They walk EVERY checkout at or above the scanned directory, not the nearest
+    (``path_trust._checkouts_holding``), so a temporary directory placed inside
+    a work tree (a pytest base temp under a clone) would make the operator's
+    files in ``tmp_path`` the repository's. The tests here are about the
+    checkout they make, not about one above the temporary directory."""
+    from automated_security_helper.config import path_trust
+    from automated_security_helper.config.sandbox_grants import is_within
+
+    real = path_trust._checkouts_holding
+    monkeypatch.setattr(
+        path_trust,
+        "_checkouts_holding",
+        lambda scan_root: [c for c in real(scan_root) if is_within(c, tmp_path)],
+    )
+
+
 def _context(tmp_path: Path) -> PluginContext:
     """A scan of ``tmp_path/src``, which is made its own git checkout.
 
     The trust rules look for a checkout at or above the scanned directory, and
-    every directory above ``tmp_path`` is the host's. Making ``src`` the
-    nearest checkout fixes what "the repository" is for these tests, so a
-    ``.git`` that happens to sit in a parent of the temporary directory cannot
-    widen what they treat as the repository's."""
+    every directory above ``tmp_path`` is the host's. Making ``src`` a
+    checkout gives the tests the repository they mean; the autouse fixture
+    above hides any checkout above the temporary directory, because the rules
+    count all of them and ``src`` being the nearest does not keep an enclosing
+    one from holding the temporary directory's files."""
     context = PluginContext(
         source_dir=tmp_path / "src",
         output_dir=tmp_path / "out",

@@ -1383,11 +1383,18 @@ def test_a_relative_gitleaks_config_variable_is_anchored_where_the_operator_set_
         assert f"--config={anchored}" in call["argv"], call["argv"]
         assert not any(repo_copy in a for a in call["argv"])
         # And the environment the child really gets cannot lead gitleaks into
-        # the tree: a value set there is resolved where gitleaks runs (the
-        # run's working directory, a copy of the tree for a re-scan), and must
-        # land in neither the scanned tree nor that directory.
-        value = (call["env"] or {}).get("GITLEAKS_CONFIG")
-        if value:
+        # the tree. A run recorded with no environment inherits ASH's own,
+        # where the variable is the operator's relative value, and gitleaks
+        # reads ``--config`` before the variable: that is the assertion above.
+        # A run recorded with an environment is read as it stands: the
+        # variable absent, or set to a value that, resolved where gitleaks
+        # runs (the run's working directory, a copy of the tree for a
+        # re-scan), lands in neither the scanned tree nor that directory.
+        environment = call["env"]
+        if environment is None:
+            continue
+        value = environment.get("GITLEAKS_CONFIG")
+        if value is not None:
             resolved = (Path(call["cwd"]) / value).resolve()
             assert not resolved.is_relative_to(source.resolve()), value
             assert not resolved.is_relative_to(Path(call["cwd"]).resolve()), value
