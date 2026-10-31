@@ -193,13 +193,28 @@ def test_a_cr_between_the_comment_marker_and_the_word_is_no_directive(tmp_path, 
 # that is itself at a word start (``f"``, ``rb'``); an apostrophe glued to a
 # word opens nothing.
 _OPENER = r"(?:(?<!\w)|(?<=\b[rRbBfFuU])|(?<=\b[rRbBfFuU]{2}))"
+
+
+def _reference_string(quote: str) -> str:
+    """A string of ``quote``: a quote between two word characters (``it's``) is
+    content, so it neither opens nor closes one."""
+    return (
+        _OPENER
+        + quote
+        + r"(?:\\.|[^"
+        + quote
+        + r"\\]|(?<=\w)"
+        + quote
+        + r"(?=\w))*(?:(?<!\w)"
+        + quote
+        + "|"
+        + quote
+        + r"(?!\w))"
+    )
+
+
 _REFERENCE_QUOTED_STRING = re.compile(
-    _OPENER
-    + r"\"(?:\\.|[^\"\\])*\"|"
-    + _OPENER
-    + r"'(?:\\.|[^'\\])*'|"
-    + _OPENER
-    + r"`(?:\\.|[^`\\])*`"
+    "|".join(_reference_string(quote) for quote in ('"', "'", "`"))
 )
 
 
@@ -228,6 +243,9 @@ _REFERENCE_QUOTED_STRING = re.compile(
         'abc"# ash-ignore: X"',
         "x = 1 ;f'# ash-ignore: X'",
         "1'# ash-ignore: X'",
+        "s.replace(/'/g, \"&#39;\")  // ash-ignore: X it's escaped",
+        "fn f(x: &'a str) { x } // ash-ignore: X it's fine",
+        "'it's' # ash-ignore: X",
     ],
 )
 def test_the_quoted_spans_are_the_reference_expressions(line):
@@ -252,6 +270,14 @@ def test_the_quoted_spans_are_the_reference_expressions(line):
         pytest.param(
             "x = 1  # it's ok # ash-ignore: CKV_AWS_18 it's fixture-only",
             id="apostrophes-in-the-comment",
+        ),
+        pytest.param(
+            "s.replace(/'/g, \"&#39;\")  // ash-ignore: CKV_AWS_18 it's escaped",
+            id="a-lone-quote-before-an-apostrophe-in-the-reason",
+        ),
+        pytest.param(
+            "fn f(x: &'a str) { x } // ash-ignore: CKV_AWS_18 it's fine",
+            id="a-lifetime-before-an-apostrophe-in-the-reason",
         ),
     ],
 )

@@ -120,13 +120,28 @@ def _opens_a_string(line: str, index: int) -> bool:
     return len(prefix) <= 2 and all(c in _STRING_PREFIX_LETTERS for c in prefix)
 
 
+def _is_between_word_characters(line: str, index: int) -> bool:
+    """Whether the character at ``index`` has a word character on both sides.
+
+    A quote there is an apostrophe inside a word (``it's``), which cannot end a
+    string any more than it can open one (``_opens_a_string``): ``it's`` in a
+    directive's reason closed a string opened before the marker, and hid it.
+    """
+    return (
+        0 < index < len(line) - 1
+        and _is_word_character(line[index - 1])
+        and _is_word_character(line[index + 1])
+    )
+
+
 def _quoted_spans(line: str) -> List[Tuple[int, int]]:
     """The ``[start, end)`` spans of the quoted strings in ``line``, left to right.
 
     A string opens at a quote character that ``_opens_a_string`` admits and
     closes at the next quote character of the same kind that no odd run of
-    backslashes precedes; a quote with no such closer on the line opens nothing,
-    and the scan goes on from the next character. That is what the regular
+    backslashes precedes and that is not between two word characters
+    (``_is_between_word_characters``); a quote with no such closer on the line
+    opens nothing, and the scan goes on from the next character. That is what the regular
     expression this replaced found (the word-character rule added), but the
     expression was tried afresh at every quote in the line, and each attempt
     from a quote that never closes ran to the end of the line: a line of many
@@ -146,7 +161,11 @@ def _quoted_spans(line: str) -> List[Tuple[int, int]]:
         if character == "\\":
             backslashes += 1
             continue
-        if character in closers and backslashes % 2 == 0:
+        if (
+            character in closers
+            and backslashes % 2 == 0
+            and not _is_between_word_characters(line, index)
+        ):
             closers[character].append(index)
         backslashes = 0
     spans: List[Tuple[int, int]] = []
