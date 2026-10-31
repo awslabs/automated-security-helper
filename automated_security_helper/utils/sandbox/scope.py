@@ -274,6 +274,9 @@ def clear_backend_cache() -> None:
     with _probe_lock:
         _resolved.clear()
         _transient_holds.clear()
+    # The set has a lock of its own (see above); nothing takes it while holding
+    # the probe lock, so taking it after the probe state is cleared cannot invert.
+    with _withheld_lock:
         _WARNED_WITHHELD.clear()
 
 
@@ -644,6 +647,10 @@ def _warn_withheld_once(
     """
     from automated_security_helper.utils.subprocess_utils import tree_scope_key
 
+    if level not in (logging.INFO, logging.WARNING):
+        # Only the two levels the notes use have a method here; any other was
+        # written as a warning without a word.
+        raise ValueError(f"a withheld-grant note is INFO or WARNING, not {level}")
     entry = (tree_scope_key(), name, key)
     notes = _scan_notes()
     written = notes if notes is not None else _WARNED_WITHHELD

@@ -21,6 +21,7 @@ be read, saying for a class scope that none exist. Nothing runs a backend.
 from __future__ import annotations
 
 import copy
+import logging
 import pickle
 import tempfile
 from pathlib import Path
@@ -236,6 +237,40 @@ def test_a_withheld_note_is_said_once_per_scanned_tree(fresh, tmp_path, monkeypa
     ], logger.lines
 
 
+def test_a_withheld_note_has_a_level_it_can_be_written_at(fresh, monkeypatch):
+    logger = _Logger()
+    monkeypatch.setattr(scope, "ASH_LOGGER", logger)
+
+    scope._warn_withheld_once("tool", "info-note", "said at info", level=logging.INFO)
+    scope._warn_withheld_once("tool", "default-note", "said at the default")
+    # Red at the base: written as a warning, with no word that the level was wrong.
+    with pytest.raises(ValueError, match="INFO or WARNING"):
+        scope._warn_withheld_once("tool", "odd", "never said", level=logging.ERROR)
+
+    assert logger.lines == [
+        ("info", "said at info"),
+        ("warning", "said at the default"),
+    ]
+
+
+def test_clearing_the_notes_takes_the_lock_that_guards_them(monkeypatch):
+    taken: list = []
+
+    class _Lock:
+        def __enter__(self):
+            taken.append("withheld")
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(scope, "_withheld_lock", _Lock())
+
+    scope.clear_backend_cache()
+
+    # Red at the base: the set was cleared under the probe lock alone.
+    assert taken == ["withheld"]
+
+
 def test_a_second_scan_of_the_same_tree_writes_the_withheld_note_again(
     fresh, tmp_path, monkeypatch
 ):
@@ -364,6 +399,39 @@ def test_a_registration_that_raises_runs_the_plans_cleanup(
     monkeypatch.setattr(scope, "register_writable_root", refusing)
     with pytest.raises(OSError, match="cannot register"):
         scope._plan_spawn(_scope(tmp_path, backend=recorder), ["tool"], {}, None)
+    assert ran == ["backend"]
+
+
+def test_a_registration_that_raises_on_the_second_root_releases_the_first(
+    tmp_path, monkeypatch
+):
+    """The loop that releases the roots registered before the one that raised
+    has to do so past the first registration, not only for an empty list."""
+    first, second = Path("/w1"), Path("/w2")
+    monkeypatch.setattr(
+        scope,
+        "build_scanner_policy",
+        lambda *args, **kwargs: SimpleNamespace(
+            network=False, writable=[first, second]
+        ),
+    )
+    released: list = []
+    ran: list = []
+    recorder = _Recorder()
+    recorder.cleanups = [lambda: ran.append("backend")]
+
+    def register(path):
+        if Path(path) == second:
+            raise OSError("cannot register the second root")
+        return Path(path)
+
+    monkeypatch.setattr(scope, "register_writable_root", register)
+    monkeypatch.setattr(scope, "release_writable_root", released.append)
+
+    with pytest.raises(OSError, match="second root"):
+        scope._plan_spawn(_scope(tmp_path, backend=recorder), ["tool"], {}, None)
+
+    assert released == [first]
     assert ran == ["backend"]
 
 
