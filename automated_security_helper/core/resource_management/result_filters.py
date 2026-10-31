@@ -355,7 +355,11 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     for scanner_name, scanner_data in scanner_results.items():
-        status = scanner_data.get("status", "UNKNOWN")
+        # An entry with no status key is a PASSED scanner, as the results model
+        # and _outcome_counter read it: the scan_stats above count it as
+        # passed, so the row shown here and the completed count read it the
+        # same way instead of calling it "UNKNOWN" and leaving it out.
+        status = scanner_data.get("status", "PASSED")
         severity_counts = scanner_data.get("severity_counts", {})
 
         scanner_info = {
@@ -376,7 +380,7 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
 
         summary["scanner_summary"]["by_scanner"][scanner_name] = scanner_info
 
-        if status in ["PASSED", "FAILED"]:
+        if _outcome_counter(scanner_data) in ("passed", "failed"):
             summary["scanner_summary"]["completed_scanners"] += 1
 
     return summary

@@ -148,6 +148,46 @@ class TestFilterSummaryWithoutSummaryStats:
             "error": 0,
         }
 
+    def test_an_entry_with_no_status_is_a_passed_scanner_in_the_scanner_summary(self):
+        """The scan_stats count an entry with no status as passed. The scanner
+        summary beside them showed the same entry as "UNKNOWN" and left it out of
+        completed_scanners, so one summary said passed 2 and completed 1."""
+        results = _results(with_summary_stats=False)
+        del results["raw_results"]["scanner_results"]["bandit"]["status"]
+
+        summary = filter_summary(results)
+
+        assert summary["scanner_summary"]["by_scanner"]["bandit"]["status"] == "PASSED"
+        # bandit (no status, read as PASSED) and semgrep (FAILED) ran; grype is
+        # MISSING.
+        assert summary["scanner_summary"]["completed_scanners"] == 2
+        assert summary["findings_summary"]["scan_stats"]["passed"] == 1
+
+    def test_a_status_word_in_another_case_completes_the_scanner_as_it_counts(self):
+        """The outcome counters read a status case-insensitively; the completed
+        count compared two exact-case literals, so "passed" counted as a passed
+        scanner in scan_stats and as not completed beside it."""
+        results = _results(with_summary_stats=False)
+        results["raw_results"]["scanner_results"]["bandit"]["status"] = "passed"
+
+        summary = filter_summary(results)
+
+        assert summary["findings_summary"]["scan_stats"]["passed"] == 1
+        assert summary["scanner_summary"]["completed_scanners"] == 2
+
+    def test_an_entry_with_no_status_and_no_actionable_count_leaves_it_unknown(self):
+        """The same entry is a scanner that ran with no actionable count, which
+        the derived summary reports as unknown, not as a sum over the others."""
+        results = _results(with_summary_stats=False)
+        bandit = results["raw_results"]["scanner_results"]["bandit"]
+        del bandit["status"]
+        del bandit["actionable_finding_count"]
+
+        summary = filter_summary(results)
+
+        assert summary["findings_summary"]["by_severity"]["actionable"] is None
+        assert summary["scanner_summary"]["completed_scanners"] == 2
+
     def test_a_status_that_is_not_a_word_counts_in_no_outcome(self):
         results = _results(with_summary_stats=False)
         results["raw_results"]["scanner_results"]["bandit"]["status"] = 5
