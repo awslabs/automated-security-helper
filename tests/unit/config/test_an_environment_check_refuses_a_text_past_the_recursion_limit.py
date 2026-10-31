@@ -70,8 +70,8 @@ def test_a_refused_env_file_that_is_too_deep_is_an_unparsed_config() -> None:
 
 def test_a_shallow_reference_is_still_found() -> None:
     """The control."""
-    assert text_reads_the_environment(Path("flat.yaml"), "a: ${ASH_U35_X}\n") is True
-    assert text_reads_the_environment(Path("flat.toml"), 'a = "${ASH_U35_X}"\n') is True
+    assert text_reads_the_environment(Path("flat.yaml"), "a: ${ASH_VAR_X}\n") is True
+    assert text_reads_the_environment(Path("flat.toml"), 'a = "${ASH_VAR_X}"\n') is True
 
 
 def test_an_ordinary_parse_error_still_reads_nothing() -> None:

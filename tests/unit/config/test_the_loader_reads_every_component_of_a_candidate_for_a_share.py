@@ -37,6 +37,7 @@ import pytest
 
 from automated_security_helper.config import config_sources, resolve_config
 from automated_security_helper.core.exceptions import ASHConfigInputNotPermittedError
+from automated_security_helper.utils import link_chain
 
 pytestmark = [
     pytest.mark.unit,
@@ -299,7 +300,16 @@ def test_a_local_spelling_is_still_admitted(
     monkeypatch: pytest.MonkeyPatch,
     spelling: str,
 ) -> None:
-    """The control for the test above: a local name is not over-refused."""
+    """The control for the test above: a local name is not over-refused.
+
+    Under ``posixpath`` the walk below reads each of these spellings as one
+    relative name that is not there, which admits any text, so the admission
+    alone does not show the spelling is local. The Windows reading of the
+    spelling is text (``ntpath``, on every platform): it names no share and no
+    device, and it is not a drive with no root. That is asserted first.
+    """
+    assert link_chain.names_a_windows_share(spelling) is False
+    assert link_chain._is_drive_relative(spelling) is False
     link = tmp_path / ".ash.yaml"
     link.symlink_to(tmp_path / "anything.yaml")
     _readlink_answering(monkeypatch, {link: spelling})
@@ -327,7 +337,11 @@ def test_a_search_directory_that_is_a_link_to_a_share_is_refused_before_any_look
     assert asked == []
     assert resolved == []
     assert _under(seen, link) == []
-    assert "server" not in str(raised.value)
+    # The share spelling is the link's target and must not be echoed. Checked by
+    # the backslash-bearing spellings, which no temp directory name holds, and
+    # not by a bare word such as "server", which a temp root can hold.
+    assert SHARE not in str(raised.value)
+    assert "\\\\server" not in str(raised.value)
     assert "Errno" not in str(raised.value)
 
 

@@ -27,13 +27,13 @@ class _Config(dict):
 
 def _rewrite(path) -> EnvironmentRewrite:
     return EnvironmentRewrite(
-        "value", path, "html", "${ASH_U35_F}", "html", "${ASH_U35_F}"
+        "value", path, "html", "${ASH_VAR_F}", "html", "${ASH_VAR_F}"
     )
 
 
 def _taken(own: _Config) -> _Config:
     record = _Config({"output_formats": ["sarif"], "project_name": "p"})
-    take_own_values(record, own, references=[("output_formats", "${ASH_U35_F}")])
+    take_own_values(record, own, references=[("output_formats", "${ASH_VAR_F}")])
     return record
 
 

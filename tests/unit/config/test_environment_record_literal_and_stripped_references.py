@@ -32,16 +32,16 @@ def test_a_literal_key_pairs_with_itself_when_its_value_names_another_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Red at the base: the literal key paired with ``a``, giving one key
-    reference read from the environment and no read of ``ASH_U35_V``."""
-    monkeypatch.setenv("ASH_U35_K", "a")
-    monkeypatch.setenv("ASH_U35_V", "v")
-    written = {"${ASH_U35_K}": {"x": "${ASH_U35_V}"}, "a": {"x": "lit"}}
-    resolved = {"${ASH_U35_K}": {"x": "v"}, "a": {"x": "lit"}}
+    reference read from the environment and no read of ``ASH_VAR_V``."""
+    monkeypatch.setenv("ASH_VAR_K", "a")
+    monkeypatch.setenv("ASH_VAR_V", "v")
+    written = {"${ASH_VAR_K}": {"x": "${ASH_VAR_V}"}, "a": {"x": "lit"}}
+    resolved = {"${ASH_VAR_K}": {"x": "v"}, "a": {"x": "lit"}}
 
     found = environment_references(written, resolved)
 
     assert [(r.path, r.written, r.value, r.key) for r in found] == [
-        (("${ASH_U35_K}", "x"), "${ASH_U35_V}", "v", False)
+        (("${ASH_VAR_K}", "x"), "${ASH_VAR_V}", "v", False)
     ]
 
 
@@ -50,9 +50,9 @@ def test_a_key_the_loader_resolved_still_pairs_with_its_value(
 ) -> None:
     """The control: a key that came to its value, beside a plain key, pairs
     under the value and records the key's own read."""
-    monkeypatch.setenv("ASH_U35_K", "a")
-    monkeypatch.setenv("ASH_U35_V", "v")
-    written = {"other": {"x": "lit"}, "${ASH_U35_K}": {"x": "${ASH_U35_V}"}}
+    monkeypatch.setenv("ASH_VAR_K", "a")
+    monkeypatch.setenv("ASH_VAR_V", "v")
+    written = {"other": {"x": "lit"}, "${ASH_VAR_K}": {"x": "${ASH_VAR_V}"}}
     resolved = {"other": {"x": "lit"}, "a": {"x": "v"}}
 
     found = environment_references(written, resolved)
@@ -67,26 +67,26 @@ def test_a_key_left_as_written_pairs_with_its_stripped_spelling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Red at the base: no reference at all, the key came to none."""
-    monkeypatch.setenv("ASH_U35_V", "v")
-    written = {"!ENV ${OTHER_U35_NAME} ": {"x": "${ASH_U35_V}"}}
-    resolved = {"${OTHER_U35_NAME}": {"x": "v"}}
+    monkeypatch.setenv("ASH_VAR_V", "v")
+    written = {"!ENV ${OTHER_VAR_NAME} ": {"x": "${ASH_VAR_V}"}}
+    resolved = {"${OTHER_VAR_NAME}": {"x": "v"}}
 
     found = environment_references(written, resolved)
 
     assert [(r.path, r.written, r.value, r.key) for r in found] == [
-        (("${OTHER_U35_NAME}", "x"), "${ASH_U35_V}", "v", False)
+        (("${OTHER_VAR_NAME}", "x"), "${ASH_VAR_V}", "v", False)
     ]
 
 
 def test_a_composite_value_left_as_written_with_blanks_records_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Red at the base: one reference, with the value of ``ASH_U35_A``, for a
+    """Red at the base: one reference, with the value of ``ASH_VAR_A``, for a
     place that holds the file's own text."""
-    monkeypatch.setenv("ASH_U35_A", "ASH")
-    monkeypatch.setenv("ASH_U35_B", "b")
-    written = {"project_name": "${ASH_U35_A}/${ASH_U35_B} "}
-    resolved = {"project_name": "${ASH_U35_A}/${ASH_U35_B}"}
+    monkeypatch.setenv("ASH_VAR_A", "ASH")
+    monkeypatch.setenv("ASH_VAR_B", "b")
+    written = {"project_name": "${ASH_VAR_A}/${ASH_VAR_B} "}
+    resolved = {"project_name": "${ASH_VAR_A}/${ASH_VAR_B}"}
 
     assert environment_references(written, resolved) == []
 
@@ -96,8 +96,8 @@ def test_a_resolved_value_with_blanks_is_still_recorded(
 ) -> None:
     """The control: a reference the resolver read, with blanks after it, is a
     value read from the environment."""
-    monkeypatch.setenv("ASH_U35_A", "name")
-    written = {"project_name": "${ASH_U35_A} "}
+    monkeypatch.setenv("ASH_VAR_A", "name")
+    written = {"project_name": "${ASH_VAR_A} "}
     resolved = {"project_name": "name"}
 
     found = environment_references(written, resolved)

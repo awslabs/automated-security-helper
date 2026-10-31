@@ -39,7 +39,7 @@ def test_the_list_holding_the_item_is_taken_out() -> None:
         "content_db_staleness_overrides": [
             {
                 "database": "grype-db",
-                "policy": "${ASH_U35_POLICY}",
+                "policy": "${ASH_VAR_POLICY}",
                 "expiration": "2099-01-01",
                 "reason": "held",
             }
@@ -50,7 +50,7 @@ def test_the_list_holding_the_item_is_taken_out() -> None:
             {
                 "type": "literal_error",
                 "loc": ("content_db_staleness_overrides", 0, "policy"),
-                "input": "${ASH_U35_POLICY}",
+                "input": "${ASH_VAR_POLICY}",
             }
         ]
     )
@@ -59,20 +59,20 @@ def test_the_list_holding_the_item_is_taken_out() -> None:
 
     assert "content_db_staleness_overrides" not in kept
     assert kept["fail_on_findings"] is True
-    assert found == [("content_db_staleness_overrides", "${ASH_U35_POLICY}")]
+    assert found == [("content_db_staleness_overrides", "${ASH_VAR_POLICY}")]
     # The input is left as it was.
     assert "content_db_staleness_overrides" in data
 
 
 def test_a_reference_at_a_list_index_takes_the_list_out_as_before() -> None:
     """The control: the documented list rule, a reference that IS the item."""
-    data = {"output_formats": ["${ASH_U35_FORMAT}"]}
+    data = {"output_formats": ["${ASH_VAR_FORMAT}"]}
     refusal = _Refusal(
         [
             {
                 "type": "value_error",
                 "loc": ("output_formats", 0),
-                "input": "${ASH_U35_FORMAT}",
+                "input": "${ASH_VAR_FORMAT}",
             }
         ]
     )
@@ -80,4 +80,4 @@ def test_a_reference_at_a_list_index_takes_the_list_out_as_before() -> None:
     kept, found = without_unreadable_references(data, refusal)
 
     assert kept == {}
-    assert found == [("output_formats", "${ASH_U35_FORMAT}")]
+    assert found == [("output_formats", "${ASH_VAR_FORMAT}")]

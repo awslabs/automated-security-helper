@@ -275,9 +275,9 @@ def test_an_unswapped_root_is_read_by_the_second_resolution(tmp_path: Path) -> N
 def test_the_resolution_hands_the_root_identity_it_read_with_to_the_blind_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, given: bool
 ) -> None:
-    monkeypatch.delenv("ASH_U35_UNSET", raising=False)
+    monkeypatch.delenv("ASH_VAR_UNSET", raising=False)
     (tmp_path / "base.yaml").write_text(
-        "global_settings:\n  severity_threshold: ${ASH_U35_UNSET}\n", encoding="utf-8"
+        "global_settings:\n  severity_threshold: ${ASH_VAR_UNSET}\n", encoding="utf-8"
     )
     root = tmp_path / ".ash.yaml"
     root.write_text("extends: base.yaml\nproject_name: p\n", encoding="utf-8")

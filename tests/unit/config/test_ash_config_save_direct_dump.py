@@ -34,7 +34,7 @@ from automated_security_helper.utils.redacted_model import env_resolved_scalar
 
 pytestmark = pytest.mark.unit
 
-VARIABLE = "ASH_U35_SAVE_TOKEN_NAME"
+VARIABLE = "ASH_VAR_SAVE_TOKEN_NAME"
 VALUE = "u35-save-value-from-the-environment"
 
 
@@ -109,7 +109,7 @@ def test_a_value_left_as_text_when_saving_as_written_is_refused_by_its_variable(
     config._environment_references = (
         EnvironmentReference(
             path=("project_name",),
-            written="${ASH_U35_SAVE_PROJECT}",
+            written="${ASH_VAR_SAVE_PROJECT}",
             resolved="save-demo",
             value="save-demo",
         ),
@@ -132,7 +132,7 @@ def test_a_json_path_that_would_hold_references_is_refused(tmp_path: Path):
     config._environment_references = (
         EnvironmentReference(
             path=("project_name",),
-            written="${ASH_U35_SAVE_PROJECT}",
+            written="${ASH_VAR_SAVE_PROJECT}",
             resolved="save-demo",
             value="save-demo",
         ),

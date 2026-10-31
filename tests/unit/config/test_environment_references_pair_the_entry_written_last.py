@@ -11,7 +11,7 @@ plain key's reference-shaped value was paired with the other entry's value and
 recorded as a reference the file never made there, while the kept entry's own
 reads went unpaired.
 
-Red at the base: the record held a reference at ``a`` written ``${ASH_U35_V}``
+Red at the base: the record held a reference at ``a`` written ``${ASH_VAR_V}``
 and resolved to ``z``, the value the referenced key wrote.
 """
 
@@ -29,9 +29,9 @@ pytestmark = pytest.mark.unit
 def test_a_plain_key_overwritten_by_a_later_referenced_key_is_not_paired(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ASH_U35_K", "a")
-    monkeypatch.setenv("ASH_U35_V", "v")
-    written = {"a": "${ASH_U35_V}", "${ASH_U35_K}": "z"}
+    monkeypatch.setenv("ASH_VAR_K", "a")
+    monkeypatch.setenv("ASH_VAR_V", "v")
+    written = {"a": "${ASH_VAR_V}", "${ASH_VAR_K}": "z"}
     resolved = {"a": "z"}
 
     found = environment_references(written, resolved)
@@ -39,29 +39,29 @@ def test_a_plain_key_overwritten_by_a_later_referenced_key_is_not_paired(
     values = [(r.path, r.written, r.resolved) for r in found if not r.key]
     assert values == [], values
     keys = [(r.path, r.written, r.resolved) for r in found if r.key]
-    assert keys == [((), "${ASH_U35_K}", "a")], keys
+    assert keys == [((), "${ASH_VAR_K}", "a")], keys
 
 
 def test_a_referenced_key_overwritten_by_a_later_plain_key_pairs_the_plain_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ASH_U35_K", "a")
-    monkeypatch.setenv("ASH_U35_V", "v")
-    written = {"${ASH_U35_K}": "${ASH_U35_V}", "a": "${ASH_U35_V}"}
+    monkeypatch.setenv("ASH_VAR_K", "a")
+    monkeypatch.setenv("ASH_VAR_V", "v")
+    written = {"${ASH_VAR_K}": "${ASH_VAR_V}", "a": "${ASH_VAR_V}"}
     resolved = {"a": "v"}
 
     found = environment_references(written, resolved)
 
     values = [(r.path, r.written, r.resolved, r.value) for r in found if not r.key]
-    assert values == [(("a",), "${ASH_U35_V}", "v", "v")], values
+    assert values == [(("a",), "${ASH_VAR_V}", "v", "v")], values
 
 
 def test_a_lone_plain_key_pairs_as_before(monkeypatch: pytest.MonkeyPatch) -> None:
     """The control."""
-    monkeypatch.setenv("ASH_U35_V", "v")
+    monkeypatch.setenv("ASH_VAR_V", "v")
 
-    found = environment_references({"a": "${ASH_U35_V}"}, {"a": "v"})
+    found = environment_references({"a": "${ASH_VAR_V}"}, {"a": "v"})
 
     assert [(r.path, r.written, r.value) for r in found] == [
-        (("a",), "${ASH_U35_V}", "v")
+        (("a",), "${ASH_VAR_V}", "v")
     ]

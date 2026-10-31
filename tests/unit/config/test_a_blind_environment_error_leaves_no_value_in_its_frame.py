@@ -57,14 +57,14 @@ def _chain(error: BaseException):
 def test_the_resolving_frame_holds_no_environment_value(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("ASH_U35_READ", MARKER)
-    monkeypatch.delenv("ASH_U35_UNSET", raising=False)
+    monkeypatch.setenv("ASH_VAR_READ", MARKER)
+    monkeypatch.delenv("ASH_VAR_UNSET", raising=False)
     (tmp_path / "base.yaml").write_text(
-        "global_settings:\n  severity_threshold: ${ASH_U35_UNSET}\n", encoding="utf-8"
+        "global_settings:\n  severity_threshold: ${ASH_VAR_UNSET}\n", encoding="utf-8"
     )
     root = tmp_path / ".ash.yaml"
     root.write_text(
-        "extends: base.yaml\nproject_name: ${ASH_U35_READ}\n", encoding="utf-8"
+        "extends: base.yaml\nproject_name: ${ASH_VAR_READ}\n", encoding="utf-8"
     )
 
     with pytest.raises(ASHConfigSourceError) as refused:
@@ -89,10 +89,10 @@ def test_a_missing_base_is_refused_as_itself_with_a_cause_that_names_no_file(
     ``config_load_category`` reads the chain to answer the MCP category as a
     path problem. That cause is rebuilt without the OSError's file name, so
     nothing on the chain holds the value the root read."""
-    monkeypatch.setenv("ASH_U35_READ", MARKER)
+    monkeypatch.setenv("ASH_VAR_READ", MARKER)
     root = tmp_path / ".ash.yaml"
     root.write_text(
-        "extends: missing-base.yaml\nproject_name: ${ASH_U35_READ}\n",
+        "extends: missing-base.yaml\nproject_name: ${ASH_VAR_READ}\n",
         encoding="utf-8",
     )
 
@@ -139,20 +139,20 @@ def test_the_same_chain_loads_once_the_variable_is_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The control: the chain reads both values when the second is set."""
-    monkeypatch.setenv("ASH_U35_READ", MARKER)
-    monkeypatch.setenv("ASH_U35_UNSET", "HIGH")
+    monkeypatch.setenv("ASH_VAR_READ", MARKER)
+    monkeypatch.setenv("ASH_VAR_UNSET", "HIGH")
     (tmp_path / "base.yaml").write_text(
-        "global_settings:\n  severity_threshold: ${ASH_U35_UNSET}\n", encoding="utf-8"
+        "global_settings:\n  severity_threshold: ${ASH_VAR_UNSET}\n", encoding="utf-8"
     )
     root = tmp_path / ".ash.yaml"
     root.write_text(
-        "extends: base.yaml\nproject_name: ${ASH_U35_READ}\n", encoding="utf-8"
+        "extends: base.yaml\nproject_name: ${ASH_VAR_READ}\n", encoding="utf-8"
     )
 
     document = resolve_config_document(root)
 
     assert document.data["project_name"] == MARKER
     assert {r.written for r in document.environment_references} == {
-        "${ASH_U35_READ}",
-        "${ASH_U35_UNSET}",
+        "${ASH_VAR_READ}",
+        "${ASH_VAR_UNSET}",
     }

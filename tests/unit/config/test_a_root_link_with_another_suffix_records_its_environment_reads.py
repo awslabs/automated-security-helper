@@ -36,12 +36,12 @@ pytestmark = [
 def test_the_linked_roots_environment_read_is_recorded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("ASH_U35_LEVEL", "HIGH")
+    monkeypatch.setenv("ASH_VAR_LEVEL", "HIGH")
     # YAML block text behind a .json name: parsed as YAML under the link's own
     # suffix, and not JSON at all.
     target = tmp_path / "settings.json"
     target.write_text(
-        "global_settings:\n  severity_threshold: ${ASH_U35_LEVEL}\n",
+        "global_settings:\n  severity_threshold: ${ASH_VAR_LEVEL}\n",
         encoding="utf-8",
     )
     link = tmp_path / ".ash.yaml"
@@ -55,7 +55,7 @@ def test_the_linked_roots_environment_read_is_recorded(
         for reference in document.environment_references
     ]
     assert recorded == [
-        (("global_settings", "severity_threshold"), "${ASH_U35_LEVEL}", "HIGH")
+        (("global_settings", "severity_threshold"), "${ASH_VAR_LEVEL}", "HIGH")
     ], recorded
 
 
@@ -63,10 +63,10 @@ def test_a_plain_root_records_as_before(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The control: a root parsed under its own suffix."""
-    monkeypatch.setenv("ASH_U35_LEVEL", "HIGH")
+    monkeypatch.setenv("ASH_VAR_LEVEL", "HIGH")
     root = tmp_path / ".ash.yaml"
-    root.write_text("global_settings:\n  severity_threshold: ${ASH_U35_LEVEL}\n")
+    root.write_text("global_settings:\n  severity_threshold: ${ASH_VAR_LEVEL}\n")
 
     document = resolve_config_document(root)
 
-    assert [r.written for r in document.environment_references] == ["${ASH_U35_LEVEL}"]
+    assert [r.written for r in document.environment_references] == ["${ASH_VAR_LEVEL}"]

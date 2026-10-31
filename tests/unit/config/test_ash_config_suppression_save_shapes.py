@@ -228,7 +228,7 @@ def test_the_full_rewrite_reads_references_from_the_text_it_edits(
 ):
     config_path = tmp_path / ".ash.yaml"
     before = (
-        "project_name: !ENV ${ASH_U35_PROJECT_NAME}\n"
+        "project_name: !ENV ${ASH_VAR_PROJECT_NAME}\n"
         "global_settings: {severity_threshold: HIGH}\n"
     )
     config_path.write_text(before, encoding="utf-8")

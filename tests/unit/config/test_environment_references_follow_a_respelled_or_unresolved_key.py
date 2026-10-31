@@ -28,18 +28,18 @@ pytestmark = pytest.mark.unit
 def test_a_respelled_plugin_section_key_pairs_with_the_folded_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ASH_U35_SCANNER", "Bandit")
-    monkeypatch.setenv("ASH_U35_V", "v")
-    written = {"scanners": {"${ASH_U35_SCANNER}": {"options": {"x": "${ASH_U35_V}"}}}}
+    monkeypatch.setenv("ASH_VAR_SCANNER", "Bandit")
+    monkeypatch.setenv("ASH_VAR_V", "v")
+    written = {"scanners": {"${ASH_VAR_SCANNER}": {"options": {"x": "${ASH_VAR_V}"}}}}
     resolved = {"scanners": {"bandit": {"options": {"x": "v"}}}}
 
     found = environment_references(written, resolved)
 
     assert [(r.path, r.written, r.value) for r in found if not r.key] == [
-        (("scanners", "bandit", "options", "x"), "${ASH_U35_V}", "v")
+        (("scanners", "bandit", "options", "x"), "${ASH_VAR_V}", "v")
     ]
     assert [(r.path, r.written, r.resolved) for r in found if r.key] == [
-        (("scanners",), "${ASH_U35_SCANNER}", "bandit")
+        (("scanners",), "${ASH_VAR_SCANNER}", "bandit")
     ]
 
 
@@ -47,23 +47,23 @@ def test_a_key_the_loader_never_resolved_pairs_with_its_own_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A TOML key, or a quoted YAML key, stays its own text in both views."""
-    monkeypatch.setenv("ASH_U35_K", "a")
-    monkeypatch.setenv("ASH_U35_V", "v")
-    written = {"${ASH_U35_K}": {"x": "${ASH_U35_V}"}}
-    resolved = {"${ASH_U35_K}": {"x": "v"}}
+    monkeypatch.setenv("ASH_VAR_K", "a")
+    monkeypatch.setenv("ASH_VAR_V", "v")
+    written = {"${ASH_VAR_K}": {"x": "${ASH_VAR_V}"}}
+    resolved = {"${ASH_VAR_K}": {"x": "v"}}
 
     found = environment_references(written, resolved)
 
     assert [(r.path, r.written, r.value, r.key) for r in found] == [
-        (("${ASH_U35_K}", "x"), "${ASH_U35_V}", "v", False)
+        (("${ASH_VAR_K}", "x"), "${ASH_VAR_V}", "v", False)
     ]
 
 
 def test_a_resolved_key_still_pairs_exactly(monkeypatch: pytest.MonkeyPatch) -> None:
     """The control: a key that came to its value pairs under the value."""
-    monkeypatch.setenv("ASH_U35_K", "bandit")
-    monkeypatch.setenv("ASH_U35_V", "v")
-    written = {"scanners": {"${ASH_U35_K}": {"options": {"x": "${ASH_U35_V}"}}}}
+    monkeypatch.setenv("ASH_VAR_K", "bandit")
+    monkeypatch.setenv("ASH_VAR_V", "v")
+    written = {"scanners": {"${ASH_VAR_K}": {"options": {"x": "${ASH_VAR_V}"}}}}
     resolved = {"scanners": {"bandit": {"options": {"x": "v"}}}}
 
     found = environment_references(written, resolved)
