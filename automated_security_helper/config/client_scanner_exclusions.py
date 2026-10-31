@@ -151,6 +151,7 @@ import fnmatch
 import functools
 import multiprocessing
 import os
+import posixpath
 import re
 import sys
 import time
@@ -356,11 +357,17 @@ def _names_no_root(relative: str) -> bool:
     for a drive on Windows alone, and false for ``..`` everywhere, so each
     platform matched the other's spelling, and a ``../`` path, as a run of
     directories above the scan root.
+
+    The path is collapsed first (``posixpath.normpath``), so one that climbs out
+    partway, ``x/../../vendor/a.py``, reads as the ``../vendor/a.py`` it is; only
+    a leading ``..`` was looked for before, and an unanchored entry hid such a
+    finding as a file inside the tree.
     """
     below = _slashed(relative)
-    while below.startswith("./"):
-        below = below[2:]
-    if not below or below.startswith("/") or _has_a_drive(below):
+    if below.startswith("/") or _has_a_drive(below):
+        return True
+    below = posixpath.normpath(below)
+    if below in ("", "."):
         return True
     return below.split("/", 1)[0] == ".."
 

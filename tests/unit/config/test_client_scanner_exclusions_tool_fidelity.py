@@ -30,6 +30,7 @@ or the move out of the options read more or less than the scanner did:
 from __future__ import annotations
 
 import os
+import posixpath
 import threading
 import time
 from datetime import date
@@ -262,33 +263,57 @@ def test_a_finding_outside_the_scan_root_is_not_hidden_by_a_path_pattern(
         "C:/elsewhere/vendor/a.py",
         "../vendor/a.py",
         "./../vendor/a.py",
+        "x/../../vendor/a.py",
     ],
-    ids=["posix-root", "drive", "parent", "dot-parent"],
+    ids=["posix-root", "drive", "parent", "dot-parent", "climbs-out-midway"],
 )
 @pytest.mark.parametrize(
-    ("scanner", "option", "kind"),
+    ("scanner", "option", "kind", "pattern", "paths", "rule_id"),
     [
-        ("semgrep", "exclude", "glob"),
-        ("checkov", "skip_path", "checkov"),
-        ("bandit", "excluded_paths", "bandit"),
+        ("semgrep", "exclude", "glob", "vendor", (), None),
+        ("checkov", "skip_path", "checkov", "vendor", (), None),
+        ("bandit", "excluded_paths", "bandit", "vendor", (), None),
+        (
+            "trivy-repo",
+            "ignore_file",
+            "trivy-ignore-file",
+            "CVE-1",
+            ("**/vendor/**",),
+            "CVE-1",
+        ),
     ],
-    ids=["glob", "checkov", "bandit"],
+    ids=["glob", "checkov", "bandit", "trivy"],
 )
 def test_every_spelling_of_a_path_outside_the_tree_hides_nothing(
-    scanner, option, kind, outside
+    scanner, option, kind, pattern, paths, rule_id, outside
 ):
     """A POSIX root is absolute to ``Path`` on POSIX alone, a drive on Windows
     alone, and a leading ``..`` nowhere, so the glob, checkov and trivy kinds
     read the other platform's spelling, and a path climbing out of the tree, as
     directories above the scan root and matched an unanchored entry against
     them. One reading (``_names_no_root``) now serves every kind, bandit's
-    included, whatever the host."""
+    included, whatever the host. A path that climbs out partway
+    (``x/../../vendor/a.py``) is the same path as ``../vendor/a.py``.
+
+    The finding's absolute path is the one a real finding has: the spelling
+    itself where it is absolute, the root joined with it and collapsed where it
+    is not (an absolute path that is not ``<root>/<relative>`` is how the
+    SARIF step marks a path it could not place under the root)."""
+    if outside.startswith("/") or outside[1:2] == ":":
+        absolute = outside
+    else:
+        absolute = posixpath.normpath(posixpath.join("/s", outside))
     exclusion = ClientScannerExclusion(
-        scanner=scanner, option=option, kind=kind, pattern="vendor", reason="r"
+        scanner=scanner,
+        option=option,
+        kind=kind,
+        pattern=pattern,
+        reason="r",
+        paths=paths,
     )
-    assert not exclusion.hides(relative=outside, absolute=f"/s/{outside}", rule_id=None)
+    assert not exclusion.hides(relative=outside, absolute=absolute, rule_id=rule_id)
     assert exclusion.hides(
-        relative="vendor/a.py", absolute="/s/vendor/a.py", rule_id=None
+        relative="vendor/a.py", absolute="/s/vendor/a.py", rule_id=rule_id
     )
 
 
