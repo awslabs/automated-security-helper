@@ -878,14 +878,16 @@ def apply_content_filters(
             new_scanner_results = {}
             for name, data in orig.items():
                 if name.lower() in scanner_list:
-                    if severity_list and "severity_counts" in data:
+                    if severity_list and _records_a_breakdown(
+                        data.get("severity_counts")
+                    ):
                         data = _scanner_row_at_severities(data, severity_list)
                     new_scanner_results[name] = data
             filtered_results["raw_results"]["scanner_results"] = new_scanner_results
         elif severity_list:
             new_scanner_results = {}
             for name, data in orig.items():
-                if "severity_counts" in data:
+                if _records_a_breakdown(data.get("severity_counts")):
                     data = _scanner_row_at_severities(data, severity_list)
                 new_scanner_results[name] = data
             filtered_results["raw_results"]["scanner_results"] = new_scanner_results
@@ -1084,6 +1086,12 @@ def _scanner_row_at_severities(
     them). Left as it was, a row under a ``severities`` filter said "7 findings"
     beside buckets that summed to 2; summed over every kept bucket, a row under
     ``severities="suppressed"`` counted its suppressed findings as findings.
+
+    Only a row that records a breakdown is narrowed (:func:`_records_a_breakdown`,
+    which the callers check): a row whose ``severity_counts`` is empty, or holds
+    nothing the summary has a bucket for, has only its ``finding_count`` to say
+    what the scanner found; summing the buckets it does not have gave 0 for a
+    scanner that found 2.
     """
     data = data.copy()
     data["severity_counts"] = {

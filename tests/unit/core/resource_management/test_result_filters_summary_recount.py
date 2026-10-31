@@ -863,3 +863,74 @@ class TestARowWithoutBucketsLeavesTheFilteredBucketsUnknown:
 
         assert by_severity["high"] == 1
         assert by_severity["total"] == 1
+
+
+class TestARowWhoseBreakdownNamesNothingIsNotNarrowed:
+    """A row can carry a ``severity_counts`` object that records no breakdown: it
+    is empty, or it holds only keys the summary has no bucket for. The row's
+    ``finding_count`` is then the only record of what the scanner found, as for
+    a row with no ``severity_counts`` key at all. The severities filter narrowed
+    any row that HAD the key, and summed the buckets it did not have: a scanner
+    that found 2 read as 0, beside a summary that (correctly) kept the total at
+    2 and the buckets unknown for the same row without the key."""
+
+    _breakdowns_that_name_nothing = pytest.mark.parametrize(
+        "breakdown", [{}, {"unrelated": 3}], ids=["empty", "no_known_bucket"]
+    )
+
+    @staticmethod
+    def _results_with_such_a_row(breakdown):
+        results = _results()
+        results["raw_results"]["scanner_results"]["trivy"] = {
+            "status": "PASSED",
+            "finding_count": 2,
+            "severity_counts": breakdown,
+        }
+        return results
+
+    @_breakdowns_that_name_nothing
+    def test_a_selection_that_hides_nothing_keeps_the_rows_count(self, breakdown):
+        filtered = apply_content_filters(
+            self._results_with_such_a_row(breakdown),
+            scanners="trivy",
+            severities="critical,high,medium,low,info",
+        )
+        row = filtered["raw_results"]["scanner_results"]["trivy"]
+        by_severity = filter_summary(filtered)["findings_summary"]["by_severity"]
+
+        assert row["finding_count"] == 2
+        assert row["severity_counts"] == breakdown
+        assert by_severity["total"] == 2
+        assert by_severity["critical"] is None
+
+    @_breakdowns_that_name_nothing
+    def test_a_partial_selection_leaves_the_buckets_unknown(self, breakdown):
+        filtered = apply_content_filters(
+            self._results_with_such_a_row(breakdown),
+            scanners="trivy",
+            severities="high",
+        )
+        row = filtered["raw_results"]["scanner_results"]["trivy"]
+        by_severity = filter_summary(filtered)["findings_summary"]["by_severity"]
+
+        # The same answers as the row without the key (see the class above):
+        # how many of the two findings are high is unknown, not 0.
+        assert row["finding_count"] == 2
+        assert by_severity["high"] is None
+        assert by_severity["total"] is None
+        assert by_severity["low"] == 0
+
+    @_breakdowns_that_name_nothing
+    def test_a_severities_filter_over_every_scanner_keeps_the_rows_count(
+        self, breakdown
+    ):
+        filtered = apply_content_filters(
+            self._results_with_such_a_row(breakdown), severities="high"
+        )
+        rows = filtered["raw_results"]["scanner_results"]
+
+        assert rows["trivy"]["finding_count"] == 2
+        # Control: green before and after the cure. A row that records a
+        # breakdown is still narrowed to the selected buckets.
+        assert rows["bandit"]["finding_count"] == 1
+        assert rows["bandit"]["severity_counts"] == {"high": 1}
