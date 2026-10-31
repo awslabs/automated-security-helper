@@ -682,13 +682,18 @@ def stop_grace_in_progress() -> Iterator[None]:
     is.
     """
     global _GRACE_WAITS
-    with _GRACE_WAITS_WRITE_LOCK:
-        _GRACE_WAITS += 1
+    entered = False
+    # The count is raised inside the try, so an interrupt that lands after the
+    # increment still reaches the finally, which lowers it only if it was raised.
     try:
+        with _GRACE_WAITS_WRITE_LOCK:
+            _GRACE_WAITS += 1
+            entered = True
         yield
     finally:
-        with _GRACE_WAITS_WRITE_LOCK:
-            _GRACE_WAITS -= 1
+        if entered:
+            with _GRACE_WAITS_WRITE_LOCK:
+                _GRACE_WAITS -= 1
 
 
 def shutdown_requested() -> bool:
