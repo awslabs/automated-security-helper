@@ -470,6 +470,37 @@ class TestAnOverlappingFindingsSourceText:
         neighbor = model.sarif.runs[0].results[1]
         assert getattr(neighbor.properties, "snippet") == snippet
 
+    @pytest.mark.parametrize(
+        ("region_line", "masked_whole"),
+        [(1, True), (2, True), (3, True), (4, True), (5, False)],
+    )
+    def test_the_window_of_a_snippet_with_more_lines_than_its_region_has_two_edges(
+        self, region_line, masked_whole
+    ):
+        """The secret is on line 2 and the snippet has three lines for a one-line
+        region, so the snippet could start two lines above the region or run two
+        lines below it: regions at lines 1 to 4 reach the secret line (the window
+        runs from the region's line less two to its line plus two), the region
+        at line 5 does not. A window of one line above, or none below, lets the
+        snippets at lines 4 and 1 keep the secret line."""
+        snippet = OTHER_LINE + "x = 1\n" + "y = 2\n"
+        model = _results(
+            self._secret(),
+            _result(
+                "B404",
+                "app.py",
+                region_line,
+                "import",
+                "bandit",
+                extra={"properties": {"snippet": snippet}},
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        shown = getattr(model.sarif.runs[0].results[1].properties, "snippet")
+        assert shown == ((MASKED_LINE + "\n") * 3 if masked_whole else snippet)
+
     def test_a_snippet_is_placed_by_the_first_location_only(self):
         """The snippet is the first location's code; a later location in a file
         with a secret finding says nothing about where the snippet's lines are."""
