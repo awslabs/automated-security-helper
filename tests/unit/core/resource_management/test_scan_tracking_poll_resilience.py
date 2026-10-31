@@ -352,16 +352,43 @@ class TestTheSkippedScannerSummaryReadsTheDocumentAsTheModelDoes:
         self._write(tmp_path, {"semgrep": {"status": "MISSING"}})
         reads = []
 
-        def reader(path, encoding="utf-8"):
+        def reader(path):
             reads.append(Path(path).name)
-            return Path(path).read_bytes().decode(encoding)
+            return Path(path).read_bytes().decode("utf-8")
 
-        monkeypatch.setattr(scan_tracking, "read_text_of_replaced_file", reader)
+        monkeypatch.setattr(scan_tracking, "_read_regular_file_text", reader)
 
         summary = summarize_scanner_statuses(tmp_path)
 
         assert reads == ["ash_aggregated_results.json"]
         assert [row["scanner"] for row in summary["skipped_scanners"]] == ["semgrep"]
+
+    def test_a_link_swapped_in_after_the_look_is_not_followed(
+        self, tmp_path, monkeypatch
+    ):
+        """The look at the name and the read are two calls. The look is made to
+        report a regular file while the name already holds a link to a document
+        outside the output tree: the read by descriptor refuses the link, where
+        a read by name returned the outside document's skipped scanners as this
+        scan's."""
+        outside = tmp_path / "outside.json"
+        outside.write_text(
+            json.dumps({"scanner_results": {"semgrep": {"status": "MISSING"}}}),
+            encoding="utf-8",
+        )
+        output_dir = tmp_path / "ash_output"
+        output_dir.mkdir()
+        try:
+            (output_dir / "ash_aggregated_results.json").symlink_to(outside)
+        except (OSError, NotImplementedError) as error:
+            pytest.skip(f"symlinks cannot be made here: {error}")
+        monkeypatch.setattr(
+            scan_tracking, "is_regular_result_file", lambda *args, **kwargs: True
+        )
+
+        summary = summarize_scanner_statuses(output_dir)
+
+        assert summary == {"scanner_statuses": {}, "skipped_scanners": []}
 
     def test_a_status_in_lower_case_is_read_as_its_member(self, tmp_path):
         self._write(

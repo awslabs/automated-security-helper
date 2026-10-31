@@ -18,6 +18,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Set
 
+from automated_security_helper.core.resource_management.error_handling import (
+    _NotARegularFile,
+    _read_regular_file_text,
+)
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
@@ -25,7 +29,6 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     warning_of_dropped_keys,
 )
-from automated_security_helper.utils.atomic_write import read_text_of_replaced_file
 from automated_security_helper.utils.error_text import (
     error_text,
     log_unexpected_error,
@@ -1035,12 +1038,16 @@ def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
     if not is_regular_result_file(results_path, max_bytes=None):
         return empty
     try:
-        # The file is replaced atomically while a scan writes it, and on Windows a
+        # The look above is by name; the read is by descriptor, opened without
+        # following a link or waiting on a FIFO and checked to be a regular
+        # file's, so a link or FIFO swapped in between the two is refused where
+        # a reopen by name followed it or blocked under the registry lock. The
+        # file is replaced atomically while a scan writes it, and on Windows a
         # read that lands in the replace fails with a PermissionError that
         # passes a moment later: retried, where one read here reported a scan that
         # had skipped scanners as having skipped none.
-        raw = read_text_of_replaced_file(results_path, encoding="utf-8")
-    except (OSError, ValueError):
+        raw = _read_regular_file_text(results_path)
+    except (OSError, ValueError, _NotARegularFile):
         # ValueError: UnicodeDecodeError, a file that is not UTF-8.
         return empty
 
