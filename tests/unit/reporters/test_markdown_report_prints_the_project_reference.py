@@ -67,11 +67,9 @@ class TestTheReferenceHelper:
         assert _reference_text("${ORG}/${REPO}") == "`${ORG}`/`${REPO}`"
 
     def test_a_reference_beside_another_dollar_sign_is_still_one_code_span(self):
-        """The reference's own dollar signs sit inside its code span, so a bare
-        ``$`` elsewhere on the line has no partner to open a formula with. It is
-        left as written, and the reference is not run into it."""
-        assert _reference_text("${ORG}-$HOME") == "`${ORG}`-$HOME"
-        assert _reference_text("$HOME-${ORG}") == "$HOME-`${ORG}`"
+        """A bare ``$`` outside a reference is escaped, as in any other text."""
+        assert _reference_text("${ORG}-$HOME") == "`${ORG}`-\\$HOME"
+        assert _reference_text("$HOME-${ORG}") == "\\$HOME-`${ORG}`"
 
     def test_every_other_character_is_still_escaped(self):
         assert _reference_text("a_b *c* ${X}") == "a\\_b \\*c\\* `${X}`"
