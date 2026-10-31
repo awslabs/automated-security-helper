@@ -92,7 +92,13 @@ def _own_nodes(owner: ast.AST):
 
 
 def _bindings(owner: ast.AST) -> Bindings:
-    """The names a module or function binds, with the values it gives them."""
+    """The names a module, function or lambda binds, with the values it gives them.
+
+    A store the reader does not follow binds the name to None, so the value is
+    unreadable: a parameter, a loop variable, a ``with ... as`` name, an
+    ``except ... as`` name, an import, a ``def`` or ``class``. So does a name that
+    this scope or any scope below it declares ``global`` or ``nonlocal``: that code
+    assigns it from statements these bindings do not show."""
     found: Bindings = {}
 
     def bind(target: ast.AST, value: Optional[ast.AST]) -> None:
@@ -102,7 +108,7 @@ def _bindings(owner: ast.AST) -> Bindings:
             for inner in ast.iter_child_nodes(target):
                 bind(inner, None)
 
-    if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
         arguments = owner.args
         for argument in [
             *arguments.posonlyargs,
@@ -134,6 +140,12 @@ def _bindings(owner: ast.AST) -> Bindings:
                 )
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             found.setdefault(node.name, []).append(None)
+        elif isinstance(node, ast.ExceptHandler) and node.name is not None:
+            found.setdefault(node.name, []).append(None)
+    for node in ast.walk(owner):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            for name in node.names:
+                found.setdefault(name, []).append(None)
     return found
 
 
@@ -247,6 +259,11 @@ def write_sites(source: str, module: str) -> List[Site]:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 visit(child, [*scope, child.name], [*frames, _bindings(child)])
+                continue
+            if isinstance(child, ast.Lambda):
+                # Its parameters are its own: a name it takes is not the enclosing
+                # function's name of the same spelling.
+                visit(child, scope, [*frames, _bindings(child)])
                 continue
             if isinstance(child, ast.ClassDef):
                 visit(child, [*scope, child.name], frames)
