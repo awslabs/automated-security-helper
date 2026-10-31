@@ -1589,20 +1589,16 @@ class ScannerStatisticsCalculator:
         with an unevaluated target" contract clause 3i forbids.
 
         Which reports count is ``target_report_is_missing``. Only this scanner's own
-        reports count, as in ``_recorded_report``: a mapping that names another
-        scanner is no report of this one's.
+        reports count (``_own_reports``): a mapping that names another scanner is no
+        report of this one's, and a report that names none is read for the key it is
+        filed under, as ``any_target_errored`` and the metrics' ``own_target_reports``
+        read it. Requiring the name here dropped a name-less MISSING report while its
+        ERROR counterpart counted, so one old results file rolled up PASSED for a
+        missing tool and ERROR for a failed one.
         """
-        reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
-        if not isinstance(reports, dict):
-            return False
+        reports = ScannerStatisticsCalculator._own_reports(asharp_model, scanner_name)
 
         for target_report in reports.values():
-            if not isinstance(
-                target_report, dict
-            ) or not ScannerStatisticsCalculator._same_scanner(
-                target_report.get("scanner_name"), scanner_name
-            ):
-                continue
             if ScannerStatisticsCalculator.target_report_is_missing(target_report):
                 return True
         return False

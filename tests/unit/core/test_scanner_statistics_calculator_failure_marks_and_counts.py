@@ -213,6 +213,36 @@ class TestACrashedTreeBesideACleanSourceIsAnError:
         assert ScannerStatisticsCalculator.any_target_errored(model, "bandit") is False
 
 
+class TestANameLessReportIsReadTheSameWayForMissingAndError:
+    """``any_target_errored`` read a report that names no scanner for the key it is
+    filed under; ``any_target_missing`` required the name and dropped it. An old
+    results file with a name-less ``converted: {status: MISSING}`` therefore rolled
+    up PASSED, and the same file with ERROR rolled up ERROR."""
+
+    @staticmethod
+    def _model_with_a_converted_report(report: dict) -> AshAggregatedResults:
+        return _model({"bandit": {"source": _report("bandit"), "converted": report}})
+
+    def test_a_name_less_missing_report_counts(self):
+        model = self._model_with_a_converted_report({"status": "MISSING"})
+
+        assert ScannerStatisticsCalculator.any_target_missing(model, "bandit") is True
+
+    def test_a_name_less_error_report_counts_the_same_way(self):
+        """The counterpart that already counted: the two walks now agree."""
+        model = self._model_with_a_converted_report({"status": "ERROR"})
+
+        assert ScannerStatisticsCalculator.any_target_errored(model, "bandit") is True
+
+    def test_a_missing_report_naming_another_scanner_does_not_count(self):
+        """Control: a report that names a different scanner is nobody's here."""
+        model = self._model_with_a_converted_report(
+            {"scanner_name": "semgrep", "status": "MISSING"}
+        )
+
+        assert ScannerStatisticsCalculator.any_target_missing(model, "bandit") is False
+
+
 def _sarif(scanner_name: str, levels: list[str]) -> SarifReport:
     return SarifReport(
         runs=[
