@@ -221,9 +221,10 @@ it needs.
   `NAME=value` sets it. Every backend reads the same list, and a list you write
   replaces the default one, as a compose list replaces an image's (see
   [Pass other variables](#environment)). A proxy setting is passed only to a scanner
-  that has a network. A name the rule above drops, `TMPDIR` (every backend gives each
-  scanner a private one) and ASH's own run id are refused with the name, so the list
-  is not a channel for secrets. A `NAME=value` entry whose value carries
+  that has a network. A name the rule above drops, `TMPDIR` (each backend gives a
+  scanner a private temporary directory of its own, so a listed value would only point
+  it elsewhere) and ASH's own run id are refused with the name, so the list is not a
+  channel for secrets. A `NAME=value` entry whose value carries
   `user:password@` in a URL is refused with the variable named and no value shown,
   because the sandbox would drop it from every scanner and the entry would do
   nothing. A variable the list passes by name is held to the same rule when ASH is

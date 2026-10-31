@@ -299,9 +299,11 @@ def parse_environment(
             )
         if name == "TMPDIR":
             raise ValueError(
-                f"environment entry {name!r} is refused: every scanner gets a "
-                "private TMPDIR of the sandbox's own, which a listed value cannot "
-                "replace"
+                f"environment entry {name!r} is refused: the Landlock and "
+                "sandbox-exec backends point it at a private directory of their "
+                "own, and bwrap and firejail give each scanner a private /tmp, so "
+                "a listed value would send temporary files somewhere the sandbox "
+                "did not make for the scanner"
             )
         marker = next((m for m in CREDENTIAL_MARKERS if m in name.upper()), None)
         if marker is not None:

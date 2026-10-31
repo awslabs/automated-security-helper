@@ -1548,6 +1548,20 @@ def test_a_listed_tmpdir_is_refused_so_no_backend_passes_it(
         plan.run_cleanup()
 
 
+def test_the_tmpdir_refusal_says_what_each_backend_does():
+    """Only Landlock and sandbox-exec set TMPDIR; bwrap and firejail give each
+    scanner a private /tmp and set no variable, so the text must not say that every
+    backend gives each scanner a private TMPDIR."""
+    with pytest.raises(ValueError, match="TMPDIR") as refused:
+        policy_module.parse_environment(["TMPDIR=/somewhere"])
+
+    text = str(refused.value)
+    assert "Landlock and sandbox-exec" in text
+    assert "bwrap and firejail give each scanner a private /tmp" in text
+    assert "every scanner gets a private TMPDIR" not in text
+    assert "/somewhere" not in text
+
+
 @pytest.mark.parametrize(
     "entry",
     [
