@@ -1275,8 +1275,8 @@ def _remove_kept_work_dirs(third_party_dir: Path, final: Path, staged: Path) -> 
     kept then holds the only copy, and deleting it would leave the name empty with
     the install reported as done.
 
-    Returns False when nothing stood at ``final`` and so no directory was looked at,
-    True otherwise.
+    Returns False when no entry read as standing at ``final`` (it may be gone, or the
+    probes may have failed) and so no directory was looked at, True otherwise.
     """
     if not (_present(final, unknown=False) or _same_files(staged, final)):
         return False
@@ -1423,9 +1423,13 @@ def publish_third_party(staged: Path, third_party_dir: Path) -> Path:
         else:
             shutil.rmtree(work, ignore_errors=True)
     if not _remove_kept_work_dirs(third_party_dir, final, staged):
+        # Only what was read is said: the entry did not read back as the one this
+        # publish placed. It may be gone, or the probes may have failed, and a kept
+        # directory may or may not exist.
         print(
-            f"no license entry stands at {final} now, so a directory kept for the "
-            f"previous {final.name} entry stays in place; install {final.name} again",
+            f"{final} did not read back as the license entry this publish placed, so "
+            f"no directory kept for an earlier {final.name} entry was removed; if "
+            f"{final} is missing, install {final.name} again",
             file=sys.stderr,
         )
     print(f"Installed {staged.name} license files to {final}", flush=True)

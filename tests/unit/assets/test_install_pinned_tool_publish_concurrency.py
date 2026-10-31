@@ -456,8 +456,15 @@ class TestAKeptDirectoryGoesOnlyWhileAnEntryStands:
         # reader that the name is empty and a directory was kept. Red before: nothing
         # was printed to stderr, and the line said "Installed" alone.
         streams = capsys.readouterr()
-        assert f"no license entry stands at {final} now" in streams.err
-        assert "install demo again" in streams.err
+        assert (
+            f"{final} did not read back as the license entry this publish placed"
+            in streams.err
+        )
+        assert f"if {final} is missing, install demo again" in streams.err
+        # The note says what was read, not a state it did not read: whether a kept
+        # directory exists, or whether the entry is gone or only unreadable.
+        assert "no license entry stands" not in streams.err
+        assert "stays in place" not in streams.err
         assert "Installed demo license files" in streams.out
 
     def test_it_goes_when_an_entry_stands_at_the_name(self, tmp_path, capsys):
@@ -469,8 +476,53 @@ class TestAKeptDirectoryGoesOnlyWhileAnEntryStands:
         installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
 
         assert not kept.exists()
-        assert "no license entry stands" not in capsys.readouterr().err
+        assert "did not read back" not in capsys.readouterr().err
         assert sorted(p.name for p in third_party.iterdir()) == ["demo"]
+
+    def test_the_note_claims_no_empty_name_when_only_the_probes_failed(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Asking raises and the files cannot prove the entry: it stands, unread."""
+        third_party = tmp_path / "third-party"
+        third_party.mkdir()
+        final = third_party / "demo"
+        kept = self._keep_a_directory(third_party, b"old\n")
+        real_replace, real_exists = os.replace, Path.exists
+        real_is_symlink, real_same_files = Path.is_symlink, installer._same_files
+        armed = {"on": False}
+
+        def replace(src, dst, *args, **kwargs):
+            real_replace(src, dst, *args, **kwargs)
+            if Path(dst) == final and Path(src).name == "incoming":
+                armed["on"] = True
+
+        def exists(self, *args, **kwargs):
+            if armed["on"] and self == final:
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_exists(self, *args, **kwargs)
+
+        def is_symlink(self):
+            if armed["on"] and self == final:
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_is_symlink(self)
+
+        def same_files(first, second):
+            return False if armed["on"] else real_same_files(first, second)
+
+        monkeypatch.setattr(os, "replace", replace)
+        monkeypatch.setattr(Path, "exists", exists)
+        monkeypatch.setattr(Path, "is_symlink", is_symlink)
+        monkeypatch.setattr(installer, "_same_files", same_files)
+
+        installer.publish_third_party(_staged(tmp_path, b"new\n"), third_party)
+
+        # Red before: the note said "no license entry stands", although the entry
+        # was there and only the probes could not say so.
+        assert (final / "LICENSE").read_bytes() == b"new\n"
+        assert kept.exists(), "nothing proved the entry, so the directory stays"
+        err = capsys.readouterr().err
+        assert f"{final} did not read back as the license entry" in err
+        assert "no license entry stands" not in err
 
     def test_it_goes_when_the_files_prove_the_entry_though_asking_raises(
         self, tmp_path, monkeypatch
