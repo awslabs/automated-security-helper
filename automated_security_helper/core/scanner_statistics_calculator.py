@@ -1037,7 +1037,7 @@ class ScannerStatisticsCalculator:
         # The scanner's own threshold when it has one, otherwise the global one: the
         # rule ScannerExecutor grades each target's report by, from the same helper.
         evaluation_threshold, scanner_threshold_def = resolve_scanner_threshold(
-            scanner_threshold, ash_conf
+            scanner_threshold, ash_conf, scanner_name=scanner_name
         )
         # The kept reference form describes where the scanner's own threshold
         # came from. Keep it while the resolver still sources the graded value

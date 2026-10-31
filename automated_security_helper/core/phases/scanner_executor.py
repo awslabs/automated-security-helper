@@ -2329,6 +2329,7 @@ class ScannerExecutor:
                         threshold, _ = resolve_scanner_threshold(
                             scanner_config.options.severity_threshold,
                             getattr(self.plugin_context, "config", None),
+                            scanner_name=scanner_config_name,
                         )
                         # The level this row is graded against, recorded on the
                         # report beside its counts. A reader of the results file

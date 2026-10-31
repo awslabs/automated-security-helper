@@ -601,20 +601,31 @@ def _warn_off_table_threshold(threshold: object) -> None:
     )
 
 
-def _warn_dropped_scanner_threshold(threshold: object) -> None:
-    """Log once per type that a scanner's threshold is not text and is ignored.
+def _warn_dropped_scanner_threshold(
+    threshold: object, scanner_name: Optional[str] = None
+) -> None:
+    """Log once per scanner and type that a scanner's threshold is not text and
+    is ignored.
 
     The scanner then grades against the global threshold. That was silent, so a
     scanner whose section held ``severity_threshold: 5`` or a list was graded
     against a threshold its owner never wrote and nothing said so. Like the
-    off-table warning, it names the type of the value and never the value."""
+    off-table warning, it names the type of the value and never the value. It
+    names the scanner when the caller knows it, and is once per scanner: two
+    scanners with a bad value each get their line, where one warning that named
+    neither left the owner of the second to find it by reading the config.
+    Without a name it is once per type, as before."""
     key = f"<{type(threshold).__name__}>"
+    if scanner_name:
+        key = f"{scanner_name}: {key}"
     if key in _WARNED_DROPPED_SCANNER:
         return
     _WARNED_DROPPED_SCANNER.add(key)
+    whose = f"Scanner {scanner_name}'s" if scanner_name else "Scanner"
     _ash_logger().warning(
-        f"Scanner severity threshold {_threshold_for_log(threshold)} is ignored; "
-        "the global severity threshold applies to that scanner"
+        f"{whose} severity threshold {_threshold_for_log(threshold)} is ignored; "
+        "the global severity threshold applies to that scanner",
+        extra={"markup": False},
     )
 
 
@@ -693,7 +704,10 @@ def result_fails_scanner_threshold(
 
 
 def resolve_scanner_threshold(
-    scanner_threshold: Optional[str], ash_config: object
+    scanner_threshold: Optional[str],
+    ash_config: object,
+    *,
+    scanner_name: Optional[str] = None,
 ) -> Tuple[str, str]:
     """The threshold a scanner is graded against, and where it came from.
 
@@ -724,6 +738,10 @@ def resolve_scanner_threshold(
     to the global threshold, a blank global value to ``ASH_DEFAULT_SEVERITY_LEVEL``.
     A non-blank value off the ladder is returned as written, from either side: the
     summary row shows it, and the ladder grades it at its unrecognised rank.
+
+    *scanner_name* is the scanner the threshold belongs to, when the caller knows
+    it. It is used for one thing: the warning for a scanner threshold that is not
+    text names the scanner and is logged once per scanner, not once per type.
     """
     # Only text can be a threshold: a number, a boolean or a list from an external
     # section is read as unset, like the global value below. Returned as given it
@@ -736,7 +754,7 @@ def resolve_scanner_threshold(
         if scanner_threshold.strip():
             return scanner_threshold, "config"
     elif scanner_threshold is not None:
-        _warn_dropped_scanner_threshold(scanner_threshold)
+        _warn_dropped_scanner_threshold(scanner_threshold, scanner_name)
     global_settings = getattr(ash_config, "global_settings", None)
     if global_settings is not None and hasattr(global_settings, "severity_threshold"):
         configured = global_settings.severity_threshold

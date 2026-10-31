@@ -194,6 +194,40 @@ def test_dropping_a_scanner_threshold_that_is_not_text_is_logged_once(
     assert "global" in warnings[0]
 
 
+def test_the_dropped_threshold_warning_names_the_scanner_and_is_once_per_scanner(
+    dropped_log,
+):
+    """One warning for the first scanner with a bad value, naming neither, left
+    the owner of the second to find it in the config: the once-only key was the
+    value's type alone."""
+    config = SimpleNamespace(global_settings=SimpleNamespace(severity_threshold="LOW"))
+
+    for name in ("bandit", "semgrep", "bandit", "semgrep"):
+        assert resolve_scanner_threshold(5, config, scanner_name=name) == (
+            "LOW",
+            "global",
+        )
+
+    warnings = [r.getMessage() for r in dropped_log.records if r.levelname == "WARNING"]
+    assert len(warnings) == 2
+    assert "bandit" in warnings[0] and "semgrep" not in warnings[0]
+    assert "semgrep" in warnings[1] and "bandit" not in warnings[1]
+    # Still the type of the value and never the value.
+    assert all("a value of type int (not shown: not text)" in line for line in warnings)
+
+
+def test_the_dropped_threshold_warning_without_a_name_is_once_per_type(dropped_log):
+    """The control: a caller that gives no name gets the earlier warning."""
+    config = SimpleNamespace(global_settings=SimpleNamespace(severity_threshold="LOW"))
+
+    resolve_scanner_threshold(5, config)
+    resolve_scanner_threshold(7, config)
+
+    warnings = [r.getMessage() for r in dropped_log.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert warnings[0].startswith("Scanner severity threshold ")
+
+
 @pytest.mark.parametrize("value", [None, "", "high", "bogus"], ids=repr)
 def test_a_scanner_threshold_that_is_unset_or_text_logs_no_drop(dropped_log, value):
     config = SimpleNamespace(global_settings=SimpleNamespace(severity_threshold="LOW"))

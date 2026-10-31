@@ -427,7 +427,7 @@ def test_the_reference_is_kept_while_the_source_is_the_scanners_own_config(
     monkeypatch.setattr(
         scanner_statistics_calculator,
         "resolve_scanner_threshold",
-        lambda scanner_threshold, ash_config: resolved,
+        lambda scanner_threshold, ash_config, scanner_name=None: resolved,
     )
 
     assert (
@@ -458,7 +458,7 @@ def test_a_literal_threshold_the_resolver_normalized_shows_what_is_graded(
     monkeypatch.setattr(
         scanner_statistics_calculator,
         "resolve_scanner_threshold",
-        lambda scanner_threshold, ash_config: ("HIGH", "config"),
+        lambda scanner_threshold, ash_config, scanner_name=None: ("HIGH", "config"),
     )
 
     assert ScannerStatisticsCalculator._threshold_resolution(
