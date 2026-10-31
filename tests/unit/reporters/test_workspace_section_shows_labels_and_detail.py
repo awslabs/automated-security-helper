@@ -66,8 +66,13 @@ class TestTheLabelIsShownNotObeyed:
         )
         text = "\n".join(lines)
         assert "\x1b" not in text
-        assert not any(line.startswith("## injected") for line in lines)
-        (row,) = [line for line in lines if "injected" in line]
+        # The lines the document is made of, not the list elements: an element
+        # that kept a raw newline would hold a heading on a line of its own and
+        # pass a check made element by element.
+        assert all("\n" not in line.rstrip("\n") for line in lines), lines
+        rendered = text.splitlines()
+        assert not any(line.startswith("## injected") for line in rendered)
+        (row,) = [line for line in rendered if "injected" in line]
         # The label's own pipe is written escaped (a backslash before it) and is
         # not a column edge; every other pipe is one.
         assert (
@@ -87,8 +92,10 @@ class TestTheLabelIsShownNotObeyed:
         )
         text = "\n".join(lines)
         assert "\x1b" not in text
-        assert not any(line.startswith("## injected") for line in lines)
-        assert any("\\x1b" in line and "injected" in line for line in lines), lines
+        assert all("\n" not in line for line in lines), lines
+        rendered = text.splitlines()
+        assert not any(line.startswith("## injected") for line in rendered)
+        assert any("\\x1b" in line and "injected" in line for line in rendered), lines
 
     def test_html_shows_the_control_as_an_escape(self):
         fragment = html_workspace_section(
@@ -135,6 +142,54 @@ class TestTheDetailIsRendered:
         assert 'class="project-notes"' in fragment
         assert "did not complete: semgrep, grype" in fragment
         assert fragment.count("<li>") == 1
+
+    HOSTILE_ERROR = "boom\n## injected-note <b>x</b>\x1b[31m *bold* | pipe"
+
+    @classmethod
+    def _hostile(cls) -> AshAggregatedResults:
+        """A failed project whose label and error text both hold a newline, a
+        tag, an escape code, emphasis and a pipe: the error text is the field
+        most likely to carry arbitrary text from a scanner."""
+        return _model(
+            _project(
+                "web",
+                display_label=HOSTILE_LABEL,
+                status=ProjectRunStatus.FAILED,
+                error=cls.HOSTILE_ERROR,
+                severity_threshold=None,
+            )
+        )
+
+    def test_markdown_shows_the_label_and_the_error_on_one_note_line(self):
+        lines = markdown_workspace_section(self._hostile())
+        text = "\n".join(lines)
+        assert "\x1b" not in text
+        rendered = text.splitlines()
+        assert not any(line.startswith("## injected") for line in rendered)
+        (note,) = [line for line in rendered if line.startswith("- **")]
+        assert "&lt;b&gt;" in note and "<b>" not in note, note
+        assert "\\*bold\\*" in note, note
+        assert "\\x1b" in note, note
+        assert "injected-note" in note, note
+
+    def test_text_shows_the_label_and_the_error_on_one_note_line(self):
+        lines = text_workspace_section(self._hostile())
+        text = "\n".join(lines)
+        assert "\x1b" not in text
+        rendered = text.splitlines()
+        assert not any(line.lstrip().startswith("## injected") for line in rendered)
+        (note,) = [line for line in rendered if "injected-note" in line]
+        assert note.startswith("  "), note
+        assert "\\x1b" in note, note
+
+    def test_html_escapes_the_label_and_the_error_in_the_note(self):
+        fragment = html_workspace_section(self._hostile())
+        assert "\x1b" not in fragment
+        notes = fragment.split('class="project-notes"', 1)[1]
+        assert fragment.count("<li>") == 1
+        assert "<b>" not in notes
+        assert "&lt;b&gt;" in notes
+        assert "\\x1b" in notes
 
     def test_no_notes_when_no_row_has_a_detail(self):
         model = _model(_project("api"), _project("web"))

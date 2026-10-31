@@ -499,6 +499,24 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
         finding.severity = "MEDIUM"
         assert emitter.is_finding_actionable(finding)
 
+    @pytest.mark.parametrize(
+        ("written", "severity"), [("all", "INFO"), ("low", "LOW")], ids=["all", "low"]
+    )
+    def test_a_lowercase_gate_below_the_default_grades_by_its_own_name(
+        self, model, written, severity
+    ):
+        """``"medium"`` is also ASH's default gate, so the test above cannot tell
+        a reader that normalizes the recorded name from one that ignores a name it
+        does not know and falls back to the default; the old reading of an
+        unknown name as CRITICAL is the only one it rules out. A gate below the
+        default tells them apart: normalized, a finding at its level is
+        actionable; under the default fallback or under CRITICAL it is not."""
+        model.workspace.projects[0].severity_threshold = written
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        (finding,) = emitter.flat_vulns
+        finding.severity = severity
+        assert emitter.is_finding_actionable(finding)
+
     def test_a_single_directory_finding_keeps_the_scanner_threshold(self):
         """The control: with no workspace the recorded config still decides."""
         emitter = ReportContentEmitter(AshAggregatedResults())
@@ -506,13 +524,16 @@ class TestAWorkspaceFindingIsGradedByItsProjectsGate:
 
 
 class TestALowercaseRecordedGateLabelsAFindingActionableInEveryReport:
-    """A project declared ``medium`` fails on a HIGH finding; the reports say so.
+    """A project declared ``low`` fails on a LOW finding; the reports say so.
 
     The exit code upper-cases a project's gate before the ladder reads it. The
     emitter passed the recorded spelling to the case-sensitive ladder, which
     reads a name it does not know as CRITICAL, so the HTML, Markdown and text
-    reports labelled a HIGH finding "below threshold" for a project the exit
-    code failed. The three reports read one normalized table now.
+    reports labelled a finding "below threshold" for a project the exit code
+    failed. The three reports read one normalized table now. The gate and the
+    finding are both below ASH's default (MEDIUM), so a reader that ignored the
+    unknown name and fell back to the default would label the finding below
+    threshold too, and the reports tell it from one that normalizes.
     """
 
     @pytest.fixture
@@ -527,9 +548,9 @@ class TestALowercaseRecordedGateLabelsAFindingActionableInEveryReport:
                         "tool": {"driver": {"name": "ASH"}},
                         "results": [
                             {
-                                "ruleId": "RULE-HIGH",
-                                "level": "error",
-                                "message": {"text": "a high finding"},
+                                "ruleId": "RULE-LOW",
+                                "level": "note",
+                                "message": {"text": "a low finding"},
                                 "locations": [
                                     {
                                         "physicalLocation": {
@@ -549,7 +570,7 @@ class TestALowercaseRecordedGateLabelsAFindingActionableInEveryReport:
             }
         )
         model.workspace = _workspace(
-            tmp_path, _project("lower", severity_threshold="medium")
+            tmp_path, _project("lower", severity_threshold="low")
         )
         return model
 
@@ -600,7 +621,11 @@ class TestANoChangesSkipIsNotAnIncompleteScan:
         summary = ReportContentEmitter(
             self._model(tmp_path, SkippedProjectReason.NO_CHANGES)
         ).get_scan_summary()
-        assert summary["title"] != "Scan incomplete", summary
+        # The exact reading: a clean no-op over a completed scanner. Any title
+        # other than "Scan incomplete" would pass the weaker check, a "Review
+        # required" over findings that do not exist among them.
+        assert summary["title"] == "No actionable findings", summary
+        assert summary["tone"] == "success", summary
 
     def test_an_error_skip_still_makes_the_run_incomplete(self, tmp_path):
         summary = ReportContentEmitter(
@@ -670,7 +695,13 @@ class TestAScannerInErrorForAStaleDatabaseCounts:
         summary = ReportContentEmitter(self._model()).get_scan_summary()
         assert summary["completed"] == 1, summary
         assert "grype" not in summary["unavailable"], summary
-        assert summary["title"] != "No scanners completed", summary
+        # The fixture's record fails the scan, so the run exits non-zero. The
+        # headline must not read as a clean pass: it names the database, in a
+        # tone that is not success. (Any title but "No scanners completed" would
+        # accept "No actionable findings" in the success tone, the disagreement
+        # with the exit code this module exists to remove.)
+        assert summary["title"] == "Scan needs attention", summary
+        assert summary["tone"] != "success", summary
         assert summary["stale"], "the stale notice still names the database"
 
     def test_a_scanner_in_error_for_another_reason_still_needs_attention(self):
@@ -700,3 +731,43 @@ class TestASnippetIsTextOrNothing:
 
     def test_a_string_snippet_is_returned_as_written(self):
         assert self._snippet({"snippet": "y = 2"}) == "y = 2"
+
+    @pytest.mark.parametrize(
+        "snippet",
+        [{"text": 5}, {"text": ["x = 1"]}, {"text": None}, ["x = 1"], None],
+        ids=repr,
+    )
+    def test_a_snippet_whose_text_is_not_a_string_yields_nothing(self, snippet):
+        """The object form with a text that is no string: a reader that returns
+        ``snippet.get("text")`` without a type check passes the cases above and
+        still hands a number or a list to the renderer."""
+        assert self._snippet({"snippet": snippet}) is None
+
+    @pytest.mark.parametrize(
+        "snippet", [5, {"text": 5}, {"text": ["x = 1"]}, ["x = 1"]], ids=repr
+    )
+    def test_the_markdown_report_renders_a_finding_whose_snippet_is_not_text(
+        self, monkeypatch, test_plugin_context, snippet
+    ):
+        """The crash this guards was in the Markdown renderer, which passes the
+        snippet to the shown-text helpers: it is tested there, not only at the
+        private extractor."""
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
+            MarkdownReporter,
+        )
+
+        vuln = _vuln(
+            severity="HIGH",
+            file_path="app.py",
+            line_start=1,
+            raw_data=json.dumps({"snippet": snippet}),
+        )
+        monkeypatch.setattr(
+            AshAggregatedResults, "to_flat_vulnerabilities", lambda self: [vuln]
+        )
+
+        document = MarkdownReporter(context=test_plugin_context).report(
+            AshAggregatedResults()
+        )
+
+        assert "a finding" in document, document[:2000]

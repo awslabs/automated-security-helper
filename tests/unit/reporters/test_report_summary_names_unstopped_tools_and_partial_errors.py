@@ -75,8 +75,13 @@ class TestAToolThatCouldNotBeStoppedIsNamed:
         assert "pid 4242" in document, document[:3000]
         assert "not stopped" in document.lower(), document[:3000]
 
+    @pytest.mark.parametrize(
+        "reporter",
+        [HtmlReporter, MarkdownReporter, TextReporter],
+        ids=lambda r: r.__name__,
+    )
     def test_a_run_whose_tools_stopped_carries_no_such_notice(
-        self, test_plugin_context
+        self, reporter, test_plugin_context
     ):
         model = _model(
             {
@@ -89,8 +94,12 @@ class TestAToolThatCouldNotBeStoppedIsNamed:
                 }
             }
         )
-        document = TextReporter(context=test_plugin_context).report(model)
-        assert "NOT STOPPED" not in document
+        document = reporter(context=test_plugin_context).report(model)
+        # The spelling the positive check above uses, in all three reporters:
+        # the text report writes the heading in capitals, the others in
+        # sentence case, so a case-sensitive control for one spelling would
+        # pass a report that wrote the other on every run.
+        assert "not stopped" not in document.lower()
         assert ReportContentEmitter(model).get_scan_summary()["could_not_stop"] == []
 
 
@@ -122,5 +131,46 @@ class TestAPartialLossErrorScannerCountsAsRun:
         summary = ReportContentEmitter(
             _model(self._report("ERROR", 3, 3))
         ).get_scan_summary()
+        assert summary["completed"] == 0, summary
+        assert "cdk-nag" in summary["unavailable"], summary
+
+    @pytest.mark.parametrize(
+        "counters",
+        [
+            {"targets_failed": 2},
+            {"targets_attempted": None, "targets_failed": 2},
+            {"targets_attempted": 3, "targets_failed": 0},
+            {"targets_attempted": 3},
+            {},
+        ],
+        ids=[
+            "failed-without-attempted",
+            "failed-with-attempted-none",
+            "error-with-no-failed-targets",
+            "attempted-without-failed",
+            "no-counters",
+        ],
+    )
+    def test_an_error_with_no_readable_partial_loss_still_needs_attention(
+        self, counters
+    ):
+        """The docstring's other half: a total loss and an unknown-size loss do
+        not count as run. A loose "has a shortfall field" check would let these
+        through: a failure count with no attempt count (the size is unknown), an
+        ERROR whose failed count is zero (nothing was lost, so something else
+        is wrong), and an ERROR with no usable counters."""
+        report = {
+            "cdk-nag": {
+                "source": {
+                    "scanner_name": "cdk-nag",
+                    "status": "ERROR",
+                    "duration": 1.0,
+                    **counters,
+                }
+            }
+        }
+
+        summary = ReportContentEmitter(_model(report)).get_scan_summary()
+
         assert summary["completed"] == 0, summary
         assert "cdk-nag" in summary["unavailable"], summary
