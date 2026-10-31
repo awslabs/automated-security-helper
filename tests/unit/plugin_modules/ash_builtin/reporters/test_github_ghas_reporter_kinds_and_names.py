@@ -25,10 +25,13 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_
     GHASReporter,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactLocation,
     Kind,
     Level,
+    Location,
     Message,
     MultiformatMessageString,
+    PhysicalLocation,
     PropertyBag,
     ReportingDescriptor,
     Result,
@@ -108,6 +111,45 @@ class TestUnjudgedKindsAreCounted:
 
         warned = [call.args[0] for call in logger.warning.call_args_list]
         assert not any("of kind" in message for message in warned)
+
+    def test_a_document_refused_for_its_base_ids_still_counts_the_kinds(
+        self, reporter, monkeypatch
+    ):
+        """Two runs that declare one base id differently cannot share a table
+        and the document is not written; the open results it held are still
+        counted in the log."""
+        logger = MagicMock()
+        monkeypatch.setattr(github_ghas_reporter, "ASH_LOGGER", logger)
+        location = Location(
+            physicalLocation=PhysicalLocation(
+                artifactLocation=ArtifactLocation(uri="a.py", uriBaseId="SRCROOT")
+            )
+        )
+
+        def run(base_uri: str, kind: Kind = Kind.fail) -> Run:
+            return Run(
+                tool=Tool(driver=ToolComponent(name="ASH")),
+                results=[
+                    Result(
+                        ruleId="A",
+                        kind=kind,
+                        level=Level.error,
+                        message=Message(text="a"),
+                        locations=[location],
+                    )
+                ],
+                originalUriBaseIds={"SRCROOT": ArtifactLocation(uri=base_uri)},
+            )
+
+        model = AshAggregatedResults()
+        model.sarif = SarifReport(
+            version="2.1.0",
+            runs=[run("file:///repo/"), run("file:///elsewhere/", Kind.open)],
+        )
+
+        assert reporter.report(model) is None
+        warned = [call.args[0] for call in logger.warning.call_args_list]
+        assert any("1 of kind 'open'" in message for message in warned)
 
 
 class TestScannerNameFallback:
