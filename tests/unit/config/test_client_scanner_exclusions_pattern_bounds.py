@@ -198,6 +198,9 @@ def _is_running(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # The process is there and not ours to signal; /proc says if it runs.
+        pass
     try:
         text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -239,6 +242,29 @@ def test_a_running_process_reads_as_running():
         child.kill()
         child.wait()
     assert not _is_running(child.pid)
+
+
+@pytest.mark.skipif(
+    not Path("/proc/self/stat").exists() or os.name != "posix",
+    reason="a zombie is told from a running process by /proc",
+)
+def test_a_signal_probe_that_is_refused_does_not_end_the_check(monkeypatch):
+    """``os.kill(pid, 0)`` raises ``PermissionError`` for a process that exists
+    under another user. That propagated out of the check; the process is
+    there, so /proc decides, and a running one reads as running. The probe is
+    replaced by one that only raises, so no signal is sent."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+
+        def refused(pid, signal_number):
+            raise PermissionError(1, "Operation not permitted")
+
+        with monkeypatch.context() as patched:
+            patched.setattr(os, "kill", refused)
+            assert _is_running(child.pid)
+    finally:
+        child.kill()
+        child.wait()
 
 
 @pytest.mark.skipif(
