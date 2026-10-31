@@ -719,9 +719,9 @@ class TestOcsfReporterHelperMethods:
         same uid; two builds show that as well as a hundred would."""
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         result = Result(
-            ruleId="STRESS_TEST",
+            ruleId="REPEAT_BUILD",
             level=Level.error,
-            message=Message(root=Message1(text="Stress test message")),
+            message=Message(root=Message1(text="Repeat build message")),
         )
 
         findings = []
