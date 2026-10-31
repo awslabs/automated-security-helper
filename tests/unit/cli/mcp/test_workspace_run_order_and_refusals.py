@@ -554,16 +554,23 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
         holder.start()
         assert held.wait(timeout=5)
 
+        errors: List[BaseException] = []
+
         def run() -> None:
-            with patch.object(
-                workspace_module, "execute_workspace", side_effect=lambda *a, **k: None
-            ):
-                workspace_module._under_session_lock(
-                    "clock-session",
-                    plan,
-                    settings,
-                    on_locked=lambda: order.append("clock started"),
-                )
+            try:
+                with patch.object(
+                    workspace_module,
+                    "execute_workspace",
+                    side_effect=lambda *a, **k: None,
+                ):
+                    workspace_module._under_session_lock(
+                        "clock-session",
+                        plan,
+                        settings,
+                        on_locked=lambda: order.append("clock started"),
+                    )
+            except BaseException as error:  # noqa: BLE001 -- re-raised below
+                errors.append(error)
 
         runner = threading.Thread(target=run)
         try:
@@ -574,6 +581,7 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
             runner.join(timeout=5)
             holder.join(timeout=5)
 
+            assert errors == [], errors
             assert order.index("releasing") < order.index("clock started"), order
         finally:
             # A failed assertion above must not leave the holder with the lock or
@@ -603,7 +611,11 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
         assert order == ["clock started"]
 
     def test_execute_hands_its_clock_to_the_lock(self, tmp_path):
-        """``_execute`` starts the clock through the lock, once, for a claimed session."""
+        """``_execute`` starts the clock through the lock, once, for a claimed session.
+
+        With no session the lock is skipped and the clock starts at once, so this
+        test only counts the call; the next one gives ``_execute`` a real session.
+        """
         order: List[str] = []
         plan = _plan(tmp_path)
         settings = _settings(tmp_path)
@@ -631,6 +643,80 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
             )
 
         assert order.count("clock started") == 1
+
+    def test_execute_waits_for_the_sessions_lock_before_its_clock(self, tmp_path):
+        """Through ``_execute`` with a real session: the clock waits for the lock.
+
+        The test above passes no session, so ``_under_session_lock`` never waits
+        and a clock armed before the lock passes it. Here the session's lock is
+        held by another thread, and the clock must not start until it is released.
+        """
+        from automated_security_helper.cli.mcp.sessions import (
+            get_default_registry,
+            reset_default_registry_for_tests,
+        )
+
+        reset_default_registry_for_tests()
+        session = get_default_registry().session_for("clock-session")
+        plan = _plan(tmp_path)
+        settings = _settings(tmp_path)
+        order: List[str] = []
+        held = threading.Event()
+        released = threading.Event()
+        errors: List[BaseException] = []
+
+        def hold_the_lock() -> None:
+            with session.lock:
+                order.append("lock held by another scan")
+                held.set()
+                released.wait(timeout=5)
+                order.append("releasing")
+
+        holder = threading.Thread(target=hold_the_lock)
+        holder.start()
+        assert held.wait(timeout=5)
+
+        def run() -> None:
+            try:
+                with (
+                    patch.object(
+                        workspace_module,
+                        "execute_workspace",
+                        side_effect=lambda p, s, **k: _result(p, s),
+                    ),
+                    patch.object(workspace_module, "ScanPresence") as presence,
+                ):
+                    presence.return_value.__enter__.return_value = None
+                    presence.return_value.__exit__.return_value = False
+                    asyncio.run(
+                        workspace_module._execute(
+                            plan=plan,
+                            settings=settings,
+                            project_outputs={},
+                            progress_reporter=None,
+                            session_id="clock-session",
+                            claim=_Claim(order),
+                            on_thread_start=lambda: order.append("clock started"),
+                        )
+                    )
+            except BaseException as error:  # noqa: BLE001 -- re-raised below
+                errors.append(error)
+
+        try:
+            runner = threading.Thread(target=run)
+            runner.start()
+            runner.join(timeout=0.5)
+            assert "clock started" not in order, order
+            released.set()
+            runner.join(timeout=5)
+            holder.join(timeout=5)
+
+            assert errors == [], errors
+            assert order.count("clock started") == 1, order
+            assert order.index("releasing") < order.index("clock started"), order
+        finally:
+            released.set()
+            reset_default_registry_for_tests()
 
 
 class TestTheWorkerSettlesBeforeItGivesTheClaimBack:
