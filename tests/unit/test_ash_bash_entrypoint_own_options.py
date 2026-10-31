@@ -221,12 +221,14 @@ def suite_python(tmp_path: Path) -> Path:
     symlink to it: a virtual environment's interpreter finds the environment's
     packages from the directory it is started in, so one reached through a link in
     some other directory ran as the base interpreter, without the CLI's
-    dependencies, and the three tests below failed with an import error."""
+    dependencies, and the three tests below failed with an import error. The script
+    names /bin/sh, not /bin/bash: the module's skip guard looks bash up on PATH, so a
+    script that named its own bash would fail where the guard passed."""
     bin_dir = tmp_path / "suite-python"
     bin_dir.mkdir()
     python = bin_dir / "python"
     python.write_text(
-        f'#!/bin/bash\nexec {shlex.quote(sys.executable)} "$@"\n', encoding="utf-8"
+        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n', encoding="utf-8"
     )
     python.chmod(0o755)
     return bin_dir
@@ -247,6 +249,20 @@ def test_the_suite_python_keeps_the_suites_own_environment(suite_python):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == sys.prefix, result.stderr
+
+
+def test_the_suite_python_script_names_an_interpreter_the_module_checked_for(
+    suite_python,
+):
+    """The fixture's script starts with a shebang, and the interpreter it names has to
+    be one this module's skip guard has already looked up: /bin/sh, or the bash that
+    `shutil.which("bash")` finds. A script that names /bin/bash while the guard
+    found bash somewhere else fails with "bad interpreter" on such a host, in the
+    three tests that put it first on PATH."""
+    first_line = (suite_python / "python").read_text(encoding="utf-8").splitlines()[0]
+    assert first_line.startswith("#!"), first_line
+    interpreter = first_line[2:].strip()
+    assert interpreter in ("/bin/sh", shutil.which("bash")), first_line
 
 
 def _dirs(tmp_path: Path):
