@@ -2275,19 +2275,15 @@ def _apply_unused_fixes(
 
     report_path, report_timestamp, age_seconds = report_info
 
-    # A report that lists scanners which did not run is not edited from (the
-    # fixer comments nothing out of it), so no question about its age is asked
-    # and the run does not end in a green "nothing to comment out" under lint's
-    # own notes: the reason is the line printed.
-    not_run = ConfigLinter.unused_report_scanners_not_run(report_path)
-    if not_run:
+    # A report the fixer comments nothing out of (one that cannot be read, that
+    # evaluated no suppression, or that lists scanners which did not run) is not
+    # edited from, so no question about its age is asked and the run does not
+    # end in a green "nothing to comment out" under lint's own notes: the
+    # reason, as the fixer's own check gives it, is the line printed.
+    blocker = ConfigLinter.unused_report_blocker(report_path)
+    if blocker is not None:
         secho(
-            shown_on_one_line(
-                "⚠️  Nothing is commented out: the unused suppressions report "
-                f"lists scanners that did not run ({', '.join(not_run)}), and it "
-                "does not record which suppressions belong to them. Run a scan in "
-                "which those scanners run, then run --fix-unused again."
-            ),
+            shown_on_one_line(f"⚠️  Nothing is commented out: {blocker}"),
             fg=typer.colors.YELLOW,
         )
         return False

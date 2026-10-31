@@ -738,22 +738,12 @@ class ConfigLinter:
         except (ValueError, OSError):
             return raw_content, [], report_timestamp
 
-        # A report whose scan evaluated no suppression (it ran with
-        # --ignore-suppressions) lists none as unused and says so; nothing
-        # is commented out on its account.
-        if report_data.get("not_evaluated"):
-            return raw_content, [], report_timestamp
-
-        # A report that lists scanners which did not run cannot say which of its
-        # entries belong to them: a suppression carries no scanner name, and the
-        # findings it would have matched were never reported. Every entry it
-        # lists is then in doubt, and commenting out a suppression that is in
-        # force makes the next full scan fail, so none is commented out. The
-        # reporter lists a scanner only when a later full scan would run it
-        # (tool missing, error, excluded for that run); one with nothing to scan
-        # or turned off in the configuration is not listed, so this skip does
-        # not fire on a scan where every scanner that could run did.
-        if cls._scanners_not_run_of(report_data):
+        # A report that cannot be edited from (its scan evaluated no suppression,
+        # or it lists scanners that did not run) comments nothing out. The
+        # command asks ``unused_report_blocker`` the same question before it
+        # asks about the report's age, so the reason is told once and the two
+        # cannot disagree.
+        if cls._report_blocker(report_data) is not None:
             return raw_content, [], report_timestamp
 
         unused_suppressions = report_data.get("unused_suppressions", [])
@@ -885,6 +875,61 @@ class ConfigLinter:
         if isinstance(listed, (list, tuple)):
             return [str(name) for name in listed]
         return [str(listed)]
+
+    @classmethod
+    def _report_blocker(cls, report_data: Dict[str, Any]) -> Optional[str]:
+        """Why nothing is commented out of a report that was read, else None.
+
+        A report whose scan evaluated no suppression (it ran with
+        --ignore-suppressions) lists none as unused and says so; nothing is
+        commented out on its account.
+
+        A report that lists scanners which did not run cannot say which of its
+        entries belong to them: a suppression carries no scanner name, and the
+        findings it would have matched were never reported. Every entry it
+        lists is then in doubt, and commenting out a suppression that is in
+        force makes the next full scan fail, so none is commented out. The
+        reporter lists a scanner only when a later full scan would run it (tool
+        missing, error, excluded for that run); one with nothing to scan or
+        turned off in the configuration is not listed, so this does not fire on
+        a scan where every scanner that could run did.
+        """
+        if report_data.get("not_evaluated"):
+            return (
+                "the unused suppressions report evaluated no suppression: the "
+                "scan ran with --ignore-suppressions. Run a scan without it, "
+                "then run --fix-unused again."
+            )
+        not_run = cls._scanners_not_run_of(report_data)
+        if not_run:
+            return (
+                "the unused suppressions report lists scanners that did not run "
+                f"({', '.join(not_run)}), and it does not record which "
+                "suppressions belong to them. Run a scan in which those scanners "
+                "run, then run --fix-unused again."
+            )
+        return None
+
+    @classmethod
+    def unused_report_blocker(cls, report_path: Path) -> Optional[str]:
+        """Why ``--fix-unused`` comments nothing out of the report at
+        ``report_path``, as a sentence; None when it can be edited from.
+
+        Public for the command, which says so before it asks about a report's
+        age: the fixer comments nothing out of an unreadable report, a
+        ``not_evaluated`` one or one that lists scanners which did not run
+        (``fix_unused_suppressions`` asks ``_report_blocker`` the same
+        question), and the command reported each of them as the green "nothing
+        to comment out" after the age question.
+        """
+        try:
+            report_data = cls._read_unused_report(report_path)
+        except (ValueError, OSError) as exc:
+            return (
+                f"the unused suppressions report could not be read ({exc}). "
+                "Run a scan to write it again, then run --fix-unused again."
+            )
+        return cls._report_blocker(report_data)
 
     @classmethod
     def unused_report_scanners_not_run(cls, report_path: Path) -> List[str]:
