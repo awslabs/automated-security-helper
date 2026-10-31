@@ -48,7 +48,8 @@ What crosses the process boundary, and why each piece does:
 - The parent's working directory. ``get_shortest_name`` names a template relative to the
   current directory, and those names appear in finding URIs, messages and synth output
   paths. The child cannot rely on its own working directory, which a sandbox may not
-  even let it enter, so it names templates against the parent's.
+  even let it enter, so it names templates against the parent's, by passing that directory
+  as the ``cwd`` argument of the shared ``get_shortest_name``.
 
 Failure and time limits. The scanner's ``scan_timeout`` bounds the BATCH: the first
 child gets the whole limit, and a child started after one died gets what is left of it,
@@ -79,6 +80,7 @@ from __future__ import annotations
 
 import builtins
 import contextvars
+import functools
 import json
 import logging
 import os
@@ -95,7 +97,6 @@ from typing import (
     IO,
     TYPE_CHECKING,
     Any,
-    Callable,
     Dict,
     Iterator,
     List,
@@ -142,42 +143,6 @@ class _RecordCollector(logging.Handler):
     def take(self) -> List[Dict[str, Any]]:
         taken, self.records = self.records, []
         return taken
-
-
-def _shortest_name_relative_to(cwd: Path) -> Callable[["str | Path"], "str | Path"]:
-    """``get_shortest_name`` as the parent process would compute it.
-
-    The logic of ``utils/get_shortest_name.py`` with the parent's working directory in
-    place of ``Path.cwd()``: a copy, because the shared helper reads the cwd of the process
-    that calls it, and this process may not be able to enter the parent's (a sandbox). The
-    one deliberate difference is the prefix test, which here requires the separator after
-    the working directory, so a sibling directory whose name merely starts with it is not
-    made relative; the shared helper's test is its own unit's.
-    """
-
-    def get_shortest_name(input: "str | Path") -> "str | Path":  # noqa: A002
-        if input == ".":
-            return input
-        in_path = Path(input)
-        probe = in_path if in_path.is_absolute() else cwd / in_path
-        if not probe.exists():
-            return input
-        input_posix = probe.absolute().as_posix()
-        cwd_posix = cwd.absolute().as_posix()
-        # The working directory as a path prefix: with the separator, so a sibling
-        # directory whose name merely starts with the working directory's name
-        # (``/work2/t.yaml`` beside ``/work``) is not taken for a path inside it.
-        # A bare string prefix test sent such a template into ``relative_to``,
-        # which raised ValueError, and the template was counted as a failed target.
-        cwd_prefix = cwd_posix if cwd_posix.endswith("/") else cwd_posix + "/"
-        shortest: "str | Path"
-        if input_posix.startswith(cwd_prefix):
-            shortest = probe.absolute().relative_to(cwd)
-        else:
-            shortest = input
-        return Path(shortest).as_posix()
-
-    return get_shortest_name
 
 
 def _exception_kind(exc: BaseException) -> str:
@@ -271,11 +236,17 @@ def _evaluate(request: Dict[str, Any], out: IO[str]) -> None:
     was working on is lost.
     """
     from automated_security_helper.utils import cdk_nag_wrapper
+    from automated_security_helper.utils.get_shortest_name import get_shortest_name
     from automated_security_helper.utils.log import ASH_LOGGER
 
     parent_cwd = Path(request["cwd"])
+    # The shared helper with the parent's working directory bound: this process may not
+    # be able to enter that directory (a sandbox), so the helper is told where the
+    # names are relative to instead of reading the cwd of the process it runs in.
     setattr(
-        cdk_nag_wrapper, "get_shortest_name", _shortest_name_relative_to(parent_cwd)
+        cdk_nag_wrapper,
+        "get_shortest_name",
+        functools.partial(get_shortest_name, cwd=parent_cwd),
     )
     try:
         os.chdir(parent_cwd)

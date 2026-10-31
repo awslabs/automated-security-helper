@@ -772,8 +772,8 @@ def test_logs_are_replayed_with_their_origin(tmp_path, monkeypatch, caplog):
 
 @pytest.mark.unit
 def test_template_names_match_get_shortest_name_in_the_parent(tmp_path, monkeypatch):
-    """Built from the parent's directory, then used from another one, as the child
-    does."""
+    """The shared helper told the parent's directory, then used from another one, as
+    the child does."""
     parent = tmp_path / "parent"
     inside = parent / "cfn" / "t.yaml"
     inside.parent.mkdir(parents=True)
@@ -783,10 +783,91 @@ def test_template_names_match_get_shortest_name_in_the_parent(tmp_path, monkeypa
     candidates = (inside, str(inside), Path(sys.executable), ".", "missing.yaml")
     monkeypatch.chdir(parent)
     expected = [get_shortest_name(c) for c in candidates]
-    emulated = cdk_nag_worker._shortest_name_relative_to(Path.cwd())
     monkeypatch.chdir(elsewhere)
-    assert [emulated(c) for c in candidates] == expected
-    assert emulated(inside) == "cfn/t.yaml"
+    assert [get_shortest_name(c, cwd=parent) for c in candidates] == expected
+    assert get_shortest_name(inside, cwd=parent) == "cfn/t.yaml"
+    # A relative name and the existence check are resolved against the given
+    # directory too, not against the directory the process is in.
+    assert get_shortest_name("cfn/t.yaml", cwd=parent) == "cfn/t.yaml"
+    assert get_shortest_name(Path("cfn/t.yaml"), cwd=parent) == "cfn/t.yaml"
+    assert not (elsewhere / "cfn" / "t.yaml").exists()
+
+
+@pytest.mark.unit
+def test_the_name_function_the_child_installs_is_the_shared_helper_for_the_parent(
+    tmp_path, monkeypatch
+):
+    """What ``_evaluate`` puts on the wrapper answers as ``get_shortest_name`` does in
+    the parent, for a path under the parent's directory and for paths outside it.
+
+    At the base the child installed a copy of the helper: it gave back a missing path
+    as it was given (a ``Path`` stayed a ``Path``) where the shared helper gives text,
+    so the two answered differently for a template that was not on disk.
+    """
+    import io
+
+    from automated_security_helper.utils import cdk_nag_wrapper
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    parent = tmp_path / "parent"
+    inside = parent / "cfn" / "t.yaml"
+    inside.parent.mkdir(parents=True)
+    inside.write_text("Resources: {}\n", encoding="utf-8")
+    sibling = tmp_path / "parent2" / "t.yaml"
+    sibling.parent.mkdir()
+    sibling.write_text("Resources: {}\n", encoding="utf-8")
+    elsewhere = tmp_path / "child"
+    elsewhere.mkdir()
+    candidates = (
+        inside,
+        str(inside),
+        sibling,
+        Path(sys.executable),
+        ".",
+        "missing.yaml",
+        Path("missing.yaml"),
+        "cfn/t.yaml",
+    )
+
+    seen: List[object] = []
+
+    def fake_run(**kwargs):
+        seen.append(cdk_nag_wrapper.get_shortest_name)
+        return None
+
+    # _evaluate rebinds the wrapper's name, the logger's handlers and its level, and
+    # changes directory; each is put back when the test ends.
+    monkeypatch.setattr(cdk_nag_wrapper, "run_cdk_nag_against_cfn_template", fake_run)
+    monkeypatch.setattr(
+        cdk_nag_wrapper, "get_shortest_name", cdk_nag_wrapper.get_shortest_name
+    )
+    monkeypatch.setattr(ASH_LOGGER, "handlers", list(ASH_LOGGER.handlers))
+    monkeypatch.setattr(ASH_LOGGER, "level", ASH_LOGGER.level)
+    monkeypatch.chdir(parent)
+    expected = [get_shortest_name(c) for c in candidates]
+
+    monkeypatch.chdir(elsewhere)
+    request = {
+        "cwd": str(parent),
+        "templates": [str(inside)],
+        "options": {
+            "nag_packs": ["AwsSolutionsChecks"],
+            "outdir": None,
+            "include_compliant_checks": False,
+            "stack_name": None,
+            "honor_template_suppressions": True,
+        },
+    }
+    cdk_nag_worker._evaluate(request, io.StringIO())
+    assert len(seen) == 1
+    installed = seen[0]
+    monkeypatch.chdir(elsewhere)
+
+    assert [installed(c) for c in candidates] == expected
+    assert installed(inside) == "cfn/t.yaml"
+    assert installed(sibling) == sibling.as_posix()
+    assert installed(Path("missing.yaml")) == "missing.yaml"
+    assert not hasattr(cdk_nag_worker, "_shortest_name_relative_to")
 
 
 @pytest.mark.integration
@@ -941,7 +1022,7 @@ def test_each_child_gets_a_directory_of_its_own(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# The child's shortest-name emulation: a sibling of the working directory
+# The child's shortest names: a sibling of the working directory
 # ---------------------------------------------------------------------------
 
 
@@ -949,20 +1030,21 @@ def test_each_child_gets_a_directory_of_its_own(tmp_path, monkeypatch):
 def test_a_sibling_directory_sharing_the_cwds_name_prefix_is_not_made_relative(
     tmp_path,
 ):
-    """``/work2/t.yaml`` is not inside ``/work``. At the base the bare string-prefix test
-    said it was, ``relative_to`` raised ValueError, and the template was counted as a
-    failed target."""
+    """``/work2/t.yaml`` is not inside ``/work``. With a bare string-prefix test the
+    sibling was taken for a path inside, ``relative_to`` raised ValueError, and the
+    template was counted as a failed target. The child names templates with the shared
+    helper told the parent's directory, so the helper's component test decides it."""
     cwd = tmp_path / "work"
     cwd.mkdir()
     sibling = tmp_path / "work2" / "t.yaml"
     sibling.parent.mkdir()
     sibling.write_text("Resources: {}\n", encoding="utf-8")
-    emulated = cdk_nag_worker._shortest_name_relative_to(cwd)
 
-    assert emulated(sibling) == sibling.as_posix()
+    assert get_shortest_name(sibling, cwd=cwd) == sibling.as_posix()
     inside = cwd / "t.yaml"
     inside.write_text("Resources: {}\n", encoding="utf-8")
-    assert emulated(inside) == "t.yaml"
+    assert get_shortest_name(inside, cwd=cwd) == "t.yaml"
+    assert get_shortest_name(cwd, cwd=cwd) == cwd.as_posix()
 
 
 # ---------------------------------------------------------------------------

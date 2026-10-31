@@ -16,18 +16,28 @@ from pathlib import Path
 # The A001 on the body WAS fixed: reassigning the parameter was never part of any
 # contract, and the reassignment also changed the bound type (str -> Path)
 # midway, which is worth removing on its own.
-def get_shortest_name(input: str | Path):  # noqa: A002
+#
+# `cwd` names the directory the answer is relative to. It defaults to the working
+# directory of the calling process. A caller that computes names for another process,
+# such as the cdk-nag worker child naming templates against its parent's directory,
+# passes that directory: a relative input and the existence check are then resolved
+# against it too, so the answer does not depend on where the caller happens to be
+# running (or on whether it can enter that directory at all).
+def get_shortest_name(input: str | Path, cwd: Path | None = None):  # noqa: A002
     if input == ".":
         # Just return the input, it's already referencing the relative path to CWD
         return input
     in_path = Path(input)
-    if not in_path.exists():
+    base = None if cwd is None else Path(cwd).absolute()
+    probe = in_path if base is None or in_path.is_absolute() else base / in_path
+    if not probe.exists():
         # Not an existing path: returned as given, as text. Callers put the result
         # in str-typed SARIF fields (artifactLocation.uri, working_directory), and a
         # Path handed back unchanged reached them as a Path.
         return input if isinstance(input, str) else input.as_posix()
-    cwd = Path.cwd().absolute()
-    absolute = in_path.absolute()
+    if base is None:
+        base = Path.cwd().absolute()
+    absolute = probe.absolute()
     # Annotated because the two branches bind different types: relative_to() gives a
     # Path, while `input` is still str | Path. Without this mypy infers Path from the
     # first branch and rejects the second -- the union is the honest type here, and
@@ -37,9 +47,9 @@ def get_shortest_name(input: str | Path):  # noqa: A002
     # /work/app-src/f starts with the cwd's text but is not below it, and
     # relative_to() then raised ValueError out of every scanner and converter that
     # names a file this way.
-    if absolute != cwd and absolute.is_relative_to(cwd):
+    if absolute != base and absolute.is_relative_to(base):
         # If input is below the cwd, use the relative path
-        shortest = absolute.relative_to(cwd)
+        shortest = absolute.relative_to(base)
     else:
         shortest = input
     return Path(shortest).as_posix()
