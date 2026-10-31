@@ -186,6 +186,11 @@ def test_a_values_hook_that_raises_refuses_the_copy_on_path(
     Fails at the tip that returned True from the value-free arm (the check
     answered True and no reason was recorded), and at the base, where the
     exception escaped ``_validate_tool_dependencies``.
+
+    The reason offers no uv remedy either: the mixin's run path refuses the uv
+    route on the same hook failure, so installing uv would not make the scan run.
+    That row fails at the previous tip, whose reason ended "or install uv so ASH
+    can run a verified copy".
     """
     scanner = _scanner(test_plugin_context, monkeypatch)
     seen: list = []
@@ -202,6 +207,7 @@ def test_a_values_hook_that_raises_refuses_the_copy_on_path(
     reason = scanner.dependency_unavailable_reason or ""
     assert "values hook" in reason and "RuntimeError" in reason, reason
     assert BINARY not in reason, reason
+    assert "install uv" not in reason, reason
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any(
         "RuntimeError" in line and "not verified" in line for line in warnings

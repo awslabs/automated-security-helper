@@ -323,8 +323,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             self.dependency_unavailable_reason = (
                 f"{self.command} cannot be used: the plugin's values hook {failure}, "
                 "so the copy on PATH could not be verified and its records could "
-                "not be redacted. Fix the plugin's values hook, or install uv so ASH "
-                "can run a verified copy."
+                "not be redacted. Fix the plugin's values hook."
             )
             return False
         values: Tuple[str, ...] = read.values
