@@ -232,6 +232,7 @@ def test_the_grants_a_rewritten_section_carries_are_not_adopted(tmp_path):
                 # with the empty one there: a limit to nothing.
                 "read_path_scanners": [],
                 "env_scanners": [],
+                "environment": [],
             },
             id="a-rewritten-section-that-carries-a-list",
         ),

@@ -44,6 +44,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
 )
 from automated_security_helper.cli.mcp.sandbox import session_sandbox
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.sandbox.policy import DEFAULT_ENVIRONMENT
 
 pytestmark = pytest.mark.unit
 
@@ -390,6 +391,7 @@ def test_get_config_shows_the_bound_profile_as_the_base_for_an_upload(
         "extra_read_paths": ["/opt/ca"],
         "read_path_scanners": [],
         "env_scanners": [],
+        "environment": list(DEFAULT_ENVIRONMENT),
     }
     assert shown == _resolved_by_scan(_server["target"], uploaded).sandbox.model_dump()
 
@@ -406,6 +408,7 @@ def test_get_config_still_shows_the_operator_profiles_grants(_server) -> None:
         "extra_read_paths": ["/opt/ca"],
         "read_path_scanners": [],
         "env_scanners": [],
+        "environment": list(DEFAULT_ENVIRONMENT),
     }
     assert shown == _resolved_by_scan(_server["target"], bound).sandbox.model_dump()
 
@@ -426,6 +429,7 @@ def test_get_config_discovering_an_uploaded_config_does_not_show_its_grants(
         "extra_read_paths": ["/opt/ca"],
         "read_path_scanners": [],
         "env_scanners": [],
+        "environment": list(DEFAULT_ENVIRONMENT),
     }
 
 

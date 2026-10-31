@@ -45,6 +45,7 @@ from automated_security_helper.cli.mcp.sandbox import (
     session_sandbox,
 )
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.sandbox.policy import DEFAULT_ENVIRONMENT
 
 pytestmark = pytest.mark.unit
 
@@ -740,12 +741,13 @@ def test_get_config_shows_a_patched_profile_with_the_registered_grants(
     shown = mcp_get_config(config_path=bound, session_id=SESSION)
 
     assert shown["project_name"] == "x"
-    # The full dump also shows the two scanner grants the profile leaves at
-    # their defaults.
+    # The full dump also shows the two scanner grants and the environment list
+    # the profile leaves at their defaults.
     assert shown["sandbox"] == {
         **_GRANTS,
         "read_path_scanners": [],
         "env_scanners": [],
+        "environment": list(DEFAULT_ENVIRONMENT),
     }
 
 
