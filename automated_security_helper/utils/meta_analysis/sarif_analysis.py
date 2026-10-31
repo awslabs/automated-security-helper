@@ -110,7 +110,9 @@ def extract_result_summary(result: Dict) -> Dict:
 
 
 def validate_sarif_aggregation(
-    original_reports: Dict[str, Dict], aggregated_report: Dict
+    original_reports: Dict[str, Dict],
+    aggregated_report: Dict,
+    scan_root: Optional[str] = None,
 ) -> Dict:
     """
     Validate that all important fields from original scanner reports
@@ -132,6 +134,12 @@ def validate_sarif_aggregation(
     Args:
         original_reports: Dict mapping scanner names to their SARIF reports
         aggregated_report: The combined ASH SARIF report
+        scan_root: The directory the scan was run on, when known. With it a
+            result's file is compared whole relative to that root: a file the
+            aggregate wrote without a leading directory (``lib/a.py`` as
+            ``a.py``) is no longer read as the same file by the end of its
+            path. Without it, a relative path matches an absolute one that ends
+            with it.
 
     Returns:
         Dict with validation results and statistics
@@ -193,7 +201,7 @@ def validate_sarif_aggregation(
             for orig_result in _all_results(original_report)
         )
 
-    matches = _match_originals(originals, agg_results)
+    matches = _match_originals(originals, agg_results, scan_root)
 
     for (normalized_scanner_name, orig_result), matched_result in zip(
         originals, matches
@@ -207,7 +215,9 @@ def validate_sarif_aggregation(
             validation_results["summary"]["matched_findings"] += 1
 
             # Compare fields between original and matched result
-            missing_fields = compare_result_fields(orig_result, matched_result)
+            missing_fields = compare_result_fields(
+                orig_result, matched_result, scan_root
+            )
             stats["fields_compared"] += len(comparable_field_paths(orig_result))
             stats["fields_missing"] += len(missing_fields)
 
@@ -257,7 +267,9 @@ def _all_results(report: Dict) -> List[Dict]:
 
 
 def _match_originals(
-    originals: List[Tuple[str, Dict]], aggregated_results: List[Dict]
+    originals: List[Tuple[str, Dict]],
+    aggregated_results: List[Dict],
+    scan_root: Optional[str] = None,
 ) -> List[Optional[Dict]]:
     """The aggregated result each original stands for, or None, in order.
 
@@ -283,6 +295,7 @@ def _match_originals(
                 exclude_ids=taken_ids,
                 scanner_name=scanner_name,
                 exact_only=exact_only,
+                scan_root=scan_root,
             )
             if found:
                 taken_ids.add(id(found))
@@ -326,6 +339,7 @@ def find_matching_result(
     exclude_ids: Optional[Set[int]] = None,
     scanner_name: Optional[str] = None,
     exact_only: bool = False,
+    scan_root: Optional[str] = None,
 ) -> Optional[Dict]:
     """
     Find a matching result in the aggregated report using rule ID and location.
@@ -357,6 +371,8 @@ def find_matching_result(
             file and lines (or, for results with no location, with an equal
             message or ``analysisTarget``). ``validate_sarif_aggregation`` takes
             every original's exact match this way before it offers overlaps.
+        scan_root: The directory the scan was run on, when known: files are
+            then compared whole relative to it (see ``file_paths_match``)
 
     Returns:
         Matching result or None
@@ -398,11 +414,11 @@ def find_matching_result(
             if (
                 original_located
                 and agg_located
-                and locations_match(location_info, agg_location)
+                and locations_match(location_info, agg_location, scan_root)
             ):
                 if rule_id is None and not _messages_agree(original_result, agg_result):
                     continue
-                if _locations_equal(location_info, agg_location):
+                if _locations_equal(location_info, agg_location, scan_root):
                     return agg_result
                 if overlapping_match is None:
                     overlapping_match = agg_result
@@ -425,7 +441,9 @@ def find_matching_result(
     return None if exact_only else overlapping_match
 
 
-def _locations_equal(location_info: Dict, other: Dict) -> bool:
+def _locations_equal(
+    location_info: Dict, other: Dict, scan_root: Optional[str] = None
+) -> bool:
     """Whether two ``extract_location_info`` dicts name one file and one line
     range: the same file once the URIs are read as paths, and equal start and
     end lines once digit strings are read as the integers they spell."""
@@ -437,7 +455,7 @@ def _locations_equal(location_info: Dict, other: Dict) -> bool:
     file_one, file_two = location_info.get("file_path"), other.get("file_path")
     if (file_one is None) != (file_two is None):
         return False
-    if file_one is not None and not file_paths_match(file_one, file_two):
+    if file_one is not None and not file_paths_match(file_one, file_two, scan_root):
         return False
     return all(
         _line_number(location_info.get(key)) == _line_number(other.get(key))

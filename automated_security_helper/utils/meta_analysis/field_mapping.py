@@ -382,7 +382,9 @@ def comparable_field_paths(result: Dict) -> List[str]:
     return paths
 
 
-def _leaf_values_equivalent(path: str, original: Any, aggregated: Any) -> bool:
+def _leaf_values_equivalent(
+    path: str, original: Any, aggregated: Any, scan_root: Optional[str] = None
+) -> bool:
     """Whether the aggregated leaf at *path* carries the original's value.
 
     A location's file URI is compared as a path (``file:///work/src/a.py`` and
@@ -399,11 +401,15 @@ def _leaf_values_equivalent(path: str, original: Any, aggregated: Any) -> bool:
         and isinstance(original, str)
         and isinstance(aggregated, str)
     ):
-        return file_paths_match(original, aggregated)
+        return file_paths_match(original, aggregated, scan_root)
     return are_values_equivalent(original, aggregated)
 
 
-def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> List[Dict]:
+def compare_result_fields(
+    original_result: Dict,
+    aggregated_result: Dict,
+    scan_root: Optional[str] = None,
+) -> List[Dict]:
     """
     Compare fields between original and aggregated results.
 
@@ -419,6 +425,9 @@ def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> Lis
     Args:
         original_result: Result from original scanner report
         aggregated_result: Matching result from aggregated report
+        scan_root: The directory the scan was run on, when known: with it a
+            location's file is compared whole relative to that root, not by the
+            end of its path (see ``file_paths_match``)
 
     Returns:
         List of missing fields with their importance
@@ -431,7 +440,7 @@ def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> Lis
         original = get_value_from_path(original_result, path)
         aggregated = get_value_from_path(aggregated_result, path)
         if aggregated["exists"] and _leaf_values_equivalent(
-            path, original["value"], aggregated["value"]
+            path, original["value"], aggregated["value"], scan_root
         ):
             continue
         missing_fields.append(

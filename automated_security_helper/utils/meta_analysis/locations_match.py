@@ -2,7 +2,7 @@ from typing import Dict, Optional
 from urllib.parse import unquote
 
 
-def locations_match(loc1: Dict, loc2: Dict) -> bool:
+def locations_match(loc1: Dict, loc2: Dict, scan_root: Optional[str] = None) -> bool:
     """
     Check if two locations match, allowing for path normalization and flexible matching.
 
@@ -23,6 +23,8 @@ def locations_match(loc1: Dict, loc2: Dict) -> bool:
     Args:
         loc1: First location (can be SARIF format or simple format)
         loc2: Second location (can be SARIF format or simple format)
+        scan_root: The directory the scan was run on, when known: see
+            :func:`file_paths_match`
 
     Returns:
         True if locations match or are compatible
@@ -46,7 +48,7 @@ def locations_match(loc1: Dict, loc2: Dict) -> bool:
     # URIs (a file:// URI or an absolute path becomes a path relative to the scan
     # root), so the two spellings are compared as paths, not as text.
     if file1 and file2:
-        if not file_paths_match(file1, file2):
+        if not file_paths_match(file1, file2, scan_root):
             return False
     # If one has a file path and the other doesn't, they don't match
     elif file1 or file2:
@@ -195,16 +197,35 @@ def _normalize_file_path(path: str) -> str:
     return text.rstrip("/")
 
 
-def file_paths_match(file1: str, file2: str) -> bool:
+def _below_root(path: str, root: str) -> str:
+    """*path* (normalized) as a path relative to *root* (normalized) when it is
+    below it, else unchanged."""
+    if root and path.startswith(root + "/"):
+        return path[len(root) + 1 :]
+    return path
+
+
+def file_paths_match(file1: str, file2: str, scan_root: Optional[str] = None) -> bool:
     """Whether two location URIs name the same file.
 
     Equal once normalized, or one is absolute and the other, relative, is its
     tail at a component boundary: ``/work/app/src/a.py`` and ``src/a.py`` are one
     file. Two relative paths are compared whole, so ``src/a.py`` and
     ``other/src/a.py`` stay two files.
+
+    The tail rule cannot tell which file an absolute path means when two files of
+    the scan share their end (``src/main.py`` and ``services/api/src/main.py``),
+    and it reads an aggregate that dropped a leading directory (``lib/a.py``
+    written ``a.py``) as a file kept. With *scan_root*, the directory the scan was
+    run on, a path below it is read as the path relative to it and the two are
+    compared whole: no tail is ever matched, and an absolute path outside the
+    root names no file of the aggregate.
     """
     norm1 = _normalize_file_path(file1)
     norm2 = _normalize_file_path(file2)
+    if scan_root:
+        root = _normalize_file_path(scan_root)
+        return _below_root(norm1, root) == _below_root(norm2, root)
     if norm1 == norm2:
         return True
     for longer, shorter in ((norm1, norm2), (norm2, norm1)):
