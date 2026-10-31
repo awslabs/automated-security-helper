@@ -1003,19 +1003,28 @@ def _lenient_document(text: str) -> tuple[bool, Any]:
 
 def _structure_says_template(text: str) -> bool:
     """For text the template parser rejected: is its STRUCTURE a template? True when
-    a lenient reading (:func:`_lenient_document`) yields a mapping with a ``Resources``
-    mapping; False when the root is a sequence, when neither reading yields a
-    document, or when the document is not that shape. The marker plays no part: this
-    is the read that makes an undecodable candidate a failed target
-    (:func:`judge_undecodable_candidate`, :func:`unmarked_wide_template_reason`)."""
+    the document is a mapping with a ``Resources`` mapping; False when the root is a
+    sequence, when the text is not a document, or when the document is not that
+    shape. The marker plays no part: this is the read that makes an undecodable
+    candidate a failed target (:func:`judge_undecodable_candidate`,
+    :func:`unmarked_wide_template_reason`).
+
+    A lenient reading (:func:`_lenient_document`) answers when it yields a document.
+    When neither lenient reading does, the shape is read the way the UTF-8 route
+    reads it (:func:`_has_top_level_resources`, which builds no value), so a value
+    no constructor can build (``!!int forty-two``), a merge chain past its bound or
+    a document nested past the recursion limit does not hide a ``Resources``
+    mapping on any route. Without that fallback a template saved as cp1252 or as
+    UTF-16 without a byte-order mark, with one such value in it, read as a file that
+    could not be parsed where its UTF-8 twin is a failed target."""
     if _root_is_a_sequence(text):
         return False
     parsed, document = _lenient_document(text)
-    return (
-        parsed
-        and isinstance(document, Mapping)
-        and isinstance(document.get("Resources"), Mapping)
-    )
+    if parsed:
+        return isinstance(document, Mapping) and isinstance(
+            document.get("Resources"), Mapping
+        )
+    return _has_top_level_resources(text)
 
 
 def _could_be_a_template(text: str) -> bool:

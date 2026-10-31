@@ -414,6 +414,75 @@ def test_a_marker_only_template_without_a_byte_order_mark_is_skipped_as_unparsea
     assert not any("did not evaluate" in e and name in e for e in scanner.errors)
 
 
+def test_a_value_that_cannot_be_built_fails_the_template_in_any_encoding(
+    scanner, deps_available, subprocess_double
+):
+    """One template with a Resources mapping and an int tag on a word, saved as
+    UTF-8, as cp1252 and as UTF-16 without a byte-order mark. The structure is a
+    template and a value in it cannot be built, so each copy is a failed target
+    named in the error record. At the previous tip the cp1252 and UTF-16 copies were
+    decided by a read that builds values, which raised on the int tag and found no
+    document: each was skipped as a template that could not be parsed and counted
+    as nothing, where the UTF-8 copy failed the scan."""
+    stack = (
+        "# Queue settings\n"
+        "Resources:\n"
+        "  Q:\n"
+        "    Type: AWS::SQS::Queue\n"
+        "    Properties:\n"
+        "      DelaySeconds: !!int forty-two\n"
+    )
+    accent = stack.replace("# Queue settings", "# Warteschlange für die Queue")
+    work = scanner.context.work_dir
+    (work / "unbuildable-utf8.yaml").write_bytes(stack.encode("utf-8"))
+    (work / "unbuildable-cp1252.yaml").write_bytes(accent.encode("cp1252"))
+    (work / "unbuildable-utf16-nomark.yaml").write_bytes(stack.encode("utf-16-le"))
+    (work / "role.yaml").write_text(CFN_TEMPLATE)
+
+    report = scanner.scan(target=work, target_type="converted")
+
+    assert subprocess_double.call_count == 1
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert scanner.targets_attempted == 4
+    assert scanner.targets_failed == 3
+    for name in (
+        "unbuildable-utf8.yaml",
+        "unbuildable-cp1252.yaml",
+        "unbuildable-utf16-nomark.yaml",
+    ):
+        named = [e for e in scanner.errors if "did not evaluate" in e and name in e]
+        assert len(named) == 1, (name, scanner.errors)
+        assert any(name in t for t in scanner.unevaluated_targets), name
+        assert not any("Skipped" in e and name in e for e in scanner.errors), name
+
+
+def test_a_value_that_cannot_be_built_in_a_file_without_resources_is_skipped(
+    scanner, deps_available, subprocess_double
+):
+    """The control of the test above: the same int tag in a file with no Resources
+    mapping is no template, so the non-UTF-8 copy is skipped as not CloudFormation
+    and counted as nothing, whatever the tag."""
+    settings = (
+        "# Warteschlange für die Queue\nsettings:\n  DelaySeconds: !!int forty-two\n"
+    )
+    (scanner.context.work_dir / "settings-cp1252.yaml").write_bytes(
+        settings.encode("cp1252")
+    )
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert subprocess_double.call_count == 1
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 0
+    assert not scanner.unevaluated_targets
+    skipped = [
+        e for e in scanner.errors if "Skipped" in e and "settings-cp1252.yaml" in e
+    ]
+    assert len(skipped) == 1 and "not UTF-8" in skipped[0], scanner.errors
+
+
 def test_errors_are_reset_for_each_scan_call(scanner, deps_available):
     """A line recorded by an earlier scan() call is not carried into the next.
 

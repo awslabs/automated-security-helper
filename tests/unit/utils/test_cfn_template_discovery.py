@@ -225,6 +225,104 @@ def test_a_marker_only_template_without_a_byte_order_mark_reads_unparseable(cont
     assert len(found.templates) == 4
 
 
+# A real Resources mapping with one value no YAML constructor can build: the int tag
+# on a word. The shape is a template; the value is why ASH cannot evaluate it. The
+# accented comment makes the cp1252 copy invalid UTF-8, so that copy takes the
+# UnicodeDecodeError arm; the ASCII copy's UTF-16 and UTF-32 bytes, written without a
+# byte-order mark, are valid UTF-8 and take the NUL-interleaved route.
+UNBUILDABLE_STACK = (
+    "# Queue settings\n"
+    "Resources:\n"
+    "  Q:\n"
+    "    Type: AWS::SQS::Queue\n"
+    "    Properties:\n"
+    "      DelaySeconds: !!int forty-two\n"
+)
+UNBUILDABLE_STACK_ACCENT = UNBUILDABLE_STACK.replace(
+    "# Queue settings", "# Warteschlange für die Queue"
+)
+
+
+@pytest.mark.unit
+def test_a_value_that_cannot_be_built_does_not_hide_a_template_in_any_encoding(
+    context,
+):
+    """One template with a Resources mapping and a value no constructor can build,
+    saved as UTF-8, as cp1252 and as UTF-16 and UTF-32 without a byte-order mark. The
+    UTF-8 copy is a failed target: the structure is read without building a value.
+    At the previous tip the other three were decided by a read that builds values,
+    which raised on the int tag and found no document, so each read as a file that
+    could not be parsed where its UTF-8 twin was a failed target, and saving a
+    template in another encoding refused it less. All four now read alike."""
+    source = Path(context.source_dir)
+    (source / "unbuildable-utf8.yaml").write_bytes(UNBUILDABLE_STACK.encode("utf-8"))
+    (source / "unbuildable-cp1252.yaml").write_bytes(
+        UNBUILDABLE_STACK_ACCENT.encode("cp1252")
+    )
+    (source / "unbuildable-utf16-nomark.yaml").write_bytes(
+        UNBUILDABLE_STACK.encode("utf-16-le")
+    )
+    (source / "unbuildable-utf32-nomark.yaml").write_bytes(
+        UNBUILDABLE_STACK.encode("utf-32-be")
+    )
+    # What routes each copy: the accented cp1252 bytes are not UTF-8; the wide
+    # copies' bytes are, since NUL is valid UTF-8.
+    with pytest.raises(UnicodeDecodeError):
+        UNBUILDABLE_STACK_ACCENT.encode("cp1252").decode("utf-8")
+    for name in ("unbuildable-utf16-nomark.yaml", "unbuildable-utf32-nomark.yaml"):
+        assert b"\x00" in (source / name).read_bytes()
+        (source / name).read_bytes().decode("utf-8")
+
+    found = discover_templates(context, "source")
+
+    assert sorted(display_path(p, source) for p, _ in found.unmodelable) == [
+        "custom.yaml",
+        "unbuildable-utf8.yaml",
+    ]
+    unreadable = dict(found.unreadable)
+    assert sorted(unreadable) == [
+        "unbuildable-cp1252.yaml",
+        "unbuildable-utf16-nomark.yaml",
+        "unbuildable-utf32-nomark.yaml",
+    ]
+    assert "UnicodeDecodeError" in unreadable["unbuildable-cp1252.yaml"], unreadable
+    assert (
+        "UTF-16 text without a byte-order mark"
+        in unreadable["unbuildable-utf16-nomark.yaml"]
+    )
+    assert (
+        "UTF-32 text without a byte-order mark"
+        in unreadable["unbuildable-utf32-nomark.yaml"]
+    )
+    assert found.unparseable == []
+    assert found.skipped == []
+    assert len(found.templates) == 4
+
+
+@pytest.mark.unit
+def test_a_value_that_cannot_be_built_in_a_file_without_resources_is_not_a_template(
+    context,
+):
+    """The same unbuildable int tag in a file with no Resources mapping is no
+    template in any encoding: the structure read that finds the mapping in the test
+    above finds none here, so the non-UTF-8 copy is skipped as not CloudFormation and
+    the UTF-16 copy is not named at all, as their UTF-8 twin is not."""
+    source = Path(context.source_dir)
+    settings = "# Queue settings\nsettings:\n  DelaySeconds: !!int forty-two\n"
+    accent = settings.replace("# Queue settings", "# Warteschlange für die Queue")
+    (source / "settings-utf8.yaml").write_bytes(settings.encode("utf-8"))
+    (source / "settings-cp1252.yaml").write_bytes(accent.encode("cp1252"))
+    (source / "settings-utf16-nomark.yaml").write_bytes(settings.encode("utf-16-le"))
+
+    found = discover_templates(context, "source")
+
+    assert [shown for shown, _ in found.skipped] == ["settings-cp1252.yaml"]
+    assert [p.name for p, _ in found.unmodelable] == ["custom.yaml"]
+    assert found.unreadable == []
+    assert found.unparseable == []
+    assert len(found.templates) == 4
+
+
 @pytest.mark.unit
 def test_a_second_read_that_fails_is_answered_as_a_template(context):
     """The judgment reads the candidate again; a file gone or swapped under the
