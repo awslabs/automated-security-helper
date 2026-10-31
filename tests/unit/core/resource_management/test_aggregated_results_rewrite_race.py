@@ -35,19 +35,20 @@ deterministic in the direction that matters: it cannot fail on correct code.
 from __future__ import annotations
 
 import contextlib
-import io
 import json
 import os
 import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable, List, Tuple
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.resource_management import error_handling
 from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
 )
@@ -214,35 +215,56 @@ def test_a_failed_atomic_write_keeps_the_old_file_and_removes_the_staging_file(
     assert sorted(p.name for p in tmp_path.iterdir()) == [target.name]
 
 
+class _OsWith:
+    """The ``os`` module with some functions replaced, for one module's binding.
+
+    Replacing ``error_handling.os`` reaches that module alone. Patching ``os.open``
+    itself would replace it for the whole process while the test runs, and pathlib,
+    logging and pytest call it too.
+    """
+
+    def __init__(self, **replacements) -> None:
+        self.__dict__.update(replacements)
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
 class _SharingViolationOnOpen:
     """Fail the first ``failures`` opens of one file the way Windows does mid-replace.
 
     ``os.replace`` on Windows holds the file without read sharing while it swaps it,
     and a reader's open in that window raises ``PermissionError`` (errno 13). That is
-    what the race tests above hit on the Windows legs. Both ``builtins.open`` and
-    ``io.open`` are wrapped so the fault reaches the reader whichever one it calls.
+    what the race tests above hit on the Windows legs.
+
+    The reader opens the file by descriptor (``os.open``, then ``os.fdopen``), never
+    through ``builtins.open``, so the fault is planted on the reader module's own
+    ``os.open``. Its pause between attempts is replaced on the module's own ``time``
+    binding and recorded in ``sleeps``, so a bounded retry costs no real time and
+    the test can say how many pauses the retry took.
     """
 
     def __init__(self, target: Path, failures: int) -> None:
         self.target = Path(target)
         self.remaining = failures
         self.opens_of_target = 0
-        self._real_open = io.open
+        self.sleeps: List[float] = []
 
-    def __call__(self, file, *args, **kwargs):
-        if isinstance(file, (str, os.PathLike)) and Path(file) == self.target:
+    def __call__(self, path, flags, *args, **kwargs):
+        if isinstance(path, (str, os.PathLike)) and Path(path) == self.target:
             self.opens_of_target += 1
             if self.remaining > 0:
                 self.remaining -= 1
-                raise PermissionError(13, "Permission denied", str(file))
-        return self._real_open(file, *args, **kwargs)
+                raise PermissionError(13, "Permission denied", str(path))
+        return os.open(path, flags, *args, **kwargs)
 
     def installed(self):
         stack = contextlib.ExitStack()
-        stack.enter_context(patch("builtins.open", self))
-        stack.enter_context(patch("io.open", self))
+        stack.enter_context(patch.object(error_handling, "os", _OsWith(open=self)))
         stack.enter_context(
-            patch("automated_security_helper.utils.atomic_write.time.sleep")
+            patch.object(
+                error_handling, "time", SimpleNamespace(sleep=self.sleeps.append)
+            )
         )
         return stack
 
@@ -269,6 +291,7 @@ def test_a_windows_read_that_lands_inside_a_replace_is_retried(tmp_path: Path) -
     assert data == {"scanner_results": {"bandit": {}}}
     # Control: the fault fired three times, so the read was retried, not unaffected.
     assert fault.opens_of_target == 4
+    assert fault.sleeps == [error_handling._REPLACED_FILE_BACKOFF_SECONDS] * 3
 
 
 def test_a_windows_file_that_stays_unreadable_is_still_an_error(tmp_path: Path) -> None:
@@ -276,7 +299,6 @@ def test_a_windows_file_that_stays_unreadable_is_still_an_error(tmp_path: Path) 
     from automated_security_helper.core.resource_management.error_handling import (
         safe_read_json_file,
     )
-    from automated_security_helper.utils.atomic_write import _REPLACE_ATTEMPTS
 
     target = _results_file(tmp_path)
     fault = _SharingViolationOnOpen(target, failures=10_000)
@@ -289,7 +311,11 @@ def test_a_windows_file_that_stays_unreadable_is_still_an_error(tmp_path: Path) 
     # A read error, not a parse error: the file was never read, so nothing about
     # its contents is known.
     assert error.context["error_category"] == "permission_denied"
-    assert fault.opens_of_target == _REPLACE_ATTEMPTS
+    # The reader's own bound: every attempt opened the file, and the last one did
+    # not pause before it gave up.
+    attempts = error_handling._REPLACED_FILE_ATTEMPTS
+    assert fault.opens_of_target == attempts
+    assert len(fault.sleeps) == attempts - 1
 
 
 def test_a_posix_permission_error_is_not_retried(tmp_path: Path) -> None:
@@ -309,6 +335,7 @@ def test_a_posix_permission_error_is_not_retried(tmp_path: Path) -> None:
     # its contents is known.
     assert error.context["error_category"] == "permission_denied"
     assert fault.opens_of_target == 1
+    assert fault.sleeps == []
 
 
 def test_an_atomic_write_gets_the_same_mode_as_a_plain_write(tmp_path: Path) -> None:
