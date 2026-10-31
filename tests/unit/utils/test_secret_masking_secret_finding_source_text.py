@@ -201,6 +201,36 @@ class TestASecretFindingsOwnSourceText:
         assert ASSIGN_LINE.rstrip("\n") not in text
         assert MASKED_LINE in text
 
+    def test_every_fenced_block_in_the_message_is_masked(self):
+        """The flat model reads the first fenced block as the finding's code, but
+        the Markdown and HTML reports render the whole message: a secret in the
+        second block is masked as well as one in the first."""
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.py",
+                2,
+                "Secret of type 'Keyword' detected\n\n```python\n"
+                + OTHER_LINE
+                + "```\n\nand again\n\n```python\n"
+                + ASSIGN_LINE
+                + "```",
+                "detect-secrets",
+            )
+        )
+
+        mask_secrets_in_results(model)
+
+        text = _first(model).message.root.text
+        two_lines = (MASKED_LINE + "\n") * 2
+        assert text == (
+            "Secret of type 'Keyword' detected\n\n```"
+            + two_lines
+            + "```\n\nand again\n\n```"
+            + two_lines
+            + "```"
+        )
+
     def test_the_markdown_and_arguments_of_the_message_are_masked(self):
         """A value that does not propagate is still masked in its own message,
         in every form the message carries it."""
