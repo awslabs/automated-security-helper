@@ -43,6 +43,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     SHOULD_EXCLUDE_FILE_FILTER,
     DetectSecretsScanner,
     DetectSecretsScannerConfig,
+    DetectSecretsScannerConfigOptions,
+    DetectSecretsScanSettings,
     DetectSecretsScanSettingsFiltersUsed,
 )
 
@@ -168,6 +170,68 @@ def test_the_worker_gets_neither_the_excluded_files_nor_the_filter(
         item.get("path") == SHOULD_EXCLUDE_FILE_FILTER
         for item in seen["scan_settings_dict"].get("filters_used", [])
     ), seen["scan_settings_dict"]
+
+
+def test_the_operators_patterns_are_not_labeled_as_the_baselines(
+    tmp_path, monkeypatch, caplog
+):
+    """A baseline is in use, and the pattern in play is the operator's own. The
+    two filter runs shared one label, so a timeout in the operator's pattern was
+    reported as 'loaded with the baseline ...', and the count of excluded files
+    was logged as the baseline's."""
+    context = _context(tmp_path)
+    tree = Path(context.source_dir)
+    _write(tree, "settings.py")
+    _write(tree, "tests/fixture.py")
+    _write(
+        tree,
+        ".secrets.baseline",
+        json.dumps(
+            {
+                "version": "1.5.0",
+                "plugins_used": [{"name": "AWSKeyDetector"}],
+                "filters_used": [],
+                "results": {},
+                "generated_at": "2026-01-01T00:00:00Z",
+            }
+        ),
+    )
+    monkeypatch.chdir(tmp_path)
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(
+                scan_settings=DetectSecretsScanSettings(
+                    filters_used=[
+                        DetectSecretsScanSettingsFiltersUsed(
+                            path=SHOULD_EXCLUDE_FILE_FILTER, pattern=[r"^tests/"]
+                        )
+                    ]
+                )
+            )
+        ),
+    )
+    assert scanner._baseline_in_use()
+    seen = _record_worker(scanner, monkeypatch)
+    labels: list[str] = []
+    real = DetectSecretsScanner._apply_file_exclusions
+
+    def recording(files, patterns, root=None, timeout=None, source=""):
+        if patterns:
+            labels.append(source)
+        return real(files, patterns, root, timeout, source)
+
+    monkeypatch.setattr(
+        DetectSecretsScanner, "_apply_file_exclusions", staticmethod(recording)
+    )
+
+    with caplog.at_level("DEBUG"):
+        scanner.scan(target=tree, target_type="source")
+
+    assert len(labels) == 1, labels
+    assert "loaded with the baseline" not in labels[0]
+    assert "tests/fixture.py" not in _relative_scan_paths(seen, tree)
+    assert "based on baseline exclude patterns" not in caplog.text
 
 
 def test_a_pattern_written_as_one_string_is_one_pattern(tmp_path, monkeypatch):

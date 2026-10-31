@@ -2703,12 +2703,15 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             scan_timeout = self.config.options.scan_timeout
             own_patterns, baseline_patterns = self._exclude_patterns_by_author(values)
             if own_patterns or baseline_patterns:
-                pre_filter_count = len(scannable)
-                pattern_source = (
+                # Each run is labeled with where its patterns came from, so a
+                # timeout in the operator's own patterns is not reported as the
+                # baseline's, and each run's count is its own.
+                own_source = (
                     "the should_exclude_file filter of scan_settings.filters_used"
                 )
+                baseline_source = own_source
                 if self._baseline_in_use():
-                    pattern_source += (
+                    baseline_source += (
                         f", loaded with the baseline "
                         f"{Path(self._baseline_file_path()).as_posix()}"
                     )
@@ -2719,31 +2722,42 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # value written with backslashes is hidden in that spelling too.
                 named = environment_strings(values)
                 forward = tuple(v.replace("\\", "/") for v in named if "\\" in v)
-                pattern_source = text_without_values(
-                    pattern_source, (*named, *forward)
+                own_source = text_without_values(own_source, (*named, *forward))
+                baseline_source = text_without_values(
+                    baseline_source, (*named, *forward)
                 )
-                scannable = self._apply_file_exclusions(
-                    scannable,
-                    own_patterns,
-                    scan_root,
-                    timeout=scan_timeout,
-                    source=pattern_source,
-                )
-                scannable = self._apply_file_exclusions(
-                    scannable,
-                    baseline_patterns,
-                    baseline_anchor,
-                    timeout=scan_timeout,
-                    source=pattern_source,
-                )
-                excluded_count = pre_filter_count - len(scannable)
-                if excluded_count > 0:
-                    self._plugin_log(
-                        f"Excluded {excluded_count} files from detect-secrets scan "
-                        f"based on baseline exclude patterns",
-                        level=logging.VERBOSE,
-                        target_type=target_type,
+                # A run with no patterns keeps every file and is not made, so
+                # the filter is handed only the runs that have something to
+                # match and each text it is given names where those came from.
+                before_own = len(scannable)
+                if own_patterns:
+                    scannable = self._apply_file_exclusions(
+                        scannable,
+                        own_patterns,
+                        scan_root,
+                        timeout=scan_timeout,
+                        source=own_source,
                     )
+                before_baseline = len(scannable)
+                if baseline_patterns:
+                    scannable = self._apply_file_exclusions(
+                        scannable,
+                        baseline_patterns,
+                        baseline_anchor,
+                        timeout=scan_timeout,
+                        source=baseline_source,
+                    )
+                for excluded_count, origin in (
+                    (before_own - before_baseline, "the operator's exclude patterns"),
+                    (before_baseline - len(scannable), "baseline exclude patterns"),
+                ):
+                    if excluded_count > 0:
+                        self._plugin_log(
+                            f"Excluded {excluded_count} files from detect-secrets "
+                            f"scan based on {origin}",
+                            level=logging.VERBOSE,
+                            target_type=target_type,
+                        )
             if "filters_used" in scan_settings_dict:
                 scan_settings_dict["filters_used"] = [
                     item
