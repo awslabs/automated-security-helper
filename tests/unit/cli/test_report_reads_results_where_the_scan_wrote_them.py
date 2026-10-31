@@ -224,6 +224,30 @@ def test_a_results_file_the_user_cannot_reach_is_refused_not_skipped(tmp_path):
     assert "No scan results found" not in result.output, result.output
 
 
+@pytest.mark.skipif(os.name == "nt", reason="directory modes are POSIX")
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root searches any directory"
+)
+def test_a_place_the_user_cannot_search_is_not_a_second_results_file(tmp_path):
+    """The search read a place it could not search as a results file found, so
+    the one file there was in the directory itself made 'More than one scan
+    results file found' and named a path that may hold nothing. It is not
+    counted; the report is made on the file found, and the unsearched place is
+    named on stderr, because a file there would be a different scan."""
+    results = _write_results(tmp_path / "out")
+    locked = _write_results(tmp_path / "out" / ".ash" / "ash_output").parent
+    locked.chmod(0o000)
+    try:
+        result = _report("--format", "text", "--output-dir", str(results.parent))
+    finally:
+        locked.chmod(0o700)
+
+    assert result.exit_code == 0, result.output
+    assert "More than one" not in result.output, result.output
+    assert "cannot be searched" in result.output, result.output
+    assert locked.as_posix() in " ".join(result.output.split()), result.output
+
+
 def test_the_refused_name_is_never_none(monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     assert _refused_config_name("a.yaml") == "a.yaml"

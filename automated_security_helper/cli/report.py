@@ -308,10 +308,23 @@ def _exists(path: Path) -> bool:
     ``Path.exists`` answered False: a ``--cli-json-input`` document can carry
     one, and the check is not the place for a traceback.
     """
+    return _presence(path) is not False
+
+
+def _presence(path: Path) -> Optional[bool]:
+    """Whether *path* exists: True, False, or None when it cannot be told.
+
+    None is a path the user may not reach (``os.stat`` raised PermissionError),
+    which ``_exists`` reads as present. A search for one file among several places
+    reads it as unknown instead: counting it as a file found made a directory
+    the user cannot search a second results file, and refused a command whose
+    other place holds the one file there is. Every other failure reads as
+    absent, as ``_exists`` says.
+    """
     try:
         os.stat(path)
     except PermissionError:
-        return True
+        return None
     except (OSError, ValueError):
         return False
     return True
@@ -708,9 +721,18 @@ def report_command(
     # on the first found read as a report on the other. The refusal is below,
     # after the configuration and the format are checked, with the other usage
     # errors; results_file stays the first found for the checks between.
-    found_results_files = [path for path in results_file_paths if _exists(path)]
+    # A place the user cannot search is neither found nor absent: it is not a
+    # second results file, and it is not skipped either. When nothing else is
+    # found the first such place is read, so the open that follows says why it
+    # cannot be (exit 1); when a results file is found elsewhere it is said,
+    # below, that the place was not searched.
+    presences = [(path, _presence(path)) for path in results_file_paths]
+    found_results_files = [path for path, found in presences if found]
+    unsearched_results_paths = [path for path, found in presences if found is None]
     if found_results_files:
         results_file = found_results_files[0]
+    elif unsearched_results_paths:
+        results_file = unsearched_results_paths[0]
     # The output directory is the one the results were read from. --output-dir
     # may name the scanned repository's root (the first candidate reads
     # <dir>/.ash/ash_output/); the plugin context, the work directory and the
@@ -978,6 +1000,13 @@ def report_command(
             searched,
         )
         raise typer.Exit(1)
+    if found_results_files and unsearched_results_paths:
+        _print_refusal(
+            "[yellow]Warning: {} cannot be searched, so a scan results file there, "
+            "if one exists, is not reported on. Reporting on {}.[/yellow]",
+            ", ".join(path.as_posix() for path in unsearched_results_paths),
+            results_file.as_posix(),
+        )
 
     # Load the results file
     #
