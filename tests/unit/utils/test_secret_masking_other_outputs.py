@@ -26,6 +26,7 @@ from automated_security_helper.utils.secret_masking import (
     MASKED_LINE,
     _mask_secret_value,
     mask_secrets_in_results,
+    source_snippet_masker,
 )
 
 pytestmark = pytest.mark.unit
@@ -338,3 +339,53 @@ class TestInlineExternalProperties:
         neighbor = model.sarif.inlineExternalProperties[0].results[1]
         physical = neighbor.locations[0].physicalLocation.root
         assert physical.region.snippet.text == MASKED_LINE + "\n"
+
+
+def _snippet_of(result):
+    return result.locations[0].physicalLocation.root.region.snippet.text
+
+
+class TestResultsAcrossContainers:
+    """A secret finding in a run and a result in the log's external properties
+    report the same file: each is masked by the other's lines."""
+
+    NEIGHBOR = ("B404", "app.py", 2, "import", "bandit")
+
+    def test_a_secret_finding_in_a_run_masks_a_result_in_external_properties(self):
+        model = _results(
+            [_secret()], external=[_result(*self.NEIGHBOR, snippet=ASSIGN_LINE)]
+        )
+
+        mask_secrets_in_results(model)
+
+        neighbor = model.sarif.inlineExternalProperties[0].results[0]
+        assert _snippet_of(neighbor) == MASKED_LINE + "\n"
+
+    def test_a_secret_finding_in_external_properties_masks_a_result_in_a_run(self):
+        model = _results(
+            [_result(*self.NEIGHBOR, snippet=ASSIGN_LINE)], external=[_secret()]
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _snippet_of(model.sarif.runs[0].results[0]) == MASKED_LINE + "\n"
+
+    def test_the_findings_browser_reads_a_log_whose_secret_is_in_external_properties(
+        self,
+    ):
+        """A log with no runs and one secret finding in its external properties:
+        the source text the browser shows from disk is masked at that line."""
+        model = AshAggregatedResults()
+        model.sarif = SarifReport.model_validate(
+            {
+                "version": "2.1.0",
+                "runs": [],
+                "inlineExternalProperties": [{"results": [_secret()]}],
+            }
+        )
+
+        shown = source_snippet_masker(model)(
+            "app.py", 1, "import os\n" + ASSIGN_LINE + "y = 2\n"
+        )
+
+        assert shown == "import os\n" + MASKED_LINE + "\ny = 2\n"
