@@ -31,18 +31,25 @@ def _kept(model, data):
     return entry
 
 
-def test_a_kept_blank_expiration_reads_as_expired():
-    entry = _kept(IgnorePathWithReason, {"path": "x", "reason": "r", "expiration": ""})
+@pytest.mark.parametrize("blank", ["", "   "], ids=["empty", "spaces"])
+def test_a_kept_blank_expiration_reads_as_expired(blank):
+    entry = _kept(
+        IgnorePathWithReason, {"path": "x", "reason": "r", "expiration": blank}
+    )
 
     assert entry.is_expired is True
+    # An unreadable date has no day count, and asking for one does not raise:
+    # a report that shows the days left reads it as "none".
+    assert entry.days_until_expiry is None
 
 
-def test_a_kept_blank_expiration_stops_a_suppression_from_matching():
+@pytest.mark.parametrize("blank", ["", "   "], ids=["empty", "spaces"])
+def test_a_kept_blank_expiration_stops_a_suppression_from_matching(blank):
     from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
     suppression = _kept(
         AshSuppression,
-        {"path": "app.py", "reason": "r", "rule_id": "B101", "expiration": ""},
+        {"path": "app.py", "reason": "r", "rule_id": "B101", "expiration": blank},
     )
     finding = FlatVulnerability(
         id="f1",
