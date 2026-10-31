@@ -465,9 +465,9 @@ class _ShownLines:
     command only as a whole line. A flush writes the held piece as far as it
     goes: a hook that writes a prompt without its newline and flushes before it
     reads the answer is waiting for a reader who must see the prompt. The one
-    piece a flush keeps is a line start made only of ``:`` or ``#``: shown
-    alone, the rest of the line written after it would start the reader's line
-    as a command form. Not a
+    piece a flush keeps is a line start that could be the front of a command
+    form (:meth:`_holds_the_start_of_a_command`): shown alone, the rest of the
+    line written after it would finish the reader's line as one. Not a
     terminal (``isatty()`` is false) and no descriptor, so a writer that asks
     does not color its text or write past the stream.
     """
@@ -497,13 +497,27 @@ class _ShownLines:
         for line in lines:
             self.write(line)
 
+    def _holds_the_start_of_a_command(self) -> bool:
+        """Whether the held piece is the start of a line that a CI command form
+        could be finished on: after its leading blanks it starts with ``:`` or
+        ``#`` and holds no blank. A command's name has none (``::warning``,
+        ``##vso``, ``##teamcity``), and the bracket that completes the Azure and
+        TeamCity forms can arrive in the next write; a prompt such as
+        ``# Send the report? [y/N] `` holds blanks and is written."""
+        piece = self._held.lstrip()
+        return (
+            not self._unended
+            and piece[:1] in (":", "#")
+            and not any(character.isspace() for character in piece)
+        )
+
     def flush(self) -> None:
-        # A piece at a line's start made only of the characters a CI command
-        # form starts with (":" before "::warning::", "#" before "##vso[") stays
-        # held: written on its own it is harmless, and the rest of the line,
-        # written after, would then start the line for the reader. Shown with
-        # its line by the next write or by end().
-        if self._held and not (not self._unended and set(self._held) <= {":", "#"}):
+        # A piece at a line's start that could be the front of a CI command form
+        # (":" before "::warning::", "#" before "##vso[", and "##vso" before "[")
+        # stays held: shown on its own it is no command, and the rest of the
+        # line, written after, would finish the line for the reader as one. Shown
+        # with its line by the next write or by end().
+        if self._held and not self._holds_the_start_of_a_command():
             self._stream.write(self._show(self._held))
             self._held = ""
             self._unended = True

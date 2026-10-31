@@ -322,6 +322,55 @@ def test_a_flushed_line_start_hash_is_ended_by_end():
     assert real.getvalue() == str(shown_not_obeyed("#\n"))
 
 
+@pytest.mark.parametrize(
+    ("front", "rest"),
+    [
+        ("##vso", "[task.complete result=Succeeded]x\n"),
+        ("##teamcity", "[message text='x']\n"),
+        ("::wa", "rn::x\n"),
+        ("  ##vso", "[task.complete result=Succeeded]x\n"),
+    ],
+)
+def test_a_flushed_front_of_a_command_name_is_kept_for_the_rest_of_its_line(
+    front, rest
+):
+    """Only a piece made of colons and hashes was kept. "##vso" is no command on
+    its own, so a flush wrote it, and the "[...]" written after finished a
+    command on the reader's line that was never shown as one."""
+    from automated_security_helper.utils.terminal_text import shown_not_obeyed
+
+    real = io.StringIO()
+    shown = entrypoint._ShownLines(real)
+
+    shown.write(front)
+    shown.flush()
+    assert real.getvalue() == "", real.getvalue()
+    shown.write(rest)
+
+    assert real.getvalue() == str(shown_not_obeyed(front + rest))
+    assert "##vso[" not in real.getvalue()
+    assert "##teamcity[" not in real.getvalue()
+
+
+def test_a_flushed_prompt_that_starts_with_a_hash_or_a_colon_is_still_written():
+    """The control: a piece with a blank in it is no command's front, and a hook
+    waiting for an answer needs its prompt; so does a colon in the middle of a
+    line."""
+    real = io.StringIO()
+    shown = entrypoint._ShownLines(real)
+
+    shown.write("# Send the report? [y/N] ")
+    shown.flush()
+    assert real.getvalue() == "# Send the report? [y/N] "
+    shown.write("y\n")
+    shown.write("see ")
+    shown.flush()
+    shown.write(":")
+    shown.flush()
+
+    assert real.getvalue().endswith("see :"), real.getvalue()
+
+
 def test_an_exception_whose_text_cannot_be_read_is_still_reported(monkeypatch):
     """The floor's own line formatted str(exc) outside any handler."""
 
