@@ -3406,6 +3406,49 @@ def _selected_config_is_a_link_loop(selected: Optional[str]) -> bool:
     return isinstance(answer, StatProblem) and answer.kind == LOOP
 
 
+def _discovered_config_refusal(
+    selected: str, error: OSError
+) -> ASHConfigValidationError:
+    """The refusal for a DISCOVERED config file whose read raised *error*.
+
+    The pre-run gate defers the OSError of a named file to the checks that own
+    ``--config`` (container mode's handover check, nix mode's
+    :func:`_unusable_nix_config`). Neither judges a file discovery selected, so
+    a discovered ``.ash.yaml`` that cannot be read passed the gate: the previous
+    run's output was cleared and the shell or container started before the scan
+    inside refused it, and the scan inside a container, running as root, read
+    it. Worded as a local scan words the same read of the same file
+    (``resolve_config``'s handler for an OSError the load raises): the file as
+    the scan named it, then the error without its own copy of that name.
+    """
+    from automated_security_helper.config.config_sources import describe_config_path
+    from automated_security_helper.utils.error_text import os_error_without_named_file
+
+    path = Path(selected)
+    refusal = ASHConfigValidationError(
+        f"could not read {describe_config_path(path)}: "
+        f"{os_error_without_named_file(error, path)}"
+    )
+    refusal.ash_config_file = path
+    return refusal
+
+
+def _names_the_failed_file(error: OSError, selected: str) -> bool:
+    """Whether *error*'s own filename is *selected*, the config file the gate's
+    load was reading: the OSError the open of that file raised names it, while
+    one the checkout walk or another read raised names some other path or none,
+    and is not the config file's to word. The two are compared as
+    :func:`_names_the_same_file` compares them, so a relative spelling, a link
+    or another prefix of the same file still counts as that file."""
+    filename = error.filename
+    if not isinstance(filename, (str, bytes, os.PathLike)):
+        return False
+    try:
+        return _names_the_same_file(os.fsdecode(filename), selected)
+    except TypeError:
+        return False
+
+
 def _unusable_nix_config(opts: ScanOptions) -> Optional[ASHConfigValidationError]:
     """The refusal for a ``--config`` that names no file the shell's ASH can read.
 
@@ -3569,7 +3612,10 @@ def _outer_mode_config_load(opts: ScanOptions) -> _OuterModeConfigLoad:
     :func:`_image_ash_revision_differs` (its narrow cause) decides whose
     answer a model refusal is. A file given as ``--config`` that
     is MISSING or UNREADABLE raises an ``OSError`` the gate does not word
-    itself. It returns :func:`_unusable_nix_config`'s answer: in nix mode a
+    itself (a file DISCOVERY selected is the one exception: no owner of that
+    shape judges it, so the gate words it as a local scan does,
+    :func:`_discovered_config_refusal`). It returns
+    :func:`_unusable_nix_config`'s answer: in nix mode a
     refusal with exit 3 before the previous run's output is cleared, and in
     container mode none, because the handover check owns that shape and
     refuses a config it cannot hand over, with exit 3. The file ``ASH_CONFIG``
@@ -3865,6 +3911,27 @@ def _outer_mode_config_load(opts: ScanOptions) -> _OuterModeConfigLoad:
             refusal.ash_config_file = Path(unparsed_file)
             return _OuterModeConfigLoad(
                 refusal, selected, loaded, document, image_may_differ, own_model
+            )
+        if (
+            isinstance(exc, OSError)
+            and reading == "selected"
+            and opts.config is None
+            and selected_path is not None
+            and _names_the_failed_file(exc, selected_path)
+        ):
+            # A DISCOVERED file the load could not open. The deferral below
+            # judges --config alone, so this file passed the gate and the run
+            # cleared the previous output before the scan inside refused it.
+            # Refused here, in a local scan's words (_discovered_config_refusal).
+            # Only when the error names the selected file: an OSError the
+            # checkout walk or another read raised keeps the deferral.
+            return _OuterModeConfigLoad(
+                _discovered_config_refusal(selected_path, exc),
+                selected,
+                loaded,
+                document,
+                image_may_differ,
+                own_model,
             )
         return _OuterModeConfigLoad(
             _unusable_nix_config(opts),

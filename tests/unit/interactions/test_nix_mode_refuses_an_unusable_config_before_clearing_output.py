@@ -53,7 +53,10 @@ def _flat(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def _scan(tmp_path, monkeypatch, config, ash_config=None):
+def _scan(tmp_path, monkeypatch, config, ash_config=None, discovered=None):
+    """``config`` is the ``--config`` path, or None for a scan that names none;
+    ``discovered``, when given, is called with the ``.ash.yaml`` path in the
+    source directory to write the file discovery will select."""
     if ash_config is None:
         monkeypatch.delenv("ASH_CONFIG", raising=False)
     else:
@@ -61,6 +64,8 @@ def _scan(tmp_path, monkeypatch, config, ash_config=None):
     src = tmp_path / "src"
     src.mkdir()
     (src / "app.py").write_text("x = 1\n", encoding="utf-8")
+    if discovered is not None:
+        discovered(src / ".ash.yaml")
     out = tmp_path / "out"
     artifact = _plant_prior_run(out)
     launcher = MagicMock()
@@ -426,6 +431,88 @@ def test_a_readable_file_whose_load_failed_some_other_way_is_left_to_the_shell(
         source_dir=tmp_path,
         output_dir=tmp_path / "out",
         config=str(named),
+        mode=RunMode.nix,
+    )
+
+    assert ras._outer_mode_config_load(opts).refusal is None
+
+
+def _write_unreadable(path, request):
+    path.write_text("project_name: locked\n", encoding="utf-8")
+    path.chmod(0)
+    request.addfinalizer(lambda: path.chmod(0o600))
+    if os.access(path, os.R_OK):
+        pytest.skip("this process can read a mode-0 file")
+
+
+@_NEEDS_PERMISSION_BITS
+def test_an_unreadable_discovered_config_is_refused_and_the_prior_run_is_kept(
+    tmp_path, monkeypatch, request, capsys
+):
+    """No ``--config`` and no ``ASH_CONFIG``: discovery selects ``src/.ash.yaml``,
+    which this process cannot read. The gate deferred that OSError to
+    ``_unusable_nix_config``, which judges ``--config`` alone, so the file passed
+    the gate, the previous run's output was cleared and the shell started."""
+    refused, launcher, artifact = _scan(
+        tmp_path,
+        monkeypatch,
+        None,
+        discovered=lambda path: _write_unreadable(path, request),
+    )
+
+    _kept(refused, launcher, artifact)
+    flat = _flat(capsys.readouterr().out)
+    assert "could not read" in flat, flat
+    assert ".ash.yaml" in flat, flat
+
+
+@_NEEDS_PERMISSION_BITS
+def test_an_unreadable_discovered_config_is_worded_as_the_local_scan_words_it(
+    tmp_path, monkeypatch, request
+):
+    """The nix gate's refusal of the discovered file is the local scan's refusal
+    of the same file, word for word (resolve_config's OSError handler)."""
+    refused, _launcher, _artifact = _scan(
+        tmp_path,
+        monkeypatch,
+        None,
+        discovered=lambda path: _write_unreadable(path, request),
+    )
+
+    with pytest.raises(ScanRefusedExit) as local_refused:
+        run_ash_scan(
+            source_dir=tmp_path / "src",
+            output_dir=tmp_path / "local-out",
+            mode=RunMode.local,
+            progress=False,
+            show_summary=False,
+        )
+
+    assert refused.code == 3 and local_refused.value.code == 3
+    assert refused.message == local_refused.value.message, (
+        refused.message,
+        local_refused.value.message,
+    )
+    assert str(tmp_path / "src" / ".ash.yaml") in refused.message, refused.message
+
+
+def test_a_discovered_file_whose_load_failed_some_other_way_is_left_to_the_shell(
+    tmp_path, monkeypatch
+):
+    """An OSError that does not name the discovered file (the checkout walk's,
+    say) keeps the deferral: only the open of the selected file is worded."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / ".ash.yaml").write_text("project_name: t\n", encoding="utf-8")
+
+    def load_that_fails(_opts, for_run=False, **_kwargs):
+        raise OSError("some other failure")
+
+    monkeypatch.setattr(ras, "_loaded_config_file", load_that_fails)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    opts = ras.ScanOptions(
+        source_dir=src,
+        output_dir=tmp_path / "out",
         mode=RunMode.nix,
     )
 
