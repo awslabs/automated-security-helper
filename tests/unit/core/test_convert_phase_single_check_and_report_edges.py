@@ -222,22 +222,25 @@ class TestAProbeScopeThatFailsToOpen:
 
         @contextlib.contextmanager
         def scope(target, context):
-            if isinstance(target, type):
-                with original(target, context):
-                    yield
-            else:
+            # Fails for one converter only, so a phase that marked every later
+            # converter unsatisfied after the first failure is seen.
+            if not isinstance(target, type) and target.config.name == "scope-fails":
                 raise RuntimeError("the scope could not be opened")
+            with original(target, context):
+                yield
 
         monkeypatch.setattr(convert_phase, "plugin_probe_scope", scope)
         left = _converter("scope-fails")
+        fine = _converter("scope-opens", answer=True, paths=["converted/a.py"])
 
         # Red at the base: the filter's scope was outside any try.
-        results = _run(plugin_context, [left, _converter("scope-fails-too")])
+        results = _run(plugin_context, [left, fine])
 
         assert results.converter_results["scope-fails"].dependencies_satisfied is False
-        assert (
-            results.converter_results["scope-fails-too"].dependencies_satisfied is False
-        )
+        opened = results.converter_results["scope-opens"]
+        assert opened.dependencies_satisfied is True
+        assert opened.converted_paths == ["converted/a.py"]
+        assert fine.checks == 1
 
 
 class TestAConstructorFailureIsKeyedLikeABuiltConverter:
