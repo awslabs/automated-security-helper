@@ -10,8 +10,7 @@ gives for a directory is now kept for the rest of the check, so the second and
 third asks about the same directory read the first's answer; a listing for one
 directory is never used for another.
 
-git is not run here: ``git_index_below`` and ``committed_files_at_results_paths``
-are fakes that count what they were asked.
+git is not run here: ``git_index_below`` is a fake that counts what it was asked.
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ pytestmark = pytest.mark.unit
 
 
 def _counting_git(monkeypatch, repository: Path, names_by_dir: dict[Path, list[str]]):
-    """Fakes of the two git readers, recording the directory of every ask."""
+    """A fake of the git reader, recording the directory of every ask."""
     asked: list[Path] = []
 
     def index_below(directory, **_kw):
@@ -44,11 +43,6 @@ def _counting_git(monkeypatch, repository: Path, names_by_dir: dict[Path, list[s
         )
 
     monkeypatch.setattr(committed_output_module, "git_index_below", index_below)
-    monkeypatch.setattr(
-        committed_output_module,
-        "committed_files_at_results_paths",
-        lambda directory: [],
-    )
     return asked
 
 

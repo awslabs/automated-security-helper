@@ -30,11 +30,6 @@ pytestmark = pytest.mark.unit
 def _fake_git(monkeypatch, output: Path, names: list[str]) -> None:
     monkeypatch.setattr(
         committed_output_module,
-        "committed_files_at_results_paths",
-        lambda directory: [],
-    )
-    monkeypatch.setattr(
-        committed_output_module,
         "git_index_below",
         lambda directory, **_kw: GitIndexAnswer(
             base=Path(directory).resolve(), names=list(names), repository=output

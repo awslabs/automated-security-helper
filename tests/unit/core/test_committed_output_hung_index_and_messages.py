@@ -33,7 +33,6 @@ from automated_security_helper.core.committed_output import (
 from automated_security_helper.utils.scan_output_dirs import (
     RESULTS_FILE_NAME,
     GitIndexAnswer,
-    GitIndexUnavailable,
 )
 
 pytestmark = pytest.mark.unit
@@ -58,17 +57,13 @@ def _hung_git(monkeypatch, repositories: list[Path]) -> list[Path]:
                 return repository
         return None
 
-    def listing(directory):
+    def listing(directory, **_kw):
         asked.append(Path(directory))
-        raise GitIndexUnavailable(
-            GitIndexAnswer(
-                Path(directory), repository=repository_of(Path(directory)), error=HUNG
-            )
+        return GitIndexAnswer(
+            Path(directory), repository=repository_of(Path(directory)), error=HUNG
         )
 
-    monkeypatch.setattr(
-        committed_output_module, "committed_files_at_results_paths", listing
-    )
+    monkeypatch.setattr(committed_output_module, "git_index_below", listing)
     monkeypatch.setattr(committed_output_module, "_repository_root_of", repository_of)
     return asked
 

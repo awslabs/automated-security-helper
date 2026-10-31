@@ -74,11 +74,9 @@ from automated_security_helper.utils.scan_output_dirs import (
     SCAN_SET_RUN_FILE_NAME,
     SCAN_START_FILE_NAMES,
     GitIndexAnswer,
-    GitIndexUnavailable,
     _an_enclosing_repository_tracks_the_root,
     _repository_root_of,
     _where_git_is_asked,
-    committed_files_at_results_paths,
     entries_at_results_paths,
     entries_on_disk,
     git_index_below,
@@ -212,9 +210,10 @@ class _GitFailures:
     root's spool check and its projects-entry check ask about the same
     directory, and asked git once each, so a workspace check ran ``git
     ls-files`` for the root three times and derived three answers from one
-    listing. The second ask for a directory now reads the first's answer. Only
-    answers that went through :func:`_index_below` are kept; the results-path
-    listing (``committed_files_at_results_paths``) asks git on its own.
+    listing. The second ask for a directory now reads the first's answer. Every
+    check of a directory, the results-path check included, asks through
+    :func:`_index_below`, so a directory costs one ``git ls-files`` however many
+    checks read it.
     """
 
     def __init__(self) -> None:
@@ -334,25 +333,20 @@ def _found_in_the_way(
         if files is None and directories is None
         else ()
     )
-    known = failures.known_for(output_dir) if failures is not None else None
+    # One listing answers both questions below, the results paths and the
+    # previous-run files outside them: asked separately they were two spawns of
+    # ``git ls-files`` of the same directory, each allowed its own timeout. The
+    # results paths are read from it as committed_files_at_results_paths reads
+    # them from its own.
+    answer = _index_below(output_dir, failures)
     unanswered: Optional[GitIndexAnswer] = None
     committed: List[Path] = []
-    if known is not None and known.names is not None:
-        # git listed this directory earlier in the same check: the results
-        # paths are read from that listing, as committed_files_at_results_paths
-        # reads them from its own.
-        committed = entries_at_results_paths(known.base, known.names)
-        if "" in known.names or _an_enclosing_repository_tracks_the_root(known):
-            committed.insert(0, known.base)
-    elif known is not None:
-        unanswered = known
-    else:
-        try:
-            committed = committed_files_at_results_paths(output_dir)
-        except GitIndexUnavailable as unavailable:
-            unanswered = unavailable.answer
-            if failures is not None:
-                failures.remember(unanswered)
+    if answer.unanswered:
+        unanswered = answer
+    elif answer.names is not None:
+        committed = entries_at_results_paths(answer.base, answer.names)
+        if "" in answer.names or _an_enclosing_repository_tracks_the_root(answer):
+            committed.insert(0, answer.base)
     if unanswered is not None:
         root_files, cleared = results_path_names()
         skipped = {output_name_key(name) for name in not_on_disk}
@@ -365,7 +359,7 @@ def _found_in_the_way(
         return _Found([], _scoped(output_dir, on_disk, files, directories), unanswered)
     found = _Found(_scoped(output_dir, committed, files, directories), [], None)
     if unlisted:
-        found = _combined([found, _found_under(output_dir, unlisted, failures)])
+        found = _combined([found, _entries_named(answer, unlisted)])
     return found
 
 
@@ -377,6 +371,13 @@ def _found_under(
     answer = _index_below(output_dir, failures)
     if answer.unanswered:
         return _Found([], entries_on_disk(output_dir, (), names), answer)
+    return _entries_named(answer, names)
+
+
+def _entries_named(answer: GitIndexAnswer, names: Collection[str]) -> _Found:
+    """The entries of git's listing *answer* that are, or are under, one of *names*
+    at its directory's root. *answer* is one git gave: a directory outside a
+    repository has no entries."""
     if answer.names is None:
         return _Found([], [], None)
     base = answer.base
