@@ -63,3 +63,21 @@ class TestJsonSpellingsOfAValue:
         assert json.loads(json.loads(masked)["raw_data"])[
             "token"
         ] == _mask_secret_value(QUOTED_VALUE)
+
+    def test_a_non_ascii_value_inside_a_json_document_in_a_json_string_is_masked(
+        self,
+    ):
+        """The inner document writes the non-ASCII character as an escape and the
+        quote escaped, and the outer string escapes every one of those
+        backslashes again: the spelling of a value with both characters in
+        GitLab SAST's ``raw_data``."""
+        inner = json.dumps({"token": ACCENTED_VALUE})
+        assert "é" not in inner
+        text = json.dumps({"raw_data": inner})
+
+        masked = mask_secret_values_in_text(text, [ACCENTED_VALUE])
+
+        expected_inner = json.dumps({"token": _mask_secret_value(ACCENTED_VALUE)})
+        assert masked == json.dumps({"raw_data": expected_inner})
+        decoded = json.loads(json.loads(masked)["raw_data"])["token"]
+        assert decoded == _mask_secret_value(ACCENTED_VALUE)
