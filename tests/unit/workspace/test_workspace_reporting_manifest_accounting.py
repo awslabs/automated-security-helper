@@ -546,6 +546,27 @@ class TestAnUnbuildableReporterFailsOnlyWhatItOwed:
         assert "fake-unconstructible" in outcome.failed_reporters
         assert "fake-merged" in outcome.workspace_artifacts
 
+    def test_a_disabled_reporter_the_formats_leave_out_is_not_requested(
+        self, workspace
+    ):
+        """The same label a built reporter gets for the same two facts: the
+        formats are applied before the config's switch."""
+        _, output_dir, _ = workspace
+        outcome = _emit(
+            workspace,
+            FakeUnconstructibleOffReporter,
+            FakeDefaultOffMergedReporter,
+            FakeMergedReporter,
+            output_formats=("fake-merged",),
+        )
+
+        reporters = _manifest(output_dir)["reporters"]
+        assert reporters["fake-default-off-merged"]["skipped"] == SKIP_NOT_REQUESTED
+        entry = reporters["fake-unconstructible-off"]
+        assert "could not be constructed" in entry["error"]
+        assert entry["skipped"] == SKIP_NOT_REQUESTED
+        assert outcome.failed is False
+
     def test_a_reporter_that_cannot_be_built_leaves_no_earlier_file(self, workspace):
         """The earlier run's report stayed beside a manifest saying the reporter
         could not be constructed, and read as this run's."""

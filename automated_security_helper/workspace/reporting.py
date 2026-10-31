@@ -545,19 +545,25 @@ def _construction_skip_reason(
         )
     else:
         declared = declared_config_model(reporter_class, ReporterPluginConfigBase)
-        field = (getattr(declared, "model_fields", None) or {}).get("enabled")
-        if field is not None and getattr(field, "default", True) is False:
+        enabled_field = (getattr(declared, "model_fields", None) or {}).get("enabled")
+        if (
+            enabled_field is not None
+            and getattr(enabled_field, "default", True) is False
+        ):
             enabled = False
     if enabled and off_host_reporter_refused(reporter_class, config):
         enabled = False
-    if not enabled:
-        return SKIP_DISABLED
+    # The formats first, then the switch, as _selected_reporters decides them for
+    # a built reporter: the operator's flags applied to every project's report
+    # phase too, so a reporter they left out is "not requested" whether or not
+    # its config also turns it off.
     if isinstance(output_formats, str):
         output_formats = (output_formats,) if output_formats else ()
-    if not output_formats:
-        return None
-    requested = {str(getattr(fmt, "value", fmt)) for fmt in output_formats}
-    return None if str(name or key) in requested else SKIP_NOT_REQUESTED
+    if output_formats:
+        requested = {str(getattr(fmt, "value", fmt)) for fmt in output_formats}
+        if str(name or key) not in requested:
+            return SKIP_NOT_REQUESTED
+    return None if enabled else SKIP_DISABLED
 
 
 def _declared_file_name(reporter_class: type) -> str:
