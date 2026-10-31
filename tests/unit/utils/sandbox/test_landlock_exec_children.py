@@ -299,6 +299,28 @@ def test_a_scan_with_a_deadline_is_bounded_by_the_deadline_not_the_cap(
     assert landlock_exec._parent_map(until=lambda: 20.0) == {ME: [1, 2, 3, 4]}
 
 
+def test_a_scan_past_its_cap_ends_at_the_deadline(procfs, monkeypatch):
+    """The cap is a floor: past it the scan reads on only while the deadline has
+    not passed. Each entry read moves the clock ten seconds on, so the entry after
+    the cap finds the deadline behind it and the scan ends with the rest of
+    /proc unread. A scan that kept reading to the end of the listing whenever it
+    was handed a deadline would read all four."""
+    files: Dict[str, Entry] = {"/proc": ["1", "2", "3", "4", "self"]}
+    for pid in range(1, 5):
+        files[f"/proc/{pid}/stat"] = _stat(pid, ME)
+    proc = procfs(files)
+    monkeypatch.setattr(
+        landlock_exec,
+        "time",
+        types.SimpleNamespace(monotonic=lambda: 5.0 + 10.0 * len(proc.opened)),
+    )
+
+    parents = landlock_exec._parent_map(until=lambda: 10.0, limit=2)
+
+    assert parents == {ME: [1, 2]}
+    assert proc.opened == ["/proc/1/stat", "/proc/2/stat"]
+
+
 def test_a_walk_with_time_left_is_not_capped_on_a_kernel_without_children_files(
     procfs, monkeypatch
 ):
