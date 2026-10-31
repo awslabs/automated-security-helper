@@ -27,10 +27,10 @@ PLANTED = "hunter2-planted-password"
 def test_an_override_shapes_both_recorded_streams(plugin_context, monkeypatch):
     scanner = _scanner(plugin_context)
 
-    streams: list[str] = []
+    seen: dict[str, str] = {}
 
     def _without_the_planted(self, text, stream):
-        streams.append(stream)
+        seen[stream] = text
         return None if text is None else text.replace(PLANTED, "[removed]")
 
     monkeypatch.setattr(type(scanner), "_tool_text_for_records", _without_the_planted)
@@ -49,7 +49,13 @@ def test_an_override_shapes_both_recorded_streams(plugin_context, monkeypatch):
     # The stderr lines were shaped too, not dropped: a swapped stream label or a
     # lost stream would leave the PLANTED checks above green.
     assert any("[removed]" in line for line in scanner.errors), scanner.errors
-    assert streams == ["stdout", "stderr"], streams
+    # Each stream's text reached the hook under its own label, in whatever
+    # order the base shapes them: a swapped label would pair stdout's JSON with
+    # "stderr", and an implementation that shapes stderr first is still right.
+    assert set(seen) == {"stdout", "stderr"}, seen
+    assert PLANTED in seen["stdout"] and '{"snippet"' in seen["stdout"], seen
+    assert "saw " in seen["stderr"] and PLANTED in seen["stderr"], seen
+    assert '{"snippet"' not in seen["stderr"], seen
     assert scanner.exit_code == 1
 
 
