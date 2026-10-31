@@ -217,15 +217,21 @@ class TestARedirectLeavingHttpsIsRefused:
         assert "answered 301 Moved Permanently: refusing" in capsys.readouterr().err
 
     @staticmethod
-    def _answer(location: str, code: int = 302, source: str = "https://h.invalid/x"):
+    def _answer(
+        location: str,
+        code: int = 302,
+        source: str = "https://h.invalid/x",
+        header: str = "Location",
+    ):
         """Hand a 3xx response to the handler's ``http_error_<code>``, as urllib does.
 
         CPython's ``http_error_302`` refuses schemes other than http, https and ftp
         before it calls ``redirect_request``, so only a call through it reaches that
-        branch.
+        branch. ``header`` is the header that carries the target: CPython reads
+        ``Location``, and ``URI`` when there is none.
         """
         headers = email.message.Message()
-        headers["Location"] = location
+        headers[header] = location
         handler = installer._HttpsOnlyRedirects()
         return getattr(handler, f"http_error_{code}")(
             urllib.request.Request(source), io.BytesIO(b""), code, "Found", headers
@@ -252,6 +258,113 @@ class TestARedirectLeavingHttpsIsRefused:
         with pytest.raises(SystemExit) as raised:
             self._answer("http://[::1/x?token=T")
         assert raised.value.code == installer._EXIT_INTEGRITY
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            "file:///etc/passwd?token=URI-SECRET",
+            "http://h.invalid/x?token=URI-SECRET",
+            "gopher://h.invalid/x?token=URI-SECRET",
+        ],
+    )
+    def test_a_uri_header_is_checked_like_a_location(self, target, capsys):
+        # CPython's http_error_302 takes ``URI`` when there is no ``Location``, and
+        # then refuses a scheme it does not know with an HTTPError that names the
+        # whole URL, the leak this class exists to remove. The handler reads ``URI``
+        # too; nothing showed it.
+        with pytest.raises(SystemExit) as raised:
+            self._answer(target, header="URI")
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert "URI-SECRET" not in capsys.readouterr().err
+        assert "URI-SECRET" not in str(raised.value)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            301,
+            302,
+            303,
+            307,
+            pytest.param(
+                308,
+                marks=pytest.mark.skipif(
+                    sys.version_info < (3, 11),
+                    reason="CPython follows a 308 from 3.11 on",
+                ),
+            ),
+        ],
+    )
+    def test_an_absolute_https_location_is_followed(self, code):
+        """Control: GitHub's redirect to its object host, for every code urllib follows."""
+        handler = installer._HttpsOnlyRedirects()
+        opened = []
+        handler.add_parent(
+            types.SimpleNamespace(
+                open=lambda new, timeout=None: opened.append(new.full_url) or "ok"
+            )
+        )
+        headers = email.message.Message()
+        headers["Location"] = "https://objects.example.invalid/asset.tar.gz?sig=S"
+        request = urllib.request.Request("https://h.invalid/a")
+        request.timeout = 5
+
+        answered = getattr(handler, f"http_error_{code}")(
+            request, io.BytesIO(b""), code, "Found", headers
+        )
+
+        assert answered == "ok"
+        assert opened == ["https://objects.example.invalid/asset.tar.gz?sig=S"]
+
+    @pytest.mark.parametrize(
+        ("source", "location", "secrets"),
+        [
+            (
+                "https://user:PASSWORD@h.invalid/a?sig=FIRST#FRAGMENT",
+                "http://x.invalid/b?sig=SECOND",
+                ["PASSWORD", "FIRST", "FRAGMENT", "SECOND"],
+            ),
+            (
+                "https://h.invalid/x",
+                "file:///etc/passwd?token=LOC-SECRET",
+                ["LOC-SECRET"],
+            ),
+            (
+                "https://h.invalid/x",
+                "http://[::1/secret-path?token=T",
+                ["secret-path", "token=T"],
+            ),
+            (
+                "https://h.invalid/x",
+                "ftp://user:FTPPASS@x.invalid/f;k=PARAM?q=FTPKEY#FTPFRAG",
+                ["FTPPASS", "PARAM", "FTPKEY", "FTPFRAG"],
+            ),
+        ],
+    )
+    def test_the_exit_carries_none_of_the_secrets(
+        self, source, location, secrets, capsys
+    ):
+        # Red before: only standard error was read, and the SystemExit the caller
+        # sees carries the same message; a secret there reaches whatever prints it.
+        headers = email.message.Message()
+        headers["Location"] = location
+        handler = installer._HttpsOnlyRedirects()
+        with pytest.raises(SystemExit) as raised:
+            handler.http_error_302(
+                urllib.request.Request(source), io.BytesIO(b""), 302, "Found", headers
+            )
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        printed = capsys.readouterr().err
+        carried = [str(raised.value), *(str(arg) for arg in raised.value.args)]
+        for secret in secrets:
+            assert secret not in printed
+            assert all(secret not in text for text in carried)
+
+    def test_a_plain_url_keeps_ipv6_brackets_and_does_not_read_the_port(self):
+        plain = installer._plain_url
+        assert plain("https://[::1]:8443/a") == "https://[::1]:8443/a"
+        # ``.port`` raises ValueError for these; the netloc is printed as written.
+        assert plain("http://h.invalid:notaport/x") == "http://h.invalid:notaport/x"
+        assert plain("http://h.invalid:99999/x") == "http://h.invalid:99999/x"
 
     def test_a_relative_location_on_https_is_followed(self):
         """Control: the check joins the Location to the request URL, as urllib will."""
