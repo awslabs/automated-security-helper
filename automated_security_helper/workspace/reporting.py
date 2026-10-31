@@ -1341,11 +1341,21 @@ def emit_workspace_reports(
             # workspace context is not one of the step's. Its projects' files
             # are listed as a built per-project reporter's are.
             per_project.append(key)
-            entries, missing = _per_project_artifacts(
-                plan, output_dir, failure.file_name, completed()
-            )
-            manifest_reporters[key]["per_project_artifacts"] = entries
-            manifest_reporters[key]["missing_per_project_artifacts"] = missing
+            if failure.file_name_declared:
+                entries, missing = _per_project_artifacts(
+                    plan, output_dir, failure.file_name, completed()
+                )
+                manifest_reporters[key]["per_project_artifacts"] = entries
+                manifest_reporters[key]["missing_per_project_artifacts"] = missing
+            else:
+                # The name is the ``ash.txt`` fallback, a guess: listing each
+                # project's file under it would state a guess as a fact, and
+                # naming every project that lacks it missing would blame them
+                # for a file nothing says this reporter writes.
+                manifest_reporters[key]["note"] = (
+                    "the reporter's class declares no extension, so the name of "
+                    "its per-project files is not known and none are listed"
+                )
             ASH_LOGGER.warning(
                 f"Reporter {key} is per-project and could not be constructed for "
                 f"the workspace report step; its own projects' report phases "

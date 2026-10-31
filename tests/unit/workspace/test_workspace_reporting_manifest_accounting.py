@@ -180,6 +180,27 @@ class FakeOffHostUnbuildableReporter(ReporterPluginBase[_OffHostUnbuildableConfi
         raise AssertionError("never constructed")
 
 
+class _UnbuildableNoExtensionPerProjectConfig(ReporterPluginConfigBase):
+    name: str = "fake-unbuildable-no-extension-per-project"
+    enabled: bool = True
+
+
+class FakeUnbuildableNoExtensionPerProjectReporter(
+    ReporterPluginBase[_UnbuildableNoExtensionPerProjectConfig]
+):
+    """Per-project, enabled, unbuildable here, and its class declares no
+    extension: the name of the file each project's report phase writes for it is
+    not known from the class."""
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+
+    def model_post_init(self, context):
+        raise RuntimeError("cannot be built in the workspace context")
+
+    def report(self, model) -> str:  # pragma: no cover - never constructed
+        raise AssertionError("never constructed")
+
+
 class _UnbuildablePerProjectConfig(ReporterPluginConfigBase):
     name: str = "fake-unbuildable-per-project"
     extension: str = "cdx.json"
@@ -572,6 +593,34 @@ class TestAnUnbuildableReporterFailsOnlyWhatItOwed:
         assert outcome.per_project_reporters == ("fake-unbuildable-per-project",)
         assert outcome.failed is False
         assert "fake-merged" in outcome.workspace_artifacts
+
+    def test_a_per_project_reporter_with_no_declared_extension_lists_no_guess(
+        self, workspace
+    ):
+        """The listing is by file name, and ``ash.txt`` is only the fallback for
+        a class that declares no extension. Each project was searched for a file
+        of that guessed name and, lacking it, named missing for a reporter whose
+        real file name nothing says. The control is the test above, where the
+        class declares ``cdx.json`` and its projects' files are listed."""
+        _, output_dir, _ = workspace
+        outcome = _emit(
+            workspace,
+            FakeUnbuildableNoExtensionPerProjectReporter,
+            FakeMergedReporter,
+        )
+
+        entry = _manifest(output_dir)["reporters"][
+            "fake-unbuildable-no-extension-per-project"
+        ]
+        assert entry["behaviour"] == ReporterWorkspaceBehaviour.PER_PROJECT.value
+        assert "could not be constructed" in entry["error"]
+        assert entry["per_project_artifacts"] == []
+        assert entry["missing_per_project_artifacts"] == []
+        assert "declares no extension" in entry["note"]
+        assert outcome.failed is False
+        assert "fake-unbuildable-no-extension-per-project" in (
+            outcome.per_project_reporters
+        )
 
     def test_a_name_that_cannot_be_read_is_recorded_under_the_class_name(
         self, workspace, monkeypatch
