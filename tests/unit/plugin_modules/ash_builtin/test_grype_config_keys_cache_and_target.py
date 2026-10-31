@@ -55,6 +55,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner
     GrypeScannerConfigOptions,
     _name_grype_garbled,
 )
+from automated_security_helper.utils.error_text import text_without_values
 from tests.utils.undecodable_names import make_tree
 
 pytestmark = pytest.mark.unit
@@ -210,8 +211,6 @@ def test_the_path_spellings_include_the_native_windows_spelling(monkeypatch):
 
 
 def test_a_config_named_with_windows_separators_is_redacted(monkeypatch):
-    from automated_security_helper.utils.error_text import text_without_values
-
     configured = "~/zz-grype-config.yaml"
     monkeypatch.setattr(grype_scanner, "Path", PureWindowsPath)
     needles = grype_scanner._with_path_spellings([configured])
@@ -235,8 +234,6 @@ def test_a_config_spelled_with_backslashes_is_respelled_for_redaction(
     """On Windows a value written with backslashes is also collapsed by Path()
     (a "." segment, a doubled separator), and the warnings print that spelling,
     so it has to be a needle although the value holds no forward slash."""
-    from automated_security_helper.utils.error_text import text_without_values
-
     monkeypatch.setattr(grype_scanner, "Path", PureWindowsPath)
 
     needles = grype_scanner._with_path_spellings([configured])
