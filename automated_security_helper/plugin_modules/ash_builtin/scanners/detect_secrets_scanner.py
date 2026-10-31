@@ -522,12 +522,15 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         pass already filled in, so the swap changes nothing there; a config
         that differs is processed as a constructed one is.
 
-        The swap does build new filter objects even when the dumps match, so
-        the record of which ``filters_used`` entries are the operator's, kept
-        by object identity, would point at objects that are gone: every entry
-        then read as the baseline's, and the operator's exclude patterns were
-        matched at the baseline's anchor. When the dumps match, the record is
-        carried over by position instead.
+        The base swaps a config in only when its dump differs from the current
+        one, and a swap builds new filter objects. The record of which
+        ``filters_used`` entries are the operator's is kept by object identity,
+        so after a swap it would point at objects that are gone: every entry
+        would read as the baseline's, and the operator's exclude patterns
+        would be matched at the baseline's anchor. When the dump after the
+        base step equals the dump before it, either nothing was swapped or the
+        swap rebuilt the same settings as new objects, and the record is
+        carried over by position, which covers both.
         """
         before = None if config is None else self.config.model_dump(by_alias=True)
         validated = super()._pre_scan(target, target_type, config, *args, **kwargs)
