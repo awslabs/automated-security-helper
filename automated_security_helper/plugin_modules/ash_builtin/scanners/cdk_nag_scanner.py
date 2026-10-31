@@ -1666,10 +1666,23 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         sarif_results.extend(kept)
                         if ran:
                             self.targets_partly_evaluated += 1
+                            # "Their" counts the requested packs' findings only; CDK's
+                            # own plugin's are named apart, as the branch below names
+                            # them, so a requested pack is not credited with them.
+                            ran_findings = sum(
+                                len(findings) for findings in ran.values()
+                            )
+                            own_findings = len(kept) - ran_findings
+                            also = (
+                                f"; {own_findings} finding(s) from CDK's own "
+                                "validation plugin are kept as well"
+                                if own_findings
+                                else ""
+                            )
                             ASH_LOGGER.error(
                                 f"cdk-nag did not evaluate every requested pack against "
                                 f"{cfn_file} ({len(ran)} pack(s) evaluated it; their "
-                                f"{len(kept)} finding(s) are kept): {failure}"
+                                f"{ran_findings} finding(s) are kept{also}): {failure}"
                             )
                         else:
                             if kept:

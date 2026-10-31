@@ -1654,6 +1654,56 @@ def test_a_template_only_cdks_own_plugin_evaluated_keeps_its_findings_and_says_s
     )
 
 
+def test_the_partly_evaluated_line_does_not_credit_requested_packs_with_cdks_findings(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, caplog
+):
+    """One requested pack evaluated the template and reported one finding, another
+    threw, and CDK's own plugin reported two. The line counts the finding the requested
+    pack made as "their" findings and names CDK's two apart; it used to count all three
+    as the requested packs', which read as a pack having found what only CDK's plugin
+    found. All three findings reach the report.
+
+    The failure text in the fixture names a pack inside the quoted payload, so the
+    counts are read from the head of the record, ahead of the colon that starts it."""
+    own_name = wrapper_module.CDK_OWN_PLUGIN_NAME
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={
+            "HIPAA.Security": [
+                nag_result(rule_id="HIPAA.Security-S1", pack="HIPAA.Security")
+            ],
+            own_name: [
+                nag_result(rule_id="CloudFormation-Validate-1", pack=own_name),
+                nag_result(rule_id="CloudFormation-Validate-2", pack=own_name),
+            ],
+        },
+        failure=(
+            "cdk-nag validation report shows that not every requested pack evaluated "
+            "this template (pack(s) that reported failure without evaluating a rule: "
+            "AwsSolutions)."
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert sorted(r.ruleId for r in report.runs[0].results) == [
+        "CloudFormation-Validate-1",
+        "CloudFormation-Validate-2",
+        "HIPAA.Security-S1",
+    ]
+    assert scanner.targets_partly_evaluated == 1
+    heads = [r.message.split("): ", 1)[0] for r in caplog.records]
+    counts = (
+        "(1 pack(s) evaluated it; their 1 finding(s) are kept; 2 finding(s) from "
+        "CDK's own validation plugin are kept as well"
+    )
+    assert any(
+        head.startswith("cdk-nag did not evaluate every requested pack against ")
+        and counts in head
+        for head in heads
+    ), heads
+
+
 def test_the_missing_dependency_reason_offers_no_install_hint_for_a_wrapper_import_failure(
     scanner, monkeypatch
 ):
