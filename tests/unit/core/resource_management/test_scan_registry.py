@@ -8,6 +8,7 @@ Unit tests for the scan registry module.
 This module tests the scan registry and management components for ASH MCP server.
 """
 
+import json
 import os
 import signal
 from datetime import datetime
@@ -1050,6 +1051,88 @@ class TestTheOutputDirectoryNeedNotExistYet:
 
         assert str(excinfo.value) == f"Output directory is not a directory: {output}"
         assert registry.list_scans() == []
+
+
+class TestAResultsFileThatDoesNotLoadClosesAPendingScanFailed:
+    """A pending scan no runner owns is closed from its results file.
+
+    The progress view can read a file as a finished scan's while the results
+    model cannot be built from it, and then there is no coverage to assess. The
+    poll used to close such a scan as completed, so a scan that was never shown
+    to have covered anything read as a clean one. It closes as failed, with the
+    file named, the way an unreadable file does.
+    """
+
+    _LOADER = (
+        "automated_security_helper.core.resource_management.scan_registry."
+        "load_aggregated_results_model"
+    )
+
+    @staticmethod
+    def _pending_scan_with_a_results_file(tmp_path):
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = tmp_path / "out"
+        output.mkdir()
+        (output / "ash_aggregated_results.json").write_text(
+            json.dumps(
+                {
+                    "metadata": {
+                        "generated_at": "2024-01-01T00:00:00",
+                        "summary_stats": {},
+                    },
+                    "scanner_results": {
+                        "bandit": {"status": "PASSED", "finding_count": 0}
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        registry = ScanRegistry()
+        scan_id = registry.register_scan(
+            directory_path=str(project), output_directory=str(output)
+        )
+        return registry, scan_id, output
+
+    def test_a_loader_that_returns_none_fails_the_scan_and_names_the_file(
+        self, tmp_path
+    ):
+        registry, scan_id, output = self._pending_scan_with_a_results_file(tmp_path)
+
+        with mock.patch(self._LOADER, return_value=None):
+            progress = registry.check_scan_progress(scan_id)
+
+        entry = registry.get_scan(scan_id)
+        assert entry.status is MCScanStatus.FAILED, entry.status
+        assert entry.error_message is not None
+        assert str(output / "ash_aggregated_results.json") in entry.error_message
+        assert "could not be loaded" in entry.error_message
+        assert entry.end_time is not None
+        assert entry.closed_from_file is True
+        assert progress["status"] == "failed"
+        assert progress["is_complete"] is True
+        assert progress["results_available"] is False
+        assert progress["error_message"] == entry.error_message
+
+    def test_a_results_file_that_loads_still_closes_the_scan_from_the_file(
+        self, tmp_path
+    ):
+        """The same file through the real loader: nothing else changes."""
+        from automated_security_helper.core.resource_management.scan_tracking import (
+            load_aggregated_results_model,
+        )
+
+        registry, scan_id, output = self._pending_scan_with_a_results_file(tmp_path)
+        assert load_aggregated_results_model(output) is not None
+
+        progress = registry.check_scan_progress(scan_id)
+
+        entry = registry.get_scan(scan_id)
+        assert entry.status in (MCScanStatus.COMPLETED, MCScanStatus.INCOMPLETE)
+        assert entry.error_message is None
+        assert entry.closed_from_file is True
+        assert progress["status"] == entry.status.value
+        assert progress["results_available"] is True
 
 
 def test_a_failed_scans_message_hides_a_value_split_by_an_escape_code(tmp_path):

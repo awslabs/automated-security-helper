@@ -2132,9 +2132,23 @@ class ScanRegistry:
                         # the rule the runner's exit code uses, not by the file
                         # merely parsing. Recorded as closed from the file, so a
                         # runner that claims the entry after all may reopen it.
+                        #
+                        # A file the progress view read as a finished scan's but
+                        # that cannot be loaded as results has no coverage to
+                        # assess, and a scan whose coverage cannot be told was not
+                        # shown to have covered anything. It closes as failed, the
+                        # way the unreadable-file arm below closes a pending
+                        # entry, through the same sink so the message is redacted.
                         model = load_aggregated_results_model(output_dir)
                         if model is None:
-                            entry.mark_completed()
+                            self._apply_status(
+                                scan_id,
+                                entry,
+                                MCScanStatus.FAILED,
+                                f"Aggregated results file {results_path} could not "
+                                "be loaded as scan results, so the scan's coverage "
+                                "cannot be assessed",
+                            )
                         else:
                             gate_fires, entry.coverage = assess_coverage(model)
                             if gate_fires:
