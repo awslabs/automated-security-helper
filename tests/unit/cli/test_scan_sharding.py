@@ -231,7 +231,7 @@ class TestShardProvenanceOnDisk:
 class TestProvenanceSurvivesTheReportPhase:
     """The stamp is applied after scan, and the report phase rebuilds metrics.
 
-    ``populate_metrics_from_unified_source`` replaces summary_stats and rewrites
+    ``populate_metrics_from_unified_source`` updates summary_stats and rewrites
     scanner_results on the same metadata object the stamp lives on. If it ever
     rebuilt ReportMetadata instead of mutating it, the stamp would be dropped
     between the scan and the file -- and only for runs that asked for reports,

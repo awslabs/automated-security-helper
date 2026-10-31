@@ -901,8 +901,9 @@ def populate_metrics_from_unified_source(
     """Populate summary_stats and scanner_results from unified metrics.
 
     This function ensures that all metrics are driven from the same source of truth:
-    the final SARIF data via get_unified_scanner_metrics(). It replaces any existing
-    summary_stats and updates scanner_results to consolidate source/converted layers.
+    the final SARIF data via get_unified_scanner_metrics(). It updates any existing
+    summary_stats in place and updates scanner_results to consolidate source/converted
+    layers.
 
     This should be called after the SARIF data is finalized to ensure consistency
     across all metrics reporting.
