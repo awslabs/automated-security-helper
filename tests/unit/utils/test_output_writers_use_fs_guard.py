@@ -160,8 +160,10 @@ def _flag_names(node: ast.AST, frames: List[Bindings], seen=frozenset()):
     when any part of it cannot be followed to such a name: a parameter, a call
     result, an attribute of anything but ``os``, a bare ``O_`` name that nothing
     binds, a number other than 0. Names are followed through the enclosing
-    functions and the module, and a name with several bindings stands for all of
-    them; an ``O_`` name is followed to what binds it, as any other is."""
+    functions and the module, innermost first, and a value found in an enclosing
+    scope is read with the names that scope sees, not the call's own; a name with
+    several bindings stands for all of them; an ``O_`` name is followed to what
+    binds it, as any other is."""
     if isinstance(node, ast.Constant):
         return set() if node.value == 0 else None
     if isinstance(node, ast.Attribute):
@@ -173,13 +175,17 @@ def _flag_names(node: ast.AST, frames: List[Bindings], seen=frozenset()):
     if isinstance(node, ast.Name):
         if node.id in seen:
             return set()
-        for frame in reversed(frames):
+        for index in range(len(frames) - 1, -1, -1):
+            frame = frames[index]
             if node.id in frame:
+                # A value is read in the scope that holds it: the frames from the
+                # module down to this one, not the inner scopes the call sits in.
+                visible = frames[: index + 1]
                 names: set = set()
                 for value in frame[node.id]:
                     if value is None:
                         return None
-                    part = _flag_names(value, frames, seen | {node.id})
+                    part = _flag_names(value, visible, seen | {node.id})
                     if part is None:
                         return None
                     names |= part
@@ -1062,6 +1068,49 @@ def test_control_an_o_name_is_followed_to_what_binds_it():
     )
 
     assert write_sites(source, "probe.py") == [("probe.py", "emit", "os.open")]
+
+
+def test_a_module_value_is_read_with_the_names_the_module_sees():
+    """``flags`` is the module's ``mode``, a write; the function has a ``mode`` of
+    its own that reads. The lookup took the function's ``mode`` for the module's
+    value and passed the call."""
+    source = (
+        "import os\n"
+        "mode = os.O_RDWR\n"
+        "flags = mode\n"
+        "def look(path):\n"
+        "    mode = os.O_RDONLY\n"
+        "    return os.open(path, flags)\n"
+    )
+
+    assert _opens(source) == ["os.open"]
+
+
+def test_an_enclosing_functions_value_is_read_with_the_names_that_function_sees():
+    source = (
+        "import os\n"
+        "def outer(path):\n"
+        "    mode = os.O_RDWR\n"
+        "    flags = mode\n"
+        "    def look():\n"
+        "        mode = os.O_RDONLY\n"
+        "        return os.open(path, flags)\n"
+        "    return look\n"
+    )
+
+    assert _opens(source) == ["os.open"]
+
+
+def test_control_a_name_the_call_reads_directly_is_the_innermost_binding():
+    source = (
+        "import os\n"
+        "mode = os.O_RDWR\n"
+        "def look(path):\n"
+        "    mode = os.O_RDONLY\n"
+        "    return os.open(path, mode)\n"
+    )
+
+    assert _opens(source) == []
 
 
 def test_every_write_in_the_package_is_guarded_or_listed():
