@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import re
 import shutil
 import subprocess  # nosec B404 - runs the real trivy binary and ash CLI under test
@@ -40,7 +39,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.utils.trivy_fixture import materialize
+from tests.utils.trivy_fixture import PINNED_TRIVY, materialize, version_of
 import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -51,7 +50,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner
     TrivyScannerConfigOptions,
 )
 from automated_security_helper.utils.config_trust import record_provenance
-from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 
 PluginContext.model_rebuild()
 
@@ -59,55 +57,13 @@ pytestmark = pytest.mark.integration
 
 DATA = Path(__file__).parents[2] / "test_data" / "scanners" / "trivy"
 CAPTURED_SARIF = DATA / "trivy-0.69.3.vuln.sarif"
-PINNED = TOOL_VERSIONS["trivy"].lstrip("v")
+PINNED = PINNED_TRIVY
 
 #: Advisories old enough that the database will keep them: one per manifest.
 STABLE = {
     ("CVE-2018-18074", "requirements.txt"),
     ("CVE-2021-23337", "package-lock.json"),
 }
-
-
-def _arch() -> str:
-    machine = platform.machine().lower()
-    return {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}[
-        machine
-    ]
-
-
-def _platform() -> str:
-    return {"linux": "linux", "darwin": "darwin", "win32": "windows"}[sys.platform]
-
-
-def _version_of(binary: str) -> str | None:
-    try:
-        out = subprocess.run(  # nosec B603 - fixed argv, asks the binary under test for its version
-            [binary, "--version"], capture_output=True, text=True, timeout=30
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-    match = re.search(r"\d+\.\d+\.\d+", out)
-    return match.group(0) if match else None
-
-
-@pytest.fixture(scope="module")
-def trivy_bin_dir(tmp_path_factory) -> Path:
-    """A directory holding the pinned trivy, provisioned if need be."""
-    on_path = shutil.which("trivy")
-    if on_path and _version_of(on_path) == PINNED:
-        return Path(on_path).parent
-    from automated_security_helper.utils.download_utils import install_pinned_tool
-
-    bin_dir = tmp_path_factory.mktemp("trivy-bin")
-    try:
-        installed = install_pinned_tool("trivy", _platform(), _arch(), bin_dir)
-    except Exception as exc:  # pragma: no cover - network-dependent
-        pytest.fail(
-            f"could not provision trivy {PINNED} through ASH's pinned installer "
-            f"({exc}). These tests must run, not skip."
-        )
-    assert _version_of(str(installed)) == PINNED
-    return bin_dir
 
 
 @pytest.fixture(scope="module")
@@ -130,14 +86,9 @@ def trivy_cache(trivy_bin_dir, tmp_path_factory) -> Path:
 
 
 @pytest.fixture
-def trivy_env(trivy_bin_dir, trivy_cache, monkeypatch):
-    from automated_security_helper.utils import subprocess_utils
-
-    monkeypatch.setenv("PATH", f"{trivy_bin_dir}{os.pathsep}{os.environ['PATH']}")
+def trivy_env(trivy_on_path, trivy_cache, monkeypatch):
     monkeypatch.setenv("TRIVY_CACHE_DIR", str(trivy_cache))
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    # find_executable caches per process, including a miss.
-    monkeypatch.setattr(subprocess_utils, "_find_executable_cache", {})
     return dict(os.environ)
 
 
@@ -198,7 +149,7 @@ def _pairs(report) -> set:
 
 
 def test_the_binary_is_the_pinned_version(trivy_env):
-    assert _version_of(shutil.which("trivy")) == PINNED
+    assert version_of(shutil.which("trivy")) == PINNED
 
 
 def test_the_capture_still_describes_the_pinned_binary(tmp_path, trivy_env):

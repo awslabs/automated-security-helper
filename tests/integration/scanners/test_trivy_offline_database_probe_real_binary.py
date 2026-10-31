@@ -9,12 +9,13 @@ the offline check runs, so they read the same on every machine. This test runs i
 the scanner to land as unavailable for want of a database. The probe's
 ``ContentDatabaseAbsent`` is a ``ValueError``, the arm the check reads as no
 database, and a release of trivy that handled an empty ``--cache-dir`` another way
-would show here and nowhere else. Skipped when no trivy executable is on PATH.
+would show here and nowhere else. It runs against the pinned release the other
+real-binary tests use (``trivy_on_path`` in ``conftest.py``), which is installed when
+it is not on PATH and fails the test, rather than skipping it, when it cannot be.
 """
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,9 +38,7 @@ PluginContext.model_rebuild(_types_namespace={"AshConfig": AshConfig})
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(
-        shutil.which("trivy") is None, reason="needs a trivy executable on PATH"
-    ),
+    pytest.mark.usefixtures("trivy_on_path"),
 ]
 
 
