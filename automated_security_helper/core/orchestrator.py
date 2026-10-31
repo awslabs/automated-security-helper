@@ -1515,8 +1515,9 @@ class ASHScanOrchestrator(BaseModel):
         initialize, are dropped once the phases have finished, and put back if the
         scan ends any other way: an exception, a cancel (ScanCancelled), Ctrl-C. A
         cancel that lands after the last phase counts as ending without results;
-        one read at the results-file write itself leaves them set aside, for the
-        caller to settle (_write_results_file).
+        one read at the results-file write itself puts them back too when
+        settle_on_success is True, and leaves them set aside, for the caller to
+        settle, when it is False (_write_results_file).
 
         Args:
             phases (List[ExecutionPhaseType], optional): The phases to execute.
@@ -1566,9 +1567,17 @@ class ASHScanOrchestrator(BaseModel):
             # scan's directories.
             forget_derived_roots(self.config, self._run_id)
         # Outside the arm above: a cancel read at the write ends the scan with no
-        # results file and the previous results still set aside, for the caller
-        # to settle, as the CLI's own write after its own check left them.
-        self._write_results_file(phases, results)
+        # results file. With settle_on_success False the previous results stay
+        # set aside for the caller to settle, as the CLI's own write after its
+        # own check left them. With True the caller settles nothing later (that
+        # is what True says), so they are put back here: left set aside, a
+        # cancel at the write stranded them in the held directory.
+        try:
+            self._write_results_file(phases, results)
+        except BaseException:
+            if settle_on_success:
+                self.settle_previous_results(restore=True)
+            raise
         if settle_on_success:
             self.settle_previous_results(restore=False)
         return results
@@ -1591,8 +1600,9 @@ class ASHScanOrchestrator(BaseModel):
         being written takes the file this run wrote with it: a client polling a
         cancelled scan reads that file as finished results. Either way the
         cancel propagates from here, outside execute_scan's arm that puts the
-        previous results back, so they stay set aside for the caller to settle,
-        as the CLI's single write (after its own check) left them.
+        previous results back. execute_scan puts them back when it settles (its
+        ``settle_on_success``), and otherwise they stay set aside for the caller
+        to settle, as the CLI's single write (after its own check) left them.
 
         A write that FAILS is a failed scan, as it was when the write sat inside
         _execute_scan: the previous results are put back here, and the failure
