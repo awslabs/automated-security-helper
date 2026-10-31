@@ -64,6 +64,13 @@ def test_a_secret_findings_fenced_message_snippet_is_the_placeholder():
     flat = FlatVulnerability.from_sarif_result(result, "semgrep", "SAST")
 
     assert flat.code_snippet == MASKED_LINE
+    # Only the snippet is checked, on purpose. This builds a flat finding from a
+    # bare Result that has not been through the masking pass, so its description
+    # is the message as written. In a real run the message is whatever
+    # AshAggregatedResults.model_post_init left after
+    # secret_masking.mask_secrets_in_results, which masks the values it knows of;
+    # what this file pins is the fallback snippet, a slot that pass does not
+    # rewrite by location the way it does a region's snippet.
 
 
 def test_another_findings_properties_snippet_is_kept():
