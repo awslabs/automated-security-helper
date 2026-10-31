@@ -544,7 +544,7 @@ _UV_UNKNOWN_EXTRA_PATTERN = r"The package `([^`]+)` " + _UV_UNKNOWN_EXTRA_MARKER
 _NAME_HEAD = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
-def _names_in_fragment(fragment: str) -> frozenset:
+def _names_in_fragment(fragment: str) -> frozenset[str]:
     """The canonical package names uv's backticked fragment can be naming.
 
     ``bandit==1.7.0``, ``bandit>=1.7``, ``bandit @ file:///x`` and ``bandit[sarif]``

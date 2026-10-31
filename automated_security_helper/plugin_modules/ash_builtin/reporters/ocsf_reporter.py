@@ -109,7 +109,7 @@ def _file_name(path: str) -> str:
     return parts[-1] if parts else path
 
 
-def _component_labels(component: Any) -> frozenset:
+def _component_labels(component: Any) -> frozenset[str]:
     """The names a tool component answers to, lower-cased: its name and full
     name, and the scanner name ASH stamps on it
     (``properties.scanner_details.tool_name``), which stays when a merge
@@ -171,7 +171,9 @@ def _rule_descriptor(
     return declared[0][2] if len(declared) == 1 else None
 
 
-def _rule_descriptors(sarif: Any) -> Dict[str, List[Tuple[frozenset, bool, Any]]]:
+def _rule_descriptors(
+    sarif: Any,
+) -> Dict[str, List[Tuple[frozenset[str], bool, Any]]]:
     """Each rule id to the descriptors declaring it, over every run's driver and
     extensions: what a message given by ``id`` is resolved against.
 
@@ -179,7 +181,7 @@ def _rule_descriptors(sarif: Any) -> Dict[str, List[Tuple[frozenset, bool, Any]]
     the driver before the extensions: the component's names
     (:func:`_component_labels`), whether it is a driver, and the first
     descriptor it holds for the id."""
-    rules: Dict[str, List[Tuple[frozenset, bool, Any]]] = {}
+    rules: Dict[str, List[Tuple[frozenset[str], bool, Any]]] = {}
     for run in getattr(sarif, "runs", None) or []:
         tool = getattr(run, "tool", None)
         extensions = getattr(tool, "extensions", None) or []

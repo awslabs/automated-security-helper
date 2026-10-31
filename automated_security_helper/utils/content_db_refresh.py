@@ -218,7 +218,7 @@ _prepared: Dict[Tuple[str, str, bool, bool, str, str], None] = {}
 _PREPARED_LIMIT = 1024
 #: The grype update settings already said once in this process (see
 #: ``_say_grype_auto_update_once``), under ``_prepared_lock``.
-_grype_notices: set = set()
+_grype_notices: set[str] = set()
 
 #: The Go ``os.TempDir`` fallback on Unix when ``TMPDIR`` is unset.
 _GO_UNIX_TEMP_DIR = "/tmp"  # nosec B108 - Go's own constant, read, never written

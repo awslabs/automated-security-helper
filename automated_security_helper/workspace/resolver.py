@@ -1573,7 +1573,7 @@ def _assign_display_labels(projects: List[ProjectPlan]) -> None:
         for project in plain or colliding:
             project.display_label = f"{project.display_label} ({project.key})"
 
-    taken: set = set()
+    taken: set[str] = set()
     for project in projects:
         label, number = project.display_label, 2
         while label in taken:
