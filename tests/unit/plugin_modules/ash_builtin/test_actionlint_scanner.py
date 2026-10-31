@@ -1226,6 +1226,112 @@ def test_repository_config_paths_lists_both_names_at_each_root_once(tmp_path):
     ]
 
 
+def _tree_with_a_regular_config(repo: Path) -> None:
+    """*repo* as a project root (``.git``) holding a regular actionlint config."""
+    (repo / ".git").mkdir()
+    (repo / ".github" / "actionlint.yaml").write_text("self-hosted-runner: {}\n")
+
+
+@pytest.mark.unit
+def test_no_time_left_for_the_run_from_a_copy_ends_the_scan_as_a_timeout(
+    repo, monkeypatch, on_path
+):
+    """scan_timeout bounds the target. The first run exits 3 having used the
+    whole limit (the clock jumps past the deadline before the second run is
+    started), so the run from the copy never starts and the scan ends as a
+    timeout that says which run it was."""
+    _tree_with_a_regular_config(repo)
+    # Read once when the deadline is set and once before the second run (the
+    # first batch is given the limit as set, with no read).
+    readings = [0.0, 10.0]
+
+    def monotonic():
+        return readings.pop(0) if len(readings) > 1 else readings[0]
+
+    monkeypatch.setattr(module, "time", types.SimpleNamespace(monotonic=monotonic))
+    scanner = _scanner(repo, scan_timeout=7)
+    fake = FakeRuns(scanner, _EMPTY_STDOUT, [3])
+    monkeypatch.setattr(scanner, "_run_subprocess", fake)
+
+    with pytest.raises(ScannerError, match="timed out after '7' s") as caught:
+        scanner.scan(target=repo, target_type="source")
+
+    assert "before it could be run again from a copy" in str(caught.value)
+    assert len(fake.calls) == 1
+
+
+@pytest.mark.unit
+def test_a_later_batch_that_exits_3_moves_only_that_batch_and_those_after(
+    repo, monkeypatch, on_path
+):
+    """Three batches: the first is linted in the tree and stays there; the
+    second exits 3 and is run again from the copy; the third is run from the
+    copy at once, not in the tree first."""
+    monkeypatch.setattr(module, "_WORKFLOW_ARGV_BUDGET", 30)
+    _tree_with_a_regular_config(repo)
+    workflows = repo / ".github" / "workflows"
+    shutil.copy(workflows / "clean.yml", workflows / "third.yml")
+    scanner = _scanner(repo)
+    fake = FakeRuns(scanner, _EMPTY_STDOUT, [0, 3, 0, 0])
+    monkeypatch.setattr(scanner, "_run_subprocess", fake)
+
+    report = scanner.scan(target=repo, target_type="source")
+
+    assert isinstance(report, SarifReport)
+    assert len(fake.calls) == 4
+    given = [argv[argv.index("--") + 1 :] for argv, _ in fake.calls]
+    assert given == [
+        [".github/workflows/clean.yml"],
+        [".github/workflows/third.yml"],
+        [".github/workflows/third.yml"],
+        [".github/workflows/vulnerable.yml"],
+    ]
+    roots = [Path(kwargs["cwd"]) for _, kwargs in fake.calls]
+    assert roots[0] == roots[1] == repo
+    assert roots[2] == roots[3]
+    assert not roots[2].resolve().is_relative_to(repo.resolve())
+    assert scanner.exit_code == 0
+
+
+@pytest.mark.unit
+def test_a_copy_run_that_also_exits_3_fails_the_target_with_that_code(
+    repo, monkeypatch, on_path
+):
+    """Both runs exit 3: the target fails with actionlint's own code, no report
+    is written, and the failure is counted against every workflow."""
+    _tree_with_a_regular_config(repo)
+    scanner = _scanner(repo)
+    fake = FakeRuns(scanner, _EMPTY_STDOUT, [3])
+    monkeypatch.setattr(scanner, "_run_subprocess", fake)
+
+    with pytest.raises(ScannerError, match="actionlint exited 3"):
+        scanner.scan(target=repo, target_type="source")
+
+    assert len(fake.calls) == 2
+    assert scanner.exit_code == 3
+    assert scanner.targets_failed == scanner.targets_attempted == 2
+    assert not (Path(scanner.results_dir) / "source" / "actionlint.sarif").exists()
+
+
+@pytest.mark.unit
+def test_a_first_run_that_times_out_is_not_run_again_from_a_copy(
+    repo, monkeypatch, on_path, caplog
+):
+    """A timed-out run says nothing about the config, whatever code it
+    returned: it is a timeout, in the tree, with no second run."""
+    _tree_with_a_regular_config(repo)
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, "", 3, timed_out=True)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ScannerError, match="timed out"):
+            scanner.scan(target=repo, target_type="source")
+
+    ((_, kwargs),) = fake.calls
+    assert kwargs["cwd"] == repo
+    assert "linted from a copy outside the tree" not in caplog.text
+
+
 @pytest.mark.unit
 def test_a_regular_tree_config_keeps_the_run_in_the_tree(
     repo, monkeypatch, on_path, caplog
