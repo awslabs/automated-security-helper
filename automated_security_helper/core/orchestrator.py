@@ -1145,7 +1145,9 @@ class ASHScanOrchestrator(BaseModel):
         ``announce`` False leaves the log lines to the first application.
 
         Raises:
-            ASHValidationError: *restriction* names no threshold.
+            ASHConfigValidationError: *restriction* names no threshold. A refused
+                input like an invalid configuration (exit 3 in the CLI's handlers),
+                not a crash; still an ASHValidationError.
         """
         from automated_security_helper.utils.severity_ladder import (
             normalize_threshold,
@@ -1156,7 +1158,7 @@ class ASHScanOrchestrator(BaseModel):
             return
         requested = normalize_threshold(restriction)
         if requested is None:
-            raise ASHValidationError(
+            raise ASHConfigValidationError(
                 f"The severity threshold {restriction!r} is not one of ALL, LOW, "
                 "MEDIUM, HIGH or CRITICAL."
             )
