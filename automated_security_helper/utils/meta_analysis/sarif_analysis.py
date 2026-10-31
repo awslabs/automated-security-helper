@@ -154,10 +154,10 @@ def validate_sarif_aggregation(
     # writes one run per project, and reading runs[0] alone left every other
     # run's findings unmatched.
     agg_results = _all_results(aggregated_report)
-    # Each aggregated result stands for one original: once it has matched, it is
-    # not offered again, so an original whose aggregated copy was dropped is not
-    # counted as matched against a sibling's copy.
-    taken_ids: Set[int] = set()
+
+    # Every original of every scanner report, in report order. Matching needs the
+    # whole list before it starts: see _match_originals.
+    originals: List[Tuple[str, Dict]] = []
 
     # For each scanner's report
     for scanner_name, original_report in original_reports.items():
@@ -168,7 +168,7 @@ def validate_sarif_aggregation(
             normalized_scanner_name,
             {"critical": [], "important": [], "informational": []},
         )
-        stats = validation_results["match_statistics"].setdefault(
+        validation_results["match_statistics"].setdefault(
             normalized_scanner_name,
             {
                 "total_results": 0,
@@ -183,53 +183,47 @@ def validate_sarif_aggregation(
             },
         )
 
-        # Process each result of every run in the original report
-        for orig_result in _all_results(original_report):
-            stats["total_results"] += 1
-            validation_results["summary"]["total_findings"] += 1
+        # Every result of every run in the original report
+        originals.extend(
+            (normalized_scanner_name, orig_result)
+            for orig_result in _all_results(original_report)
+        )
 
-            # Find matching result in aggregated report
-            matched_result = find_matching_result(
-                orig_result,
-                agg_results,
-                exclude_ids=taken_ids,
-                scanner_name=normalized_scanner_name,
-            )
+    matches = _match_originals(originals, agg_results)
 
-            if matched_result:
-                taken_ids.add(id(matched_result))
-                stats["matched_results"] += 1
-                validation_results["summary"]["matched_findings"] += 1
+    for (normalized_scanner_name, orig_result), matched_result in zip(
+        originals, matches
+    ):
+        stats = validation_results["match_statistics"][normalized_scanner_name]
+        stats["total_results"] += 1
+        validation_results["summary"]["total_findings"] += 1
 
-                # Compare fields between original and matched result
-                missing_fields = compare_result_fields(orig_result, matched_result)
-                stats["fields_compared"] += len(comparable_field_paths(orig_result))
-                stats["fields_missing"] += len(missing_fields)
+        if matched_result:
+            stats["matched_results"] += 1
+            validation_results["summary"]["matched_findings"] += 1
 
-                # Categorize missing fields by importance. compare_result_fields
-                # writes IMPORTANCE_LEVELS, the names these buckets carry; a name
-                # outside them is a defect in that function, not a field to drop.
-                for field_info in missing_fields:
-                    importance = field_info["importance"]
-                    validation_results["missing_fields"][normalized_scanner_name][
-                        importance
-                    ].append(field_info)
-                    validation_results["match_statistics"][normalized_scanner_name][
-                        f"{importance}_fields_missing"
-                    ] += 1
-                    validation_results["summary"][f"{importance}_missing_fields"] += 1
-            else:
-                # Track unmatched results
-                if (
-                    normalized_scanner_name
-                    not in validation_results["unmatched_results"]
-                ):
-                    validation_results["unmatched_results"][
-                        normalized_scanner_name
-                    ] = []
-                validation_results["unmatched_results"][normalized_scanner_name].append(
-                    extract_result_summary(orig_result)
-                )
+            # Compare fields between original and matched result
+            missing_fields = compare_result_fields(orig_result, matched_result)
+            stats["fields_compared"] += len(comparable_field_paths(orig_result))
+            stats["fields_missing"] += len(missing_fields)
+
+            # Categorize missing fields by importance. compare_result_fields
+            # writes IMPORTANCE_LEVELS, the names these buckets carry; a name
+            # outside them is a defect in that function, not a field to drop.
+            for field_info in missing_fields:
+                importance = field_info["importance"]
+                validation_results["missing_fields"][normalized_scanner_name][
+                    importance
+                ].append(field_info)
+                validation_results["match_statistics"][normalized_scanner_name][
+                    f"{importance}_fields_missing"
+                ] += 1
+                validation_results["summary"][f"{importance}_missing_fields"] += 1
+        else:
+            # Track unmatched results
+            validation_results["unmatched_results"].setdefault(
+                normalized_scanner_name, []
+            ).append(extract_result_summary(orig_result))
 
     # Calculate the match and field preservation rates
     for scanner_name in validation_results["match_statistics"]:
@@ -256,6 +250,40 @@ def _all_results(report: Dict) -> List[Dict]:
         if isinstance(run, dict) and run.get("results"):
             results.extend(run["results"])
     return results
+
+
+def _match_originals(
+    originals: List[Tuple[str, Dict]], aggregated_results: List[Dict]
+) -> List[Optional[Dict]]:
+    """The aggregated result each original stands for, or None, in order.
+
+    *originals* are ``(normalized scanner name, result)`` pairs. Each aggregated
+    result stands for one original: once taken it is not offered again, so an
+    original whose aggregated copy was dropped is not counted as matched against
+    a sibling's copy. Taking in report order was not enough: an original whose
+    copy was dropped took the sibling's copy as the nearest overlapping result,
+    and when the sibling came next its own copy was gone, so the sibling was
+    reported unmatched and the fields the dropped original lacked in the copy
+    were reported as lost. Every original's exact match is therefore taken
+    first, and an overlapping result is offered only to what is left.
+    """
+    taken_ids: Set[int] = set()
+    matches: List[Optional[Dict]] = [None] * len(originals)
+    for exact_only in (True, False):
+        for index, (scanner_name, original) in enumerate(originals):
+            if matches[index]:
+                continue
+            found = find_matching_result(
+                original,
+                aggregated_results,
+                exclude_ids=taken_ids,
+                scanner_name=scanner_name,
+                exact_only=exact_only,
+            )
+            if found:
+                taken_ids.add(id(found))
+                matches[index] = found
+    return matches
 
 
 def _has_location(location_info: Dict) -> bool:
@@ -293,6 +321,7 @@ def find_matching_result(
     aggregated_results: List[Dict],
     exclude_ids: Optional[Set[int]] = None,
     scanner_name: Optional[str] = None,
+    exact_only: bool = False,
 ) -> Optional[Dict]:
     """
     Find a matching result in the aggregated report using rule ID and location.
@@ -320,6 +349,10 @@ def find_matching_result(
             original, which are not offered again
         scanner_name: The normalized name of the scanner that reported
             *original_result*, when known
+        exact_only: Offer no overlapping result: only one at the original's own
+            file and lines (or, for results with no location, with an equal
+            message or ``analysisTarget``). ``validate_sarif_aggregation`` takes
+            every original's exact match this way before it offers overlaps.
 
     Returns:
         Matching result or None
@@ -385,7 +418,7 @@ def find_matching_result(
         if original_target and original_target == agg_target:
             return agg_result
 
-    return overlapping_match
+    return None if exact_only else overlapping_match
 
 
 def _locations_equal(location_info: Dict, other: Dict) -> bool:
