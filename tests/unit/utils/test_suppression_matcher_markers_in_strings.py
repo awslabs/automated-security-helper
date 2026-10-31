@@ -73,3 +73,46 @@ def test_a_line_of_many_markers_inside_strings_is_scanned_once(tmp_path):
 def test_the_answers_for_ordinary_lines_are_unchanged(tmp_path, line, expected):
     """The positive controls: what the pass found before it finds now."""
     assert find_inline_suppressions(_write(tmp_path, line)) == expected
+
+
+@pytest.mark.parametrize(
+    ("line", "rule"),
+    [
+        pytest.param(
+            "x = 'a'if y else 1  # ash-ignore: R5 see 'notes'\n",
+            "R5",
+            id="single-quote-then-if",
+        ),
+        pytest.param(
+            'if "dbg"in env:  # ash-ignore: R6 about "that"\n',
+            "R6",
+            id="double-quote-then-in",
+        ),
+        pytest.param(
+            "x = 'a'or 'b'  # ash-ignore: R7 see 'notes'\n",
+            "R7",
+            id="single-quote-then-or",
+        ),
+        pytest.param(
+            'y = "abc"_s  # ash-ignore: R8 see "it"\n',
+            "R8",
+            id="user-defined-literal-suffix",
+        ),
+        pytest.param(
+            "Description: Bob's bucket  # ash-ignore: R9 logging isn't needed\n",
+            "R9",
+            id="apostrophes-in-prose-still-close-nothing",
+        ),
+    ],
+)
+def test_a_string_closed_before_a_keyword_does_not_hide_a_directive(
+    tmp_path, line, rule
+):
+    """Red at the base for the first four: the closing quote of the string, glued
+    to the keyword or suffix after it, was read as an apostrophe, so the string
+    stayed open until a quote in the directive's reason and the marker fell
+    inside it; the directive was not honored. The last line is the positive
+    control: an apostrophe in prose is still not a closer."""
+    found = find_inline_suppressions(_write(tmp_path, line))
+
+    assert [(item.line_number, item.rule_id) for item in found] == [(1, rule)]

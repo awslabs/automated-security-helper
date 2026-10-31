@@ -126,6 +126,11 @@ def _is_between_word_characters(line: str, index: int) -> bool:
     A quote there is an apostrophe inside a word (``it's``), which cannot end a
     string any more than it can open one (``_opens_a_string``): ``it's`` in a
     directive's reason closed a string opened before the marker, and hid it.
+
+    A closer is the exception where a keyword or a ``_`` follows it
+    (``_is_followed_by_what_follows_a_string``): ``"x"in env`` ends its string,
+    and a quote read as an apostrophe there left the string open until a quote
+    in the directive's reason, which put the marker inside it.
     """
     return (
         0 < index < len(line) - 1
@@ -134,13 +139,48 @@ def _is_between_word_characters(line: str, index: int) -> bool:
     )
 
 
+#: Words that follow a string literal directly in the languages ASH reads
+#: (``"x"in env``, ``'a'if cond else 'b'``, ``'a'or 'b'``), and so tell a closing
+#: quote from an apostrophe: a word of prose never continues an apostrophe
+#: with one of these (``it's``, ``don't``, ``rock'n'roll``).
+_WORDS_AFTER_A_STRING = frozenset(
+    {"in", "is", "or", "and", "not", "if", "else", "for", "of", "instanceof"}
+)
+#: The longest of them, so the walk to the end of a word stops there.
+_LONGEST_WORD_AFTER_A_STRING = max(map(len, _WORDS_AFTER_A_STRING))
+
+
+def _is_followed_by_what_follows_a_string(line: str, index: int) -> bool:
+    """Whether the text after the quote at ``index`` can follow a string literal.
+
+    A keyword (``_WORDS_AFTER_A_STRING``) that ends at a non-word character or at
+    the end of the line, or a ``_``: the suffix of a user-defined literal
+    (``"abc"_s``). Called for a quote between two word characters, so
+    ``line[index + 1]`` exists; the walk is at most one character past the
+    longest keyword, so the check is constant per quote.
+    """
+    start = index + 1
+    if line[start] == "_":
+        return True
+    end = start
+    while (
+        end < len(line)
+        and end - start <= _LONGEST_WORD_AFTER_A_STRING
+        and _is_word_character(line[end])
+    ):
+        end += 1
+    return line[start:end] in _WORDS_AFTER_A_STRING
+
+
 def _quoted_spans(line: str) -> List[Tuple[int, int]]:
     """The ``[start, end)`` spans of the quoted strings in ``line``, left to right.
 
     A string opens at a quote character that ``_opens_a_string`` admits and
     closes at the next quote character of the same kind that no odd run of
     backslashes precedes and that is not between two word characters
-    (``_is_between_word_characters``); a quote with no such closer on the line
+    (``_is_between_word_characters``), unless what follows it is what follows a
+    string (``_is_followed_by_what_follows_a_string``: ``"x"in env``,
+    ``'a'or 'b'``, ``"abc"_s``); a quote with no such closer on the line
     opens nothing, and the scan goes on from the next character. That is what the regular
     expression this replaced found (the word-character rule added), but the
     expression was tried afresh at every quote in the line, and each attempt
@@ -164,7 +204,10 @@ def _quoted_spans(line: str) -> List[Tuple[int, int]]:
         if (
             character in closers
             and backslashes % 2 == 0
-            and not _is_between_word_characters(line, index)
+            and (
+                not _is_between_word_characters(line, index)
+                or _is_followed_by_what_follows_a_string(line, index)
+            )
         ):
             closers[character].append(index)
         backslashes = 0
