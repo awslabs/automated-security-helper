@@ -1798,7 +1798,58 @@ def test_the_operators_skip_entries_are_held_to_what_is_left_of_the_budget(
     assert tokens == ["--skip-dirs=aaaa"], tokens
     (warning,) = [m for m in messages if "exceed the size" in m]
     assert warning.startswith("3 entries"), warning
+    # Where the overflow starts: the variable and the first entry left out, never
+    # an entry's text.
+    assert "from entry 2 of TRIVY_SKIP_DIRS on, are not given" in warning, warning
     assert "bbbb" not in warning and "dddd" not in warning
+
+
+def test_a_single_entry_over_the_budget_is_reported_in_the_singular(
+    tmp_path, monkeypatch
+):
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "aaaa"}
+    ashs_own = "--skip-dirs=x"
+    monkeypatch.setattr(
+        trivy_base, "skip_args_budget", lambda environment: len(ashs_own) + 1
+    )
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        tokens = scanner._operator_skip_args([ashs_own])
+
+    assert tokens == []
+    (warning,) = _operator_warnings(messages)
+    assert warning.startswith("1 entry of the operator's"), warning
+    assert "from entry 1 of TRIVY_SKIP_DIRS on, is not given" in warning, warning
+    assert "That entry does not apply" in warning, warning
+    assert "it would exceed" in warning, warning
+
+
+def test_a_second_overflow_from_another_source_is_reported_too(tmp_path, monkeypatch):
+    """One scanner object scans the source and then the converted copy, and the
+    warning was remembered under one fixed key, so the second target's overflow, a
+    different list, was never said. Keyed on where it starts and how large it is, a
+    different overflow is reported and the same one is still said once."""
+    scanner = _repo_scanner(tmp_path)
+    ashs_own = "--skip-dirs=x"
+    monkeypatch.setattr(
+        trivy_base, "skip_args_budget", lambda environment: len(ashs_own) + 1
+    )
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        scanner.extra_env = {"TRIVY_SKIP_DIRS": "aaaa,bbbb"}
+        scanner._operator_skip_args([ashs_own])
+        scanner._operator_skip_args([ashs_own])
+        scanner.extra_env = {"TRIVY_SKIP_FILES": "cccc"}
+        scanner._operator_skip_args([ashs_own])
+
+    first, second = _operator_warnings(messages)
+    assert first.startswith("2 entries"), first
+    assert "from entry 1 of TRIVY_SKIP_DIRS on" in first, first
+    assert second.startswith("1 entry"), second
+    assert "from entry 1 of TRIVY_SKIP_FILES on" in second, second
 
 
 def test_control_the_operators_skip_entries_all_fit_a_budget_that_holds_them(

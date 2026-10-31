@@ -1250,17 +1250,26 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             for argument in final_args
         ):
             return []
-        tokens, over_budget = self._operator_skip_tokens(final_args)
-        if over_budget:
-            refusal = "operator-skip:budget"
+        tokens, over_budget, first_dropped = self._operator_skip_tokens(final_args)
+        if over_budget and first_dropped is not None:
+            source, position = first_dropped
+            # Keyed on where the overflow starts and how large it is, so a second
+            # target (the converted copy after the source) or a changed list that
+            # overflows differently is reported, and a repeat of the same one is not.
+            refusal = f"operator-skip:budget:{source}:{position}:{over_budget}"
             if refusal not in self._warned_inputs:
                 self._warned_inputs.add(refusal)
+                one = over_budget == 1
+                noun = "entry" if one else "entries"
+                verb = "is" if one else "are"
+                pronoun = "it" if one else "they"
+                subject = "That entry does" if one else "Those entries do"
                 self._plugin_log(
-                    f"{over_budget} entr{'y' if over_budget == 1 else 'ies'} of the "
-                    "operator's skip-dirs and skip-files settings are not given to "
-                    "trivy as --skip-dirs or --skip-files: with ASH's own tokens "
-                    "they would exceed the size the OS starts a program with. "
-                    "Those entries do not apply to this scan.",
+                    f"{over_budget} {noun} of the operator's skip-dirs and "
+                    f"skip-files settings, from entry {position} of {source} on, "
+                    f"{verb} not given to trivy as --skip-dirs or --skip-files: "
+                    f"with ASH's own tokens {pronoun} would exceed the size the OS "
+                    f"starts a program with. {subject} not apply to this scan.",
                     level=logging.WARNING,
                 )
         return tokens
@@ -1275,14 +1284,15 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         operator's own ``--skip-dirs`` / ``--skip-files`` entries. Nothing is logged
         here: the warnings are given where the tokens are.
         """
-        tokens, _ = self._operator_skip_tokens(final_args, quiet=True)
+        tokens, _, _ = self._operator_skip_tokens(final_args, quiet=True)
         return _skip_tokens_size([*final_args, *tokens])
 
     def _operator_skip_tokens(
         self, final_args: List[str], *, quiet: bool = False
-    ) -> Tuple[List[str], int]:
+    ) -> Tuple[List[str], int, Optional[Tuple[str, int]]]:
         """The operator's skip entries that fit beside ``final_args``' own skip
-        tokens, and how many do not (``_operator_skip_args``, which gives the reasons).
+        tokens, how many do not, and where the first of those is: its source (the
+        variable or the config file key) and its position there.
 
         ``quiet`` leaves out the warning for an entry holding a line break, for a
         caller that only sizes the entries (``_skip_args_reserved``).
@@ -1290,6 +1300,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         used = _skip_tokens_size(final_args)
         budget = skip_args_budget(self._scan_environment())
         over_budget = 0
+        first_dropped: Optional[Tuple[str, int]] = None
         tokens: List[str] = []
         for flag, variable, key in (
             ("--skip-dirs", "TRIVY_SKIP_DIRS", "skip-dirs"),
@@ -1318,11 +1329,13 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                     continue
                 size = _skip_token_size(token)
                 if over_budget or used + size > budget:
+                    if not over_budget:
+                        first_dropped = (source, position)
                     over_budget += 1
                     continue
                 used += size
                 tokens.append(token)
-        return tokens, over_budget
+        return tokens, over_budget, first_dropped
 
     def _trivy_input_file(
         self,
