@@ -21,6 +21,7 @@ Two readings that went wrong before, shared by ``trivy`` and ``trivy-repo``:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -41,13 +42,27 @@ pytestmark = pytest.mark.unit
 
 OFFLINE_FLAGS = ["--skip-db-update", "--skip-java-db-update", "--skip-check-update"]
 
+#: What the host's shell may set that these tests would otherwise read: the files
+#: trivy is pointed at, its scanner set, and the three settings that switch off or
+#: reshape its database update (``TRIVY_SKIP_DB_UPDATE`` and ``TRIVY_SKIP_UPDATE``
+#: suppress the update, ``TRIVY_EXIT_CODE`` changes the exit status), as the
+#: update tests in test_trivy_scanner.py clear them.
+HOST_TRIVY_VARIABLES = (
+    "TRIVY_CONFIG",
+    "TRIVY_IGNOREFILE",
+    "TRIVY_SECRET_CONFIG",
+    "TRIVY_SCANNERS",
+    "TRIVY_SKIP_DB_UPDATE",
+    "TRIVY_SKIP_UPDATE",
+    "TRIVY_EXIT_CODE",
+)
+
 
 @pytest.fixture(autouse=True)
 def _online_host(monkeypatch, tmp_path):
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    for name in ("TRIVY_CONFIG", "TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG"):
+    for name in HOST_TRIVY_VARIABLES:
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.delenv("TRIVY_SCANNERS", raising=False)
     monkeypatch.setenv("TRIVY_CACHE_DIR", str(tmp_path / "trivy-cache"))
     monkeypatch.setattr(trivy_base, "find_executable", lambda name: f"/bin/{name}")
 
@@ -93,6 +108,17 @@ def _scanner(tmp_path: Path, **options) -> TrivyRepoScanner:
     scanner.results_dir = context.output_dir / "scanners" / "trivy-repo"
     scanner.results_dir.mkdir(parents=True, exist_ok=True)
     return scanner
+
+
+@pytest.mark.parametrize(
+    "name", ["TRIVY_SKIP_DB_UPDATE", "TRIVY_SKIP_UPDATE", "TRIVY_EXIT_CODE"]
+)
+def test_the_host_fixture_clears_trivys_update_settings_a_shell_may_hold(name):
+    """A shell with ``TRIVY_SKIP_DB_UPDATE=true`` suppresses the update, so the
+    update-count assertions below read zero where they expect one. The autouse
+    fixture has run by now: the setting is named in its list and is gone."""
+    assert name in HOST_TRIVY_VARIABLES
+    assert name not in os.environ
 
 
 # --- the update runs only for a scan that reads the database --------------------
