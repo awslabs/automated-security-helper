@@ -155,6 +155,87 @@ def test_no_child_is_started_with_less_than_it_needs_to_start(tmp_path, monkeypa
     assert batch.failed_child_responses == [{"returncode": 1}]
 
 
+def test_a_child_that_started_and_died_is_not_followed_by_one_under_the_full_floor(
+    tmp_path, monkeypatch
+):
+    """Under a limit of 8 seconds a child wrote its header, died on the first template
+    after 3.5 seconds, and 4.5 seconds were left. A child started with that much is
+    below the five seconds it needs to get past jsii startup, so it would time out and
+    add a timed-out record for templates that were never going to be evaluated. The
+    floor was loosened to half the limit for every retry, 4 seconds here, which started
+    that child. Only the retry after a child that wrote no header gets the looser floor
+    (the next test)."""
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(cdk_nag_worker.time, "monotonic", lambda: clock["now"])
+    seen = []
+
+    def fake_run_child(
+        pending, options, work_root, cwd, timeout, values, *, declared_timeout=None
+    ):
+        seen.append((list(pending), timeout))
+        clock["now"] += 3.5
+        return (
+            [],
+            "the cdk-nag worker process exited 139 before answering: x",
+            False,
+            {"returncode": 139, "worker_started": True},
+        )
+
+    monkeypatch.setattr(cdk_nag_worker, "_run_child", fake_run_child)
+    batch = cdk_nag_worker._Batch(
+        ["a.yaml", "b.yaml", "c.yaml"], tmp_path, tmp_path, timeout=8.0, values=()
+    )
+
+    batch._evaluate(list(batch.templates), {})
+
+    assert [pending for pending, _ in seen] == [["a.yaml", "b.yaml", "c.yaml"]]
+    assert "exited 139" in batch.errors["a.yaml"]
+    assert "time ran out" in batch.errors["b.yaml"]
+    assert "time ran out" in batch.errors["c.yaml"]
+    assert batch.failed_child_responses == [{"returncode": 139, "worker_started": True}]
+
+
+def test_the_retry_after_a_child_with_no_header_gets_the_looser_floor(
+    tmp_path, monkeypatch
+):
+    """The control for the test above, under the same limit and the same 4.5 seconds
+    left: the first child never wrote its header, so it never reached a template, and
+    the retry the batch promises is the templates' only chance. It starts, with every
+    template still pending, because its floor is half the limit (4 seconds)."""
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(cdk_nag_worker.time, "monotonic", lambda: clock["now"])
+    seen = []
+
+    def fake_run_child(
+        pending, options, work_root, cwd, timeout, values, *, declared_timeout=None
+    ):
+        seen.append((list(pending), timeout))
+        clock["now"] += 3.5
+        if len(seen) == 1:
+            return (
+                [],
+                "the cdk-nag worker process exited 1 before answering: x",
+                False,
+                {"returncode": 1},
+            )
+        return [NOT_CFN for _ in pending], None, False, {"returncode": 0}
+
+    monkeypatch.setattr(cdk_nag_worker, "_run_child", fake_run_child)
+    batch = cdk_nag_worker._Batch(
+        ["a.yaml", "b.yaml", "c.yaml"], tmp_path, tmp_path, timeout=8.0, values=()
+    )
+
+    batch._evaluate(list(batch.templates), {})
+
+    assert [pending for pending, _ in seen] == [
+        ["a.yaml", "b.yaml", "c.yaml"],
+        ["a.yaml", "b.yaml", "c.yaml"],
+    ]
+    assert seen[1][1] == pytest.approx(4.5)
+    assert batch.errors == {}
+    assert set(batch.answers) == {"a.yaml", "b.yaml", "c.yaml"}
+
+
 def test_a_batch_with_no_timeout_bounds_nothing(tmp_path, monkeypatch):
     seen = []
 

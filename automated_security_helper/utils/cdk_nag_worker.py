@@ -473,17 +473,24 @@ _READ_CHUNK_BYTES = 1024 * 1024
 #: The least of the batch's time limit a new child is started with. A child needs
 #: seconds to start the jsii kernel before it can answer anything; one started with
 #: less is certain to time out, and used to add a timed-out record and a "killed at
-#: the limit" reason for templates that were never going to be evaluated. Bounded
-#: by half the configured limit (``_child_floor``): a fixed floor above a small
-#: limit refused every second child, so the headerless retry the batch promises,
-#: and every retry after a child died at once, read "time ran out" with almost
-#: the whole limit left.
+#: the limit" reason for templates that were never going to be evaluated. Every
+#: child but one waits for the whole floor. The exception is the one retry the batch
+#: promises after a child that never wrote its protocol header (``_child_floor``):
+#: nothing was evaluated, so that retry is the only chance the templates have, and
+#: a fixed floor above a small limit refused it with almost the whole limit left.
+#: Its floor is bounded by half the limit. A retry after a child that did start and
+#: died on a template keeps the whole floor, since a child given less is the timed-out
+#: record this floor exists to prevent.
 _MIN_CHILD_SECONDS = 5.0
 
 
-def _child_floor(timeout: Optional[float]) -> float:
-    """The least of what is left of ``timeout`` another child is started with."""
-    if timeout is None:
+def _child_floor(timeout: Optional[float], headerless_retry: bool = False) -> float:
+    """The least of what is left of ``timeout`` another child is started with.
+
+    ``headerless_retry`` marks the child that follows one which wrote no protocol
+    header; only that child's floor is bounded by half the limit.
+    """
+    if timeout is None or not headerless_retry:
         return _MIN_CHILD_SECONDS
     return min(_MIN_CHILD_SECONDS, timeout / 2)
 
@@ -926,9 +933,10 @@ class _Batch:
         The timeout bounds the whole of this call, not each child. The first child
         gets the configured limit; a child started after one died gets what is left
         of it, and when nothing is left, or less than a child needs to get past jsii
-        startup (``_child_floor``: a few seconds, never more than half the limit, so
-        a small limit still admits the retry), the pending templates fail with the
-        timeout reason without a child being started. Each child used to get the full
+        startup (``_child_floor``: a few seconds; for the one retry after a child
+        that wrote no header, never more than half the limit, so a small limit
+        still admits it), the pending templates fail with the timeout reason
+        without a child being started. Each child used to get the full
         limit afresh, so a batch whose children kept dying ran for about half as many
         limits as it had templates.
 
@@ -945,12 +953,14 @@ class _Batch:
         last_signature: Optional[tuple] = None
         deadline = None if self.timeout is None else time.monotonic() + self.timeout
         first_child = True
+        # Whether the child about to start is the retry after one that wrote no header.
+        after_headerless = False
         while pending:
             if first_child or deadline is None:
                 child_timeout = self.timeout
             else:
                 remaining = deadline - time.monotonic()
-                if remaining <= _child_floor(self.timeout):
+                if remaining <= _child_floor(self.timeout, after_headerless):
                     from automated_security_helper.utils.error_text import (
                         timeout_limit_token,
                     )
@@ -968,6 +978,7 @@ class _Batch:
                     return
                 child_timeout = remaining
             first_child = False
+            after_headerless = False
             try:
                 answers, error, fail_rest, response = _run_child(
                     pending,
@@ -1023,6 +1034,7 @@ class _Batch:
                 # them all, so this costs at most one extra child.
                 answerless_in_a_row = 1
                 last_signature = signature
+                after_headerless = True
                 continue
             if answers:
                 answerless_in_a_row = 0
