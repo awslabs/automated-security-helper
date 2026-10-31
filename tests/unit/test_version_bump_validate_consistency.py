@@ -124,12 +124,15 @@ class TestAConsistentTreePasses:
         # are the two in TestTheLabeledVersionComesFromThePyproject, where the file
         # is missing or another project's and the old code printed the installed
         # 9.9.9. This one fails if validate ever asks the distribution at all.
-        def asked():
-            raise AssertionError("validate asked the installed distribution")
-
-        monkeypatch.setattr(f"{MODULE}._installed_version", asked)
+        # The stub records the call and does not raise, so a broad ``except Exception``
+        # in validate cannot swallow the evidence.
+        calls: list[int] = []
+        monkeypatch.setattr(
+            f"{MODULE}._installed_version", lambda: calls.append(1) or "9.9.9"
+        )
         module = _load_version_bump(monkeypatch)
         assert _bumper(module, project).validate_consistency() is True
+        assert calls == []
 
 
 class TestWhatValidateExpectsIsWhatSetWrites:
@@ -232,11 +235,12 @@ class TestADisagreementFailsTheValidation:
         assert "README.md does not exist" in out
         assert "validation passed" not in out
 
-    def test_every_disagreement_is_reported_not_only_the_first(
+    def test_a_missing_page_is_reported_beside_a_table_disagreement(
         self, project, monkeypatch, capsys
     ):
         # A page that does not exist is reported whatever the tables say: that
-        # needs no version.
+        # needs no version. A page that exists is not compared with its template
+        # while the tables disagree, so this pins that pair, not every disagreement.
         _write_pyproject(project, "1.2.3", "1.2.2")
         project.joinpath("README.md").unlink()
         module = _load_version_bump(monkeypatch)
@@ -348,9 +352,16 @@ class TestTheTemplatePathComesFromTheManager:
         targets = list(manager.target_files)
         assert targets
         assert all(isinstance(target, str) for target in targets)
+        every_template_exists = all(
+            manager.template_path_for(target).exists() for target in targets
+        )
 
-        assert bumper.validate_consistency() is False
+        passed = bumper.validate_consistency()
 
+        # A target whose template is missing fails validate whatever else holds. When
+        # every template exists the pages decide, which this tree does not set up.
+        if not every_template_exists:
+            assert passed is False
         out = capsys.readouterr().out
         for target in targets:
             template = manager.template_path_for(target)

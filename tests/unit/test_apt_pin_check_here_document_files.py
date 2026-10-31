@@ -180,17 +180,22 @@ class TestAFileBodyIsNotCommands:
 
     def test_a_shell_marker_after_a_file_marker_is_told_apart(self, tmp_path):
         """Control: the bodies are told apart in the order the shell reads them."""
+        # The two bodies hold different parameters, so the order they are matched to
+        # their markers shows in what is refused: "$1" (line 4) belongs to the file and
+        # is skipped, "$@" (line 6) belongs to bash and is part of the instruction that
+        # starts on line 3. Read the other way round, "$1" would be the one refused.
         body = (
             "RUN cat > /a <<'A'; bash <<B\n"
-            'apt-get install -y "$@"\n'
+            'apt-get install -y "$1"\n'
             "A\n"
             'apt-get install -y "$@"\n'
             "B\n"
         )
-        # The file body's "$@" (line 4) is skipped. The shell body's (line 6) is part of
-        # the instruction that starts on line 3, and is refused there.
-        with pytest.raises(checker.PinEnumerationError, match=r"Dockerfile:3 installs"):
+        with pytest.raises(
+            checker.PinEnumerationError, match=r"Dockerfile:3 installs '\$@'"
+        ) as refused:
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+        assert "'$1'" not in str(refused.value)
 
 
 class TestAFileBodyIsStillRead:

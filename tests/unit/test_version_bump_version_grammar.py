@@ -131,7 +131,17 @@ class TestPep440VersionsParse:
         assert module.parse_version("3.8.0-rc1") == (3, 8, 0)
 
     @pytest.mark.parametrize(
-        "version", ["3.8.0a2", "3.8.0b3", "3.8.0rc1", "3.8.0.dev1", "3.8.0rc1.dev2"]
+        "version",
+        [
+            "3.8.0a2",
+            "3.8.0b3",
+            "3.8.0rc1",
+            "3.8.0.dev1",
+            "3.8.0rc1.dev2",
+            # The spelling an old ``set`` wrote: PEP 440 reads it as 3.8.0rc1, so the
+            # finalize rule applies to it as to the pip spelling.
+            "3.8.0-rc1",
+        ],
     )
     def test_a_bump_from_a_version_before_its_release_finalizes_it(
         self, monkeypatch, version
