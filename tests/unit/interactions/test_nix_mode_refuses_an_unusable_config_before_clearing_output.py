@@ -82,7 +82,7 @@ def _scan(tmp_path, monkeypatch, config, ash_config=None, discovered=None):
             run_ash_scan(
                 source_dir=src,
                 output_dir=out,
-                config=str(config),
+                config=str(config) if config is not None else None,
                 mode=RunMode.nix,
                 progress=False,
                 show_summary=False,
