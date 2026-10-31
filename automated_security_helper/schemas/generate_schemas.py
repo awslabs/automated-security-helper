@@ -213,7 +213,7 @@ def _is_enum_core(core_schema: Any, definitions: Any = None) -> bool:
             return True
         if kind == "definition-ref" and definitions:
             ref = core_schema.get("schema_ref")
-            if ref in followed or ref not in definitions:
+            if not isinstance(ref, str) or ref in followed or ref not in definitions:
                 return False
             followed.add(ref)
             core_schema = definitions[ref]
