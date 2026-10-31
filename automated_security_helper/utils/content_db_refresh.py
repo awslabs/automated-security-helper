@@ -98,11 +98,15 @@ Serialized by ``utils/file_lock.exclusive_lock`` on a lock file in the cache
 directory, or in the temporary directory named for the cache when the cache is not
 writable: the scanners of one scan run in threads, and other ASH processes may
 share the cache. The second caller to take the lock finds the database current,
-and the tool returns at once. ``scan_id`` also skips every call after the first
-that succeeded for the same tool, cache and scan. It is the scan's
-``PluginContext.scan_id``, a random id, rather than anything derived from the
-context object's address, which a long-running process such as the MCP server
-can hand to a later scan's context once the first is freed.
+and the tool returns at once. It waits for the lock longer than a healthy holder
+keeps it: every command the tool may run at its own ``UPDATE_TIMEOUT_SECONDS``,
+and never less than the lock's default (``_lock_wait_seconds``).
+
+``scan_id`` also skips every call after the first that succeeded for the same
+tool, cache and scan. It is the scan's ``PluginContext.scan_id``, a random id,
+rather than anything derived from the context object's address, which a
+long-running process such as the MCP server can hand to a later scan's context
+once the first is freed.
 
 Failure modes
 -------------
@@ -137,7 +141,10 @@ from automated_security_helper.config.path_trust import (
 )
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
-from automated_security_helper.utils.file_lock import exclusive_lock
+from automated_security_helper.utils.file_lock import (
+    LOCK_TIMEOUT_SECONDS,
+    exclusive_lock,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.scope import outside_scanner_sandbox
@@ -149,6 +156,16 @@ TOOLS = ("grype", "trivy")
 #: How long one refresh command may take. A first download of either database is
 #: a few hundred megabytes.
 UPDATE_TIMEOUT_SECONDS = 900
+
+#: The most commands one refresh of each tool runs under its lock: grype's database
+#: update; trivy's database, Java database and checks bundle. Each is bounded by
+#: ``UPDATE_TIMEOUT_SECONDS``, so a healthy holder keeps the lock for at most this
+#: many times that bound, whatever the caller that waits on it asked for.
+_MOST_COMMANDS = {"grype": 1, "trivy": 3}
+
+#: Added to the longest a healthy holder keeps the lock, for what it does outside
+#: the commands: its work directory, the process starts and the hand-off.
+_LOCK_MARGIN_SECONDS = 120.0
 
 #: Environment for grype inside the sandbox once its database has been prepared:
 #: no update of its own (the cache is read-only), no update check for grype itself,
@@ -565,6 +582,22 @@ def _lock_is_openable(lock: Path) -> bool:
     return stat.S_ISREG(mode) and os.access(lock, os.R_OK)
 
 
+def _lock_wait_seconds(tool: str) -> float:
+    """How long a caller waits for another update's lock before giving it up.
+
+    The lock's own default, 30 minutes, is the floor: a holder that never releases
+    it (it died) must still end the wait. Above it, the longest a healthy holder of
+    this tool keeps the lock, every command it may run at its own bound plus a
+    margin. Under the default alone a trivy update that runs its database, Java
+    database and checks bundle commands one after the other can hold the lock for
+    45 minutes, and a second ASH process sharing the cache gave it up as dead while
+    it was still downloading. The caller's own settings do not size the wait: what
+    it asks to update says nothing of what the holder is running.
+    """
+    longest = _MOST_COMMANDS[tool] * UPDATE_TIMEOUT_SECONDS + _LOCK_MARGIN_SECONDS
+    return max(LOCK_TIMEOUT_SECONDS, longest)
+
+
 def _lock_refused(tool: str, lock: Path, exc: OSError) -> ScannerError:
     """The ``ScannerError`` for a lock ``exclusive_lock`` could not take."""
     return ScannerError(
@@ -586,7 +619,7 @@ def _refresh_lock(
     kept it past the bound) becomes the ``ScannerError`` the scanners turn into a
     failed scanner, instead of an ``OSError`` or ``TimeoutError`` that ends the
     scan. Only the taking is worded here: whatever the block raises passes
-    through as it is.
+    through as it is. The wait for a holder is ``_lock_wait_seconds(tool)``.
 
     ``fallback`` is the lock to take instead when ``lock`` is refused for a reason
     other than a holder: the shared temporary lock, whose name any account can
@@ -597,9 +630,10 @@ def _refresh_lock(
     refusal to route around: another update is running, and taking a second name
     would let this refresh run beside it instead of after it.
     """
+    wait = _lock_wait_seconds(tool)
     with contextlib.ExitStack() as held:
         try:
-            held.enter_context(exclusive_lock(lock))
+            held.enter_context(exclusive_lock(lock, timeout=wait))
         except OSError as exc:  # TimeoutError is one
             if fallback is None or isinstance(exc, TimeoutError):
                 raise _lock_refused(tool, lock, exc) from exc
@@ -608,7 +642,7 @@ def _refresh_lock(
                 f"({exc}); taking {fallback.as_posix()}"
             )
             try:
-                held.enter_context(exclusive_lock(fallback))
+                held.enter_context(exclusive_lock(fallback, timeout=wait))
             except OSError as second:
                 raise _lock_refused(tool, fallback, second) from second
         yield

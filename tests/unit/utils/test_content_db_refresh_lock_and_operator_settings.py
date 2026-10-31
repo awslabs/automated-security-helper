@@ -28,6 +28,7 @@ Every command is captured, never run.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import getpass
 import hashlib
@@ -410,6 +411,72 @@ def test_a_shared_temp_lock_and_the_account_lock_both_refused_name_the_last(
     assert own.as_posix() in str(raised.value)
     assert raised.value.__cause__ is refusals[own]
     assert captured == []
+
+
+_NOT_PASSED = object()
+
+
+def _recording_lock(monkeypatch, refusals=()):
+    """Stand in for ``exclusive_lock`` as the refresh imported it: each call is
+    recorded as (path, timeout), the first ``len(refusals)`` calls raise the
+    refusals in order, and the rest take a lock that holds nothing. A call that
+    passes no timeout records ``_NOT_PASSED``, the lock's own default."""
+    taken = []
+    pending = list(refusals)
+
+    @contextlib.contextmanager
+    def _lock(path, *, timeout=_NOT_PASSED):
+        taken.append((Path(path), timeout))
+        if pending:
+            raise pending.pop(0)
+        yield
+
+    monkeypatch.setattr(refresh, "exclusive_lock", _lock)
+    return taken
+
+
+@pytest.mark.parametrize(
+    "tool, kwargs, most_commands",
+    [
+        pytest.param("grype", {}, 1, id="grype"),
+        pytest.param("trivy", {}, 3, id="trivy-database-only"),
+        pytest.param("trivy", {"java": True, "checks": True}, 3, id="trivy-all-three"),
+    ],
+)
+def test_a_waiter_outlasts_the_longest_update_a_holder_of_the_tool_can_run(
+    tool, kwargs, most_commands, tmp_path, monkeypatch, captured
+):
+    """The refresh lock is held while up to three commands run, each allowed
+    ``UPDATE_TIMEOUT_SECONDS``: trivy's database, its Java database and its checks
+    bundle. A second ASH process on the cache waited the lock's default of 30
+    minutes and gave a holder still downloading up as dead, with a raw
+    ``TimeoutError``. The wait now covers every command a holder of the tool may
+    run, whatever this caller asked to update (the holder's own settings are not
+    known to it), and is never shorter than the lock's default."""
+    taken = _recording_lock(monkeypatch)
+    _prepare(tool, tmp_path / f"{tool}-cache", tmp_path, **kwargs)
+    ((_path, timeout),) = taken
+    assert timeout is not _NOT_PASSED
+    assert timeout >= most_commands * refresh.UPDATE_TIMEOUT_SECONDS
+    assert timeout >= file_lock.LOCK_TIMEOUT_SECONDS
+
+
+def test_the_account_lock_taken_instead_is_waited_for_as_long(
+    tmp_path, monkeypatch, captured
+):
+    """The fallback is a lock too, and a holder of it is as long-running as a
+    holder of the first: both calls carry the same sized wait."""
+    cache = _blocked_cache(tmp_path)
+    _lock, shared, own = _lock_names(cache)
+    taken = _recording_lock(
+        monkeypatch, refusals=[PermissionError(errno.EACCES, "Permission denied")]
+    )
+    _prepare("trivy", cache, tmp_path)
+    assert [path for path, _timeout in taken] == [shared, own]
+    (_, first), (_, second) = taken
+    assert first is not _NOT_PASSED
+    assert first == second
+    assert first >= 3 * refresh.UPDATE_TIMEOUT_SECONDS
 
 
 @pytest.mark.parametrize(
