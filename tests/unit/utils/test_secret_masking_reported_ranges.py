@@ -853,8 +853,13 @@ class TestWhereAReaderOfASourceFileStartsReading:
 
     def test_a_reported_range_is_clipped_to_the_lookback(self):
         """A reported range that began further up than the lookback is asked for
-        from the lookback's edge, the first line of it the reader can use."""
-        key = _key_finding()
+        from the lookback's edge, the first line of it the reader can use.
+
+        The finding is a tagged secret that is not a private key, so its range
+        ends where the scanner wrote it (a private key with no END line in view
+        runs to the end of its file whatever endLine says, which would leave the
+        9000 here unread)."""
+        key = _key_finding(rule_id="CUSTOM-1", tags=["secret"])
         key["locations"][0]["physicalLocation"]["region"]["endLine"] = 9000
         masker = source_snippet_masker(_results(key))
 
