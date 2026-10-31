@@ -706,16 +706,29 @@ def project_roots(target: Path, workflows: Iterable[str]) -> List[Path]:
     one such directory only when it carries both markers, and a nested project
     (``sub/.git`` beside ``sub/.github/workflows``) is another, with its own
     config.
+
+    The search runs from the workflow's directory as named and from its real
+    path. actionlint computes its root from the physical working directory (its
+    runtime's ``os.Getwd`` falls back to the kernel's answer when ``$PWD`` is not
+    the directory it was started in), so a scanned directory that is a link to a
+    package inside a larger repository has the repository as its project, with
+    that repository's config, though no ancestor of the path as named holds one.
+    ``_reference_outside_the_tree`` reads both sets of ancestors for the same
+    reason. A root both searches reach is listed once, as the first spelled it.
     """
     base = Path(target).absolute()
     roots: List[Path] = []
+    real_roots: Set[Path] = set()
     for rel in workflows:
         start = (base / rel).parent
-        for directory in (start, *start.parents):
-            if _is_project_root(directory):
-                if directory not in roots:
-                    roots.append(directory)
-                break
+        for chain_start in (start, Path(os.path.realpath(start))):
+            for directory in (chain_start, *chain_start.parents):
+                if _is_project_root(directory):
+                    real = Path(os.path.realpath(directory))
+                    if real not in real_roots:
+                        real_roots.add(real)
+                        roots.append(directory)
+                    break
     return roots
 
 
@@ -777,10 +790,18 @@ def config_present(roots: Iterable[Path]) -> bool:
 
 def project_root_above(path: Path) -> Optional[Path]:
     """The nearest ancestor of *path* (not *path* itself) actionlint would take as a
-    project root, or None."""
-    for directory in Path(path).absolute().parents:
-        if _is_project_root(directory):
-            return directory
+    project root, or None.
+
+    The ancestors of the path as named are read first, then those of its real
+    path: a directory reached through a link has the real directory's
+    ancestors as its project, which is where actionlint looks (see
+    ``project_roots``).
+    """
+    named = Path(path).absolute()
+    for chain in (named, Path(os.path.realpath(named))):
+        for directory in chain.parents:
+            if _is_project_root(directory):
+                return directory
     return None
 
 

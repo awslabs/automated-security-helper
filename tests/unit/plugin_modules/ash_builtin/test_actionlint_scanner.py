@@ -1238,6 +1238,63 @@ def test_project_roots_are_the_nearest_directory_with_workflows_and_git(tmp_path
     assert module.project_root_above(tmp_path) is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.unit
+def test_a_linked_target_is_searched_from_its_real_path_as_actionlint_does(tmp_path):
+    """actionlint starts its project search from the physical working directory,
+    so a scan root that is a link to a package inside a larger repository has
+    that repository as its project and reads its config. No ancestor of the link
+    as named holds a project, so searching the name alone found no root, and the
+    config was neither avoided nor retried. The real path's ancestors are
+    searched too, and the root they reach is judged against the real tree."""
+    mono = tmp_path / "mono"
+    (mono / ".github" / "workflows").mkdir(parents=True)
+    (mono / ".git").mkdir()
+    (mono / ".github" / "actionlint.yaml").write_text(
+        "self-hosted-runner:\n  labels: OUTSIDE-MARKER-LABEL\n"
+    )
+    package = mono / "pkg"
+    (package / ".github" / "workflows").mkdir(parents=True)
+    (package / ".github" / "workflows" / "ci.yml").write_text("on: push\n")
+    link = tmp_path / "scan"
+    link.symlink_to(package, target_is_directory=True)
+    real_mono = Path(os.path.realpath(mono))
+
+    roots = module.project_roots(link, [".github/workflows/ci.yml"])
+
+    assert roots == [real_mono]
+    assert module.config_present(roots)
+    assert module.config_to_avoid(link, roots) == (
+        real_mono,
+        ".github/actionlint.yaml",
+        "outside the scanned tree",
+    )
+    # A root both searches reach is listed once.
+    assert module.project_roots(package, [".github/workflows/ci.yml"]) == [real_mono]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.unit
+def test_project_root_above_follows_a_linked_directory_to_its_real_ancestors(tmp_path):
+    """A directory reached through a link is where its real path is: the copy
+    directory ASH makes for the workflows must not sit under a project root,
+    whether the root is above the name or only above the real directory."""
+    repository = tmp_path / "repository"
+    (repository / ".github" / "workflows").mkdir(parents=True)
+    (repository / ".git").mkdir()
+    (repository / "sub").mkdir()
+    link = tmp_path / "scratch"
+    link.symlink_to(repository / "sub", target_is_directory=True)
+
+    assert module.project_root_above(link / "copy") == Path(
+        os.path.realpath(repository)
+    )
+    # The control: a directory under no project root, linked or not.
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert module.project_root_above(plain / "copy") is None
+
+
 @pytest.mark.unit
 def test_config_to_avoid_judges_a_candidate_by_its_stat_alone(tmp_path):
     """The first of .yaml and .yml that exists is actionlint's; an absent one or
