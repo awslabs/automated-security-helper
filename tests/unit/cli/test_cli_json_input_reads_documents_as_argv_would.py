@@ -191,9 +191,9 @@ def test_a_mark_that_splits_a_url_stays_in_a_file_uri_path(name):
 
 
 def test_a_null_byte_in_the_file_name_is_the_cannot_read_refusal():
-    """``file://a%00b`` decodes to a name with a null byte, which the file system
-    refuses with a ValueError; only OSError was caught, so the command ended in a
-    traceback instead of naming the file it cannot read."""
+    """``file://a%00b`` is a path as written (a ``%`` is not decoded after the bare
+    prefix), so it names a file that does not exist: the command names the file
+    it cannot read and does not end in a traceback."""
     result, mock_run = _scan(["--cli-json-input", "file://a%00b"])
 
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
@@ -236,20 +236,10 @@ def test_a_percent_in_a_relative_name_stays_in_it(tmp_path, monkeypatch):
     assert mock_run.call_args.kwargs["offline"] is True
 
 
-@pytest.mark.parametrize("form", ["uri", "relative"])
-def test_a_file_uri_with_a_null_byte_is_the_unreadable_refusal(
-    tmp_path, monkeypatch, form
-):
-    """``%00`` in a URI decodes to a null byte, which ``read_text`` refuses with a
-    ValueError the handler did not catch: a traceback and exit 1, where a file that
-    cannot be read is the usage refusal. The relative form is not decoded, so it
-    names a file that does not exist; it is refused the same way."""
-    monkeypatch.chdir(tmp_path)
-    source = (
-        _uri_with_host(tmp_path, "localhost") + "/a%00b.json"
-        if form == "uri"
-        else "file://a%00b.json"
-    )
+def test_a_file_uri_with_a_null_byte_is_the_unreadable_refusal(tmp_path):
+    """A regression pin: ``%00`` in a URI path decodes to a null byte, which is the
+    usage refusal for a file that cannot be read, not a traceback."""
+    source = _uri_with_host(tmp_path, "localhost") + "/a%00b.json"
 
     result, mock_run = _scan(["--cli-json-input", source])
 
