@@ -714,24 +714,35 @@ def _raising_app(error: BaseException) -> typer.Typer:
     return app
 
 
-@pytest.mark.parametrize(
-    "error",
-    [typer.Abort(), KeyboardInterrupt()],
-    ids=["an abort", "an interrupted prompt"],
-)
 def test_an_aborted_command_under_a_module_app_exits_1_with_one_word(
-    monkeypatch, capsys, error
+    monkeypatch, capsys
 ):
     """The `except Abort` branch depends on a name typer exports, and no test
-    reached it: click's Abort, and the KeyboardInterrupt click turns into one,
-    exit 1 with "Aborted!", as click's own handling does."""
+    reached it: an Abort exits 1 with "Aborted!", as click's own handling
+    does."""
     monkeypatch.setattr(sys, "argv", ["prog"])
 
     with pytest.raises(SystemExit) as exit_info:
-        entrypoint.run_module_app(_raising_app(error))
+        entrypoint.run_module_app(_raising_app(typer.Abort()))
 
     assert exit_info.value.code == 1
     assert "Aborted!" in capsys.readouterr().err
+
+
+def test_an_interrupted_command_under_a_module_app_exits_130_silently(
+    monkeypatch, capsys
+):
+    """typer's own main turns a KeyboardInterrupt into Exit(130) outside
+    standalone mode, so the interrupt comes back as a code and the branch exits
+    with it; nothing is printed, as for a Ctrl-C anywhere else in the CLI."""
+    monkeypatch.setattr(sys, "argv", ["prog"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        entrypoint.run_module_app(_raising_app(KeyboardInterrupt()))
+
+    assert exit_info.value.code == 130
+    output = capsys.readouterr()
+    assert output.out + output.err == ""
 
 
 def test_an_app_with_no_arguments_prints_its_help_under_a_module_app(
