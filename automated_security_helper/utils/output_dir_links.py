@@ -108,10 +108,13 @@ def is_junction(path: PathLike) -> bool:
     """
     isjunction = getattr(os.path, "isjunction", None)
     if isjunction is not None:
-        return bool(isjunction(path))
+        try:
+            return bool(isjunction(path))
+        except ValueError:  # a NUL in the path: no file has that name
+            return False
     try:
         found = os.lstat(path)
-    except OSError:
+    except (OSError, ValueError):
         return False
     attributes = getattr(found, "st_file_attributes", 0)
     tag = getattr(found, "st_reparse_tag", 0)
@@ -126,11 +129,14 @@ def is_link(path: PathLike) -> bool:
     Read from ``os.lstat`` directly, with every ``OSError`` answering False: on
     CPython 3.10-3.12 ``Path.is_symlink`` lets a ``PermissionError`` from an
     unsearchable parent through, which turned the pre-run link checks into
-    tracebacks where no link was there to refuse.
+    tracebacks where no link was there to refuse. A ``ValueError`` answers
+    False too: ``os.lstat`` raises it for a path holding a NUL character, which
+    no file has, and the report command's output-directory arm reached this
+    call with one from a ``--cli-json-input`` document and traced back.
     """
     try:
         found = os.lstat(path)
-    except OSError:
+    except (OSError, ValueError):
         return False
     return stat.S_ISLNK(found.st_mode) or is_junction(path)
 
@@ -138,7 +144,7 @@ def is_link(path: PathLike) -> bool:
 def _kind(path: Path) -> str:
     try:
         is_symlink = stat.S_ISLNK(os.lstat(path).st_mode)
-    except OSError:
+    except (OSError, ValueError):
         is_symlink = False
     return "a symlink" if is_symlink else "a directory junction"
 
@@ -147,11 +153,12 @@ def _identity(path: PathLike) -> Optional[Tuple[int, int]]:
     """``(st_dev, st_ino)`` of what ``path`` names, links followed, or None.
 
     None too on a filesystem that reports no inode numbers, which would otherwise
-    make every directory on it the same one.
+    make every directory on it the same one, and for a path holding a NUL
+    character (``ValueError`` from ``os.stat``), which names no file.
     """
     try:
         found = os.stat(path)
-    except OSError:
+    except (OSError, ValueError):
         return None
     if not found.st_ino:
         return None
@@ -230,6 +237,15 @@ def linked_output_component(
         workspace: The output directory is a workspace's.
     """
     spelled = Path(output_dir).absolute()
+    # A NUL names no file: os.lstat, os.stat and os.path.realpath raise
+    # ValueError for it, which the callers' except clauses (OSError) do not
+    # cover, so the report command traced back on a --cli-json-input document
+    # whose output directory held one. Refused here, before any of them is asked.
+    if "\x00" in str(spelled):
+        return (
+            f"the output directory {spelled.as_posix()!r} holds a NUL character, "
+            "which no path can"
+        )
     root_path = Path(os.path.abspath(root)) if root is not None else None
     root_identity = _identity(root_path) if root_path is not None else None
     current = Path(spelled.anchor)
