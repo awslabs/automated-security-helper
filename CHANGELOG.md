@@ -170,6 +170,13 @@
   (symlinks and reparse points such as junctions), so a link already in place is
   refused; one created between that check and the open is not.
 
+  One exception to the refusal above: the detect-secrets scanner removes its two
+  worker exchange files (`detect-secrets-worker-request.json` and its output file)
+  before it writes the request. When no sandbox is used, a symlink at either name,
+  or a name of a file that another name also refers to, is removed without being
+  followed or written through, a warning names the entry, and the scan goes on;
+  with a sandbox the link is refused before the scan starts, as above.
+
   If a sandbox was requested and cannot be provided, ASH never falls back to
   running the scanner unsandboxed, and the scan exits 1. A backend named
   explicitly (`--sandbox bwrap`) that is unavailable records the scanner as an

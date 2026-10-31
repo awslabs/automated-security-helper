@@ -1047,6 +1047,26 @@ def _open_dir_beneath(
         raise
 
 
+def _say_a_link_was_removed(name: str, *, symlink: bool, names: int) -> None:
+    """Warn that ``unlink_beneath`` removed a link, or a name of a shared file.
+
+    Removing the entry is the right outcome: nothing was followed and nothing is
+    written through it. But a link at a name ASH writes is not what a clean run
+    leaves there, so it is said, where the writers that refuse one raise
+    ``OutputLinkRefused``. ``name`` is the entry's own name, which ASH chose.
+    """
+    if symlink:
+        ASH_LOGGER.warning(
+            f"Removed the symlink at {name} instead of following it; nothing was "
+            "written through it"
+        )
+    elif names > 1:
+        ASH_LOGGER.warning(
+            f"Removed {name}, a file that {names - 1} other name(s) also refer "
+            "to; the other name(s) were not changed"
+        )
+
+
 def unlink_beneath(root: Union[str, Path], relative_parts: Tuple[str, ...]) -> bool:
     """Remove ``root/relative_parts`` without following a link below ``root``.
 
@@ -1054,7 +1074,9 @@ def unlink_beneath(root: Union[str, Path], relative_parts: Tuple[str, ...]) -> b
     open_for_write applies on the write: a directory component that is missing,
     not a directory, or a symlink ends the walk and nothing is removed, so a
     planted link cannot lead the removal outside ``root``. A missing file is
-    fine; a symlink at the final name is removed as the link it is. A directory
+    fine; a symlink at the final name is removed as the link it is, and so is a
+    file that another name refers to (only this name goes), each with a warning
+    that names the entry, since a clean run leaves neither there. A directory
     at the final name raises IsADirectoryError, on every platform, for the
     caller to decide about.
 
@@ -1084,6 +1106,7 @@ def unlink_beneath(root: Union[str, Path], relative_parts: Tuple[str, ...]) -> b
         try:
             if target.is_symlink():
                 target.unlink()
+                _say_a_link_was_removed(name, symlink=True, names=1)
             elif target.is_dir():
                 raise IsADirectoryError(
                     errno.EISDIR, os.strerror(errno.EISDIR), str(target)
@@ -1117,6 +1140,10 @@ def unlink_beneath(root: Union[str, Path], relative_parts: Tuple[str, ...]) -> b
             previous, fd = fd, child
             os.close(previous)
         try:
+            found = os.lstat(name, dir_fd=fd)
+        except FileNotFoundError:
+            return True
+        try:
             os.unlink(name, dir_fd=fd)
         except FileNotFoundError:
             return True
@@ -1128,6 +1155,9 @@ def unlink_beneath(root: Union[str, Path], relative_parts: Tuple[str, ...]) -> b
                     errno.EISDIR, os.strerror(errno.EISDIR), name
                 ) from e
             raise
+        _say_a_link_was_removed(
+            name, symlink=stat.S_ISLNK(found.st_mode), names=found.st_nlink
+        )
         return True
     finally:
         os.close(fd)
