@@ -6271,8 +6271,9 @@ _REWRITE_KEPT_SANDBOX_SETTING = "mode"
 #: replaces the trusted base's list and the scan gets no path that neither names. One
 #: the file wrote and the patch removes is left out, and the trusted base's list
 #: stands. One the file did not write and the patch leaves no list in is limited to
-#: nothing, unless the patch only inserts an entry, which takes nothing from the
-#: trusted list (``_own_grants_after_patch``).
+#: the setting's own default (nothing for the three lists whose default is empty,
+#: the proxy and CA names for ``environment``), unless the patch only inserts an
+#: entry, which takes nothing from the trusted list (``_own_grants_after_patch``).
 _ADDITIVE_SANDBOX_SETTINGS = frozenset(
     {"extra_read_paths", "read_path_scanners", "env_scanners", "environment"}
 )
@@ -6442,10 +6443,31 @@ def _only_inserts_into(setting: str, operations: Any) -> bool:
     )
 
 
+class _DefaultLimit(List[Any]):
+    """The limit for a grant list whose model default is not empty, which the file
+    does not write and its ``patch`` leaves without a list: the setting's own default.
+
+    A missing list is the model's default, and for ``environment`` that is the proxy
+    and CA-bundle names, not nothing. It is a class of its own so that
+    ``_warn_grant_list_limit`` can say that no list is named and the default stands,
+    which neither of its other sentences describes."""
+
+
+def _setting_default(setting: str) -> List[Any]:
+    """The list the model gives the grant list *setting* when a file writes none."""
+    default = SandboxConfig.model_fields[setting].default
+    return list(default) if isinstance(default, (list, tuple)) else []
+
+
 def _no_grants_left_by(setting: str, operations: Any) -> List[Any]:
-    """The empty limit for the grant list *setting*, which the file did not write and
-    *operations* leave without a list. It is an ``_EntryEditLimit`` when every write
-    that touches the list edits an entry of it."""
+    """The limit for the grant list *setting*, which the file did not write and
+    *operations* leave without a list: what the model gives a missing list. That is
+    the empty list for the lists whose default is empty, an ``_EntryEditLimit`` when
+    every write that touches the list edits an entry of it, and the setting's own
+    default for a list with one (``_DefaultLimit``)."""
+    default = _setting_default(setting)
+    if default:
+        return _DefaultLimit(default)
     touching = _writes_touching(setting, operations)
     if touching and all(place == "entry" for _kind, place, _steps in touching):
         return _EntryEditLimit()
@@ -6478,9 +6500,13 @@ def _own_grants_after_patch(
       a limit for ``_with_own_sandbox`` to hold to the trusted base's list. A patch
       that leaves no list there returns nothing for ``network_scanners`` and the
       base's list stands, because a missing network list is the widest. For a grant
-      list it returns the empty limit: a missing grant list is the model's empty one,
-      the narrowest, so the operator's own config ends with no entry and the scan
-      gets none of the base's. A patch that only inserts an entry into such a list
+      list it returns the model's own default: a missing grant list is the empty one
+      for ``extra_read_paths``, ``read_path_scanners`` and ``env_scanners``, the
+      narrowest, so the operator's own config ends with no entry and the scan gets
+      none of the base's; for ``environment`` it is the proxy and CA-bundle names,
+      so the scan keeps the entries of the base's list that the default names and
+      loses the others, never the proxies it was passed before the patch. A patch
+      that only inserts an entry into such a list
       (``add`` at ``/-`` or at an index) returns nothing: the entry is never adopted,
       so it takes nothing from the base's list, and the base's list stands. When the
       limit is empty because the patch removes or replaces entries of the list, it
@@ -6544,8 +6570,10 @@ def _own_grants_after_patch(
             # list there (it removes it, rewrites the section or the document
             # without it, removes or replaces an entry whose place is not known
             # here, or writes a value that is no list). The operator's own config
-            # ends with the model's empty list, the narrowest, so the scan gets
-            # none of the trusted base's entries. A missing network list is the
+            # ends with the model's default list: the empty one, the narrowest, for
+            # three of the lists, so the scan gets none of the trusted base's
+            # entries, and the proxy and CA names for `environment`. A missing
+            # network list is the
             # widest, and the base's list stands for it. A patch that only inserts
             # an entry is not among these: the entry is never adopted, so the
             # trusted list stands.
@@ -6624,7 +6652,13 @@ def _warn_grant_list_limit(
     keep a path the operator did not name. The warning says how to spell the entry.
     """
     left_out = [entry for entry in in_force if entry not in limit]
-    foreign = [entry for entry in limit if entry not in in_force]
+    # The setting's default names entries the trusted list may not hold; that is
+    # not an entry the patch wrote, so it is not a foreign one.
+    foreign = (
+        []
+        if isinstance(limit, _DefaultLimit)
+        else [entry for entry in limit if entry not in in_force]
+    )
     if not left_out and not foreign:
         return
     key = f"limit:{os.path.realpath(path)}:{setting}"
@@ -6632,6 +6666,18 @@ def _warn_grant_list_limit(
         if key in _DROPPED_OWN_SANDBOX_WARNED:
             return
         _DROPPED_OWN_SANDBOX_WARNED.add(key)
+    if isinstance(limit, _DefaultLimit):
+        ASH_LOGGER.warning(
+            f"The patch in '{describe_config_path(path)}' leaves no list for "
+            f"{setting}, which the file does not write, so the file's own config "
+            f"ends with the setting's default list and {len(left_out)} of the "
+            f"trusted list's {_entries(len(in_force))} "
+            f"{'is' if len(left_out) == 1 else 'are'} left out. To keep the "
+            "trusted entries, write the list in the file or leave it out of the "
+            "patch.",
+            extra=NO_MARKUP,
+        )
+        return
     if isinstance(limit, _EntryEditLimit):
         # No list is named, so "the entries it names" would not describe this.
         ASH_LOGGER.warning(

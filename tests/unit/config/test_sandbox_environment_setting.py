@@ -20,18 +20,27 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from automated_security_helper.config import client_config_policy as ccp
 from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
-from automated_security_helper.config.resolve_config import _own_grants_after_patch
-from automated_security_helper.config.sandbox_grants import confine_sandbox_grants
+from automated_security_helper.config.resolve_config import (
+    _own_grants_after_patch,
+    _with_own_sandbox,
+    reset_dropped_own_sandbox_warnings,
+)
+from automated_security_helper.config.sandbox_grants import (
+    confine_sandbox_grants,
+    scanned_trees,
+)
 from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.sandbox.policy import (
     CA_BUNDLE_ENV_NAMES,
     DEFAULT_ENVIRONMENT,
     PROXY_ENV_NAMES,
 )
+from tests.utils.helpers import mark_git_checkout
 
 pytestmark = pytest.mark.unit
 
@@ -147,6 +156,128 @@ def test_a_list_only_the_patch_writes_is_a_limit_not_the_files_setting():
 
     assert "environment" not in own
     assert limits == {"environment": ["A"]}
+
+
+def _operators_file_ends_with(tmp_path, trusted, written, operations):
+    """The sandbox ``_with_own_sandbox`` gives for an operator's file outside every
+    checkout that writes *written* and then applies *operations*."""
+    repo = tmp_path / "repo"
+    mark_git_checkout(repo)
+    root = tmp_path / "cfg" / "root.yaml"
+    root.parent.mkdir(parents=True, exist_ok=True)
+    document = {"sandbox": written, "patch": operations}
+    root.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    merged, _wrote_mode = _with_own_sandbox(
+        trusted, root, repo, [], scanned_trees(repo), None
+    )
+    return merged.sandbox
+
+
+#: A patch that leaves the operator's own file with no ``environment`` list: it
+#: removes the setting, or the section, or rewrites the section without it.
+_LEAVES_NO_ENVIRONMENT = [
+    pytest.param(
+        {}, [{"op": "remove", "path": "/sandbox/environment"}], id="remove-the-list"
+    ),
+    pytest.param(
+        {"mode": "bwrap"},
+        [{"op": "remove", "path": "/sandbox"}],
+        id="remove-the-section",
+    ),
+    pytest.param(
+        {"mode": "bwrap"},
+        [
+            {
+                "op": "add",
+                "path": "/sandbox",
+                "value": {"mode": "auto", "extra_read_paths": ["/opt/a"]},
+            }
+        ],
+        id="rewrite-the-section-without-it",
+    ),
+]
+
+
+@pytest.mark.parametrize("written, operations", _LEAVES_NO_ENVIRONMENT)
+def test_a_patch_that_leaves_no_environment_list_does_not_strip_the_default(
+    tmp_path, written, operations
+):
+    """A missing ``environment`` is the model's default list (the proxy and CA
+    names), not the empty list that a missing ``extra_read_paths`` is: reading it as
+    empty would take HTTPS_PROXY and SSL_CERT_FILE from every scanner."""
+    sandbox = _operators_file_ends_with(tmp_path, AshConfig(), written, operations)
+
+    assert sandbox.environment == list(DEFAULT_ENVIRONMENT)
+
+
+@pytest.mark.parametrize(
+    "name", ["extra_read_paths", "read_path_scanners", "env_scanners"]
+)
+def test_control_a_patch_that_leaves_no_other_grant_list_still_limits_it_to_nothing(
+    tmp_path, name
+):
+    trusted = AshConfig()
+    setattr(trusted.sandbox, name, ["/opt/trusted"])
+
+    sandbox = _operators_file_ends_with(
+        tmp_path, trusted, {}, [{"op": "remove", "path": f"/sandbox/{name}"}]
+    )
+
+    assert getattr(sandbox, name) == []
+
+
+def test_the_limit_for_a_missing_environment_list_is_the_default_list():
+    own = {"mode": "bwrap"}
+
+    limits = _own_grants_after_patch(
+        own, [{"op": "remove", "path": "/sandbox/environment"}]
+    )
+
+    assert limits == {"environment": list(DEFAULT_ENVIRONMENT)}
+
+
+def test_the_default_limit_drops_a_trusted_entry_the_default_lacks_and_says_so(
+    tmp_path, caplog
+):
+    reset_dropped_own_sandbox_warnings()
+    trusted = AshConfig()
+    trusted.sandbox.environment = [*DEFAULT_ENVIRONMENT, "MY_VAR"]
+
+    with caplog.at_level(logging.WARNING):
+        sandbox = _operators_file_ends_with(
+            tmp_path, trusted, {}, [{"op": "remove", "path": "/sandbox/environment"}]
+        )
+
+    assert sandbox.environment == list(DEFAULT_ENVIRONMENT)
+    [warning] = [
+        record.getMessage()
+        for record in caplog.records
+        if "root.yaml" in record.getMessage() and "environment" in record.getMessage()
+    ]
+    assert "leaves no list for environment" in warning, warning
+    assert "default list" in warning, warning
+    assert f"1 of the trusted list's {len(DEFAULT_ENVIRONMENT) + 1} entries" in warning
+    assert "the entries it names" not in warning, warning
+    assert "MY_VAR" not in warning, warning
+
+
+def test_control_a_patch_that_leaves_no_list_over_the_default_says_nothing(
+    tmp_path, caplog
+):
+    reset_dropped_own_sandbox_warnings()
+
+    with caplog.at_level(logging.WARNING):
+        sandbox = _operators_file_ends_with(
+            tmp_path,
+            AshConfig(),
+            {},
+            [{"op": "remove", "path": "/sandbox/environment"}],
+        )
+
+    assert sandbox.environment == list(DEFAULT_ENVIRONMENT)
+    assert not [
+        record for record in caplog.records if "root.yaml" in record.getMessage()
+    ], caplog.text
 
 
 def _refusals(document: dict, rules: ccp.ClientConfigRules, tmp_path: Path) -> list:
