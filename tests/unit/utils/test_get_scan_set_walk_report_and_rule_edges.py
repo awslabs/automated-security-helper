@@ -353,9 +353,11 @@ class TestARuleIgittigittCannotCompile:
         so ``add_rule`` took a pattern wcmatch refuses and the first match that
         reached it raised out of the scan set."""
         real = igittigitt_module._globmatch
+        refused_calls = []
 
         def refusing(path, glob):
             if "BADRULE" in glob:
+                refused_calls.append((path, glob))
                 raise re.error("bad character range")
             return real(path, glob)
 
@@ -384,6 +386,21 @@ class TestARuleIgittigittCannotCompile:
         assert any("Skipped ignore rule" in text for text in _said(warning)), _said(
             warning
         )
+
+        # The refusal has to come from the check itself, and from the call it is
+        # written to make: igittigitt's function asked about the empty path with
+        # the exact glob the parser built for the rule. A check that asked about
+        # some path, or about a different glob, would still see this stand-in
+        # refuse a rule whose text names BADRULE, so the refusal alone proves
+        # neither. The rule was never added, so no match reached its glob.
+        built = IgnoreParser()
+        built.add_rule(
+            gss.gitignore_rule_for_igittigitt("BADRULE.txt"),
+            base_path=Path(os.path.abspath(root)),
+        )
+        built_globs = [rule.pattern_glob for rule in built.rules]
+        assert built_globs, "igittigitt built no rule for the pattern"
+        assert refused_calls == [("", built_globs[0])], refused_calls
 
     def test_a_file_named_probe_in_the_tree_changes_nothing(
         self, tmp_path, monkeypatch
