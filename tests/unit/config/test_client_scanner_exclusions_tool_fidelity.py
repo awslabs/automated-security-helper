@@ -415,18 +415,22 @@ def test_a_trailing_doublestar_directory_keeps_its_anchor(pattern, relative, exc
 
 
 def test_a_path_typed_trusted_ignore_file_is_the_operators(tmp_path):
+    # Under the test's own path: a fixed ``/operator`` has no drive, so it is
+    # not absolute on Windows and was anchored against the working directory
+    # there (see ``_operator_document``).
+    operators = tmp_path / "operator" / ".trivyignore"
     base = AshConfig()
-    base.scanners.trivy.options.ignore_file = Path("/operator/.trivyignore")
+    base.scanners.trivy.options.ignore_file = operators
     spec = _spec("trivy")
-    assert _trusted_ignore_file(base, spec) == str(Path("/operator/.trivyignore"))
+    assert _trusted_ignore_file(base, spec) == str(operators)
 
     config = AshConfig()
     options = config.scanners.trivy.options
-    options.ignore_file = "/client/.trivyignore"
+    options.ignore_file = str(tmp_path / "client" / ".trivyignore")
 
     _strip(config, {}, None, tmp_path, base=base)
 
-    assert options.ignore_file == str(Path("/operator/.trivyignore"))
+    assert Path(options.ignore_file) == operators
     assert config._client_scanner_exclusions == []
 
 
