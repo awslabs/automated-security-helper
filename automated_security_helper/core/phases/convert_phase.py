@@ -84,9 +84,7 @@ def _unused_key(preferred: str, taken: Any, qualifier: str) -> str:
     return f"{qualified} #{index}"
 
 
-def _row_keys(
-    converter_instances: List[Any], aggregated_results: AshAggregatedResults
-) -> Dict[int, str]:
+def _row_keys(converter_instances: List[Any], taken: set) -> Dict[int, str]:
     """The ``converter_results`` key of each instance, by ``id``, each unique.
 
     Computed once, after the filter and before any row is written, so the row a
@@ -96,8 +94,15 @@ def _row_keys(
     is recorded under. The same key names the converter in its progress rows
     and in its CONVERT_START and CONVERT_COMPLETE events, so two converters
     sharing a display name are told apart there too.
+
+    ``taken`` is the keys THIS run has claimed so far (the constructor-failure
+    rows it wrote), and each key chosen here is added to it. It is not seeded
+    from the rows the results object already held: a phase run again over the
+    same object would file every converter under its long key and leave the
+    earlier run's row under the short one, a stale failure included, for the
+    completeness check and the reports. A row of an earlier run under a key
+    this run uses is overwritten, as it was before keys were made unique.
     """
-    taken = set(aggregated_results.converter_results)
     keys: Dict[int, str] = {}
     for plugin_instance in converter_instances:
         cls = plugin_instance.__class__
@@ -746,6 +751,10 @@ class ConvertPhase(EnginePhase):
         # configuration's environment values, before any converter adds its own.
         run_values = config_environment_values(run_config)
 
+        # The row keys this run has claimed. Rows an earlier run left in the
+        # results object are not in it (see _row_keys).
+        keys_in_use: set = set()
+
         # Create all converter instances upfront, then filter via the shared helper.
         all_converter_instances = []
         for plugin_class in converter_classes:
@@ -785,10 +794,11 @@ class ConvertPhase(EnginePhase):
                 # plugin's constructor raised.
                 failed_name = _unused_key(
                     _constructor_failure_name(plugin_class),
-                    aggregated_results.converter_results,
+                    keys_in_use,
                     f"{getattr(plugin_class, '__module__', 'unknown module')}."
                     f"{getattr(plugin_class, '__name__', 'Unknown')}",
                 )
+                keys_in_use.add(failed_name)
                 # Redacted with the config's environment values, as the scan
                 # phase redacts a scanner's construction error: the text goes to
                 # the results file, the HTML report, the progress row and ash.log,
@@ -893,7 +903,7 @@ class ConvertPhase(EnginePhase):
 
         # One key per converter, computed before any row below is written, so two
         # converters sharing a display name do not write one row over the other.
-        row_keys = _row_keys(all_converter_instances, aggregated_results)
+        row_keys = _row_keys(all_converter_instances, keys_in_use)
 
         # A row for every converter the filter dropped, so a converter that did not
         # run is present in the machine-readable output instead of being absent from
