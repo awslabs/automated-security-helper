@@ -1919,14 +1919,26 @@ class ConfigLinter:
         ``Bandit:`` is applied as one under ``bandit:`` and is reported the same.
         A message names the entry by the declared spelling, never by a key the
         file may have read from the environment.
+
+        Two spellings of one section are merged by a scan key by key, the
+        canonical spelling winning where both set a key, so when both hold the
+        list the canonical one is the list applied and the only one reported:
+        reported for each spelling, one entry drew two messages at one path, one
+        of them about a list the scan never reads.
         """
         for keys, subject in cls._IGNORE_PATH_LISTS:
+            lists = []
             for spelled in cls._as_the_file_spells(config_data, keys):
                 entries: Any = config_data
                 for key in spelled:
                     entries = entries.get(key) if isinstance(entries, dict) else None
-                if not isinstance(entries, list):
-                    continue
+                if isinstance(entries, list):
+                    lists.append((spelled, entries))
+            if len(lists) > 1 and any(spelled == keys for spelled, _ in lists):
+                lists = [
+                    (spelled, entries) for spelled, entries in lists if spelled == keys
+                ]
+            for spelled, entries in lists:
                 shown_entries = cls._shown_entries(entries, shown_data, spelled)
                 for i, (entry, shown) in enumerate(zip(entries, shown_entries)):
                     if isinstance(entry, dict):
