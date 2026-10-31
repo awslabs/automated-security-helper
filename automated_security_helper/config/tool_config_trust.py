@@ -554,6 +554,30 @@ def _or_default(value: Any, default: Any) -> Any:
     return default if value is _MISSING or value is None else value
 
 
+def _same_option_value(current: Any, expected: Any) -> bool:
+    """Whether ``current`` is ``expected`` the way a config file spells values.
+
+    JSON data is compared as JSON, not with Python equality: ``1 == True``,
+    ``1.0 == True`` and ``0 == False`` in Python, so a section that wrote ``1``
+    for the operator's ``true`` would read as the operator's value and keep the
+    file's number. A value that is not JSON data (a path an options model
+    holds, a YAML date) has no such trap among its scalars and is compared with
+    ``==``; one nested past what the encoder will follow is not ``expected``.
+    The comparison does not raise.
+    """
+    from automated_security_helper.config.runtime_patch import _same_json_value
+
+    try:
+        return _same_json_value(current, expected)
+    except RecursionError:
+        return False
+    except (TypeError, ValueError):
+        try:
+            return bool(current == expected)
+        except RecursionError:
+            return False
+
+
 def _wrote(options: Any, name: str, written: Any) -> bool:
     """Whether the config set ``name`` itself, rather than leaving it to its default.
 
@@ -723,7 +747,7 @@ def confine_scanner_config_files(
                 wrote = _file_wrote(config, path, written)
                 if wrote and is_tightening_value(scanner, name, current):
                     continue
-                if current == _or_default(wanted, default):
+                if _same_option_value(current, _or_default(wanted, default)):
                     if written is None and default is not None:
                         # An explicit null reads as the default here, but the
                         # plugin would get None; give it the trusted value.
@@ -736,7 +760,11 @@ def confine_scanner_config_files(
                 # operator's value. A list that holds only what the operator's
                 # own appended override added is no choice of the file's.
                 own_items = _with_appended(_MISSING, appended) if appended else None
-                if current != default and wrote and current != own_items:
+                if (
+                    wrote
+                    and not _same_option_value(current, default)
+                    and not _same_option_value(current, own_items)
+                ):
                     ignored.append(f"scanners.{key}.options.{name}")
                 _set(options, name, wanted, default)
     ignored.extend(_confine_settings_files(config, trusted_config, landings))
@@ -946,11 +974,11 @@ def confine_tool_versions(
                 for spelling in spellings:
                     written = _get(options, spelling)
                     current = _or_default(written, default)
-                    if current == _or_default(wanted, default):
+                    if _same_option_value(current, _or_default(wanted, default)):
                         if written is None and default is not None:
                             _set(options, spelling, wanted, default)
                         continue
-                    if current != default:
+                    if not _same_option_value(current, default):
                         ignored.append(f"{segment}.{key}.options.{name}")
                     _set(options, spelling, wanted, default)
         # A plugin section the trusted base pins that the config does not hold
