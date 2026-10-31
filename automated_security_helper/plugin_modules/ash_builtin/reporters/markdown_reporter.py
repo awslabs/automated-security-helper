@@ -47,11 +47,16 @@ from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 #: still links a bare address as a ``mailto:`` link, which notifies nobody and
 #: sends nothing until a reader follows it, so that is accepted. A URL
 #: stops at whitespace, ``<``, ``>``, a backtick or a pipe, and does not end on
-#: the punctuation that closes the sentence or bracket it sits in.
+#: the punctuation that closes the sentence or bracket it sits in. An issue
+#: reference (``#123``, ``GH-123`` or ``owner/repo#123``) is acted on too: in a
+#: pull request comment it adds a "mentioned" event to that issue, so a scanner
+#: message such as "fixed in #1234" would write into an issue of the project.
 _AUTO_REFERENCE = re.compile(
     r"(?<![\w.+-])@[A-Za-z0-9][A-Za-z0-9_-]*(?:/[A-Za-z0-9_.-]+)?"
     r"|(?:https?|ftp)://[^\s<>|`]*[^\s<>|`.,;:!?)\]}'\"]"
     r"|www\.[^\s<>|`]*[^\s<>|`.,;:!?)\]}'\"]"
+    r"|(?<![\w./@&-])[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+#[0-9]+(?!\w)"
+    r"|(?<![\w&/#-])(?:#|[Gg][Hh]-)[0-9]+(?!\w)"
 )
 
 
