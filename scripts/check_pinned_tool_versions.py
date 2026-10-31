@@ -1998,6 +1998,15 @@ def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
                             "version through an expansion that this check cannot "
                             "read. Spell the version out, as package=version."
                         )
+                    if "$" in word:
+                        # `${PKG}=1.2` and `$PKGS` carry a version or a name that is
+                        # known only when the build runs: an expansion, not a missing
+                        # version, which is what the next message would say.
+                        raise PinEnumerationError(
+                            f"{where} installs {word!r} with apt-get, naming a "
+                            "package through an expansion that this check cannot "
+                            "read. Spell each package as package=version."
+                        )
                     pin = _APT_PIN.match(word)
                     if pin is None:
                         raise PinEnumerationError(

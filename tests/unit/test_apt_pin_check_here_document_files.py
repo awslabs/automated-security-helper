@@ -1098,3 +1098,19 @@ class TestAPinWhoseVersionIsAnExpansion:
             match=r"Dockerfile:4 installs 'curl=\$1' with apt-get, pinning the version",
         ):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    @pytest.mark.parametrize("word", ["${PKG}=1.2", "$PKG", "${PKG}"])
+    def test_a_name_held_in_an_expansion_is_refused_as_an_expansion(
+        self, tmp_path, word
+    ):
+        # Red before: these were refused as "with apt-get and no version", which tells
+        # the reader to pin a package that is not named in the Dockerfile at all.
+        with pytest.raises(
+            checker.PinEnumerationError,
+            match=r"Dockerfile:3 installs '.*PKG.*' with apt-get, naming a package "
+            r"through an expansion",
+        ) as refused:
+            checker.enumerate_apt_pins(
+                _dockerfile(tmp_path, f"RUN apt-get install -y {word}\n")
+            )
+        assert "no version" not in str(refused.value)
