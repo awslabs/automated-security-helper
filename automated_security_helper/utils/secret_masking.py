@@ -1626,6 +1626,30 @@ def _reaches_a_secret(physical: Any, index: _SecretIndex) -> bool:
     return False
 
 
+def _snippet_could_reach(physical: Any, snippet: str, index: _SecretIndex) -> bool:
+    """Whether ``snippet``, if it belongs to ``physical``, could cover a reported line.
+
+    A snippet with more lines than the location's region spans carries context
+    lines above the region, below it, or both, and nothing says how many of each.
+    It is numbered from the region's first line less the surplus through the
+    first line plus the snippet's length, less one. A location whose file holds
+    no reported line cannot be reached. A file reported whole is answered by
+    the caller's line masking, not here.
+    """
+    placed = index.lines_for(_uri_of(physical, index))
+    if placed is None:
+        return False
+    _, lines = placed
+    region = getattr(physical, "region", None)
+    first = getattr(region, "startLine", None)
+    last = getattr(region, "endLine", None)
+    if not isinstance(first, int):
+        return False
+    count = len(_split_lines(snippet))
+    span = max(last, first) - first + 1 if isinstance(last, int) else 1
+    return count > span and lines.overlaps(first - (count - span), first + count - 1)
+
+
 def _overlaps_a_secret(result: Any, index: _SecretIndex) -> bool:
     """Whether a location of ``result`` lies on a line a secret finding reports."""
     return any(
@@ -2349,25 +2373,18 @@ def _mask_tree(
                     whole, lines = placed
                     region = getattr(physical, "region", None)
                     first = getattr(region, "startLine", None)
-                    last = getattr(region, "endLine", None)
-                    count = len(_split_lines(snippet))
-                    span = (
-                        max(last, first) - first + 1
-                        if isinstance(first, int) and isinstance(last, int)
-                        else 1
-                    )
-                    if (
-                        not whole
-                        and isinstance(first, int)
-                        and count > span
-                        and lines.overlaps(first - (count - span), first + count - 1)
-                    ):
+                    if not whole and _snippet_could_reach(physical, snippet, index):
                         masked = _mask_text_whole(snippet)
                     else:
                         masked = _mask_lines(snippet, first, whole, lines)
                 # Which location a snippet belongs to depends on the tool, so one
-                # that lies on a reported line, whichever it is, masks it whole.
-                if any(_reaches_a_secret(later, index) for later in locations[1:]):
+                # that lies on a reported line, or whose context window does,
+                # whichever it is, masks it whole.
+                if any(
+                    _reaches_a_secret(later, index)
+                    or _snippet_could_reach(later, snippet, index)
+                    for later in locations[1:]
+                ):
                     masked = _mask_text_whole(snippet)
                 if masked != snippet:
                     _set_extra(properties, "snippet", masked)

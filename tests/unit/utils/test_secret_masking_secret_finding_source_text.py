@@ -648,3 +648,63 @@ class TestAnOverlappingFindingsSourceText:
 
         neighbor = model.sarif.runs[0].results[1]
         assert getattr(neighbor.properties, "snippet") == OTHER_LINE
+
+    def _context_snippet_with_two_locations(self, second_uri, second_line):
+        """A result whose first location is in a file with no secret finding and
+        whose three-line snippet is the first lines of the second location's
+        file, the second line being the one the secret finding reports."""
+        result = _result(
+            "B404",
+            "lib.py",
+            4,
+            "import",
+            "bandit",
+            extra={"properties": {"snippet": OTHER_LINE + ASSIGN_LINE + "x = 1\n"}},
+        )
+        result["locations"].append(
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": second_uri},
+                    "region": {"startLine": second_line, "endLine": second_line},
+                }
+            }
+        )
+        return _results(self._secret(), result)
+
+    def test_a_snippet_with_context_lines_is_masked_by_a_later_locations_window(self):
+        """The snippet has two more lines than the second location's region, so
+        it could start two lines above that region or run two lines below it,
+        the same window the first location gets. The second location is on line
+        3 and the secret on line 2: the location itself is not on a reported
+        line, but the snippet could be."""
+        model = self._context_snippet_with_two_locations("app.py", 3)
+
+        mask_secrets_in_results(model)
+
+        shown = getattr(model.sarif.runs[0].results[1].properties, "snippet")
+        assert VALUE not in shown
+        assert shown == (MASKED_LINE + "\n") * 3
+
+    def test_a_snippet_with_context_lines_is_kept_beyond_a_later_locations_window(
+        self,
+    ):
+        """Control: the second location is on line 9, so the snippet's window
+        runs from line 7 to line 11 and cannot reach line 2."""
+        model = self._context_snippet_with_two_locations("app.py", 9)
+
+        mask_secrets_in_results(model)
+
+        shown = getattr(model.sarif.runs[0].results[1].properties, "snippet")
+        assert shown == OTHER_LINE + ASSIGN_LINE + "x = 1\n"
+
+    def test_a_snippet_with_context_lines_is_kept_for_a_later_location_elsewhere(
+        self,
+    ):
+        """Control: a file with no secret finding says nothing about the snippet,
+        however many context lines it has."""
+        model = self._context_snippet_with_two_locations("other.py", 3)
+
+        mask_secrets_in_results(model)
+
+        shown = getattr(model.sarif.runs[0].results[1].properties, "snippet")
+        assert shown == OTHER_LINE + ASSIGN_LINE + "x = 1\n"
