@@ -76,6 +76,7 @@ _PROCESS_CONTROL = (
     (signal, "raise_signal"),
     (signal, "pidfd_send_signal"),
     (signal, "pthread_kill"),
+    (resource, "setrlimit"),
 )
 
 
@@ -86,18 +87,30 @@ def no_process_control(monkeypatch):
     The test's own ``monkeypatch.setattr`` on the one call it expects lands after
     this fixture's and wins; every other call of the set fails the test with the
     call's name instead of acting on the pytest process.
+
+    The wrapper's ``libc`` is replaced too: its ``prctl`` and ``syscall`` set
+    no_new_privs, restrict the process with Landlock and install the seccomp
+    filter, none of which can be undone, so a main() that reached them (a step
+    reordered ahead of the policy check) would restrict the pytest worker for
+    every later test. ``resource.setrlimit`` is in the set for the same reason
+    (RLIMIT_CORE). A test that needs one of them stubs it, as the fork test does.
     """
 
-    def refuse(module, name):
+    def refuse(label):
         def refused(*args, **kwargs):
-            pytest.fail(
-                f"{module.__name__}.{name} reached the test process; stub it in the test"
-            )
+            pytest.fail(f"{label} reached the test process; stub it in the test")
 
         return refused
 
     for module, name in _PROCESS_CONTROL:
-        monkeypatch.setattr(module, name, refuse(module, name), raising=False)
+        monkeypatch.setattr(
+            module, name, refuse(f"{module.__name__}.{name}"), raising=False
+        )
+    monkeypatch.setattr(
+        landlock_exec,
+        "libc",
+        SimpleNamespace(prctl=refuse("libc.prctl"), syscall=refuse("libc.syscall")),
+    )
 
 
 @pytest.mark.parametrize(
@@ -118,6 +131,18 @@ def test_the_fixture_refuses_each_call_that_ends_or_signals_a_process(module, na
     fixture failed to replace raises TypeError and acts on nothing."""
     with pytest.raises(pytest.fail.Exception, match=f"{module.__name__}.{name} "):
         getattr(module, name)(1, 2, 3, 4, 5, 6, 7)
+
+
+def test_the_fixture_refuses_the_calls_that_restrict_the_process():
+    """The calls are made with an option and a system call number the kernel
+    refuses (EINVAL, ENOSYS) and with too many arguments, so that a call the
+    fixture failed to replace restricts nothing."""
+    with pytest.raises(pytest.fail.Exception, match="libc.prctl"):
+        landlock_exec.libc.prctl(0, 0, 0, 0, 0)
+    with pytest.raises(pytest.fail.Exception, match="libc.syscall"):
+        landlock_exec.libc.syscall(-1)
+    with pytest.raises(pytest.fail.Exception, match="resource.setrlimit"):
+        resource.setrlimit(1, 2, 3)
 
 
 class _Exit(BaseException):
