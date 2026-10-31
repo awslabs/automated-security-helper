@@ -14,10 +14,11 @@ Properties of utils/content_db_refresh.py that nothing else pins, several tests 
   accounts, or a refresh from before an upgrade and one from after, take turns;
 - the grype refresh runs with the operator's grype config when the caller gives
   one, so a database mirror or CA it names applies to the update as to the scan;
-- ``GRYPE_DB_AUTO_UPDATE=false`` does not turn ASH's grype update off, as trivy's
-  skip settings turn trivy's off: it is said once per process and the update runs,
-  because it is often set only to skip grype's own check and a database nothing
-  refreshes is refused once it passes its bound;
+- ``GRYPE_DB_AUTO_UPDATE`` set to a false value in the environment turns ASH's grype
+  update off, as trivy's skip settings turn trivy's off: no ``grype db update`` and
+  no other spawn runs, and one warning says the update was skipped on the operator's
+  setting and that a stale database stays in use. Any other value, and the same
+  setting in grype's config file, leaves the update in;
 - the checks-bundle fetch (``trivy config`` of an empty directory) pins its report
   format and output file, so the operator's TRIVY_OUTPUT or ``output:`` setting
   cannot make it overwrite a report file.
@@ -203,24 +204,78 @@ def test_the_grype_refresh_runs_with_the_operators_config(tmp_path, captured):
     assert env["GRYPE_DB_CACHE_DIR"] == cache.as_posix()
 
 
-def test_grype_db_auto_update_false_still_refreshes_and_says_so_once(
+def _auto_update_lines(caplog):
+    return [r for r in caplog.records if "GRYPE_DB_AUTO_UPDATE" in r.getMessage()]
+
+
+def test_grype_db_auto_update_false_in_the_environment_leaves_the_update_out(
     tmp_path, captured, monkeypatch, caplog
 ):
-    """grype's setting turns off only grype's own in-scan update, and a CI image or
-    team environment file often sets it only to skip that check. Read as an opt-out
-    of ASH's refresh it left the cached database to pass its bound, and the default
-    `fail` policy then refused every scan. The refresh runs, and the setting is
-    said once per process, not on every scan."""
+    """An operator who sets the variable false asked grype for no registry traffic,
+    and ASH's own update would fetch the database anyway. Nothing is spawned (the
+    double records every command, and a spawn that bypassed it fails here), and one
+    warning, at a level a default run shows, says the update was skipped on that
+    setting and that a stale database stays in use."""
+
+    def _no_spawn(*args, **kwargs):
+        raise AssertionError(f"the refresh spawned {args!r}")
+
+    monkeypatch.setattr(refresh, "spawn_run", _no_spawn)
     monkeypatch.setenv("GRYPE_DB_AUTO_UPDATE", "false")
     with caplog.at_level(logging.INFO):
-        _prepare("grype", tmp_path / "grype-db-1", tmp_path)
-        _prepare("grype", tmp_path / "grype-db-2", tmp_path)
-    assert [what for _argv, _env, what in captured] == ["grype database"] * 2
-    lines = [
-        r for r in caplog.records if "GRYPE_DB_AUTO_UPDATE=false" in r.getMessage()
-    ]
-    assert [r.levelno for r in lines] == [logging.WARNING]
-    assert "offline" in lines[0].getMessage()
+        _prepare("grype", tmp_path / "grype-db", tmp_path)
+    assert captured == []
+    (line,) = _auto_update_lines(caplog)
+    assert line.levelno == logging.WARNING
+    text = line.getMessage()
+    assert "GRYPE_DB_AUTO_UPDATE=false" in text
+    assert "did not update grype's database" in text
+    assert "stale database stays in use" in text
+
+
+def test_the_grype_skip_is_said_once_for_a_scan(
+    tmp_path, captured, monkeypatch, caplog
+):
+    """The scan's id remembers the skipped refresh as it remembers a run one, so a
+    second scanner of the same scan says nothing more."""
+    monkeypatch.setenv("GRYPE_DB_AUTO_UPDATE", "false")
+    with caplog.at_level(logging.INFO):
+        _prepare("grype", tmp_path / "grype-db", tmp_path, scan_id="one-scan")
+        _prepare("grype", tmp_path / "grype-db", tmp_path, scan_id="one-scan")
+    assert captured == []
+    assert len(_auto_update_lines(caplog)) == 1
+
+
+def test_grype_db_auto_update_unset_runs_the_update_without_a_notice(
+    tmp_path, captured, caplog
+):
+    """The control for the skip: with the variable unset (the fixture clears it) the
+    same call runs the update and says nothing about the setting."""
+    with caplog.at_level(logging.INFO):
+        _prepare("grype", tmp_path / "grype-db", tmp_path)
+    assert [what for _argv, _env, what in captured] == ["grype database"]
+    argv = captured[0][0]
+    assert argv[:3] == ["/opt/bin/grype", "db", "update"]
+    assert _auto_update_lines(caplog) == []
+
+
+def test_the_grype_variable_decides_before_the_grype_config(
+    tmp_path, captured, monkeypatch, caplog
+):
+    """As grype reads its settings, the environment beats the config file: a false
+    variable leaves the update out whatever the file says, and a true one keeps it
+    in whatever the file says."""
+    config = tmp_path / "grype.yaml"
+    config.write_text("db:\n  auto-update: true\n")
+    monkeypatch.setenv("GRYPE_DB_AUTO_UPDATE", "false")
+    _prepare("grype", tmp_path / "grype-db-1", tmp_path, config_file=config)
+    assert captured == []
+    config.write_text("db:\n  auto-update: false\n")
+    monkeypatch.setenv("GRYPE_DB_AUTO_UPDATE", "true")
+    with caplog.at_level(logging.INFO):
+        _prepare("grype", tmp_path / "grype-db-2", tmp_path, config_file=config)
+    assert [what for _argv, _env, what in captured] == ["grype database"]
+    assert _auto_update_lines(caplog) == []
 
 
 def test_a_grype_config_turning_auto_update_off_still_refreshes(tmp_path, captured):
@@ -231,7 +286,7 @@ def test_a_grype_config_turning_auto_update_off_still_refreshes(tmp_path, captur
 
 
 @pytest.mark.parametrize(
-    "value, said",
+    "value, skipped",
     [
         # Read as viper reads it for grype (strconv.ParseBool): these are false.
         ("false", True),
@@ -240,7 +295,7 @@ def test_a_grype_config_turning_auto_update_off_still_refreshes(tmp_path, captur
         ("f", True),
         ("F", True),
         ("0", True),
-        # Not false to ParseBool, so grype's own update stays on: nothing to say.
+        # Not false to ParseBool, so grype's own update stays on and so does ASH's.
         ("no", False),
         ("off", False),
         ("true", False),
@@ -251,17 +306,18 @@ def test_a_grype_config_turning_auto_update_off_still_refreshes(tmp_path, captur
         (None, False),
     ],
 )
-def test_grype_db_auto_update_is_said_only_when_it_reads_as_false(
-    tmp_path, captured, monkeypatch, caplog, value, said
+def test_the_grype_update_is_left_out_only_when_the_variable_reads_as_false(
+    tmp_path, captured, monkeypatch, caplog, value, skipped
 ):
-    """The refresh runs for every value; only a setting that reads as false is
-    reported."""
+    """The update runs for every value that does not read as false, and runs with no
+    notice about the setting; a value that reads as false leaves it out."""
     if value is not None:
         monkeypatch.setenv("GRYPE_DB_AUTO_UPDATE", value)
     with caplog.at_level(logging.WARNING):
         _prepare("grype", tmp_path / "grype-db", tmp_path)
-    assert [what for _argv, _env, what in captured] == ["grype database"]
-    assert any("GRYPE_DB_AUTO_UPDATE" in r.getMessage() for r in caplog.records) is said
+    expected = [] if skipped else ["grype database"]
+    assert [what for _argv, _env, what in captured] == expected
+    assert (len(_auto_update_lines(caplog)) == 1) is skipped
 
 
 def test_the_checks_bundle_fetch_pins_its_report_format_and_output(tmp_path):
