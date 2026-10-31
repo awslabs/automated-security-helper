@@ -128,9 +128,12 @@ def _html_literal(value) -> str:
     return "".join(parts)
 
 
-#: Leading blanks of a line, and a line's first character when that starts a
-#: list item, a rule or a setext underline once the blanks are gone.
-_LINE_INDENT = re.compile(r"^[ \t]+", re.MULTILINE)
+#: Leading blanks of a line that has text after them, and a line's first
+#: character when that starts a list item, a rule or a setext underline once the
+#: blanks are gone. A line of blanks alone is a blank line in Markdown and ends
+#: the paragraph above it, so it is not matched: written as non-breaking spaces
+#: it would be content and would join the paragraphs on either side of it.
+_LINE_INDENT = re.compile(r"^[ \t]+(?=[^ \t\r\n])", re.MULTILINE)
 _LINE_BLOCK_MARKER = re.compile(r"^(?:([-+=])|(\d+)([.)]))", re.MULTILINE)
 
 

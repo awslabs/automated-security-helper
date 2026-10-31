@@ -127,6 +127,14 @@ class TestAMultiLineDescriptionStaysText:
     def test_a_line_that_starts_with_a_word_is_unchanged(self):
         assert _block_text("plain\nsecond line") == "plain\nsecond line"
 
+    def test_a_line_of_blanks_stays_a_blank_line(self):
+        """Written as non-breaking spaces it was content, not a blank line, and
+        the two paragraphs on either side of it were joined into one."""
+        assert _block_text("a\n   \nb") == "a\n   \nb"
+        assert _block_text("a\n\t\nb") == "a\n\t\nb"
+        # The indent of a line with text after it is still kept.
+        assert _block_text("a\n   \n  b") == "a\n   \n&nbsp;&nbsp;b"
+
     def test_the_report_does_not_start_blocks_from_a_description(
         self, test_plugin_context
     ):
