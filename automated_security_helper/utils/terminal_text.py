@@ -463,7 +463,8 @@ def shown_in_ascii(
     replacements: Mapping[str, str],
     writable: Callable[[str], bool] | None = None,
 ) -> ShownText:
-    """*text*, shown already, with nothing outside ASCII left in it.
+    """*text*, shown already, with nothing outside ASCII left in it, but what
+    *writable* accepts.
 
     For a sink whose stream cannot encode more: utils/log.py's WindowsSafeFilter,
     on a Windows console or CI runner. Each key of *replacements* is put as its

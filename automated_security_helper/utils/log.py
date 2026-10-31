@@ -880,6 +880,11 @@ def _make_message_windows_safe(message: str, emoji_fallback_map: Dict[str, str])
 _UNFILTERED_ATTR = "_ash_unfiltered"
 
 
+#: The argument ``WindowsSafeFilter`` is built with when it is told nothing of
+#: the console: it reads the console's streams itself.
+_READ_THE_CONSOLE: Any = object()
+
+
 class WindowsSafeFilter(logging.Filter):
     """Logging filter that puts a record's text in ASCII on Windows when the
     console's encoding is limited.
@@ -900,12 +905,36 @@ class WindowsSafeFilter(logging.Filter):
     Python knows, everything outside ASCII is.
     """
 
-    def __init__(self):
+    def __init__(self, writes: Any = _READ_THE_CONSOLE):
+        """
+        Args:
+            writes: Says whether the console writes a character outside ASCII as
+                it is, or None to put everything outside ASCII in ASCII (a CI
+                runner, an encoding not known). Left out, it is read from the
+                console's streams (:func:`_console_writes`) when the filter is
+                active and None when it is not, so a filter built on a host that
+                has no encoding issue knows nothing of the console.
+        """
         super().__init__()
         self._active = _detect_encoding_issues()
-        #: Says whether the console writes a character outside ASCII as it is;
-        #: None puts everything in ASCII (a CI runner, an encoding not known).
-        self._writes = _console_writes() if self._active else None
+        self._writes = (
+            (_console_writes() if self._active else None)
+            if writes is _READ_THE_CONSOLE
+            else writes
+        )
+
+    @property
+    def _writes(self) -> Optional[Callable[[str], bool]]:
+        """Says whether the console writes a character outside ASCII as it is;
+        None puts everything in ASCII."""
+        return self._writes_character
+
+    @_writes.setter
+    def _writes(self, writes: Optional[Callable[[str], bool]]) -> None:
+        # The emoji map is what this function leaves for the console to write,
+        # so it is rebuilt with it: a map left from another function would
+        # replace an emoji the console writes, or leave one it cannot.
+        self._writes_character = writes
         self._emoji_map = {
             key: value
             for key, value in _get_default_emoji_fallback_map().items()
@@ -1004,11 +1033,12 @@ class WindowsSafeFilter(logging.Filter):
             return None
 
     def _in_ascii(self, text: str) -> str:
-        """*text* in ASCII: the emoji map's replacements, then each character
-        still outside ASCII written as its escape (``\\xNN``, ``\\uNNNN``,
-        ``\\UNNNNNNNN``). Nothing is dropped: every such character used to be
-        deleted, so a path lost its accented letters in the console and, through
-        this filter on the logger, in every file sink too."""
+        """*text* in the console's terms: the emoji map's replacements, then each
+        character still outside ASCII that the console cannot write written as its
+        escape (``\\xNN``, ``\\uNNNN``, ``\\UNNNNNNNN``), which is every such
+        character when ``_writes`` is None (ASCII). Nothing is dropped: every such
+        character used to be deleted, so a path lost its accented letters in the
+        console and, through this filter on the logger, in every file sink too."""
         safe = _make_message_windows_safe(text, self._emoji_map)
         if safe.isascii():
             return safe

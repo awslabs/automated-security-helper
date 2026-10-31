@@ -38,7 +38,8 @@ pytestmark = pytest.mark.unit
 
 def _filtered(message: str, args=(), markup: bool = True) -> logging.LogRecord:
     """A record through the active filter; with *markup* it asks for Rich markup."""
-    windows_filter = WindowsSafeFilter()
+    # A console that is known to write only ASCII, whatever host the test is on.
+    windows_filter = WindowsSafeFilter(writes=None)
     windows_filter._active = True
     record = logging.LogRecord("ash", logging.INFO, __file__, 1, message, args, None)
     if markup:

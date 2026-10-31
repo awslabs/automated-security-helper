@@ -54,7 +54,8 @@ def _filtered_record() -> logging.LogRecord:
         None,
     )
     record.markup = True
-    windows = WindowsSafeFilter()
+    # A console that is known to write only ASCII, whatever host the test is on.
+    windows = WindowsSafeFilter(writes=None)
     windows._active = True
     assert windows.filter(record) is True
     return record
@@ -100,7 +101,7 @@ def test_control_a_kept_rewrite_still_shows_once():
         None,
     )
     record.markup = True
-    windows = WindowsSafeFilter()
+    windows = WindowsSafeFilter(writes=None)
     windows._active = True
     assert windows.filter(record) is True
 

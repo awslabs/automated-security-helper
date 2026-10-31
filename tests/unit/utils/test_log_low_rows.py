@@ -164,7 +164,8 @@ def test_an_unlisted_narrow_code_page_counts_as_one_that_cannot_encode():
 
 
 def _active_filter() -> WindowsSafeFilter:
-    windows_filter = WindowsSafeFilter()
+    # A console that is known to write only ASCII, whatever host the test is on.
+    windows_filter = WindowsSafeFilter(writes=None)
     windows_filter._active = True
     return windows_filter
 
