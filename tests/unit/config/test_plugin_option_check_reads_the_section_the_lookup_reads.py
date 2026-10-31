@@ -152,6 +152,79 @@ def test_an_enabled_type_with_no_schema_is_not_a_crash():
     assert all(item.startswith("s.x.enabled (p 'x'): ") for item in problems)
 
 
+def test_a_model_validator_reading_another_key_is_not_a_crash_of_the_check():
+    """A plugin's config class may hold a model-level validator that reads a key
+    beside ``enabled``. Run over a mapping holding ``enabled`` alone it raised a
+    ``KeyError`` that ended the run with a traceback. It runs over the section
+    as the plugin is built from it now, so a bad ``enabled`` is reported there,
+    and a validator that still raises something else is left to the plugin's
+    own build."""
+    from pydantic import BaseModel, model_validator
+
+    from automated_security_helper.config.plugin_option_check import (
+        _enabled_problems,
+    )
+
+    class _ReadsOptions(BaseModel):
+        enabled: bool = True
+        options: Dict[str, Any] = {}
+
+        @model_validator(mode="before")
+        @classmethod
+        def _reads_options(cls, data):
+            _ = data["options"]
+            return data
+
+    section = {"enabled": "maybe", "options": {}}
+    refused = _enabled_problems(_ReadsOptions, section, "s.x", "p 'x'")
+    assert len(refused) == 1, refused
+    assert refused[0].startswith("s.x.enabled (p 'x'): "), refused
+    assert (
+        _enabled_problems(
+            _ReadsOptions, {"enabled": True, "options": {}}, "s.x", "p 'x'"
+        )
+        == []
+    )
+    # The validator raises past ``ValueError`` here, as the plugin's own build
+    # would: not a refusal of ``enabled``, and not a crash.
+    assert _enabled_problems(_ReadsOptions, {"enabled": "maybe"}, "s.x", "p 'x'") == []
+    assert section == {"enabled": "maybe", "options": {}}
+
+
+def test_a_validator_refusing_a_missing_key_does_not_hide_a_bad_enabled():
+    """A model-level validator that refuses a mapping without ``options`` raises
+    an error located at no field, which the ``enabled`` filter dropped, so
+    ``enabled: maybe`` went unreported. Over the real section it is reported."""
+    from pydantic import BaseModel, model_validator
+
+    from automated_security_helper.config.plugin_option_check import (
+        _enabled_problems,
+    )
+
+    class _NeedsOptions(BaseModel):
+        enabled: bool = True
+        options: Dict[str, Any] = {}
+
+        @model_validator(mode="before")
+        @classmethod
+        def _needs_options(cls, data):
+            if "options" not in data:
+                raise ValueError("options are required")
+            return data
+
+    refused = _enabled_problems(
+        _NeedsOptions, {"enabled": "maybe", "options": {}}, "s.x", "p 'x'"
+    )
+    assert len(refused) == 1, refused
+    assert refused[0].startswith("s.x.enabled (p 'x'): "), refused
+    assert (
+        _enabled_problems(
+            _NeedsOptions, {"enabled": True, "options": {}}, "s.x", "p 'x'"
+        )
+        == []
+    )
+
+
 def test_an_enabled_value_read_from_the_environment_is_left_to_the_plugin():
     """The loader's marker for text read from the environment, holding text
     the model would refuse: not this check's to refuse. The plugin that reads

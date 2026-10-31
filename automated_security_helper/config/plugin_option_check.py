@@ -104,20 +104,26 @@ def _enabled_problems(
     value = section["enabled"]
     if _read_from_environment(value):
         return []
-    # Through the plugin's own config class, as it is built, so a validator on
-    # the field runs. The class may require other fields or hold a model-level
-    # check, so only the errors located at ``enabled`` count. A type the class
-    # cannot build a schema for (a schema error is a TypeError) is not a value
-    # problem and is left to the plugin's own build.
+    # Through the plugin's own config class over the section as the plugin is
+    # built from it, so a validator on the field runs, and so does a model-level
+    # validator of a third-party class that reads another key of the section
+    # (``data["options"]``): it would raise on a mapping holding ``enabled``
+    # alone, or refuse it with an error located at no field. The class may
+    # require other fields or hold a model-level check, so only the errors
+    # located at ``enabled`` count. Anything else a validator raises (a
+    # ``KeyError`` from model code, a schema error for a type pydantic builds
+    # none for) is not a value problem of ``enabled`` and is left to the
+    # plugin's own build, which names it, rather than ending the run here with
+    # a traceback.
     try:
-        config_class.model_validate({"enabled": value})
+        config_class.model_validate(dict(section))
     except ValidationError as error:
         return [
             f"{where}.enabled ({plugin}): {item.get('msg', '')}"
             for item in error.errors()
             if tuple(item.get("loc", ()))[:1] == ("enabled",)
         ]
-    except (TypeError, ValueError):
+    except Exception:  # noqa: BLE001 -- the plugin's own build names it
         return []
     return []
 
