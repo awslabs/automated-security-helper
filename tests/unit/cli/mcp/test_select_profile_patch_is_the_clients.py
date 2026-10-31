@@ -158,6 +158,9 @@ def _scan_outcome(target: Path, session: str) -> Any:
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.config import resolve_config as rc
     from automated_security_helper.core import orchestrator
+    from automated_security_helper.core.resource_management import (
+        scan_management as management,
+    )
     from automated_security_helper.core.resource_management.scan_registry import (
         ScanRegistry,
     )
@@ -185,6 +188,14 @@ def _scan_outcome(target: Path, session: str) -> Any:
         patch.object(ras, "_setup_logger", lambda opts: _QuietLogger()),
         patch.object(orchestrator, "resolve_config", recording),
         patch.object(mcp_tools, "get_scan_registry", return_value=registry),
+        # The scan's exemption for its own copy of the session's profile
+        # (sandbox._is_a_live_scan_copy_of_this_sessions_file, through
+        # scan_management.session_holds_scan) reads the registry through
+        # scan_management, not through mcp_tools' handle. With only the
+        # handle patched, the scan registered in a registry the exemption
+        # never saw, so the copy the scan loads read as the client's and the
+        # registered profile's grants were dropped.
+        patch.object(management, "get_scan_registry", return_value=registry),
     ):
         asyncio.run(
             mcp_tools._run_scan_async(
