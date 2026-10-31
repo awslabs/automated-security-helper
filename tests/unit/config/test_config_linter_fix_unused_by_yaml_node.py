@@ -25,6 +25,7 @@ the file text unchanged.
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -242,6 +243,10 @@ def test_a_file_with_no_final_line_break_is_rewritten_whole(
 
 
 def test_a_dash_on_the_files_last_line_gets_its_own_line(tmp_path):
+    """A file whose last entry has no final line break keeps the entry as a
+    comment on a line of its own, and the next line the fixer adds does not join
+    it. The entry is checked as a comment line, not only as absent from the
+    parsed list: a fixer that deleted the entry would leave that list empty too."""
     config_path = _setup(
         tmp_path,
         "project_name: demo\nglobal_settings:\n  suppressions:\n    - {path: src/a.py, rule_id: B101, reason: one}",
@@ -253,6 +258,7 @@ def test_a_dash_on_the_files_last_line_gets_its_own_line(tmp_path):
     assert len(fixed_issues) == 1
     assert "# [ash-lint" in fixed_content
     assert "(not matched in last scan)    # - {path" not in fixed_content
+    assert re.search(r"^\s*# - \{path: src/a\.py", fixed_content, re.MULTILINE)
     assert yaml.safe_load(fixed_content)["global_settings"]["suppressions"] == []
 
 
