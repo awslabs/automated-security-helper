@@ -6666,26 +6666,33 @@ def _warn_grant_list_limit(
         if key in _DROPPED_OWN_SANDBOX_WARNED:
             return
         _DROPPED_OWN_SANDBOX_WARNED.add(key)
+    # The file's name is data: a newline or a control character in it must not
+    # start a line of its own, so each message is shown on one line here, once,
+    # as the other warnings that quote a file's path are.
     if isinstance(limit, _DefaultLimit):
         ASH_LOGGER.warning(
-            f"The patch in '{describe_config_path(path)}' leaves no list for "
-            f"{setting}, which the file does not write, so the file's own config "
-            f"ends with the setting's default list and {len(left_out)} of the "
-            f"trusted list's {_entries(len(in_force))} "
-            f"{'is' if len(left_out) == 1 else 'are'} left out. To keep the "
-            "trusted entries, write the list in the file or leave it out of the "
-            "patch.",
+            shown_on_one_line(
+                f"The patch in '{describe_config_path(path)}' leaves no list for "
+                f"{setting}, which the file does not write, so the file's own "
+                f"config ends with the setting's default list and {len(left_out)} "
+                f"of the trusted list's {_entries(len(in_force))} "
+                f"{'is' if len(left_out) == 1 else 'are'} left out. To keep the "
+                "trusted entries, write the list in the file or leave it out of "
+                "the patch."
+            ),
             extra=NO_MARKUP,
         )
         return
     if isinstance(limit, _EntryEditLimit):
         # No list is named, so "the entries it names" would not describe this.
         ASH_LOGGER.warning(
-            f"The patch in '{describe_config_path(path)}' edits entries of {setting}, "
-            "a list the file does not write, so none of the trusted list's "
-            f"{_entries(len(in_force))} is kept. An entry a patch writes is never "
-            "adopted. To keep the trusted entries, write the list in the file or "
-            "leave it out of the patch.",
+            shown_on_one_line(
+                f"The patch in '{describe_config_path(path)}' edits entries of "
+                f"{setting}, a list the file does not write, so none of the "
+                f"trusted list's {_entries(len(in_force))} is kept. An entry a "
+                "patch writes is never adopted. To keep the trusted entries, "
+                "write the list in the file or leave it out of the patch."
+            ),
             extra=NO_MARKUP,
         )
         return
@@ -6716,7 +6723,7 @@ def _warn_grant_list_limit(
         )
     else:
         text += "."
-    ASH_LOGGER.warning(text, extra=NO_MARKUP)
+    ASH_LOGGER.warning(shown_on_one_line(text), extra=NO_MARKUP)
 
 
 #: The grant lists whose entries are paths; the others hold scanner names, except
