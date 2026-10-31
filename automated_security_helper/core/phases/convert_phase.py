@@ -221,6 +221,27 @@ def _conversion_failure(run_scope: Any) -> str | None:
     return "could not convert: " + "; ".join(reasons)
 
 
+def _shown_loss(text: str, values: Any) -> str:
+    """``_conversion_failure``'s text as every sink may show it.
+
+    The scope's ``last_refusal`` is the sandbox's own sentence and its
+    ``last_failure`` is a planning exception's text, so either can quote a value
+    the converter's config read from the environment, or a path under the home
+    directory. The text goes to the row, the progress row and the CONVERT_COMPLETE
+    message, which reach the results file, the reports and the event subscribers,
+    so it is redacted once here with the values every other failure text of this
+    phase is redacted with (``scope_shown_text``, which also hides the values the
+    scope held), and the home directory is written as ``~`` as the dependency
+    reason's is (``_dependency_unavailable_reason``): ``scope_shown_text`` does
+    not fold the home directory itself.
+    """
+    if not text:
+        return text
+    from automated_security_helper.utils.get_shortest_name import home_as_tilde
+
+    return home_as_tilde(scope_shown_text(text, values))
+
+
 def _failure_field(failure: str | None) -> Dict[str, Any]:
     """The ``failure`` keyword for a converter's row, or nothing when there is none."""
     return {"failure": failure} if failure else {}
@@ -1007,9 +1028,7 @@ class ConvertPhase(EnginePhase):
                 # run, and a converter's argv can hold a value its config read
                 # from the environment. The scope is closed by now, so the
                 # values are this converter's, passed.
-                sandbox_loss = scope_shown_text(
-                    _conversion_failure(run_scope) or "", values
-                )
+                sandbox_loss = _shown_loss(_conversion_failure(run_scope) or "", values)
 
                 if len(convert_result) > 0:
                     ASH_LOGGER.debug(

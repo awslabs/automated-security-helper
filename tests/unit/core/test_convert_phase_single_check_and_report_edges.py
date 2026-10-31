@@ -517,6 +517,52 @@ class TestFailedPlansAreNotRefusals:
         assert "RuntimeError" in failure
 
 
+class TestTheSandboxLossIsRedactedLikeEveryOtherFailureText:
+    """The scope's last refusal and last failure are free text: one quotes a
+    value the config read from the environment, the other a path under home."""
+
+    @pytest.fixture
+    def leaking(self, monkeypatch, tmp_path):
+        home = tmp_path / "ash-home"
+        monkeypatch.setattr(
+            "automated_security_helper.core.constants.usable_home", lambda: home
+        )
+
+        @contextlib.contextmanager
+        def scope(plugin, context):
+            yield SimpleNamespace(
+                refused_spawns=1,
+                last_refusal=f"no grant for the bucket {ENV_VALUE}",
+                failed_spawns=1,
+                last_failure=(
+                    f"FileNotFoundError: no program named 'tool' under {home}/bin"
+                ),
+            )
+
+        monkeypatch.setattr(convert_phase, "converter_run_scope", scope)
+        return home
+
+    def test_the_row_the_progress_row_and_the_event_carry_neither(
+        self, plugin_context, leaking
+    ):
+        leaky = _converter("leaky-loss", env_values=(ENV_VALUE,))
+
+        results, events, progress = _observed(plugin_context, [leaky])
+
+        failure = results.converter_results["leaky-loss"].failure
+        progress_rows = [d for d in _descriptions(progress) if "leaky-loss" in d]
+        complete = [kw["message"] for name, kw in events if "CONVERT_COMPLETE" in name]
+        assert progress_rows and len(complete) == 1
+        # Red at the base: the environment value is already hidden there, but the
+        # absolute home directory was written as it was in all three.
+        for shown in (failure, *progress_rows, *complete):
+            assert ENV_VALUE not in shown, shown
+            assert str(leaking) not in shown, shown
+        # The loss itself is still said, with the home directory written as ~.
+        assert "sandbox refused 1 process" in failure
+        assert "under ~/bin" in failure
+
+
 class TestNoConverterRanSaysWhy:
     def test_a_missing_tool_is_not_conversion_turned_off(self, plugin_context, caplog):
         missing = _converter("tool-missing", answer=False)
