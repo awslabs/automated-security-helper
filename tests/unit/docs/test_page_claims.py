@@ -7050,11 +7050,12 @@ def test_an_offline_scan_names_the_missing_cache_grype_variable_points_at(
 def test_the_offline_trivy_row_says_how_the_version_check_is_turned_off() -> None:
     """run-offline.md (What each scanner does offline).
 
-    The row said every trivy scan gets ``--skip-version-check``. An offline command
-    never carries it (a trivy too old to know the flag refuses the command over it),
-    and the check is turned off by ``TRIVY_SKIP_VERSION_CHECK`` in the child's
-    environment instead. The row names both, and the code is read for each: the
-    flag is the online set's, and the variable is in the offline environment.
+    An earlier wording of the row said every trivy scan gets
+    ``--skip-version-check``. An offline command never carries it (a trivy too old
+    to know the flag refuses the command over it), and the check is turned off by
+    ``TRIVY_SKIP_VERSION_CHECK`` in the child's environment instead. The row names
+    both, and the code is read for each: the flag is the online set's, and the
+    variable is in the offline environment.
     """
     from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
         ONLINE_FLAGS,
