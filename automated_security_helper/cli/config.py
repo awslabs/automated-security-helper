@@ -106,6 +106,7 @@ from automated_security_helper.utils.log import (
     get_logger,
     show_debug_locals,
 )
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 from automated_security_helper.utils.path_stat import (
     UNREADABLE,
     StatProblem,
@@ -422,7 +423,13 @@ def _staged_write_falls_back(error: OSError) -> bool:
     (PermissionError from the rename) are all places the plain in-place write
     these commands made used to succeed, so it is made then. Any other error
     (a full disk among them) is the write's own and is raised.
+
+    A refusal the guard made on purpose (a link below a guarded root, a file
+    another name refers to) is never one of them, whatever its errno: the
+    in-place write would make the very write the guard refused.
     """
+    if isinstance(error, OutputDirLinkRefused):
+        return False
     return isinstance(error, PermissionError) or error.errno in (
         errno.EBUSY,
         errno.EXDEV,
