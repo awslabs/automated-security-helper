@@ -591,6 +591,48 @@ def test_an_ini_entry_ending_in_a_glob_warns_that_it_crosses_directories(
     assert _covers(_entries(argv), f"{source.as_posix()}/test_helpers/app.py")
 
 
+def test_an_ini_entry_with_a_glob_in_a_middle_component_warns_it_crosses(
+    tmp_path, caplog
+):
+    """Only the last component was looked at, but a ``*`` in a middle one takes
+    a ``/`` in bandit's fnmatch too: ``src/*/tests`` skips
+    ``src/a/b/tests/x.py``, and nothing said so. Every component holding ``*``
+    or ``?`` counts now; a plain path, and the bare ``*`` that opens or closes
+    the usual ``*/tests/*``, draw no warning."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = src/*/tests,src/tests\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py", "src/a/b/tests/x.py", "src/tests/y.py"])
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        scanner._execute_scan(source, "source", [])
+
+    messages = [r.getMessage() for r in caplog.records]
+    told = [m for m in messages if "also take a '/'" in m]
+    assert len(told) == 1, messages
+    assert repr("src/*/tests") in told[0]
+    assert repr("src/tests") not in told[0]
+
+
+def test_a_star_slash_entry_and_a_plain_path_draw_no_crossing_warning(
+    tmp_path, caplog
+):
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = */tests/*,src/tests\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py", "src/tests/y.py"])
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        scanner._execute_scan(source, "source", [])
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("also take a '/'" in m for m in messages), messages
+
+
 def test_an_ini_warning_is_given_once_per_build_not_once_per_target(tmp_path, caplog):
     """``_ini_excludes`` runs for every scanned target (the source and the
     converted one); its warnings describe the operator's file, so a second

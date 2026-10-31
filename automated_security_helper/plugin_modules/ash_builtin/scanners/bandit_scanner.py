@@ -1549,18 +1549,26 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     f"any depth below the target; write a glob ({entry}*) to keep "
                     "the wider reading.",
                 )
-            last = spelled.rstrip("/").rsplit("/", 1)[-1]
-            if last not in ("*", "**") and ("*" in last or "?" in last):
+            # Every component holding a '*' or '?' crosses a '/' in bandit's
+            # fnmatch, a middle one too (src/*/tests skips src/a/b/tests/x.py).
+            # A bare '*' or '**' as the first or the last component is the usual
+            # idiom (*/tests/*) and draws no warning.
+            parts = spelled.rstrip("/").split("/")
+            if any(
+                ("*" in part or "?" in part)
+                and not (part in ("*", "**") and index in (0, len(parts) - 1))
+                for index, part in enumerate(parts)
+            ):
                 self._warn_about_ini_once(
                     entry,
                     "crosses",
-                    f"The .bandit exclude entry {entry!r} ends in a glob, and in "
+                    f"The .bandit exclude entry {entry!r} holds a glob, and in "
                     "bandit's fnmatch matching '*' and '?' also take a '/', so "
                     "under the target it skips a file in any directory whose "
                     "name the glob fits too (test_*.py skips test_helpers/app.py). "
                     "bandit alone matches an entry against the whole absolute "
-                    "path and would skip none of these; name the directory to "
-                    "skip it on purpose.",
+                    "path, so an entry that does not open with a glob would skip "
+                    "none of these; name the directory to skip it on purpose.",
                 )
             if entry in anchor:
                 self._warn_about_ini_once(
