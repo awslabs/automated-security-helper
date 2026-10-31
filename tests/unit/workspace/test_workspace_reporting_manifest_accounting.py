@@ -34,6 +34,7 @@ from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     WorkspaceProjectResult,
 )
+from automated_security_helper.core.exceptions import WorkspaceDefinitionError
 from automated_security_helper.utils.error_text import carry_environment_values
 from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 from automated_security_helper.workspace import reporting
@@ -46,6 +47,7 @@ from automated_security_helper.workspace.reporting import (
     SKIP_NOT_PYTHON_ONLY,
     SKIP_NOT_REQUESTED,
     emit_workspace_reports,
+    refuse_linked_workspace_report_paths,
 )
 
 pytestmark = pytest.mark.unit
@@ -607,6 +609,47 @@ class TestAnUnbuildableReporterFailsOnlyWhatItOwed:
         assert "no name can be read" in entry["error"]
         assert "FakeUnconstructibleReporter" in outcome.failed_reporters
         assert "fake-merged" in outcome.workspace_artifacts
+
+
+class TestAnUnbuildableReporterIsRefusedBeforeAnythingIsScanned:
+    """The post-scan step fails the run for a report it owed and could not build
+    (``TestAnUnbuildableReporterFailsOnlyWhatItOwed``); the pre-scan check finds
+    the same reporters first, so the operator learns before paying for the scans."""
+
+    def test_a_reporter_the_step_would_run_refuses_the_run(self, workspace):
+        plan, output_dir, _ = workspace
+
+        with pytest.raises(WorkspaceDefinitionError) as excinfo:
+            refuse_linked_workspace_report_paths(
+                plan,
+                output_dir,
+                reporter_classes=[FakeUnconstructibleReporter, FakeMergedReporter],
+            )
+
+        message = str(excinfo.value)
+        assert "fake-unconstructible" in message
+        assert "cannot be built" in message
+        assert "Nothing was scanned" in message
+
+    def test_control_a_reporter_the_step_would_not_run_refuses_nothing(self, workspace):
+        plan, output_dir, _ = workspace
+
+        # Disabled, a per-project reporter, and one the formats leave out.
+        refuse_linked_workspace_report_paths(
+            plan,
+            output_dir,
+            reporter_classes=[
+                FakeUnconstructibleOffReporter,
+                FakeUnbuildablePerProjectReporter,
+                FakeMergedReporter,
+            ],
+        )
+        refuse_linked_workspace_report_paths(
+            plan,
+            output_dir,
+            output_formats=("fake-merged",),
+            reporter_classes=[FakeUnconstructibleReporter, FakeMergedReporter],
+        )
 
 
 class TestFailuresAreRecordedNotRaised:

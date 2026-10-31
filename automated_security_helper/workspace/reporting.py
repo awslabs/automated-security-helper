@@ -153,6 +153,7 @@ from automated_security_helper.base.reporter_plugin import (
     write_report_file,
 )
 from automated_security_helper.core.cancellation import raise_if_cancelled
+from automated_security_helper.core.exceptions import WorkspaceDefinitionError
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     WorkspaceExitCode,
@@ -918,6 +919,10 @@ def refuse_linked_workspace_report_paths(
     how to leave such a reporter out.
 
     Raises:
+        WorkspaceDefinitionError: A reporter the step would run cannot be
+            constructed (a per-project one, which writes in each project's own
+            reports, is not counted), so the report owed for it is known before
+            any project is scanned.
         ReportPathRefused: A selected reporter's file name is not a file name.
         ReportNameCollision: Two selected reporters would write the same file, or
             a workspace-level reporter would write the manifest's.
@@ -925,6 +930,7 @@ def refuse_linked_workspace_report_paths(
             manifest is a symlink or a directory junction.
     """
     context, config_lookup = _workspace_context(plan.workspace_root, Path(output_dir))
+    construction_failures: Dict[str, _ConstructionFailure] = {}
     selection = list(
         _selected_reporters(
             context=context,
@@ -934,8 +940,24 @@ def refuse_linked_workspace_report_paths(
             reporter_classes=reporter_classes,
             check_dependencies=False,
             plugin_modules=plugin_modules,
+            construction_failures=construction_failures,
         )
     )
+    # A reporter the step would run that cannot be built is found here, before the
+    # scans, rather than after every project was scanned and its report was owed.
+    unbuilt = [
+        f"{key}: {failure.error}"
+        for key, failure in construction_failures.items()
+        if failure.skipped is None
+        and failure.behaviour is not ReporterWorkspaceBehaviour.PER_PROJECT
+    ]
+    if unbuilt:
+        raise WorkspaceDefinitionError.listing(
+            "A reporter this run asks for cannot be constructed, so its workspace "
+            "report cannot be written. Nothing was scanned. Fix the reporter, "
+            "narrow --output-format to leave it out, or disable it:",
+            unbuilt,
+        )
     refuse_report_names_outside(
         Path(output_dir) / REPORTS_DIR_NAME,
         _workspace_report_main_names(selection, every_behaviour=True),
