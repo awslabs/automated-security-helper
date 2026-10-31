@@ -557,7 +557,9 @@ def _write_config_text(config_path: Path, text: str) -> None:
             or _has_other_names(before)
         ):
             raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
-        with open_for_atomic_write(target, encoding="utf-8") as handle:
+        # newline="": the text reaches the file as it was given, so a text that
+        # already carries CRLF is not translated a second time on Windows.
+        with open_for_atomic_write(target, encoding="utf-8", newline="") as handle:
             # Before the first byte: the staging file is created with the
             # umask-derived mode, and a 0o600 config's text must not be written
             # into a file another local user can open.

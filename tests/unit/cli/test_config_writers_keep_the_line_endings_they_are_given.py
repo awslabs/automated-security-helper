@@ -85,6 +85,21 @@ def _windows_line_endings(
     monkeypatch.setattr(fs_guard, "open_for_write", plain)
 
 
+def test_the_staged_write_keeps_the_line_endings_of_the_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Red at the base: the staged write asked the guard for a text handle without
+    ``newline``, so a text with CR LF in it came out with CR CR LF wherever the
+    guard's own default translates (before it passes ``newline=""`` itself)."""
+    config = tmp_path / ".ash.yaml"
+    config.write_bytes(b"project_name: before\r\n")
+    _windows_line_endings(monkeypatch)
+
+    _write_config_text(config, CRLF_TEXT)
+
+    assert config.read_bytes() == CRLF_TEXT.encode("utf-8")
+
+
 def test_the_in_place_write_keeps_the_line_endings_of_the_text(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
