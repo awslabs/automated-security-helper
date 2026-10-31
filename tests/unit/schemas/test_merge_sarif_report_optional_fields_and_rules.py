@@ -1690,6 +1690,70 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         assert taxon.toolComponent.name == "CWE"
         assert taxon.toolComponent.index in (None, -1)
 
+    @staticmethod
+    def _merged_taxa(taxa: list, extensions: list):
+        """The taxa of the one merged result, from a run that carries the
+        taxonomy ``CWE`` (taxa ``CWE-1``, ``CWE-79``) and *extensions*."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_finding("T-1", taxa=taxa)],
+                    extensions=extensions,
+                    taxonomies=[
+                        {"name": "CWE", "taxa": [{"id": "CWE-1"}, {"id": "CWE-79"}]}
+                    ],
+                )
+            ]
+        )
+        aggregated.merge_sarif_report(incoming)
+        return aggregated.runs[0].results[0].taxa
+
+    def test_a_reference_naming_an_extension_is_not_read_from_a_taxonomy(self):
+        """``{"index": 0, "name": "plugin"}`` in a run with a taxonomy at 0 and
+        an extension called ``plugin``: the name says the reference means the
+        extension, and reading the index against the taxonomy paired the plugin's
+        name with CWE's taxon. A reference whose name is the taxonomy's, beside
+        it, is still read by its index."""
+        extensions = [{"name": "plugin", "taxa": [{"id": "P-0"}, {"id": "P-1"}]}]
+
+        named_plugin = self._merged_taxa(
+            [{"index": 1, "toolComponent": {"index": 0, "name": "plugin"}}], extensions
+        )
+        named_cwe = self._merged_taxa(
+            [{"index": 1, "toolComponent": {"index": 0, "name": "CWE"}}], extensions
+        )
+
+        assert [(t.root.id, t.root.toolComponent.name) for t in named_plugin] == [
+            ("P-1", "plugin")
+        ]
+        assert [(t.root.id, t.root.toolComponent.name) for t in named_cwe] == [
+            ("CWE-79", "CWE")
+        ]
+
+    def test_an_index_past_the_taxonomies_is_not_read_against_the_extensions(self):
+        """The run has one taxonomy, so a component index of 1 counted a position
+        that is not there. Read again as a position in the extensions it credited
+        the taxon to the second one; the reference now names nothing and is
+        dropped. Named by name, the extension is still found."""
+        extensions = [
+            {"name": "A", "taxa": [{"id": "A-0"}, {"id": "A-1"}]},
+            {"name": "B", "taxa": [{"id": "B-0"}, {"id": "B-1"}]},
+        ]
+
+        by_index = self._merged_taxa(
+            [{"index": 1, "toolComponent": {"index": 1}}], extensions
+        )
+        by_name = self._merged_taxa(
+            [{"index": 1, "toolComponent": {"index": 1, "name": "B"}}], extensions
+        )
+
+        assert not by_index
+        assert [(t.root.id, t.root.toolComponent.name) for t in by_name] == [
+            ("B-1", "B")
+        ]
+
     def test_the_taxonomy_a_kept_taxon_names_is_carried_into_the_aggregate(self):
         """The kept taxon reference names ``CWE`` once its index is dropped, so
         the run it lands in has to hold a ``CWE`` taxonomy with the taxon in it;

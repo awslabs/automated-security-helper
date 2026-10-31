@@ -3132,15 +3132,38 @@ def _detach_run_scoped_references(
         logical.pop("index", None)
         logical.pop("parentIndex", None)
 
+    def referenced_extension(component_reference: object) -> Optional["ToolComponent"]:
+        """The component a taxon reference names among the tool's extensions,
+        for a reference no taxonomy answered to. A run that has taxonomies
+        counted the reference's ``index`` there, so an index that ran past them
+        must not be read again as a position in the extensions, which would
+        credit the taxon to whichever extension sits there: only a name or a
+        guid names an extension in such a run."""
+        if incoming.taxonomies and isinstance(component_reference, dict):
+            component_reference = {
+                key: value
+                for key, value in component_reference.items()
+                if key != "index"
+            }
+            if (
+                component_reference.get("name") is None
+                and component_reference.get("guid") is None
+            ):
+                return None
+        return _referenced_tool_component(component_reference, incoming.tool)
+
     def detach_descriptor_reference(reference: object) -> None:
         """A taxon reference: its ``index`` points into the ``taxa`` of the
         component its ``toolComponent`` names, and that component reference's
         own ``index`` into the run's ``taxonomies``. The component is looked up
         in the incoming run's taxonomies first, since a result's taxa are
-        categories of a taxonomy; a reference that names nothing there is read
-        against the tool's extensions, as a scanner that carries its taxa in an
-        extension wrote it. The id is read from the incoming run when the
-        reference carries none, then both indices are dropped; the component's
+        categories of a taxonomy (the index counts there only when the reference's
+        name or guid, if it gives one, is the taxonomy's); a reference that names
+        nothing there is read against the tool's extensions, as a scanner that
+        carries its taxa in an extension wrote it (by name or guid alone when
+        the run has taxonomies, see ``referenced_extension``). The id is read
+        from the incoming run when the reference carries none, then both
+        indices are dropped; the component's
         name and guid stay, since they name the component by content, not by
         position (the same shape ``_keep_the_rule_by_id`` gives a result's
         ``rule``). A component reference that named its component by index
@@ -3150,12 +3173,9 @@ def _detach_run_scoped_references(
         if not isinstance(reference, dict):
             return
         component_reference = reference.get("toolComponent")
-        taxonomy = _referenced_taxonomy(component_reference, incoming)
-        component = (
-            taxonomy
-            if taxonomy is not None
-            else _referenced_tool_component(component_reference, incoming.tool)
-        )
+        component = _referenced_taxonomy(component_reference, incoming)
+        if component is None:
+            component = referenced_extension(component_reference)
         if reference.get("id") is None and reference.get("guid") is None:
             taxa = (getattr(component, "taxa", None) or []) if component else []
             index = reference.get("index")
@@ -3493,18 +3513,27 @@ def _referenced_taxonomy(
 
     A result's ``taxa`` are references into a taxonomy, not into the tool's
     extensions or driver: the component reference's ``index`` counts positions
-    in ``run.taxonomies``. The taxonomy at that index,
-    or the one whose ``guid`` or ``name`` the reference gives; None when the
-    reference names no taxonomy this run carries, or none at all.
+    in ``run.taxonomies``. The taxonomy at that index when the reference gives
+    no ``guid`` or ``name``, or gives one that the taxonomy carries; otherwise
+    (the index is out of range, or the name or guid says the reference means
+    another component) the taxonomy whose ``guid`` or ``name`` the reference
+    gives. None when the reference names no taxonomy this run carries, or none
+    at all, which leaves the caller to read it against the tool's extensions.
     """
     if not isinstance(component_reference, dict):
         return None
     taxonomies = run.taxonomies or []
     index = component_reference.get("index", -1)
-    if isinstance(index, int) and index >= 0:
-        return taxonomies[index] if index < len(taxonomies) else None
     guid = component_reference.get("guid")
     name = component_reference.get("name")
+    if isinstance(index, int) and 0 <= index < len(taxonomies):
+        indexed = taxonomies[index]
+        if (
+            (guid is None and name is None)
+            or (guid is not None and indexed.guid == guid)
+            or (name is not None and indexed.name == name)
+        ):
+            return indexed
     for taxonomy in taxonomies:
         if guid is not None and taxonomy.guid == guid:
             return taxonomy
