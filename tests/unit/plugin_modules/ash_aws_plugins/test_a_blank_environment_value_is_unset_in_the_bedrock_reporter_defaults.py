@@ -12,6 +12,9 @@ blank ``AWS_PROFILE`` reached botocore as a profile named by spaces.
 Nothing here reaches AWS: the tests build the options model.
 """
 
+import sys
+from pathlib import Path
+
 import pytest
 
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
@@ -70,3 +73,20 @@ def test_with_nothing_set_the_region_is_the_built_in_one_and_no_profile():
 
     assert options.aws_region == "us-east-1"
     assert options.aws_profile is None
+
+
+def test_the_reference_generator_still_reads_both_region_variables():
+    """The configuration reference is generated from the factories' source: the
+    first environment read and the fallback it names. The blank-safe factory
+    keeps that shape, so the page still says AWS_REGION, else AWS_DEFAULT_REGION."""
+    scripts = Path(__file__).resolve().parents[4] / "scripts"
+    sys.path.insert(0, str(scripts))
+    try:
+        import generate_config_reference
+    finally:
+        sys.path.remove(str(scripts))
+
+    chains = generate_config_reference.env_defaults(BedrockSummaryReporterConfigOptions)
+
+    assert chains["aws_region"] == ["AWS_REGION", "AWS_DEFAULT_REGION"], chains
+    assert chains["aws_profile"] == ["AWS_PROFILE"], chains
