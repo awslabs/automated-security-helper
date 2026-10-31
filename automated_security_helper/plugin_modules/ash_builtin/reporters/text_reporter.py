@@ -161,7 +161,14 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 summary["description"],
                 (
                     f"{summary['actionable']} actionable | {summary['below_threshold']} below threshold | "
-                    f"{summary['suppressed']} suppressed | {summary['completed']}/{summary['scanners']} scanners completed"
+                    # Findings the project's outcome left out are counted apart
+                    # from the ones the threshold sets aside, only when present.
+                    + (
+                        f"{summary['policy_not_gating']} not gating (workspace policy) | "
+                        if summary.get("policy_not_gating")
+                        else ""
+                    )
+                    + f"{summary['suppressed']} suppressed | {summary['completed']}/{summary['scanners']} scanners completed"
                 ),
                 f"Next: {summary['next_step']}",
                 "",

@@ -429,6 +429,11 @@ class ReportContentEmitter:
         completed_names = {result["scanner_name"] for result in results if ran(result)}
         unavailable_count = sum(name not in completed_names for name in unavailable)
         active = sum(counts.values())
+        # Policy-scanner findings the project's outcome left out are counted
+        # apart: they are active, not actionable, and not below any threshold.
+        policy_not_gating = sum(
+            self.is_policy_not_gating(vuln) for vuln in self.flat_vulns
+        )
         # A tool ASH could not stop fails the run whatever the gate says, and it
         # may still be writing into the output directory after this report is
         # rendered, so the report is not final. The exit code reads it from the
@@ -489,7 +494,8 @@ class ReportContentEmitter:
             "next_step": next_step,
             "actionable": actionable,
             "active": active,
-            "below_threshold": max(0, active - actionable),
+            "below_threshold": max(0, active - actionable - policy_not_gating),
+            "policy_not_gating": policy_not_gating,
             "suppressed": suppressed,
             "counts": counts,
             "completed": completed,
@@ -558,11 +564,9 @@ class ReportContentEmitter:
 
         # A finding from a scanner only the workspace policy added, in a project
         # whose policy_scanners_gate is off, is reported and left out of that
-        # project's outcome, so it is not actionable here either.
-        if (
-            vuln.workspace_project in self._policy_not_gating
-            and self._is_policy_origin_finding(vuln)
-        ):
+        # project's outcome, so it is not actionable here either. It is not
+        # below the threshold either: see is_policy_not_gating.
+        if self.is_policy_not_gating(vuln):
             return False
 
         threshold = self._threshold_for(vuln.workspace_project, scanner_name)
@@ -572,6 +576,25 @@ class ReportContentEmitter:
 
         # Determine if the finding is actionable based on the threshold
         return self._is_severity_actionable(severity, threshold)
+
+    def is_policy_not_gating(self, vuln: FlatVulnerability) -> bool:
+        """Whether *vuln* is reported but left out of its project's outcome.
+
+        A finding of a scanner only the workspace policy added, in a project
+        whose ``policy_scanners_gate`` is off. Such a finding is not actionable,
+        and it is not "below threshold" either: its severity may be CRITICAL,
+        and it is left out because of where it came from, not how severe it is.
+        A report that filed it under "Below threshold" hid it from the default
+        view and counted it with the low-severity findings the threshold exists
+        to set aside, where the merged JUnit report gives it its own skip type.
+        The reports show it under its own status and count it apart.
+        """
+        if vuln.is_suppressed:
+            return False
+        return (
+            vuln.workspace_project in self._policy_not_gating
+            and self._is_policy_origin_finding(vuln)
+        )
 
     def _threshold_for(self, project: str | None, scanner_name: str) -> str:
         """The gate a finding of *scanner_name* in *project* is graded by.

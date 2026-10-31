@@ -221,6 +221,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             "next_step": summary["next_step"],
             "actionable": summary["actionable"],
             "below_threshold": summary["below_threshold"],
+            "policy_not_gating_tile": self._format_policy_not_gating_tile(
+                summary.get("policy_not_gating", 0)
+            ),
             "suppressed": summary["suppressed"],
             "completed": summary["completed"],
             "scanners": summary["scanners"],
@@ -245,6 +248,21 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         return Template(
             assets.joinpath("ash-report.html").read_text(encoding="utf-8")
         ).substitute(data)
+
+    @staticmethod
+    def _format_policy_not_gating_tile(count: int) -> str:
+        """The masthead tile for findings the project's outcome left out.
+
+        Present only when there are such findings, so a report without any is
+        the page it always was.
+        """
+        if not count:
+            return ""
+        return (
+            f"<div><dl><dt>Not gating</dt><dd>{count}"
+            '<span class="metric-description">Workspace policy findings, '
+            "reported and left out of the outcome</span></dd></dl></div>"
+        )
 
     @staticmethod
     def _format_severity_counts(counts: Dict[str, int]) -> str:
@@ -388,6 +406,11 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             severity_class = severity.lower() if severity in order else "unknown"
             if finding.is_suppressed:
                 status, label = "suppressed", "Suppressed"
+            elif emitter.is_policy_not_gating(finding):
+                # Left out of the project's outcome by where it came from, at
+                # any severity: its own status, shown by the default view,
+                # never "Below threshold".
+                status, label = "policy-not-gating", "Not gating (workspace policy)"
             elif emitter.is_finding_actionable(finding):
                 status, label = "actionable", "Actionable"
             else:

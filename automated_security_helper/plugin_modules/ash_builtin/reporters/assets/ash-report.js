@@ -45,7 +45,11 @@
     let shown = 0;
     for (const card of cards) {
       const status = card.dataset.status;
+      // A finding the project's outcome left out (a workspace policy scanner
+      // whose policy does not gate) is shown by the default view, whatever its
+      // severity: it is reported, not set aside as below the threshold.
       const matchesScope = scope.value === "all" || status === scope.value ||
+        (scope.value === "actionable" && status === "policy-not-gating") ||
         (scope.value === "active" && status !== "suppressed");
       const matches = matchesScope &&
         (severity.value === "all" || card.dataset.severity === severity.value) &&

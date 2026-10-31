@@ -227,7 +227,14 @@ def outcome_markdown(summary: Dict[str, Any]) -> str:
             (
                 f"> **{summary['actionable']} actionable** · "
                 f"{summary['below_threshold']} below threshold · "
-                f"{summary['suppressed']} suppressed · "
+                # Findings the project's outcome left out are counted apart from
+                # the ones the threshold sets aside, only when present.
+                + (
+                    f"{summary['policy_not_gating']} not gating (workspace policy) · "
+                    if summary.get("policy_not_gating")
+                    else ""
+                )
+                + f"{summary['suppressed']} suppressed · "
                 f"{summary['completed']}/{summary['scanners']} scanners completed"
             ),
             ">",
