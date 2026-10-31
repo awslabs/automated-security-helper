@@ -85,6 +85,8 @@ class PerTargetScanner(ScannerPluginBase):
         self.start_time = datetime(2026, 1, 1, 10, 0, 0)
         self.end_time = datetime(2026, 1, 1, 10, 0, 7)
         self.exit_code = 0
+        if self.failing_finding:
+            return {"findings": [{"severity": "critical"}]}
         return {"findings": []}
 
 
@@ -103,11 +105,15 @@ def plugin_context(tmp_path):
     )
 
 
-def _row(plugin_context, kept, limit, record_error=None):
-    scanner = PerTargetScanner(config=_Config(), context=plugin_context)
+def _row(plugin_context, kept, limit, record_error=None, failing_finding=False):
+    config = _Config()
+    # Pinned, so a critical finding fails the gate whatever the global default is.
+    config.options.severity_threshold = "MEDIUM"
+    scanner = PerTargetScanner(config=config, context=plugin_context)
     scanner.kept = kept
     scanner.limit = limit
     scanner.record_error = record_error
+    scanner.failing_finding = failing_finding
     executor = ScannerExecutor(
         plugin_context=plugin_context, progress_display=MagicMock(), scanner_tasks=[]
     )
@@ -125,11 +131,42 @@ def _reasons(row) -> str:
 
 class TestAKeptTimeoutFlagAloneGradesTheRowError:
     def test_the_flag_with_no_recorded_limit_is_the_rows_error(self, plugin_context):
+        """The reason text is what only the flag's grading writes. The status is
+        not: the failed target the fixture counts (the skip needs one) makes a
+        clean row ERROR on its own, so the test below is the one that tells the
+        flag's grade from the target's."""
         row = _row(plugin_context, kept=("timed_out", REASON), limit=None)
 
         assert row.status == ScannerStatus.ERROR
         assert "timed out on source" in _reasons(row), row.errors
         assert REASON in _reasons(row), row.errors
+
+    def test_the_flag_makes_the_row_error_over_findings_that_fail_the_gate(
+        self, plugin_context
+    ):
+        """With findings that fail the severity gate, the scanner's own accounting
+        of one failed target among two reads FAILED: the gate runs first and
+        a failed target grades ERROR only when the findings pass it. Only the kept
+        flag, with no limit recorded, turns that row ERROR, so removing the flag's
+        grading leaves this row FAILED."""
+        row = _row(
+            plugin_context,
+            kept=("timed_out", REASON),
+            limit=None,
+            failing_finding=True,
+        )
+
+        assert row.status == ScannerStatus.ERROR
+        assert REASON in _reasons(row), row.errors
+
+    def test_control_findings_that_fail_the_gate_with_no_flag_grade_failed(
+        self, plugin_context
+    ):
+        """Control: the finding in the test above fails the gate by itself, so
+        that test's FAILED reading without the flag is what this row shows."""
+        row = _row(plugin_context, kept=None, limit=None, failing_finding=True)
+
+        assert row.status == ScannerStatus.FAILED
 
     def test_control_a_recorded_limit_keeps_the_timeout_line(self, plugin_context):
         row = _row(plugin_context, kept=("timed_out", REASON), limit=30.0)
