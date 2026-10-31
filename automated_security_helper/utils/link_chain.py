@@ -44,6 +44,20 @@ open a link's own entry and never what it names:
   is the answer too, marked unexaminable: it may be a link resolving would
   follow, and the doubt is refused, never passed on as a local name.
 
+What the lexical collapse rests on: Win32 collapses ``..`` before the file
+system is asked, so the collapsed spelling is the one the OS opens. A POSIX
+caller would examine a different path than the one it opens, since a POSIX
+kernel follows a link under a step back before it applies the step; no POSIX
+caller of this module exists, and the sandbox runs the reading only on Windows.
+
+The two readings answer a component that is not there differently, and both
+answers mean "nothing to refuse": :func:`link_chain_names_a_windows_share` gives
+False (a local name), where None means a chain that cannot be judged and is
+refused; :func:`first_unsafe_link` gives None (nothing judged), since it
+answers with a component or nothing. No product code calls
+:func:`link_chain_names_a_windows_share` at present: the sandbox keeps an alias
+of it for its tests.
+
 Both readings walk a path the way resolving does, so that ``os.lstat`` is only ever
 asked about an entry whose parent directories have all been examined and hold no
 link. The walk keeps a prefix it has reached, which holds no link, and looks one
