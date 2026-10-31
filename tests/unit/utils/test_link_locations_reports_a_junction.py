@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,12 @@ import pytest
 from automated_security_helper.utils.link_locations import link_locations
 
 pytestmark = pytest.mark.unit
+
+#: The junction stand-in runs everywhere; only the test that also makes a real
+#: symlink needs the privilege Windows runners lack.
+needs_symlinks = pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
 
 #: IO_REPARSE_TAG_MOUNT_POINT, the reparse tag of a junction.
 MOUNT_POINT_TAG = 0xA0000003
@@ -75,6 +82,7 @@ def test_a_junction_on_the_way_is_a_link_location(tmp_path, monkeypatch):
     assert link_locations(junction / "sub" / "config.yaml") == [junction]
 
 
+@needs_symlinks
 def test_a_link_behind_a_junction_is_found_where_the_junction_leads(
     tmp_path, monkeypatch
 ):

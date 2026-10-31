@@ -108,6 +108,9 @@ def test_two_spellings_of_one_named_directory_leave_one_named(
     assert scanned == []
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
 def test_reached_through_a_link_walks_from_a_base_in_another_case(folding, tmp_path):
     tree = Path(os.path.realpath(tmp_path))
     (tree / "Repo" / ".ash").mkdir(parents=True)
