@@ -2993,6 +2993,15 @@ def execute_workspace(
             ignore_suppressions=settings.ignore_suppressions,
             reporter_classes=reporter_classes,
             plugin_modules=workspace_plugin_modules(plan, settings),
+            # The projects this run scanned to completion, from the outcomes held
+            # here: a per-project artifact on disk is this run's only for such a
+            # project, and the report step then does not parse the whole results
+            # file back to learn what this function already knows.
+            completed_projects=[
+                key
+                for key, entry in collected.items()
+                if entry.outcome.status is ProjectRunStatus.COMPLETED
+            ],
         )
         # After the results file, so the file is restamped when this changes the
         # answer: it records "the process status this run exited with", and a
