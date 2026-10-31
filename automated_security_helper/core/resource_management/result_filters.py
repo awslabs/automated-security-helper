@@ -347,6 +347,9 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
     }
     summary["scanner_summary"] = {
         "by_scanner": {},
+        # Every scanner in the results, whatever its status. The top-level
+        # total_scanners of the same results counts only the scanners that ran
+        # to an end (PASSED or FAILED); see ScanProgress.total_scanners.
         "total_scanners": len(scanner_results),
         "completed_scanners": 0,
     }

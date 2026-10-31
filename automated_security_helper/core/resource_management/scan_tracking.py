@@ -462,6 +462,18 @@ class ScanProgress:
         Returns:
             Total number of scanners: one per scanner name, however many targets
             it has results for
+
+        Not every payload field called ``total_scanners`` counts the same
+        thing, and the difference is part of what a client reads. This
+        property, and the partial progress info built from the files on disk,
+        count the scanners seen so far: every scanner that has written a file,
+        finished or not. The completed progress info and ``get_scan_results``
+        count the scanners that ran to an end, PASSED or FAILED, so a MISSING,
+        SKIPPED or ERROR scanner is in the first count and not in the second.
+        In ``result_filters``, ``scanner_summary.total_scanners`` counts every
+        scanner in the results whatever its status, and a scanners filter
+        recounts the top-level value as PASSED plus FAILED. Both meanings are
+        kept; each site says which one it reports.
         """
         return len(self.scanners)
 
@@ -2246,6 +2258,10 @@ def get_scan_results(
             "actionable_findings": metadata.get("summary_stats", {}).get("actionable"),
             "summary_stats": metadata.get("summary_stats", {}),
             "scanner_reports": results_dict.get("additional_reports", {}),
+            # The scanners that ran to an end (PASSED or FAILED), counted above,
+            # not every scanner in scanner_results: a MISSING, SKIPPED or ERROR
+            # scanner is not in this number. See ScanProgress.total_scanners for
+            # the other meaning of the name.
             "total_scanners": len(scanners_completed),
             "completion_time": metadata.get("generated_at", datetime.now().isoformat()),
             "raw_results": results_dict,
