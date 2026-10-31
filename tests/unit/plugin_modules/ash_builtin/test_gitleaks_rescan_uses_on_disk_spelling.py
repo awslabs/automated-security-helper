@@ -199,10 +199,22 @@ def test_a_copy_the_copy_filesystem_reads_as_the_ignore_file_fails_the_scan(
     """The tree keeps ``.GITLEAKSIGNORE`` apart from ``.gitleaksignore`` (a
     case-sensitive filesystem), so it is an ordinary file; the copies are made on
     a filesystem that reads the two as one. A copy at the tree's root would be the
-    ignore file for the re-scan, so the scan fails instead of reporting less."""
+    ignore file for the re-scan, so the scan fails instead of reporting less.
+
+    The tree's case-sensitivity is stood in for as well, because the test must
+    hold on a case-insensitive host (macOS and Windows by default): there the
+    real ``samefile`` reads the tree's ``.GITLEAKSIGNORE`` as the ignore file,
+    classes it with the ignore file's own batch, and nothing is copied into the
+    tree's batch for the guard to refuse. Here ``.gitleaksignore`` reaches no
+    file, as it does on a case-sensitive filesystem."""
     scanner, _ = _rescan_harness(tmp_path, monkeypatch, {})
     source = Path(scanner.context.source_dir)
     _write(source, ".GITLEAKSIGNORE")
+
+    def samefile(first, second):
+        raise FileNotFoundError(os.fspath(second))
+
+    monkeypatch.setattr(module.os.path, "samefile", samefile)
     real_exists = Path.exists
 
     def exists(self, *args, **kwargs):
