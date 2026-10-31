@@ -606,6 +606,64 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert removed is False
         assert ran == []
 
+    def test_a_second_scan_of_the_root_tree_registered_later_holds_the_inner_files(
+        self, tmp_path
+    ):
+        """A project scan cleaned up with its output kept is recorded on the root
+        scan that was in the registry then. A second scan of the same root tree,
+        registered after the project scan left, has no record of it, and its
+        removal deleted the project's files while the first root scan still
+        recorded them."""
+        registry = ScanRegistry()
+        old, project_scan, _project, inner = self._root_scan_and_inner_project(
+            registry, tmp_path
+        )
+        registry.update_scan_status(project_scan, MCScanStatus.RUNNING)
+        registry.update_scan_status(project_scan, MCScanStatus.COMPLETED)
+        assert registry.cleanup_scan(project_scan) is True
+        second_root = _register(registry, tmp_path / "ws", inner.parent.parent)
+        registry.update_scan_status(second_root, MCScanStatus.RUNNING)
+        registry.update_scan_status(second_root, MCScanStatus.COMPLETED)
+        assert registry.get_scan(second_root).removed_nested_scan_ids == []
+        assert registry.get_scan(old).removed_nested_scan_ids == [project_scan]
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(second_root), lambda: ran.append(1) or True
+        )
+
+        assert reason == "a later scan holds its results in this output directory"
+        assert removed is False
+        assert ran == []
+
+    def test_a_second_scan_of_another_output_tree_is_not_held_by_the_record(
+        self, tmp_path
+    ):
+        """The control: the second root scan writes another output directory, the
+        project's files are not in its tree, so its removal runs."""
+        registry = ScanRegistry()
+        old, project_scan, _project, _inner = self._root_scan_and_inner_project(
+            registry, tmp_path
+        )
+        registry.update_scan_status(project_scan, MCScanStatus.RUNNING)
+        registry.update_scan_status(project_scan, MCScanStatus.COMPLETED)
+        assert registry.cleanup_scan(project_scan) is True
+        elsewhere = _register(
+            registry, tmp_path / "ws", tmp_path / "ws" / ".ash" / "elsewhere"
+        )
+        registry.update_scan_status(elsewhere, MCScanStatus.RUNNING)
+        registry.update_scan_status(elsewhere, MCScanStatus.COMPLETED)
+        assert registry.get_scan(old).removed_nested_scan_ids == [project_scan]
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(elsewhere), lambda: ran.append(1) or True
+        )
+
+        assert reason is None
+        assert removed is True
+        assert ran == [1]
+
     def test_the_removal_of_another_inner_directory_keeps_the_record(self, tmp_path):
         """The control: a removal frees only the scans whose directories lie in
         the tree it deleted. The first project scan's directory is a sibling of

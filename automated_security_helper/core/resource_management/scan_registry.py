@@ -753,25 +753,35 @@ class ScanRegistry:
 
         A nested scan that has left the registry with its output kept (cleaned
         up without ``remove_output``) still has its files in the tree, so it
-        counts too: :meth:`_remember_nested_scan` recorded it on this entry
-        (``removed_nested_scan_ids``) when it was removed, the way
-        ``later_scan_ids`` keeps a removed scan of the same directory. Read
-        from the registry alone, cleaning a finished project scan up made the
-        removal of the root scan's tree delete the project's results.
+        counts too: :meth:`_remember_nested_scan` recorded it, with its
+        directory, on the entries registered when it was removed
+        (``removed_nested_scan_directories``), the way ``later_scan_ids`` keeps
+        a removed scan of the same directory. Read from the registry alone,
+        cleaning a finished project scan up made the removal of the root scan's
+        tree delete the project's results.
+
+        Every entry's record is read, not only ``entry``'s own, and each one is
+        compared by its directory: a second scan of the same tree, registered
+        after the project scan left, has no record of it, while the first scan
+        still in the registry does, and the project's files are in the one tree
+        both scans share. A directory equal to ``entry``'s own is not held: a
+        scan of that directory wrote over what an earlier scan left there.
         """
+        tree = entry.canonical_output_directory
         inside: List[str] = []
         for other in self._registry.values():
             if other.scan_id == entry.scan_id:
                 continue
-            if entry.canonical_output_directory not in (
-                other.canonical_output_directory.parents
-            ):
+            if tree not in other.canonical_output_directory.parents:
                 continue
             if other.claimed_output_tree and not other.output_holds_previous_results:
                 inside.append(other.scan_id)
-        for removed_id in entry.removed_nested_scan_ids:
-            if removed_id not in self._registry and removed_id not in inside:
-                inside.append(removed_id)
+        for holder in self._registry.values():
+            for removed_id, directory in holder.removed_nested_scan_directories.items():
+                if tree not in directory.parents:
+                    continue
+                if removed_id not in self._registry and removed_id not in inside:
+                    inside.append(removed_id)
         return inside
 
     def _remember_nested_scan(self, removed: ScanRegistryEntry) -> None:
