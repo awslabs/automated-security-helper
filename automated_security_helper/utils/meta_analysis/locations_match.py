@@ -68,8 +68,14 @@ def locations_match(loc1: Dict, loc2: Dict, scan_root: Optional[str] = None) -> 
     if unreadable1 and unreadable2:
         # Neither side names a line this module can place, so the two are the
         # same location only when they spell the same lines: a finding and its
-        # unchanged copy both carrying ``startLine: "abc"`` are one finding.
-        return _raw_line_range(loc1) == _raw_line_range(loc2)
+        # unchanged copy both carrying ``startLine: "abc"`` are one finding. Each
+        # line is compared as ``lines_equal`` does, since a side can state one
+        # line that reads (``10``) beside the one that does not, and ``10`` and
+        # ``"10"`` are the same line.
+        return all(
+            lines_equal(first, second)
+            for first, second in zip(_raw_line_range(loc1), _raw_line_range(loc2))
+        )
     if (unreadable1 and _has_readable_line(loc2)) or (
         unreadable2 and _has_readable_line(loc1)
     ):

@@ -99,6 +99,21 @@ def test_two_locations_that_spell_an_unreadable_line_apart_are_two_locations():
     )
 
 
+def test_a_readable_line_beside_an_unreadable_one_is_compared_by_the_line_it_names():
+    """The pair is compared line by line as written when both sides state an
+    unreadable one; ``10`` and ``"10"`` are the same line, though the raw pair
+    ``("abc", 10)`` is not the raw pair ``("abc", "10")``."""
+    assert locations_match(_sarif(start="abc", end=10), _sarif(start="abc", end="10"))
+    assert locations_match(_sarif(start="abc", end=10.0), _sarif(start="abc", end="10"))
+    # The control: a different unreadable spelling, or a different line, is two.
+    assert not locations_match(
+        _sarif(start="abc", end=10), _sarif(start="xyz", end="10")
+    )
+    assert not locations_match(
+        _sarif(start="abc", end=10), _sarif(start="abc", end="11")
+    )
+
+
 def test_an_unreadable_line_beside_a_location_with_no_line_matches_at_file_level():
     # The copy lost its region: the finding is there, its line is the lost field.
     region_none = {
