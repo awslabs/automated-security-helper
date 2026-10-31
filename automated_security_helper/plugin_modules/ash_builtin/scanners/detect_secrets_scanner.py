@@ -42,6 +42,7 @@ from automated_security_helper.config.client_scanner_exclusions import (
 from automated_security_helper.config.path_trust import (
     derived_roots,
     honored_path,
+    named_by_operator,
     scanned_checkout_reason,
 )
 from automated_security_helper.config.secret_verification_trust import (
@@ -195,6 +196,11 @@ IS_BASELINE_FILE_FILTER = "detect_secrets.filters.common.is_baseline_file"
 #: where it was named and checks both before the settings reach the worker
 #: (``_check_wordlist_filter``).
 WORDLIST_FILTER = "detect_secrets.filters.wordlist.should_exclude_secret"
+#: The option key the operator's record (``AshConfig._operator_paths``) is read
+#: at for a word list's ``file_name``.
+WORDLIST_FILE_KEY = (
+    "scanners.detect_secrets.options.scan_settings.filters_used[].file_name"
+)
 #: The ``min_length`` detect-secrets' own ``wordlist.initialize`` defaults to.
 WORDLIST_DEFAULT_MIN_LENGTH = 3
 
@@ -1281,7 +1287,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ``_untrusted_detect_secrets_settings``), which holds entries a
         repository chose. Only an entry of the operator's own configuration is
         not confined: an absolute name, or a relative one that leaves the
-        directory of its config file, is the operator's to choose. The entry is
+        directory of its config file, is the operator's to choose. When a
+        repository's configuration was read beside the operator's, only an
+        absolute name the operator's config holds too keeps that exemption
+        (``_operator_named_wordlist``); a relative one is confined. The entry is
         kept with the resolved absolute path and the defaults detect-secrets'
         own ``initialize`` uses for the keys it lacks; one its source may not
         supply, one that resolves outside those places, one whose file is not a
@@ -1312,10 +1321,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 item,
                 from_baseline=from_baseline,
                 untrusted=untrusted if from_baseline else None,
-                # An entry is the operator's own only when the configuration
-                # that holds it is: one read from the repository's files is
-                # confined like a baseline's entry.
-                confine=from_baseline or record is not None,
+                # A configuration read from the repository's files is confined
+                # like a baseline's entry, except for an absolute list the
+                # operator's own config names too (_operator_named_wordlist).
+                confine=from_baseline
+                or (record is not None and not self._operator_named_wordlist(item)),
             )
             if reason is None:
                 kept.append(item)
@@ -1327,6 +1337,28 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 "reported."
             )
         settings.filters_used = kept
+
+    def _operator_named_wordlist(self, item: Any) -> bool:
+        """Whether the operator's own config names this entry's word list.
+
+        True only for an absolute ``file_name`` (a leading ``~`` counts) that
+        the operator's trusted base config holds, as written, at the same
+        option (``AshConfig._operator_paths``, read by ``named_by_operator``).
+        When a configuration read from the repository's files sits beside the
+        operator's, the merged entry no longer says which file wrote it, so
+        this is the one test that does not depend on it: an absolute path
+        leads to the same file whoever wrote it, and the operator chose it.
+        A relative name is anchored at the config file's directory, which is
+        the repository's in that case, so it never counts here.
+        """
+        file_name = getattr(item, "file_name", None)
+        if not isinstance(file_name, str) or not file_name.strip():
+            return False
+        if not Path(os.path.expanduser(file_name)).is_absolute():
+            return False
+        return named_by_operator(
+            WORDLIST_FILE_KEY, file_name, getattr(self.context, "config", None)
+        )
 
     def _wordlist_filter_refusal(
         self,

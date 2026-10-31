@@ -51,6 +51,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.config.path_trust import OperatorPaths
 from automated_security_helper.config.secret_verification_trust import (
     UntrustedDetectSecretsSettings,
 )
@@ -536,17 +537,46 @@ def test_the_operators_relative_word_list_may_leave_its_config_files_directory(
     assert entry.file_name == expected.as_posix()
 
 
-def _repository_written_scanner_naming(tmp_path, monkeypatch, file_name):
+def _operator_document_naming(file_name):
+    """The operator's trusted base config, as ``resolve_config`` records it in
+    ``AshConfig._operator_paths``, naming ``file_name`` as a word list."""
+    return {
+        "scanners": {
+            "detect_secrets": {
+                "options": {
+                    "scan_settings": {
+                        "filters_used": [
+                            {"path": WORDLIST_FILTER, "file_name": file_name}
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+
+def _repository_written_scanner_naming(
+    tmp_path, monkeypatch, file_name, *, operator_names=None, config_file=False
+):
     """A configuration read from the repository's own files (the record
     resolve_config leaves on it) names ``file_name`` as its word list; no
     baseline is in use. ``<tmp>/secret/words.txt`` lies outside the scanned
-    tree, and the scanned tree holds ``words.txt`` too."""
+    tree, and the scanned tree holds ``words.txt`` too. ``operator_names`` is
+    a word list the operator's own config names as well (the trusted base the
+    record keeps in ``_operator_paths``), or None for no such record."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(module, "_module_importable", lambda name: True)
     context = _context(tmp_path)
     (tmp_path / "secret").mkdir()
     (tmp_path / "secret" / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
     (context.source_dir / "words.txt").write_text("AKIATEST\n", encoding="utf-8")
+    if config_file:
+        (tmp_path / "cfg").mkdir()
+        context.config._loaded_from = tmp_path / "cfg" / "ash.yaml"
+    if operator_names is not None:
+        context.config._operator_paths = OperatorPaths(
+            documents=[_operator_document_naming(operator_names)]
+        )
     context.config._untrusted_detect_secrets_settings = UntrustedDetectSecretsSettings(
         reason="the configuration was read from the scanned repository"
     )
@@ -587,6 +617,62 @@ def test_a_repository_written_configs_word_list_inside_the_tree_is_kept(
     (entry,) = _wordlist_entries(scanner)
     expected = Path(os.path.realpath(tmp_path / "src" / "words.txt"))
     assert entry.file_name == expected.as_posix()
+
+
+def test_the_operators_absolute_word_list_survives_a_repository_config_beside_it(
+    tmp_path, monkeypatch
+):
+    """The repository commits a config, so the record is set; the operator's own
+    config names an absolute list on the host. The merged entry is the
+    operator's list, and it is kept, not refused with the repository's."""
+    outside = tmp_path / "secret" / "words.txt"
+    scanner = _repository_written_scanner_naming(
+        tmp_path, monkeypatch, str(outside), operator_names=str(outside)
+    )
+    (entry,) = _wordlist_entries(scanner)
+    expected = Path(os.path.realpath(outside))
+    assert entry.file_name == expected.as_posix()
+    assert _handed_wordlists(scanner, monkeypatch) == [expected.as_posix()]
+
+
+def test_a_repository_config_cannot_borrow_the_operators_word_list_exemption(
+    tmp_path, monkeypatch, caplog
+):
+    """The operator's config names one list; the repository's entry names a
+    different one outside the tree. The exemption is for the operator's name
+    only, so the repository's entry is refused."""
+    operators = tmp_path / "secret" / "words.txt"
+    other = tmp_path / "secret" / "other-words.txt"
+    other.parent.mkdir(exist_ok=True)
+    other.write_text("AKIATEST\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        scanner = _repository_written_scanner_naming(
+            tmp_path, monkeypatch, str(other), operator_names=str(operators)
+        )
+    assert _wordlist_entries(scanner) == []
+    assert "resolves outside the directory of the file that named the entry" in (
+        caplog.text
+    )
+
+
+def test_a_relative_word_list_the_operator_also_names_is_still_confined(
+    tmp_path, monkeypatch, caplog
+):
+    """A relative name is anchored at the config file's directory, which is the
+    repository's when its config was read, so the operator naming the same text
+    does not exempt it."""
+    with caplog.at_level(logging.WARNING):
+        scanner = _repository_written_scanner_naming(
+            tmp_path,
+            monkeypatch,
+            "../secret/words.txt",
+            operator_names="../secret/words.txt",
+            config_file=True,
+        )
+    assert _wordlist_entries(scanner) == []
+    assert "resolves outside the directory of the file that named the entry" in (
+        caplog.text
+    )
 
 
 def test_a_word_list_that_is_not_there_drops_the_filter_with_a_warning(
