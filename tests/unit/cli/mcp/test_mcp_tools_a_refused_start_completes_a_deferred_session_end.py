@@ -63,14 +63,25 @@ def layout(tmp_path, monkeypatch) -> Dict[str, Path]:
     clear_all_session_state()
 
 
-@pytest.fixture
-def ended(monkeypatch) -> List[Any]:
-    """The session ids ``finish_ended_session`` was asked to complete."""
+def _the_end_arrives_while_the_claim_is_held() -> None:
+    """End the session now, as a client would: the scan's claim refuses the
+    removal and leaves it pending for whoever releases the claim."""
     from automated_security_helper.cli.mcp import sessions
 
-    asked: List[Any] = []
-    monkeypatch.setattr(sessions, "finish_ended_session", asked.append)
-    return asked
+    assert sessions.end_session(SESSION) is False, "control: the claim did not refuse"
+    with sessions._ended_lock:
+        pending = SESSION in sessions._ended_while_scanning
+    assert pending, "control: the refused end was not left pending"
+
+
+def _the_end_was_completed() -> None:
+    """The removal ran, as the real ``finish_ended_session`` runs it."""
+    from automated_security_helper.cli.mcp import sessions
+
+    with sessions._ended_lock:
+        still_pending = SESSION in sessions._ended_while_scanning
+    assert not still_pending, "the end waited for the TTL sweep"
+    assert sessions.get_default_registry().get(SESSION) is None
 
 
 def _scan(**kwargs: Any) -> Dict[str, Any]:
@@ -80,13 +91,15 @@ def _scan(**kwargs: Any) -> Dict[str, Any]:
 
 
 def test_a_start_that_fails_after_the_claim_completes_the_end(
-    layout, ended, monkeypatch
+    layout, monkeypatch
 ) -> None:
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.cli.mcp import sessions
 
     def cannot_start(scan_id, coroutine, **kwargs) -> None:
         coroutine.close()
+        # The claim is held here: the end arrives and waits for its release.
+        _the_end_arrives_while_the_claim_is_held()
         raise RuntimeError("the loop is gone")
 
     monkeypatch.setattr(mcp_tools, "_start_scan_task", cannot_start)
@@ -94,16 +107,14 @@ def test_a_start_that_fails_after_the_claim_completes_the_end(
     response = _scan(directory_path=str(layout["scan"]))
 
     assert response["success"] is False, response
-    assert ended == [SESSION], ended
+    _the_end_was_completed()
     # The claim itself went back too.
     session = sessions.get_default_registry().session_for(SESSION)
     assert session.try_begin_change() is None
     session.end_change()
 
 
-def test_a_scan_turned_away_at_the_limit_completes_the_end(
-    layout, ended, monkeypatch
-) -> None:
+def test_a_scan_turned_away_at_the_limit_completes_the_end(layout, monkeypatch) -> None:
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.cli.mcp import sessions
 
@@ -122,16 +133,27 @@ def test_a_scan_turned_away_at_the_limit_completes_the_end(
     )
     session = sessions.get_default_registry().session_for(SESSION)
     assert session.try_start_scan(1)
+    real_try_start_scan = sessions.MCPSession.try_start_scan
+
+    def end_while_the_claim_is_held(self, limit):
+        # The scan's claim is held when the limit is asked: the end arrives
+        # here and waits for the claim's release.
+        _the_end_arrives_while_the_claim_is_held()
+        return real_try_start_scan(self, limit)
+
+    monkeypatch.setattr(
+        sessions.MCPSession, "try_start_scan", end_while_the_claim_is_held
+    )
     try:
         response = _scan(directory_path=str(layout["scan"]))
     finally:
         session.scan_returned()
 
     assert response["error_type"] == "session_scan_limit", response
-    assert ended == [SESSION], ended
+    _the_end_was_completed()
 
 
-def test_a_task_cancelled_before_it_ran_gives_everything_back(layout, ended) -> None:
+def test_a_task_cancelled_before_it_ran_gives_everything_back(layout) -> None:
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.cli.mcp import sessions
     from automated_security_helper.core.resource_management.scan_registry import (
@@ -149,6 +171,8 @@ def test_a_task_cancelled_before_it_ran_gives_everything_back(layout, ended) -> 
             for task, scan_id in mcp_tools._scan_tasks.items()
             if scan_id == response["scan_id"]
         )
+        # The end arrives while the scan's claim is held, and waits for it.
+        _the_end_arrives_while_the_claim_is_held()
         # Cancelled before the loop first ran it: no line of the runner runs.
         task.cancel()
         await asyncio.wait([task])
@@ -161,10 +185,10 @@ def test_a_task_cancelled_before_it_ran_gives_everything_back(layout, ended) -> 
     assert entry is not None
     assert entry.status is MCScanStatus.FAILED, entry.status
     assert "could not be started" in (entry.error_message or ""), entry.error_message
+    _the_end_was_completed()
     session = sessions.get_default_registry().session_for(SESSION)
     assert session.try_begin_change() is None, "the scan's claim is still held"
     session.end_change()
-    assert ended == [SESSION], ended
 
 
 def test_the_scan_thread_completes_an_end_the_lock_refused(layout) -> None:
