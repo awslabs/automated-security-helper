@@ -3341,19 +3341,25 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
     is given the id of the rule those name (``_rule_id_of_reference``). The
     reference's own ``index`` and its ``toolComponent.index`` point into the
     incoming run's arrays, which the merged run does not have, so they are
-    dropped from the copy; the component's ``name`` and ``guid`` name it by
-    content, and the component itself is folded into the aggregate's
-    extensions under that name, so they stay (a reference with no component
-    reads as the driver's, SARIF 3.52.7, and after the merge the driver is the
-    aggregate's own). A component reference that named its component by index
-    alone takes that component's name and guid from the incoming run's tool
-    before the index goes, since without them the rule would read as the
-    driver's; one that names an extension the run does not carry, or the
-    driver, is dropped, and a reference left with neither id nor guid is
-    dropped whole. The exception is a reference that kept the name of a
-    component other than the driver: it takes the result's ``ruleId`` as its
-    own id, so the rule stays attributed to that component instead of reading
-    as the driver's.
+    dropped from the copy.
+
+    A reference with no component reads as the driver's (SARIF 3.52.7). The
+    merge does not change that for the driver rules of an incoming tool: a
+    driver that is not the aggregate's own joins the aggregate as an extension,
+    so its rules read as the aggregate driver's by that rule although their
+    descriptors live in the extension, and ``ruleId`` is what finds them. The
+    merge names a component only when the scanner did: ``name`` and ``guid``
+    name it by content, and the component itself is folded into the
+    aggregate's extensions under that name, so they stay. A component reference
+    that named its component by index alone takes that component's name and
+    guid from the incoming run's tool before the index goes, since without them
+    the rule would read as the driver's. A reference left with neither id nor
+    guid is dropped whole, except one whose component reference kept the name
+    or guid of an extension the incoming run carries: it takes the id of the
+    rule its index names (the result's ``ruleId`` when the index names none),
+    so the rule stays attributed to that component instead of reading as the
+    driver's. A component the run does not carry, or one that is the driver,
+    gives the reference no id, and it is dropped.
     """
     reference = dumped.get("rule")
     if dumped.get("ruleId") is None:
@@ -3392,14 +3398,24 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
             kept.get("id") is None
             and kept.get("guid") is None
             and "toolComponent" in kept
-            and dumped.get("ruleId")
+            and _referenced_tool_component(component_reference, report_tool)
+            is not None
         ):
-            # A reference that named its rule by index alone, in a component
-            # other than the driver, and whose id the result now states. Dropped
-            # whole, the rule would read as the driver's in the merged run (the
-            # reason the component's name is kept above); the id the result
-            # carries is the rule's, so the reference keeps it.
-            kept["id"] = dumped["ruleId"]
+            # A reference that named its rule by index alone, in an extension
+            # the incoming run carries. Dropped whole, the rule would read as
+            # the driver's in the merged run (the reason the component's name is
+            # kept above), so the reference keeps an id: the id of the rule its
+            # index names, which is the rule the reference means. The result's
+            # own ``ruleId`` is only the fallback for an index that names no
+            # rule: a scanner may write a ruleId of its own, or a hierarchical
+            # sub-rule id (``CA2101/1`` for the rule ``CA2101``), and copying it
+            # would name a rule the component does not have. A component the run
+            # does not carry is not given an id: the name would point at nothing
+            # in the merged run, and the reference is dropped as it always was.
+            indexed = _rule_id_of_reference(reference, result.ruleIndex, report_tool)
+            rule_id = indexed or dumped.get("ruleId")
+            if rule_id:
+                kept["id"] = rule_id
         if kept.get("id") is None and kept.get("guid") is None:
             dumped.pop("rule", None)
         else:

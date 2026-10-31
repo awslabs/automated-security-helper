@@ -385,6 +385,75 @@ class TestResultsKeepTheirRuleById:
         assert reference["toolComponent"] == {"name": "pack"}
         assert "index" not in reference
 
+    @staticmethod
+    def _merged_reference(rule: dict, rule_id: str):
+        """The merged result of one finding that states *rule_id* and names its
+        rule by *rule*, from a run whose extension ``pack`` holds the rules
+        ``P-0`` and ``CA2101``."""
+        pack = {"name": "pack", "rules": [{"id": "P-0"}, {"id": "CA2101"}]}
+        aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+        incoming = SarifReport(
+            runs=[
+                _run(
+                    "tool",
+                    [_finding(rule_id, rule=rule)],
+                    [],
+                    rules=[{"id": "D-0"}],
+                    extensions=[pack],
+                )
+            ]
+        )
+        aggregated.merge_sarif_report(incoming)
+        return aggregated.runs[0].results[0]
+
+    def test_a_reference_into_an_extension_takes_the_id_of_the_rule_its_index_names(
+        self,
+    ):
+        """The scanner wrote its own ``ruleId`` (``X-9``) and a reference whose
+        index names the extension's rule ``CA2101``. The reference means that
+        rule, so it keeps ``CA2101``; the result's ruleId stays as written."""
+        merged = self._merged_reference(
+            {"index": 1, "toolComponent": {"name": "pack"}}, "X-9"
+        )
+
+        assert merged.ruleId == "X-9"
+        reference = merged.rule.root.model_dump(exclude_unset=True)
+        assert reference["id"] == "CA2101"
+        assert reference["toolComponent"] == {"name": "pack"}
+
+    def test_a_hierarchical_rule_id_does_not_become_the_references_id(self):
+        """``CA2101/1`` is a sub-rule id some scanners write on the result; the
+        component's rule is ``CA2101``, which is what the reference names."""
+        merged = self._merged_reference(
+            {"index": 1, "toolComponent": {"name": "pack"}}, "CA2101/1"
+        )
+
+        assert merged.ruleId == "CA2101/1"
+        assert merged.rule.root.model_dump(exclude_unset=True)["id"] == "CA2101"
+
+    def test_a_reference_into_a_component_the_run_lacks_is_dropped(self):
+        """A reference that names an extension the incoming run does not carry
+        points at nothing in the merged run, and the result's ruleId is not a
+        reason to give it an id: it is dropped, as it was before the id was
+        borrowed from the result."""
+        merged = self._merged_reference(
+            {"index": 0, "toolComponent": {"name": "ghost"}}, "X-9"
+        )
+
+        assert merged.ruleId == "X-9"
+        assert merged.rule is None
+
+    def test_an_index_that_names_no_rule_falls_back_to_the_results_rule_id(self):
+        """The control: the component is the run's own and the index runs past
+        its rules, so the result's ruleId is the only id there is."""
+        merged = self._merged_reference(
+            {"index": 5, "toolComponent": {"name": "pack"}}, "X-9"
+        )
+
+        reference = merged.rule.root.model_dump(exclude_unset=True)
+        assert reference["id"] == "X-9"
+        assert reference["toolComponent"] == {"name": "pack"}
+
     def test_a_rule_reference_keeps_its_id_and_loses_the_run_scoped_indices(self):
         aggregated = SarifReport(runs=[_run("aggregate", [], [])])
         incoming = SarifReport(
