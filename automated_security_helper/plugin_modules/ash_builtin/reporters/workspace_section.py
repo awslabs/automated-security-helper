@@ -237,8 +237,13 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # ahead of the error text, so a skipped project that also carries an
             # error text reads SKIPPED, as workspace_exit_code reads it.
             result = f"SKIPPED ({reason})" if reason else "SKIPPED"
-        elif project.skip_reason is not None:
+        elif project.skip_reason is not None and not project.exceeds_threshold:
             # Fallbacks for a record whose status does not say: the text fields.
+            # A COMPLETED record that carries a skip reason is read by its
+            # findings first: workspace_exit_code counts such a project as
+            # completed and fails the run when it exceeds its threshold, so a
+            # row that read SKIPPED for it would hide the finding the run fails
+            # for. The arms below then give it FAILED.
             result = f"SKIPPED ({reason})"
         elif project.error:
             result = "FAILED"

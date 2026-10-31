@@ -9,6 +9,14 @@ project whose error text was null or empty, and a SKIPPED project with no
 recorded reason, fell through to PASSED with zero counts: the same row a clean
 scan produces, for a project that was never scanned, while workspace_exit_code
 fails the run for the FAILED one.
+
+The rule for a record whose status and texts disagree. A FAILED or SKIPPED
+status decides ahead of both texts. A COMPLETED status does not hide a text:
+an error text reads FAILED, and a skip reason reads ``SKIPPED (reason)`` unless
+the project also exceeds its threshold, when it reads FAILED, because
+``workspace_exit_code`` counts a COMPLETED project as completed and fails the
+run for the findings, whatever reason the record also holds. No such record
+reads PASSED.
 """
 
 import pytest
@@ -187,7 +195,37 @@ def test_a_completed_project_that_also_carries_an_error_text_never_reads_passed(
 
 
 def test_a_completed_project_that_also_carries_a_skip_reason_never_reads_passed():
+    """With no finding over the gate, the reason names the row (the control)."""
     from automated_security_helper.models.workspace import SkippedProjectReason
 
     model = _model(_project("svc", skip_reason=SkippedProjectReason.NO_CHANGES))
     assert _result(model, "svc") == "SKIPPED (no-changes)"
+
+
+def test_a_completed_project_with_a_skip_reason_and_findings_over_the_gate_reads_failed():
+    """The run fails for the findings, so the row does not read SKIPPED.
+
+    RED at the base: the skip-reason arm came before the threshold arm, so the
+    row read ``SKIPPED (no-changes)`` for a project ``workspace_exit_code`` fails
+    the run for (ACTIONABLE_FINDINGS), and its finding was nowhere in the table.
+    """
+    from automated_security_helper.models.workspace import (
+        SkippedProjectReason,
+        WorkspaceExitCode,
+        workspace_exit_code,
+    )
+
+    project = _project(
+        "svc",
+        skip_reason=SkippedProjectReason.NO_CHANGES,
+        finding_count=2,
+        actionable_finding_count=2,
+        exceeds_threshold=True,
+    )
+    model = _model(project)
+
+    assert workspace_exit_code(model.workspace.projects) == (
+        WorkspaceExitCode.ACTIONABLE_FINDINGS
+    )
+    assert _result(model, "svc") == "FAILED"
+    assert 'class="failed"' in html_workspace_section(model)
