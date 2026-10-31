@@ -724,6 +724,10 @@ NOT_WRITES: Dict[Site, Tuple[int, str]] = {
         1,
         "nothing: the urllib opener's opener.open(url, ...), a network call",
     ),
+    (f"{_ASH}/utils/download_utils.py", "_open_url", "Path.open"): (
+        1,
+        "nothing: the urllib opener's opener.open(url, ...), a network call",
+    ),
     # `zf.open(info)` opens a zip member for reading; the detector cannot read the
     # mode of an open() whose first argument is not a literal.
     (f"{_ASH}/cli/mcp/source_delivery.py", "_finalize_zip_upload", "Path.open"): (
