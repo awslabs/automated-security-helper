@@ -74,8 +74,15 @@ _BANDIT_EXCLUDE_UNSAFE = frozenset(",\n\0")
 
 #: bandit's own default ``--exclude`` value (``bandit.core.constants.EXCLUDE`` in
 #: bandit 1.9.4). Any ``--exclude`` passed on the command line replaces it, and ASH
-#: always passes one, so these are passed too; without them ``.tox``, ``.eggs`` and
-#: ``*.egg`` trees of installed third-party code were scanned.
+#: always passes one, so these are passed too; without them ``.tox`` and ``.eggs``
+#: trees of installed third-party code were scanned. ``*.egg`` is the one default
+#: whose reading widens: bandit matches it with ``fnmatch`` against a file's whole
+#: path, so it only skips a file whose name ends in ``.egg``, never a ``.py`` file
+#: inside a directory called ``x.egg``; the builder gives it the same directory
+#: form as every other entry (``bandit_excluded_path_globs``), so ASH skips an
+#: unpacked egg directory's Python files too. That is ASH's own exclusion, kept on
+#: purpose (an unpacked egg is installed third-party code), not parity with bandit,
+#: and nothing applies it after the scan.
 BANDIT_DEFAULT_EXCLUDES = (
     ".svn",
     "CVS",

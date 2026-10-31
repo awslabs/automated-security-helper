@@ -297,7 +297,7 @@ def test_bandits_own_default_excludes_are_passed(tmp_path):
     bandit applies the entries (an fnmatch glob or a plain substring) against
     files under the defaults' names, not against the builder's own output,
     which a builder returning nothing for ``*.egg`` would have satisfied."""
-    source = _tree(tmp_path, ["app.py", ".tox/x.py", "pkg.egg"])
+    source = _tree(tmp_path, ["app.py", ".tox/x.py", "pkg.egg", "unpacked.egg/mod.py"])
     scanner = _scanner(source, tmp_path)
 
     argv, _, _ = scanner._execute_scan(source, "source", [])
@@ -316,7 +316,37 @@ def test_bandits_own_default_excludes_are_passed(tmp_path):
             assert entry in entries, (item, entry)
     assert skipped(".tox/x.py")
     assert skipped("pkg.egg")
+    # ASH's own exclusion, not parity: bandit's ``*.egg`` fnmatch skips only a
+    # file named like that, and ASH also skips the Python files of an unpacked
+    # egg directory (see ``BANDIT_DEFAULT_EXCLUDES``). Said here so a change to
+    # either reading is a decision.
+    assert skipped("unpacked.egg/mod.py")
     assert not skipped("app.py")
+
+
+def test_the_default_excludes_match_the_installed_bandits_own_list():
+    """The tuple is a hand-kept copy of ``bandit.core.constants.EXCLUDE``; read
+    from the installed bandit, a change to its list shows here and not as a
+    scan quietly covering more or less than bandit's own default did."""
+    constants = pytest.importorskip("bandit.core.constants")
+
+    assert set(BANDIT_DEFAULT_EXCLUDES) == set(constants.EXCLUDE)
+
+
+@pytest.mark.parametrize("name", BANDIT_DEFAULT_EXCLUDES)
+def test_every_default_exclude_skips_the_files_under_it(tmp_path, name):
+    """Each default is checked against a real file under it, as bandit applies
+    the entries (an fnmatch glob or a plain substring), not against the
+    builder's own output."""
+    directory = name.replace("*", "pkg")
+    source = _tree(tmp_path, ["app.py", f"{directory}/x.py"])
+    scanner = _scanner(source, tmp_path)
+
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    entries = _entries(argv)
+    assert _covers(entries, f"{source.as_posix()}/{directory}/x.py"), (name, entries)
+    assert not _covers(entries, f"{source.as_posix()}/app.py"), entries
 
 
 def test_the_operators_bandit_ini_exclude_reaches_bandit(tmp_path):
