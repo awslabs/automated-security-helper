@@ -7,7 +7,7 @@ import json
 import re
 from typing import Literal, TYPE_CHECKING, Any, ClassVar, Dict, List, Tuple
 
-from pydantic import field_validator
+from pydantic import ValidationInfo, field_validator
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -27,6 +27,7 @@ from automated_security_helper.models.core import (
     AshSuppression,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.unknown_keys import tolerated_notes
 from automated_security_helper.utils.suppression_matcher import (
     recorded_suppressions,
     written_suppression_id,
@@ -79,16 +80,33 @@ class UnusedSuppressionsReporterConfigOptions(ReporterOptionsBase):
 
     @field_validator("output_format", mode="before")
     @classmethod
-    def _output_format_is_one_of_the_three(cls, value: Any) -> Any:
+    def _output_format_is_one_of_the_three(
+        cls, value: Any, info: ValidationInfo
+    ) -> Any:
         """Read the case of the name away, and refuse any other.
 
         ``report`` took every value but ``both`` and ``markdown`` for ``json``,
         so ``md``, ``Both`` and ``MARKDOWN`` were silently the JSON-only report.
         The message names the allowed values and not the one given: it can be a
         value read from the environment.
+
+        The config a results file recorded is read again by every reader of the
+        file (``ash report``, ``--existing-results``, ``ash merge``), and a scan
+        by an earlier version may have run with a value this refuses. Refusing it
+        there would lose the results of a scan nobody is about to run again, so
+        under the stored-config tolerance (``utils/unknown_keys``) the value is
+        read as the earlier version read it, ``json``, and a note says so
+        without naming the value.
         """
         if isinstance(value, str) and value.strip().lower() in _OUTPUT_FORMATS:
             return value.strip().lower()
+        notes = tolerated_notes(info)
+        if notes is not None:
+            notes.append(
+                "an unreadable output_format of the unused-suppressions reporter "
+                "was read as json"
+            )
+            return "json"
         raise ValueError("output_format must be one of: json, markdown, both")
 
 
