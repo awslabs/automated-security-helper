@@ -75,6 +75,21 @@ def _coverage_fields(results: Dict[str, Any]) -> Dict[str, Any]:
     return {key: results[key] for key in _COVERAGE_KEYS if key in results}
 
 
+def _outcome_counter(data: Dict[str, Any]) -> Optional[str]:
+    """The SummaryStats outcome counter a ``scanner_results`` entry feeds, or None.
+
+    An entry with no ``status`` key is read as PASSED, as the results model
+    reads it (and as ``scan_tracking`` reads the same entry); counted as no
+    outcome, it left ``passed`` and the scanner total short, and the actionable
+    count a lower bound shown as exact. A status that is not a string, or a
+    word the model does not have, feeds no counter.
+    """
+    status = data.get("status", "PASSED")
+    if not isinstance(status, str):
+        return None
+    return _OUTCOME_COUNTERS.get(status.upper())
+
+
 def _total_of(counts: Dict[str, Any]) -> int:
     """``total`` by the one rule: the non-suppressed buckets of *counts*."""
     return sum(_count(counts.get(bucket)) for bucket in _COUNTED_SEVERITY_KEYS)
@@ -125,7 +140,7 @@ def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
             stats["total"] += _total_of(own_counts)
         else:
             stats["total"] += _count(data.get("finding_count"))
-        counter = _OUTCOME_COUNTERS.get(str(data.get("status") or "").upper())
+        counter = _outcome_counter(data)
         if counter is not None:
             stats[counter] += 1
         actionable = data.get("actionable_finding_count")
@@ -157,7 +172,7 @@ def _seed_scanners_the_sarif_never_named(
     for name, data in rows.items():
         if not isinstance(data, dict):
             continue
-        counter = _OUTCOME_COUNTERS.get(str(data.get("status") or "").upper())
+        counter = _outcome_counter(data)
         if counter in ("passed", "failed"):
             kept_per_scanner.setdefault(name, dict.fromkeys(_SEVERITY_KEYS, 0))
 

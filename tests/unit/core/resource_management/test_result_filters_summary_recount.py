@@ -131,6 +131,32 @@ class TestFilterSummaryWithoutSummaryStats:
         assert scan_stats["error"] == 1
         assert sum(scan_stats.values()) == 4
 
+    def test_an_entry_with_no_status_counts_as_passed_as_the_model_reads_it(self):
+        """The results model reads an absent status as PASSED. Read as no
+        outcome, the scanner was in no counter, so passed fell short of the
+        scanners that ran."""
+        results = _results(with_summary_stats=False)
+        del results["raw_results"]["scanner_results"]["bandit"]["status"]
+
+        scan_stats = filter_summary(results)["findings_summary"]["scan_stats"]
+
+        assert scan_stats == {
+            "passed": 1,
+            "failed": 1,
+            "missing": 1,
+            "skipped": 0,
+            "error": 0,
+        }
+
+    def test_a_status_that_is_not_a_word_counts_in_no_outcome(self):
+        results = _results(with_summary_stats=False)
+        results["raw_results"]["scanner_results"]["bandit"]["status"] = 5
+
+        scan_stats = filter_summary(results)["findings_summary"]["scan_stats"]
+
+        assert scan_stats["passed"] == 0
+        assert sum(scan_stats.values()) == 2
+
     def test_nothing_to_count_from_reads_as_unknown_not_zero(self):
         results = _results(with_summary_stats=False)
         results["raw_results"]["scanner_results"] = {}
