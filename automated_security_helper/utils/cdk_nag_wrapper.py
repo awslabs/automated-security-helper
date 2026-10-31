@@ -1488,8 +1488,21 @@ def run_cdk_nag_against_cfn_template(
                 jsii_env["JSII_NODE"] = node
             elif refusal is not None:
                 raise RuntimeError(refusal)
-            # Not on PATH and not in the tree: the operator's value stands, and jsii's
-            # own error names what it could not start.
+            else:
+                # Neither on PATH nor refused in the tree, which does not rule out a
+                # copy the working directory would supply to a bare name: Windows
+                # starts one from there before it reads PATH. The default branch above
+                # refuses that copy, and the bare name is the same lookup, so it is
+                # refused here too rather than started from the scanned repository.
+                local = started_from_working_directory(explicit_node)
+                if local is not None:
+                    raise RuntimeError(
+                        f"JSII_NODE names {explicit_node}, which is not on PATH, and "
+                        f"the copy found through the working directory, {local}, is "
+                        "not run"
+                    )
+            # Not on PATH and not in the working directory either: the operator's value
+            # stands, and jsii's own error names what it could not start.
         _original_jsii_env = apply_environ_overrides(jsii_env)
 
         # Suppress JSII stack traces by redirecting stderr for entire function

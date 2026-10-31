@@ -3746,3 +3746,95 @@ def test_a_bare_jsii_node_on_no_path_is_left_as_the_operator_set_it(
     _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
 
     assert jsii_node_during_the_call == ["nodejs"]
+
+
+def test_a_bare_jsii_node_reached_only_through_the_working_directory_is_refused(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """The lookup answers (None, None) for a name that is neither on PATH nor refused
+    in the tree, which leaves a copy in the working directory unruled out: Windows
+    starts one from there before it reads PATH, and the scanned repository is usually
+    the working directory. The default branch (no JSII_NODE) refuses that copy; the
+    bare-name branch ran it. The decision is a function-level one, so the working
+    directory search is stood in for and the test needs no Windows."""
+    copy = tmp_path / "repo" / "nodejs.exe"
+    asked: list = []
+
+    def started(name, cwd=None, env=None):
+        asked.append(name)
+        return str(copy)
+
+    monkeypatch.setattr(cdk_nag_wrapper, "lookup_for_scan", lambda c, r: (None, None))
+    monkeypatch.setattr(cdk_nag_wrapper, "started_from_working_directory", started)
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    with pytest.raises(RuntimeError, match="through the working directory") as raised:
+        _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert asked == ["nodejs"]
+    assert str(copy) in str(raised.value)
+    assert jsii_node_during_the_call == [], "cdk-nag started anyway"
+    assert os.environ.get("JSII_NODE") == "nodejs", "the operator's value is restored"
+
+
+def test_a_bare_jsii_node_with_no_working_directory_copy_is_left_as_set(
+    cdk_doubles,
+    template_file,
+    outdir,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """The control: the working directory search is asked about the bare name and finds
+    nothing, so the operator's value stands. Asking is part of the assertion, so a
+    stand-in that is never reached cannot pass for it."""
+    asked: list = []
+
+    def started(name, cwd=None, env=None):
+        asked.append(name)
+        return None
+
+    monkeypatch.setattr(cdk_nag_wrapper, "lookup_for_scan", lambda c, r: (None, None))
+    monkeypatch.setattr(cdk_nag_wrapper, "started_from_working_directory", started)
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert asked == ["nodejs"]
+    assert jsii_node_during_the_call == ["nodejs"]
+
+
+def test_a_bare_jsii_node_found_on_path_does_not_ask_the_working_directory(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """The other control: a name PATH resolves is started by its absolute path, so the
+    working directory is never a candidate and is not searched."""
+    resolved = _fake_node(tmp_path / "installed" / "bin")
+    asked: list = []
+
+    def started(name, cwd=None, env=None):
+        asked.append(name)
+        return str(tmp_path / "repo" / "nodejs.exe")
+
+    monkeypatch.setattr(
+        cdk_nag_wrapper, "lookup_for_scan", lambda c, r: (str(resolved), None)
+    )
+    monkeypatch.setattr(cdk_nag_wrapper, "started_from_working_directory", started)
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert asked == []
+    assert jsii_node_during_the_call == [str(resolved)]
