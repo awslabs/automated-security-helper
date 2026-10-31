@@ -283,7 +283,7 @@ class TestShownFlakeRef:
         assert "hunter2" not in shown_flake_ref(ref)
 
     def test_a_query_of_ordinary_parameters_is_shown_as_it_is(self):
-        ref = "git+https://host/repo?ref=main&rev=0123abc&dir=sub"
+        ref = "git+https://host/repo?ref=main&rev=trunk2&dir=sub"
         assert shown_flake_ref(ref) == ref
 
     def test_an_at_sign_after_the_authority_is_left_alone(self):

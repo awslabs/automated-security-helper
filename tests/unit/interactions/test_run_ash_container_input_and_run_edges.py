@@ -213,7 +213,7 @@ def test_a_json_values_generic_key_lines_are_not_hidden_on_their_own():
     value = (
         "{\n"
         '  "type": "service_account",\n'
-        '  "private_key_id": "0123456789abcdef0123456789abcdef01234567",\n'
+        '  "private_key_id": "sample-key-id-for-the-test",\n'
         '  "client_email": "svc@project.iam.gserviceaccount.com"\n'
         "}"
     )
@@ -221,7 +221,7 @@ def test_a_json_values_generic_key_lines_are_not_hidden_on_their_own():
     lines = rac._value_lines((value,))
 
     assert '"type": "service_account",' not in lines
-    assert '"private_key_id": "0123456789abcdef0123456789abcdef01234567",' in lines
+    assert '"private_key_id": "sample-key-id-for-the-test",' in lines
     assert '"client_email": "svc@project.iam.gserviceaccount.com"' in lines
 
 

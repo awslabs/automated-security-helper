@@ -107,12 +107,12 @@ def test_an_exit_raised_while_the_runtime_runs_stops_it_first(
     )
     stops = []
 
-    def stop(process, **kwargs):
+    def ends_it(process, **kwargs):
         stops.append(kwargs)
         process.returncode = -15
         return True
 
-    monkeypatch.setattr(rac, "_stop_after_interrupt", stop)
+    monkeypatch.setattr(rac, "_stop_after_interrupt", ends_it)
     event = CancelEvent()
 
     with cancel_scope(event):
