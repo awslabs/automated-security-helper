@@ -231,7 +231,10 @@ def test_the_ownership_of_the_file_replaced_is_not_changed_to_follow(
     where, monkeypatch
 ):
     """Only the permission bits follow the old file: the writer makes no ownership
-    call (the new file is the process's own), so a rewrite is not a chown."""
+    call (the new file is the process's own), so a rewrite is not a chown. The
+    planted file belongs to the test process too, so its owner would read the same
+    whatever the writer did; the assertion that pins this is that no chown, fchown
+    or lchown call was made."""
     target = where / "report.json"
     _plant(target, 0o600)
     owner = os.lstat(target).st_uid
@@ -247,7 +250,6 @@ def test_the_ownership_of_the_file_replaced_is_not_changed_to_follow(
         handle.write("written\n")
 
     assert chowned == []
-    assert os.lstat(target).st_uid == owner
 
 
 def test_a_filesystem_that_refuses_the_mode_change_keeps_the_write(where, monkeypatch):
