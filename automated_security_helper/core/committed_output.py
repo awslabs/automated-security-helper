@@ -77,7 +77,7 @@ from automated_security_helper.utils.scan_output_dirs import (
     GitIndexUnavailable,
     _an_enclosing_repository_tracks_the_root,
     _repository_root_of,
-    _resolved,
+    _where_git_is_asked,
     committed_files_at_results_paths,
     entries_at_results_paths,
     entries_on_disk,
@@ -239,9 +239,23 @@ class _GitFailures:
             return listed
         if not self._answers:
             return None
-        if not base.is_dir():
+        # Path.is_dir lets a PermissionError through on CPython 3.10-3.12 when a
+        # parent cannot be searched; a directory that cannot be looked up is
+        # one git is not asked about (git_index_below answers it as not there),
+        # so there is nothing remembered for it.
+        try:
+            is_dir = base.is_dir()
+        except OSError:
             return None
-        root = _repository_root_of(_resolved(base))
+        if not is_dir:
+            return None
+        # The repository is found where git_index_below finds it, from where
+        # the directory really is and, for a directory that is itself a link,
+        # from its parent: the root the failure was remembered under is that
+        # one, and the resolved target of a link can lie in another repository
+        # (or in none).
+        asked, _tail = _where_git_is_asked(base)
+        root = _repository_root_of(asked)
         remembered = self._answers.get(root) if root is not None else None
         if remembered is None:
             return None
