@@ -773,6 +773,12 @@ class TestFailuresAreRecordedNotRaised:
     ):
         _, output_dir, _ = workspace
         original = reporting.write_report_file
+        # An earlier run's file at the name the refused write was for. It is the
+        # file the refusal must not leave behind: without it the final assertion
+        # below holds whatever the step did, as the refused write creates nothing.
+        stale = output_dir / REPORTS_DIR_NAME / "ash.twin-a.txt"
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        stale.write_text("from an earlier run", encoding="utf-8")
 
         def planted(reports_dir, filename, content):
             if filename == "ash.twin-a.txt":
