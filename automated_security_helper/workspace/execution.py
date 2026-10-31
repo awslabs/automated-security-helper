@@ -1432,7 +1432,7 @@ def _scan_one_project(
             duration_seconds=time.monotonic() - started,
         )
         cancelled.output_written = handed
-        cancelled.secret_values = exposed_secret_values(results)
+        cancelled.secret_values = _exposed_values_without_raising(results, project)
         return cancelled
     except ASHConfigValidationError as exc:
         # The label the single-directory CLI prints ("Scan refused" for committed
@@ -1462,7 +1462,7 @@ def _scan_one_project(
             duration_seconds=time.monotonic() - started,
         )
         refused.output_written = handed
-        refused.secret_values = exposed_secret_values(results)
+        refused.secret_values = _exposed_values_without_raising(results, project)
         return refused
     except Exception as exc:  # noqa: BLE001 -- one project must not sink the workspace
         ASH_LOGGER.error(f"Project '{project.key}' failed: {error_text(exc)}")
@@ -1490,8 +1490,27 @@ def _scan_one_project(
         # The values the scan's findings exposed, when the raise came after the
         # scan returned (the reduction): the masking pass over every project's
         # output reads them from the outcome, and the outcome was built here.
-        failed.secret_values = exposed_secret_values(results)
+        failed.secret_values = _exposed_values_without_raising(results, project)
         return failed
+
+
+def _exposed_values_without_raising(results: Any, project: ProjectPlan) -> Set[str]:
+    """The secret values ``results`` exposed, or none when they cannot be read.
+
+    Called from the arms of ``_scan_one_project`` that build a failed outcome
+    after the reduction raised, where ``results`` may be the very object that
+    was malformed. A raise from the read there would leave the arm without
+    returning its outcome, and the project would be recorded as a plain failure
+    with none of the re-masking those arms exist to do.
+    """
+    try:
+        return exposed_secret_values(results)
+    except Exception as exc:  # noqa: BLE001 -- the arm must still return its outcome
+        ASH_LOGGER.error(
+            f"Project '{project.key}': could not read the secret values its scan "
+            f"exposed: {error_text(exc)}"
+        )
+        return set()
 
 
 def _put_previous_results_back(orchestrator: Any) -> None:
