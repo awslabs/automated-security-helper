@@ -125,10 +125,10 @@ subprocess call with shell=True identified, security issue.
       "tool_name": "bandit",
       "tool_version": "1.8.6",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 1.25,
         "start_time": "2026-01-15T12:00:00+00:00",
-        "end_time": "2026-01-15T12:00:01.250000+00:00"
+        "end_time": "2026-01-15T12:00:01.250000+00:00",
+        "exit_code": 0,
+        "duration": 1.25
       }
     }
   },
@@ -194,10 +194,10 @@ S3 Bucket has an ACL defined which allows public READ access.
       "tool_name": "checkov",
       "tool_version": "3.2.469",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 7.5,
         "start_time": "2026-01-15T12:00:01.250000+00:00",
-        "end_time": "2026-01-15T12:00:08.750000+00:00"
+        "end_time": "2026-01-15T12:00:08.750000+00:00",
+        "exit_code": 0,
+        "duration": 7.5
       }
     }
   },
@@ -251,10 +251,10 @@ Ensure the S3 bucket has access logging enabled
       "tool_name": "checkov",
       "tool_version": "3.2.469",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 7.5,
         "start_time": "2026-01-15T12:00:01.250000+00:00",
-        "end_time": "2026-01-15T12:00:08.750000+00:00"
+        "end_time": "2026-01-15T12:00:08.750000+00:00",
+        "exit_code": 0,
+        "duration": 7.5
       }
     }
   },
@@ -309,10 +309,10 @@ Ensure the last USER is not root
       "tool_name": "checkov",
       "tool_version": "3.2.469",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 7.5,
         "start_time": "2026-01-15T12:00:01.250000+00:00",
-        "end_time": "2026-01-15T12:00:08.750000+00:00"
+        "end_time": "2026-01-15T12:00:08.750000+00:00",
+        "exit_code": 0,
+        "duration": 7.5
       }
     }
   },
@@ -412,10 +412,10 @@ A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requi
       "tool_name": "grype",
       "tool_version": "0.100.0",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 3.0,
         "start_time": "2026-01-15T12:00:13.250000+00:00",
-        "end_time": "2026-01-15T12:00:16.250000+00:00"
+        "end_time": "2026-01-15T12:00:16.250000+00:00",
+        "exit_code": 0,
+        "duration": 3.0
       }
     }
   },
@@ -469,10 +469,10 @@ A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at require
       "tool_name": "grype",
       "tool_version": "0.100.0",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 3.0,
         "start_time": "2026-01-15T12:00:13.250000+00:00",
-        "end_time": "2026-01-15T12:00:16.250000+00:00"
+        "end_time": "2026-01-15T12:00:16.250000+00:00",
+        "exit_code": 0,
+        "duration": 3.0
       }
     }
   },

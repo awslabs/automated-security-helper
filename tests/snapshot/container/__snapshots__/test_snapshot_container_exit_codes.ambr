@@ -5,7 +5,6 @@
     'stderr': '',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       
       === ASH Scan Completed in <DURATION>: Next Steps ===
@@ -45,7 +44,6 @@
     ''',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       ERROR    Container execution failed with code 125
       ERROR    Container stderr:
@@ -69,7 +67,6 @@
     ''',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       ERROR    Container execution failed with code 137
       ERROR    Container stderr:
@@ -93,7 +90,6 @@
     ''',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       ERROR    Container execution failed with code 3
       ERROR    Container stderr:
@@ -117,7 +113,6 @@
     ''',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       ERROR    Container execution failed with code 4
       ERROR    Container stderr:
@@ -141,7 +136,6 @@
     ''',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       ERROR    Container execution failed with code 5
       ERROR    Container stderr:
@@ -162,7 +156,6 @@
     'stderr': '',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       ERROR    The container run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. An ASH older than this one does not write that record: rebuild the image from this ASH (run without --no-build, with --force if the image is cached). Without --ash-revision-to-install, the build installs this ASH's own source tree.
   
@@ -175,7 +168,6 @@
     'stderr': '',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       ERROR    The container run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. An ASH older than this one does not write that record: rebuild the image from this ASH (run without --no-build, with --force if the image is cached). Without --ash-revision-to-install, the build installs this ASH's own source tree.
   
@@ -188,10 +180,9 @@
     'stderr': '',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       container wrote nothing
-      ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json
+      ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json. The container exited with code 0.
   
     ''',
   })
@@ -202,7 +193,6 @@
     'stderr': '',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       ERROR    Failed to parse results file <TMP>/out/ash_aggregated_results.json: Invalid value at '(top level)': Invalid JSON: key must be a string at line 1 column 2
   
@@ -215,7 +205,6 @@
     'stderr': '',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       ERROR    Scan incomplete: cfn-nag (ERROR), npm-audit (MISSING)
       
@@ -249,8 +238,8 @@
     'stderr': '',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
+      ERROR    Container execution failed with code 1
       ERROR    Scan incomplete: cfn-nag (ERROR), npm-audit (MISSING)
       
       === ASH Scan Completed in <DURATION>: Next Steps ===
@@ -283,7 +272,6 @@
     'stderr': '',
     'stdout': '''
       INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       ERROR    Scan incomplete: cfn-nag (ERROR), npm-audit (MISSING)
       

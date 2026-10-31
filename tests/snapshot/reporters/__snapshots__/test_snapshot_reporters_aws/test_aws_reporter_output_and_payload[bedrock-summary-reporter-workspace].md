@@ -107,10 +107,10 @@ subprocess call with shell=True identified, security issue.
       "tool_name": "bandit",
       "tool_version": "1.8.6",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 1.0,
         "start_time": "2026-01-15T12:00:00+00:00",
-        "end_time": "2026-01-15T12:00:01+00:00"
+        "end_time": "2026-01-15T12:00:01+00:00",
+        "exit_code": 0,
+        "duration": 1.0
       }
     },
     "workspace_project": "api",
@@ -168,10 +168,10 @@ S3 Bucket has an ACL defined which allows public READ access.
       "tool_name": "checkov",
       "tool_version": "3.2.469",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 2.0,
         "start_time": "2026-01-15T12:00:00+00:00",
-        "end_time": "2026-01-15T12:00:02+00:00"
+        "end_time": "2026-01-15T12:00:02+00:00",
+        "exit_code": 0,
+        "duration": 2.0
       }
     },
     "workspace_project": "web",
@@ -228,10 +228,10 @@ Bucket name is hardcoded; derive it from a variable.
       "tool_name": "semgrep",
       "tool_version": "1.140.0",
       "tool_invocation": {
-        "exit_code": 0,
-        "duration": 1.5,
         "start_time": "2026-01-15T12:00:02+00:00",
-        "end_time": "2026-01-15T12:00:03.500000+00:00"
+        "end_time": "2026-01-15T12:00:03.500000+00:00",
+        "exit_code": 0,
+        "duration": 1.5
       }
     },
     "workspace_project": "web",
