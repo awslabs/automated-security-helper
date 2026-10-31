@@ -319,7 +319,8 @@ class TestResultsKeepTheirRuleById:
         # names nothing and is dropped rather than left pointing into the
         # incoming run's rules. It named no component, which SARIF 3.52.7 reads
         # as the driver's, and it is left that way on purpose: the merge keeps
-        # a component name only when the scanner wrote one. A result that names
+        # or resolves a component name only when the scanner named a component
+        # (by name, guid or index). A result that names
         # its rule by ruleId alone carries no reference at all and reads as the
         # driver's in the same way, so the ruleId is the key that finds this
         # rule in the merged report. Naming the "tool" extension here would
