@@ -307,6 +307,69 @@ def test_get_scanner_refuses_a_scanner_its_section_disables(tmp_path, monkeypatc
     )
 
 
+def test_get_scanner_reads_an_absent_section_once(tmp_path, monkeypatch):
+    """The section is read once per class and handed to the name, the refusal
+    and the constructor. Red at the base: a class with no section answered None,
+    which was also what a lookup that raised answered, so the constructor read
+    it again and the one lookup was two."""
+    engine = _engine(tmp_path)
+    reads = []
+
+    def absent(self, plugin_type, plugin_name):
+        reads.append((plugin_type, plugin_name))
+        return None
+
+    monkeypatch.setattr(AshConfig, "get_plugin_config", absent)
+    engine.plugins["scanner"] = [_FakeScanner]
+
+    assert isinstance(engine.get_scanner("fake-scan"), _FakeScanner)
+    assert reads == [("scanner", "fake-scan")], reads
+
+
+def test_get_scanner_builds_nothing_on_a_section_the_refusal_never_judged(
+    tmp_path, monkeypatch
+):
+    """A lookup that raises once and then answers ``enabled: false``. The
+    refusal reads the raise as no section (it names nothing and disables
+    nothing) and lets the scanner through; red at the base: the constructor then
+    read the section again, got the disabled one, and built a scanner the
+    configuration disables. The exception the first read raised is raised
+    instead, as the constructor's own read raised before the section was shared."""
+    engine = _engine(tmp_path)
+    reads = []
+
+    def raises_once(self, plugin_type, plugin_name):
+        reads.append(plugin_name)
+        if len(reads) == 1:
+            raise RuntimeError("the configuration could not be read")
+        return {"enabled": False}
+
+    monkeypatch.setattr(AshConfig, "get_plugin_config", raises_once)
+    engine.plugins["scanner"] = [_FakeScanner]
+
+    with pytest.raises(RuntimeError, match="could not be read"):
+        engine.get_scanner("fake-scan")
+    assert reads == ["fake-scan"], reads
+
+
+@pytest.mark.parametrize("check_enabled", [True, False])
+def test_control_a_lookup_that_keeps_raising_raises_for_the_scanner(
+    tmp_path, monkeypatch, check_enabled
+):
+    """Control, green at both sides: a configuration whose lookup always raises
+    is an error for the scanner that asked, with or without the refusal."""
+    engine = _engine(tmp_path)
+
+    def always_raises(self, plugin_type, plugin_name):
+        raise RuntimeError("the configuration could not be read")
+
+    monkeypatch.setattr(AshConfig, "get_plugin_config", always_raises)
+    engine.plugins["scanner"] = [_FakeScanner]
+
+    with pytest.raises(RuntimeError, match="could not be read"):
+        engine.get_scanner("fake-scan", check_enabled=check_enabled)
+
+
 # ---------------------------------------------------------------------------
 # The construction-time selection refusal compares the phase's names
 # ---------------------------------------------------------------------------

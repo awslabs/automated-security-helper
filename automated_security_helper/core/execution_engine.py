@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import platform
 import time
-from typing import Any, List, Literal, Mapping, Optional, Set
+from typing import Any, List, Literal, Mapping, Optional, Set, Tuple
 
 
 from automated_security_helper.base.plugin_config import (
@@ -581,8 +581,9 @@ class ScanExecutionEngine:
             # The configured section is read once per class and handed to the
             # name, the refusal and the constructor: read by each, the one call
             # the lookup used to make became three, which a caller counting the
-            # config reads (and a config whose lookup is costly) sees.
-            section = self._scanner_section(scanner_class)
+            # config reads (and a config whose lookup is costly) sees. A read
+            # that raised is kept with it (section_error), not read again.
+            section, section_error = self._read_scanner_section(scanner_class)
             configured = self._selectable_scanner_name(scanner_class, section)
             if configured is not None:
                 names.add(configured.lower().strip())
@@ -593,16 +594,15 @@ class ScanExecutionEngine:
                     self._refuse_unselected_scanner(
                         scanner_name, names, scanner_class, section
                     )
-                if section is None and self._context.config:
-                    # No section was read: either none exists, or the lookup
-                    # raised and _scanner_section read that as none. The
-                    # constructor's own read answers None for the first and
-                    # raises for the second, as it did before the section was
-                    # shared.
-                    section = self._context.config.get_plugin_config(
-                        plugin_type="scanner",
-                        plugin_name=plugin_config_key(scanner_class),
-                    )
+                if section_error is not None:
+                    # The lookup raised, and the refusal above judged the scanner
+                    # as one with no section (it names nothing and disables
+                    # nothing). The constructor's own read raised for this, as
+                    # it did before the section was shared, and so does this:
+                    # reading it a second time could return a section the
+                    # refusal never saw, an `enabled: false` among them, and
+                    # build a scanner the refusal let through.
+                    raise section_error
                 # Create and return the scanner instance
                 scanner = scanner_class(context=self._context, config=section)
                 return scanner
@@ -663,15 +663,31 @@ class ScanExecutionEngine:
         too: it names nothing and disables nothing, so the declared name and
         the enabled default stand, as ``_selectable_scanner_name`` reads them.
         """
+        section, _error = self._read_scanner_section(plugin_class)
+        return section
+
+    def _read_scanner_section(
+        self, plugin_class: type
+    ) -> Tuple[Any, Optional[Exception]]:
+        """``(section, error)`` for *plugin_class*: one read of the configuration.
+
+        *section* is what ``_scanner_section`` answers, None for no section and
+        for a lookup that raised. *error* is the exception the lookup raised, or
+        None, so a caller can tell the two apart without reading again: a second
+        read can answer differently from the first.
+        """
         config = self._context.config
         if config is None:
-            return None
+            return None, None
         try:
-            return config.get_plugin_config(
-                plugin_type="scanner", plugin_name=plugin_config_key(plugin_class)
+            return (
+                config.get_plugin_config(
+                    plugin_type="scanner", plugin_name=plugin_config_key(plugin_class)
+                ),
+                None,
             )
-        except Exception:  # noqa: BLE001 -- a section that cannot be read names nothing
-            return None
+        except Exception as error:  # noqa: BLE001 -- a section that cannot be read names nothing
+            return None, error
 
     def _selectable_scanner_name(
         self, plugin_class: type, section: Any = _UNREAD
