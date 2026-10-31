@@ -104,3 +104,63 @@ def test_a_directory_at_the_name_is_still_refused_without_a_warning(tmp_path, ca
 
     assert (tmp_path / "work" / NAME).is_dir()
     assert _removal_warnings(caplog) == []
+
+
+# The platform without os.fwalk removes by name from lstat checks. Taking fwalk
+# away selects that branch on any POSIX host, where these links can be planted.
+
+
+def test_by_name_a_file_another_name_refers_to_is_removed_by_name_only_and_said(
+    tmp_path, caplog, monkeypatch
+):
+    monkeypatch.delattr(os, "fwalk", raising=False)
+    other = tmp_path / "other-name"
+    other.write_text("keep\n")
+    work = tmp_path / "work"
+    work.mkdir()
+    os.link(other, work / NAME)
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        assert fs_guard.unlink_beneath(tmp_path, ("work", NAME)) is True
+
+    assert not (work / NAME).exists()
+    assert other.read_text() == "keep\n"
+    assert os.stat(other).st_nlink == 1
+    (message,) = _removal_warnings(caplog)
+    assert "other name" in message
+
+
+def test_by_name_a_symlink_at_the_name_is_removed_not_followed_and_said(
+    tmp_path, caplog, monkeypatch
+):
+    monkeypatch.delattr(os, "fwalk", raising=False)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep\n")
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / NAME).symlink_to(outside)
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        assert fs_guard.unlink_beneath(tmp_path, ("work", NAME)) is True
+
+    assert not (work / NAME).is_symlink()
+    assert outside.read_text() == "keep\n"
+    (message,) = _removal_warnings(caplog)
+    assert "symlink" in message
+
+
+def test_by_name_a_file_with_one_name_and_a_missing_name_are_silent(
+    tmp_path, caplog, monkeypatch
+):
+    """The controls: the warning is for a link, not for every removal."""
+    monkeypatch.delattr(os, "fwalk", raising=False)
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / NAME).write_text("stale\n")
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        assert fs_guard.unlink_beneath(tmp_path, ("work", NAME)) is True
+        assert not (work / NAME).exists()
+        assert fs_guard.unlink_beneath(tmp_path, ("work", NAME)) is True
+
+    assert _removal_warnings(caplog) == []

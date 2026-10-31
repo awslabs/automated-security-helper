@@ -1201,7 +1201,11 @@ def unlink_beneath(root: Union[str, Path], relative_parts: Tuple[str, ...]) -> b
                     errno.EISDIR, os.strerror(errno.EISDIR), str(target)
                 )
             else:
+                # Read the link count before the unlink, as the descriptor
+                # branch does, so a file another name refers to is said too.
+                status = os.lstat(target)
                 target.unlink()
+                _say_a_link_was_removed(name, symlink=False, names=status.st_nlink)
         except FileNotFoundError:
             return True
         except PermissionError as e:
