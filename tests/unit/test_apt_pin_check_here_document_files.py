@@ -23,7 +23,11 @@ followed by ``apt-get install -y $PKGS`` installed unpinned packages with the ch
 green. A body whose marker is not quoted (``<<EOF``) is expanded by the build shell as
 it is written, so it is read as ``RUN`` text. A body given to a shell, to a command
 that writes nothing, or to a redirection that keeps nothing (``/dev/null``, ``2>&1``)
-is commands run now, and an expansion in it is refused as before. A comment
+is commands run now, and an expansion in it is refused as before. So is the body of a
+file the same ``RUN`` goes on to run (``&& sh /tmp/install.sh jq``, ``&& chmod +x
+/tmp/install.sh && /tmp/install.sh jq``): its caller is on the line, and a ``"$@"`` in
+it is a package installed now that no lookup can see. A file that is only written, or
+run by a later instruction, stays a file body. A comment
 ``# apt-pin-check: skip`` directly above a ``RUN`` drops the file bodies of that
 instruction, for a file that is not a script (a motd, a README).
 
@@ -192,13 +196,15 @@ class TestAFileBodyIsNotCommands:
 class TestAFileBodyIsStillRead:
     def test_an_unpinned_package_in_a_script_that_is_run_is_refused(self, tmp_path):
         # Red before: the whole body was dropped, so neither package was read, and the
-        # check could not fail on the install it exists to catch.
+        # check could not fail on the install it exists to catch. The file is run by
+        # the instruction that writes it, so its body is that instruction's commands
+        # and the refusal names the instruction's line (3), not the body's.
         body = (
             "RUN cat > /tmp/install.sh <<'EOF' && sh /tmp/install.sh\n"
             f"apt-get install -y --no-install-recommends {CURL} jq\n"
             "EOF\n"
         )
-        with pytest.raises(checker.PinEnumerationError, match="Dockerfile:4.*'jq'"):
+        with pytest.raises(checker.PinEnumerationError, match="Dockerfile:3.*'jq'"):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
     def test_an_unpinned_package_in_a_backslash_quoted_script_is_refused(
@@ -212,7 +218,7 @@ class TestAFileBodyIsStillRead:
             f"apt-get install -y --no-install-recommends {CURL} jq\n"
             "EOF\n"
         )
-        with pytest.raises(checker.PinEnumerationError, match="Dockerfile:4.*'jq'"):
+        with pytest.raises(checker.PinEnumerationError, match="Dockerfile:3.*'jq'"):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
     def test_a_pinned_package_in_a_written_script_is_looked_up(self, tmp_path):
@@ -235,6 +241,110 @@ class TestAFileBodyIsStillRead:
         )
         with pytest.raises(checker.PinEnumerationError, match="every stage"):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+
+class TestAFileTheSameInstructionRunsIsCommands:
+    """A script written and run in one RUN has its caller on the line.
+
+    The ``"$@"`` in its body is the package that caller passes, installed while the
+    image builds, so it is refused like an install in a shell body. A script that is
+    only written (or only made executable) is a file the image gets, as before.
+    """
+
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            "RUN cat > /tmp/i.sh <<'EOF' && sh /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && bash /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && bash -e /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && . /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && source /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && chmod +x /tmp/i.sh && /tmp/i.sh jq",
+            "RUN cat > i.sh <<'EOF' && chmod +x i.sh && ./i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF'; sh /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && sudo sh /tmp/i.sh jq",
+            "RUN cat > /tmp/i.sh <<'EOF' && sh -c 'chmod +x /tmp/i.sh && /tmp/i.sh jq'",
+            "RUN cat > /tmp/i.sh <<\\EOF && sh /tmp/i.sh jq",
+            "RUN cat <<'EOF' > /tmp/i.sh && sh /tmp/i.sh jq",
+            "RUN cat <<'EOF' | tee /tmp/i.sh > /dev/null && sh /tmp/i.sh jq",
+            "RUN tee /tmp/i.sh <<'EOF' >/dev/null && sh /tmp/i.sh jq",
+            "RUN install -D -m 0755 /dev/stdin /tmp/i.sh <<'EOF' && /tmp/i.sh jq",
+            "RUN dd of=/tmp/i.sh <<'EOF' && sh /tmp/i.sh jq",
+        ],
+    )
+    def test_a_positional_parameter_in_a_script_the_run_executes_is_refused(
+        self, tmp_path, first_line
+    ):
+        # Red before: the body was a file's content, its "$@" was skipped as the
+        # caller's, and the `jq` the line passes was installed with the check green.
+        body = f'{first_line}\napt-get install -y "$@"\nEOF\n'
+        with pytest.raises(
+            checker.PinEnumerationError, match=r"Dockerfile:3 installs '\$@'"
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            "RUN cat > /tmp/i.sh <<'EOF'",
+            "RUN cat > /tmp/i.sh <<'EOF' && chmod +x /tmp/i.sh",
+            "RUN cat > /tmp/i.sh <<'EOF' && sh /tmp/other.sh",
+            "RUN cat > /tmp/i.sh <<'EOF' && echo done",
+        ],
+    )
+    def test_a_script_that_is_only_written_stays_a_file_body(
+        self, tmp_path, first_line
+    ):
+        """Control: green before and after; nothing on the line runs the file."""
+        body = f'{first_line}\napt-get install -y "$@"\nEOF\n'
+        assert _pins(tmp_path, body) == {}
+
+    @pytest.mark.parametrize(
+        "install", ["apt-get install -y $PKGS", "apt-get install -y ${PKGS}"]
+    )
+    def test_a_named_variable_in_a_script_the_run_executes_is_refused(
+        self, tmp_path, install
+    ):
+        """Control: refused before too, as a named variable in any file body is."""
+        body = (
+            "RUN cat > /tmp/i.sh <<'EOF' && sh /tmp/i.sh\n"
+            'PKGS="jq curl"\n'
+            f"{install}\n"
+            "EOF\n"
+        )
+        with pytest.raises(
+            checker.PinEnumerationError, match=r"Dockerfile:3 installs '\$\{?PKGS\}?'"
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_a_pinned_package_in_a_script_the_run_executes_is_looked_up(self, tmp_path):
+        """Control: green before and after; the pin is read, no parameter is."""
+        body = (
+            "RUN cat > /tmp/i.sh <<'EOF' && chmod +x /tmp/i.sh && /tmp/i.sh\n"
+            f"apt-get install -y {CURL}\n"
+            "EOF\n"
+        )
+        assert _pins(tmp_path, body) == {"curl": ("7.88.1-10+deb12u15", (4,))}
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            ("cat > /x <<'EOF' && sh /x", [("EOF", False)]),
+            ("cat > /x <<'EOF' && sh -e /x jq", [("EOF", False)]),
+            ("cat > /x <<'EOF' && /x", [("EOF", False)]),
+            ("cat > /x <<'EOF' && chmod +x /x && ./x", [("EOF", False)]),
+            ("cat > /x <<'EOF' ; . /x", [("EOF", False)]),
+            ("cat > /x <<'EOF' && sh /y", [("EOF", True)]),
+            ("cat > /x <<'EOF' && chmod +x /x", [("EOF", True)]),
+            ("cat > /x <<'EOF' && cat /x", [("EOF", True)]),
+            # Each marker is judged by its own file: bash reads B, no file is named, so
+            # A's stays a file; and only B's file (/b) is the one sh runs.
+            ("cat > /a <<'A'; bash <<'B'", [("A", True), ("B", False)]),
+            ("cat > /a <<'A'; cat > /b <<'B'; sh /b", [("A", True), ("B", False)]),
+        ],
+    )
+    def test_the_marker_scan_tells_a_run_file_from_a_kept_one(self, line, expected):
+        assert checker._heredoc_markers(line) == expected
 
 
 class TestAShellBodyIsStillCommands:

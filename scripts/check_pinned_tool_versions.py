@@ -1357,6 +1357,8 @@ _COMMAND_END = re.compile(r"\|\||&&|[;|]|(?<![<>&])&(?![>&])")
 # A redirection of output to a file: "> x", ">> x", "2> x", "&> x". Not a copy of a
 # descriptor (``2>&1``), and not /dev/null, which keeps nothing.
 _FILE_REDIRECT = re.compile(r"(?:&|\d*)>>?(?!&)\s*(?!/dev/null(?![\w/.-]))[^\s<>|;&]")
+# The file a redirection of output names: "> x", ">> x", "2> x", "&> x".
+_REDIRECT_TARGET = re.compile(r"(?:&|\d*)>>?(?!&)\s*(?P<file>[^\s<>|;&]+)")
 # A redirection or a here-document marker among the words of a command.
 _REDIRECT_WORD = re.compile(r"(?:&|\d*)>>?\s*\S*|<<-?\s*[\"'\\]?\w+[\"']?")
 # What _split_substitutions leaves in place of a command substitution, $(...) or
@@ -1438,7 +1440,9 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
     an install (``"$@"``) is skipped as the caller's. A marker that is not quoted
     (``<<EOF``, not ``<<'EOF'`` or ``<<\\EOF``) has the build shell expand the body as
     it is written, so what lands in the file is whatever the RUN's variables were; that
-    body is read as commands too.
+    body is read as commands too. So is the body of a file the same instruction goes on
+    to run (``cat > x.sh <<'EOF' && sh x.sh jq``, ``... && chmod +x x.sh && x.sh``): its
+    caller is on the line, so a ``"$@"`` in it is the caller's package, installed now.
     """
     cleaned = _ARITHMETIC.sub(" ", line)
     segments: list[tuple[int, int, str]] = []  # (start, stop, what ended the command)
@@ -1458,6 +1462,7 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
         while segments[sinks[-1]][2] == "|":
             sinks.append(sinks[-1] + 1)
         writes = shell = False
+        written: set[str] = set()
         # The body is a file's content only if every command it reaches copies it: the
         # one it is given to by what it is, those piped on to by what it is and by
         # writing a file.
@@ -1468,6 +1473,7 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
             words = _REDIRECT_WORD.sub(" ", command).split()
             writes_here = bool(_FILE_REDIRECT.search(command)) or _writes_a_file(words)
             writes = writes or writes_here
+            written.update(_written_files(command, words))
             shell = shell or _runs_a_shell(words)
             copies = copies and _program(words) in _COPIERS
             copies = copies and (writes_here or position == 0)
@@ -1475,8 +1481,68 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
         # shell does not expand the body for.
         quoted = bool(match.group(1) or match.group("escaped"))
         name = match.group("name") or match.group("bare")
-        markers.append((name, writes and copies and not shell and quoted))
+        # A file the same instruction runs is not kept for later: its body is the
+        # commands of this build, whatever the marker.
+        runs_it = bool(written) and _runs_a_file(
+            [
+                cleaned[begin:end]
+                for index, (begin, end, _) in enumerate(segments)
+                if index not in sinks
+            ],
+            written,
+        )
+        is_file = writes and copies and not shell and quoted and not runs_it
+        markers.append((name, is_file))
     return markers
+
+
+def _written_files(command: str, words: list[str]) -> set[str]:
+    """The files one command writes its input to, as the names it spells them.
+
+    These are the names of ``> f``, ``>> f``, ``tee f``, ``install /dev/stdin f``,
+    ``cp /dev/stdin f`` and ``dd of=f``. ``/dev/null`` keeps nothing.
+    """
+    files = {
+        match.group("file").strip("'\"") for match in _REDIRECT_TARGET.finditer(command)
+    }
+    names = [word.strip("(){}").rsplit("/", 1)[-1] for word in words]
+    if "tee" in names:
+        after_tee = words[names.index("tee") + 1 :]
+        files.update(w for w in after_tee if not w.startswith("-"))
+    if "/dev/stdin" in words:
+        files.update(
+            w for w in words[words.index("/dev/stdin") + 1 :] if not w.startswith("-")
+        )
+    files.update(w[3:] for w in words if w.startswith("of="))
+    files.discard("/dev/null")
+    files.discard("")
+    return files
+
+
+def _runs_a_file(commands: list[str], files: set[str]) -> bool:
+    """Whether one of the commands runs one of the files, by its name or its path.
+
+    A file is run when it is the program (``x.sh``, ``./x.sh``, ``sudo /tmp/x.sh``), or
+    when a shell, ``.`` or ``source`` has its name among the words (``sh x.sh``,
+    ``bash -e /tmp/x.sh jq``, ``. x.sh``), or inside a ``-c`` script (``sh -c
+    'chmod +x x.sh && x.sh'``). The names are matched
+    without their directory, so a different directory is taken for the same file: the
+    body is then read as commands, which is the side of caution.
+    """
+    wanted = {path.rsplit("/", 1)[-1] for path in files} - {""}
+    for command in commands:
+        words = [w.strip("'\"") for w in _REDIRECT_WORD.sub(" ", command).split()]
+        program = _program(words)
+        if program in wanted:
+            return True
+        if program in _SHELLS or program in {".", "source"}:
+            if any(word.rsplit("/", 1)[-1] in wanted for word in words):
+                return True
+            # A script given to the shell as a string names the file somewhere in it.
+            script = words[words.index("-c") + 1 :] if "-c" in words else []
+            if any(name in word for word in script for name in wanted):
+                return True
+    return False
 
 
 def _program(words: list[str]) -> str:
