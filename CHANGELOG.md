@@ -8243,10 +8243,12 @@
   Markdown showed the backticks between them as text. Pieces that touch now
   share one span.
 
-- **The Markdown report escapes `$` in scanner and project text.** GitHub reads a
-  pair of dollar signs as a formula, so text such as a shell snippet holding two
-  `$` characters rendered as math. Each `$` outside a written `${NAME}`
-  reference now carries a backslash like the other Markdown syntax characters.
+- **The Markdown report and the Bedrock summary escape `$` in scanner and
+  project text.** GitHub reads a pair of dollar signs as a formula, so text such
+  as a shell snippet holding two `$` characters rendered as math. Each `$`
+  outside a written `${NAME}` reference now carries a backslash like the other
+  Markdown syntax characters. The Bedrock summary's Markdown reads its text
+  through the same helper, so it changes in the same way.
 
 - **The GitHub GHAS report leaves out results that state no failing finding, and
   names its category only when asked.** A result whose SARIF `kind` is `pass`,
