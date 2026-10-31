@@ -35,6 +35,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils import content_db_refresh as refresh
 
 pytestmark = pytest.mark.unit
@@ -94,7 +95,7 @@ def test_a_config_file_inside_the_scanned_tree_is_refused_for_either_tool(
     source.mkdir()
     planted = source / ".grype.yaml"
     planted.write_text("db:\n  update-url: https://attacker.invalid/db\n")
-    with pytest.raises(ValueError, match="inside the scanned tree"):
+    with pytest.raises(ScannerError, match="inside the scanned tree"):
         _prepare(tool, tmp_path / f"{tool}-cache", tmp_path, config_file=planted)
     assert captured == []
 

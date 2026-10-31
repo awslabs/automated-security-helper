@@ -532,7 +532,10 @@ def prepare_content_db(
     it is run and the setting is said once; see "The operator's opt-out" above.
 
     Raises:
-        ScannerError: The tool is missing, failed, or timed out.
+        ScannerError: The tool is missing, failed, or timed out, or ``config_file``
+            is inside the scanned tree. The scanners turn this error into a failed
+            scanner; any other exception type would end the scan instead.
+        ValueError: ``tool`` is not one this module refreshes (a programming error).
     """
     if tool not in TOOLS:
         raise ValueError(f"no content database refresh for {tool!r}")
@@ -547,7 +550,7 @@ def prepare_content_db(
         # the sandbox and writes the shared cache, so a config the scanned
         # repository could have written (a database mirror, a CA) never reaches
         # it, whatever a caller passes.
-        raise ValueError(
+        raise ScannerError(
             f"the {tool} config file given to the database refresh, "
             f"{operator_config.as_posix()}, is inside the scanned tree "
             f"{Path(source_dir).as_posix()}; the refresh takes only the operator's "
