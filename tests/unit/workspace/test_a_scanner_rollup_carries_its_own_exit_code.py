@@ -115,25 +115,29 @@ def _rollup_in_completion_order(
     [
         pytest.param(
             (("web", {"bandit": "PASSED"}), ("api", {"Bandit": "PASSED"})),
-            id="web-first",
+            id="plan-first-finishes-first",
         ),
         pytest.param(
             (("api", {"Bandit": "PASSED"}), ("web", {"bandit": "PASSED"})),
-            id="api-first",
+            id="plan-first-finishes-last",
         ),
     ],
 )
 def test_the_published_row_is_named_by_the_plan_orders_spelling_whatever_finished_first(
     tmp_path, completed
 ):
-    """Red at the base for the web-first order: the row took the spelling of the
-    project that finished first, so a parallel run named it ``bandit`` one time
-    and ``Bandit`` the next."""
-    rolled = _rollup_in_completion_order(tmp_path, ("api", "web"), *completed)
+    """Red at the base for the order where ``api`` finishes first: the row took the
+    spelling of the project that finished first, so a parallel run named it
+    ``Bandit`` one time and ``bandit`` the next.
 
-    assert "Bandit" in rolled, sorted(rolled)
-    assert "bandit" not in rolled
-    assert rolled["Bandit"]["status"] == "PASSED"
+    The plan is ``("web", "api")``, not alphabetical, and its first project spells
+    the scanner ``bandit``, which is not the smallest spelling (``"B" < "b"``), so
+    neither the smallest spelling nor the project key's order gives the answer."""
+    rolled = _rollup_in_completion_order(tmp_path, ("web", "api"), *completed)
+
+    assert "bandit" in rolled, sorted(rolled)
+    assert "Bandit" not in rolled
+    assert rolled["bandit"]["status"] == "PASSED"
 
 
 @pytest.mark.parametrize(

@@ -456,21 +456,6 @@ class TestWorkspaceProjectsFollowTheSameRule:
             }
         ]
 
-    def test_for_a_local_caller_the_stored_reason_keeps_the_pid(self, tmp_path):
-        """Control: a local caller reads the reason as recorded, pid included."""
-        reason = "bandit's tool was still running after the stop (pid 7)"
-        entry = self._close(
-            tmp_path,
-            remote=False,
-            scanners={"bandit": "PASSED"},
-            unstoppable_tools={"bandit": reason},
-            scan_incomplete=True,
-        )
-
-        assert entry.coverage["could_not_stop"] == [
-            {"scanner": "bandit", "reason": reason}
-        ]
-
     def test_a_project_whose_gate_fired_is_incomplete(self, tmp_path):
         entry = self._close(
             tmp_path,
@@ -526,6 +511,8 @@ class TestWorkspaceProjectsFollowTheSameRule:
     def test_a_tool_ash_could_not_stop_is_named_in_the_single_scans_shape(
         self, tmp_path
     ):
+        """A local caller (the default here) reads the stored reason as recorded,
+        pid included, in the shape a single scan's progress gives it."""
         reason = "bandit's tool was still running after the stop (pid 7)"
         entry = self._close(
             tmp_path,

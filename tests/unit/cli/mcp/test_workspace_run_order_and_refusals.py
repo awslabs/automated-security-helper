@@ -163,6 +163,9 @@ class TestTheGitignoreIsWrittenOnceTheOutputDirectoryExists:
             "ASH_MCP_WORKSPACE_ROOT",
         ):
             monkeypatch.delenv(name, raising=False)
+        # A networked transport in the environment makes the caller remote, and
+        # the workspace is then confined as a remote caller's.
+        monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
         plan = _plan(tmp_path)
         output_dir = Path(plan.workspace_root) / ".ash" / "ash_output"
         assert not output_dir.exists()
@@ -213,13 +216,14 @@ class TestTheGitignoreIsWrittenOnceTheOutputDirectoryExists:
         assert wrote is True
         assert (output_dir / ".gitignore").exists()
 
-    def test_a_link_at_the_gitignore_name_is_refused_before_anything_is_made(
+    def test_a_link_at_the_gitignore_name_is_refused_and_makes_no_folder(
         self, tmp_path
     ):
-        """Control for the ordering: the link check that _project_outputs runs
-        before registration already examines the .gitignore name under an output
-        directory below the root (linked_output_component), so a refused call
-        creates no folder; nothing in this file changed that."""
+        """The link check that _project_outputs runs before registration examines
+        the .gitignore name under an output directory below the root
+        (linked_output_component), so a refused call raises and creates no
+        folder. Only that check is driven here; the order of the entry point's
+        own steps is the test above."""
         plan = _plan(tmp_path)
         output_dir = Path(plan.workspace_root) / ".ash" / "ash_output"
         output_dir.mkdir(parents=True)
@@ -447,8 +451,8 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
                     on_locked=lambda: order.append("clock started"),
                 )
 
+        runner = threading.Thread(target=run)
         try:
-            runner = threading.Thread(target=run)
             runner.start()
             runner.join(timeout=0.5)
             assert "clock started" not in order, order
@@ -458,6 +462,13 @@ class TestTheClockStartsOnceTheSessionLockIsHeld:
 
             assert order.index("releasing") < order.index("clock started"), order
         finally:
+            # A failed assertion above must not leave the holder with the lock or
+            # the runner inside the patched execute_workspace, which is
+            # process-global and would stay active for the tests that follow.
+            released.set()
+            if runner.is_alive():
+                runner.join(timeout=5)
+            holder.join(timeout=5)
             # The session claimed above does not stay in the shared registry
             # for the tests that follow.
             reset_default_registry_for_tests()

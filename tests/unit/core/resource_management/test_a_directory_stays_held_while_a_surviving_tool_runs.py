@@ -104,9 +104,13 @@ def test_the_directory_stays_held_while_the_tool_runs(tmp_path, alive):
 
 
 def _a_stopped_scan_whose_tool_was_spawned_by_path(
-    tmp_path: Path,
+    tmp_path: Path, name_process_ids: bool = False
 ) -> tuple[ScanRegistry, str, Path, Path]:
-    """As above, with the tool recorded as the server path it was spawned as."""
+    """As above, with the tool recorded as the server path it was spawned as.
+
+    ``name_process_ids`` is the flag the record is made with: False for a remote
+    caller, whose warning keeps the pid out, True for a local one.
+    """
     project = tmp_path / "project"
     project.mkdir()
     output = project / ".ash" / "ash_output"
@@ -120,19 +124,24 @@ def _a_stopped_scan_whose_tool_was_spawned_by_path(
     entry.mark_running()
     assert registry.cancel_scan(scan_id) is True
     assert registry.record_cancel_outcome(
-        scan_id, ((SPAWNED_AS, BANDIT_PID),), name_process_ids=False
+        scan_id, ((SPAWNED_AS, BANDIT_PID),), name_process_ids=name_process_ids
     )
     entry.runner_done.set()
     return registry, scan_id, project, output
 
 
-def test_the_refusal_names_the_tool_by_basename_never_by_server_path(tmp_path, alive):
+@pytest.mark.parametrize("name_process_ids", [False, True], ids=["remote", "local"])
+def test_the_refusal_names_the_tool_by_basename_never_by_server_path(
+    tmp_path, alive, name_process_ids
+):
     """Red at the base: the refusal joined the recorded names as spawned, so the
     owning session, remote on a network transport, read a server path the
-    entry's own warning already withholds from it."""
+    entry's own warning already withholds from it. Both ways the record is made:
+    the refusal is built at register time from the recorded names, whichever
+    flag the record was made with."""
     alive[BANDIT_PID] = True
     registry, _scan_id, project, output = (
-        _a_stopped_scan_whose_tool_was_spawned_by_path(tmp_path)
+        _a_stopped_scan_whose_tool_was_spawned_by_path(tmp_path, name_process_ids)
     )
 
     with pytest.raises(MCPResourceError) as refused:
@@ -146,7 +155,8 @@ def test_the_refusal_names_the_tool_by_basename_never_by_server_path(tmp_path, a
     assert "bandit" in message, message
     assert SPAWNED_AS not in message, message
     assert "/opt/scanners" not in message, message
-    assert str(BANDIT_PID) not in message, message
+    if not name_process_ids:
+        assert str(BANDIT_PID) not in message, message
 
 
 def test_progress_reports_the_surviving_tool_under_could_not_stop(tmp_path, alive):

@@ -328,6 +328,10 @@ class TestCheckScanProgressWithoutAnOutputDirectory:
         assert progress["results_available"] is False
         assert progress["error_message"], "the unusable file is reported"
         assert "ash_aggregated_results.json" in progress["error_message"]
+        # The message names the path, so the directories above the file are in it
+        # too; with one of them present and the value absent, the value was in the
+        # path and was removed, and not never there.
+        assert "ash_output" in progress["error_message"]
         assert SECRET not in progress["error_message"]
 
 

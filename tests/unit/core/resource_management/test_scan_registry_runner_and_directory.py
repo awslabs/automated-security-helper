@@ -986,8 +986,8 @@ class TestProgressOfASupersededScanReadsNoFiles:
         self, tmp_path
     ):
         """What makes "once" hold: the entry's ``claimed_output_tree`` flag, False
-        until the scan claims its tree and True from then on, and a direct second
-        record of a claimed entry appends nothing."""
+        until the scan claims its tree and True from then on, and a later status
+        change of a claimed entry appends nothing."""
         registry = ScanRegistry()
         project = tmp_path / "proj"
         project.mkdir()
@@ -1003,12 +1003,9 @@ class TestProgressOfASupersededScanReadsNoFiles:
 
         assert registry.get_scan(new).claimed_output_tree is True
         assert registry.get_scan(old).later_scan_ids == [new]
-        # ``_record_supersession`` is called with ``_registry_lock`` held, as its
-        # callers hold it; the lock is a plain ``Lock`` and ``get_scan`` takes it,
-        # so the entry is read before the lock is taken, not inside it.
-        entry = registry.get_scan(new)
-        with registry._registry_lock:
-            registry._record_supersession(entry)
+        # A further status change through the public method reaches the same
+        # claim again and records nothing more.
+        registry.update_scan_status(new, MCScanStatus.COMPLETED)
         assert registry.get_scan(old).later_scan_ids == [new]
 
     def test_supersession_survives_the_later_scans_removal(self, tmp_path):
