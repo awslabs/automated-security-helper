@@ -268,6 +268,27 @@ def test_a_run_less_report_for_an_empty_results_file_is_refused(tmp_path):
         scanner.scan(target=_populated_target(tmp_path), target_type="source")
 
 
+def test_a_run_less_hook_report_is_not_blamed_on_the_results_file(tmp_path):
+    """The file was empty. It is the scanner's hook that answered with no run,
+    and the message says so instead of pointing at the file."""
+    scanner = _scanner(_context(tmp_path, ()), execute_scan=_execute_writing(""))
+
+    with (
+        patch.object(type(scanner), "_run_subprocess", return_value={"returncode": 0}),
+        patch.object(
+            type(scanner),
+            "_handle_empty_results",
+            lambda self: SarifReport.model_validate({}),
+        ),
+        pytest.raises(ScannerError) as excinfo,
+    ):
+        scanner.scan(target=_populated_target(tmp_path), target_type="source")
+
+    message = str(excinfo.value)
+    assert "empty-results hook" in message, message
+    assert "its results file holds no SARIF run" not in message, message
+
+
 @pytest.mark.parametrize(
     "flag, said",
     [("cancelled", "cancelled"), ("result_rejected", "rejected")],

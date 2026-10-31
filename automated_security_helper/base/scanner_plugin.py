@@ -1438,9 +1438,16 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         write an empty file for a clean scan overrides this to return a report.
 
         A report an override returns has to hold at least one SARIF run, as a
-        report the tool wrote does: one with none is refused with the same
-        "no SARIF run" error, since it grades nothing. A clean scan is a run
+        report the tool wrote does: one with none is refused with a "no SARIF
+        run" error of its own, since it grades nothing. A clean scan is a run
         with no results.
+
+        ``scan()`` finishes the report the hook returns as it finishes one the
+        tool wrote: it adds the invocation record (timing, exit code, command)
+        and then runs ``_post_process_sarif`` on it. A hook returns the report
+        bare and does neither itself; ``_inject_invocation`` tolerates a second
+        call on one report, but a ``_post_process_sarif`` may not. No built-in
+        scanner overrides this hook.
         """
         raise ScannerError("its results file is empty, so there is nothing to grade")
 
@@ -1838,9 +1845,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 # gets the invocation record (timing, exit code, command) and
                 # the scanner's own adjustments.
                 if not report.runs:
+                    # The results file was empty, so this is not the file's
+                    # doing: the scanner's own hook answered with no run.
                     raise ScannerError(
-                        "its results file holds no SARIF run, so there is "
-                        "nothing to grade"
+                        "the report its empty-results hook returned holds no "
+                        "SARIF run, so there is nothing to grade"
                     )
                 self._inject_invocation(report, final_args, target)
                 return self._post_process_sarif(report, final_args, target)
