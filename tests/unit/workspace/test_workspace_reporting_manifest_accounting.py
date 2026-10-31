@@ -769,6 +769,59 @@ class TestFailuresAreRecordedNotRaised:
         assert not (output_dir / REPORTS_DIR_NAME / "ash.twin-a.txt").exists()
 
 
+def _answering(answer):
+    """A merged reporter whose ``report()`` returns ``answer``."""
+
+    class _Answering(FakeMergedReporter):
+        def report(self, model):
+            return answer
+
+    return _Answering
+
+
+class TestCoversProjectsIsOnOnlyForAWrittenMergedFile:
+    """``covers_projects`` says a merged file exists, whatever the other fields say."""
+
+    def test_it_is_on_when_the_merged_file_is_written(self, workspace):
+        _, output_dir, _ = workspace
+        _emit(workspace, _answering("content"))
+
+        entry = _manifest(output_dir)["reporters"]["fake-merged"]
+        assert entry["workspace_artifact"] is not None
+        assert entry["covers_projects"] is True
+
+    @pytest.mark.parametrize("answer", [None, ""], ids=["none", "empty"])
+    def test_it_is_off_when_the_reporter_wrote_nothing(self, workspace, answer):
+        _, output_dir, _ = workspace
+        _emit(workspace, _answering(answer))
+
+        entry = _manifest(output_dir)["reporters"]["fake-merged"]
+        assert entry["workspace_artifact"] is None
+        assert entry["covers_projects"] is False
+
+    @pytest.mark.parametrize("failure", ["raises", "returns_none"])
+    def test_it_is_off_when_the_file_could_not_be_written(
+        self, workspace, monkeypatch, failure
+    ):
+        _, output_dir, _ = workspace
+        original = reporting.write_report_file
+
+        def refused(reports_dir, filename, content):
+            if filename == "ash.merged.txt":
+                if failure == "raises":
+                    raise OutputDirLinkRefused("a link appeared")
+                return None
+            return original(reports_dir, filename, content)
+
+        monkeypatch.setattr(reporting, "write_report_file", refused)
+
+        _emit(workspace, _answering("content"))
+
+        entry = _manifest(output_dir)["reporters"]["fake-merged"]
+        assert entry["workspace_artifact"] is None
+        assert entry["covers_projects"] is False
+
+
 class TestACancelIsHonored:
     def test_no_further_reporter_runs_and_no_manifest_is_written(self, workspace):
         _, output_dir, _ = workspace

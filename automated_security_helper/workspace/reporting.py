@@ -1256,7 +1256,9 @@ def emit_workspace_reports(
         entry: Dict[str, Any] = {
             "behaviour": behaviour.value,
             "considered": skipped is None,
-            "covers_projects": behaviour is ReporterWorkspaceBehaviour.MERGED,
+            # Off until the merged artefact is on disk (set where it is written,
+            # below), so no failure branch has to turn it off again.
+            "covers_projects": False,
             "workspace_artifact": None,
             "per_project_artifacts": [],
             "missing_per_project_artifacts": [],
@@ -1277,7 +1279,6 @@ def emit_workspace_reports(
             if present:
                 per_project.append(key)
                 entry["considered"] = True
-                entry["covers_projects"] = False
                 entry["per_project_artifacts"] = present
                 ASH_LOGGER.verbose(
                     f"Reporter {name} is off in the default config but per-project; "
@@ -1292,12 +1293,10 @@ def emit_workspace_reports(
             # answer rather than silence. Silence is the defect this manifest
             # exists to prevent; only the reason differs from a withheld artefact.
             entry["skipped"] = skipped
-            entry["covers_projects"] = False
             continue
 
         if behaviour is ReporterWorkspaceBehaviour.UNSUPPORTED:
             unsupported.append(key)
-            entry["covers_projects"] = False
             entry["error"] = (
                 "the reporter declares that it cannot produce a correct artefact "
                 "in workspace mode; disable it or scan the projects separately"
@@ -1336,7 +1335,6 @@ def emit_workspace_reports(
             # silently producing nothing.
             failures[key] = f"unhandled workspace behaviour {behaviour!r}"
             entry["error"] = failures[key]
-            entry["covers_projects"] = False
             ASH_LOGGER.error(f"Reporter {name}: {failures[key]}")
             continue
 
@@ -1359,7 +1357,6 @@ def emit_workspace_reports(
             # per reporter so the manifest names each report that did not arrive.
             failures[key] = model_failure or "the unified results could not be loaded"
             entry["error"] = failures[key]
-            entry["covers_projects"] = False
             continue
 
         try:
@@ -1367,7 +1364,6 @@ def emit_workspace_reports(
         except Exception as exc:  # noqa: BLE001 -- one reporter must not sink the rest
             failures[key] = f"{type(exc).__name__}: {error_text(exc)}"
             entry["error"] = failures[key]
-            entry["covers_projects"] = False
             ASH_LOGGER.error(
                 f"Reporter {name} failed at workspace level: {failures[key]}"
             )
@@ -1382,7 +1378,6 @@ def emit_workspace_reports(
             # string below, which several reporters legitimately return.
             failures[key] = "the reporter returned None instead of a report"
             entry["error"] = failures[key]
-            entry["covers_projects"] = False
             ASH_LOGGER.error(f"Reporter {name}: {failures[key]}")
             continue
 
@@ -1391,7 +1386,6 @@ def emit_workspace_reports(
             # they have nothing to say. Recorded so that "returned nothing" is
             # distinguishable from "was never run". No artefact covers anything.
             entry["error"] = "the reporter returned no content"
-            entry["covers_projects"] = False
             ASH_LOGGER.verbose(f"Reporter {name} returned no content")
             continue
 
@@ -1409,7 +1403,6 @@ def emit_workspace_reports(
                 f"{type(exc).__name__}: {error_text(exc)}"
             )
             entry["error"] = failures[key]
-            entry["covers_projects"] = False
             ASH_LOGGER.error(f"Reporter {name}: {failures[key]}")
             ASH_LOGGER.debug(f"Reporter write traceback: {traceback_text(exc)}")
             continue
@@ -1418,11 +1411,12 @@ def emit_workspace_reports(
                 f"report file {filename!r} could not be written in {reports_dir}"
             )
             entry["error"] = failures[key]
-            entry["covers_projects"] = False
             ASH_LOGGER.error(f"Reporter {name}: {failures[key]}")
             continue
         artifacts[key] = target
         entry["workspace_artifact"] = target.relative_to(output_dir).as_posix()
+        # The one place it turns on: a merged reporter whose file is written.
+        entry["covers_projects"] = behaviour is ReporterWorkspaceBehaviour.MERGED
         ASH_LOGGER.info(f"Writing workspace {name} report to {target}")
 
     # Before the manifest, as before each reporter: a manifest written after a
