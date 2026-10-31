@@ -11,7 +11,8 @@ Each test was red at the base it was written against:
   new child is started beside it; a child that ended with no exit status is not said to
   have "exited None";
 - an OSError raised in the child comes back as an OSError with its errno, strerror and
-  file names, not as a plain Exception carrying the repr-quoted text;
+  file names, not as a plain Exception carrying the repr-quoted text; the native
+  Windows code reaches the constructor only when the child's error had one;
 - every path in the request file is absolute;
 - the response is read in bounded pieces, never with one cap-sized allocation;
 - the level the child collects at follows what ASH's last resort would show in-process;
@@ -23,6 +24,7 @@ import json
 import logging
 import os
 import tempfile
+import types
 from pathlib import Path
 
 import pytest
@@ -377,7 +379,11 @@ def test_an_os_error_crosses_with_its_errno_and_file_names():
 
 
 def test_an_os_error_with_two_files_keeps_both():
-    raised = FileExistsError(17, "File exists", "/a", None, "/b")
+    # Built with no code beside the errno, as an error the C library raised is: a
+    # positional None in the fourth place would make Windows print "[WinError None]"
+    # for the original as well as for any copy.
+    raised = FileExistsError(17, "File exists", "/a")
+    raised.filename2 = "/b"
 
     answer = cdk_nag_worker._raised_answer(raised)
     with pytest.raises(OSError) as excinfo:
@@ -419,6 +425,80 @@ def test_an_os_error_carries_its_windows_error_code_across():
         cdk_nag_worker._raise_as_reported(answer)
     assert excinfo.value.errno == 13
     assert excinfo.value.filename == "x"
+
+
+class _RecordingOSError(OSError):
+    """An OSError subclass that remembers the positional fields it was built from."""
+
+    built_from: list = []
+
+    def __init__(self, *args):
+        type(self).built_from.append(args)
+        super().__init__(*args)
+
+
+def _rebuild_with_recorder(monkeypatch, **fields):
+    """Rebuild an answer naming ``_RecordingOSError`` and return (error, fields)."""
+    _RecordingOSError.built_from = []
+    monkeypatch.setattr(
+        cdk_nag_worker,
+        "builtins",
+        types.SimpleNamespace(_RecordingOSError=_RecordingOSError),
+    )
+    answer = {
+        "status": "raised",
+        "kind": "os",
+        "type": "_RecordingOSError",
+        "message": "",
+        "errno": 13,
+        "strerror": "Access is denied",
+        "filename": "x",
+        "filename2": None,
+        "winerror": None,
+        **fields,
+    }
+    with pytest.raises(_RecordingOSError) as excinfo:
+        cdk_nag_worker._raise_as_reported(answer)
+    assert len(_RecordingOSError.built_from) == 1
+    return excinfo.value, _RecordingOSError.built_from[0]
+
+
+def test_a_rebuilt_os_error_gets_no_windows_code_when_the_child_had_none(monkeypatch):
+    """The fourth positional field is the native code: Windows stores a None there as
+    the error's winerror and prints "[WinError None]" where the original printed
+    "[Errno 13]". The three fields the child's error had are what the rebuild gets,
+    on every platform."""
+    rebuilt, fields = _rebuild_with_recorder(monkeypatch)
+
+    assert fields == (13, "Access is denied", "x")
+    assert rebuilt.errno == 13
+    assert rebuilt.filename == "x"
+    assert "WinError" not in str(rebuilt)
+    assert str(rebuilt) == str(OSError(13, "Access is denied", "x"))
+
+
+def test_a_rebuilt_os_error_keeps_a_second_file_without_a_windows_code(monkeypatch):
+    """With no native code there is no constructor slot for the second file name, so
+    it is set on the rebuilt error, where the text reads it."""
+    rebuilt, fields = _rebuild_with_recorder(
+        monkeypatch,
+        errno=2,
+        strerror="No such file or directory",
+        filename="a",
+        filename2="b",
+    )
+
+    assert fields == (2, "No such file or directory", "a")
+    assert rebuilt.filename2 == "b"
+    assert str(rebuilt) == "[Errno 2] No such file or directory: 'a' -> 'b'"
+
+
+def test_a_rebuilt_os_error_gets_the_windows_code_the_child_had(monkeypatch):
+    """An int native code crosses as the fourth field, the second file name as the
+    fifth: the construction the code's own text is built from."""
+    _, fields = _rebuild_with_recorder(monkeypatch, winerror=5, filename2="b")
+
+    assert fields == (13, "Access is denied", "x", 5, "b")
 
 
 def test_an_os_error_on_a_file_descriptor_keeps_the_descriptor():

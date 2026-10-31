@@ -377,25 +377,35 @@ def _raise_as_reported(answer: Dict[str, Any]) -> None:
         )
         errno = answer.get("errno")
         if isinstance(errno, int) and not isinstance(errno, bool):
-            fields = (
+            winerror = answer.get("winerror")
+            filename2 = answer.get("filename2")
+            has_winerror = isinstance(winerror, int) and not isinstance(winerror, bool)
+            fields: tuple = (
                 errno,
                 str(answer.get("strerror") or message),
                 answer.get("filename"),
-                # The native code on Windows, which the text there is built from;
-                # read and ignored on every other platform.
-                answer.get("winerror"),
-                answer.get("filename2"),
             )
+            if has_winerror:
+                # The native code on Windows, which the text there is built from;
+                # read and ignored on every other platform. Passed only when the
+                # child's error carried one: on Windows a positional None is stored
+                # as the winerror attribute and the text prints "[WinError None]"
+                # where the original printed "[Errno N]".
+                fields += (winerror, filename2)
             try:
                 rebuilt: OSError = os_cls(*fields)
             except TypeError:
-                # No builtin OSError subclass refuses these five fields: every one
-                # takes OSError's own (errno, strerror, filename, winerror,
-                # filename2), and BlockingIOError reads an int third field as its
+                # No builtin OSError subclass refuses these fields: every one takes
+                # OSError's own (errno, strerror, filename, winerror, filename2),
+                # and BlockingIOError reads an int third field as its
                 # characters_written rather than raising, so a descriptor-valued
                 # filename (": 3") lands there and its text drops the suffix. Kept
                 # for an OSError subclass another runtime constructs differently.
                 rebuilt = type(name, (OSError,), {})(*fields)
+            if not has_winerror and filename2 is not None:
+                # The second file name has no constructor slot without the code
+                # before it; it is a plain member, and the text reads it from there.
+                rebuilt.filename2 = filename2
             raise rebuilt
         raise os_cls(message)
     raise type(name, (Exception,), {})(message)
