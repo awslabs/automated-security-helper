@@ -8250,6 +8250,14 @@
   Markdown syntax characters. The Bedrock summary's Markdown reads its text
   through the same helper, so it changes in the same way.
 
+- **The Markdown report prints an issue reference in a code span.** Where the
+  summary is posted as a pull request comment, GitHub links `#123`, `GH-123` and
+  `owner/repo#123` and adds a "mentioned" event to the issue they name, so a
+  scanner message such as "fixed in #1234" wrote into an issue of the project.
+  Each is now printed in a code span, as an `@name` and a bare URL already were.
+  The Bedrock summary reads its text through the same helper and changes in the
+  same way.
+
 - **The GitHub GHAS report leaves out results that state no failing finding, and
   names its category only when asked.** A result whose SARIF `kind` is `pass`,
   `open`, `review`, `notApplicable` or `informational` (a cdk-nag rule that was
