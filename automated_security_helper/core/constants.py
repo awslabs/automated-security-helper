@@ -122,21 +122,38 @@ def usable_home() -> Optional[Path]:
     that has a drive or share and is not a drive's root.
     """
     if os.name == "nt":
-        home = os.path.expanduser("~")
-        if home == "~" or not is_anchored(home) or _is_filesystem_root(home):
+        home = _fallback_home()
+        if home is None or not is_anchored(home) or _is_filesystem_root(home):
             return None
         return Path(home)
     value = os.environ.get("HOME")
     if value is None:
-        try:
-            import pwd
-
-            value = pwd.getpwuid(os.getuid()).pw_dir
-        except (ImportError, KeyError, AttributeError, OSError):
+        value = _fallback_home()
+        if value is None:
             return None
     if not value or not is_anchored(value) or _is_filesystem_root(value):
         return None
     return Path(value)
+
+
+def _fallback_home() -> Optional[str]:
+    """The home an unset HOME (USERPROFILE) falls back to, or None when there is none.
+
+    On POSIX that is the passwd entry's home directory, which is None when the
+    user database cannot be read or has no entry for this user. On Windows it is
+    the home ``os.path.expanduser`` builds from HOMEDRIVE and HOMEPATH, which is
+    None when it finds none. The value is returned as found: the caller decides
+    whether it is usable.
+    """
+    if os.name == "nt":
+        home = os.path.expanduser("~")
+        return None if home == "~" else home
+    try:
+        import pwd
+
+        return pwd.getpwuid(os.getuid()).pw_dir
+    except (ImportError, KeyError, AttributeError, OSError):
+        return None
 
 
 def _is_filesystem_root(value: str) -> bool:
@@ -196,16 +213,13 @@ def _fallback_home_is_a_root() -> bool:
     anchored (it names a location by itself) and :func:`usable_home` still refuses
     it, which :func:`usable_home` does only for a filesystem or drive root.
     """
-    if os.name == "nt":
-        home = os.path.expanduser("~")
-        return home != "~" and is_anchored(home) and _is_filesystem_root(home)
-    try:
-        import pwd
-
-        home = pwd.getpwuid(os.getuid()).pw_dir
-    except (ImportError, KeyError, AttributeError, OSError):
-        return False
-    return bool(home) and is_anchored(home) and _is_filesystem_root(home)
+    home = _fallback_home()
+    return (
+        home is not None
+        and bool(home)
+        and is_anchored(home)
+        and _is_filesystem_root(home)
+    )
 
 
 def warn_if_home_unusable() -> None:
