@@ -129,6 +129,9 @@ def _scan_outcome(target: Path, config_path: str) -> Any:
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.config import resolve_config as rc
     from automated_security_helper.core import orchestrator
+    from automated_security_helper.core.resource_management import (
+        scan_registry as scan_registry_module,
+    )
     from automated_security_helper.core.resource_management.scan_registry import (
         ScanRegistry,
     )
@@ -146,13 +149,20 @@ def _scan_outcome(target: Path, config_path: str) -> Any:
 
     output = target / ".ash" / "ash_output"
     output.mkdir(parents=True, exist_ok=True)
+    # The scan is the session's, and the registry that holds it is the one every
+    # reader consults: whether a scan's copy of the bound profile is the server's
+    # own (cli/mcp/sandbox.py's session_holds_scan) is answered from the module's
+    # registry, not from the name mcp_tools imported. A registry only mcp_tools
+    # sees, or a scan registered with no session, makes the copy a file nobody can
+    # vouch for, and the operator's profile is read as the client's.
     registry = ScanRegistry()
     scan_id = registry.register_scan(
-        directory_path=str(target), output_directory=str(output)
+        directory_path=str(target), output_directory=str(output), session_id=SESSION
     )
     with (
         patch.object(ras, "_setup_logger", lambda opts: _QuietLogger()),
         patch.object(orchestrator, "resolve_config", recording),
+        patch.object(scan_registry_module, "_scan_registry", registry),
         patch.object(mcp_tools, "get_scan_registry", return_value=registry),
     ):
         asyncio.run(

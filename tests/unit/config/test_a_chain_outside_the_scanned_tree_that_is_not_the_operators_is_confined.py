@@ -12,12 +12,13 @@ was returned unconfined (the early return), and an operator ``trusted_config_pat
 or ``ASH_CONFIG`` file outside them became the trusted base the grants are held
 to, even when it sat in another git checkout or was delivered.
 
-Every cell here runs the real client-policy step (``apply_client_config_rules``
-is not replaced): the delivered-file cells use the two lists that step does not
-compare (``read_path_scanners`` and ``env_scanners``), so they reach the
-confinement the way a command-line resolve does. The trusted-base cells use all
-five grants, since that step never sees the trusted file. Each refusal has a
-positive control: the same file outside every checkout and the MCP root grants.
+Every test here runs the real client-policy step (``apply_client_config_rules``
+is not replaced). The delivered-file tests that name the two lists of scanners
+(``read_path_scanners`` and ``env_scanners``) are refused by that step, which
+compares both with the trusted base and names the fields a file asks for beyond
+it. The trusted-base tests use all five grants, since that step never sees the
+trusted file. Each refusal has a positive control: the same file outside every
+checkout and the MCP root grants.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from automated_security_helper.config.sandbox_grants import (
     membership_clause,
     scanned_trees,
 )
+from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 from tests.utils.helpers import mark_git_checkout
 
 pytestmark = pytest.mark.unit
@@ -76,7 +78,7 @@ OUTSIDE_SENTENCE = (
 
 
 class Layout:
-    """The directories one cell is built in."""
+    """The directories one test is built in."""
 
     def __init__(self, tmp_path: Path) -> None:
         self.mcp_root = tmp_path / "mcp-workspaces"
@@ -134,37 +136,38 @@ def _defaults() -> Dict[str, Any]:
 
 
 def test_a_delivered_config_outside_the_tree_applies_no_scanner_grants(
-    layout: Layout, caplog: pytest.LogCaptureFixture
+    layout: Layout,
 ) -> None:
-    """The lists the client-policy step does not compare are held to the trusted base."""
+    """A delivered chain wholly outside the scanned tree is not returned unconfined.
+
+    The client-policy step compares both lists with the trusted base (the server's
+    own settings, here the defaults, which name no scanner), so a file that asks
+    for more is refused with the fields named; no config comes back to apply a
+    grant from."""
     delivered = layout.write(layout.delivered / "ash.yaml", SCANNER_GRANTS)
 
-    with caplog.at_level(logging.WARNING):
-        config = rc.resolve_config(config_path=delivered, source_dir=layout.repo)
+    with pytest.raises(ASHConfigFieldDeniedError) as refusal:
+        rc.resolve_config(config_path=delivered, source_dir=layout.repo)
 
-    assert config.sandbox.read_path_scanners == []
-    assert config.sandbox.env_scanners == []
-    ignored = [
-        record.getMessage()
-        for record in caplog.records
-        if record.getMessage().startswith("Ignoring sandbox.read_path_scanners")
-    ]
-    assert len(ignored) == 1, caplog.text
-    assert "sandbox.env_scanners" in ignored[0]
-    assert OUTSIDE_SENTENCE in ignored[0]
+    refused = str(refusal.value)
+    assert "sandbox.read_path_scanners" in refused, refused
+    assert "sandbox.env_scanners" in refused, refused
 
 
 def test_a_delivered_ash_config_with_no_config_file_applies_no_scanner_grants(
     layout: Layout, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With no config file the configuration is ASH_CONFIG's chain."""
+    """With no config file the configuration is ASH_CONFIG's chain, refused the
+    same way as a config path the client names."""
     delivered = layout.write(layout.delivered / "ash.yaml", SCANNER_GRANTS)
     monkeypatch.setenv("ASH_CONFIG", str(delivered))
 
-    config = rc.resolve_config(source_dir=layout.repo)
+    with pytest.raises(ASHConfigFieldDeniedError) as refusal:
+        rc.resolve_config(source_dir=layout.repo)
 
-    assert config.sandbox.read_path_scanners == []
-    assert config.sandbox.env_scanners == []
+    refused = str(refusal.value)
+    assert "sandbox.read_path_scanners" in refused, refused
+    assert "sandbox.env_scanners" in refused, refused
 
 
 def test_positive_control_the_same_file_outside_the_mcp_root_keeps_scanner_grants(
