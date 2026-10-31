@@ -80,19 +80,35 @@ def _jq_condition(steps: List[PathStep]) -> str:
     return f"any({head}; {_jq_condition(steps[first + 1 :])})"
 
 
-def generate_jq_query(field_path: str) -> str:
+def _is_a_log_array(before: List[PathStep], key: str) -> bool:
+    """Whether the bare key *key*, after the steps *before*, is one of the SARIF
+    log's own arrays: ``runs`` at the top, ``results`` directly under a run. A key
+    of either name anywhere deeper (``properties.results``) is a property of the
+    finding and as likely an object as an array."""
+    if key == "runs":
+        return not before
+    if key == "results":
+        return before[-2:] == [("key", "runs"), ("any", None)]
+    return False
+
+
+def generate_jq_query(field_path: str, result_relative: bool = False) -> str:
     """
     Generate a JQ query to find the findings that carry the specified field.
 
     A path under ``runs[].results[]`` becomes ``.runs[].results[] |
     select(<the rest is set>)``, which outputs each result that has the field.
     An index reads as ``[]`` (``runs[0]`` is ``runs[]``), and so does a bare
-    ``runs`` or ``results`` key, since both are arrays. A path that starts with
+    ``runs`` key at the top and a bare ``results`` key directly under a run,
+    since both are arrays there. A path that starts with
     a key the document itself has, with no array segment, selects the document
     (``. | select(has("version")) | select(.version != null)``); one under an
     array other than results streams that array (``.runs[] | select(...)``).
     A path that starts with a result's own key (``message.text``, the form the
-    validation reports) is read as relative to a result. Arrays below the
+    validation reports) is read as relative to a result. Some of a result's keys
+    are also the document's (``properties``), so a path that starts with one is
+    read as the document's unless the caller says, with *result_relative*, that
+    every path it passes is a result's. Arrays below the
     streamed one are tested with ``any(.x[]; ...)``: a generator inside
     ``select`` printed the document once per matching element. A key that is
     not a jq identifier is written ``["key"]``, so a fingerprint key such as
@@ -100,6 +116,7 @@ def generate_jq_query(field_path: str) -> str:
 
     Args:
         field_path: The field path to search for (e.g., 'runs[0].results[0].suppressions[0].kind')
+        result_relative: The path is relative to a result whatever its first key.
 
     Returns:
         A JQ query string that will return findings containing the field
@@ -108,24 +125,27 @@ def generate_jq_query(field_path: str) -> str:
     if steps is None or steps[0][0] != "key":
         return f". | select(.{str(field_path)} != null)"
 
-    # Every index is any element; a bare runs or results key is its array.
+    # Every index is any element; a bare runs or results key is its array where
+    # the log has one (a path the caller says is a result's has no log above it).
     normalized: List[PathStep] = []
     for position, (kind, value) in enumerate(steps):
         if kind == "index":
             normalized.append(("any", None))
             continue
-        normalized.append((kind, value))
         following = steps[position + 1] if position + 1 < len(steps) else None
-        if (
-            kind == "key"
-            and value in ("runs", "results")
+        names_an_array = (
+            not result_relative
+            and kind == "key"
             and following is not None
             and following[0] == "key"
-        ):
+            and _is_a_log_array(normalized, value)
+        )
+        normalized.append((kind, value))
+        if names_an_array:
             normalized.append(("any", None))
 
     first_key = normalized[0][1]
-    if first_key not in _DOCUMENT_KEYS:
+    if result_relative or first_key not in _DOCUMENT_KEYS:
         # Relative to a result.
         return f".runs[].results[] | select({_jq_condition(normalized)})"
 
@@ -745,6 +765,8 @@ def generate_html_report(
                         "type": set(),
                         "in_aggregate": False,
                         "intentionally_excluded": False,
+                        # compare_result_fields reports result-relative paths.
+                        "result_relative": True,
                     }
                 else:
                     all_fields_by_path[path]["scanners"].add(scanner)
@@ -805,8 +827,11 @@ def generate_html_report(
         if info["type"]:
             field_type = ", ".join(sorted(info["type"]))
 
-        # Generate JQ query for this field
-        jq_query = generate_jq_query(path)
+        # Generate JQ query for this field. A path the validation reported is
+        # relative to a result even when it starts with ``properties``.
+        jq_query = generate_jq_query(
+            path, result_relative=bool(info.get("result_relative", False))
+        )
 
         # Find an example file that contains this field
         example_file = _example_file(info["scanners"], sarif_dir)
