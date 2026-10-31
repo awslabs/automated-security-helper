@@ -116,7 +116,7 @@ def test_a_scanner_finishing_during_the_cancels_wait_is_recorded(tmp_path, monke
             # The premise is a scanner RUNNING at the cancel. Raising before
             # s1 has started leaves s1 in the queue, where the cancel removes
             # it instead -- on an interpreter whose workers dequeue later
-            # (3.12), that was every run, and the cell measured nothing.
+            # (3.12), that was every run, and the test measured nothing.
             assert s1_started.wait(timeout=30), "s1 never started"
             cancel_came.set()
             raise ScanCancelled("the scan was cancelled while s0 was running")
@@ -153,7 +153,7 @@ def test_a_scanner_finishing_during_the_cancels_wait_is_recorded(tmp_path, monke
 def _a_cancel_with_a_finished_siblings_result_in_hand(tmp_path, monkeypatch):
     """Two scanners at the cancel: s1 finished FIRST, and the cancel (s0) is
     handed to the recording loop before s1 is -- an interleaving as_completed
-    is free to produce, pinned here by an ordering wrapper so the cell is
+    is free to produce, pinned here by an ordering wrapper so the test is
     deterministic. At the loop's break, s1's finished result is in hand but
     not yet handed over: exactly the state the drain ordering decides.
     Returns (executor, recorded, order, pool_cls); ``order`` logs s1's
@@ -187,7 +187,7 @@ def _a_cancel_with_a_finished_siblings_result_in_hand(tmp_path, monkeypatch):
         # Settle the premise "s1 finished first" before handing anything
         # over: s1's event fires before its future completes, so without
         # this wait a descheduled completion can leave s1 un-done at the
-        # break and the cell orders nothing. s0 raises once s1's event is
+        # break and the test orders nothing. s0 raises once s1's event is
         # set, so both futures complete promptly.
         concurrent.futures.wait(futures)
         cancel_future = next(
@@ -226,7 +226,7 @@ def test_a_result_in_hand_is_recorded_before_the_drain(tmp_path, monkeypatch):
     def shutdown_logs_the_drain(self, *args, **kwargs):
         # The drain is the WAITING shutdown. The cancel's own queue-shutdown
         # (wait=False, cancel_futures=True) precedes the sweep by design and
-        # waits for nothing, so it is not the drain this cell orders against.
+        # waits for nothing, so it is not the drain this test orders against.
         waits = args[0] if args else kwargs.get("wait", True)
         if waits and "drain" not in order:
             order.append("drain")
@@ -270,7 +270,7 @@ def test_an_interrupt_during_the_drain_keeps_the_results_in_hand(tmp_path, monke
     with pytest.raises(KeyboardInterrupt):
         executor.run_parallel(MagicMock())
 
-    assert interrupted, "the cell shows nothing: the drain was never entered"
+    assert interrupted, "this run pinned nothing: the drain was never entered"
     assert any(arg == ["done-s1"] for arg in recorded), (
         f"an interrupt during the drain lost the results in hand: {recorded}"
     )
@@ -397,7 +397,7 @@ def test_a_queued_scanner_is_not_started_after_the_cancel(tmp_path, monkeypatch)
         if any(arg == "done-s1" or arg == ["done-s1"] for arg in args):
             may_dequeue.set()
             assert a_gated_dequeue_returned.wait(timeout=30), (
-                "the cell shows nothing: no freed worker reached the queue"
+                "this run pinned nothing: no freed worker reached the queue"
             )
         return args[-1]
 
@@ -426,7 +426,7 @@ def test_a_scan_cancelled_by_one_scanner_starts_no_queued_scanner(
     bounded, until the worker has entered the start check for s1, so the race
     the contract decides is pinned on every interpreter -- a worker whose
     dequeue comes later (3.12's blocking get) otherwise loses it to the
-    queue-shutdown and the cell measures nothing."""
+    queue-shutdown and the test measures nothing."""
     from concurrent.futures import ThreadPoolExecutor
 
     ran: list = []
@@ -461,7 +461,7 @@ def test_a_scan_cancelled_by_one_scanner_starts_no_queued_scanner(
 
     def shutdown_after_the_dequeue(self, *args, **kwargs):
         assert s1_reached_the_start_check.wait(timeout=30), (
-            "the cell shows nothing: the worker never reached s1's start check"
+            "this run pinned nothing: the worker never reached s1's start check"
         )
         return real_shutdown(self, *args, **kwargs)
 
@@ -478,7 +478,7 @@ def test_a_scan_cancelled_by_one_scanner_starts_no_queued_scanner(
     # almost always wins, and this assert catches the run in about 120
     # where it doesn't.
     assert s1_reached_the_start_check.is_set(), (
-        "the cell shows nothing: run_parallel ended without the worker "
+        "this run pinned nothing: run_parallel ended without the worker "
         "reaching s1's start check, so the race was never pinned"
     )
     late = [name for name in ran if name != "s0"]
@@ -536,7 +536,7 @@ def test_a_cancels_own_future_is_not_a_completed_scanner(tmp_path, monkeypatch):
         for event_type, kwargs in events
         if event_type == AshEventType.SCAN_COMPLETE and kwargs.get("scanner") == "s1"
     ]
-    assert completions, "the cell shows nothing: s1 never completed"
+    assert completions, "this run pinned nothing: s1 never completed"
     assert completions[0]["completed_count"] == 1, completions
     assert completions[0]["total_count"] == 2, completions
 
@@ -612,7 +612,7 @@ def test_a_recorded_failure_counts_as_a_completion_in_a_cancelled_run(
         for event_type, kwargs in events
         if event_type == AshEventType.SCAN_COMPLETE and kwargs.get("scanner") == "s2"
     ]
-    assert completions, "the cell shows nothing: s2 never completed"
+    assert completions, "this run pinned nothing: s2 never completed"
     failed_turns = [
         kwargs
         for event_type, kwargs in events
@@ -620,7 +620,7 @@ def test_a_recorded_failure_counts_as_a_completion_in_a_cancelled_run(
     ]
     assert len(failed_turns) == 1, failed_turns
     assert failed_turns[0]["succeeded"] is False, (
-        "the cell shows nothing: s1 was announced as a success instead of a failure"
+        "this run pinned nothing: s1 was announced as a success instead of a failure"
     )
     assert completions[0]["succeeded"] is True, completions
     assert completions[0]["completed_count"] == 2, completions

@@ -319,7 +319,7 @@ class TestTwoScannersWithOneName:
         queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
         assert sorted(queued) == ["one", "two"]
 
-    def test_a_later_carrier_the_operator_excluded_is_skipped_not_error(self, ctx):
+    def test_a_later_holder_the_operator_excluded_is_skipped_not_error(self, ctx):
         """Selection before diagnosis, as for every scanner that does not run.
         Red at the base: the duplicate was recorded ERROR before any selection
         step, so `--exclude-scanners twin` failed the completeness gate on a run
@@ -335,7 +335,7 @@ class TestTwoScannersWithOneName:
 
         queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
         assert queued == []
-        # Both carriers are recorded SKIPPED, excluded: the first under its name,
+        # Both holders are recorded SKIPPED, excluded: the first under its name,
         # the later one under a row of its own, named by its class (it is not a
         # failure, but a row keyed by the shared name would be the first's).
         row = results.scanner_results["twin"]
@@ -445,7 +445,7 @@ class TestTwoScannersWithOneName:
         assert len(later_rows) == 1
         assert results.scanner_results[later_rows[0]].status == ScannerStatus.SKIPPED
 
-    def test_a_later_carrier_of_a_refused_name_is_told_the_first_does_not_run(
+    def test_a_later_holder_of_a_refused_name_is_told_the_first_does_not_run(
         self, ctx, logger
     ):
         """The first holder's name was refused by the tracker, so the later
