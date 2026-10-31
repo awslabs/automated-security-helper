@@ -1046,17 +1046,13 @@ def install_dependencies(
         # invalid-configuration code, as an unusable --config is.
         print(f"[red]{escape(NO_BIN_DIRECTORY)}[/red]")
         raise typer.Exit(EXIT_INVALID_CONFIG)
-    # Exported absolute, for the install's own commands and the sweep below: tool
-    # lookup does not search a relative ASH_BIN_PATH
-    # (subprocess_utils.find_executable). The panel shows the value as given. The
-    # directory itself is made just before the installs run (below), after every
-    # refusal of this command's own.
-    absolute_bin_path = Path(os.path.abspath(target_bin_path))
-    set_environ("ASH_BIN_PATH", str(absolute_bin_path))
-
     # The working directory is the source tree this command installs for. Deleted
     # or unmounted under the shell, Path.cwd() raised FileNotFoundError after the
     # panel was printed; it is the usage error a scan gives such a directory.
+    # Checked before the bin path is made absolute: os.path.abspath reads the
+    # working directory for a relative path, so a relative --bin-path or
+    # ASH_BIN_PATH under a deleted directory raised the same error out of the
+    # command, with the failed-install code, before this check was reached.
     try:
         source_dir = Path.cwd()
     except OSError:
@@ -1065,6 +1061,14 @@ def install_dependencies(
             "deleted or unmounted. Change to a directory that exists.[/red]"
         )
         raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+
+    # Exported absolute, for the install's own commands and the sweep below: tool
+    # lookup does not search a relative ASH_BIN_PATH
+    # (subprocess_utils.find_executable). The panel shows the value as given. The
+    # directory itself is made just before the installs run (below), after every
+    # refusal of this command's own.
+    absolute_bin_path = Path(os.path.abspath(target_bin_path))
+    set_environ("ASH_BIN_PATH", str(absolute_bin_path))
 
     console.print(
         Panel(

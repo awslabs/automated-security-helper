@@ -233,6 +233,36 @@ def test_a_deleted_working_directory_is_the_usage_refusal(
     assert "deleted or unmounted" in _flat(result.output), result.output
 
 
+@pytest.mark.parametrize("how", ["option", "environment"])
+def test_a_relative_bin_path_under_a_deleted_working_directory_is_the_usage_refusal(
+    quiet_machine, tmp_path, how
+):
+    """The bin path was made absolute before the working directory was checked,
+    and os.path.abspath reads the working directory for a relative path: the
+    command ended in a FileNotFoundError traceback, exit 1, where the same
+    deleted directory with an absolute --bin-path is the usage refusal."""
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    before = os.getcwd()
+    os.chdir(gone)
+    try:
+        gone.rmdir()
+        if how == "option":
+            result = runner.invoke(
+                dependencies_app, ["--bin-path", "bin", "--tool", "sarif"]
+            )
+        else:
+            result = runner.invoke(
+                dependencies_app, ["--tool", "sarif"], env={"ASH_BIN_PATH": "bin"}
+            )
+    finally:
+        os.chdir(before)
+
+    assert result.exit_code == 5, (result.output, result.exception)
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "deleted or unmounted" in _flat(result.output), result.output
+
+
 # --- install commands ---
 
 
