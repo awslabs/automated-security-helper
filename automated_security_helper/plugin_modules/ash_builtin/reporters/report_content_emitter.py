@@ -682,20 +682,31 @@ class ReportContentEmitter:
         """
         return severity_fails_threshold(severity, threshold)
 
+    @staticmethod
+    def _overview_row(vuln: FlatVulnerability) -> Dict[str, Any]:
+        """The row of a findings table for *vuln*."""
+        return {
+            "severity": vuln.severity or "UNKNOWN",
+            "scanner": vuln.scanner or "Unknown",
+            "rule_id": vuln.rule_id or "N/A",
+            "title": vuln.title or "Unknown Issue",
+            "file_path": vuln.file_path or "N/A",
+        }
+
+    @staticmethod
+    def _severity_sort_key(vuln: FlatVulnerability) -> tuple:
+        """Most severe first, then by file, line and rule."""
+        severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+        return (
+            severity_order.get(str(vuln.severity).upper(), 5),
+            vuln.file_path or "",
+            vuln.line_start or 0,
+            vuln.rule_id or "",
+        )
+
     def get_findings_overview(self) -> List[Dict[str, Any]]:
         """Get overview of all findings."""
-        findings = []
-        for vuln in self.flat_vulns:
-            findings.append(
-                {
-                    "severity": vuln.severity or "UNKNOWN",
-                    "scanner": vuln.scanner or "Unknown",
-                    "rule_id": vuln.rule_id or "N/A",
-                    "title": vuln.title or "Unknown Issue",
-                    "file_path": vuln.file_path or "N/A",
-                }
-            )
-        return findings
+        return [self._overview_row(vuln) for vuln in self.flat_vulns]
 
     def get_detailed_findings(self, max_findings: int = 20) -> List[Dict[str, Any]]:
         """Get detailed information for actionable findings, limited to max_findings."""
@@ -708,15 +719,7 @@ class ReportContentEmitter:
         ]
 
         # Limit the number of detailed findings
-        severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
-        actionable_findings.sort(
-            key=lambda vuln: (
-                severity_order.get(str(vuln.severity).upper(), 5),
-                vuln.file_path or "",
-                vuln.line_start or 0,
-                vuln.rule_id or "",
-            )
-        )
+        actionable_findings.sort(key=self._severity_sort_key)
         # A negative limit would slice from the end and drop the last findings
         # instead of none; the reporters refuse one, and a caller that passes
         # one anyway gets none.
@@ -736,25 +739,8 @@ class ReportContentEmitter:
         in its summary names none of them.
         """
         left_out = [vuln for vuln in self.flat_vulns if self.is_policy_not_gating(vuln)]
-        severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
-        left_out.sort(
-            key=lambda vuln: (
-                severity_order.get(str(vuln.severity).upper(), 5),
-                vuln.file_path or "",
-                vuln.line_start or 0,
-                vuln.rule_id or "",
-            )
-        )
-        return [
-            {
-                "severity": vuln.severity or "UNKNOWN",
-                "scanner": vuln.scanner or "Unknown",
-                "rule_id": vuln.rule_id or "N/A",
-                "title": vuln.title or "Unknown Issue",
-                "file_path": vuln.file_path or "N/A",
-            }
-            for vuln in left_out[: max(max_findings, 0)]
-        ]
+        left_out.sort(key=self._severity_sort_key)
+        return [self._overview_row(vuln) for vuln in left_out[: max(max_findings, 0)]]
 
     def _create_detailed_finding(self, vuln: FlatVulnerability) -> Dict[str, Any]:
         """Create a detailed finding dictionary from a vulnerability."""

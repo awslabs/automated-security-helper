@@ -563,3 +563,22 @@ class TestTheCutListPointsToTheRest:
         for out in (markdown, text):
             assert '"Not gating" scope' not in out, out
             assert "'Not gating' scope" not in out, out
+
+
+def test_the_not_gating_rows_are_the_overview_rows_of_the_same_findings(tmp_path):
+    """The two lists share one row shape and one severity order (a pin, green
+    at the base and at the tip of the refactor that gave them one builder)."""
+    emitter = ReportContentEmitter(_three_left_out(tmp_path), human_presentation=True)
+
+    left_out = emitter.get_policy_not_gating_findings(10)
+    overview = emitter.get_findings_overview()
+
+    assert len(left_out) == 3, left_out
+    assert sorted(left_out, key=lambda row: row["rule_id"]) == sorted(
+        overview, key=lambda row: row["rule_id"]
+    )
+    assert [row["rule_id"] for row in left_out] == [
+        "POLICY-AAA",
+        "POLICY-BBB",
+        "POLICY-CCC",
+    ]

@@ -210,6 +210,25 @@ def _cell(value) -> str:
     return _text(value).replace("\r", "").replace("\n", "<br>")
 
 
+def _findings_table(findings) -> list[str]:
+    """The header, the divider and one row per finding of a findings table.
+
+    The rows are those of ``ReportContentEmitter``; each value is one shown
+    line, as the rule ID, title and path come from the scan.
+    """
+    keys = ("severity", "scanner", "rule_id", "title", "file_path")
+    return [
+        "| Severity | Scanner | Rule ID | Title | File |",
+        "| --- | --- | --- | --- | --- |",
+        *(
+            "| "
+            + " | ".join(_cell(shown_on_one_line(finding[key])) for key in keys)
+            + " |"
+            for finding in findings
+        ),
+    ]
+
+
 def _code_block(value: str, language: str = "") -> str:
     # Scanner snippets can contain Markdown fences of their own.
     longest = max((len(run) for run in re.findall(r"`+", value)), default=0)
@@ -545,30 +564,8 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
         if options.include_findings_table:
             findings = emitter.get_findings_overview()
             if findings:
-                parts.extend(
-                    [
-                        "## Findings overview\n",
-                        "| Severity | Scanner | Rule ID | Title | File |",
-                        "| --- | --- | --- | --- | --- |",
-                    ]
-                )
-                for finding in findings:
-                    parts.append(
-                        "| "
-                        + " | ".join(
-                            # Each cell is one shown line: the rule ID, title
-                            # and path come from the scan.
-                            _cell(shown_on_one_line(finding[key]))
-                            for key in (
-                                "severity",
-                                "scanner",
-                                "rule_id",
-                                "title",
-                                "file_path",
-                            )
-                        )
-                        + " |"
-                    )
+                parts.append("## Findings overview\n")
+                parts.extend(_findings_table(findings))
                 parts.append("")
 
         if options.include_detailed_findings:
@@ -656,25 +653,9 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                             "left out of the outcome because "
                             "`policy_scanners_gate` is off.\n"
                         ),
-                        "| Severity | Scanner | Rule ID | Title | File |",
-                        "| --- | --- | --- | --- | --- |",
                     ]
                 )
-                for finding in left_out:
-                    parts.append(
-                        "| "
-                        + " | ".join(
-                            _cell(shown_on_one_line(finding[key]))
-                            for key in (
-                                "severity",
-                                "scanner",
-                                "rule_id",
-                                "title",
-                                "file_path",
-                            )
-                        )
-                        + " |"
-                    )
+                parts.extend(_findings_table(left_out))
                 parts.append("")
                 # The table stops at the same limit as the list above, so
                 # say where the rest is, as that list does.

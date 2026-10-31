@@ -43,6 +43,30 @@ from automated_security_helper.utils.converter_refusals import (
 )
 
 
+def _findings_table(findings) -> list[str]:
+    """The header, the divider and one row per finding of a findings table.
+
+    The rows are those of ``ReportContentEmitter``. The scanner, rule ID,
+    title and path come from the scan: each is shown on one line before it is
+    cut to its column, and an additional report's severity is the results
+    file's text.
+    """
+    lines = [
+        f"{'Severity':<10} {'Scanner':<15} {'Rule ID':<15} {'Title':<30} {'File':<30}",
+        f"{'-' * 10} {'-' * 15} {'-' * 15} {'-' * 30} {'-' * 30}",
+    ]
+    for finding in findings:
+        severity = str(shown_on_one_line(finding["severity"]))
+        scanner = str(shown_on_one_line(finding["scanner"]))[:15]
+        rule_id = str(shown_on_one_line(finding["rule_id"]))[:15]
+        title = str(shown_on_one_line(finding["title"]))[:30]
+        file_path = str(shown_on_one_line(finding["file_path"]))[:30]
+        lines.append(
+            f"{severity:<10} {scanner:<15} {rule_id:<15} {title:<30} {file_path:<30}"
+        )
+    return lines
+
+
 class TextReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Text reporter."""
 
@@ -346,31 +370,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             if findings:
                 text_parts.append("FINDINGS OVERVIEW")
                 text_parts.append("----------------")
-                text_parts.append(
-                    f"{'Severity':<10} {'Scanner':<15} {'Rule ID':<15} {'Title':<30} {'File':<30}"
-                )
-                text_parts.append(
-                    f"{'-' * 10} {'-' * 15} {'-' * 15} {'-' * 30} {'-' * 30}"
-                )
-
-                for finding in findings:
-                    # Truncate long fields to fit in the table
-                    # The scanner, rule ID, title and path come from the scan:
-                    # each is shown on one line before it is cut to its column.
-                    scanner = str(shown_on_one_line(finding["scanner"]))[:15]
-                    rule_id = str(shown_on_one_line(finding["rule_id"]))[:15]
-                    title = str(shown_on_one_line(finding["title"]))[:30]
-                    file_path = str(shown_on_one_line(finding["file_path"]))[:30]
-
-                    # An additional report's severity is the results file's text.
-                    severity = str(shown_on_one_line(finding["severity"]))
-                    text_parts.append(
-                        f"{severity:<10} "
-                        f"{scanner:<15} "
-                        f"{rule_id:<15} "
-                        f"{title:<30} "
-                        f"{file_path:<30}"
-                    )
+                text_parts.extend(_findings_table(findings))
                 text_parts.append("")
 
         # Add detailed findings if enabled
@@ -450,27 +450,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                     "findings reported and left out of the outcome because "
                     "policy_scanners_gate is off."
                 )
-                text_parts.append(
-                    f"{'Severity':<10} {'Scanner':<15} {'Rule ID':<15} {'Title':<30} {'File':<30}"
-                )
-                text_parts.append(
-                    f"{'-' * 10} {'-' * 15} {'-' * 15} {'-' * 30} {'-' * 30}"
-                )
-                for finding in left_out:
-                    # Each field comes from the scan: shown on one line before it
-                    # is cut to its column, as the findings overview does.
-                    severity = str(shown_on_one_line(finding["severity"]))
-                    scanner = str(shown_on_one_line(finding["scanner"]))[:15]
-                    rule_id = str(shown_on_one_line(finding["rule_id"]))[:15]
-                    title = str(shown_on_one_line(finding["title"]))[:30]
-                    file_path = str(shown_on_one_line(finding["file_path"]))[:30]
-                    text_parts.append(
-                        f"{severity:<10} "
-                        f"{scanner:<15} "
-                        f"{rule_id:<15} "
-                        f"{title:<30} "
-                        f"{file_path:<30}"
-                    )
+                text_parts.extend(_findings_table(left_out))
                 # The list stops at the same limit as the one above, so say
                 # where the rest is, as that list does.
                 if len(left_out) < summary["policy_not_gating"]:
