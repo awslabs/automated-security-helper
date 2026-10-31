@@ -617,9 +617,11 @@ class CliJsonInputCommand(TyperCommand):
         # the document sets, the environment is not read at all (rule 2 over
         # rule 3). The parse reads copies of those parameters that have no
         # variable (get_params below): the parameter objects are the command's,
-        # shared by every invocation of it, so clearing the variable on them hid
-        # it from a parse running at the same time and relied on a restore that
-        # an error could skip.
+        # shared by every invocation of it, so clearing the variable on them, even
+        # with a restore afterwards, hid it from a parse running at the same time.
+        # The copies belong to this parse's context alone. (The root group in
+        # main.py clears and restores variables on its own shared parameters in
+        # its own parse; this command does not touch the objects it shares.)
         set_aside_key = f"{_ENV_SET_ASIDE}:{id(ctx)}"
         if supplied:
             ctx.meta[set_aside_key] = {

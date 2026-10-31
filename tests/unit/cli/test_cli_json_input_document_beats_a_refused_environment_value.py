@@ -90,9 +90,10 @@ def test_the_environment_variable_is_read_again_after_a_document_set_the_key(
     tmp_path, monkeypatch
 ):
     """The command's parameter objects outlive one invocation: the variable
-    set aside for a parse the document set must be back for the next one. Both
-    runs use the one command object, as a server running many scans in one
-    process does."""
+    set aside for a parse the document set must be read again by the next one.
+    Both runs use the one command object, as a server running many scans in one
+    process does. Like the failed-parse case below, it held under the earlier
+    clear-and-restore scheme as well."""
     captured: dict = {}
     demo = _app(captured)
     _one_command(monkeypatch, demo)
@@ -112,9 +113,12 @@ def test_the_environment_variable_is_read_again_after_a_document_set_the_key(
 def test_the_environment_variable_is_read_again_after_a_parse_that_failed(
     tmp_path, monkeypatch
 ):
-    """A parse the document set the key for can still end in a usage error (a
-    bad value on the command line). The variable must be back for the next run
-    then too."""
+    """A regression pin, not a cure's test: a parse the document set the key for
+    can still end in a usage error (a bad value on the command line), and the
+    variable must be read again by the next run. This held when the variable
+    was cleared on the shared parameter and restored in a ``finally``, and it
+    holds now that the parse reads a copy; the test that tells the two apart is
+    the one below that reads the shared parameter during a parse."""
     captured: dict = {}
     demo = _app(captured)
     _one_command(monkeypatch, demo)
