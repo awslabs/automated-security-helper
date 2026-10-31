@@ -124,6 +124,32 @@ class TestOneReportFailsTheOtherIsWritten:
         assert APT_REPORT_HEADING in captured.out
         assert APT_UNAVAILABLE_LINE in captured.out
 
+    @pytest.mark.parametrize(
+        ("flags", "table_start"), [([], "tool"), (["--markdown"], "| tool |")]
+    )
+    def test_the_bare_table_is_followed_by_a_notice_in_the_summary(
+        self, monkeypatch, capsys, flags, table_start
+    ):
+        # Red before: stdout held the bare table, with no notes, bump steps or closing
+        # line, and nothing said they were missing, while the apt side wrote a notice.
+        _wire(monkeypatch, "current", render_report=_cannot("no bump steps"))
+        assert checker.main(flags) == checker.EXIT_ERROR
+        out = capsys.readouterr().out
+        assert out.splitlines()[0].startswith(table_start)
+        assert (
+            "could not render the notes, bump steps and closing line: "
+            "ValueError: no bump steps" in out
+        )
+        assert TOOL_REPORT_CLOSING not in out
+
+    def test_a_report_that_renders_has_no_notice(self, monkeypatch, capsys):
+        """Control: the notice is for the fallback only."""
+        _wire(monkeypatch, "current")
+        assert checker.main([]) == checker.EXIT_OK
+        out = capsys.readouterr().out
+        assert "could not render" not in out
+        assert TOOL_REPORT_CLOSING in out
+
     def test_an_apt_report_fault_keeps_the_tool_report(self, monkeypatch, capsys):
         # Red before: the apt fault was handled as a tool-report fault, and only the
         # plain table was written, without the closing line and the notes.

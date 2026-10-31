@@ -222,11 +222,41 @@ class TestClosingLine:
         assert EVERY not in report
         assert note in report
 
+    @staticmethod
+    def _bundled(tool: str = "lib") -> Any:
+        return checker.Pin(
+            tool=tool,
+            version="1.0.0",
+            ecosystem=checker.BUNDLED,
+            project="wheel",
+            pinned_in=("THIRD_PARTY_LICENSES (bundled)",),
+            kind=checker.BUNDLED_LIBRARY,
+        )
+
     def test_current_and_held_pins_keep_the_claim(self):
-        """Control: the sentence is still printed when it is true."""
-        held = checker.Result(_pin("lib"), None, "held", "version set by wheel")
-        report = self._report(checker.Result(_pin(), "v1.0.0", "current"), held)
+        # Red before: the held row check() builds carries its reason in ``note``, which
+        # the closing line read as a caveat, so every real run with a bundled library
+        # printed "not every pin is at its upstream's latest release". The control built
+        # its held row with the reason as ``detail``, a shape check() no longer makes.
+        results = checker.check(
+            [_pin(), self._bundled()],
+            fetchers={checker.GITHUB: lambda project: "v1.0.0"},
+        )
+        assert [r.status for r in results] == ["current", "held"]
+        assert results[1].note == "version set by wheel"
+        report = self._report(*results)
         assert EVERY in report
+        assert "not every pin" not in report
+        assert "lib: version set by wheel" in report
+
+    def test_a_caveat_beside_a_held_pin_still_withholds_the_claim(self):
+        """Control: only the held row's own note is left out of the condition."""
+        note = "9.0 is the newest release, but it needs Ruby 9.0"
+        gem = checker.Result(_pin(), "v1.0.0", "current", note=note)
+        held = checker.check([self._bundled()])[0]
+        report = self._report(gem, held)
+        assert EVERY not in report
+        assert "not every pin is at its upstream's latest release" in report
 
     def test_an_outdated_pin_has_neither_closing_line(self, monkeypatch):
         """Control: a pin that is behind gets its steps and no summary sentence."""

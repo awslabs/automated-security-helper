@@ -2230,7 +2230,10 @@ def render_report(pins: Any, results: list[Result], markdown: bool = False) -> s
         detail = _escape_markdown(r.detail) if markdown else r.detail
         out.append(f"\n{r.pin.tool}: lookup failed ({detail})")
     if not outdated and not errors:
-        if noted or any(r.status == "ahead" for r in results):
+        # A held row (a bundled library, whose version another pin sets) carries a note
+        # that says why it is not compared. That is no release the image cannot use.
+        caveats = any(r.note for r in results if r.status != "held")
+        if caveats or any(r.status == "ahead" for r in results):
             # Nothing is behind, but a pin newer than upstream's latest, or a newer
             # release the image cannot use, is not "at its upstream's latest release".
             out.append(
@@ -2306,7 +2309,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         render_failed = True
         try:
-            report = render_table(results, markdown=args.markdown) + "\n"
+            # stdout is the job summary: the bare table has no notes, bump steps or
+            # closing line, and it has to say so.
+            report = (
+                render_table(results, markdown=args.markdown)
+                + "\n"
+                + _render_fault_notice(
+                    "Pinned tool notes and bump steps",
+                    "notes, bump steps and closing line",
+                    exc,
+                    args.markdown,
+                )
+            )
         except Exception as table_exc:  # the same fault, one level down
             print(
                 "error: could not render the tool table: "
