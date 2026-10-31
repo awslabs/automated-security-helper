@@ -139,6 +139,11 @@ KNOWN_SKIP_REASONS: frozenset[str] = frozenset(
     }
 )
 
+#: The name a skipped entry is grouped under when it carries no reason (the key
+#: absent, null or blank). It is not in ``KNOWN_SKIP_REASONS``, so a scan of nothing
+#: whose skipped entries say nothing about why is refused like any unknown reason.
+NO_SKIP_REASON = "no reason given"
+
 
 #: The paths semgrep and opengrep skip by default when no .semgrepignore is
 #: read. Passed as --exclude with --x-ignore-semgrepignore-files, so that a
@@ -1113,11 +1118,12 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         permissions (``UNREAD_SKIP_REASONS``; the tool reports those before it
         chooses a language, so whether a rule covers the file cannot be told, and
         the refusal says that and names the remedies), and when it skipped a file
-        for a reason this version of ASH does not know (``KNOWN_SKIP_REASONS``). None
-        scanned otherwise means nothing below the target is in a language the rules
-        cover, or every such file is one the tool's own defaults or ASH's exclusions
-        leave out, which the executor grades SKIPPED (``targets_attempted`` 0). An
-        absent or unreadable paths file leaves the count unset (no claim).
+        for a reason this version of ASH does not know (``KNOWN_SKIP_REASONS``), or
+        gave none (``NO_SKIP_REASON``). None scanned otherwise means nothing below
+        the target is in a language the rules cover, or every such file is one the
+        tool's own defaults or ASH's exclusions leave out, which the executor grades
+        SKIPPED (``targets_attempted`` 0). An absent or unreadable paths file leaves
+        the count unset (no claim).
 
         Raises:
             ScannerError: When ``--exclude`` patterns left out every file the tool
@@ -1197,9 +1203,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 by_reason: dict = {}
                 for entry in skipped:
                     if isinstance(entry, dict):
-                        by_reason.setdefault(
-                            str(entry.get("reason")).lower(), []
-                        ).append(entry)
+                        by_reason.setdefault(_skip_reason(entry), []).append(entry)
                 where = (
                     f"{self.command} scanned no file below {Path(target).as_posix()}"
                 )
@@ -1227,9 +1231,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         "ASH, and an exclude pattern of this scanner is read as the "
                         "operator's patterns, which keeps the scan refused."
                     )
-                unknown = sorted(
-                    r for r in by_reason if r not in KNOWN_SKIP_REASONS and r != "none"
-                )
+                unknown = sorted(r for r in by_reason if r not in KNOWN_SKIP_REASONS)
                 if unknown:
                     count = sum(len(by_reason[r]) for r in unknown)
                     raise ScannerError(
@@ -1424,6 +1426,18 @@ _PATHS_OUTPUT_FLAG = "--json-output"
 
 #: The largest scanned-paths JSON read.
 _PATHS_OUTPUT_READ_LIMIT = 64 * 1024 * 1024
+
+
+def _skip_reason(entry: dict) -> str:
+    """The lowercased ``reason`` of one ``paths.skipped`` entry, or
+    ``NO_SKIP_REASON`` when it has none (absent, null or blank). The key used to be
+    read as ``str(entry.get("reason"))``, which turned an absent or null reason into
+    the text ``none`` and let it past the unknown-reason refusal, and left a blank
+    one to be refused under an empty name."""
+    reason = entry.get("reason")
+    if reason is None or not str(reason).strip():
+        return NO_SKIP_REASON
+    return str(reason).lower()
 
 
 def _read_paths_output(final_args: List[str]) -> Optional[dict]:

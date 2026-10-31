@@ -501,6 +501,34 @@ def test_an_unknown_skip_reason_is_refused_not_graded_skipped(
 
 
 @pytest.mark.parametrize(
+    "entry",
+    [
+        pytest.param({"path": "src/app.py"}, id="key-absent"),
+        pytest.param({"path": "src/app.py", "reason": None}, id="null"),
+        pytest.param({"path": "src/app.py", "reason": ""}, id="empty"),
+        pytest.param({"path": "src/app.py", "reason": "  "}, id="blank"),
+    ],
+)
+def test_a_skipped_file_with_no_reason_is_refused_not_graded_skipped(
+    test_plugin_context, monkeypatch, tmp_path, entry
+):
+    """An entry that says nothing about why the file was skipped could be a covered
+    file that went unread, as an unlisted reason could: nothing scanned is refused,
+    and the refusal names that no reason was given.
+
+    Fails on the code before the reason was read through ``_skip_reason``: an
+    absent or null reason read as the text ``none``, which the unknown-reason test
+    skipped, so the target graded SKIPPED (the first two rows do not raise); an
+    empty reason raised with an empty name, ``does not know ()`` (the last two rows
+    do not match the message).
+    """
+    scanner = _scanner(test_plugin_context, monkeypatch)
+
+    with pytest.raises(ScannerError, match="does not know \\(no reason given\\)"):
+        _grade(scanner, tmp_path, [entry])
+
+
+@pytest.mark.parametrize(
     "reason",
     [
         "always_skipped",
