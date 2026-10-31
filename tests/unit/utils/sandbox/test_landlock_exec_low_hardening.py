@@ -94,10 +94,18 @@ def no_process_control(monkeypatch):
     reordered ahead of the policy check) would restrict the pytest worker for
     every later test. ``resource.setrlimit`` is in the set for the same reason
     (RLIMIT_CORE). A test that needs one of them stubs it, as the fork test does.
+
+    ``pytest.fail`` raises a BaseException, which code under test that wraps its
+    work in ``except BaseException`` (the forked child does) turns into its own
+    exit, leaving the test to pass on whatever that exit reports. So each refusal
+    is also recorded, the fixture yields the list, and it asserts the list empty
+    once the test is over. A test that provokes a refusal on purpose clears it.
     """
+    reached = []
 
     def refuse(label):
         def refused(*args, **kwargs):
+            reached.append(label)
             pytest.fail(f"{label} reached the test process; stub it in the test")
 
         return refused
@@ -111,6 +119,8 @@ def no_process_control(monkeypatch):
         "libc",
         SimpleNamespace(prctl=refuse("libc.prctl"), syscall=refuse("libc.syscall")),
     )
+    yield reached
+    assert not reached, f"reached the test process, and swallowed there: {reached}"
 
 
 @pytest.mark.parametrize(
@@ -126,14 +136,17 @@ def no_process_control(monkeypatch):
         (signal, "pthread_kill"),
     ],
 )
-def test_the_fixture_refuses_each_call_that_ends_or_signals_a_process(module, name):
+def test_the_fixture_refuses_each_call_that_ends_or_signals_a_process(
+    module, name, no_process_control
+):
     """Called with more arguments than the real function takes, so that a call the
     fixture failed to replace raises TypeError and acts on nothing."""
     with pytest.raises(pytest.fail.Exception, match=f"{module.__name__}.{name} "):
         getattr(module, name)(1, 2, 3, 4, 5, 6, 7)
+    no_process_control.clear()
 
 
-def test_the_fixture_refuses_the_calls_that_restrict_the_process():
+def test_the_fixture_refuses_the_calls_that_restrict_the_process(no_process_control):
     """The calls are made with an option and a system call number the kernel
     refuses (EINVAL, ENOSYS) and with too many arguments, so that a call the
     fixture failed to replace restricts nothing."""
@@ -143,6 +156,19 @@ def test_the_fixture_refuses_the_calls_that_restrict_the_process():
         landlock_exec.libc.syscall(-1)
     with pytest.raises(pytest.fail.Exception, match="resource.setrlimit"):
         resource.setrlimit(1, 2, 3)
+    no_process_control.clear()
+
+
+def test_a_refusal_the_code_under_test_swallows_is_still_recorded(no_process_control):
+    """Too many arguments again, so that a call the fixture failed to replace is a
+    TypeError and replaces nothing."""
+    try:
+        os.execv(1, 2, 3, 4, 5, 6, 7)
+    except BaseException:  # noqa: BLE001 - what the forked child's reporting does
+        pass
+
+    assert no_process_control == ["os.execv"]
+    no_process_control.clear()
 
 
 class _Exit(BaseException):
