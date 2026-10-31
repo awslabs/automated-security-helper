@@ -42,7 +42,7 @@ import pytest
 
 from automated_security_helper.config.config_validator import REDACTED
 from automated_security_helper.utils import subprocess_utils
-from automated_security_helper.utils.sandbox import backends, scope
+from automated_security_helper.utils.sandbox import backends, fs_guard, scope
 from automated_security_helper.utils.sandbox.backends import SandboxBackend, SpawnPlan
 from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
@@ -741,6 +741,52 @@ def test_a_value_that_is_not_text_does_not_stop_the_spawn(tmp_path, debug_record
 
     assert plan.argv == ["tool", "--x=it's-text"]
     assert len(debug_record.debug_lines) == 1
+
+
+def _two_writable_roots(tmp_path, monkeypatch):
+    """The policy now grants two directories, so the spawn registers two roots
+    (``debug_record``'s policy grants none, and no registration was made)."""
+    roots = [tmp_path / "w1", tmp_path / "w2"]
+    for root in roots:
+        root.mkdir()
+    monkeypatch.setattr(
+        scope,
+        "build_scanner_policy",
+        lambda *args, **kwargs: SimpleNamespace(network=False, writable=list(roots)),
+    )
+    return {Path(os.path.abspath(root)) for root in roots}
+
+
+def test_the_roots_a_spawn_registers_are_held_until_its_cleanup(
+    tmp_path, monkeypatch, debug_record
+):
+    """Both ends of the registration the module docstring talks about: the roots
+    are registered once the plan is made, and the plan's cleanup releases them."""
+    registered = _two_writable_roots(tmp_path, monkeypatch)
+    before = fs_guard.registered_roots()
+
+    plan = scope._plan_spawn(_scope(tmp_path), ["tool"], {}, None)
+
+    assert registered <= fs_guard.registered_roots()
+    plan.run_cleanup()
+    assert fs_guard.registered_roots() == before
+
+
+def test_an_interrupt_in_the_record_leaves_no_root_registered(
+    tmp_path, monkeypatch, debug_record
+):
+    _two_writable_roots(tmp_path, monkeypatch)
+    before = fs_guard.registered_roots()
+
+    def interrupted(sandbox_scope, policy, plan):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(scope, "_record_plan", interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        scope._plan_spawn(_scope(tmp_path), ["tool"], {}, None)
+
+    assert fs_guard.registered_roots() == before
 
 
 class _Unprintable:
