@@ -13,7 +13,9 @@ were set on the new one, and its extras, and the copy in ``save_model`` is gone.
 
 The controls say the dump of the set fields carries the keys it carried when the
 object was replaced, that only what was set on the source reaches the target, and that
-two models never share a summary object.
+two models never share a summary object. A metadata that never set ``summary_stats``
+(read from a file that lacks the key) counts the field as set once the pass has filled
+it, so the dump that leaves out unset fields carries the block.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from automated_security_helper.core.unified_metrics import (
 )
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
+    ReportMetadata,
     SummaryStats,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -64,8 +67,14 @@ def _result(rule: str, suppressed: bool = False) -> Result:
     )
 
 
-def _model(*results: Result) -> AshAggregatedResults:
-    model = AshAggregatedResults()
+def _model(
+    *results: Result, metadata: ReportMetadata | None = None
+) -> AshAggregatedResults:
+    model = (
+        AshAggregatedResults()
+        if metadata is None
+        else AshAggregatedResults(metadata=metadata)
+    )
     model.ash_config = get_default_config()
     model.sarif = SarifReport(
         version="2.1.0",
@@ -157,6 +166,25 @@ def test_an_extra_field_of_the_source_reaches_the_target():
     _copy_set_fields(target, SummaryStats(suppressed=1, custom_note="kept"))
 
     assert target.custom_note == "kept"
+
+
+def test_a_metadata_that_never_set_summary_stats_carries_them_after_the_pass():
+    model = _model(
+        _result("R1"),
+        _result("R2", suppressed=True),
+        metadata=ReportMetadata(project_name="x"),
+    )
+    held = model.metadata.summary_stats
+    assert "summary_stats" not in model.metadata.model_fields_set
+    assert "summary_stats" not in model.to_simple_dict()["metadata"]
+
+    populate_metrics_from_unified_source(model)
+
+    assert model.metadata.summary_stats is held
+    assert "summary_stats" in model.metadata.model_fields_set
+    sent = model.to_simple_dict()["metadata"]["summary_stats"]
+    assert sent["severity_counts"]["critical"] == 1
+    assert sent["severity_counts"]["suppressed"] == 1
 
 
 def test_two_models_never_share_a_summary_object():

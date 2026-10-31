@@ -1115,6 +1115,11 @@ def _populate_summary_stats_from_unified_metrics(
         error=error_count,
     )
     _copy_set_fields(held, rebuilt)
+    # The same object, assigned back so the metadata counts the field as set. A
+    # metadata read from a file that lacks the key never set it, and a dump that
+    # leaves out unset fields (the CloudWatch Logs and S3 payloads) would leave
+    # out the whole block, whatever the object now carries.
+    aggregated_results.metadata.summary_stats = held
 
     ASH_LOGGER.debug(
         f"Updated summary_stats: {total_actionable} actionable findings across {len(unified_metrics)} scanners"
