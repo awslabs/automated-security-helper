@@ -1581,6 +1581,10 @@ class TestEveryReaderFiltersExpiredEntries:
         # Workspace policy: copied into each project's global_settings.ignore_paths.
         ("config/ash_workspace_config.py", "ignore_paths"): "feeds-global",
         ("workspace/plan.py", "policy_ignore_paths"): "feeds-global",
+        # What one push-down of the policy's entries made for a project
+        # (_PushedDown in workspace/policy.py): the entries are then resolved into
+        # the project's policy, whose ignore paths feed plan.policy_ignore_paths.
+        ("workspace/policy.py", "entries"): "feeds-global",
         # Scanner options, turned into tool arguments in their own module.
         (
             "plugin_modules/ash_builtin/scanners/bandit_scanner.py",
