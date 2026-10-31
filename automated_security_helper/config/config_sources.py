@@ -1727,10 +1727,18 @@ def _descriptor_leads_to_the_judged_path(opened: OpenedConfig, resolved: Path) -
     a name the judgment spelled as it was typed (``/repo/.ASH.yaml`` for
     ``/repo/.ash.yaml``), and a legitimate config was then refused as changed
     after it was checked, a race that never happened. A path that differs only in
-    case therefore counts when the judged path is not a link and is the very file
-    the descriptor holds (the same device and inode). Any other difference, and a
-    descriptor whose path cannot be told, stays a refusal: no identity vouches
-    for a file the permit did not see.
+    case therefore counts when no component of the judged path is a link now and
+    the judged path is the very file the descriptor holds (the same device and
+    inode). The judged path was resolved before the permit, so it names no link;
+    one that does now was swapped in since, and a parent directory made a link
+    to a sibling that differs from it in case alone would otherwise make the
+    descriptor's path look like the judged one while the file is not the one the
+    permit saw. The test is that resolving the judged path again gives it back
+    unchanged: resolution reads links and never changes case on a case-sensitive
+    file system, and the judged path is already in the case the system reports
+    where it ignores case. Any other difference, and a descriptor whose path
+    cannot be told, stays a refusal: no identity vouches for a file the permit
+    did not see.
     """
     if opened.real is None:
         return False
@@ -1740,10 +1748,14 @@ def _descriptor_leads_to_the_judged_path(opened: OpenedConfig, resolved: Path) -
         return False
     try:
         leaf = os.lstat(resolved)
+        # lstat refuses a link at the last component only, and follows one in
+        # any parent: the judged path must still lead to itself.
+        again = Path(os.path.realpath(resolved))
     except (OSError, ValueError):
         return False
     return (
-        not _is_a_symlink_or_reparse_point(leaf)
+        again == resolved
+        and not _is_a_symlink_or_reparse_point(leaf)
         and (leaf.st_dev, leaf.st_ino) == opened.identity
     )
 
@@ -1766,7 +1778,8 @@ def _identity_held_after_the_judgment(
     ``ABSENT_FILE`` when the judged path leads to no regular file now (a
     directory, a dangling link, an unreadable name, a leaf made a link), when
     the descriptor's path is not the judged one (a difference in case alone is
-    settled by the inode, ``_descriptor_leads_to_the_judged_path``), and when
+    settled by the inode, provided no component of the judged path is a link
+    now, ``_descriptor_leads_to_the_judged_path``), and when
     the descriptor's path cannot be told: no identity vouches for a file the
     permit did not see, and a read held to ``ABSENT_FILE`` refuses whatever file
     is at the name by then.
