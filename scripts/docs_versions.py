@@ -617,6 +617,13 @@ _TABLE = re.compile(r"<table\b.*?</table>", re.DOTALL)
 _TEXT_SAMPLE = re.compile(
     r'<div class="language-text\b[^"]*"[^>]*>.*?</div>', re.DOTALL
 )
+_CODE_BLOCK_END = re.compile(r"</pre\s*>")
+#: The line page_text puts after every code block. Two blocks with nothing between
+#: them are separated by blank lines only, and the entry walk of
+#: scripts/version_template_manager.py crosses blank lines (a YAML entry may hold
+#: them), so without a line of text at indent 0 the last entry of one block would
+#: take in the indented first lines of the next.
+CODE_BLOCK_END = "(end of code block)"
 
 
 def page_text(content: bytes, *, commands_only: bool = False) -> str:
@@ -625,7 +632,8 @@ def page_text(content: bytes, *, commands_only: bool = False) -> str:
     A code element starts and ends a line, so two spans of one sentence do not run
     together: the pin readers of scripts/version_template_manager.py end a command at
     a line break, and an inline span written with backticks in the source has none
-    left once its tags are gone.
+    left once its tags are gone. A line of text, CODE_BLOCK_END, follows every code
+    block, so an entry that ends one block does not reach the lines of the next.
 
     With commands_only, without its tables and `text` samples: a template may name the
     current release there with {{RELEASE}} (scripts/docs_checks.py
@@ -636,6 +644,7 @@ def page_text(content: bytes, *, commands_only: bool = False) -> str:
     markup = content.decode("utf-8", "replace")
     if commands_only:
         markup = _TEXT_SAMPLE.sub("", _TABLE.sub("", markup))
+    markup = _CODE_BLOCK_END.sub(f"</pre>\n{CODE_BLOCK_END}\n", markup)
     markup = _CODE_TAG.sub("\n", markup)
     return html.unescape(re.sub(r"<[^>]+>", "", markup))
 

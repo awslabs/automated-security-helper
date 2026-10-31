@@ -1142,6 +1142,62 @@ def test_the_built_text_is_what_the_check_reads():
 
 
 @pytest.mark.unit
+def test_the_built_text_puts_a_line_of_text_after_every_code_block():
+    """Red before: two code blocks with no text between them came out separated by
+    blank lines only, and the entry walk crosses blank lines."""
+    markdown = "```yaml\nfirst: 1\n```\n\n```yaml\nsecond: 2\n```\n"
+    lines = _built_text(markdown, commands_only=False).splitlines()
+    assert lines.count(dv.CODE_BLOCK_END) == 2, lines
+    assert lines.index("first: 1") < lines.index(dv.CODE_BLOCK_END), lines
+    assert lines.index(dv.CODE_BLOCK_END) < lines.index("second: 2"), lines
+
+
+# An ASH pin whose entry does not name this repository, at the end or the start of one
+# code block, and another project's entry at the start or the end of the block beside
+# it. Nothing is written between the two blocks, and the second block is indented
+# deeper than the first (or the first shallower than the second), as a `repos:` list
+# shown on its own is.
+ADJACENT_BLOCKS = {
+    "the pin ends a block, the other project starts the next": (
+        "```yaml\n- {repo: $ASH_REPO, rev: v3.3.0}\n```\n\n"
+        f"```yaml\n  - repo: {OTHER_PROJECT_URL}\n    rev: v4.6.0\n```\n"
+    ),
+    "the other project ends a block, the pin starts the next": (
+        f"```yaml\n- repo: {OTHER_PROJECT_URL}\n```\n\n"
+        '```yaml\n  repo: "$ASH_REPO"\n  rev: v3.3.0\n```\n'
+    ),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "markdown", list(ADJACENT_BLOCKS.values()), ids=list(ADJACENT_BLOCKS)
+)
+def test_an_allowance_does_not_excuse_a_pin_in_the_next_code_block(markdown):
+    """Red before: the blank lines between two blocks were crossed like the blank lines
+    inside an entry, so an entry that ended one block took in the indented lines of
+    the next, and the project named there excused a stale pin of this repository."""
+    manager = _manager()
+    text = _built_text(markdown, commands_only=False)
+    problems = dv.unrecognized_pin_problems(
+        manager, text, "page/", ("example/other-project",)
+    )
+    assert len(problems) == 1, problems
+    assert "pin of 3.3.0" in problems[0], problems
+
+
+@pytest.mark.unit
+def test_an_allowance_still_excuses_a_pin_below_a_blank_line_in_one_code_block():
+    """The control: a blank line inside one block is inside the entry."""
+    manager = _manager()
+    markdown = f"```yaml\n- repo: {OTHER_PROJECT_URL}\n\n  rev: v4.6.0\n```\n"
+    text = _built_text(markdown, commands_only=False)
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    allowed = ("example/other-project",)
+    assert dv.unrecognized_pin_problems(manager, text, "page/", allowed) == []
+
+
+@pytest.mark.unit
 def test_the_built_text_of_main_drops_a_text_sample():
     markdown = "```text\nrev: v3.3.0\n```\n\n```bash\nrun it\n```\n"
     assert "v3.3.0" in _built_text(markdown, commands_only=False)
