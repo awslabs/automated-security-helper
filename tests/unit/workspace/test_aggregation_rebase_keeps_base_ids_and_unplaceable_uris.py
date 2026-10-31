@@ -40,7 +40,9 @@ The contract these cases pin:
 - ``_rooted`` reads a UNC or drive path as absolute and a single leading
   backslash as a file-name character (``uri_separators``' rule for a POSIX
   project), a base chain is bounded by the bases it names, and the
-  policy-origin marker and its reader have one home, ``aggregation``.
+  policy-origin marker and its reader have one home, ``aggregation`` (the result
+  filters spell the value again so they need not import the workspace, and a
+  test pins that spelling equal).
 """
 
 from __future__ import annotations
@@ -50,6 +52,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.core.resource_management import result_filters
 from automated_security_helper.workspace import aggregation, execution
 from automated_security_helper.workspace.aggregation import (
     PROJECT_ROOT_URI_BASE_ID,
@@ -534,6 +537,9 @@ def test_the_policy_origin_marker_and_its_reader_have_one_home():
     """Red at the base: execution kept its own ``_is_policy_origin`` beside
     aggregation's copy, and nothing failed when the two drifted."""
     assert execution.POLICY_ORIGIN == aggregation.POLICY_ORIGIN == "workspace-policy"
+    # The third spelling of the value: the result filters keep their own copy so
+    # that module does not import the workspace, and nothing else pins it.
+    assert result_filters._POLICY_ORIGIN == aggregation.POLICY_ORIGIN
     assert execution.is_policy_origin is aggregation.is_policy_origin
     assert not hasattr(execution, "_is_policy_origin")
     assert aggregation.is_policy_origin({"properties": {"origin": "workspace-policy"}})

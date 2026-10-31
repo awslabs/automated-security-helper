@@ -566,8 +566,9 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
 
 
 #: The ``properties.origin`` value the workspace executor writes on a finding from
-#: a scanner only the workspace policy added (``workspace.execution.POLICY_ORIGIN``,
-#: spelled here so this module does not import the executor).
+#: a scanner only the workspace policy added (``workspace.aggregation.POLICY_ORIGIN``,
+#: spelled here so this module does not import the workspace; a test pins the two
+#: equal).
 _POLICY_ORIGIN = "workspace-policy"
 
 
