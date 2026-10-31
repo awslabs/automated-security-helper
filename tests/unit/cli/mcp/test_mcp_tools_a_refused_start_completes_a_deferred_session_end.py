@@ -10,8 +10,8 @@ whose start failed after the claim, and a task cancelled before the loop first
 ran its coroutine (whose finally never runs) all gave the claim back without it,
 so an end that arrived in that window waited for the TTL sweep. And a task
 cancelled while its scan thread still held the session lock asked while the lock
-refused the end, with nothing asking again once the thread let go. Each path now
-asks: the start paths through ``_release_what_the_scan_held_off_the_loop`` (on a
+refused the end, with nothing asking again once the thread released it. Each path
+now asks: the start paths through ``_release_what_the_scan_held_off_the_loop`` (on a
 worker thread, never raising; see
 test_mcp_tools_a_refused_start_releases_its_session_off_the_loop.py), the
 never-run callback through ``_release_what_the_scan_held``, the scan thread once
