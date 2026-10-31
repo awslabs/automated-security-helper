@@ -37,8 +37,14 @@ def _reference_schema(description: str) -> dict:
 
 
 ENV_REFERENCE_JSON_SCHEMA = _reference_schema(
-    "An environment reference, kept as the configuration file wrote it. "
-    "The field is read with its default."
+    "An environment reference, kept as the configuration file wrote it: the "
+    "variable's value is never recorded. The field is read with its default, "
+    "the model's own and not the one written inside the reference (the 600 "
+    "of ${VAR:600}); a reference inside a list takes the whole list out, so "
+    "the list is read with its default too. The load warns and lists the "
+    "field as unreadable. ash merge and ash report refuse unless the "
+    "operator supplies the field, and a command that runs a scan takes the "
+    "operator's own value. A true/false field holds no reference at all."
 )
 
 #: The same reference in a configuration file, where the loader resolves it to

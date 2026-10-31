@@ -349,3 +349,43 @@ def test_the_reference_branch_is_the_shared_one(results_schema):
     assert ENV_REFERENCE_JSON_SCHEMA in branches
     (choices,) = [branch for branch in branches if "enum" in branch]
     assert choices["enum"] == ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+
+def test_the_reference_branch_says_what_reading_with_its_default_means():
+    """The description of the shared branch states the rules the load follows
+    (config/recorded_config.py), so an editor hint does not leave a reader to
+    guess which default, what happens to a list, and who is told."""
+    description = ENV_REFERENCE_JSON_SCHEMA["description"]
+
+    assert "read with its default" in description
+    # The model's default, not the one written inside the reference.
+    assert "${VAR:600}" in description
+    # A reference inside a list takes the whole list out.
+    assert "whole list" in description
+    # The load says so, and the commands that act on the field refuse.
+    assert "unreadable" in description
+    assert "ash merge" in description and "ash report" in description
+    # No reference is admitted for a true/false field.
+    assert "true/false" in description
+
+
+def test_what_the_description_says_about_a_list_is_what_the_load_does():
+    """The control for the sentence about lists: a reference in one item of a
+    list takes the list out whole, not the item."""
+    from automated_security_helper.config.recorded_config import (
+        without_unreadable_references,
+    )
+    from pydantic import BaseModel, ValidationError
+    from typing import List, Literal
+
+    class _Section(BaseModel):
+        formats: List[Literal["json", "yaml"]] = ["json"]
+
+    data = {"formats": ["yaml", "${FORMAT}"]}
+    with pytest.raises(ValidationError) as refused:
+        _Section.model_validate(data)
+
+    kept, found = without_unreadable_references(data, refused.value)
+
+    assert kept == {}
+    assert found == [("formats", "${FORMAT}")]
