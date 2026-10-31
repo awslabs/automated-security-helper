@@ -194,15 +194,18 @@ def test_the_temporary_lock_is_named_for_the_cache_alone(tmp_path):
     assert lock.name == f"ash-grype-update-{digest}.lock"
 
 
-def _lock_names(cache):
-    """The cache lock's path, the shared temporary lock's and this account's."""
+def _lock_names(cache, tool="grype"):
+    """The cache lock's path, the shared temporary lock's and this account's.
+
+    The names carry the tool, as the refresh's do, so a test that refreshes another
+    tool's cache asks for that tool's names."""
     digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
     account = str(os.getuid()) if hasattr(os, "getuid") else getpass.getuser()
     temporary = Path(tempfile.gettempdir())
     return (
-        cache / ".ash-grype-update.lock",
-        temporary / f"ash-grype-update-{digest}.lock",
-        temporary / f"ash-grype-update-{digest}-{account}.lock",
+        cache / f".ash-{tool}-update.lock",
+        temporary / f"ash-{tool}-update-{digest}.lock",
+        temporary / f"ash-{tool}-update-{digest}-{account}.lock",
     )
 
 
@@ -467,7 +470,7 @@ def test_the_account_lock_taken_instead_is_waited_for_as_long(
     """The fallback is a lock too, and a holder of it is as long-running as a
     holder of the first: both calls carry the same sized wait."""
     cache = _blocked_cache(tmp_path)
-    _lock, shared, own = _lock_names(cache)
+    _lock, shared, own = _lock_names(cache, "trivy")
     taken = _recording_lock(
         monkeypatch, refusals=[PermissionError(errno.EACCES, "Permission denied")]
     )
