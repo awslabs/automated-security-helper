@@ -901,10 +901,16 @@ def test_a_scan_root_reached_through_a_link_below_the_baselines_directory_keeps_
     against the baseline's: when it is not that directory, the baseline's paths
     are read relative to the scan root, the shape before the re-anchoring. The
     control is the same baseline under the real directory, where the walk is
-    right and the anchor is the checkout."""
+    right and the anchor is the checkout.
+
+    The checkout has a ``.git`` holding ``HEAD`` (a bare ``.git`` directory is
+    no checkout to the trust rules), and the scanner finds the baseline itself:
+    the tree's ``.secrets.baseline`` is a link up to the checkout's file, which
+    is admitted as the repository's."""
     monkeypatch.chdir(tmp_path)
     checkout = tmp_path / "repo"
     (checkout / ".git").mkdir(parents=True)
+    (checkout / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     real_api = checkout / "packages" / "api"
     real_api.mkdir(parents=True)
     (real_api / "settings.py").write_text(f"KEY = '{KEPT_SECRET}'\n", encoding="utf-8")
@@ -914,6 +920,9 @@ def test_a_scan_root_reached_through_a_link_below_the_baselines_directory_keeps_
     try:
         (checkout / "api").symlink_to(
             Path("packages") / "api", target_is_directory=True
+        )
+        (real_api / ".secrets.baseline").symlink_to(
+            Path("..") / ".." / ".secrets.baseline"
         )
     except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
         pytest.skip(f"symlinks unavailable on this platform: {exc}")
@@ -925,12 +934,12 @@ def test_a_scan_root_reached_through_a_link_below_the_baselines_directory_keeps_
     )
     context.output_dir.mkdir(parents=True)
     scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
-    # No baseline was placed in the tree; the anchor rule is driven directly
-    # with the checkout's baseline as the one the scan found and parsed.
-    assert not scanner._baseline_in_use()
-    scanner._baseline_real = Path(os.path.realpath(checkout / ".secrets.baseline"))
-    scanner._baseline_from_option = False
-    scanner._baseline_document = {"results": {}}
+    # The scan found the checkout's baseline through the tree's own link.
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_from_option is False
+    assert scanner._baseline_real == Path(
+        os.path.realpath(checkout / ".secrets.baseline")
+    )
 
     assert scanner._baseline_anchor(checkout / "api", "source") == checkout / "api"
     assert scanner._baseline_anchor(real_api, "source") == checkout
