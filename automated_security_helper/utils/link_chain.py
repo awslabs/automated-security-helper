@@ -41,6 +41,17 @@ open a link's own entry and never what it names:
   too, marked unexaminable: it may be a link resolving would follow, and the
   doubt is refused, never passed on as a local name.
 
+Both readings walk a path the way resolving does, so that ``os.lstat`` is only ever
+asked about an entry whose parent directories have all been examined and hold no
+link. The walk keeps a prefix it has reached, which holds no link, and looks one
+name up under it. A link met on the way is read with ``os.readlink`` and its
+target's names are walked next: from the directory the link is in, which is the
+one reached (``a\\l3`` with ``a`` a link to ``b\\c`` has ``l3`` in ``b\\c``, and a
+target ``..\\x`` of ``l3`` is ``b\\x``, not ``x`` beside ``a``), or from the
+target's own anchor when it has one. A link in a parent of a hop's target is
+therefore examined before anything under it is, and a relative target is taken
+from where the link is, not from where the caller spelled it.
+
 Nothing here decides a refusal's wording or its platform gate; the callers do
 (``_running_on_windows`` in the sandbox, ``_on_windows`` in the loader).
 """
@@ -51,7 +62,7 @@ import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 #: Links followed before a chain is given up on as unjudgeable: the bound
 #: ``os.path.realpath`` applies to a chain of links before it stops following.
@@ -161,15 +172,16 @@ def link_chain_names_a_windows_share(
     at the first name that is not a link, or that is not there: a local name is
     then all that resolving would open, and the answer is False.
 
-    A hop's target is examined with ``os.lstat``, which does not follow the
-    target itself but DOES follow a link in any of the target's parent
-    components; so before that lstat the target's parent components are judged
-    by the component walk (:func:`first_unsafe_link`), and a parent that is a
-    link to a share, or whose target cannot be read, or that cannot be examined
-    at all, is the chain's answer. A
-    config file linked as ``.ash/ash.yaml -> ..\\vendor\\cfg.yaml`` with
-    ``vendor`` a junction to a share is judged at ``vendor`` and the share is
-    never opened.
+    A hop's target is walked name by name from the directory the link is in
+    (``text`` is that link's own location, so the directory holds no link the
+    caller has not judged: the component walk, :func:`first_unsafe_link`, calls
+    this with the directory it has reached), so ``os.lstat``, which does not
+    follow the entry it is given but DOES follow a link in any of its parents,
+    is only asked about an entry under parents already examined. A parent of
+    the target that is a link to a share, or whose target cannot be read, or
+    that cannot be examined at all, is the chain's answer. A config file linked
+    as ``.ash/ash.yaml -> ..\\vendor\\cfg.yaml`` with ``vendor`` a junction to a
+    share is judged at ``vendor`` and the share is never opened.
 
     None when the chain cannot be judged: a reparse point whose name cannot be
     read (one that is no symbolic link or junction), a hop that cannot be
@@ -183,47 +195,132 @@ def link_chain_names_a_windows_share(
     return _chain_names_a_windows_share(text, _Hops(hops))
 
 
-def _chain_names_a_windows_share(text: str, budget: _Hops) -> Optional[bool]:
-    current = text
-    while budget.take():
+@dataclass(frozen=True)
+class _Finding:
+    """Why a walk stopped on a link.
+
+    ``reaches_a_share`` is True when the chain names a share or a device, and
+    None when it cannot be judged. ``unexaminable`` is True when the entry the
+    caller named could not be examined at all (``os.lstat`` refused it), as
+    opposed to something its target leads through.
+    """
+
+    reaches_a_share: Optional[bool]
+    unexaminable: bool = False
+
+
+def _parent(reached: str) -> str:
+    """The directory above ``reached``, which holds no link, so this is its parent."""
+    if not reached or os.path.basename(reached) == "..":
+        # A relative prefix that has not left its start (or is already above
+        # it) goes up by a step that is kept, not collapsed.
+        return os.path.join(reached, "..")
+    parent = os.path.dirname(reached)
+    if not parent and os.path.splitdrive(reached)[0]:
+        return reached
+    return parent
+
+
+def _split_target(directory: str, target: str) -> Tuple[str, List[str]]:
+    """Where a link's target starts, and the names still to walk under it.
+
+    A relative target starts at ``directory``, the one the link is in. A target
+    with an anchor starts there: a drive and a root, a root alone (on the
+    volume the link is on, as the OS takes it), or a drive alone.
+    """
+    parsed = Path(target)
+    parts = list(parsed.parts)
+    if not parsed.anchor:
+        return directory, parts
+    if parsed.root and not parsed.drive:
+        start = os.path.splitdrive(directory)[0] + parsed.root
+    else:
+        start = parsed.anchor
+    return start, (parts[1:] if parts and parts[0] == parsed.anchor else parts)
+
+
+def _walk_names(
+    reached: str, names: List[str], budget: _Hops, *, spliced: bool
+) -> Tuple[Optional[str], Optional[_Finding]]:
+    """Walk ``names`` down from ``reached``, a directory known to hold no link.
+
+    Each name is looked up with ``os.lstat`` under the prefix reached so far,
+    never under a spelling that passes through a link. A name that is a link is
+    read, its target is judged by its text, and the target's own names are
+    walked next, in place of the link, from the directory the link is in (or
+    from the target's anchor): so a relative target is taken from where the
+    link is, and a link in a parent of the target is examined before anything
+    under it is. A ``..`` goes up from the prefix reached, which is a real
+    directory, so it is not a lexical step over a name that was never opened.
+
+    Returns the prefix reached when every name was walked and none was unsafe;
+    ``(None, None)`` when a name is not there (nothing below it is there
+    either, so resolving opens nothing); and ``(None, finding)`` for the first
+    link whose chain leads to a share (``True``) or cannot be judged
+    (``None``): its target cannot be read, it is past the shared hop budget, or
+    an entry on the way cannot be examined. That last case is marked
+    ``unexaminable`` only for a name the caller itself gave (``spliced`` False
+    until a link has been followed): inside a target it is the chain that
+    cannot be told.
+    """
+    pending = list(reversed(names))
+    while pending:
+        name = pending.pop()
+        if name in ("", "."):
+            continue
+        if name == "..":
+            reached = _parent(reached)
+            continue
+        candidate = os.path.join(reached, name)
         try:
-            target = os.readlink(current)
+            info = os.lstat(candidate)
+        except (FileNotFoundError, NotADirectoryError):
+            # Not there: a local name that resolving would open nothing for.
+            return None, None
+        except (OSError, ValueError):
+            # Cannot be examined (a directory the process cannot search, an
+            # entry it may not read, or a spelling the filesystem refuses, such
+            # as an embedded NUL that ``os.lstat`` raises ValueError for): the
+            # entry may itself be a link to a share, so the doubt is the answer.
+            return None, _Finding(None, unexaminable=not spliced)
+        if not is_link_stat(info):
+            reached = candidate
+            continue
+        if not budget.take():
+            return None, _Finding(None)
+        try:
+            target = os.readlink(candidate)
         except (OSError, ValueError):
             # OSError: the entry went away or cannot be opened. ValueError: on
             # Windows CPython raises "not a symbolic link" for a reparse point
             # that names a path but is neither a symbolic link nor a junction
             # (a WSL link), and for one that names no path at all, which
             # ``is_link_stat`` reads as a link.
-            return None
+            return None, _Finding(None)
         if names_a_windows_share(target):
-            return True
-        if not os.path.isabs(target):
-            target = os.path.join(os.path.dirname(current), target)
-        target = os.path.normpath(target)
-        parent = os.path.dirname(target)
-        if parent and parent != target:
-            # The lstat below follows a link in a PARENT component of the
-            # target; judge those components first, as the caller's own path
-            # was judged, so a junction to a share on the way is found before
-            # anything under it is touched.
-            unsafe_parent = _first_unsafe_link(parent, budget)
-            if unsafe_parent is not None:
-                return True if unsafe_parent.reaches_a_share else None
-        try:
-            is_link = is_link_stat(os.lstat(target))
-        except (FileNotFoundError, NotADirectoryError):
-            # Not there: a local name that resolving would open nothing for.
-            return False
-        except (OSError, ValueError):
-            # Cannot be examined (a directory the process cannot search, or a
-            # target spelling the filesystem refuses, such as an embedded NUL
-            # that ``os.lstat`` raises ValueError for): the entry may itself
-            # be a link to a share, so the chain is unjudged.
-            return None
-        if not is_link:
-            return False
-        current = target
-    return None
+            return None, _Finding(True)
+        reached, target_names = _split_target(reached, target)
+        pending.extend(reversed(target_names))
+        spliced = True
+    return reached, None
+
+
+def _chain_names_a_windows_share(text: str, budget: _Hops) -> Optional[bool]:
+    if not budget.take():
+        return None
+    try:
+        target = os.readlink(text)
+    except (OSError, ValueError):
+        # As in _walk_names: the entry went away, or it is a reparse point
+        # that is no symbolic link or junction.
+        return None
+    if names_a_windows_share(target):
+        return True
+    start, names = _split_target(os.path.dirname(text), target)
+    _, finding = _walk_names(start, names, budget, spliced=True)
+    if finding is None:
+        return False
+    return True if finding.reaches_a_share else None
 
 
 def components_down_to(text: str) -> List[str]:
@@ -275,10 +372,13 @@ def first_unsafe_link(text: str, *, hops: int = LINK_HOPS) -> Optional[UnsafeLin
     collapsed before any file access, so ``C:\\granted\\missing\\..\\lnk`` examines
     ``C:\\granted\\lnk`` and never asks whether ``missing`` is there, and
     ``C:\\granted\\lnk\\..\\other`` never opens ``lnk``. Every component is read with
-    ``os.lstat``, which does not follow the component it is given; a link in a
-    parent is therefore found before anything under it is touched. A local link
-    is followed (the components under it are judged through it, as resolving
-    would read them). A component that is not there ends the walk with None:
+    ``os.lstat``, which does not follow the component it is given, and under a
+    prefix that holds no link, so a link in a parent is found before anything
+    under it is touched. A local link is followed: the components under it are
+    judged in the directory it leads to, which is where resolving would read
+    them, and a relative link met there is taken from that directory, not from
+    the spelling the caller gave. A component that is not there ends the walk
+    with None:
     nothing below it is there either, and the caller's gates judge the path as
     they do on every other platform. A component that IS there but cannot be
     examined (its entry refuses the read, or the spelling cannot be given to the
@@ -295,33 +395,29 @@ def first_unsafe_link(text: str, *, hops: int = LINK_HOPS) -> Optional[UnsafeLin
 
 
 def _first_unsafe_link(text: str, budget: _Hops) -> Optional[UnsafeLink]:
-    components = components_down_to(os.path.normpath(text))
-    for index, component in enumerate(components):
-        try:
-            is_link = is_link_stat(os.lstat(component))
-        except (FileNotFoundError, NotADirectoryError):
+    collapsed = os.path.normpath(text)
+    parsed = Path(collapsed)
+    parts = list(parsed.parts)
+    if parsed.anchor and parts and parts[0] == parsed.anchor:
+        reached, names = parts[0], parts[1:]
+    else:
+        reached, names = "", parts
+    # The components are the collapsed spellings the answer names; the walk
+    # itself goes by the prefix it has reached, which differs from the spelling
+    # once a local link has been followed.
+    components = components_down_to(collapsed)
+    for index, name in enumerate(names):
+        walked, finding = _walk_names(reached, [name], budget, spliced=False)
+        if finding is not None:
+            return UnsafeLink(
+                component=components[index],
+                is_last=index == len(names) - 1,
+                reaches_a_share=finding.reaches_a_share,
+                unexaminable=finding.unexaminable,
+            )
+        if walked is None:
             # Not there: nothing below it is there either, so resolving opens
             # nothing; the caller's gates judge the path.
             return None
-        except (OSError, ValueError):
-            # Cannot be examined: an entry the process may not read, or a
-            # spelling the filesystem refuses (an embedded NUL). It may be a
-            # link that resolving would follow, so the doubt is the answer and
-            # the caller refuses it, as it refuses a chain it cannot read.
-            return UnsafeLink(
-                component=component,
-                is_last=index == len(components) - 1,
-                reaches_a_share=None,
-                unexaminable=True,
-            )
-        if not is_link:
-            continue
-        reaches_a_share = _chain_names_a_windows_share(component, budget)
-        if reaches_a_share is False:
-            continue
-        return UnsafeLink(
-            component=component,
-            is_last=index == len(components) - 1,
-            reaches_a_share=reaches_a_share,
-        )
+        reached = walked
     return None

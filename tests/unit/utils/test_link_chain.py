@@ -447,3 +447,84 @@ class TestAComponentThatCannotBeExaminedIsRefused:
         assert found.reaches_a_share is None
         # The link itself was examined; its chain is what cannot be told.
         assert found.unexaminable is False
+
+
+class TestARelativeHopIsTakenFromTheDirectoryItWasReachedIn:
+    """A relative link target is taken from the directory the link is in.
+
+    ``repo/a`` is a link to ``b/c``, so ``repo/a/l3`` is the entry ``repo/b/c/l3``,
+    and its target ``../x`` is ``repo/b/x``. The walk joined the target to the
+    path as the caller spelled it, ``repo/a``, which read ``repo/x`` (not there:
+    local), then asked ``os.lstat`` about ``repo/a/l3/sub``, and the OS followed
+    ``l3`` to ``repo/b/x``, a link to a share, inside the check.
+    """
+
+    @staticmethod
+    def _tree(tmp_path: Path, *, share: bool) -> Path:
+        repo = tmp_path / "repo"
+        (repo / "b" / "c").mkdir(parents=True)
+        (repo / "a").symlink_to(os.path.join("b", "c"))
+        (repo / "b" / "c" / "l3").symlink_to(os.path.join("..", "x"))
+        if share:
+            (repo / "b" / "x").symlink_to("\\\\server\\share")
+        else:
+            (repo / "b" / "x").mkdir()
+        return repo
+
+    def test_a_share_behind_a_relative_hop_under_a_link_is_found(self, tmp_path):
+        repo = self._tree(tmp_path, share=True)
+
+        found = link_chain.first_unsafe_link(str(repo / "a" / "l3" / "sub"))
+
+        assert found is not None
+        assert found.component == str(repo / "a" / "l3")
+        assert found.is_last is False
+        assert found.reaches_a_share is True
+
+    def test_the_same_tree_with_a_local_target_is_not_refused(self, tmp_path):
+        """Control: ``x`` is a plain directory, so nothing is unsafe, and the
+        hop read from where the link is leads to it."""
+        repo = self._tree(tmp_path, share=False)
+
+        assert link_chain.first_unsafe_link(str(repo / "a" / "l3" / "sub")) is None
+        assert (
+            link_chain.link_chain_names_a_windows_share(str(repo / "b" / "c" / "l3"))
+            is False
+        )
+
+    def test_the_link_in_a_target_is_judged_from_its_own_directory(self, tmp_path):
+        """The chain reading starts from the link's own location: ``l3`` in
+        ``repo/b/c`` leads to ``repo/b/x``, a share."""
+        repo = self._tree(tmp_path, share=True)
+
+        assert (
+            link_chain.link_chain_names_a_windows_share(str(repo / "b" / "c" / "l3"))
+            is True
+        )
+
+    def test_lstat_is_never_asked_through_a_link(self, tmp_path, monkeypatch):
+        """No entry the walk examines sits below a link: every parent of every
+        path handed to ``os.lstat`` is a real directory."""
+        repo = self._tree(tmp_path, share=True)
+        examined = []
+        real_lstat = os.lstat
+
+        def recording_lstat(path, *args, **kwargs):
+            examined.append(os.fspath(path))
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", recording_lstat)
+
+        found = link_chain.first_unsafe_link(str(repo / "a" / "l3" / "sub"))
+
+        assert found is not None
+        assert examined, "the walk examined nothing"
+        through_a_link = [
+            path
+            for path in examined
+            if any(
+                stat.S_ISLNK(real_lstat(str(parent)).st_mode)
+                for parent in Path(path).parents
+            )
+        ]
+        assert through_a_link == []
