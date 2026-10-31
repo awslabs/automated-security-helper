@@ -780,10 +780,14 @@ class ConvertPhase(EnginePhase):
                 # Keyed on the name the class declares (the one a constructed
                 # instance's row carries), else on the class, with no instance to
                 # ask; a second class of the same name is told apart by its module.
+                # Qualified as a built converter's key is (module.Class), so the
+                # key of a converter does not change with whether another
+                # plugin's constructor raised.
                 failed_name = _unused_key(
                     _constructor_failure_name(plugin_class),
                     aggregated_results.converter_results,
-                    getattr(plugin_class, "__module__", "unknown module"),
+                    f"{getattr(plugin_class, '__module__', 'unknown module')}."
+                    f"{getattr(plugin_class, '__name__', 'Unknown')}",
                 )
                 # Redacted with the config's environment values, as the scan
                 # phase redacts a scanner's construction error: the text goes to
@@ -907,7 +911,8 @@ class ConvertPhase(EnginePhase):
 
         enabled_converters = [inst.__class__ for inst in filtered_instances]
         enabled_converter_names = [
-            _converter_display_name(inst) for inst in filtered_instances
+            row_keys.get(id(inst), _converter_display_name(inst))
+            for inst in filtered_instances
         ]
 
         ASH_LOGGER.verbose(
@@ -1126,7 +1131,9 @@ class ConvertPhase(EnginePhase):
                         if part
                     )
                     if not outcome:
-                        converters_with_no_files.append(display_name)
+                        # The row's key, which tells two converters of one name
+                        # apart as their rows and events do.
+                        converters_with_no_files.append(row_key)
 
                     # Update converter task to 100%. A converter whose every input
                     # failed says so, rather than what a tree with none gets; one
@@ -1202,7 +1209,7 @@ class ConvertPhase(EnginePhase):
 
             except Exception as e:
                 failure = _failure_text(e, values)
-                ASH_LOGGER.error(f"Error in converter {plugin_name}: {failure}")
+                ASH_LOGGER.error(f"Error in converter {row_key}: {failure}")
                 ASH_LOGGER.debug(
                     f"Converter exception traceback: {traceback_text(values=values)}"
                 )
@@ -1250,7 +1257,7 @@ class ConvertPhase(EnginePhase):
                 except Exception as row_error:
                     ASH_LOGGER.error(
                         f"Could not record the input records of converter "
-                        f"{plugin_name}: {error_text(row_error, values)}"
+                        f"{row_key}: {error_text(row_error, values)}"
                     )
                     row = ConverterStatusInfo(
                         failure=(
@@ -1306,7 +1313,7 @@ class ConvertPhase(EnginePhase):
                     except Exception as display_error:
                         ASH_LOGGER.error(
                             f"Could not update the progress row of converter "
-                            f"{plugin_name}: {error_text(display_error, values)}"
+                            f"{row_key}: {error_text(display_error, values)}"
                         )
 
         # Log a summary warning if no files were converted.
@@ -1325,15 +1332,12 @@ class ConvertPhase(EnginePhase):
             # empty result as well as a crash does, and the gate counts it (its
             # row has dependencies_satisfied False and is not excluded), so it is
             # listed with its reason instead of leaving the bare wording.
-            unproductive = [
-                f"{name} ({reason})"
-                for name, row in aggregated_results.converter_results.items()
-                if (reason := _unproductive_reason(row))
-            ]
+            unproductive = _why_no_converter_ran(aggregated_results)
             if unproductive:
                 ASH_LOGGER.warning(
                     "No files were converted, and at least one converter did not "
-                    f"finish or refused an archive: {', '.join(unproductive)}"
+                    "finish (it failed, was missing its tool, or refused an "
+                    f"archive): {', '.join(unproductive)}"
                 )
             else:
                 ASH_LOGGER.warning("No files were converted by any converter plugins")

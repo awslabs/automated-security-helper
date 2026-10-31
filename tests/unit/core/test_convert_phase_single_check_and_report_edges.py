@@ -532,6 +532,41 @@ class TestFailedPlansAreNotRefusals:
         assert "RuntimeError" in failure
 
 
+class TestConvertersOfOneNameAreToldApartWhereTheyAreNamed:
+    def test_the_no_files_line_lists_each_converter_by_its_own_key(
+        self, plugin_context, caplog
+    ):
+        twins = [_converter("twin-name"), _converter("twin-name")]
+        converts = _converter("converts", paths=["x.py"])
+
+        with caplog.at_level(logging.INFO):
+            results = _run(plugin_context, [*twins, converts])
+
+        (line,) = _messages_with(caplog, "found no files to convert")
+        shown = line.split(": ", 1)[1].split(", ")
+        # Red at the base: "twin-name, twin-name", one display name twice.
+        assert len(shown) == 2 and len(set(shown)) == 2, line
+        assert set(shown) == {
+            key for key in results.converter_results if key.startswith("twin-name")
+        }
+
+    def test_a_constructor_failure_is_qualified_like_a_built_converters_key(
+        self, plugin_context
+    ):
+        def refuses(self, **kwargs):
+            raise ValueError("plugin options are malformed")
+
+        first = type("Boom", (), {"__init__": refuses})
+        second = type("Boom", (), {"__init__": refuses})
+
+        results = _run(plugin_context, [first, second])
+
+        # Red at the base: the second key was "Boom (<module>)", unlike the
+        # "<module>.<Class>" qualifier a built converter's key carries.
+        keys = {key for key in results.converter_results if key.startswith("Boom")}
+        assert keys == {"Boom", f"Boom ({second.__module__}.Boom)"}
+
+
 class TestTheSandboxLossIsRedactedLikeEveryOtherFailureText:
     """The scope's last refusal and last failure are free text: one quotes a
     value the config read from the environment, the other a path under home."""
