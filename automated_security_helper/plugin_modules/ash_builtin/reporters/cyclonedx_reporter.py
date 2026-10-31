@@ -65,6 +65,31 @@ def _conforming_licenses(value: Any, counts: Dict[str, int]) -> Any:
     return value
 
 
+def conforming_bom(report: CycloneDXReport) -> CycloneDXReport:
+    """``report`` with every license list reduced to what CycloneDX 1.6 allows.
+
+    Every writer of a CycloneDX document from a stored BOM goes through this
+    function, so the ``cyclonedx`` and ``gitlab-cyclonedx`` reporters agree on
+    what a license list holds. A bare id is written as an SPDX expression and any
+    other entry is left out, with one warning that counts both (see
+    :func:`_conforming_licenses`). The BOM given in is left as it was, and is
+    returned itself when nothing in it needed a change.
+    """
+    counts = {"expressions": 0, "dropped": 0}
+    bom = _conforming_licenses(report, counts)
+    if counts["expressions"] or counts["dropped"]:
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        ASH_LOGGER.warning(
+            "CycloneDX 1.6 allows only license objects and SPDX expressions in a "
+            "license list. In the SBOM written from this scan, "
+            f"{counts['expressions']} bare license id(s) were written as SPDX "
+            f"expressions and {counts['dropped']} other entry(ies) were left out; "
+            "the stored results are unchanged."
+        )
+    return bom
+
+
 def serialize_bom(report: CycloneDXReport) -> str:
     """The CycloneDX document the reporter writes for ``report``.
 
@@ -89,18 +114,7 @@ def serialize_bom(report: CycloneDXReport) -> str:
     id is written as an expression and any other entry is left out, with one
     warning that counts both.
     """
-    counts = {"expressions": 0, "dropped": 0}
-    bom = _conforming_licenses(report, counts).model_copy()
-    if counts["expressions"] or counts["dropped"]:
-        from automated_security_helper.utils.log import ASH_LOGGER
-
-        ASH_LOGGER.warning(
-            "CycloneDX 1.6 allows only license objects and SPDX expressions in a "
-            "license list. In the SBOM written from this scan, "
-            f"{counts['expressions']} bare license id(s) were written as SPDX "
-            f"expressions and {counts['dropped']} other entry(ies) were left out; "
-            "the stored results are unchanged."
-        )
+    bom = conforming_bom(report).model_copy()
     # Every SBOM a scanner writes has metadata or a serial number; the default
     # model and its dump read back from a results file have neither.
     no_sbom = bom.metadata is None and bom.serialNumber is None and not bom.components

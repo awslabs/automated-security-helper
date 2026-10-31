@@ -30,6 +30,9 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter import (
+    conforming_bom,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -708,8 +711,11 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
                 separators=(",", ":"),
             )
 
-        # Serialize to dict for manipulation
-        doc = model.cyclonedx.model_dump(
+        # Serialize to dict for manipulation. The BOM is first reduced to the
+        # license lists CycloneDX 1.6 allows, as the ``cyclonedx`` reporter
+        # does: a stored results file can hold an entry the lenient load kept,
+        # and GitLab refuses a document that repeats it.
+        doc = conforming_bom(model.cyclonedx).model_dump(
             by_alias=True,
             exclude_unset=True,
             exclude_none=True,
