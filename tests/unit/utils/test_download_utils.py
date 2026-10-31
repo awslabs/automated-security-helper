@@ -154,11 +154,12 @@ def test_unquarantine_macos_binary_non_macos(mock_run_command):
 
 
 @pytest.mark.unit
+@patch("automated_security_helper.utils.download_utils.write_receipt")
 @patch("automated_security_helper.utils.download_utils._download_verified")
 @patch("automated_security_helper.utils.download_utils.make_executable")
 @patch("automated_security_helper.utils.download_utils.unquarantine_macos_binary")
 def test_install_binary_from_url(
-    mock_unquarantine, mock_make_executable, mock_download_verified
+    mock_unquarantine, mock_make_executable, mock_download_verified, mock_write_receipt
 ):
     """Test install_binary_from_url function.
 
@@ -171,6 +172,12 @@ def test_install_binary_from_url(
     The binary's mode is the download's business: the install names ``mode=0o755`` on
     the call, and the staged file gets it on its own descriptor before the rename, so
     no ``make_executable`` reopens the landed path by name afterwards.
+
+    ``write_receipt`` is mocked, not run: the whole call runs under a faked
+    ``platform.system() == "Darwin"``, and the real receipt writer reads that answer
+    too, so on a Windows host it took its POSIX branch (``os.O_DIRECTORY``, absent
+    there). What this test checks of the receipt is what the install hands it: the
+    digest verified as the bytes landed, not a fresh hash.
     """
     # Setup mocks
     mock_download_verified.return_value = (Path("/test/destination/file"), "d" * 64)
@@ -196,6 +203,11 @@ def test_install_binary_from_url(
         )
         mock_make_executable.assert_not_called()
         mock_unquarantine.assert_called_once_with(Path("/test/destination/file"))
+        mock_write_receipt.assert_called_once()
+        receipt_dir, _installed_as, receipt = mock_write_receipt.call_args.args
+        assert receipt_dir == Path("/test/destination")
+        assert receipt["sha256"] == "e" * 64
+        assert receipt["installed_sha256"] == "d" * 64
 
         # Verify result
         assert result == Path("/test/destination/file")
