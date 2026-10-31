@@ -1261,6 +1261,12 @@ def _record_plan(scope: SandboxScope, policy: Any, plan: SpawnPlan) -> None:
     not be read (``environment_values_unread``) nothing in the argv can be
     redacted, so the record names the spawn and not its argv.
 
+    A failure while the record is made (an argument whose ``str`` raises) is
+    logged by its type and does not reach the caller: the record is a log line, and
+    raising from it failed a spawn that was planned, counted it as a failed plan,
+    and ran the plan's cleanup. Only ``Exception`` is absorbed here; an interrupt
+    still reaches ``_plan_spawn``'s cleanup.
+
     Guarded by BOTH halves of emission: .debug() is gated by the logger's level
     (isEnabledFor), and the record then has to reach a handler whose level admits
     it (utils/log.py delivers). The CLI's logger sits at TRACE with its file
@@ -1272,23 +1278,36 @@ def _record_plan(scope: SandboxScope, policy: Any, plan: SpawnPlan) -> None:
         ASH_LOGGER.isEnabledFor(logging.DEBUG) and delivers(ASH_LOGGER, logging.DEBUG)
     ):
         return
-    head = (
-        f"Scanner sandbox ({scope.backend.name}, "
-        f"network={'yes' if policy.network else 'no'}) for {scope.scanner_name}"
-    )
-    if scope.environment_values_unread:
-        # A class scope has no values hook to read, so nothing failed there; the
-        # instance case is a hook that raised or gave no value set.
-        why = (
-            "a class scope carries no redaction values"
-            if scope.class_scope
-            else "the plugin's redaction values could not be read"
+    try:
+        head = (
+            f"Scanner sandbox ({scope.backend.name}, "
+            f"network={'yes' if policy.network else 'no'}) for {scope.scanner_name}"
         )
-        ASH_LOGGER.debug(f"{head}: the planned command line is not shown because {why}")
-        return
-    ASH_LOGGER.debug(
-        scope_shown_text(f"{head}: {_argv_text(plan.argv)}", _quoted_spellings(scope))
-    )
+        if scope.environment_values_unread:
+            # A class scope has no values hook to read, so nothing failed there;
+            # the instance case is a hook that raised or gave no value set.
+            why = (
+                "a class scope carries no redaction values"
+                if scope.class_scope
+                else "the plugin's redaction values could not be read"
+            )
+            ASH_LOGGER.debug(
+                f"{head}: the planned command line is not shown because {why}"
+            )
+            return
+        ASH_LOGGER.debug(
+            scope_shown_text(
+                f"{head}: {_argv_text(plan.argv)}", _quoted_spellings(scope)
+            )
+        )
+    except Exception as failure:  # noqa: BLE001 -- a log line must not fail a spawn
+        # An argument whose text cannot be made, or a policy that lacks a field:
+        # the spawn is still planned and still runs. Only the type is said, never
+        # the message, which may quote the argument.
+        ASH_LOGGER.debug(
+            f"Scanner sandbox for {scope.scanner_name}: the planned command line "
+            f"could not be recorded ({type(failure).__name__})"
+        )
 
 
 def _argv_text(argv: Sequence[Any]) -> str:

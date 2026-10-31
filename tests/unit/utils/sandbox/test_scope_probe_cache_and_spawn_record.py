@@ -675,6 +675,64 @@ def test_a_value_that_is_not_text_does_not_stop_the_spawn(tmp_path, debug_record
     assert len(debug_record.debug_lines) == 1
 
 
+class _Unprintable:
+    """An argument subprocess would accept as a path, with a text that raises."""
+
+    def __str__(self):
+        raise RuntimeError("no text for this one: the-secret")
+
+
+def test_an_argument_with_no_text_does_not_fail_the_spawn(tmp_path, debug_record):
+    """The record is a log line: an argument whose ``str`` raises used to abort a
+    planned spawn and count it as a failed plan. The spawn is planned as given,
+    nothing is counted, and the record says it could not be made, by type only."""
+    sandbox_scope = _scope(tmp_path)
+    odd = _Unprintable()
+
+    with scope.sandbox_scope(sandbox_scope):
+        plan = scope.prepare_spawn(["tool", odd], {}, None)
+
+    # Red at the base: RuntimeError out of prepare_spawn, failed_spawns 1.
+    assert plan is not None and plan.argv == ["tool", odd]
+    assert sandbox_scope.failed_spawns == 0
+    assert sandbox_scope.last_failure is None
+    (line,) = debug_record.debug_lines
+    assert line == (
+        "Scanner sandbox for scanner: the planned command line could not be "
+        "recorded (RuntimeError)"
+    )
+    assert "the-secret" not in line
+
+
+def test_an_interrupt_in_the_record_still_runs_the_plans_cleanup(tmp_path, monkeypatch):
+    """The control for the case above: only an Exception is absorbed. An
+    interrupt reaches ``_plan_spawn``, which runs the plan's cleanup once."""
+    ran: list = []
+
+    class _Backend:
+        name = "fake"
+
+        def plan(self, argv, env, policy):
+            return SpawnPlan(
+                argv=list(argv), env=dict(env), cleanup=[lambda: ran.append("backend")]
+            )
+
+    def interrupted(sandbox_scope, policy, plan):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        scope,
+        "build_scanner_policy",
+        lambda *args, **kwargs: SimpleNamespace(network=False, writable=[]),
+    )
+    monkeypatch.setattr(scope, "_record_plan", interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        scope._plan_spawn(_scope(tmp_path, backend=_Backend()), ["tool"], {}, None)
+
+    assert ran == ["backend"]
+
+
 class _ProgramlessBackend:
     """A backend that resolves the program itself and finds none, as Landlock does."""
 
