@@ -871,6 +871,21 @@ def test_a_skipped_files_uri_spells_the_same_path_as_its_metrics_key(uri, key, w
     )
 
 
+def test_a_backslash_is_a_separator_on_windows_alone():
+    """On POSIX ``a\\b.py`` is one file's name, not ``a/b.py``: rewritten to the
+    same key, a skipped file hid its twin from the scanned count. The URI of such
+    a name carries the backslash percent-encoded, which reads back the same."""
+    assert _spelled_path("a\\b.py", uri=False, windows=False) == "a\\b.py"
+    assert _spelled_path("a\\b.py", uri=False, windows=False) != _spelled_path(
+        "a/b.py", uri=False, windows=False
+    )
+    assert _spelled_path("proj/a%5Cb.py", uri=True, windows=False) == _spelled_path(
+        "proj/a\\b.py", uri=False, windows=False
+    )
+    # The control: Windows reads the same text as a separator.
+    assert _spelled_path("a\\b.py", uri=False, windows=True) == "a/b.py"
+
+
 @pytest.mark.parametrize(
     "platform, expected",
     [("nt", "C:/x.py"), ("posix", "/C:/x.py")],

@@ -344,6 +344,10 @@ def _spelled_path(text: str, *, uri: bool, windows: Optional[bool] = None) -> st
     (``windows``, the running platform by default). On POSIX a root directory
     named like a drive, ``/a:/x.py``, is spelled ``file:///a:/x.py``, and
     reading its ``/a:/`` as a drive dropped the slash the key keeps.
+
+    A backslash is a separator on Windows alone. On POSIX it is a character of
+    a file's name, so ``a\\b.py`` and ``a/b.py`` are two files, and rewriting the
+    one to the other made a skipped file count a parsed one as skipped.
     """
     from urllib.parse import unquote
 
@@ -367,7 +371,8 @@ def _spelled_path(text: str, *, uri: bool, windows: Optional[bool] = None) -> st
             elif windows and not spelled.startswith("/"):
                 # ``file://server/share/x.py``: the key is ``\\server\share\x.py``.
                 spelled = "//" + spelled
-    spelled = spelled.replace("\\", "/")
+    if windows:
+        spelled = spelled.replace("\\", "/")
     while spelled.startswith("./"):
         spelled = spelled[2:]
     return spelled
