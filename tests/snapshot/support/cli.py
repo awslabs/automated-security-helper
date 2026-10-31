@@ -190,6 +190,12 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     that: it splits the cwd on the native separator only, so a POSIX-spelled cwd on
     Windows became one component, ``/workspace/demo-project\\probe``, which compares
     unequal to the same path parsed normally and failed the probe below.
+
+    The redirect of ``pathlib``'s own accessor on Python 3.10 covers ``stat`` and
+    ``lstat`` only: they are the two reads ``Path.is_dir`` and ``Path.exists`` make.
+    The accessor binds its other calls (``open``, ``listdir``, ``mkdir``, ``unlink``
+    and the rest) at import too, and they are not redirected, because nothing the
+    product does under this context reaches them through a displayed path.
     """
     import pathlib
 
