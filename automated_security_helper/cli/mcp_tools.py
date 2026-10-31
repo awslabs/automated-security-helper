@@ -1091,12 +1091,19 @@ def _config_pre_check(
     # client delivered the file read a named file elsewhere with the
     # operator's settings while the scan read it confined, and a refusal of
     # that read was swallowed below as the scan's.
-    settings = scan_repository_settings(
-        scanned_trees(source_dir),
-        every_file=client_named
-        and client_named_config_is_untrusted(path, session_id=session_id),
-    )
     try:
+        # Inside the try: the predicate reads the filesystem (a resolve, a
+        # samefile), so a link loop at the named path, or its directory gone
+        # since the request was made, raises an OSError here. Outside the try
+        # it left this function as an exception, through the thread the start
+        # path runs it in, and the start answered an internal error with a
+        # traceback instead of the read refusal below, which is what the same
+        # path gets when the file itself cannot be read.
+        settings = scan_repository_settings(
+            scanned_trees(source_dir),
+            every_file=client_named
+            and client_named_config_is_untrusted(path, session_id=session_id),
+        )
         resolved = resolve_config_document(
             path,
             confine_to=default_confinement_root(path, source_dir),
