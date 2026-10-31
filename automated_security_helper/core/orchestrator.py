@@ -872,6 +872,13 @@ class ASHScanOrchestrator(BaseModel):
                     raise ASHValidationError(
                         f"Failed to load existing results: {error_text(e, values)}"
                     ) from e
+            # Without the records an earlier run left about itself, as the reload
+            # in _execute_scan does: the report phase reads a "reports written"
+            # record on the model as this run's own, so a model that carried an
+            # earlier run's would have its files counted as written here.
+            asharp_model.validation_checkpoints = without_run_records(
+                asharp_model.validation_checkpoints
+            )
             self._adopt_this_runs_values(asharp_model, config)
             exec_engine_params = {"asharp_model": asharp_model}
 
