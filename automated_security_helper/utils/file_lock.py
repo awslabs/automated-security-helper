@@ -84,6 +84,12 @@ LOCK_TIMEOUT_SECONDS = 1800.0
 #: How often a waiting ``exclusive_lock`` asks for the OS lock again.
 _LOCK_POLL_SECONDS = 0.1
 
+#: The errors a non-blocking ``flock`` answers when another holder has the lock:
+#: ``EAGAIN`` and ``EWOULDBLOCK`` (one value on Linux) locally, and ``EACCES`` on
+#: CIFS, where the emulated byte-range lock reports a conflict as a permission
+#: error. ``EPERM`` and the rest are real refusals and are not waited out.
+_LOCK_HELD_ERRNOS = frozenset({errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES})
+
 _registry_lock = threading.Lock()
 _thread_locks: Dict[str, threading.Lock] = {}
 
@@ -159,8 +165,10 @@ def _flock_within(fd: int, timeout: Optional[float], path: Path) -> None:
 
     None waits without bound. The lock is asked for without blocking and the ask
     repeated, so a holder that never releases ends in ``TimeoutError`` rather than
-    a hang. A refusal other than "held by someone else" (``EWOULDBLOCK``)
-    propagates as it is.
+    a hang. "Held by someone else" is ``EWOULDBLOCK`` (``EAGAIN``) on a local
+    filesystem and ``EACCES`` on CIFS, whose emulated byte-range lock answers a
+    conflict that way; both are waited out. Any other refusal propagates as it
+    is.
     """
     if timeout is None:
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -170,7 +178,9 @@ def _flock_within(fd: int, timeout: Optional[float], path: Path) -> None:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return
-        except BlockingIOError:
+        except OSError as refused:
+            if refused.errno not in _LOCK_HELD_ERRNOS:
+                raise
             if time.monotonic() >= deadline:
                 raise TimeoutError(
                     f"Another process has held the lock {path.as_posix()} for "
