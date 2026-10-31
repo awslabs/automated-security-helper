@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import hashlib
 from pathlib import Path
 import re
 
@@ -39,8 +40,29 @@ def _escape(character: str, fold_case: bool = False) -> str:
     return f"_U{code_point:08x}"
 
 
+#: How many characters of the input's SHA-256 a cut name carries.
+_DIGEST_CHARS = 12
+
+
+def _cut_with_digest(name: str, source: str, max_bytes: int) -> str:
+    """*name* when it fits *max_bytes* of UTF-8, else its first bytes and a digest
+    of *source*, ``<cut>-<digest>``, at most *max_bytes* in all."""
+    encoded = name.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return name
+    digest = hashlib.sha256(source.encode("utf-8", "surrogateescape")).hexdigest()[
+        :_DIGEST_CHARS
+    ]
+    room = max_bytes - len(digest) - 1
+    cut = encoded[:room].decode("utf-8", "ignore").rstrip("-_")
+    return f"{cut}-{digest}"
+
+
 def get_normalized_filename(
-    str_to_normalize: str | Path, *, fold_case: bool = False
+    str_to_normalize: str | Path,
+    *,
+    fold_case: bool = False,
+    max_bytes: int | None = None,
 ) -> str:
     """Returns a normalized filename for the given string.
 
@@ -59,15 +81,39 @@ def get_normalized_filename(
     case is ignored. The names are different from the default ones, so a caller
     turns it on from the start rather than for a name it has already written.
 
+    The escapes make a name longer than the input: ``_`` and ``.`` take two
+    characters, a space or other ASCII punctuation four, another non-word
+    character in the basic plane six and one outside it ten, where a run of any
+    of them was once a single ``-``. A path with many of them can run past the 255 bytes a file
+    name may take, and the directory made for it then fails to be made. A caller
+    that makes a name of the result passes ``max_bytes`` (UTF-8 bytes): a longer
+    name is cut and ends in ``-`` and a digest of the whole input, so two long
+    names that share their first bytes stay apart, and the name is never longer
+    than ``max_bytes``. A name that fits is returned as it is.
+
     Args:
         str_to_normalize (str | Path): The string to normalize.
         fold_case (bool): Escape letters that have a lower-case form, so the
             result is unique on a case-insensitive filesystem too.
+        max_bytes (int | None): The most bytes the name may take, at least 16
+            when given. None puts no limit on it.
 
     Returns:
         str: The normalized filename.
+
+    Raises:
+        ValueError: ``max_bytes`` is too small to hold a digest and a cut.
     """
+    if max_bytes is not None and max_bytes < _DIGEST_CHARS + 4:
+        raise ValueError(
+            f"max_bytes must be at least {_DIGEST_CHARS + 4} to hold a digest "
+            f"and a cut of the name, not {max_bytes}"
+        )
     if isinstance(str_to_normalize, Path):
         str_to_normalize = get_shortest_name(input=str_to_normalize)
 
-    return "".join(_escape(character, fold_case) for character in str(str_to_normalize))
+    source = str(str_to_normalize)
+    name = "".join(_escape(character, fold_case) for character in source)
+    if max_bytes is None:
+        return name
+    return _cut_with_digest(name, source, max_bytes)
