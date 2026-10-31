@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
+import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -243,7 +244,14 @@ def test_npm_and_pnpm_run_from_a_copy_without_the_repository_s_files(
     (audit,) = _audits(spawns)
     assert audit["command"][0] == binary
     assert audit["cwd"] != package
-    assert sorted(audit["files"]) == sorted(["package.json", lockfile])
+    files = dict(audit["files"])
+    if binary == "pnpm":
+        # The copy is its own pnpm workspace root, with the package alone and
+        # none of the repository's file (its registry marker stays out).
+        workspace = files.pop("pnpm-workspace.yaml")
+        assert yaml.safe_load(workspace) == {"packages": ["."]}
+        assert REPOSITORY_REGISTRY not in workspace
+    assert sorted(files) == sorted(["package.json", lockfile])
     _assert_operator_settings_untouched(audit["env"])
 
 

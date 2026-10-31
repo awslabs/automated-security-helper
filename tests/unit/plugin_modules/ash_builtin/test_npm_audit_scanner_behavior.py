@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -459,7 +460,8 @@ def test_audit_runs_in_the_lock_files_own_directory(
     Each runs in a private copy of the lock file's directory, holding the manifest
     and the lockfile and no settings file of the repository's (see
     test_npm_audit_project_rc_ignored.py), read here when the tool is started,
-    since the copy is removed after.
+    since the copy is removed after. pnpm's copy also holds a workspace file of
+    its own, naming the package alone.
     """
     nested = node_project(
         directory=scanner.context.work_dir / "packages" / "api", lock_name=lock_name
@@ -487,6 +489,12 @@ def test_audit_runs_in_the_lock_files_own_directory(
 
     ((cwd, files),) = started
     assert cwd != nested
+    if lock_name == "pnpm-lock.yaml":
+        # pnpm's copy is its own workspace root (see
+        # test_package_manager_child_reads_and_settings.py): the one file here
+        # that the repository did not have.
+        workspace = files.pop("pnpm-workspace.yaml")
+        assert yaml.safe_load(workspace) == {"packages": ["."]}
     assert files == {
         "package.json": (nested / "package.json").read_text(),
         lock_name: (nested / lock_name).read_text(),

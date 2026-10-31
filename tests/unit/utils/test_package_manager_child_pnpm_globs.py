@@ -58,11 +58,11 @@ def test_an_absolute_root_relative_or_climbing_glob_leaves_the_package(glob):
     assert _member_glob_stays_inside(glob) is False
 
 
-def _copy_of(document: dict) -> dict | None:
+def _copy_of(document: dict) -> dict:
     out = _pnpm_workspace_copy(
         yaml.safe_dump(document).encode("utf-8"), ignore_suppressions=False
     )
-    return None if out is None else yaml.safe_load(out)
+    return yaml.safe_load(out)
 
 
 def test_the_copy_keeps_only_the_globs_that_stay_inside():
@@ -89,14 +89,14 @@ def test_the_copy_keeps_only_the_globs_that_stay_inside():
     }
 
 
-def test_globs_that_all_leave_the_package_drop_the_key():
-    """Control: with no glob left the key goes too, as for a value that is not
-    the list-of-strings shape."""
+def test_globs_that_all_leave_the_package_give_the_package_itself():
+    """Control: with no glob left the copy is the package alone, as for a value
+    that is not the list-of-strings shape."""
     copied = _copy_of(
         {"packages": ["../*", "/elsewhere/*"], "auditConfig": AUDIT_CONFIG}
     )
 
-    assert copied == {"auditConfig": AUDIT_CONFIG}
+    assert copied == {"auditConfig": AUDIT_CONFIG, "packages": ["."]}
 
 
 def test_a_packages_value_that_is_not_a_list_of_globs_stays_out_of_the_copy():
@@ -104,4 +104,54 @@ def test_a_packages_value_that_is_not_a_list_of_globs_stays_out_of_the_copy():
     only the list-of-strings shape pnpm defines is read as member globs."""
     copied = _copy_of({"packages": {"glob": "packages/*"}, "auditConfig": AUDIT_CONFIG})
 
-    assert copied == {"auditConfig": AUDIT_CONFIG}
+    assert copied == {"auditConfig": AUDIT_CONFIG, "packages": ["."]}
+
+
+def test_audit_config_without_member_globs_gets_the_package_itself():
+    """A workspace file with no ``packages`` key is one some pnpm releases refuse
+    (the module docstring), so the copy names the package."""
+    assert _copy_of({"auditConfig": AUDIT_CONFIG}) == {
+        "auditConfig": AUDIT_CONFIG,
+        "packages": ["."],
+    }
+
+
+def test_a_repository_without_a_workspace_file_gets_the_default_one():
+    """pnpm 10 walks up from the copy to the nearest workspace root and reads
+    that directory's ``.npmrc``. A copy with no file of its own took the
+    repository's root, and the audit went to the registry the repository names.
+    So the copy always has one: the package alone."""
+    out = _pnpm_workspace_copy(None, ignore_suppressions=False)
+
+    assert yaml.safe_load(out) == {"packages": ["."]}
+
+
+def test_a_file_without_audit_config_gets_the_default_one_not_its_settings():
+    """The registry in a repository's file stays out, and so do its globs: they
+    cross only with ``auditConfig``."""
+    copied = _copy_of({"packages": ["apps/*"], "registry": "https://registry.example/"})
+
+    assert copied == {"packages": ["."]}
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["a: [unclosed", "- one\n- two\n", "just a string\n", ""],
+)
+def test_a_file_that_is_not_a_mapping_gets_the_default_one(text):
+    out = _pnpm_workspace_copy(text.encode("utf-8"), ignore_suppressions=False)
+
+    assert yaml.safe_load(out) == {"packages": ["."]}
+
+
+def test_nothing_of_the_repository_s_file_crosses_under_ignore_suppressions():
+    """The flag lifts every suppression, so ``auditConfig`` goes; the copy is
+    still its own workspace root."""
+    out = _pnpm_workspace_copy(
+        yaml.safe_dump({"auditConfig": AUDIT_CONFIG, "packages": ["apps/*"]}).encode(
+            "utf-8"
+        ),
+        ignore_suppressions=True,
+    )
+
+    assert yaml.safe_load(out) == {"packages": ["."]}

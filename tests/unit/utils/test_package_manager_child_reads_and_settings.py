@@ -211,28 +211,81 @@ class TestPnpmWorkspaceSettings:
         copied = _copy("pnpm", package, tmp_path)
 
         assert yaml.safe_load(copied["pnpm-workspace.yaml"]) == {
-            "auditConfig": AUDIT_CONFIG
+            "auditConfig": AUDIT_CONFIG,
+            "packages": ["."],
         }
 
     def test_nothing_crosses_under_ignore_suppressions(self, tmp_path):
+        """``auditConfig`` is a suppression, so the flag drops it; the copy keeps
+        a workspace file of its own with the package alone."""
         package = self._workspace(
             tmp_path, yaml.safe_dump({"auditConfig": AUDIT_CONFIG})
         )
 
         copied = _copy("pnpm", package, tmp_path, ignore_suppressions=True)
 
-        assert "pnpm-workspace.yaml" not in copied
+        assert yaml.safe_load(copied["pnpm-workspace.yaml"]) == {"packages": ["."]}
 
-    def test_a_file_without_the_key_gives_no_file(self, tmp_path):
-        """Control: the settings-only file the module distrusts stays out."""
+    def test_a_file_without_the_key_gives_the_default_file(self, tmp_path):
+        """Control: the settings-only file the module distrusts stays out, and
+        the copy holds the default one in its place."""
         package = self._workspace(
             tmp_path, 'packages: []\nregistry: "https://registry.example/"\n'
         )
 
         copied = _copy("pnpm", package, tmp_path)
 
+        assert yaml.safe_load(copied["pnpm-workspace.yaml"]) == {"packages": ["."]}
+        assert b"registry.example" not in copied["pnpm-workspace.yaml"]
+        assert set(copied) == {"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"}
+
+    def test_a_repository_without_a_workspace_file_gets_one_in_the_copy(self, tmp_path):
+        """pnpm 10 walks up from the copy to the nearest workspace root and
+        reads its ``.npmrc``; the copy sits below the output directory, inside
+        the scanned tree by default, so with no file of its own its root was
+        the repository's and the audit went to the registry that repository
+        names. The copy is its own workspace root whatever the repository
+        holds (pnpm 10.34.9 made two requests to the repository's registry
+        without it; pnpm 12.17.0 made none)."""
+        package = _package(tmp_path / "repo" / "web", "pnpm-lock.yaml")
+        assert not (package / "pnpm-workspace.yaml").exists()
+
+        copied = _copy("pnpm", package, tmp_path)
+
+        assert yaml.safe_load(copied["pnpm-workspace.yaml"]) == {"packages": ["."]}
+        assert set(copied) == {"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"}
+
+    def test_a_refused_workspace_file_still_leaves_the_copy_a_default_one(
+        self, tmp_path
+    ):
+        """A workspace file the scanner refuses (a link out of the tree) is
+        skipped by the copy, which then holds the default file, not none."""
+        package = _package(tmp_path / "repo" / "web", "pnpm-lock.yaml")
+        outside = tmp_path / "elsewhere" / "pnpm-workspace.yaml"
+        outside.parent.mkdir()
+        outside.write_text(
+            'registry: "https://registry.example/"\nauditConfig: {}\n', encoding="utf-8"
+        )
+        os.symlink(outside, package / "pnpm-workspace.yaml")
+
+        copied = _copy("pnpm", package, tmp_path)
+
+        assert yaml.safe_load(copied["pnpm-workspace.yaml"]) == {"packages": ["."]}
+        assert b"registry.example" not in copied["pnpm-workspace.yaml"]
+
+    @pytest.mark.parametrize(
+        ("binary", "lockfile"),
+        [("npm", "package-lock.json"), ("yarn", "yarn.lock")],
+    )
+    def test_npm_and_yarn_copies_get_no_workspace_file(
+        self, tmp_path, binary, lockfile
+    ):
+        """Control: the file is pnpm's; the other two copies are unchanged."""
+        package = _package(tmp_path / "repo" / "web", lockfile)
+
+        copied = _copy(binary, package, tmp_path, yarn_major=1)
+
         assert "pnpm-workspace.yaml" not in copied
-        assert set(copied) == {"package.json", "pnpm-lock.yaml"}
 
     def test_the_workspace_file_is_an_input_of_pnpm(self, tmp_path):
         """A linked one that leaves the tree refuses the package like any input."""

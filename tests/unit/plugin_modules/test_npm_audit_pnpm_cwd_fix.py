@@ -23,6 +23,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
     NpmAuditScanner,
@@ -95,9 +96,12 @@ def test_pnpm_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
     ):
         npm_scanner.scan(target=root, target_type="source")
 
+    # The copy is its own pnpm workspace root, so it holds a workspace file the
+    # repository's directory did not have.
     expected = {
         "package.json": (nested / "package.json").read_text(),
         "pnpm-lock.yaml": (nested / "pnpm-lock.yaml").read_text(),
+        "pnpm-workspace.yaml": yaml.safe_dump({"packages": ["."]}),
     }
     assert expected in seen, f"no pnpm run had {nested}'s lockfile: {seen}"
 

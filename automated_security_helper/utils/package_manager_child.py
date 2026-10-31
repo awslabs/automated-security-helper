@@ -49,9 +49,21 @@ advisory ignore lists), a suppression the repository holds, as ASH honors reposi
 suppressions; under ``--ignore-suppressions`` it is removed from the copy, as that
 flag lifts every suppression. pnpm 10 reads the same lists from ``auditConfig`` in
 ``pnpm-workspace.yaml``, beside the registry and every other setting that file
-holds, so the copy gets a ``pnpm-workspace.yaml`` holding that one key and nothing
-else when the repository's file has it (and the flag is not set); the rest of the
-file, the settings the first paragraph distrusts, is never copied.
+holds, so the copy gets a ``pnpm-workspace.yaml`` holding that one key (and the
+member globs that stay inside the package) when the repository's file has it and
+the flag is not set; the rest of the file, the settings the first paragraph
+distrusts, is never copied.
+
+The pnpm copy always holds a ``pnpm-workspace.yaml``, with at least
+``packages: ["."]``, whether or not the repository has one. The copy sits below
+``parent``, which by default is inside the scanned tree, and pnpm 10 finds its
+workspace root by walking up from the directory it runs in and reads that root's
+``.npmrc``: without a workspace file of its own the copy's root was the
+repository's, so the audit went to the registry the repository's ``.npmrc`` names
+(measured with pnpm 10.34.9: two requests to that registry; pnpm 12.17.0 made
+none). A workspace file in the copy makes the copy its own workspace root, so
+the walk ends there. pnpm 10.34.9 and 12.17.0 both accept the file with
+``packages: ["."]``.
 
 The same shape as ``utils/python_child.py``: the private directory is made for the
 child and removed when the block ends. yarn 2+ itself was not measured: none was
@@ -95,7 +107,8 @@ PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml"
 
 #: The files npm and pnpm read from the package: the manifest and the lockfiles,
 #: and for pnpm the workspace settings file, which is copied reduced to its
-#: ``auditConfig`` (``_pnpm_workspace_copy``) and is otherwise no settings file.
+#: ``auditConfig`` and member globs (``_pnpm_workspace_copy``), and is otherwise
+#: no settings file. The pnpm copy holds one even when the repository has none.
 _PACKAGE_MANAGER_INPUTS: Dict[str, Tuple[str, ...]] = {
     "npm": ("package.json", "package-lock.json", "npm-shrinkwrap.json"),
     "pnpm": ("package.json", "pnpm-lock.yaml", PNPM_WORKSPACE_FILE),
@@ -515,8 +528,17 @@ def _copy_manifest(
     _write_copy(target, data, private)
 
 
-def _pnpm_workspace_copy(data: bytes, *, ignore_suppressions: bool) -> Optional[bytes]:
-    """The ``pnpm-workspace.yaml`` the copy gets, or None for no file.
+def _pnpm_workspace_copy(data: Optional[bytes], *, ignore_suppressions: bool) -> bytes:
+    """The ``pnpm-workspace.yaml`` the copy gets, which is always a file.
+
+    ``data`` is the repository's file, or None when it has none. The copy holds
+    a workspace file whatever the repository has, so that it is its own
+    workspace root: pnpm 10 walks up from the directory it runs in to the
+    workspace root and reads that directory's ``.npmrc``, and the copy sits
+    below the scanner's output directory, which is inside the scanned tree by
+    default. A copy without the file took the repository's root and its
+    registry. The file carries ``packages: ["."]`` at least (a workspace file
+    without ``packages`` is one some pnpm releases refuse).
 
     ``auditConfig`` crosses: pnpm 10 reads its advisory ignore lists from that
     key of the workspace file as well as from ``pnpm.auditConfig`` in the
@@ -529,24 +551,28 @@ def _pnpm_workspace_copy(data: bytes, *, ignore_suppressions: bool) -> Optional[
     glob only crosses when it stays inside the package: a relative pattern with
     no ``..`` component (a leading ``!`` negation is admitted). An absolute
     pattern or one that climbs out names a path outside the package the copy
-    holds, and is left out; when none remains the key is left out with them.
+    holds, and is left out; when none remains the globs are ``["."]``.
     Every other key (the registry among them) is a setting the module does not
     let the repository set, and stays out. Under ``--ignore-suppressions``
-    nothing crosses, as the manifest's key is dropped. A file that is not
-    YAML, or not a mapping, gives no file: pnpm then runs as it did without
-    one.
+    nothing crosses, as the manifest's key is dropped, and the file is
+    ``packages: ["."]`` alone. So is the file for a repository file that is not
+    YAML, not a mapping, or without ``auditConfig``, and for no file at all.
     """
-    if ignore_suppressions:
-        return None
     import yaml
 
+    default: Dict[str, object] = {"packages": ["."]}
+    if data is None or ignore_suppressions:
+        return yaml.safe_dump(default).encode("utf-8")
     try:
         document = yaml.safe_load(data.decode("utf-8-sig"))
     except (ValueError, RecursionError, yaml.YAMLError):
-        return None
+        return yaml.safe_dump(default).encode("utf-8")
     if not isinstance(document, dict) or "auditConfig" not in document:
-        return None
-    copied: Dict[str, object] = {"auditConfig": document["auditConfig"]}
+        return yaml.safe_dump(default).encode("utf-8")
+    copied: Dict[str, object] = {
+        "auditConfig": document["auditConfig"],
+        "packages": ["."],
+    }
     packages = document.get("packages")
     if isinstance(packages, list) and all(isinstance(p, str) for p in packages):
         inside = [glob for glob in packages if _member_glob_stays_inside(glob)]
@@ -899,7 +925,12 @@ def _copy_inputs(
     to the scan loop, which records it) and written through fs_guard
     (``_write_copy``), which makes the parents and refuses a link on the way,
     with ``private`` as the guarded root.
+
+    pnpm's copy always ends up with a ``pnpm-workspace.yaml`` (``_pnpm_workspace_copy``):
+    the repository's, reduced, when it has one that was admitted, else the
+    default, so the copy is its own workspace root whatever the repository holds.
     """
+    workspace_written = False
     for source in package_manager_inputs(binary, package_dir, skip=skip, roots=roots):
         data = _read_admitted(source, roots)
         if data is None:
@@ -916,10 +947,16 @@ def _copy_inputs(
             reduced = _pnpm_workspace_copy(
                 data, ignore_suppressions=ignore_suppressions
             )
-            if reduced is not None:
-                _write_copy(target, reduced, private)
+            _write_copy(target, reduced, private)
+            workspace_written = True
         else:
             _write_copy(target, data, private)
+    if binary == "pnpm" and not workspace_written:
+        _write_copy(
+            project / PNPM_WORKSPACE_FILE,
+            _pnpm_workspace_copy(None, ignore_suppressions=ignore_suppressions),
+            private,
+        )
 
 
 @contextmanager
