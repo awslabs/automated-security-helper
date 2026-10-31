@@ -668,13 +668,15 @@ class ConvertPhase(EnginePhase):
                 # Dropped although every predicate this method can evaluate says it
                 # should have survived, and the filter recorded no exception. The
                 # filter and these predicates disagree (an answer that changes
-                # between two calls). Recorded as a failure rather than left as a
-                # row that reads "ran and found nothing to convert", because the
-                # whole point of these rows is that a converter which did not run
-                # says so.
+                # between two calls). The filter makes no dependency check here:
+                # the phase made it once before the filter and passed
+                # check_dependencies=False. Recorded as a failure rather than left
+                # as a row that reads "ran and found nothing to convert", because
+                # the whole point of these rows is that a converter which did not
+                # run says so.
                 failure = (
-                    "dropped by the enabled/dependency filter, although its own "
-                    "dependency check reported satisfied"
+                    "dropped by the enabled filter, although its own dependency "
+                    "check reported satisfied"
                 )
 
             # Asked even though this converter is about to disappear, and that is the
@@ -823,7 +825,8 @@ class ConvertPhase(EnginePhase):
         # and are told apart in every line this phase logs about them.
         row_keys = _row_keys(all_converter_instances, keys_in_use)
 
-        # Assigned before filtering, and on the instance rather than in a local,
+        # Assigned before filtering, and kept in the local ``dependency_answers`` by
+        # converter (also set on the instance, for the code that reads it there),
         # because filter_enabled_plugins returns only the survivors: a converter
         # dropped for unsatisfied dependencies never reaches the loop below, which
         # is the only site that writes converter_results. Recording the answer here
@@ -838,9 +841,9 @@ class ConvertPhase(EnginePhase):
         # installs a tool (the jupyter converter's resolves nbconvert through uv)
         # ran its install attempt, with its retries and its timeout, twice per
         # scan; and a check that answered differently the second time recorded
-        # one answer in the row and acted on another. The one answer is kept by
-        # converter in ``dependency_answers``, and also on the instance for the
-        # code that reads it there.
+        # one answer in the row and acted on another. The one answer is the local
+        # ``dependency_answers``, which is the source of truth; the instance's copy
+        # is for the code that reads it there.
         #
         # Not for a converter the config turned off, and not for a non-Python
         # converter on a Python-only run. The filter below drops both before

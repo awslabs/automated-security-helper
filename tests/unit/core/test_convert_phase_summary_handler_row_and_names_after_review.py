@@ -24,7 +24,7 @@ The fixtures mirror the sibling module's.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Literal
+from typing import Any, ClassVar, Dict, List, Literal
 from unittest.mock import MagicMock
 
 import pytest
@@ -91,7 +91,10 @@ class _ShellCountingConfig(ConverterPluginConfigBase):
 
 
 class _ShellCountingConverter(ConverterPluginBase[_ShellCountingConfig]):
-    checks: int = 0
+    # A class variable, not a model field: pydantic removes a field's default from
+    # the class namespace, so a test that skipped the reset would fail inside the
+    # dependency check with an AttributeError.
+    checks: ClassVar[int] = 0
 
     def model_post_init(self, context):
         if self.config is None:
@@ -116,7 +119,7 @@ class _UnanswerableConfig(ConverterPluginConfigBase):
 class _UnanswerableConverter(ConverterPluginBase[_UnanswerableConfig]):
     """A converter whose is_python_only() raises, on a Python-only run."""
 
-    checks: int = 0
+    checks: ClassVar[int] = 0
 
     def model_post_init(self, context):
         if self.config is None:

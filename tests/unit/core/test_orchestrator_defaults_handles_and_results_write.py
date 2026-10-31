@@ -331,10 +331,12 @@ class TestTheEndOfAScan:
 
         results = orchestrator._execute_scan(phases=["scan"])
 
+        # The behavior is the pin: a local binding of the name made this call raise
+        # UnboundLocalError before it returned, so reaching the engine's own model
+        # here is the assertion that fails on the defect. (A check of the code
+        # object's variable names read the mechanism, and failed on a harmless
+        # rename of the function.)
         assert results is engine_model
-        # The mechanism, pinned: no local binding of the name in the function.
-        code = ASHScanOrchestrator._execute_scan.__code__
-        assert "AshAggregatedResults" not in code.co_varnames
 
 
 class TestMetadataAndThresholds:

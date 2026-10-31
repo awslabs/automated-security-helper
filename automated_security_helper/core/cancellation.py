@@ -100,10 +100,14 @@ Limits
   putting the previous results back, which replaces every result the scan wrote;
   its logs (``ash.log``, ``ash.log.jsonl``) stay, as they are not among
   ``previous_results.RESULT_ENTRIES``.
-- The report phase removes the reports it wrote, by path. A reporter that
-  writes a file of its own (``unused_suppressions_reporter`` writes its markdown
-  beside the JSON the phase writes) leaves that file behind, unless previous
-  results are put back over it.
+- The report phase removes the reports it wrote, by path, and every other entry
+  that appeared under the reports directory while it ran: a reporter that writes
+  a file of its own (``unused_suppressions_reporter`` writes its markdown beside
+  the JSON the phase writes) has it removed too. That second removal needs a
+  listing of the directory taken before the reporters ran; when that listing did
+  not complete, only the files written by path are removed and such a file
+  stays, unless previous results are put back over it. Files a reporter that sends findings off
+  the host left are kept, as the record of what it sent.
 - A workspace scan has an event per project, which its project's worker sets as
   its scope, and one for the run (workspace/execution.py). The run checks its own
   before writing the unified results and before the workspace reports, not while
@@ -180,8 +184,9 @@ class _ChainedPrompt(threading.Event):
     """A CancelEvent's prompt, answering for the event's ancestors too.
 
     ``is_set`` reads this event's own flag OR the SIGTERM handler's lock-free
-    latch on the owner OR the owner's parent's ``stop_promptly``, so the grace
-    wait's per-tick ``prompt.is_set()`` read
+    latch on the owner OR the same two on each ancestor, walked here with a seen
+    set rather than through the parent's ``stop_promptly`` (which recursed up the
+    chain), so the grace wait's per-tick ``prompt.is_set()`` read
     (utils/subprocess_utils._wait_out_grace) sees any of them within one grace
     poll tick. ``wait`` polls the same read in slices (:func:`_poll_wait`):
     the plain event's wait blocked on the OWN flag only, so a wait already in
@@ -425,7 +430,8 @@ _SIGTERM_SEEN = False
 #: so the handler reads a consistent snapshot without taking a lock.
 _SHUTDOWN_SCOPES: Tuple[CancelEvent, ...] = ()
 
-#: Set once the handler has cancelled the registered scopes: a plain bool,
+#: Set by the handler before it reads the registered scopes, on a first Ctrl-C
+#: or a SIGTERM and whether or not any scan is registered: a plain bool,
 #: not an Event, because the handler writes it with the interrupted frame's
 #: locks unknowable and ``Event.set`` takes one. Read by
 #: :func:`shutdown_requested` and by :func:`shutdown_cancels`, so a scope
@@ -807,6 +813,13 @@ def _handle_sigint(signum: int, frame: object) -> None:
     arm's unwinding. Unlike SIGTERM's no-scan branch, a first Ctrl-C with no
     scan registered kills nothing: ``KeyboardInterrupt`` unwinds and the
     cleanup runs.
+
+    One exception to "stays an interrupt": inside :func:`stop_grace_in_progress`
+    (the shutdown of a tool that a timeout began is waiting out its grace), a
+    first Ctrl-C with a scan registered latches the cancel and returns without
+    chaining, since the interrupt would land in the grace wait and end the
+    escalation before its kill. With no scan registered nothing reads the latch,
+    so the interrupt is chained there as everywhere else.
 
     A second shutdown signal of either kind -- another Ctrl-C, or a Ctrl-C
     after a SIGTERM already started the cooperative stop -- means the

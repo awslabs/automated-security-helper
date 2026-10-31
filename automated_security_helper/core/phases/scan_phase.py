@@ -167,11 +167,15 @@ def _missing_dependency_reason(plugin_instance, values: Iterable[str] = ()) -> s
     if reason:
         # As the plugin gave it; the caller logs it so and tildes it for the results.
         return reason
-    return _generic_missing_dependency_reason(plugin_instance)
+    return _unexplained_dependency_failure_reason(plugin_instance)
 
 
-def _generic_missing_dependency_reason(plugin_instance) -> str:
-    """The reason when the scanner's dependency check gave none: names the scanner."""
+def _unexplained_dependency_failure_reason(plugin_instance) -> str:
+    """The reason when the scanner's dependency check gave none: names the scanner.
+
+    Not ``base.scanner_plugin._generic_missing_dependency_reason``, which is the
+    base hook's own "not found on PATH" answer for a missing tool.
+    """
     return (
         f"{_scanner_display_name(plugin_instance)}'s dependency check failed; "
         "ash.log has the scanner's own message"
@@ -1865,8 +1869,9 @@ class ScanPhase(EnginePhase):
                             # replaced the scanner's own explanation. The base
                             # hook's generic answer ("not found on PATH") is not
                             # added beside a refusal, which it would contradict,
-                            # and the generic sentence below only stands in when
-                            # neither has anything to say.
+                            # and the sentence from
+                            # _unexplained_dependency_failure_reason below only
+                            # stands in when neither has anything to say.
                             own_reason = plugin_missing_dependency_reason(
                                 plugin_instance, environment_values
                             )
@@ -1885,7 +1890,7 @@ class ScanPhase(EnginePhase):
                             raw_reason = text_without_values(
                                 "; ".join(reason_parts)
                                 if reason_parts
-                                else _generic_missing_dependency_reason(
+                                else _unexplained_dependency_failure_reason(
                                     plugin_instance
                                 ),
                                 environment_values,
