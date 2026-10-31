@@ -213,6 +213,22 @@ def test_a_keyword_in_any_case_ends_its_string():
     assert _quoted_spans('"a"And b') == [(0, 3)]
 
 
+def test_a_capitalized_particle_before_a_name_closes_the_string_by_design(tmp_path):
+    """The recorded trade-off of matching keywords in any case: ``d'If`` (like
+    ``d'Or`` and ``l'As``) continues with a word that is a keyword once
+    lower-cased, so the quote is read as a closer and the string ends there. A
+    marker later in the same literal is then read as a directive. The line is
+    pinned as it reads today, so a change to either side shows."""
+    from automated_security_helper.utils.suppression_matcher import _quoted_spans
+
+    assert _quoted_spans("'Chateau d'If'") == [(0, 11)]
+
+    line = "x = 'Chateau d'If # ash-ignore: R16 see it'\n"
+    found = find_inline_suppressions(_write(tmp_path, line))
+
+    assert [(item.line_number, item.rule_id) for item in found] == [(1, "R16")]
+
+
 def test_a_name_that_only_starts_with_a_keyword_is_still_prose():
     """The positive control: ``O'Dowd`` and ``l'asile`` continue past the
     letters of ``do`` and ``as``, so neither quote closes anything."""

@@ -146,7 +146,11 @@ def _is_between_word_characters(line: str, index: int) -> bool:
 #: with one of these (``it's``, ``don't``, ``rock'n'roll``). They are compared
 #: without regard to case, since SQL and Visual Basic keywords are written in
 #: any (``'x'OR 1=1``, ``"a"And b``). The list is not every language's: a
-#: keyword missing from it leaves the quote read as an apostrophe.
+#: keyword missing from it leaves the quote read as an apostrophe. The same
+#: case-blind compare reads a capitalized particle before a name (``d'Or``,
+#: ``d'If``, ``l'As``) as a closer: the string ends there, and a marker later in
+#: the same literal is read as a directive. That is the recorded trade-off of
+#: matching SQL and Visual Basic keywords in any case.
 _WORDS_AFTER_A_STRING = frozenset(
     {
         "in",
