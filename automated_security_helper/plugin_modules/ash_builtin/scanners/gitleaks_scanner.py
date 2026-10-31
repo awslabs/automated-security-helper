@@ -73,9 +73,12 @@ which are both, so the scanned tree does not configure gitleaks:
   reached through a symlink, nothing that is not a regular file, nothing ASH
   wrote under its output directory, not the operator's baseline. A failed re-run
   fails the scan rather than reporting the first run alone, and the copies are
-  removed when it ends. It copies at most ``MAX_RESCAN_FILES`` files, and its
-  runs share one ``scan_timeout``; names past the limit are reported as not
-  evaluated, which makes the scan incomplete.
+  removed when it ends. It copies at most ``MAX_RESCAN_FILES`` files and
+  ``MAX_RESCAN_BYTES`` bytes (a file that does not fit is skipped and the names
+  after it are still tried), reads at most ``MAX_IGNORE_CANDIDATES`` names from
+  the ignore file, and its copies and runs share one ``scan_timeout``; files
+  and names not reached are reported as not evaluated, which makes the scan
+  incomplete.
 * Inline ``gitleaks:allow`` comments drop a finding the same way, so ASH passes
   ``--ignore-gitleaks-allow``. ``options.honor_inline_ignores: true`` turns them
   back on; it is honored only when the operator set it, and from a config inside a

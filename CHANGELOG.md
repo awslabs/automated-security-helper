@@ -7980,6 +7980,25 @@
   copies uses the same anchor. An absolute `GITLEAKS_CONFIG`, and
   `GITLEAKS_CONFIG_TOML`, are left to gitleaks as before.
 
+- **What the gitleaks re-scan of the tree's `.gitleaksignore` can now report.**
+  gitleaks applies `<scan path>/.gitleaksignore` whatever ASH passes, so ASH
+  copies the files it names and scans them again. A run can now end differently
+  in these cases. The re-scan copies at most 1 GiB in all (there is no option
+  for it): a file that does not fit is skipped, the files after it are still
+  re-scanned, and the scan is reported as incomplete (exit 1). It reads at most
+  100,000 names from the file, and one line of colons no longer makes a name for
+  each colon: names no file can have are not built, and what is left unread makes
+  the scan incomplete. The counts in the warning and in the report are of real
+  files, not of every name a colon split makes. A `.gitleaksignore` that changed
+  while gitleaks ran fails the scan, and so does an empty re-scan report or one
+  with no run, where each used to read as no dropped findings. Results under an
+  earlier run's `.ash/ash_output` are dropped even when `--output-dir` points
+  elsewhere, as they are under this run's. A `.gitleaksignore` that is a symlink
+  to a directory, or a dangling one, is read as no ignore file instead of
+  stopping the scan. On a case-insensitive filesystem a `.gitleaksignore`
+  committed as `.GITLEAKSIGNORE` is re-scanned as the ignore file it is, and an
+  entry spelled in another case, which hid no finding, is skipped.
+
 - **The operator's own `file://` detect-secrets filters keep the operator's
   judgment beside a baseline's filters.** Authorship of a `filters_used` entry
   was judged per option: once the baseline in use had any filter, every retained
