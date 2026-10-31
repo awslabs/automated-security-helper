@@ -563,19 +563,28 @@ class TestWhereYarnsCopyGoes:
         """The ancestor check runs on the nearest EXISTING directory before the
         candidate is made, and again on the candidate as made: a part that
         comes out shared (made meanwhile by another process, or found half-way
-        with a lax mode) is named, and the candidate is passed over."""
+        with a lax mode) is named, and the candidate is passed over.
+
+        The stub flags the candidate itself, and only once it exists. A stub that
+        flagged any existing path would also reject a candidate before it was
+        made, if the check were handed the nearest existing directory, and the
+        text would match without the re-check on the made directory ever
+        running; here the directory has to exist when the candidate is
+        rejected."""
         cache_home = tmp_path / "cache-home"
         monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
         repo = tmp_path / "repo"
         _yarn_package(repo)
+        candidate = cache_home / "ash"
         monkeypatch.setattr(
             child_module,
             "_untrusted_ancestor",
-            lambda path: path if path.exists() else None,
+            lambda path: path if path == candidate and path.exists() else None,
         )
 
         chosen, passed_over = child_module._yarn_copy_parent(repo / "out", repo)
 
+        assert candidate.is_dir(), "the candidate was rejected before it was made"
         assert chosen is None, (chosen, passed_over)
         assert any(
             str(cache_home / "ash") in p and "another account" in p for p in passed_over
