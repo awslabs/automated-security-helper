@@ -33,8 +33,12 @@ def test_the_bedrock_reporter_hands_no_shown_text_to_a_sink():
     # The control: the file is in the walk, so an empty answer is a reading.
     assert REPORTER in sources
 
-    offenders = sorted(
-        site for site in _Analysis(sources).offenders() if site[0] == REPORTER
-    )
+    every_site = list(_Analysis(sources).offenders())
+    # The control for the filter below: a site's first element is a key of
+    # ``sources``, so comparing it with REPORTER can match. A key in another
+    # format (an absolute path) would make the filter empty for any reporter.
+    assert all(site[0] in sources for site in every_site), every_site
+
+    offenders = sorted(site for site in every_site if site[0] == REPORTER)
 
     assert offenders == [], "shown twice:\n" + "\n".join(map(repr, offenders))

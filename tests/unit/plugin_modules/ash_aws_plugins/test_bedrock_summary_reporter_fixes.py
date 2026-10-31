@@ -303,8 +303,31 @@ def test_the_dependency_check_accepts_a_later_fallback(context, monkeypatch):  #
     reporter = make_reporter(context, enable_fallback_models=True)
 
     assert reporter.validate_plugin_dependencies() is True, reporter.errors
-    # One listing serves the configured model's check and the chain's walk
-    # (ListingsOnce wraps the client before the first check).
+    # One listing of each kind serves the configured model's check and the
+    # chain's walk (ListingsOnce wraps the client before the first check). The
+    # foundation models are asked twice: the reachability probe and the
+    # validator's listing are two calls with different arguments.
+    assert control.list_inference_profiles.call_count == 1
+    assert control.list_foundation_models.call_count == 2
+    first, second = control.list_foundation_models.call_args_list
+    assert first != second
+
+
+def test_the_dependency_check_refuses_when_no_model_of_the_chain_is_listed(
+    context,  # noqa: F811
+    monkeypatch,
+):
+    """The control: with nothing of the chain listed, the walk finds no model
+    and the reporter is disabled; the check is not an unconditional True."""
+    control = _control_plane()
+    monkeypatch.setattr(f"{MODULE}.boto3.Session", Session(sts=_sts(), bedrock=control))
+    monkeypatch.setattr(
+        f"{MODULE}.get_fallback_model",
+        {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO}.get,
+    )
+    reporter = make_reporter(context, enable_fallback_models=True)
+
+    assert reporter.validate_plugin_dependencies() is False
     assert control.list_inference_profiles.call_count == 1
 
 
@@ -397,7 +420,23 @@ def test_the_evidence_section_keeps_every_instances_raw_json(context, monkeypatc
         *[finding("R1", uri=f"src/{i}.py") for i in range(3)],
     )
 
-    assert report.count("<summary>Raw JSON</summary>") == 3, report
+    # Three blocks, and each is a different instance: the same instance written
+    # three times would also count three.
+    blocks = _raw_json_blocks(report)
+    assert len(blocks) == 3, report
+    assert {
+        block["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        for block in blocks
+    } == {"src/0.py", "src/1.py", "src/2.py"}, blocks
+
+
+def _raw_json_blocks(report):
+    """The JSON each "Raw JSON" section of the report holds, parsed."""
+    blocks = []
+    for chunk in report.split("<summary>Raw JSON</summary>")[1:]:
+        body = chunk.split("</details>", 1)[0]
+        blocks.append(json.loads(body[body.index("{") : body.rindex("}") + 1]))
+    return blocks
 
 
 # ---------------------------------------------------------------------------

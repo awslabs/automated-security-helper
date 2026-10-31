@@ -265,10 +265,32 @@ def test_a_secrets_only_scan_sends_no_recommendations_placeholder(context, monke
         reporter, monkeypatch, runtime, finding("S1", scanner="detect-secrets")
     )
 
-    assert not any("FINDINGS BY SEVERITY" in prompt for prompt in runtime.prompts()), (
-        runtime.prompts()
-    )
+    # The one request is the secrets advice; the Recommendations section sent
+    # none.
+    (prompt,) = runtime.prompts()
+    assert "potential secrets" in prompt, prompt
     assert "## Recommendations" in report, report
+    assert "No actionable findings to analyze for this section." in report, report
+
+
+def test_a_secrets_only_scan_with_only_the_recommendations_section_sends_nothing(
+    context,  # noqa: F811
+    monkeypatch,
+):
+    """The claim without the secrets advice beside it: no request at all."""
+    reporter = make_reporter(
+        context,
+        output_markdown=False,
+        group_by_severity=False,
+        include_sections=["remediation_guide"],
+    )
+    runtime = Runtime()
+
+    report = _run(
+        reporter, monkeypatch, runtime, finding("S1", scanner="detect-secrets")
+    )
+
+    assert runtime.prompts() == []
     assert "No actionable findings to analyze for this section." in report, report
 
 
@@ -398,13 +420,20 @@ def test_the_sentence_is_written_when_the_secrets_section_is_included(
 
 def test_without_the_main_reports_section_set_no_section_is_named(context):  # noqa: F811
     """The separate technical-analysis file calls with no section set: it has
-    no secrets section to point at, whatever the main report includes."""
-    reporter = make_reporter(context, include_sections=["technical_analysis"])
+    no secrets section to point at, whatever the main report includes. The
+    main report includes the secrets section here, so the no-section call is
+    the only reason the sentence is left out."""
+    reporter = make_reporter(
+        context, include_sections=["technical_analysis", "secret_findings"]
+    )
     reporter._secret_findings_exist = True
 
     text = reporter._nothing_to_analyze()
+    with_section = reporter._nothing_to_analyze({"secret_findings"})
 
     assert text == "No actionable findings to analyze for this section."
+    # The control: the same reporter names the section when it is given one.
+    assert "reported in their own section" in with_section, with_section
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +461,8 @@ def test_the_dependency_check_asks_the_control_plane_once_for_the_whole_chain(
     # The reachability probe (byOutputModality) and the validator's listing are
     # two calls with different arguments; neither is repeated.
     assert control.list_foundation_models.call_count == 2
+    first, second = control.list_foundation_models.call_args_list
+    assert first != second
 
 
 def test_a_failed_profile_listing_is_warned_once_across_the_chain(
@@ -444,8 +475,17 @@ def test_a_failed_profile_listing_is_warned_once_across_the_chain(
     two later checks logging the kept failure at DEBUG. Before, the walk's fresh
     wrapper raised the original error again and warned twice. The reporter's
     "Configured model ... is not valid" WARNING quotes the reason and is a
-    different line, so the count is of the listing's line, not of the phrase."""
-    control = _control_plane(FALLBACK_TWO)
+    different line, so the count is of the listing's line, not of the phrase.
+
+    The three models carry an area prefix, as a cross-region profile id does:
+    only such an id (or an ARN, or a model the foundation listing names as
+    profile-routed) is left unchecked by a failed profile listing. An id with
+    no area is an on-demand model, and the on-demand list already said it is
+    not there. The last model is listed, so the check passes."""
+    primary = f"us.{PRIMARY_MODEL}"
+    fallback_one = f"us.{FALLBACK_ONE}"
+    fallback_two = f"us.{FALLBACK_TWO}"
+    control = _control_plane(fallback_two)
     control.list_inference_profiles.side_effect = botocore.exceptions.ClientError(
         {"Error": {"Code": "AccessDeniedException", "Message": "Access denied"}},
         "ListInferenceProfiles",
@@ -453,12 +493,14 @@ def test_a_failed_profile_listing_is_warned_once_across_the_chain(
     monkeypatch.setattr(f"{MODULE}.boto3.Session", Session(sts=_sts(), bedrock=control))
     monkeypatch.setattr(
         f"{MODULE}.get_fallback_model",
-        {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO}.get,
+        {primary: fallback_one, fallback_one: fallback_two}.get,
     )
-    reporter = make_reporter(context, enable_fallback_models=True)
+    reporter = make_reporter(context, enable_fallback_models=True, model_id=primary)
 
     with caplog.at_level(logging.DEBUG):
-        reporter.validate_plugin_dependencies()
+        satisfied = reporter.validate_plugin_dependencies()
+
+    assert satisfied is True, reporter.errors
 
     warned = [
         record
