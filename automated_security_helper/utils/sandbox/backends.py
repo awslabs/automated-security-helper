@@ -524,24 +524,32 @@ def _operator_ca_reads(
             if is_directory:
                 if not os.path.isdir(real):
                     continue
-                if _exposes_a_home(real, homes):
-                    # Every scanner spawn plans again, so the warning is for the
-                    # first one.
-                    if (f"{name} home", entry) not in _ca_unspelled_warned:
-                        _ca_unspelled_warned.add((f"{name} home", entry))
-                        ASH_LOGGER.warning(
-                            f"${name} names {entry!r}, which is not readable in "
-                            "the scanner sandbox: it would expose far more than "
-                            "one directory. Point it at the directory of "
-                            "certificates."
-                        )
-                    continue
             elif not os.path.isfile(real):
                 continue
             # Visible already, unless a home carved out of the path that shows it
             # (a HOME under /opt) is where it sits.
             in_a_home = any(real == h or _is_within(real, h) for h in homes)
             hidden_link = _link_inside_a_home(Path(entry), homes)
+            visible = (
+                not in_a_home
+                and not (hidden_link and recreates_links)
+                and any(real == p or _is_within(real, p) for p in seen)
+            )
+            # Asked after the directory is known to be shown or not: a directory
+            # that holds a home but is shown already (/opt, with a HOME under it) is
+            # readable, so a warning that it is not would be false.
+            if is_directory and not visible and _exposes_a_home(real, homes):
+                # Every scanner spawn plans again, so the warning is for the
+                # first one.
+                if (f"{name} home", entry) not in _ca_unspelled_warned:
+                    _ca_unspelled_warned.add((f"{name} home", entry))
+                    ASH_LOGGER.warning(
+                        f"${name} names {entry!r}, which is not readable in "
+                        "the scanner sandbox: it would expose far more than "
+                        "one directory. Point it at the directory of "
+                        "certificates."
+                    )
+                continue
             if hidden_link and warns_of_hidden_links:
                 if (f"{name} link", entry) not in _ca_unspelled_warned:
                     _ca_unspelled_warned.add((f"{name} link", entry))
@@ -551,11 +559,7 @@ def _operator_ca_reads(
                         "sandbox, the link is not, so a scanner that opens the "
                         "written path will not find it. Point it at the file itself."
                     )
-            if (
-                not in_a_home
-                and not (hidden_link and recreates_links)
-                and any(real == p or _is_within(real, p) for p in seen)
-            ):
+            if visible:
                 continue
             if spell is not None:
                 try:

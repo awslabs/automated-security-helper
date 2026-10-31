@@ -1138,6 +1138,36 @@ def test_a_ca_directory_that_holds_a_home_is_warned_of_once(
 
 
 @POSIX
+def test_a_visible_ca_directory_that_holds_a_home_is_not_warned_of(
+    layout, monkeypatch, caplog
+):
+    """A directory the policy shows already is readable even when a home sits under
+    it (``/opt``, with a ``HOME`` below), so a warning that it is not readable would
+    be false. The same directory with nothing showing it keeps the warning."""
+    env = {"SSL_CERT_DIR": str(layout.tmp)}
+    monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+    monkeypatch.setattr(backends, "_ca_unspelled_warned", set())
+    shown = _policy(layout, network=True, read_only=(layout.system, layout.tmp))
+    hidden = _policy(layout, network=True)
+
+    def warnings():
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if "SSL_CERT_DIR" in record.getMessage()
+        ]
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        assert backends._operator_ca_reads(shown, env) == []
+    assert warnings() == [], warnings()
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        assert backends._operator_ca_reads(hidden, env) == []
+    assert len(warnings()) == 1, warnings()
+    assert "expose" in warnings()[0]
+
+
+@POSIX
 @pytest.mark.parametrize("kind", _BACKEND_KINDS)
 def test_a_ca_path_that_cannot_be_examined_is_passed_on_and_fails_no_plan(
     layout, monkeypatch, kind
