@@ -90,7 +90,17 @@ import threading
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeGuard,
+    Union,
+)
 from automated_security_helper.utils.error_text import ESCAPE_CODES, text_without_values
 from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.process_env import environ_for_parsed_output
@@ -382,7 +392,7 @@ def _stage_nix_metadata(site_dirs: Sequence[str], target: Path) -> int:
     gave uv two candidates for one requirement. Returns the number staged.
     """
     staged = 0
-    seen: set = set()
+    seen: set[str] = set()
     for site_dir in site_dirs:
         try:
             entries = sorted(Path(site_dir).glob("*.dist-info"))
@@ -443,11 +453,12 @@ class _ProbeFailure:
 
 #: What ``_run`` and ``_probe`` answer: the probe's result, a failure to run it
 #: (with the cause), or None from an older stub that knows only "did not run".
-_ProbeAnswer = Union[subprocess.CompletedProcess, _ProbeFailure, None]
+_ProbeAnswer = Union[subprocess.CompletedProcess[Any], _ProbeFailure, None]
 
 
-def _did_not_run(answer: _ProbeAnswer) -> bool:
-    return answer is None or isinstance(answer, _ProbeFailure)
+def _ran(answer: _ProbeAnswer) -> TypeGuard[subprocess.CompletedProcess[Any]]:
+    """True when the probe ran to an answer: not None, not a ``_ProbeFailure``."""
+    return answer is not None and not isinstance(answer, _ProbeFailure)
 
 
 def _probe_cause(answer: _ProbeAnswer) -> str:
@@ -650,7 +661,7 @@ def _dry_run(
                 )
                 return "unverifiable", reason
         result = _run(command + [requirement], _UV_DRY_RUN_TIMEOUT)
-    if _did_not_run(result):
+    if not _ran(result):
         return (
             "unverifiable",
             f"could not run uv to check {requirement!r}{_probe_cause(result)}",
@@ -879,7 +890,7 @@ def _verify(
     values: Tuple[str, ...] = (),
 ) -> PreInstalledToolVerdict:
     probe = _run([executable, "--version"], _VERSION_PROBE_TIMEOUT)
-    if _did_not_run(probe):
+    if not _ran(probe):
         return PreInstalledToolVerdict(
             "unverifiable",
             executable,
