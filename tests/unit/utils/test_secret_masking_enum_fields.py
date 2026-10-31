@@ -79,15 +79,18 @@ def _results(*results):
 
 class TestEnumFieldsOfOverlappingResults:
     def test_a_value_equal_to_a_level_leaves_the_level_alone(self):
-        """The hard-coded value ``warning`` is the level of the result on its line."""
+        """The hard-coded value ``warning`` is the level of the result on its line.
+        The same word in that result's message is masked: the value is masked on
+        the line, and only the enum field is exempt."""
         model = _results(
             _result("B105", 5, HARDCODED + "'warning'", level="error"),
-            _result("B404", 5, "import", level="warning", kind="fail"),
+            _result("B404", 5, "uses warning", level="warning", kind="fail"),
         )
 
         mask_secrets_in_results(model)
 
         neighbor = model.sarif.runs[0].results[1]
+        assert neighbor.message.root.text == "uses " + _mask_secret_value("warning")
         assert neighbor.level == Level.warning
         assert neighbor.kind == Kind.fail
         assert model.sarif.runs[0].results[0].level == Level.error
@@ -98,15 +101,43 @@ class TestEnumFieldsOfOverlappingResults:
             _result(
                 "B404",
                 5,
-                "import",
+                "uses inSource",
                 suppressions=[{"kind": "inSource", "justification": "reviewed"}],
             ),
         )
 
         mask_secrets_in_results(model)
 
-        suppression = model.sarif.runs[0].results[1].suppressions[0]
-        assert suppression.kind == Kind1.inSource
+        neighbor = model.sarif.runs[0].results[1]
+        assert neighbor.message.root.text == "uses " + _mask_secret_value("inSource")
+        assert neighbor.suppressions[0].kind == Kind1.inSource
+
+    def test_a_value_equal_to_the_column_kind_leaves_the_run_alone(self):
+        """``Run.columnKind`` is the enum a value can equal in a model too: the
+        word holds digits, so it propagates to every message."""
+        word = ColumnKind.utf16CodeUnits.value
+        model = AshAggregatedResults()
+        model.sarif = SarifReport.model_validate(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "test"}},
+                        "columnKind": word,
+                        "results": [
+                            _result("B105", 5, HARDCODED + f"'{word}'"),
+                            _result("B404", 9, f"uses {word}"),
+                        ],
+                    }
+                ],
+            }
+        )
+
+        mask_secrets_in_results(model)
+
+        run = model.sarif.runs[0]
+        assert run.columnKind == ColumnKind.utf16CodeUnits
+        assert run.results[1].message.root.text == "uses " + _mask_secret_value(word)
 
     def test_the_masked_results_validate_when_loaded_back(self):
         model = _results(
