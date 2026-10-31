@@ -188,6 +188,52 @@ def test_a_receipt_directory_this_user_cannot_search_reads_as_no_receipt(
 
 
 @posix_only
+@not_root
+def test_a_receipt_level_this_user_cannot_read_skips_the_receipt_and_raises_nothing(
+    monkeypatch, tmp_path
+):
+    """The mode of each receipt level is set on a read-only descriptor, so a level
+    without the read bit fails the open. The receipt is best-effort: it is not
+    written, the call returns None, and the install it follows stays installed."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    path = download_utils.write_receipt(
+        destination, "tool", {"url": _URL, "sha256": _DIGEST}
+    )
+    assert path is not None
+    os.chmod(path.parent, 0o300)
+    try:
+        assert (
+            download_utils.write_receipt(
+                destination, "tool", {"url": _URL, "sha256": _DIGEST}
+            )
+            is None
+        )
+    finally:
+        os.chmod(path.parent, 0o700)
+
+
+@posix_only
+@not_root
+def test_a_write_only_file_is_not_made_executable_and_the_error_is_raised(tmp_path):
+    """The mode is read and set on a descriptor opened read-only, so a file this
+    user may not read fails the open; the by-name chmod that would have repaired
+    it is the call that followed links. The error is raised, the mode is left."""
+    tool = tmp_path / "tool"
+    tool.write_bytes(_BODY)
+    tool.chmod(0o200)
+    try:
+        with pytest.raises(PermissionError):
+            download_utils.make_executable(tool)
+        assert stat.S_IMODE(tool.stat().st_mode) == 0o200
+    finally:
+        tool.chmod(0o600)
+
+
+@posix_only
 def test_a_symlink_at_the_install_path_is_not_an_installed_tool(monkeypatch, tmp_path):
     home = tmp_path / "home"
     home.mkdir()

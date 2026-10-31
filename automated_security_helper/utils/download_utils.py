@@ -774,6 +774,12 @@ def make_executable(file_path: Path) -> None:
     The mode is read and set on one open descriptor, opened without following a
     link (``O_NOFOLLOW``): the ``is_symlink`` check alone left a window in which a
     link swapped in after it was followed by the chmod.
+
+    The open is read-only, so a file this user may not read (an owner-write-only
+    file, mode ``0o200``) fails it with PermissionError, which is raised: the
+    by-name ``chmod`` this replaced repaired such a file, but it is the call that
+    followed a link. The install paths no longer need this function; they set the
+    mode on the staged descriptor before the rename.
     """
     if platform.system() == "Windows":
         return
@@ -981,6 +987,13 @@ def _private_dir(path: Path) -> None:
     receipt root, and ``_untrusted_reason`` rejects a receipt root owned by another uid
     -- so a directory an attacker substitutes for it is theirs, and is refused. A loose
     ``~/.ash`` therefore costs a redundant download, not a bad trust decision.
+
+    The mode is set on a read-only descriptor of each level, so a level this user
+    may not read (``0o300``, say) fails the open with PermissionError and the
+    receipt is not written: ``write_receipt`` reports that and the next install
+    downloads again. A by-name ``chmod`` would repair the level, and would also
+    follow a link swapped in after the link check; the receipt store is not worth
+    that trade.
     """
     root = receipt_root()
     # Above the root, create without touching modes: those levels are shared with the
