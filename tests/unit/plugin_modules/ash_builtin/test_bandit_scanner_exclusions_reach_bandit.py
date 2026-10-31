@@ -583,6 +583,9 @@ def test_a_target_whose_path_holds_a_comma_gets_no_ini_entries(tmp_path, caplog)
     )
 
     with caplog.at_level(logging.WARNING):
+        # Cleared here: whatever the construction above logged is not about
+        # the entries, and a warning added to it later must not fail this test.
+        caplog.clear()
         assert scanner._ini_excludes(comma) == []
     # Only the warnings count: caplog also holds the DEBUG lines the scanner's
     # construction logs (its uv tool set-up), which are not about the entries.
@@ -590,6 +593,18 @@ def test_a_target_whose_path_holds_a_comma_gets_no_ini_entries(tmp_path, caplog)
     assert not blamed, blamed
     # The same file does yield entries under a target it can anchor at.
     assert scanner._ini_excludes(plain), "the control target must get entries"
+
+    # The scan itself says it, once, for the target.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        scanner._execute_scan(comma, "source", [])
+    said = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.WARNING and "holds a comma" in r.getMessage()
+    ]
+    assert len(said) == 1, [r.getMessage() for r in caplog.records]
+    assert repr(comma.as_posix()) in said[0]
 
 
 def test_no_ini_adds_no_raw_entries(tmp_path):

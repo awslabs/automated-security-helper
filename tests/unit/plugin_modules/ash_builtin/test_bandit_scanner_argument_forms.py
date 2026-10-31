@@ -44,6 +44,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugin_modules.ash_builtin.scanners import bandit_scanner
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
@@ -330,9 +331,30 @@ def test_a_comma_in_the_targets_path_is_warned_about(tmp_path, caplog):
     source = _tree(tmp_path, ["app.py"], name="a,b")
     scanner = _scanner(source, tmp_path)
     with caplog.at_level(logging.WARNING):
-        scanner._execute_scan(source, "source", _ignore("vendor/**"))
+        argv, _, _ = scanner._execute_scan(source, "source", _ignore("vendor/**"))
 
     assert any("comma" in message for message in _warnings(caplog)), _warnings(caplog)
+    # The shape of the argument is pinned too: bandit gets an --exclude with no
+    # entry at all (which replaces its own defaults, as any --exclude does),
+    # not an entry anchored at the comma path and not a dropped argument.
+    assert [str(arg) for arg in argv if str(arg).startswith("--exclude")] == [
+        "--exclude="
+    ], argv
+
+
+def test_a_link_leaving_a_comma_target_refuses_the_scan(tmp_path):
+    """Every link entry is anchored at the target, so under a path holding a comma
+    none can be passed. A scan that warned and ran bandit would let it read the
+    file the link points at, outside the tree."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "target.py").write_text("x = 1\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py"], name="a,b")
+    os.symlink(outside / "target.py", source / "link.py")
+    scanner = _scanner(source, tmp_path)
+
+    with pytest.raises(ScannerError, match="cannot leave out that file alone"):
+        scanner._execute_scan(source, "source", [])
 
 
 # ---------------------------------------------------------------------------
