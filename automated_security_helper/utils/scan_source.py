@@ -500,7 +500,8 @@ def _git_entry_is_plain(entry: Path) -> bool:
     and the common dir's config.
 
     *entry* is a ``.git`` directory, a gitfile naming the git dir, or a symlink
-    to either (``_marks_a_checkout`` counted it). Each of the three files must be
+    to either (``_marks_a_checkout`` counted it; a link to a gitfile is read as
+    the gitfile, as git reads it). Each of the three files must be
     plain (``_plain_entry``) in the git dir the entry leads to, and so must
     ``config`` in the common dir that git dir's ``commondir`` names
     (``_common_dir_named``): git's repository-format check reads it next, and
@@ -526,19 +527,28 @@ def _git_entry_is_plain(entry: Path) -> bool:
         looked_up = os.lstat(entry)
     except OSError:
         return False
+    named_dir: Optional[Path]
     if _is_link_stat(looked_up):
-        git_dir = Path(os.path.realpath(entry))
+        target = Path(os.path.realpath(entry))
+        try:
+            target_mode = os.lstat(target).st_mode
+        except OSError:
+            return False
+        if stat.S_ISREG(target_mode):
+            # A link to a gitfile: git follows the link and reads the file, and
+            # a relative record is joined under the directory of the name it
+            # was asked for (the link's), not the file's.
+            named_dir = _git_dir_named_by(target, entry.parent)
+            if named_dir is None:
+                return False
+            git_dir = named_dir
+        else:
+            git_dir = target
     elif stat.S_ISREG(looked_up.st_mode):
-        record = _read_gitdir_record(entry)
-        if record is None:
+        named_dir = _git_dir_named_by(entry, entry.parent)
+        if named_dir is None:
             return False
-        text = record.rstrip("\r\n")
-        if not text.startswith(_GITFILE_RECORD_PREFIX):
-            return False
-        named = text[len(_GITFILE_RECORD_PREFIX) :]
-        if not named:
-            return False
-        git_dir = Path(os.path.normpath(os.path.join(entry.parent, named)))
+        git_dir = named_dir
     else:
         git_dir = entry
     try:
@@ -554,6 +564,27 @@ def _git_entry_is_plain(entry: Path) -> bool:
     if common is None:
         return False
     return common == git_dir or _plain_entry(common / "config")
+
+
+def _git_dir_named_by(gitfile: Path, base: Path) -> Optional[Path]:
+    """The git dir the gitfile *gitfile* names, parsed as git parses it, or None.
+
+    The exact prefix ``gitdir: `` then everything after it with only trailing
+    carriage returns and newlines dropped, joined under *base* unless absolute.
+    None when the record cannot be read, lacks the prefix or names nothing: git
+    starts on nothing through it (``_git_entry_is_plain`` counts that as not
+    plain).
+    """
+    record = _read_gitdir_record(gitfile)
+    if record is None:
+        return None
+    text = record.rstrip("\r\n")
+    if not text.startswith(_GITFILE_RECORD_PREFIX):
+        return None
+    named = text[len(_GITFILE_RECORD_PREFIX) :]
+    if not named:
+        return None
+    return Path(os.path.normpath(os.path.join(base, named)))
 
 
 def _common_dir_named(git_dir: Path) -> Optional[Path]:
