@@ -131,9 +131,9 @@ class LintCategory(str, Enum):
     # A value the AshConfig model refuses, so a scan refuses the config.
     SCHEMA_ERROR = "schema-error"
     PLUGIN_OPTIONS_UNCHECKED = "plugin-options-unchecked"
-    # A warning ConfigValidator gives in words lint has no category for. Not
-    # SYNTAX_ERROR: that category says the file did not load, and the CLI skips
-    # the fixers for a file that has one.
+    # What ConfigValidator reports in words lint has no category for, an error
+    # or a warning. Not SYNTAX_ERROR: that category says the file did not load,
+    # and the CLI skips the fixers for a file that has one.
     OTHER = "other"
 
 
@@ -1463,11 +1463,6 @@ class ConfigLinter:
         for warning in check.warnings:
             for issue in cls._validator_error_to_lint_issues(warning, config_data):
                 issue.severity = LintSeverity.WARNING
-                if issue.category == LintCategory.SYNTAX_ERROR:
-                    # The fallback of _validator_error_to_lint_issue, for words
-                    # it does not know. A warning is something a scan accepts, so
-                    # the file loads and is not a syntax error.
-                    issue.category = LintCategory.OTHER
                 if issue.category == LintCategory.IGNORE_PATH_ISSUE:
                     issue.pattern = cls._take_path_pattern(path_patterns, warning)
                 result.issues.append(issue)
