@@ -580,10 +580,20 @@ def _uncredited_coverage_claims(
                 continue
             if ScannerStatisticsCalculator._same_scanner(recorded, key):
                 continue
-            # A claim is a counter that was written (the zero a non-tracking scanner's
-            # report carries for the failure count is none) or a non-empty list.
+            # A claim is a loss: a failed-target counter above zero, a counter that
+            # cannot be read as a count, or a non-empty list of unscanned inputs. A
+            # report that says every attempted target was evaluated (a readable
+            # attempted count, nothing failed, nothing unscanned) claims full
+            # coverage, which is no shortfall; the zero a non-tracking scanner's
+            # report carries for the failure count is none either.
+            attempted = report.get("targets_attempted")
+            attempted_unreadable = attempted is not None and not (
+                isinstance(attempted, int)
+                and not isinstance(attempted, bool)
+                and attempted >= 0
+            )
             if (
-                report.get("targets_attempted") is not None
+                attempted_unreadable
                 or report.get("targets_failed") not in (None, 0)
                 or report.get("inputs_not_scanned")
             ):

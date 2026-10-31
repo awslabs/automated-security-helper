@@ -116,6 +116,48 @@ class TestTheReportReaders:
         assert shortfalls == []
         warning.assert_not_called()
 
+    def test_a_misfiled_report_claiming_full_coverage_is_not_a_shortfall(self):
+        """A misfiled report that says every attempted target was evaluated (four
+        attempted, none failed, nothing unscanned) records no loss, so the scanner
+        it names is not listed and nothing is warned."""
+        model = AshAggregatedResults()
+        model.additional_reports = {
+            "bandit": {
+                "source": {
+                    "scanner_name": "semgrep",
+                    "status": "PASSED",
+                    "targets_attempted": 4,
+                    "targets_failed": 0,
+                }
+            }
+        }
+
+        with patch.object(unified_metrics.ASH_LOGGER, "warning") as warning:
+            shortfalls = coverage_shortfalls(model)
+
+        assert shortfalls == []
+        warning.assert_not_called()
+
+    def test_a_misfiled_report_with_unreadable_attempted_count_is_still_listed(self):
+        """Control: an attempted count that is not a count at all is a claim that
+        cannot be read, so the named scanner is still listed with unknown size."""
+        model = AshAggregatedResults()
+        model.additional_reports = {
+            "bandit": {
+                "source": {
+                    "scanner_name": "semgrep",
+                    "status": "PASSED",
+                    "targets_attempted": "four",
+                    "targets_failed": 0,
+                }
+            }
+        }
+
+        with patch.object(unified_metrics.ASH_LOGGER, "warning"):
+            shortfalls = coverage_shortfalls(model)
+
+        assert shortfalls == [("semgrep", None, None)]
+
     def test_a_report_filed_under_its_own_scanner_is_not_marked_unknown(self):
         """Control: the same claim under the scanner's own key is read as its own."""
         model = AshAggregatedResults()
