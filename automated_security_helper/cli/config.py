@@ -434,6 +434,19 @@ def _owned_by_another_user(before: os.stat_result | None) -> bool:
     return effective != 0 and before.st_uid != effective
 
 
+def _has_other_names(before: os.stat_result | None) -> bool:
+    """Whether the file exists and another name also refers to it.
+
+    A rename over one name of a file with two names makes a new file there and
+    leaves the other name on the old text; the plain write these commands made
+    changed the one file both names refer to. Such a file is written in place,
+    so both names stay current. Below a guarded root the in-place write goes
+    through the guard, which refuses a file with a second name before it
+    changes anything (``_write_in_place``).
+    """
+    return before is not None and before.st_nlink > 1
+
+
 def _carry_file_identity(fd: int, before: os.stat_result | None) -> None:
     """Give the staging file at ``fd`` the replaced file's owner and mode.
 
@@ -444,8 +457,9 @@ def _carry_file_identity(fd: int, before: os.stat_result | None) -> None:
     attempted only where the staging file's owner differs (a process running as
     root over a bind-mounted config, say, which otherwise handed the file back
     owned by root); without the privilege it is refused and the mode is still
-    carried. Hard links, ACLs and extended attributes are not carried: the
-    rename makes a new file.
+    carried. ACLs and extended attributes are not carried: the rename makes a
+    new file. A file with a second name is never renamed over
+    (``_has_other_names``).
     """
     if before is None:
         return
@@ -520,8 +534,9 @@ def _write_config_text(config_path: Path, text: str) -> None:
     bits and owner and renamed over it (fs_guard.open_for_atomic_write, as
     utils/atomic_write.py writes); where staging or the rename is refused for
     the file's place (``_staged_write_falls_back``), or the file is one this
-    process may not write (``_may_not_write``) or one owned by another user it
-    cannot give back to (``_owned_by_another_user``), the in-place write is made.
+    process may not write (``_may_not_write``), one owned by another user it
+    cannot give back to (``_owned_by_another_user``) or one another name also
+    refers to (``_has_other_names``), the in-place write is made.
     """
     # Not at the top: fs_guard imports the sandbox package (atomic_write.py).
     from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
@@ -529,7 +544,11 @@ def _write_config_text(config_path: Path, text: str) -> None:
     target = _write_target(config_path)
     before = _stat_to_keep(target)
     try:
-        if _may_not_write(target, before) or _owned_by_another_user(before):
+        if (
+            _may_not_write(target, before)
+            or _owned_by_another_user(before)
+            or _has_other_names(before)
+        ):
             raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
         with open_for_atomic_write(target, encoding="utf-8") as handle:
             # Before the first byte: the staging file is created with the
@@ -551,7 +570,11 @@ def _write_config_bytes(config_path: Path, data: bytes) -> None:
     target = _write_target(config_path)
     before = _stat_to_keep(target)
     try:
-        if _may_not_write(target, before) or _owned_by_another_user(before):
+        if (
+            _may_not_write(target, before)
+            or _owned_by_another_user(before)
+            or _has_other_names(before)
+        ):
             raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
         with open_for_atomic_write(target, binary=True) as handle:
             # Before the first byte, as in _write_config_text.

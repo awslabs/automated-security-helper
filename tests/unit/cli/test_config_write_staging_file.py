@@ -52,25 +52,33 @@ class _WatchedHandle:
         return getattr(self._handle, name)
 
 
+class _OsWithoutFchmod:
+    """The ``os`` module as the guard sees it, with ``fchmod`` doing nothing."""
+
+    def fchmod(self, fd: int, mode: int) -> None:
+        return None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(os, name)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="file modes are POSIX modes")
-@pytest.mark.skipif(not hasattr(os, "link"), reason="the platform has no hard links")
 def test_the_staging_file_has_the_configs_mode_before_the_first_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Red at the base: the mode was carried after ``handle.write``, so the first
     write met a file with the umask-derived mode (0o644 here).
 
-    The config has a second name, which is the case the guard's own mode carry
-    skips (it carries the mode of a file with one name only), so the mode the
-    first write meets is the one this command sets.
+    The guard puts the mode of a file with one name on its staging file itself,
+    before it hands the file over, which would hide whether this command does. Its
+    own ``fchmod`` is switched off here, so the mode the first write meets is the
+    one this command sets. (A config with a second name is no way to switch it
+    off: that file is written in place, never staged.)
     """
     config = tmp_path / ".ash.yaml"
     config.write_text("token: old\n", encoding="utf-8")
     config.chmod(0o600)
-    try:
-        os.link(config, tmp_path / "second-name.yaml")
-    except OSError as refused:
-        pytest.skip(f"this host refuses hard links: {refused}")
+    monkeypatch.setattr(fs_guard, "os", _OsWithoutFchmod())
 
     modes: List[int] = []
     real = fs_guard.open_for_atomic_write

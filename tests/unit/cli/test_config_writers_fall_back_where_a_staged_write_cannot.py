@@ -1,17 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A config write that cannot be staged beside the file is made in place, the
-file's permission bits are kept, and a failed `lint --fix` write is reported.
+"""A config write that cannot be staged beside the file is made in place, a
+config that another name also refers to is never replaced, the file's permission
+bits are kept, and a failed `lint --fix` write is reported.
 
 The config writers stage the new text beside the file and rename it over the
 target, so a failed write leaves the file whole. Two places refuse that shape
 where the plain in-place write succeeded: a directory the user may not write
 (the staging file fails EACCES) and a single file bind-mounted into the
 container (the rename onto a mount point fails EBUSY). There the in-place write
-is made. The staged write makes a new inode at the umask's mode, so the file's
-own bits are put back before the rename (a 0600 config stays 0600). A write the
-lint fixers cannot make is reported on one line with exit 1, not a traceback.
+is made. A file with a second name is written in place too: a rename makes a new
+file under one name and leaves the other on the old text. The staged write makes
+a new inode at the umask's mode, so the file's own bits are put back before the
+rename (a 0600 config stays 0600). A write the lint fixers cannot make is
+reported on one line with exit 1, not a traceback.
 """
 
 from __future__ import annotations
@@ -106,6 +109,44 @@ def test_a_staging_file_refused_with_eacces_falls_back_to_the_in_place_write(
     # refused; a writer that never staged would pass without it.
     assert len(refused) == 1 and refused[0].startswith(staging_prefix)
     assert _written(config_file)["fail_on_findings"] is False
+
+
+def _replaces_of(monkeypatch: pytest.MonkeyPatch, target: Path) -> list[str]:
+    """Record every ``os.replace`` onto a file named like ``target``, letting it
+    happen. Matched on the file name alone: the guard renames by name relative to
+    a directory it holds open, so the destination may be a bare name."""
+    real_replace = os.replace
+    seen: list[str] = []
+
+    def recording_replace(src, dst, *args, **kwargs):
+        if isinstance(dst, (str, os.PathLike)) and Path(dst).name == target.name:
+            seen.append(os.fspath(dst))
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", recording_replace)
+    return seen
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX hard links")
+def test_a_hard_linked_config_is_rewritten_under_both_names(
+    config_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rename over one name of a file with two names leaves the other name on
+    the old text; the plain write changed the one file both names refer to."""
+    other = config_file.parent / "shared.yaml"
+    try:
+        os.link(config_file, other)
+    except OSError as refused:
+        pytest.skip(f"this host refuses hard links: {refused}")
+    replaced = _replaces_of(monkeypatch, config_file)
+
+    result = _update(config_file)
+
+    assert result.exit_code == 0, result.output
+    assert replaced == []
+    assert _written(config_file)["fail_on_findings"] is False
+    assert _written(other)["fail_on_findings"] is False
+    assert config_file.stat().st_nlink == 2
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
