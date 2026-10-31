@@ -95,11 +95,19 @@ def results_dirs(scanner):
 
 def _deep_directory(root: Path, levels: int = 5, width: int = 60) -> Path:
     """A chain of ``levels`` directories under ``root``, each ``width`` characters
-    long: each takes ``width`` + 2 characters of a normalized name."""
+    long: each takes ``width`` + 2 characters of a normalized name.
+
+    The chain is about 300 characters on top of the temporary directory. A Windows
+    host without long path support refuses it, and that is the host's limit, not a
+    result for the name budget these tests pin, so the test is skipped there.
+    """
     directory = root
     for level in range(levels):
         directory = directory / (str(level) * width)
-    directory.mkdir(parents=True)
+    try:
+        directory.mkdir(parents=True)
+    except OSError as error:
+        pytest.skip(f"this host cannot make a path this long: {type(error).__name__}")
     return directory
 
 
