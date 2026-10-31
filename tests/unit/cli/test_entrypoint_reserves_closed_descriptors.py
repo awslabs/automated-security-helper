@@ -158,6 +158,28 @@ def test_an_unattached_but_open_descriptor_is_not_held(
     assert no_reservations == set()
 
 
+def test_an_open_descriptor_without_a_stream_is_still_written_by_the_raw_floor(
+    monkeypatch, no_reservations
+):
+    """A PYTHONIOENCODING naming a codec Python lacks leaves both streams None
+    while descriptors 1 and 2 are open. They were recorded as closed, so the raw
+    floor skipped both and a failing run ended with no output at all."""
+    monkeypatch.setattr(entrypoint, "_CLOSED_AT_START", set())
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    monkeypatch.setattr(entrypoint, "_reattach", lambda fd: None)
+    monkeypatch.setattr(entrypoint, "_descriptor_is_closed", lambda fd: False)
+    written: list[int] = []
+    monkeypatch.setattr(os, "write", _recording_write(written))
+
+    assert entrypoint.ensure_std_streams() == ()
+
+    assert entrypoint._CLOSED_AT_START == set(), entrypoint._CLOSED_AT_START
+    assert no_reservations == set()
+    assert entrypoint._write_raw("report") is True
+    assert written == [2], written
+
+
 def test_the_null_device_handed_the_descriptor_itself_stays_open(
     monkeypatch, no_reservations, recorded_os
 ):

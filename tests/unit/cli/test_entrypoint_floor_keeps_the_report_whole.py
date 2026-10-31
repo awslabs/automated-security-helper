@@ -177,8 +177,14 @@ def test_stdout_is_flushed_before_the_raw_write_to_descriptor_1(monkeypatch):
 
 
 def test_ensure_std_streams_records_a_descriptor_it_could_not_open(monkeypatch):
+    """Recorded because it is closed. The descriptor is read as closed by a
+    stand-in here, and the null-device hold is stood in for too: the real
+    descriptor 2 is open, and holding it would replace the test runner's own."""
     monkeypatch.setattr(entrypoint, "_CLOSED_AT_START", set())
+    monkeypatch.setattr(entrypoint, "_RESERVED_DESCRIPTORS", set())
     monkeypatch.setattr(entrypoint, "_reattach", lambda fd: None)
+    monkeypatch.setattr(entrypoint, "_descriptor_is_closed", lambda fd: fd == 2)
+    monkeypatch.setattr(entrypoint, "_reserve_descriptor", lambda fd: True)
     monkeypatch.setattr(sys, "stderr", None)
 
     assert entrypoint.ensure_std_streams() == ()

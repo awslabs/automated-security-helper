@@ -101,10 +101,11 @@ _BANNER = "ash: fatal error"
 _PRINTERS = frozenset({"typer.main", "rich.traceback"})
 
 #: The descriptors :func:`ensure_std_streams` found closed when it ran: a
-#: stream was ``None`` and the descriptor under it could not be opened. A
-#: number the run opens later (the scan log, a report) can be given that
-#: descriptor, so the raw floor never writes to one of these. Empty until
-#: ensure_std_streams has run, and on every normal invocation.
+#: stream was ``None`` and the descriptor under it was closed (EBADF). A number
+#: the run opens later (the scan log, a report) can be given that descriptor, so
+#: the raw floor never writes to one of these. A descriptor that was open but
+#: could not be given a stream is not recorded: the floor still writes to it.
+#: Empty until ensure_std_streams has run, and on every normal invocation.
 _CLOSED_AT_START: set[int] = set()
 
 
@@ -240,7 +241,11 @@ def ensure_std_streams() -> tuple[str, ...]:
                 # closed at startup whether or not the hold below succeeds.
                 _RESERVED_DESCRIPTORS.add(fd)
                 _reserve_descriptor(fd)
-            _CLOSED_AT_START.add(fd)
+                _CLOSED_AT_START.add(fd)
+            # A descriptor that is open but could not be reattached (a
+            # PYTHONIOENCODING naming a codec Python lacks) is left out of both
+            # records: something is still reading it, and the raw floor is the
+            # one channel that does not need a stream object.
             continue
         _CLOSED_AT_START.discard(fd)
         setattr(sys, name, stream)
