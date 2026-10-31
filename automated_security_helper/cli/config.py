@@ -2031,7 +2031,13 @@ def lint(
         ):
             applied = (
                 _apply_unused_fixes(
-                    config_path, output_dir_path, non_interactive, color
+                    config_path,
+                    output_dir_path,
+                    non_interactive,
+                    color,
+                    lint_result.resolved_data
+                    if isinstance(lint_result.resolved_data, dict)
+                    else None,
                 )
                 or applied
             )
@@ -2156,17 +2162,25 @@ def _apply_unused_fixes(
     output_dir,
     non_interactive: bool,
     color: bool,
+    report_config: Any = None,
 ) -> bool:
     """Comment out unused suppressions in the config file. Returns whether the
     file was written. A list the fixer cannot edit (a repeated key, a flow
-    sequence, an alias) is reported with its reason and exits 1."""
+    sequence, an alias) is reported with its reason and exits 1.
+
+    ``report_config`` is the merged configuration lint named the report from
+    (``LintResult.resolved_data``): the age read and the fixer take the report
+    from it, so they read the report lint listed, not one a second resolution of
+    the chain (without the scanned tree) names."""
     from automated_security_helper.config.config_linter import (
         ConfigLinter,
         UnusedSuppressionsNotEditable,
     )
 
     # Check report age first
-    report_info = ConfigLinter.get_unused_report_age(config_path, output_dir)
+    report_info = ConfigLinter.get_unused_report_age(
+        config_path, output_dir, report_config
+    )
 
     if report_info is None:
         secho(
@@ -2206,7 +2220,9 @@ def _apply_unused_fixes(
         # for a list the fixer cannot edit would contradict it. The file is
         # unchanged when the fixer refuses.
         try:
-            return ConfigLinter.fix_unused_suppressions(config_path, output_dir)
+            return ConfigLinter.fix_unused_suppressions(
+                config_path, output_dir, report_config
+            )
         except UnusedSuppressionsNotEditable as exc:
             secho(
                 f"\n❌ The unused suppressions could not be commented out: {exc}. "

@@ -632,6 +632,7 @@ class ConfigLinter:
         cls,
         config_path: Path,
         output_dir: Optional[Path] = None,
+        report_config: Any = None,
     ) -> Tuple[Optional[str], List[LintIssue], Optional[datetime]]:
         """Comment out unused suppressions in the config based on the unused suppressions report.
 
@@ -651,6 +652,11 @@ class ConfigLinter:
         Args:
             config_path: Path to the configuration file
             output_dir: Path to the ASH output directory
+            report_config: The configuration that names the report (the merged
+                one lint read, ``LintResult.resolved_data``). Passed, the fixer
+                reads the report lint named; without it the chain is resolved
+                here, which can name another report when lint resolved it with
+                a scanned tree (``--source-dir``) this call does not know.
 
         Returns:
             Tuple of (fixed_content, list_of_commented_suppressions, report_timestamp)
@@ -687,7 +693,9 @@ class ConfigLinter:
         # a scan reads the merged configuration, so an extension an `extends`
         # base sets names the report it writes, and the fixer, which named it
         # from this file's own data, found no report of that scan.
-        report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
+        report_path, report_timestamp = cls._find_unused_report(
+            config_path, output_dir, report_config
+        )
 
         if report_path is None:
             return raw_content, [], None
@@ -1315,13 +1323,19 @@ class ConfigLinter:
         cls,
         config_path: Path,
         output_dir: Optional[Path] = None,
+        report_config: Any = None,
     ) -> Optional[Tuple[Path, datetime, float]]:
         """Get the age of the unused suppressions report.
+
+        ``report_config`` is the configuration that names the report, as for
+        ``fix_unused_suppressions``.
 
         Returns:
             Tuple of (report_path, report_timestamp, age_in_seconds) or None if not found
         """
-        report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
+        report_path, report_timestamp = cls._find_unused_report(
+            config_path, output_dir, report_config
+        )
         if report_path is None or report_timestamp is None:
             return None
 
@@ -2437,8 +2451,8 @@ class ConfigLinter:
 
         ``config_data`` is the configuration that names the report
         (``_unused_report_name``): the merged one where the caller holds it
-        (lint's ``resolved_data``), the checked file's own where the fixer
-        passes it. When the caller holds none, the chain is resolved here
+        (lint's ``resolved_data``, which the CLI passes on to the age read and
+        the fixer so all three name the same report). When the caller holds none, the chain is resolved here
         (``load_config_document``: ``extends`` and ``patch`` applied, no model
         built), so an extension set in a base names the report, as it names the
         file a scan writes; a chain that cannot be resolved falls back to the
