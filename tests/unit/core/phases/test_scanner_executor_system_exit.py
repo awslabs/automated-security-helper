@@ -40,6 +40,9 @@ from automated_security_helper.core.enums import (
 )
 from automated_security_helper.core.phases import scanner_executor
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
+from automated_security_helper.core.scanner_statistics_calculator import (
+    ScannerStatisticsCalculator,
+)
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 pytestmark = pytest.mark.unit
@@ -296,3 +299,19 @@ def test_a_parallel_run_records_the_exiting_scanner_and_the_clean_one(
     assert results is not None
     # completed_scanners holds the plugin instances, not the task names.
     assert executor.completed_scanners == [clean]
+    # The test is named for recording the exiting scanner: its row must be filed
+    # under the task's name, read as an error, and say it called sys.exit. A
+    # dropped row would leave the scanner out of the results with no other check
+    # noticing.
+    assert "exiting" in results.additional_reports, sorted(results.additional_reports)
+    exiting_reports = results.additional_reports["exiting"]
+    assert exiting_reports, results.additional_reports
+    for exiting_report in exiting_reports.values():
+        _excluded, _deps_missing, read_as_error = (
+            ScannerStatisticsCalculator._status_info_from_report(exiting_report)
+        )
+        assert read_as_error is True, exiting_report
+        assert "sys.exit(3)" in " ".join(str(e) for e in exiting_report["errors"]), (
+            exiting_report
+        )
+    assert "clean" in results.additional_reports, sorted(results.additional_reports)
