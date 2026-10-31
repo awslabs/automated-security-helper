@@ -5076,6 +5076,14 @@ def _execute_container(cmd: List[str], debug: bool, env: Dict[str, str] | None =
         + tuple(subprocess_utils._SPAWN_STRICT_VALUES.get())
     )
 
+    # The kept copy is hidden in the default band for every carried value, which is
+    # stricter than the stream: the stream's loosened band lets a bare word that
+    # equals a short carried value (a severity, a region) print as the report wrote
+    # it (_streamed_line). That exemption rests on the line being the scan's own
+    # report as it streams; the copy is read later by callers that print or log it
+    # once the run's values are no longer recorded, with no way to tell a report line
+    # from the runtime's own text, so it keeps the band that hides the short value
+    # everywhere.
     def hidden(text):
         return text_without_values(text, carried) if isinstance(text, str) else text
 
