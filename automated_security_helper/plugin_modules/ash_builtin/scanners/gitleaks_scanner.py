@@ -543,14 +543,15 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     # The target, argv and .gitleaksignore content of the run whose report
     # _read_results_file reads next, for the re-scan. Set by _execute_scan.
     _pending_run: Optional[Tuple[Path, List[str], bytes]] = PrivateAttr(default=None)
-    # Names the last re-scan did not reach (MAX_RESCAN_FILES, MAX_RESCAN_BYTES),
+    # Files the last re-scan did not reach (MAX_RESCAN_FILES, MAX_RESCAN_BYTES),
     # for the report _post_process_sarif finishes next. Reset per target in
     # _execute_scan: a source run that failed after its re-scan left the count
     # for the converted target's report.
     _rescan_skipped: int = PrivateAttr(default=0)
     # Candidate names the last read of the tree's .gitleaksignore left unread
-    # (MAX_IGNORE_CANDIDATES), set by _gitleaksignore_files and taken into
-    # _rescan_skipped by _add_back_gitleaksignore_drops.
+    # (MAX_IGNORE_CANDIDATES), added by _add_back_gitleaksignore_drops from what
+    # _gitleaksignore_names returned. Names, not files: kept apart from
+    # _rescan_skipped, and reported apart, reset with it.
     _rescan_unread: int = PrivateAttr(default=0)
     # The stderr log of a re-scan run that failed this target, for
     # _describe_scan_failure, which otherwise describes the first run's exit
@@ -1058,9 +1059,16 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     def _gitleaksignore_files(
         self, target: Path, data: Optional[bytes] = None
     ) -> List[str]:
-        """The files ``<target>/.gitleaksignore`` names, relative to the target.
+        """The files of ``_gitleaksignore_names``, without the count left unread."""
+        return self._gitleaksignore_names(target, data)[0]
 
-        Parsed as gitleaks parses it (``gitleaksignore_files``). A dir-scan
+    def _gitleaksignore_names(
+        self, target: Path, data: Optional[bytes] = None
+    ) -> Tuple[List[str], int]:
+        """The files ``<target>/.gitleaksignore`` names, relative to the target,
+        and the number of candidate names left unread.
+
+        Parsed as gitleaks parses it (``gitleaksignore_candidates``). A dir-scan
         fingerprint is ``<file>:<rule id>:<line>``; files that are not inside the
         target are left out, since gitleaks could not have matched them.
 
@@ -1082,17 +1090,17 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         if data is None:
             data = self._read_tree_ignore_file(target)
         if not data:
-            return []
+            return [], 0
         target_abs = self._rescan_root(target)
         names = set()
-        candidates, self._rescan_unread = gitleaksignore_candidates(data)
+        candidates, unread = gitleaksignore_candidates(data)
         for name in candidates:
             # Joining keeps an absolute entry as it is.
             lexical = Path(os.path.normpath(target_abs / name))
             if lexical == target_abs or not lexical.is_relative_to(target_abs):
                 continue
             names.add(lexical.relative_to(target_abs).as_posix())
-        return sorted(names)
+        return sorted(names), unread
 
     def _add_back_gitleaksignore_drops(
         self,
@@ -1121,10 +1129,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         and the copies, which hold the tree's secrets, are removed when the run
         ends.
         """
-        relatives = self._gitleaksignore_files(target, ignore_data)
-        unread, self._rescan_unread = self._rescan_unread, 0
+        relatives, unread = self._gitleaksignore_names(target, ignore_data)
         if unread:
-            self._rescan_skipped += unread
+            self._rescan_unread += unread
             self._plugin_log(
                 f"{unread} name(s) in the scanned tree's {IGNORE_FILE_NAME} were "
                 f"not read: ASH reads at most {MAX_IGNORE_CANDIDATES} candidate "
@@ -1774,34 +1781,44 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         An error-level ``toolExecutionNotifications`` entry on the invocation,
         which ``run_ash_scan.unevaluated_rules`` reads: the scan exits 1 as
         incomplete rather than reading as clean, since a finding the tree's
-        ``.gitleaksignore`` hides in those files is not reported. A count, not the
-        names, which are the tree's text.
+        ``.gitleaksignore`` hides in those files is not reported. Files not
+        re-scanned and candidate names not read are two counts and two entries,
+        since a name is not a file. A count, not the names, which are the tree's
+        text.
         """
         skipped, self._rescan_skipped = self._rescan_skipped, 0
-        if not skipped or not sarif_report.runs:
+        unread, self._rescan_unread = self._rescan_unread, 0
+        if not (skipped or unread) or not sarif_report.runs:
             return
-        notification = Notification(
-            level=Level.error,
-            message=Message(
-                root=Message1(
-                    text=(
-                        f"gitleaks: {skipped} file(s) the scanned tree's "
-                        f"{IGNORE_FILE_NAME} names were not re-scanned, past "
-                        f"ASH's limits of {MAX_RESCAN_FILES} files, "
-                        f"{MAX_RESCAN_BYTES} bytes and {MAX_IGNORE_CANDIDATES} "
-                        "names read, so a finding that file hides in them is "
-                        "not reported."
-                    )
-                )
-            ),
-        )
+        texts = []
+        if skipped:
+            texts.append(
+                f"gitleaks: {skipped} file(s) the scanned tree's "
+                f"{IGNORE_FILE_NAME} names were not re-scanned, past "
+                f"ASH's limits of {MAX_RESCAN_FILES} files and "
+                f"{MAX_RESCAN_BYTES} bytes, so a finding that file hides in "
+                "them is not reported."
+            )
+        if unread:
+            texts.append(
+                f"gitleaks: {unread} candidate name(s) in the scanned tree's "
+                f"{IGNORE_FILE_NAME} were not read, past ASH's limit of "
+                f"{MAX_IGNORE_CANDIDATES} names, so a finding the file they "
+                "name hides is not reported."
+            )
         run = sarif_report.runs[0]
         if not run.invocations:
             run.invocations = [Invocation(executionSuccessful=True)]
         invocation = run.invocations[0]
         invocation.toolExecutionNotifications = [
             *(invocation.toolExecutionNotifications or []),
-            notification,
+            *(
+                Notification(
+                    level=Level.error,
+                    message=Message(root=Message1(text=text)),
+                )
+                for text in texts
+            ),
         ]
 
     def _post_process_sarif(

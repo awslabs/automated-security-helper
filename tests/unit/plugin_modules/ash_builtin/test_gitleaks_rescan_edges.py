@@ -261,10 +261,44 @@ def test_names_the_limit_left_unread_fail_the_scan_as_incomplete(
     with caplog.at_level("WARNING"):
         _add_back(scanner, source, _report(), tmp_path)
     assert [call["files"] for call in calls] == [["app/f0.py", "app/f1.py"]]
-    assert scanner._rescan_skipped == 3
+    # Names are not files: the three names left unread are their own count.
+    assert scanner._rescan_skipped == 0
+    assert scanner._rescan_unread == 3
     assert "3 name(s) in the scanned tree's .gitleaksignore were not read" in (
         caplog.text
     )
+
+
+def test_names_not_read_and_files_not_re_scanned_are_reported_as_two_counts(
+    tmp_path, monkeypatch
+):
+    """A name is not a file. Folded into one count, three unread names read as
+    three files the re-scan missed, and the report said "files" for both."""
+    monkeypatch.setattr(module, "MAX_IGNORE_CANDIDATES", 3)
+    monkeypatch.setattr(module, "MAX_RESCAN_FILES", 1)
+    scanner, _ = _rescan_harness(tmp_path, monkeypatch, {})
+    source = Path(scanner.context.source_dir)
+    names = [f"app/f{index}.py" for index in range(6)]
+    for name in names:
+        _write(source, name)
+    (source / ".gitleaksignore").write_text(
+        "".join(f"{name}:github-pat:1\n" for name in names)
+    )
+    results_file = tmp_path / "res" / "gitleaks.sarif"
+    results_file.parent.mkdir()
+    raw = _report()
+    scanner._add_back_gitleaksignore_drops(
+        raw, source, scanner._build_arguments(source, results_file), results_file
+    )
+    report = SarifReport.model_validate(raw)
+    scanner._inject_invocation(report, ["gitleaks", "dir"], source)
+    report = scanner._post_process_sarif(report, [], source)
+
+    notifications = report.runs[0].invocations[0].toolExecutionNotifications
+    texts = [notification.message.root.text for notification in notifications]
+    assert len(texts) == 2
+    assert "2 file(s)" in texts[0] and "name(s)" not in texts[0]
+    assert "3 candidate name(s)" in texts[1] and "file(s)" not in texts[1]
 
 
 def _with_split_only_names(tmp_path, monkeypatch, real: int, limit: int):
@@ -389,9 +423,11 @@ def test_the_skipped_count_and_rescan_failure_are_reset_per_target(tmp_path):
     source = Path(scanner.context.source_dir)
     _write(source, "app/x.py")
     scanner._rescan_skipped = 5
+    scanner._rescan_unread = 4
     scanner._rescan_failure_log = tmp_path / "old.log"
     scanner._execute_scan(source, "source", [])
     assert scanner._rescan_skipped == 0
+    assert scanner._rescan_unread == 0
     assert scanner._rescan_failure_log is None
 
 
