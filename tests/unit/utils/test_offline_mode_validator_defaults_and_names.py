@@ -175,6 +175,11 @@ class TestTheDatabaseAge:
         os.environ["TZ"] = "Europe/Berlin"
         time.tzset()
         try:
+            # The precondition: a host without zone data reads an unknown TZ as
+            # UTC, which has no clock change, and the age is thirty days under
+            # either clock, so the test would pass without testing anything.
+            if time.localtime(written).tm_isdst == time.localtime(read_at).tm_isdst:
+                pytest.skip("the host has no Europe/Berlin zone data (no clock change)")
             monkeypatch.setattr(offline_mode_validator, "datetime", _Clock)
             age = offline_mode_validator._database_age(database)
         finally:
