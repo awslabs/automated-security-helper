@@ -21,6 +21,9 @@ from datetime import datetime, timezone
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+    ocsf_reporter as ocsf_module,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
     _FINDING_UID_NAMESPACE,
     ACTIVITY_NAME,
@@ -466,6 +469,33 @@ class TestTheFallbackRecordKeepsWhatItCanRead:
         assert DEGRADED_FINDING_LABEL in (degraded.metadata.labels or [])
         assert DEGRADED_FINDING_LABEL not in (whole.metadata.labels or [])
         assert degraded.finding_info.uid == whole.finding_info.uid
+
+    def test_a_record_cut_down_to_minimal_info_keeps_its_uid_and_is_labeled(
+        self, reporter, metadata, monkeypatch
+    ):
+        """When the finding info cannot be built, a minimal one is written in its
+        place. It carried a ``|fallback-info`` suffix on the uid, so the finding
+        was two records in a SIEM across runs, and nothing on the record said it
+        had lost its title and description."""
+        result = Result(ruleId="R1", level=Level.error, message=Message(text="a"))
+        whole = reporter._create_vulnerability_finding(result, metadata, 1)
+
+        real = ocsf_module.FindingInfo
+
+        def rejects_all_but_the_minimal_info(*args, **kwargs):
+            if kwargs.get("title") != "Error creating finding title":
+                raise ValueError("the finding info was rejected")
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(
+            ocsf_module, "FindingInfo", rejects_all_but_the_minimal_info
+        )
+        minimal = reporter._create_vulnerability_finding(result, metadata, 1)
+
+        assert minimal.finding_info.title == "Error creating finding title"
+        assert minimal.finding_info.uid == whole.finding_info.uid
+        assert DEGRADED_FINDING_LABEL in (minimal.metadata.labels or [])
+        assert DEGRADED_FINDING_LABEL not in (whole.metadata.labels or [])
 
 
 class TestTheShortfallRecordCannotCostTheFindings:

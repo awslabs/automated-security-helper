@@ -977,7 +977,11 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 # A finding whose title and description could not be built is
                 # degraded too; without the mark the rate counted it whole.
                 degraded = True
-                fallback_uid = _finding_uid(f"{identity}|fallback-info")
+                # The finding's own uid, as the whole record and the other
+                # degraded record carry it: a suffix on the uid split a finding
+                # that lost its title in one run and was built whole in the next
+                # into two records in a SIEM. The degraded label tells them apart.
+                fallback_uid = _finding_uid(identity)
                 finding_info = FindingInfo(
                     uid=fallback_uid,
                     title="Error creating finding title",

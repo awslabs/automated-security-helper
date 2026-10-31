@@ -8161,7 +8161,10 @@
   whose messages are given in markdown or by id are no longer numbered as repeats
   of one another, and a result that states no finding takes no number. A record
   the reporter builds in its reduced form carries the uid its whole record would
-  have, and only its degraded label tells the two apart.
+  have, and only its degraded label tells the two apart. A finding whose title and
+  description could not be built is written with a minimal finding info; that
+  record carries the same uid and the degraded label too, where it used to carry
+  a uid of its own.
 
 - **The OCSF report leaves out results that state no failing finding, and says
   when its array is short.** A result whose SARIF `kind` is `pass`, `notApplicable`
