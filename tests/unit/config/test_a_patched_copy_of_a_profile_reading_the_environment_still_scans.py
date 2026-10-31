@@ -105,6 +105,7 @@ def _scan_outcome(target: Path) -> Any:
     config_path = resolve_session_config_path(SESSION)
     assert config_path is not None
     resolved: List[Any] = []
+    faults: List[Exception] = []
     real = rc.resolve_config
 
     def recording(*args: Any, **kwargs: Any) -> AshConfig:
@@ -114,9 +115,15 @@ def _scan_outcome(target: Path) -> Any:
             # Only a config refusal is an outcome (ASHConfigValidationError and
             # its source, unset-variable and not-permitted kinds are ValueErrors,
             # and so is a model's validation error; an unreadable file is an
-            # OSError). Any other exception is a fault in the harness or the
-            # product and ends the test as it is raised.
+            # OSError).
             resolved.append(refusal)
+        except Exception as fault:
+            # Any other exception is a fault in the harness or the product. The
+            # scan swallows what its resolution raises (it has to swallow the
+            # exception raised below), so the fault is kept here and raised after
+            # the run. Left to the scan it would surface as "the scan never
+            # reached config resolution", a message that points elsewhere.
+            faults.append(fault)
         raise _StopAfterResolution
 
     output = target / ".ash" / "ash_output"
@@ -147,6 +154,8 @@ def _scan_outcome(target: Path) -> Any:
                 session_id=SESSION,
             )
         )
+    if faults:
+        raise faults[0]
     assert len(resolved) == 1, "the scan never reached config resolution"
     return resolved[0]
 
@@ -187,3 +196,39 @@ def test_the_copy_holds_the_reference_not_the_value(server) -> None:
 
     assert "${ASH_X35_IGN}" in text, text
     assert CANARY not in text, text
+
+
+def _resolution_raising(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
+    from automated_security_helper.config import resolve_config as rc
+
+    def raising(*args: Any, **kwargs: Any) -> AshConfig:
+        raise error
+
+    monkeypatch.setattr(rc, "resolve_config", raising)
+
+
+def test_a_fault_in_the_resolution_is_raised_as_itself(
+    server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The harness does not hide a fault behind its own message: the scan
+    swallows what its resolution raises, so an exception that is not a config
+    refusal is kept and raised after the run, as the exception it is."""
+    _register(server["operator"], PROFILE)
+    _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+    _resolution_raising(monkeypatch, TypeError("planted fault"))
+
+    with pytest.raises(TypeError, match="planted fault"):
+        _scan_outcome(server["target"])
+
+
+def test_a_config_refusal_is_the_outcome_and_not_a_fault(
+    server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control: a refusal of the config is what the scan resolves with, and
+    is returned as the outcome."""
+    _register(server["operator"], PROFILE)
+    _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+    refusal = ValueError("planted refusal")
+    _resolution_raising(monkeypatch, refusal)
+
+    assert _scan_outcome(server["target"]) is refusal
