@@ -314,6 +314,26 @@ def test_the_filters_source_hides_a_baseline_path_read_from_the_environment(
         assert "operator-baseline-from-environment" not in source
 
 
+def test_the_filters_source_hides_a_baseline_path_written_with_backslashes(
+    tmp_path, monkeypatch
+):
+    """The filter's text prints the baseline with forward slashes, while a
+    Windows value for ``baseline_file`` is written with backslashes: the
+    backslash spelling of the same path must hide it too. Built here from the
+    baseline's own path so the check holds on every platform."""
+    named = tmp_path / "operator-baseline-from-environment.json"
+    backslashed = named.as_posix().replace("/", "\\")
+
+    sources, _ = _sources_the_scan_gives_the_filter(
+        tmp_path, monkeypatch, (backslashed,)
+    )
+
+    assert sources
+    for source in sources:
+        assert "should_exclude_file" in source
+        assert "operator-baseline-from-environment" not in source
+
+
 def test_the_filters_source_names_a_baseline_that_is_not_an_environment_value(
     tmp_path, monkeypatch
 ):

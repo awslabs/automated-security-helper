@@ -29,7 +29,10 @@ from typing import (
 
 from pydantic import ConfigDict, Field, PrivateAttr
 
-from automated_security_helper.utils.redacted_model import RedactedSection
+from automated_security_helper.utils.redacted_model import (
+    RedactedSection,
+    environment_strings,
+)
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.config.client_scanner_exclusions import (
     evaluated_within,
@@ -2571,7 +2574,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # The baseline's path can be a value read from the environment,
                 # and this text is quoted in the error the filter raises:
                 # redacted like every other line here that names the baseline.
-                pattern_source = text_without_values(pattern_source, values)
+                # The path prints with forward slashes (as_posix), so a Windows
+                # value written with backslashes is hidden in that spelling too.
+                named = environment_strings(values)
+                forward = tuple(v.replace("\\", "/") for v in named if "\\" in v)
+                pattern_source = text_without_values(
+                    pattern_source, (*named, *forward)
+                )
                 scannable = self._apply_file_exclusions(
                     scannable,
                     own_patterns,
