@@ -3518,11 +3518,12 @@ def _referenced_taxonomy(
     A result's ``taxa`` are references into a taxonomy, not into the tool's
     extensions or driver: the component reference's ``index`` counts positions
     in ``run.taxonomies``. The taxonomy at that index when the reference gives
-    no ``guid`` or ``name``, or gives one that the taxonomy carries; otherwise
-    (the index is out of range, or the name or guid says the reference means
-    another component) the taxonomy whose ``guid`` or ``name`` the reference
-    gives. None when the reference names no taxonomy this run carries, or none
-    at all, which leaves the caller to read it against the tool's extensions.
+    no ``guid`` or ``name``, or when every one it gives is the taxonomy's own;
+    otherwise (the index is out of range, or a name or guid says the reference
+    means another component) the taxonomy whose ``guid`` or ``name`` the
+    reference gives. None when the reference names no taxonomy this run
+    carries, or none at all, which leaves the caller to read it against the
+    tool's extensions.
     """
     if not isinstance(component_reference, dict):
         return None
@@ -3532,10 +3533,8 @@ def _referenced_taxonomy(
     name = component_reference.get("name")
     if isinstance(index, int) and 0 <= index < len(taxonomies):
         indexed = taxonomies[index]
-        if (
-            (guid is None and name is None)
-            or (guid is not None and indexed.guid == guid)
-            or (name is not None and indexed.name == name)
+        if (guid is None or indexed.guid == guid) and (
+            name is None or indexed.name == name
         ):
             return indexed
     for taxonomy in taxonomies:

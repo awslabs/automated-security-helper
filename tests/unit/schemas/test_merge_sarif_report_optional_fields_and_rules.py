@@ -1754,6 +1754,47 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
             ("B-1", "B")
         ]
 
+    def test_a_matching_name_does_not_admit_a_taxonomy_whose_guid_differs(self):
+        """Two taxonomies share the name ``CWE`` and differ in guid. A reference
+        at position 0 that gives the name and the second one's guid means the
+        second: every identifier a reference gives has to agree with the
+        taxonomy it is read from, so the name alone does not admit the taxonomy
+        at the index. The control gives the first one's guid and keeps it."""
+        first_guid = "6f1c9c3a-1b2d-4e5f-8a9b-0c1d2e3f4a5b"
+        second_guid = "7a2d0d4b-2c3e-4f60-9bac-1d2e3f4a5b6c"
+
+        def merged_id(component: dict) -> str:
+            aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+            taxa = [{"index": 1, "toolComponent": component}]
+            incoming = SarifReport(
+                runs=[
+                    _run_with_tables(
+                        "tool",
+                        [_finding("T-1", taxa=taxa)],
+                        taxonomies=[
+                            {
+                                "name": "CWE",
+                                "guid": first_guid,
+                                "taxa": [{"id": "A-0"}, {"id": "A-1"}],
+                            },
+                            {
+                                "name": "CWE",
+                                "guid": second_guid,
+                                "taxa": [{"id": "B-0"}, {"id": "B-1"}],
+                            },
+                        ],
+                    )
+                ]
+            )
+            aggregated.merge_sarif_report(incoming)
+            return aggregated.runs[0].results[0].taxa[0].root.id
+
+        second = merged_id({"index": 0, "name": "CWE", "guid": second_guid})
+        first = merged_id({"index": 0, "name": "CWE", "guid": first_guid})
+
+        assert second == "B-1"
+        assert first == "A-1"
+
     def test_the_taxonomy_a_kept_taxon_names_is_carried_into_the_aggregate(self):
         """The kept taxon reference names ``CWE`` once its index is dropped, so
         the run it lands in has to hold a ``CWE`` taxonomy with the taxon in it;
