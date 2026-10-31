@@ -133,7 +133,8 @@ def test_the_real_warning_through_the_active_filter_keeps_its_command(caplog):
     with caplog.at_level(logging.WARNING):
         warn_about_scanned_output_dir(relative, 2)
     [captured] = caplog.records
-    windows_filter = WindowsSafeFilter()
+    # A console that is known to write only ASCII, whatever host the test is on.
+    windows_filter = WindowsSafeFilter(writes=None)
     windows_filter._active = True
 
     assert windows_filter.filter(captured)
