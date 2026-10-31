@@ -423,6 +423,37 @@ class TestAnOverlappingFindingsSourceText:
         text = model.sarif.runs[0].results[1].message.root.text
         assert text == "import\n\n```python\n" + OTHER_LINE + "```"
 
+    @pytest.mark.parametrize("line", [3, 4])
+    def test_a_fenced_block_quoting_context_around_its_finding_is_masked(self, line):
+        """The secret is on line 2 and its finding quotes no value. A neighbor on
+        line 3 or 4 quotes three lines of context in its message, the secret's
+        line among them, and the block has no line numbers to place it by: a
+        block of several lines reaches the lines around its finding's own."""
+        block = "```python\n" + OTHER_LINE + ASSIGN_LINE + "x = 1\n" + "```"
+        model = _results(
+            self._secret(),
+            _result("B404", "app.py", line, "import\n\n" + block, "bandit"),
+        )
+
+        mask_secrets_in_results(model)
+
+        text = model.sarif.runs[0].results[1].message.root.text
+        assert VALUE not in text
+        assert MASKED_LINE in text
+
+    def test_a_fenced_block_of_several_lines_away_from_the_secret_is_kept(self):
+        """Control: the same block on line 9 cannot reach line 2."""
+        block = "```python\n" + OTHER_LINE + ASSIGN_LINE + "x = 1\n" + "```"
+        model = _results(
+            self._secret(),
+            _result("B404", "app.py", 9, "import\n\n" + block, "bandit"),
+        )
+
+        mask_secrets_in_results(model)
+
+        text = model.sarif.runs[0].results[1].message.root.text
+        assert text == "import\n\n" + block
+
     def test_a_snippet_with_more_lines_than_its_region_is_masked_whole(self):
         """A tool's properties.snippet can carry context lines above the region;
         numbered from the region's first line the secret line escapes the range,

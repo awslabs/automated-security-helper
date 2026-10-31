@@ -1646,6 +1646,53 @@ def _overlaps_a_secret(result: Any, index: _SecretIndex) -> bool:
     )
 
 
+def _fenced_block_reach(text: str) -> int:
+    """How many lines beyond a finding's own a fenced block in ``text`` can quote:
+    the lines of its longest block (the info string counts as one), less one."""
+    reach = 0
+    for fence in _CODE_FENCES:
+        if fence not in text:
+            continue
+        parts = text.split(fence)
+        for position in range(1, len(parts), 2):
+            reach = max(reach, len(_split_lines(parts[position])) - 1)
+    return reach
+
+
+def _fenced_block_could_quote_a_secret(result: Any, index: _SecretIndex) -> bool:
+    """Whether a fenced block in the message of ``result`` could quote a line a
+    secret finding reports without ``result`` lying on it.
+
+    A message that quotes several lines of context around its finding's line
+    (``_mask_fenced_code``) has no line numbers to place them by: a block of
+    ``n`` lines can reach ``n`` lines either side of the finding's own lines. It
+    is a secret finding's excerpt of those lines whenever one of them is
+    reported, so the block is masked whole.
+    """
+    message = getattr(result, "message", None)
+    root: Any = getattr(message, "root", message)
+    reach = 0
+    for name in ("text", "markdown"):
+        text = getattr(root, name, None) if root is not None else None
+        if isinstance(text, str):
+            reach = max(reach, _fenced_block_reach(text))
+    if reach <= 0:
+        return False
+    for physical in _physical_locations_of(result, related=True):
+        placed = index.lines_for(_uri_of(physical, index))
+        if placed is None:
+            continue
+        whole, lines = placed
+        if whole:
+            return True
+        for first, last in _line_spans(physical):
+            if first is None or lines.overlaps(
+                first - reach, (last if last is not None else first) + reach
+            ):
+                return True
+    return False
+
+
 def _overlapping_values(result: Any, index: _SecretIndex) -> Set[str]:
     """The values of the secret findings whose location ``result`` overlaps."""
     found: Set[str] = set()
@@ -2339,8 +2386,11 @@ def _mask_tree(
             # A fenced code block in the message of a finding that overlaps a
             # secret finding's lines is that finding's excerpt of the same
             # lines, with no line numbers to place it by: masked whole, as its
-            # properties.snippet and fixes are at those lines.
-            if _overlaps_a_secret(node, index):
+            # properties.snippet and fixes are at those lines. A block of several
+            # lines also reaches the lines around its finding's own.
+            if _overlaps_a_secret(node, index) or _fenced_block_could_quote_a_secret(
+                node, index
+            ):
                 message = getattr(node, "message", None)
                 root: Any = getattr(message, "root", message)
                 for name in ("text", "markdown"):
