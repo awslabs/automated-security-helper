@@ -84,17 +84,27 @@ def test_text_mode_replaces_a_character_the_timeout_cut_in_half(mock_run, _mock_
 )
 @patch("automated_security_helper.utils.subprocess_utils._run_plain")
 def test_text_mode_without_an_encoding_reads_as_popens_text_mode_would(
-    mock_run, _mock_find
+    mock_run, _mock_find, monkeypatch
 ):
     """With no encoding named, the partial output is decoded with the locale
     encoding Popen's text mode resolves to, so the two agree on a non-UTF-8
-    locale too."""
-    mock_run.side_effect = _timed_out_mid_character()
+    locale too.
+
+    The locale's encoding is replaced by latin-1 and the expected text is a
+    fixed literal. Built with the same ``getpreferredencoding`` call the product
+    makes, the expected value moved with it: under PEP 538 and 540 coercion both
+    read UTF-8 on a C locale, so a decode that ignored the locale agreed with
+    itself. Byte 0xe9 is one character in latin-1 and an invalid sequence in
+    UTF-8, so only a decode that asks the locale returns the accented letter."""
+    monkeypatch.setattr(locale, "getpreferredencoding", lambda *args: "latin-1")
+    mock_run.side_effect = subprocess.TimeoutExpired(
+        cmd=["tool"], timeout=5, output=b"caf\xe9", stderr=b"still working\n"
+    )
 
     result = run_command(["tool"], timeout=5, text=True)
 
-    expected = b"caf\xc3".decode(locale.getpreferredencoding(False), errors="replace")
-    assert result.stdout == expected
+    assert result.stdout == "café"
+    assert result.stderr == "still working\n"
 
 
 @patch(
