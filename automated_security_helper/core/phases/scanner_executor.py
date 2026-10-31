@@ -981,11 +981,15 @@ class ScannerExecutor:
         Green is for "clean" only: a run that raised (its results are a failure
         container) or graded a target ERROR was shown "[green] Completed scan"
         like a clean one, so the progress display said the opposite of the row.
+        A scanner with no container at all (every target it was given was
+        missing) or whose tool was absent (MISSING) did not scan anything, and
+        is not shown as a clean scan either.
         """
         if not scanner_succeeded:
             return "failed"
-        if any(
-            getattr(container, "status", None) == ScannerStatus.ERROR
+        if not results_list or any(
+            getattr(container, "status", None)
+            in (ScannerStatus.ERROR, ScannerStatus.MISSING)
             for container in results_list
         ):
             return "errors"
@@ -2628,6 +2632,16 @@ class ScannerExecutor:
                         completed=100,
                         description=f"[red]({escape_markup(scanner_name)}) Failed: returned None results",
                     )
+                    # The turn is over and its failure recorded: announced with
+                    # succeeded False and taken off the remaining list, or the
+                    # last SCAN_COMPLETE never reads remaining_count 0.
+                    self._announce_scan_complete(
+                        scanner_name,
+                        remaining_scanners,
+                        completed + 1,
+                        total,
+                        succeeded=False,
+                    )
                 else:
                     aggregated_results = self._process_each(
                         results_list, aggregated_results
@@ -2949,6 +2963,16 @@ class ScannerExecutor:
                                 task_id=task_id,
                                 completed=100,
                                 description=f"[red]({escape_markup(scanner_name)}) Failed: returned None results",
+                            )
+                        # As in run_sequential: announced, succeeded False, and
+                        # taken off the remaining list.
+                        with remaining_scanners_lock:
+                            self._announce_scan_complete(
+                                scanner_name,
+                                remaining_scanners,
+                                completed_count + 1,
+                                total,
+                                succeeded=False,
                             )
                     else:
                         ASH_LOGGER.debug(f"Got results from {scanner_name}, processing")

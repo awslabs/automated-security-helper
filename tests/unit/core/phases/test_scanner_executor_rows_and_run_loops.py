@@ -530,6 +530,60 @@ class TestTheRunLoops:
         assert seen[0] == ["second"], seen
         assert seen[1] == [], seen
 
+    @pytest.mark.parametrize("mode", ["run_sequential", "run_parallel"])
+    def test_a_scanner_that_returned_none_is_announced_and_leaves_the_list(
+        self, tmp_path, monkeypatch, mode
+    ):
+        """Red at the base: the None branch filed the failure row and went on, so
+        the scanner stayed on the remaining list, no SCAN_COMPLETE named it, and
+        the last one never read remaining_count 0."""
+        seen = []
+
+        def _notify(event_type, **kwargs):
+            if "remaining_scanners" in kwargs:
+                seen.append(
+                    (
+                        kwargs["scanner"],
+                        kwargs["remaining_scanners"],
+                        kwargs["succeeded"],
+                        kwargs["remaining_count"],
+                    )
+                )
+
+        context = _context(tmp_path)
+        executor = _executor(
+            context,
+            [("lost", _scanner(context, _sarif()), _targets(context))],
+            notify_fn=_notify,
+        )
+        monkeypatch.setattr(
+            executor,
+            "_safe_execute_scanner",
+            lambda name, plugin, targets: (None, False),
+        )
+
+        getattr(executor, mode)(AshAggregatedResults())
+
+        assert seen == [("lost", [], False, 0)], seen
+
+    def test_a_scan_that_scanned_nothing_is_not_shown_as_clean(self):
+        """A scanner with no container (every target was missing) or only
+        MISSING ones scanned nothing: shown with errors, not in green."""
+        from automated_security_helper.models.scan_results_container import (
+            ScanResultsContainer,
+        )
+
+        outcome = ScannerExecutor._completion_outcome
+        passed = ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)
+        missing = ScanResultsContainer(scanner_name="x", status=ScannerStatus.MISSING)
+
+        assert outcome(True, [passed]) == "clean"
+        # Red at the base: "clean" for both.
+        assert outcome(True, []) == "errors"
+        assert outcome(True, [missing]) == "errors"
+        assert outcome(True, [passed, missing]) == "errors"
+        assert outcome(False, [passed]) == "failed"
+
     def test_parallel_mode_emits_scan_start_for_every_scanner(self, tmp_path):
         from automated_security_helper.plugins.events import AshEventType
 
