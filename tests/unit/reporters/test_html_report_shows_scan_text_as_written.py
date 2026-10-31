@@ -374,3 +374,42 @@ def test_one_predicate_takes_the_allowed_layout_as_a_parameter():
     assert _is_plain("a\r\nb", "\n")
     assert not _is_plain("a\rb", "\n")
     assert not _is_plain("::error::x")
+
+
+_ESCAPES = "control characters are written as escapes"
+_COMMANDS = "CI command forms are broken"
+_DOUBLED = "a backslash before text that reads as an escape is doubled"
+
+
+@pytest.mark.parametrize(
+    ("value", "changes"),
+    [
+        ("::error::x", _COMMANDS),
+        ("::error::x\r\n", _COMMANDS),
+        ("b = 1\x1b[31m", _ESCAPES),
+        ("a \\\x1b[31m", f"{_ESCAPES}; {_DOUBLED}"),
+        (
+            '::error::x\na = "\\x41"\nb = 1\x1b[31m',
+            f"{_ESCAPES}; {_COMMANDS}; {_DOUBLED}",
+        ),
+    ],
+)
+def test_a_block_that_is_shown_always_names_what_changed(value, changes):
+    """A block that is not plain gets a note with at least one clause.
+
+    A pin, green at the base and at the tip: ``_is_plain`` is false only for a
+    command form or for a control character, and each of the note's flags
+    reads the same change from the stage showing it makes, so the note never
+    reads ``Shown, not as written: .``. A fallback clause for an empty note
+    would be dead code; this test fails if a change to either side makes it
+    reachable.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
+        _shown_block,
+    )
+
+    _, note = _shown_block(value)
+
+    assert note == (
+        f'<p class="shown-note"><small>Shown, not as written: {changes}.</small></p>'
+    ), note
