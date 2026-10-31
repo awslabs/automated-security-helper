@@ -128,27 +128,22 @@ class TestCleanupWaitsForTheRunner:
         self, registry, tmp_path
     ):
         """The event is set 50 ms after the cancel, so the wait starts on an
-        unset event and has to block. (Set inside the cancel, it was already set
-        when the wait began, and a wait that only read is_set() once passed.)"""
+        unset event and has to keep reading it. (Set inside the cancel, it was
+        already set when the wait began, and a wait that only read the flag
+        once passed.)"""
         entry = _entry(tmp_path)
         registry.get_scan.return_value = entry
         timers = []
+        unset_at_cancel = []
 
         def cancel(scan_id):
+            unset_at_cancel.append(not entry.runner_done.is_set())
             timer = threading.Timer(0.05, entry.runner_done.set)
             timers.append(timer)
             timer.start()
             return True
 
         registry.cancel_scan.side_effect = cancel
-        real_wait = entry.runner_done.wait
-        unset_at_wait = []
-
-        def wait(timeout=None):
-            unset_at_wait.append(not entry.runner_done.is_set())
-            return real_wait(timeout)
-
-        entry.runner_done.wait = wait
 
         try:
             with (
@@ -160,10 +155,36 @@ class TestCleanupWaitsForTheRunner:
             for timer in timers:
                 timer.cancel()
 
-        assert unset_at_wait == [True]
+        assert unset_at_cancel == [True]
         assert result["success"] is True
         registry.cancel_scan.assert_called_once_with("scan-1")
         registry.cleanup_scan.assert_called_once_with("scan-1")
+
+    def test_the_wait_blocks_no_thread_of_the_default_pool(self, registry, tmp_path):
+        """The wait was ``asyncio.to_thread(runner_done.wait, 30.0)``: a worker
+        of the default pool, which every progress read and tree removal shares,
+        held for up to the whole bound per cleanup, and kept waiting after the
+        awaiting task was cancelled. The wait polls on the loop instead."""
+        entry = _entry(tmp_path)
+        registry.get_scan.return_value = entry
+
+        def blocking_wait(timeout=None):
+            raise AssertionError("the runner wait must not occupy a pool thread")
+
+        entry.runner_done.wait = blocking_wait
+        timer = threading.Timer(0.05, entry.runner_done.set)
+        registry.cancel_scan.side_effect = lambda scan_id: timer.start() or True
+
+        try:
+            with (
+                _use(registry),
+                patch(f"{_MODULE}._RUNNER_SETTLE_TIMEOUT_SECONDS", 2.0),
+            ):
+                result = asyncio.run(cleanup_scan_resources("scan-1"))
+        finally:
+            timer.cancel()
+
+        assert result["success"] is True
 
     def test_a_cancelled_scan_whose_runner_still_stops_is_kept(
         self, registry, tmp_path
@@ -188,16 +209,17 @@ class TestCleanupWaitsForTheRunner:
         assert output.exists()
 
     def test_a_scan_with_no_runner_is_not_waited_for(self, registry, tmp_path):
-        """Measured at the wait itself, as the settles-during-the-wait test
-        does: a patch of the module's ``asyncio.to_thread`` passed with no wait
-        made (through run_in_executor, a from-import or a polling loop) and
-        broke on any other use of to_thread in the call."""
+        """Measured at the wait itself: the module's wait is replaced by a
+        recorder, so a cleanup that enters it for a scan with no runner shows."""
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
         registry.get_scan.return_value = entry
         waits = []
-        entry.runner_done.wait = lambda timeout=None: waits.append(timeout) or True
 
-        with _use(registry):
+        async def settled(entry, timeout):
+            waits.append(timeout)
+            return True
+
+        with _use(registry), patch(f"{_MODULE}._runner_settled", settled):
             result = asyncio.run(cleanup_scan_resources("scan-1"))
 
         assert result["success"] is True
@@ -696,17 +718,24 @@ class TestTheEntryIsReadAgainAfterTheWait:
         output = _output_of(entry)
         registry.get_scan.return_value = entry
 
-        def settle_and_vanish(timeout=None):
+        def settle_and_vanish():
             # The runner settles, and by then the concurrent cleanup has
             # removed the entry from the registry.
-            entry.runner_done.set()
             registry.get_scan.return_value = None
-            return True
+            entry.runner_done.set()
 
-        entry.runner_done.wait = settle_and_vanish
-
-        with _use(registry), patch(f"{_MODULE}._RUNNER_SETTLE_TIMEOUT_SECONDS", 2.0):
-            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+        timer = threading.Timer(0.05, settle_and_vanish)
+        timer.start()
+        try:
+            with (
+                _use(registry),
+                patch(f"{_MODULE}._RUNNER_SETTLE_TIMEOUT_SECONDS", 2.0),
+            ):
+                result = asyncio.run(
+                    cleanup_scan_resources("scan-1", remove_output=True)
+                )
+        finally:
+            timer.cancel()
 
         assert result["success"] is False
         assert result["error_category"] == ErrorCategory.SCAN_NOT_FOUND.value
@@ -724,15 +753,22 @@ class TestTheEntryIsReadAgainAfterTheWait:
         current.runner_done.set()
         registry.get_scan.return_value = stale
 
-        def settle(timeout=None):
-            stale.runner_done.set()
+        def settle():
             registry.get_scan.return_value = current
-            return True
+            stale.runner_done.set()
 
-        stale.runner_done.wait = settle
-
-        with _use(registry), patch(f"{_MODULE}._RUNNER_SETTLE_TIMEOUT_SECONDS", 2.0):
-            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+        timer = threading.Timer(0.05, settle)
+        timer.start()
+        try:
+            with (
+                _use(registry),
+                patch(f"{_MODULE}._RUNNER_SETTLE_TIMEOUT_SECONDS", 2.0),
+            ):
+                result = asyncio.run(
+                    cleanup_scan_resources("scan-1", remove_output=True)
+                )
+        finally:
+            timer.cancel()
 
         assert result["success"] is True
         assert registry.remove_output_of_scan.call_args.args[0] is current

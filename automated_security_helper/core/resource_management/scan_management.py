@@ -36,6 +36,31 @@ _logger = ASH_LOGGER
 #: directory are removed only once it is done.
 _RUNNER_SETTLE_TIMEOUT_SECONDS = 30.0
 
+#: How often the wait for a runner re-reads its ``runner_done`` flag.
+_RUNNER_POLL_SECONDS = 0.1
+
+
+async def _runner_settled(entry: Any, timeout: float) -> bool:
+    """Wait on the event loop until ``entry``'s runner has settled, or ``timeout`` passes.
+
+    True once ``runner_done`` is set, False at the bound. The wait used to be
+    ``asyncio.to_thread(entry.runner_done.wait, timeout)``: a worker of the
+    loop's default pool (``min(32, cpu + 4)`` of them, shared with every
+    progress read and tree removal) held for up to the whole bound per
+    cleanup, so a few cleanups of scans that were slow to settle queued every
+    ``get_scan_progress`` behind them, and a caller that cancelled its cleanup
+    left the worker waiting out the bound. Polling with ``asyncio.sleep``
+    holds no thread and ends at once when the awaiting task is cancelled.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not entry.runner_done.is_set():
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(_RUNNER_POLL_SECONDS, remaining))
+    return True
+
 
 class _OutputDirectoryInUse(Exception):
     """The output directory must not be removed now; the message says why."""
@@ -436,9 +461,7 @@ async def cleanup_scan_resources(
         # scan whose runner has not settled in time is handed back as still
         # stopping with nothing removed.
         if entry.has_runner and not entry.runner_done.is_set():
-            settled = await asyncio.to_thread(
-                entry.runner_done.wait, _RUNNER_SETTLE_TIMEOUT_SECONDS
-            )
+            settled = await _runner_settled(entry, _RUNNER_SETTLE_TIMEOUT_SECONDS)
             if not settled:
                 return {
                     "success": False,
@@ -453,9 +476,9 @@ async def cleanup_scan_resources(
                     "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
                     "suggestions": [
                         (
-                            "Retry in a few seconds: the scan stops its scanner and "
-                            "puts the previous results back before its resources "
-                            "can be removed"
+                            "Retry once the scan has stopped: it stops its scanner "
+                            "and puts the previous results back before its "
+                            "resources can be removed"
                         ),
                     ],
                     "timestamp": datetime.now().isoformat(),
