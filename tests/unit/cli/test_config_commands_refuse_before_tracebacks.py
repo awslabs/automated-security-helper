@@ -659,10 +659,17 @@ def test_fix_unused_writes_the_text_computed_after_the_prompt(tmp_path, monkeypa
     it, over any edit made while the prompt waited."""
     config = tmp_path / ".ashrc.yaml"
     config.write_text(VALID_CONFIG, encoding="utf-8")
+    # A report where lint looks for it: the command edits only from a report
+    # lint listed, and writes nothing where lint found none.
+    report = (
+        tmp_path / ".ash" / "ash_output" / "reports" / "ash.unused-suppressions.json"
+    )
+    report.parent.mkdir(parents=True)
+    report.write_text('{"unused_suppressions": []}', encoding="utf-8")
     monkeypatch.setattr(
         ConfigLinter,
         "get_unused_report_age",
-        staticmethod(lambda *_a, **_k: _fresh_report(tmp_path / "report.json")),
+        staticmethod(lambda *_a, **_k: _fresh_report(report)),
     )
     unused = _issue(LintSeverity.WARNING, LintCategory.SUPPRESSION_UNUSED, "unused")
     texts = iter(["project_name: first\n", "project_name: second\n"])

@@ -2097,6 +2097,7 @@ def lint(
                     if isinstance(lint_result.resolved_data, dict)
                     else None,
                     report_path=lint_result.unused_report_path,
+                    report_checked=lint_result.unused_report_checked,
                 )
                 or applied
             )
@@ -2229,6 +2230,7 @@ def _apply_unused_fixes(
     color: bool,
     report_config: Any = None,
     report_path: Path | None = None,
+    report_checked: bool = False,
 ) -> bool:
     """Comment out unused suppressions in the config file. Returns whether the
     file was written. A list the fixer cannot edit (a repeated key, a flow
@@ -2243,25 +2245,32 @@ def _apply_unused_fixes(
     The age read and the fixer take that file: a config whose chain does not
     resolve (an ``extends`` that cannot be read) left ``report_config`` empty, and
     each of them then named a report by its own resolution, which can be another
-    file than the one lint listed the entries from."""
+    file than the one lint listed the entries from.
+
+    ``report_checked`` is whether lint looked for the report
+    (``LintResult.unused_report_checked``). Lint having looked and found none,
+    this says so and stops: a second lookup here could name a report lint did
+    not list, and the entries it commented out would be ones the operator was
+    never shown (with ``-y`` nothing is asked)."""
     from automated_security_helper.config.config_linter import (
         ConfigLinter,
         UnusedSuppressionsNotEditable,
     )
 
-    # Only the file lint read is passed on, and only when there is one.
-    pinned = {} if report_path is None else {"report_path": report_path}
+    no_report = (
+        "⚠️  No unused suppressions report found. Run a scan first to generate the report."
+    )
+    if report_checked and report_path is None:
+        secho(no_report, fg=typer.colors.YELLOW)
+        return False
 
     # Check report age first
     report_info = ConfigLinter.get_unused_report_age(
-        config_path, output_dir, report_config, **pinned
+        config_path, output_dir, report_config, report_path=report_path
     )
 
     if report_info is None:
-        secho(
-            "⚠️  No unused suppressions report found. Run a scan first to generate the report.",
-            fg=typer.colors.YELLOW,
-        )
+        secho(no_report, fg=typer.colors.YELLOW)
         return False
 
     report_path, report_timestamp, age_seconds = report_info
@@ -2313,7 +2322,7 @@ def _apply_unused_fixes(
         # unchanged when the fixer refuses.
         try:
             return ConfigLinter.fix_unused_suppressions(
-                config_path, output_dir, report_config, **pinned
+                config_path, output_dir, report_config, report_path=report_path
             )
         except UnusedSuppressionsNotEditable as exc:
             secho(

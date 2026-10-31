@@ -121,13 +121,18 @@ def test_the_command_hands_the_config_lint_read_to_the_age_read_and_the_fixer(
         ),
     )
     seen = {}
+    # What a call that names no report path would see, so a keyword left out of
+    # the call is told from one passed as None.
+    not_passed = "report_path was not passed"
 
-    def age(config_path, output_dir=None, report_config=None):
+    def age(config_path, output_dir=None, report_config=None, report_path=not_passed):
         seen["age"] = report_config
+        seen["age_path"] = report_path
         return (tmp_path / "report.json", datetime.now(), 0.0)
 
-    def fix(config_path, output_dir=None, report_config=None):
+    def fix(config_path, output_dir=None, report_config=None, report_path=not_passed):
         seen["fix"] = report_config
+        seen["fix_path"] = report_path
         return None, [], None
 
     monkeypatch.setattr(ConfigLinter, "get_unused_report_age", staticmethod(age))
@@ -140,6 +145,10 @@ def test_the_command_hands_the_config_lint_read_to_the_age_read_and_the_fixer(
     assert result.exit_code == 0, result.output
     assert seen.get("age") is merged, seen
     assert seen.get("fix") is merged, seen
+    # Lint did not look here (the result was built by hand), so no path is
+    # pinned; the keyword is passed all the same, as None.
+    assert seen.get("age_path") is None, seen
+    assert seen.get("fix_path") is None, seen
 
 
 def test_lint_records_the_report_it_read(tmp_path):
@@ -164,6 +173,35 @@ def test_lint_without_a_report_records_none(tmp_path):
         config, output_dir=tmp_path / ".ash" / "ash_output", check_unused=True
     )
 
+    assert result.unused_report_path is None
+    # None is not "did not look": lint looked and found none.
+    assert result.unused_report_checked is True
+
+
+def test_lint_records_that_it_looked_for_the_report(tmp_path):
+    """Red at the base: the result had no such field, so a path of None could not
+    be told from a lint that never looked."""
+    config, reports = _layout(tmp_path)
+    (reports / "ash.unused-suppressions.json").write_text(REPORT, encoding="utf-8")
+
+    result = ConfigLinter.lint(
+        config, output_dir=tmp_path / ".ash" / "ash_output", check_unused=True
+    )
+
+    assert result.unused_report_checked is True
+
+
+def test_lint_that_does_not_check_unused_records_that_it_did_not_look(tmp_path):
+    """The positive control: without ``check_unused`` nothing is looked for, and
+    the report that sits there is not recorded either."""
+    config, reports = _layout(tmp_path)
+    (reports / "ash.unused-suppressions.json").write_text(REPORT, encoding="utf-8")
+
+    result = ConfigLinter.lint(
+        config, output_dir=tmp_path / ".ash" / "ash_output", check_unused=False
+    )
+
+    assert result.unused_report_checked is False
     assert result.unused_report_path is None
 
 
