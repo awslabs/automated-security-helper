@@ -953,10 +953,13 @@ def test_an_allowance_still_excuses_the_pin_of_its_own_line_in_a_block_script(te
 def test_a_pre_commit_entry_with_a_block_scalar_key_is_still_one_entry():
     """The control: only a block scalar on the dash line makes the lines below it a
     script. A block scalar under a later key leaves the item one entry, so the
-    `repo:` line above it still names the project."""
+    `repo:` line above the pin still names the project. The `|` of that later key
+    is a command break like any other, so the key comes after the pin: a pin below
+    the indicator is cut away from the `repo:` line and is reported, which fails
+    closed."""
     manager = _manager()
     text = (
-        f"- repo: {OTHER_PROJECT_URL}\n  note: |\n    kept as written\n  rev: v4.6.0\n"
+        f"- repo: {OTHER_PROJECT_URL}\n  rev: v4.6.0\n  note: |\n    kept as written\n"
     )
     allowed = ("example/other-project",)
     assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
