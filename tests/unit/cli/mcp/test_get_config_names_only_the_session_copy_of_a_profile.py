@@ -176,5 +176,7 @@ def test_a_bound_profile_gone_while_the_workspace_is_being_removed_is_busy(bound
 
     assert result["success"] is False, result
     assert result["error_type"] == "session_workspace_busy", result
-    assert "exit_code" not in result, result
+    # The refusal carries the exit code every refusal of this tool carries.
+    assert result["exit_code"] == 1, result
+    assert result["exit_code_meaning"], result
     assert not session_copy.exists(), "the profile was written under the removal"
