@@ -172,6 +172,24 @@ def _logged(scanner) -> tuple[list[str], object]:
     )
 
 
+def _platform(monkeypatch, name: str) -> None:
+    """The trivy base reads ``name`` as the platform, and nothing else does.
+
+    ``sys.platform`` patched for the whole process also flips the path-trust and
+    config code a test reaches with POSIX temporary paths. The base reads the
+    platform in two places only (the skip budget and the size of a skip token), so
+    its own ``sys`` is replaced."""
+    monkeypatch.setattr(trivy_base, "sys", SimpleNamespace(platform=name))
+
+
+def test_a_patched_platform_is_the_trivy_bases_alone(monkeypatch):
+    real = sys.platform
+    _platform(monkeypatch, "linux" if real == "win32" else "win32")
+
+    assert sys.platform == real
+    assert trivy_base.sys.platform != real
+
+
 # --- the timeout bound -------------------------------------------------------------
 
 
@@ -443,7 +461,7 @@ def test_skip_tokens_at_the_windows_budget_keep_the_whole_command_line_in_limit(
     scanner = _repo_scanner(tmp_path)
     source = Path(scanner.context.source_dir)
     many = [f"ignored/{index}/{'x' * 200}.txt" for index in range(1_000)]
-    monkeypatch.setattr(sys, "platform", "win32")
+    _platform(monkeypatch, "win32")
     monkeypatch.setattr(trivy_base, "trivy_skip_files", lambda *a, **k: many)
     monkeypatch.setattr(trivy_base, "trivy_skip_dirs", lambda *a, **k: [])
     messages, logging_patch = _logged(scanner)
@@ -484,7 +502,7 @@ def test_the_budget_elsewhere_reads_the_hosts_arg_max_less_the_environment(
     arg_max = 2_000_000
     # ``raising=False``: Windows has no ``os.sysconf`` to replace, and this test
     # plays a Linux host there too (the platform is patched above the call).
-    monkeypatch.setattr(sys, "platform", "linux")
+    _platform(monkeypatch, "linux")
     monkeypatch.setattr(trivy_base.os, "sysconf", lambda name: arg_max, raising=False)
 
     assert skip_args_budget({}) == _SKIP_ARGS_BUDGET
@@ -496,7 +514,7 @@ def test_control_a_host_that_does_not_answer_gets_the_ceiling(monkeypatch):
     def unknown(name):
         raise ValueError(name)
 
-    monkeypatch.setattr(sys, "platform", "linux")
+    _platform(monkeypatch, "linux")
     monkeypatch.setattr(trivy_base.os, "sysconf", unknown, raising=False)
 
     assert skip_args_budget({"A": "x" * 100_000}) == _SKIP_ARGS_BUDGET
@@ -506,7 +524,7 @@ def test_a_host_without_sysconf_gets_the_ceiling(monkeypatch):
     """The ``AttributeError`` arm of the budget: a non-Windows platform whose ``os``
     has no ``sysconf`` (what a Windows interpreter is once the platform check is
     taken out of the way) gets the ceiling, not a crash."""
-    monkeypatch.setattr(sys, "platform", "linux")
+    _platform(monkeypatch, "linux")
     monkeypatch.delattr(trivy_base.os, "sysconf", raising=False)
 
     assert not hasattr(trivy_base.os, "sysconf")
@@ -2331,7 +2349,7 @@ def test_operator_entries_with_spaces_are_counted_as_the_windows_line_builds_the
     scanner = _repo_scanner(tmp_path)
     names = [f"dir {index:04d} with space" for index in range(2000)]
     scanner.extra_env = {"TRIVY_SKIP_DIRS": ",".join(names)}
-    monkeypatch.setattr(sys, "platform", "win32")
+    _platform(monkeypatch, "win32")
     ashs_own = "--skip-dirs=.ash/ash_output"
 
     with patch.object(scanner, "_plugin_log"):
@@ -2347,7 +2365,7 @@ def test_control_operator_skip_entries_without_spaces_count_as_their_bytes(
 ):
     scanner = _repo_scanner(tmp_path)
     scanner.extra_env = {"TRIVY_SKIP_DIRS": "vendor,build"}
-    monkeypatch.setattr(sys, "platform", "win32")
+    _platform(monkeypatch, "win32")
 
     with patch.object(scanner, "_plugin_log"):
         tokens = scanner._operator_skip_args(["--skip-dirs=.ash/ash_output"])
