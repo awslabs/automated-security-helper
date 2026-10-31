@@ -142,6 +142,23 @@ def test_an_unanchored_pattern_naming_a_directory_above_the_root_excludes_nothin
     assert kept == files
 
 
+def test_an_unanchored_pattern_still_excludes_a_directory_below_the_root(tmp_path):
+    """The other side of the test above: an unanchored pattern is not turned
+    into an anchored one. ``fixtures/`` matches anywhere in the path relative
+    to the root, so it takes out ``tests/fixtures/a.py`` and nothing else."""
+    root = tmp_path / "repo"
+    files = [
+        str(root / "tests" / "fixtures" / "a.py"),
+        str(root / "src" / "app.py"),
+    ]
+
+    kept = DetectSecretsScanner._apply_file_exclusions(
+        files, [re.compile(r"fixtures/")], root
+    )
+
+    assert kept == [str(root / "src" / "app.py")]
+
+
 # ---------------------------------------------------------------------------
 # The scan
 # ---------------------------------------------------------------------------
@@ -170,6 +187,39 @@ def test_the_worker_gets_neither_the_excluded_files_nor_the_filter(
         item.get("path") == SHOULD_EXCLUDE_FILE_FILTER
         for item in seen["scan_settings_dict"].get("filters_used", [])
     ), seen["scan_settings_dict"]
+
+
+def test_a_scan_root_reached_through_a_link_is_matched_as_spelled(
+    tmp_path, monkeypatch
+):
+    """The scanned directory is a link to ``real-tree/repo``. Patterns are
+    matched against the path relative to the root as the scan set spells it,
+    so ``^tests/`` still anchors at the root, and an unanchored pattern naming
+    the directory the link points into (``real-tree``) matches nothing. Matched
+    against the resolved path, that pattern would have matched every file and
+    the scan would have read clean."""
+    real = tmp_path / "real-tree" / "repo"
+    real.mkdir(parents=True)
+    link = tmp_path / "linked"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"symlinks unavailable on this platform: {exc}")
+    _write(real, "settings.py")
+    _write(real, "tests/fixture.py")
+    context = _context(tmp_path, source=link)
+    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+    scanner.config.options.scan_settings.filters_used = [
+        DetectSecretsScanSettingsFiltersUsed(
+            path=SHOULD_EXCLUDE_FILE_FILTER, pattern=[r"^tests/", r"real-tree"]
+        )
+    ]
+    seen = _record_worker(scanner, monkeypatch)
+
+    scanner.scan(target=link, target_type="source")
+
+    assert seen, "the worker was not reached"
+    assert _relative_scan_paths(seen, link) == ["settings.py"]
 
 
 def test_the_operators_patterns_are_not_labeled_as_the_baselines(
