@@ -234,7 +234,10 @@ def _entry_around(lines: List[str], index: int, begin: int, finish: int) -> str:
     deeper than it, so a pre-commit `rev:` comes with the `repo:` line above it, and a
     `- rev:` with the `repo:` below it. A list item nested deeper than the `rev:` (the
     `- id:` lines under a `hooks:` key) belongs to a sibling key and is walked past, so
-    the `repo:` line above it is still found. Prose and other text stay one line.
+    the `repo:` line above it is still found. Blank lines inside an entry are crossed,
+    as the anchored `rev:` pattern crosses them between `repo:` and `rev:`: the entry
+    ends at the first line, after any blank ones, that is indented no deeper than its
+    `- `. Prose and other text stay one line.
 
     Whatever the entry is, it is cut at the nearest `;`, `&`, `|` or backtick on each
     side of the pin (see _COMMAND_BREAKS): `git clone <another project> && \\` and the
@@ -247,7 +250,10 @@ def _entry_around(lines: List[str], index: int, begin: int, finish: int) -> str:
     if not lines[start].lstrip().startswith("- "):
         base = _indent(lines[start])
         above = start - 1
-        while above >= 0 and lines[above].strip():
+        while above >= 0:
+            if not lines[above].strip():
+                above -= 1  # a blank line is no end: the line above it decides
+                continue
             if lines[above].lstrip().startswith("- "):
                 if _indent(lines[above]) < base:
                     start = above
@@ -262,12 +268,13 @@ def _entry_around(lines: List[str], index: int, begin: int, finish: int) -> str:
         end += 1
     if lines[start].lstrip().startswith("- "):
         entry_indent = _indent(lines[start])
-        while (
-            end + 1 < len(lines)
-            and lines[end + 1].strip()
-            and _indent(lines[end + 1]) > entry_indent
-        ):
-            end += 1
+        while True:
+            following = end + 1
+            while following < len(lines) and not lines[following].strip():
+                following += 1
+            if following >= len(lines) or _indent(lines[following]) <= entry_indent:
+                break
+            end = following
     entry = "\n".join(lines[start : end + 1])
     where = sum(len(line) + 1 for line in lines[start:index])
     before = max(entry.rfind(mark, 0, where + begin) for mark in _COMMAND_BREAKS)

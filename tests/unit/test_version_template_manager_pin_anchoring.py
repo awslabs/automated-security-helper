@@ -541,6 +541,45 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
                 ),
                 f"  - repo: {OTHER_URL}\n    hooks:\n      - id: x\n    rev: v4.6.0",
             ),
+            # Blank lines between repo: and rev:, which the anchored pattern admits: the
+            # entry runs up across them. Red at the base, where the walk stopped at the
+            # blank line and returned the rev: line alone.
+            (
+                (
+                    f"  - repo: {OTHER_URL}\n\n    rev: v4.6.0\n"
+                    "  - repo: https://github.com/e/n\n"
+                ),
+                f"  - repo: {OTHER_URL}\n\n    rev: v4.6.0",
+            ),
+            # The same with the rev: first: the entry runs down across the blank line to
+            # its repo: line, and ends before the next entry.
+            (
+                (
+                    f"- rev: v4.6.0\n\n  repo: {OTHER_URL}\n\n"
+                    "- repo: https://github.com/e/n\n"
+                ),
+                f"- rev: v4.6.0\n\n  repo: {OTHER_URL}",
+            ),
+            # A nested list and a blank line together.
+            (
+                (
+                    f"  - repo: {OTHER_URL}\n    hooks:\n      - id: x\n\n"
+                    "    rev: v4.6.0\n"
+                ),
+                (
+                    f"  - repo: {OTHER_URL}\n    hooks:\n      - id: x\n\n"
+                    "    rev: v4.6.0"
+                ),
+            ),
+            # The control: a blank line before an entry as shallow as this one's `- `
+            # ends the entry, so the next entry is never absorbed.
+            (
+                (
+                    f"  - repo: {OTHER_URL}\n    rev: v4.6.0\n\n"
+                    f"  - rev: v3.3.0\n    repo: {ASH_URL}\n"
+                ),
+                f"  - repo: {OTHER_URL}\n    rev: v4.6.0",
+            ),
         ],
         ids=[
             "block",
@@ -551,6 +590,10 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
             "chained-pin-last",
             "chained-pin-first",
             "chained-on-one-line",
+            "blank-line-before-the-rev",
+            "blank-line-after-the-rev",
+            "nested-item-and-blank-line",
+            "blank-line-before-the-next-entry",
         ],
     )
     def test_the_entry_around_a_listed_pin_is_the_whole_entry_or_command(

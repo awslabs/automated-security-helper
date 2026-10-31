@@ -783,6 +783,22 @@ THIRD_PARTY_ENTRIES = {
     "a clone continued over lines": (
         f"git clone \\\n  --branch v2.0.0 \\\n  {OTHER_PROJECT_URL}.git\n"
     ),
+    # The shapes pre-commit and the anchored pattern admit: keys in any order, blank
+    # lines between them, a list under a sibling key.
+    "a rev: below blank lines under its repo:": (
+        f"repos:\n  - repo: {OTHER_PROJECT_URL}\n\n    rev: v4.6.0\n"
+    ),
+    "a rev: written before blank lines and its repo:": (
+        f"- rev: v4.6.0\n\n  repo: {OTHER_PROJECT_URL}\n"
+    ),
+    "a rev: below a list under a sibling key": (
+        f"repos:\n  - repo: {OTHER_PROJECT_URL}\n    hooks:\n      - id: x\n"
+        "    rev: v4.6.0\n"
+    ),
+    "a rev: below a list and a blank line": (
+        f"repos:\n  - repo: {OTHER_PROJECT_URL}\n    hooks:\n      - id: x\n\n"
+        "    rev: v4.6.0\n"
+    ),
 }
 
 
@@ -809,6 +825,25 @@ def test_an_allowance_does_not_excuse_the_next_entry():
     text = (
         f"- repo: {OTHER_PROJECT_URL}\n"
         "  rev: v4.6.0\n"
+        "- rev: v3.3.0\n"
+        f"  repo: {REPO_URL}\n"
+    )
+    problems = dv.unrecognized_pin_problems(
+        manager, text, "page/", ("example/other-project",)
+    )
+    assert len(problems) == 1, problems
+    assert "pin of 3.3.0" in problems[0], problems
+
+
+@pytest.mark.unit
+def test_an_allowance_does_not_excuse_the_next_entry_across_a_blank_line():
+    """The control for the blank lines an entry crosses: the entry ends where the next
+    one starts, blank line or not."""
+    manager = _manager()
+    text = (
+        f"- repo: {OTHER_PROJECT_URL}\n"
+        "  rev: v4.6.0\n"
+        "\n"
         "- rev: v3.3.0\n"
         f"  repo: {REPO_URL}\n"
     )
