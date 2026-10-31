@@ -28,7 +28,9 @@ from automated_security_helper.config import resolve_config
 from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     ConfigProvenance,
+    _override_key,
     operator_paths,
+    operator_value,
     set_by_operator,
 )
 
@@ -96,6 +98,61 @@ def test_an_override_the_base_cannot_take_leaves_the_other_keys_resolved(
     assert set_by_operator(config, "scanners.plugin-only.options.x.y", 1) is False
     assert set_by_operator(config, "scanners", trusted["scanners"]) is False
     assert set_by_operator(config, "scanners.semgrep", {"enabled": False}) is True
+
+
+def _bandit_config(tmp_path, override_key: str) -> _Config:
+    return _Config(
+        ConfigProvenance(
+            in_tree=(tmp_path / ".ash" / ".ash.yaml",),
+            trusted={
+                "scanners": {"bandit": {"options": {"config_file": "/ops/base.yaml"}}}
+            },
+            overrides=(f'{override_key}="/ops/b.yaml"',),
+        )
+    )
+
+
+def test_a_failed_override_under_another_plugin_spelling_spoils_the_folded_key(
+    dict_overrides, tmp_path
+):
+    """The base has no ``Bandit`` section, so the override fails, and it is
+    recorded under the key as written. The key a scanner asks about is spelled
+    ``bandit``: both fold to one plugin, so the failure spoils it, and the
+    trusted base's value is not offered as the operator's."""
+    config = _bandit_config(tmp_path, "scanners.Bandit.options.config_file")
+    key = "scanners.bandit.options.config_file"
+
+    assert operator_value(config, key) == (False, None)
+    assert set_by_operator(config, key, "/ops/base.yaml") is False
+    # The dashed and underscored spellings of one name fold too.
+    config = _bandit_config(tmp_path, "scanners.band-it.options.config_file")
+    assert operator_value(config, key) == (False, None)
+
+
+def test_an_override_key_loses_its_append_marker_before_its_padding():
+    """``key +=value`` writes to ``key``: the marker comes off the end of the
+    text before the padding is stripped, or the key keeps a trailing space and
+    never matches the key a scanner asks about."""
+    assert _override_key("scanners.bandit.options.x +=1") == (
+        "scanners.bandit.options.x"
+    )
+    assert _override_key("scanners.bandit.options.x+=1") == (
+        "scanners.bandit.options.x"
+    )
+    assert _override_key(" scanners.bandit.options.x = 1") == (
+        "scanners.bandit.options.x"
+    )
+
+
+def test_control_an_override_that_applies_under_the_plain_spelling_resolves(
+    dict_overrides, tmp_path
+):
+    config = _bandit_config(tmp_path, "scanners.bandit.options.config_file")
+
+    assert operator_value(config, "scanners.bandit.options.config_file") == (
+        True,
+        "/ops/b.yaml",
+    )
 
 
 def test_operator_paths_accepts_the_entry_the_operator_appended(

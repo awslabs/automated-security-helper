@@ -85,6 +85,9 @@ PathLike = Union[str, "os.PathLike[str]"]
 
 _MISSING = object()
 
+#: The top-level sections whose second segment names a plugin.
+_PLUGIN_SEGMENTS = frozenset({"scanners", "converters", "reporters"})
+
 
 @dataclass
 class ConfigProvenance:
@@ -188,13 +191,26 @@ class _ResolvedSection:
 def _override_key(override: Any) -> str:
     """The dotted key a ``--config-overrides`` entry writes to, ``key=value`` and
     ``key+=value`` alike."""
-    return str(override).partition("=")[0].strip().removesuffix("+")
+    return str(override).partition("=")[0].removesuffix("+").strip()
 
 
 def _key_parts(key: str) -> Tuple[str, ...]:
     """The segments of dotted ``key``, with ``-`` read as ``_`` in each, as the
-    config accepts either spelling (:func:`value_at`)."""
-    return tuple(part.replace("-", "_") for part in key.split("."))
+    config accepts either spelling (:func:`value_at`).
+
+    The plugin name under ``scanners``, ``converters`` or ``reporters`` is
+    folded further (case and separators dropped, as the config folds a plugin's
+    section name), so an override written ``scanners.Bandit...`` and a key asked
+    as ``scanners.bandit...`` are the same plugin to :func:`_one_under_the_other`.
+    """
+    parts = tuple(part.replace("-", "_") for part in key.split("."))
+    if len(parts) > 1 and parts[0] in _PLUGIN_SEGMENTS:
+        from automated_security_helper.config.plugin_section_names import (
+            folded_section_name,
+        )
+
+        parts = (parts[0], folded_section_name(parts[1]), *parts[2:])
+    return parts
 
 
 def _one_under_the_other(first: Tuple[str, ...], second: Tuple[str, ...]) -> bool:
