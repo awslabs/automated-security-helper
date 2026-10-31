@@ -215,6 +215,43 @@ def test_a_link_to_the_whole_package_directory_is_not_the_package_as_named(
     assert reason is not None and "scanned tree" in reason, reason
 
 
+def test_the_link_the_package_was_imported_through_is_the_package(
+    tmp_path, monkeypatch
+):
+    """An install whose package directory is itself a link (``flit install
+    --symlink``, a hand-made link, a symlink forest) is imported through that
+    link, so every module location sits under it. The link is the package
+    there, not an alias a repository placed: ASH's own modules stay exempt. A
+    second link to the same directory, which the interpreter did not import
+    through, is still an alias, and so is the link when the package was
+    imported by its real path."""
+    own = Path(automated_security_helper.__file__).resolve().parent
+    imported = tmp_path / "site" / "imported_link"
+    other = tmp_path / "site" / "other_link"
+    imported.parent.mkdir()
+    _symlink(imported, own)
+    _symlink(other, own)
+    below = imported / "plugin_modules" / "ash_builtin"
+
+    # The control: imported by its real path, the link is an alias.
+    assert not _location_is_own(imported, own, as_named=True)
+    assert not _location_is_own(below, own, as_named=True)
+
+    monkeypatch.setattr(
+        automated_security_helper, "__file__", str(imported / "__init__.py")
+    )
+
+    assert _location_is_own(imported, own, as_named=True)
+    assert _location_is_own(below, own, as_named=True)
+    assert not _location_is_own(other, own, as_named=True)
+    assert not _location_is_own(
+        other / "plugin_modules" / "ash_builtin", own, as_named=True
+    )
+    # The controls: the real package and a location elsewhere are unchanged.
+    assert _location_is_own(own, own, as_named=True)
+    assert not _location_is_own(tmp_path, own, as_named=True)
+
+
 def test_a_link_that_path_is_symlink_does_not_see_is_still_not_the_package(
     tmp_path, monkeypatch
 ):

@@ -311,6 +311,23 @@ def _own_package_dir() -> Optional[Path]:
     return Path(origin).resolve().parent if origin else None
 
 
+def _imported_package_dir() -> Optional[Path]:
+    """ASH's package directory under the name Python imported it through.
+
+    ``_own_package_dir`` resolves links, but the interpreter reaches every
+    module of an install whose package directory is itself a link
+    (``flit install --symlink``, a hand-made link, a symlink forest) through
+    that link, so a location sits under the link and never under the resolved
+    directory. Not resolved here, and spelled the way ``_as_named`` spells a
+    location, so the two compare.
+    """
+    import automated_security_helper
+    from automated_security_helper.config.sandbox_grants import _as_named
+
+    origin = getattr(automated_security_helper, "__file__", None)
+    return _as_named(Path(origin).parent) if origin else None
+
+
 def _location_is_own(location: Path, own: Path, *, as_named: bool) -> bool:
     """Whether a module *location* sits inside ASH's own package directory *own*.
 
@@ -345,12 +362,17 @@ def _location_is_own(location: Path, own: Path, *, as_named: bool) -> bool:
     # way: a link standing for the package is not the package. A link is what
     # ``_link_state`` calls one: a symlink, or on Windows a junction, which
     # ``Path.is_symlink`` does not see. A parent that cannot be examined is not
-    # shown to be the directory itself, so it is not exempt either.
+    # shown to be the directory itself, so it is not exempt either. The one
+    # link that is the package is the path the running interpreter imported it
+    # through (``_imported_package_dir``): code it already runs from there is
+    # the package, not an alias a repository placed.
     named = _as_named(location)
+    imported = _imported_package_dir()
     for candidate in (named, *named.parents):
         try:
             if candidate.samefile(own):
-                return _link_state(candidate) is False
+                state = _link_state(candidate)
+                return state is False or (state is True and candidate == imported)
         except OSError:
             continue
     return False
