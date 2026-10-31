@@ -656,6 +656,12 @@ def test_a_client_entry_in_a_mapping_that_is_not_a_dict_takes_the_operators_fiel
             }
         }
     }
+    # The precondition: the option keeps the mapping as assigned. Were
+    # assignment validated, it would be coerced to a model and this test would
+    # pass through the model arm without measuring the mapping one.
+    assert isinstance(
+        config.scanners.bandit.options.excluded_paths[0], MappingProxyType
+    )
 
     _strip(config, {}, operator, tmp_path)
 

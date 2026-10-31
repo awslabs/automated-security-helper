@@ -1562,7 +1562,7 @@ def _operator_fields(source: Any) -> Optional[Dict[str, Any]]:
 def _spelled_like(template: Any, source: Any) -> Any:
     """The operator's entry ``source`` in the shape ``template`` has in the option.
 
-    The option holds strings, dicts or validated models; the operator's entry
+    The option holds strings, mappings or validated models; the operator's entry
     comes as a string or a mapping from a document or the trusted config's dump.
     The result carries the operator's fields, its path, reason and expiration,
     in the template's shape: an operator mapping under a plain-string option is
