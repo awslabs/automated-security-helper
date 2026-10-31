@@ -46,6 +46,29 @@ def _repoints(current: Any, value: Any) -> bool:
         return True
 
 
+#: The fields typed Path that a plugin may assign a str to.
+_DIRECTORY_FIELDS = ("source_dir", "output_dir", "work_dir", "workspace_output_dir")
+
+
+def _as_path(name: str, value: Any) -> Any:
+    """``value`` as a Path when ``name`` is a directory field given a str or other
+    path-like, otherwise as it is.
+
+    The model does not validate assignments, ``model_copy`` or ``model_construct``,
+    so a str given to a directory field by any of them was stored as a str and
+    every later plugin that called a Path method on it crashed. Validation
+    coerces at construction; this does the same on the routes that skip it.
+    """
+    if (
+        name in _DIRECTORY_FIELDS
+        and value is not None
+        and not isinstance(value, Path)
+        and isinstance(value, (str, os.PathLike))
+    ):
+        return Path(value)
+    return value
+
+
 def _shown(value: Any) -> str:
     """``value`` as a POSIX path for a message, or its type when it is no path."""
     try:
@@ -257,22 +280,18 @@ class PluginContext(BaseModel):
         # assignments, so a str assigned to one (``context.work_dir = "/tmp/x"``)
         # was stored as a str and every later plugin that called a Path method
         # on it crashed. Coerced here, as validation would have at construction.
-        if (
-            name in ("source_dir", "output_dir", "work_dir", "workspace_output_dir")
-            and value is not None
-            and not isinstance(value, Path)
-            and isinstance(value, (str, os.PathLike))
-        ):
-            value = Path(value)
+        value = _as_path(name, value)
         if name == "work_dir":
             current = getattr(self, name, None)
-            if current is not None and not _repoints(current, value):
+            # Asked once: each answer costs two filesystem resolutions.
+            moved = current is not None and _repoints(current, value)
+            if current is not None and not moved:
                 # The same directory under another spelling is no change, so it
                 # is not stored either: a relative spelling would depend on the
                 # current directory from then on, and a link spelling would
                 # replace the plain path.
                 return
-            if current is not None and _repoints(current, value):
+            if moved:
                 message = (
                     f"Assigning to PluginContext.work_dir replaces {_shown(current)} "
                     f"with {_shown(value)} for every plugin in this run, not "
@@ -304,6 +323,8 @@ class PluginContext(BaseModel):
         moves one of them would leave it unrecorded. The copy registers its own
         output directory with fs_guard as well, so it stays guarded when the
         original is collected or the copy moves the directory."""
+        if update:
+            update = {key: _as_path(key, value) for key, value in update.items()}
         copied = super().model_copy(update=update, deep=deep)
         _register_output_dir(copied, getattr(copied, "output_dir", None))
         _record_derived_roots_on_config(copied)
@@ -319,6 +340,7 @@ class PluginContext(BaseModel):
         configuration as a validated one's are (``model_construct`` skips the
         validators that record them), and its output directory registered with
         fs_guard."""
+        values = {key: _as_path(key, value) for key, value in values.items()}
         built = super().model_construct(_fields_set, **values)
         _register_output_dir(built, getattr(built, "output_dir", None))
         _record_derived_roots_on_config(built)
