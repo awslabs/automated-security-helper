@@ -2465,23 +2465,66 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         finding on a value the baseline does not list stays), are dropped
         (``scan``). A value that is not 40 hexadecimal digits is not a hash
         detect-secrets wrote, so its finding stays.
+
+        A value only counts as a listed hash when it sits in a
+        ``hashed_secret`` slot and nowhere else in the document. A repository
+        can put a live token of the same shape in a slot, and the same token
+        under any other key (``notes``, say) is then a finding like any
+        other: the one finding made on it must not be taken for the entry
+        read back. Whatever the slot holds that is found nowhere else cannot
+        be told from a hash by its content, so it is still treated as one.
         """
-        echoes: Set[str] = set()
         results = (document or {}).get("results")
-        if not isinstance(results, dict):
+        if not isinstance(document, dict) or not isinstance(results, dict):
             return frozenset()
-        for entries in results.values():
+        hex_digest = re.compile(r"[0-9a-f]{40}")
+        listed: Set[str] = set()
+        # Every string of the document outside the slots, keys included.
+        elsewhere: List[str] = []
+        pending: List[Any] = []
+        for key, value in document.items():
+            elsewhere.append(str(key))
+            if key != "results":
+                pending.append(value)
+        for filename, entries in results.items():
+            elsewhere.append(str(filename))
             if not isinstance(entries, list):
+                pending.append(entries)
                 continue
             for entry in entries:
-                value = entry.get("hashed_secret") if isinstance(entry, dict) else None
-                if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value):
-                    echoes.add(
-                        hashlib.sha1(
-                            value.encode("utf-8"), usedforsecurity=False
-                        ).hexdigest()
-                    )
-        return frozenset(echoes)
+                if not isinstance(entry, dict):
+                    pending.append(entry)
+                    continue
+                for field, value in entry.items():
+                    elsewhere.append(str(field))
+                    if (
+                        field == "hashed_secret"
+                        and isinstance(value, str)
+                        and hex_digest.fullmatch(value)
+                    ):
+                        listed.add(value)
+                    else:
+                        pending.append(value)
+        while pending:
+            node = pending.pop()
+            if isinstance(node, str):
+                elsewhere.append(node)
+            elif isinstance(node, dict):
+                for field, value in node.items():
+                    elsewhere.append(str(field))
+                    pending.append(value)
+            elif isinstance(node, list):
+                pending.extend(node)
+        for text in elsewhere:
+            if not listed:
+                break
+            if len(text) >= 40:
+                for match in re.finditer(r"(?=([0-9a-f]{40}))", text):
+                    listed.discard(match.group(1))
+        return frozenset(
+            hashlib.sha1(value.encode("utf-8"), usedforsecurity=False).hexdigest()
+            for value in listed
+        )
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — DetectSecrets overrides scan() directly; this is unreachable."""
@@ -2749,7 +2792,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # (``{"results": {}, "notes": "<live key>"}``). The detectors'
             # reading of the hashes it lists is dropped from the findings
             # instead (_baseline_hash_echoes) whichever detector made them,
-            # and nothing else on the file.
+            # and nothing else on the file: a value the baseline also holds
+            # outside a ``hashed_secret`` slot is not one of its echoes.
             # Only a baseline the scan has (the parsed document): a chosen
             # file that turned out malformed is not in use
             # (_process_config_options fell back to the default settings), so
@@ -3128,7 +3172,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         # its type: the hex detectors read the value on its own,
                         # and the keyword detector reads it as the value of the
                         # ``hashed_secret`` key. The hash of the found value is
-                        # already one the baseline lists.
+                        # already one the baseline lists, and the value is
+                        # found only in the slots (_baseline_hash_echoes).
                         continue
                     key = (uri, finding.secret_hash, finding.type)
                     is_known = key in known

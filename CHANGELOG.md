@@ -8098,7 +8098,9 @@
   left out of the scan, so anything a repository put in a file of that name was
   never read. It is now in the scan set. A detector that reads back a hash the
   baseline lists, whichever detector made the finding, is not reported for that
-  file. The worker is not handed the baseline's `is_baseline_file` filter, which
+  file, unless the baseline also holds that value outside its `hashed_secret`
+  entries (under `notes`, say): a token written in both places is reported. The
+  worker is not handed the baseline's `is_baseline_file` filter, which
   skips files by name and can name any file, unless the operator's own settings
   carry it or the baseline is one the operator named outside the scanned tree.
   When the configuration was also read from the repository's own files, an

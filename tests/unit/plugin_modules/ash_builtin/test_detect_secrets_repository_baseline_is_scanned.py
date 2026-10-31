@@ -185,6 +185,86 @@ def test_a_finding_on_a_listed_hash_is_dropped_whichever_detector_made_it(
     assert _on_the_baseline(report) == [(rule, 3)]
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "echo_type",
+    [HEX_HIGH_ENTROPY_TYPE, "Secret Keyword", "Base64 High Entropy String"],
+)
+def test_a_listed_value_the_baseline_also_holds_elsewhere_is_not_an_echo(
+    tmp_path, monkeypatch, echo_type
+):
+    """A repository can write a live token of the shape of a hash into a
+    ``hashed_secret`` slot and the same token under another key. detect-secrets
+    makes one finding on it (a finding is keyed by file, hash and type), and
+    that finding is on a value the baseline holds outside its entries, so it is
+    not the entry read back and stays. An entry whose value is found nowhere
+    else is still dropped, and so is a finding on a value the baseline does
+    not list. Before, the hash alone decided, and the token vanished with the
+    entries."""
+    from detect_secrets.core.potential_secret import PotentialSecret
+
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    _write_baseline(source, notes=_hash(LISTED_ONE))
+    repeated = _hash(LISTED_ONE)
+    entry_only = _hash(LISTED_TWO)
+    unlisted = _hash(LISTED_TWO + "-not-listed")
+    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_entries_trusted() is False
+
+    def scanned(self, *, baseline, scan_paths, scan_settings_dict, **kwargs):
+        collection_cls, _, _ = _detect_secrets_api()
+        collection = collection_cls()
+        collection.root = self._secrets_collection.root
+        for secret, line in ((repeated, 9), (entry_only, 5), (unlisted, 3)):
+            collection[BASELINE_NAME].add(
+                PotentialSecret(
+                    echo_type, BASELINE_NAME, secret=secret, line_number=line
+                )
+            )
+        return collection
+
+    monkeypatch.setattr(type(scanner), "_scan_in_worker", scanned)
+
+    report = scanner.scan(target=source, target_type="source")
+
+    rule = "SECRET-" + "-".join(echo_type.upper().split())
+    assert _on_the_baseline(report) == [(rule, 3), (rule, 9)]
+
+
+@pytest.mark.integration
+def test_the_real_worker_reports_a_listed_value_that_is_also_under_notes(
+    tmp_path, monkeypatch
+):
+    """The baseline of two listed entries, with the first entry's value repeated
+    under ``notes``. Run by the real worker: the entries' echoes are still
+    dropped, and what the detectors find on the repeated value is reported,
+    on the line of the entry or of the key, and on no other line."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    repeated = _hash(LISTED_ONE)
+    text = _write_baseline(source, notes=repeated)
+    lines_holding_it = {
+        number
+        for number, content in enumerate(text.splitlines(), 1)
+        if repeated in content
+    }
+    assert len(lines_holding_it) == 2
+    scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_entries_trusted() is False
+
+    report = scanner.scan(target=source, target_type="source")
+
+    assert report is not False
+    found = _on_the_baseline(report)
+    assert found
+    assert {line for _, line in found} <= lines_holding_it
+
+
 @pytest.mark.integration
 def test_the_real_worker_reports_only_what_the_baseline_hides_in_a_key_of_its_own(
     tmp_path, monkeypatch
