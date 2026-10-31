@@ -282,11 +282,15 @@ class ContentDbAgeRecord:
             if self.policy_source:
                 # An override entry holds this database to fail: the scan-wide
                 # setting the hint names may already be warn, and changes
-                # nothing for it. The entry is what to change.
+                # nothing for it. The entry is what to change, or the flag,
+                # which outranks every override entry for its one scan
+                # (content_databases.content_db_staleness_flag_overrides).
                 tail = (
                     f"To refresh it, {self.refresh}. It is held to fail by the "
-                    f"{self.policy_source}; to scan against it anyway, change that "
-                    "entry's policy to warn or remove it from the ASH config."
+                    f"{self.policy_source}; to scan against it anyway, pass "
+                    "--allow-stale-content-db (it outranks the entry for that scan), "
+                    "or change that entry's policy to warn or remove it from the "
+                    "ASH config."
                 )
             else:
                 tail = f"To refresh it, {self.refresh}. {OPT_OUT_HINT}"

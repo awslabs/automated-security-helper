@@ -76,6 +76,8 @@ def test_a_database_held_to_fail_by_an_override_names_the_entry_as_the_remedy():
     message = _record(policy_source=source).message()
     assert "content_db_staleness: warn" not in message
     assert "held to fail by the " + source in message
+    # The flag outranks every override entry for its scan, so it stays a remedy.
+    assert "--allow-stale-content-db" in message
     # The control: without an override the scan-wide hint stands.
     assert "content_db_staleness: warn" in _record().message()
 
