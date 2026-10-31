@@ -62,13 +62,19 @@ An ``apt-get install`` of a package with no ``=version`` is refused (exit 2) rat
 than skipped, and so is one package pinned to two versions in different stages. The
 install is found in a ``RUN`` of any case, whether written in shell form, as an exec
 form array or as a here-document, and whether spelled ``apt-get`` or ``apt``. The body
-of a here-document that a command writes to a file (``cat > setup.sh <<'EOF'``) is read
-too, because the file may be run later in the build: an unpinned package in it is
-refused and a pinned one is looked up. Only a positional parameter in it (``"$@"``,
+of a here-document that a copying command writes to a file (``cat > setup.sh <<'EOF'``)
+is read too, because the file may be run later in the build: an unpinned package in it
+is refused and a pinned one is looked up. Only a positional parameter in it (``"$@"``,
 ``$1``, ``${2}``), which is whatever the script's caller passes, is not a package; a
-named variable (``$PKGS``, ``jq=${JQ_VERSION}``) or a command substitution
-(``$(cat list)``) is refused as it is in a plain ``RUN``, because the packages it names
-cannot be looked up. Such a body is read only when its marker is quoted (``<<'EOF'``);
+named variable (``$PKGS``) or a command substitution (``$(cat list)``) is refused as it
+is in a plain ``RUN``, because the packages it names cannot be looked up, and so is a
+pin whose version is an expansion (``jq=${JQ_VERSION}``), which is refused as a version
+this check cannot read. A body is a file's content only when the command it is given to
+is a copier (``cat``, ``tee``, ``install`` or ``cp`` of ``/dev/stdin``, ``dd``) and
+every command it is piped on to is a copier that writes a file; a body given to any
+other command, ``xargs apt-get install -y <<'EOF' > log`` among them, is that command's
+input, so its words are read as part of the ``RUN``. Such a body is read as a file only
+when its marker is quoted (``<<'EOF'``);
 an unquoted marker has the build shell expand the body first, so it is read as the
 ``RUN`` text it becomes. Every file body is read as shell, whatever the file is. A body
 that is not a script, a motd or a README that mentions ``apt-get install``, is skipped
@@ -124,6 +130,11 @@ Known limitations
   what apt would find, so a dependency of a pinned package that no longer resolves
   is not caught here. Debian versions are ordered by dpkg's rules (epoch, then
   upstream version, then revision, with ``~`` sorting before everything).
+* A positional parameter in a script the Dockerfile writes to a file
+  (``apt-get install -y "$@"``) is skipped: it is whatever the script's caller passes,
+  and the caller's own install is checked where the caller is. A script whose caller is
+  outside the Dockerfile, run with packages from a build argument or a mounted file,
+  installs packages this check never reads.
 
 Usage::
 
@@ -1299,6 +1310,10 @@ _APT_INSTALL = re.compile(
 _APT_PIN = re.compile(
     r"^(?P<package>[a-z0-9][a-z0-9+.-]+)=(?P<version>[A-Za-z0-9.+~:-]+)$"
 )
+# A pin whose version is an expansion, ``curl=${CURL_VERSION}``: a package and a version
+# that is known only when the build runs, which no index can be asked about.
+_APT_PIN_EXPANSION = re.compile(r"[a-z0-9][a-z0-9+.-]+=(?=\S*\$)\S+")
+_XARGS = re.compile(r"(?<![\w-])xargs(?![\w-])")
 
 # Tag parts of a base image that name a variant of the image, not a Debian suite.
 _IMAGE_VARIANTS = frozenset({"slim", "alpine"})
@@ -1346,6 +1361,24 @@ _SKIP_FILE_BODIES = re.compile(r"#\s*apt-pin-check:\s*skip\s*")
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ash", "ksh", "su", "runuser"})
 # The sudo options that start a shell: -s, -i, --shell, --login, in a cluster too (-Hs).
 _SUDO_SHELL_OPTION = re.compile(r"--shell|--login|-[A-Za-z]*[si][A-Za-z]*")
+# The commands that copy their input to a file or to their output unchanged, so a
+# here-document given to one of them is that file's content: ``cat > f <<'EOF'``,
+# ``tee f <<'EOF'``, ``install /dev/stdin f <<'EOF'``, ``cp /dev/stdin f <<'EOF'``,
+# ``dd of=f <<'EOF'``. Any other command (``xargs apt-get install -y``) reads its input
+# as it pleases.
+_COPIERS = frozenset({"cat", "tee", "install", "cp", "dd"})
+# Commands that run the command after them, and the options of each that take their
+# value as the next word. ``sudo -u builder cat`` runs cat.
+_WRAPPER_VALUE_OPTIONS = {
+    "sudo": frozenset("-C -D -g -h -p -R -r -T -t -U -u".split()),
+    "nice": frozenset({"-n"}),
+    "env": frozenset({"-u", "-C", "-S"}),
+    "command": frozenset(),
+    "exec": frozenset(),
+    "nohup": frozenset(),
+    "time": frozenset(),
+}
+_ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=\S*")
 # A shell redirection among the arguments of the install: "> /dev/null", "2>".
 _REDIRECTION = re.compile(r"(?:(?<=\s)|^)\d*(?:>>|>|<)\s*\S*")
 # The options of apt-get that take their value as the next word. A short option takes
@@ -1382,12 +1415,15 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
     """The here-documents opened on one line, as (name, body is a file's content).
 
     A body is a file's content, and not commands run now, when the command it is given
-    to, or a command it is piped on to, writes a file (``cat > setup.sh <<'EOF'``,
-    ``cat <<EOF >> conf``, ``tee setup.sh <<EOF``, ``cat <<EOF | tee setup.sh``,
-    ``install -D /dev/stdin x <<EOF``) and none of them is a shell. A body given to a
-    shell (``bash <<EOF > log``), or to commands that write no file, is commands. Both
-    are read for installs; the flag only decides whether a positional parameter in an
-    install (``"$@"``) is skipped as the caller's. A marker that is not quoted
+    to is a copier (``cat``, ``tee``, ``install`` or ``cp`` of ``/dev/stdin``, ``dd``),
+    every command it is piped on to is a copier that writes a file, one of them writes
+    a file (``cat > setup.sh <<'EOF'``, ``cat <<EOF >> conf``, ``tee setup.sh <<EOF``,
+    ``cat <<EOF | tee setup.sh``, ``install -D /dev/stdin x <<EOF``), and none of them is
+    a shell. A body given to a shell (``bash <<EOF > log``), to commands that write no
+    file, or to any other command (``xargs apt-get install -y <<EOF > log`` writes a
+    file, but its first reader is no copier) is that command's input, read as commands.
+    Both are read for installs; the flag only decides whether a positional parameter in
+    an install (``"$@"``) is skipped as the caller's. A marker that is not quoted
     (``<<EOF``, not ``<<'EOF'`` or ``<<\\EOF``) has the build shell expand the body as
     it is written, so what lands in the file is whatever the RUN's variables were; that
     body is read as commands too.
@@ -1410,19 +1446,47 @@ def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
         while segments[sinks[-1]][2] == "|":
             sinks.append(sinks[-1] + 1)
         writes = shell = False
-        for index in sinks:
+        # The body is a file's content only if every command it reaches copies it: the
+        # one it is given to by what it is, those piped on to by what it is and by
+        # writing a file.
+        copies = True
+        for position, index in enumerate(sinks):
             begin, stop, _ = segments[index]
             command = cleaned[begin:stop]
             words = _REDIRECT_WORD.sub(" ", command).split()
-            writes = writes or bool(_FILE_REDIRECT.search(command))
-            writes = writes or _writes_a_file(words)
+            writes_here = bool(_FILE_REDIRECT.search(command)) or _writes_a_file(words)
+            writes = writes or writes_here
             shell = shell or _runs_a_shell(words)
+            copies = copies and _program(words) in _COPIERS
+            copies = copies and (writes_here or position == 0)
         # A quoted name (<<'EOF') or a backslash before it (<<\EOF) is a marker the
         # shell does not expand the body for.
         quoted = bool(match.group(1) or match.group("escaped"))
         name = match.group("name") or match.group("bare")
-        markers.append((name, writes and not shell and quoted))
+        markers.append((name, writes and copies and not shell and quoted))
     return markers
+
+
+def _program(words: list[str]) -> str:
+    """The program a command runs: its first word past assignments and wrappers.
+
+    ``FOO=1 cat`` and ``sudo -u builder cat`` run ``cat``. A word this cannot place (a
+    wrapper's option it does not know) is taken for the program, which no copier
+    matches, so the body is read as commands.
+    """
+    index = 0
+    while index < len(words):
+        word = words[index].strip("(){}")
+        name = word.rsplit("/", 1)[-1]
+        index += 1
+        if not name or _ENV_ASSIGNMENT.fullmatch(word):
+            continue
+        value_options = _WRAPPER_VALUE_OPTIONS.get(name)
+        if value_options is None:
+            return name
+        while index < len(words) and words[index].startswith("-"):
+            index += 2 if words[index] in value_options else 1
+    return ""
 
 
 def _writes_a_file(words: list[str]) -> bool:
@@ -1634,6 +1698,18 @@ def _split_substitutions(text: str) -> list[str]:
     return found
 
 
+def _xargs_reads_a_here_document(shell: str, install: re.Match[str]) -> bool:
+    """Whether ``xargs`` runs this install with a here-document as its input.
+
+    ``xargs apt-get install -y <<EOF`` takes the words of the body as the packages. The
+    body lines are joined to the instruction as commands of their own, so no package in
+    them is an argument of the install and none can be read as one.
+    """
+    start = max(shell.rfind(char, 0, install.start()) for char in ";&|") + 1
+    command = shell[start : install.end()]
+    return bool(_XARGS.search(command) and _HEREDOC_MARKER.search(command))
+
+
 def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
     """Every ``package=version`` an ``apt-get install`` in ``dockerfile`` names.
 
@@ -1648,17 +1724,30 @@ def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
         block = run.lines
         for shell in _split_substitutions(_block_text(block)):
             for match in _APT_INSTALL.finditer(shell):
+                where = f"{dockerfile.name}:{block[0][0]}"
+                if _xargs_reads_a_here_document(shell, match):
+                    raise PinEnumerationError(
+                        f"{where} installs packages with apt-get through xargs, which "
+                        "reads them from a here-document. The words of its body are "
+                        "not arguments this check can read. Spell each package as an "
+                        "argument of the install, as package=version."
+                    )
                 for word in _install_words(match.group("args")):
                     if run.file_content and _POSITIONAL_PARAMETER.fullmatch(word):
                         # A script the image gets: "$@" is whatever its caller
                         # passes, and the caller's install is checked where it is.
                         continue
-                    where = f"{dockerfile.name}:{block[0][0]}"
                     if _SUBSTITUTION_WORD in word:
                         raise PinEnumerationError(
                             f"{where} installs {word!r} with apt-get, naming a "
                             "package through a command substitution that this check "
                             "cannot read. Spell each package as package=version."
+                        )
+                    if _APT_PIN_EXPANSION.fullmatch(word):
+                        raise PinEnumerationError(
+                            f"{where} installs {word!r} with apt-get, pinning the "
+                            "version through an expansion that this check cannot "
+                            "read. Spell the version out, as package=version."
                         )
                     pin = _APT_PIN.match(word)
                     if pin is None:

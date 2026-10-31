@@ -549,3 +549,145 @@ class TestASkipCommentAboveARun:
         body = "# apt-pin-check: skip\nRUN bash <<EOF\napt-get install -y git\nEOF\n"
         with pytest.raises(checker.PinEnumerationError, match="Dockerfile:4.*'git'"):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+
+class TestOnlyACopierMakesTheBodyAFile:
+    """A body is a file's content only when a copying command is the one that reads it.
+
+    Any command that writes a file used to make the body a file's, so ``xargs apt-get
+    install -y <<'EOF' > log`` with ``curl`` in its body made a block that holds no
+    install: ``curl`` was neither looked up nor refused.
+    """
+
+    XARGS_REFUSED = r"Dockerfile:3 installs packages with apt-get through xargs"
+
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            "RUN xargs apt-get install -y <<'EOF' > /var/log/apt.log",
+            'RUN xargs apt-get install -y <<"EOF" > /var/log/apt.log',
+            "RUN xargs apt-get install -y <<\\EOF > /var/log/apt.log",
+            "RUN xargs apt-get install -y <<'EOF' 2>/tmp/apt.err",
+            "RUN xargs apt-get install -y <<'EOF' >> /var/log/apt.log 2>&1",
+            "RUN xargs -r apt-get install -y <<'EOF' > /var/log/apt.log",
+            "RUN <<'EOF' xargs apt-get install -y > /var/log/apt.log",
+            "RUN xargs apt-get install -y <<EOF > /var/log/apt.log",
+        ],
+    )
+    def test_a_package_list_given_to_xargs_is_refused(self, tmp_path, first_line):
+        # Red before: with a quoted marker the body was a file's, and `curl` sat in a
+        # block with no install in it; with a bare marker the refusal named `curl` and
+        # not xargs.
+        body = f"{first_line}\ncurl\nEOF\n"
+        with pytest.raises(checker.PinEnumerationError, match=self.XARGS_REFUSED):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_a_second_line_of_the_body_is_not_dropped(self, tmp_path):
+        # Red before: each body line ended with `;`, so `git` stood in a command of its
+        # own and only the pinned first line was read, with the check green.
+        body = (
+            f"RUN xargs apt-get install -y <<EOF > /var/log/apt.log\n{CURL}\ngit\nEOF\n"
+        )
+        with pytest.raises(checker.PinEnumerationError, match=self.XARGS_REFUSED):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_xargs_with_its_packages_as_arguments_is_read_like_any_install(
+        self, tmp_path
+    ):
+        """Control: only a here-document input is refused."""
+        body = f"RUN xargs apt-get install -y {CURL}\n"
+        assert _pins(tmp_path, body) == {"curl": ("7.88.1-10+deb12u15", (3,))}
+
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            "RUN FOO=1 cat > /usr/local/bin/setup.sh <<'EOF'",
+            "RUN sudo cat > /usr/local/bin/setup.sh <<'EOF'",
+            "RUN sudo -E tee /usr/local/bin/setup.sh <<'EOF'",
+            "RUN env -i FOO=1 cat > /usr/local/bin/setup.sh <<'EOF'",
+            "RUN nice -n 5 cat > /usr/local/bin/setup.sh <<'EOF'",
+            "RUN /bin/cat > /usr/local/bin/setup.sh <<'EOF'",
+            "RUN (cat > /usr/local/bin/setup.sh <<'EOF'",
+        ],
+    )
+    def test_a_copier_behind_a_wrapper_still_writes_a_file(self, tmp_path, first_line):
+        """Control: the program is the first word past assignments and wrappers."""
+        body = f'{first_line}\napt-get install -y "$@"\nEOF\n'
+        assert _pins(tmp_path, body) == {}
+
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            "RUN cat <<'EOF' | sort > /usr/local/bin/setup.sh",
+            "RUN cat <<'EOF' | sed s/a/b/ | tee /usr/local/bin/setup.sh",
+            "RUN python3 - <<'EOF' > /var/log/setup.log",
+            "RUN sort <<'EOF' > /usr/local/bin/setup.sh",
+        ],
+    )
+    def test_a_body_a_non_copier_reads_is_commands(self, tmp_path, first_line):
+        # Red before: any writer on the line made the body a file's, so the "$@" was
+        # skipped as a caller's parameter.
+        body = f'{first_line}\napt-get install -y "$@"\nEOF\n'
+        with pytest.raises(
+            checker.PinEnumerationError, match=r"Dockerfile:3 installs '\$@'"
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            ("xargs apt-get install -y <<'EOF' > /x", [("EOF", False)]),
+            ("sort <<'EOF' > /x", [("EOF", False)]),
+            ("python3 - <<'EOF' > /x", [("EOF", False)]),
+            ("cat <<'EOF' | sort > /x", [("EOF", False)]),
+            # A pipe stage that writes no file is not a copier that writes one.
+            ("cat <<'EOF' | cat | tee /x", [("EOF", False)]),
+            ("FOO=1 cat > /x <<'EOF'", [("EOF", True)]),
+            ("sudo -u builder tee /x <<'EOF'", [("EOF", True)]),
+            ("sudo -E install /dev/stdin /x <<'EOF'", [("EOF", True)]),
+            ("env -i FOO=1 cat > /x <<'EOF'", [("EOF", True)]),
+            ("nice -n 5 cat > /x <<'EOF'", [("EOF", True)]),
+        ],
+    )
+    def test_the_marker_is_judged_by_the_program_that_reads_it(self, line, expected):
+        assert checker._heredoc_markers(line) == expected
+
+
+class TestAPinWhoseVersionIsAnExpansion:
+    UNREADABLE = (
+        r"installs 'curl=\$\{CURL_VERSION\}' with apt-get, pinning the version "
+        r"through an expansion that this check cannot read"
+    )
+
+    def test_it_is_refused_in_a_plain_run_as_an_unreadable_version(self, tmp_path):
+        # Red before: it was refused as "with apt-get and no version", which sent the
+        # reader to a pin that was written.
+        body = "RUN apt-get install -y curl=${CURL_VERSION}\n"
+        with pytest.raises(
+            checker.PinEnumerationError, match=rf"Dockerfile:3 {self.UNREADABLE}"
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_it_is_not_dropped_in_a_written_script(self, tmp_path):
+        """Control: the `$` in a written script is skipped only as a whole parameter."""
+        body = (
+            "RUN cat > /usr/local/bin/setup.sh <<'EOF'\n"
+            "apt-get install -y curl=${CURL_VERSION}\n"
+            "EOF\n"
+        )
+        with pytest.raises(
+            checker.PinEnumerationError, match=rf"Dockerfile:4 {self.UNREADABLE}"
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_a_pin_with_a_positional_version_is_refused_the_same_way(self, tmp_path):
+        body = (
+            "RUN cat > /usr/local/bin/setup.sh <<'EOF'\n"
+            "apt-get install -y curl=$1\n"
+            "EOF\n"
+        )
+        with pytest.raises(
+            checker.PinEnumerationError,
+            match=r"Dockerfile:4 installs 'curl=\$1' with apt-get, pinning the version",
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
