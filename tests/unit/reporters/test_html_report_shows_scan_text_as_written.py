@@ -413,3 +413,28 @@ def test_a_block_that_is_shown_always_names_what_changed(value, changes):
     assert note == (
         f'<p class="shown-note"><small>Shown, not as written: {changes}.</small></p>'
     ), note
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "::error::x",
+        "b = 1\x1b[31m",
+        "a \\\x1b[31m",
+        '::error::x\na = "\\x41"\nb = 1\x1b[31m',
+        "C:\\Program Files\x1b[31m",
+    ],
+)
+def test_the_shown_block_is_the_text_shown_not_obeyed(value):
+    """The text beside the note is what ``shown_not_obeyed`` returns, as plain
+    text (a pin, green at the base and at the tip of the simplification that
+    reads the third stage instead of running the three again)."""
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
+        _shown_block,
+    )
+    from automated_security_helper.utils.terminal_text import shown_not_obeyed
+
+    shown, _ = _shown_block(value)
+
+    assert shown == shown_not_obeyed(value)
+    assert type(shown) is str

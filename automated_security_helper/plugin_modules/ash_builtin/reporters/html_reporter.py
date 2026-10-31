@@ -39,7 +39,6 @@ from automated_security_helper.utils.terminal_text import (
     controls_shown,
     is_shown_as_escape,
     only_controls_shown,
-    shown_not_obeyed,
     shown_on_one_line,
 )
 from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
@@ -99,10 +98,12 @@ def _shown_block(text: Any) -> tuple[str, str]:
         return value, ""
     with_controls_written = only_controls_shown(value)
     with_runs_doubled = controls_shown(value)
-    return str(shown_not_obeyed(value)), _shown_note(
+    # The third stage is the text itself, as shown_not_obeyed returns it.
+    shown = commands_broken(with_runs_doubled)
+    return shown, _shown_note(
         controls=with_controls_written != value,
         doubled=with_runs_doubled != with_controls_written,
-        commands=commands_broken(with_runs_doubled) != with_runs_doubled,
+        commands=shown != with_runs_doubled,
     )
 
 
