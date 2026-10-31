@@ -766,3 +766,44 @@ class TestARowWithoutBucketsLeavesTheFilteredBucketsUnknown:
         assert buckets["high"] is None
         # The view holds no suppressed finding whatever the rows said: known.
         assert buckets["suppressed"] == 0
+
+    def test_a_severities_filter_over_such_a_row_leaves_the_total_unknown(self):
+        filtered = apply_content_filters(
+            self._results_with_a_row_that_only_counts(),
+            scanners="trivy",
+            severities="high",
+        )
+        by_severity = filter_summary(filtered)["findings_summary"]["by_severity"]
+
+        # trivy's two findings sit in no bucket the row records, so how many of
+        # them are high is unknown, and so is the total of the selected buckets.
+        # A total of 0 beside an unknown high bucket would say "none found".
+        assert by_severity["high"] is None
+        assert by_severity["total"] is None
+        # The buckets the view does not select are known to be empty.
+        assert by_severity["low"] == 0
+
+    def test_selecting_no_counted_bucket_keeps_the_total_known(self):
+        # Control: green before and after the cure. Only suppressed findings are
+        # selected, which the one total rule does not count, so the unknown
+        # buckets are not part of the total and it stays an exact 0.
+        filtered = apply_content_filters(
+            self._results_with_a_row_that_only_counts(),
+            scanners="trivy",
+            severities="suppressed",
+        )
+        by_severity = filter_summary(filtered)["findings_summary"]["by_severity"]
+
+        assert by_severity["total"] == 0
+
+    def test_a_severities_filter_over_rows_with_buckets_keeps_the_total_known(self):
+        # Control: green before and after the cure.
+        filtered = apply_content_filters(
+            self._results_with_a_row_that_only_counts(),
+            scanners="bandit",
+            severities="high",
+        )
+        by_severity = filter_summary(filtered)["findings_summary"]["by_severity"]
+
+        assert by_severity["high"] == 1
+        assert by_severity["total"] == 1

@@ -114,6 +114,23 @@ def _total_of(counts: Dict[str, Any]) -> int:
     return sum(_count(counts.get(bucket)) for bucket in _COUNTED_SEVERITY_KEYS)
 
 
+def _total_of_known(counts: Dict[str, Any]) -> Optional[int]:
+    """``_total_of``, or None when a counted bucket of *counts* is unknown.
+
+    A bucket present with the value None is a count the document records as
+    unknown (``_stats_of_scanners`` writes it for a row that counts findings and
+    records no breakdown). Reading it as 0 would put an exact-looking total
+    beside a bucket the same view reports as unknown. A bucket that is absent
+    reads 0, as in a recorded summary, which writes all six.
+    """
+    if any(
+        bucket in counts and counts[bucket] is None
+        for bucket in _COUNTED_SEVERITY_KEYS
+    ):
+        return None
+    return _total_of(counts)
+
+
 def _stats_of_scanners(scanner_results: Dict[str, Any]) -> Dict[str, Any]:
     """The SummaryStats fields recomputed from the per-scanner entries.
 
@@ -950,14 +967,16 @@ def apply_content_filters(
         # "total 17" reports findings it does not show. By the one rule, the
         # suppressed bucket is not part of it: selecting "suppressed" lists the
         # suppressed findings under their own count with a total of 0, as
-        # SummaryStats reports them.
+        # SummaryStats reports them. A selected bucket the view reports as
+        # unknown makes the total unknown too, not a count with that bucket read
+        # as 0.
         buckets = (
             summary_stats["severity_counts"]
             if isinstance(summary_stats.get("severity_counts"), dict)
             else summary_stats
         )
         if "total" in summary_stats:
-            summary_stats["total"] = _total_of(buckets)
+            summary_stats["total"] = _total_of_known(buckets)
         # actionable is recounted when the findings it counts are at hand: the
         # SARIF results kept above, judged by the thresholds the scan recorded.
         # Without the SARIF (the summary and minimal levels never load it) the
