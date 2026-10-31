@@ -1625,10 +1625,10 @@ def get_scan_progress_info(
     ``suppressed`` add up to ``findings_count``. The summary stats themselves
     are returned as ``summary_stats``.
 
-    ``scanners_completed`` are the scanners whose recorded status maps to
-    passed or failed (:func:`scanner_status_from_results`: case-insensitive, an
-    absent status read as PASSED as the results model reads it), the reading
-    ``create_scan_progress_from_files`` makes of the same document.
+    ``scanners_completed`` are the scanners whose recorded status word is
+    PASSED or FAILED (:func:`_recorded_status_word`: upper-cased, an absent
+    status read as PASSED as the results model reads it); an ERROR or a
+    non-string status is not a completed scanner.
 
     Args:
         output_dir: Path to the scan output directory
