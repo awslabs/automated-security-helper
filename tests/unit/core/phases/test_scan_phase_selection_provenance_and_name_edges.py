@@ -511,6 +511,78 @@ class TestARecordedRowStandsWhenItsResultsFileCannotBeWritten:
         assert results.scanner_results["two"].excluded is True
 
 
+class TestEveryRecorderOfAScannerThatDidNotRunGuardsItsWrite:
+    """The rows written before a scanner runs keep their own status when the
+    file of the row cannot be written. Each test is red at the base for the
+    recorder it names: the raise reached a wider handler."""
+
+    @staticmethod
+    def _refuse_writes(phase, matches):
+        real_process = phase._process_results
+
+        def process_or_refuse(*, results, aggregated_results):
+            if matches(results):
+                raise OSError(13, "Permission denied", "scanners/refused")
+            return real_process(results=results, aggregated_results=aggregated_results)
+
+        phase._process_results = process_or_refuse
+
+    def test_a_construction_failure_row_survives_a_failed_write(self, ctx, logger):
+        """Red at the base: the write sat in the handler of the constructor's
+        failure, so the raise ended the phase before any scanner ran."""
+        broken = _scanner_class("broken")
+        broken.side_effect = RuntimeError("constructor failed")
+        phase = _phase(ctx, [broken, _scanner_class("fine")])
+        self._refuse_writes(phase, lambda row: row.status == ScannerStatus.ERROR)
+
+        with patch.object(scan_phase_module, "ScannerExecutor") as executor_class:
+            executor_class.return_value.completed_scanners = []
+            results = _run(phase)
+
+        queued = [task[0] for task in executor_class.call_args.kwargs["scanner_tasks"]]
+        assert queued == ["fine"]
+        error_rows = [
+            row
+            for row in results.scanner_results.values()
+            if row.status == ScannerStatus.ERROR
+        ]
+        assert len(error_rows) == 1
+        assert any(
+            "Could not write the results of scanner" in line
+            for line in _lines(logger, "error")
+        ), _lines(logger, "error")
+
+    def test_a_nothing_to_scan_row_stays_skipped_when_the_write_fails(self, ctx):
+        """Red at the base: the raise reached the handler of the scanner's
+        filtering and the reconciliation recorded the scanner MISSING."""
+        scanner = _scanner_class("idle", deps=False)
+        scanner.return_value.nothing_to_scan_reason.return_value = "no files to scan"
+        phase = _phase(ctx, [scanner])
+        self._refuse_writes(phase, lambda row: row.scanner_name == "idle")
+
+        results = _run(phase)
+
+        row = results.scanner_results["idle"]
+        assert row.status == ScannerStatus.SKIPPED
+        assert row.skipped_reason == "no files to scan"
+
+    def test_a_missing_dependency_row_keeps_its_reason_when_the_write_fails(self, ctx):
+        """Red at the base: the reconciliation recorded the scanner MISSING with
+        its dependencies marked satisfied, and the reason was the unclassified
+        one, so the report lost what is actually absent."""
+        scanner = _scanner_class("tooled", deps=False)
+        scanner.return_value.missing_dependency_reason.return_value = "tool is absent"
+        phase = _phase(ctx, [scanner])
+        self._refuse_writes(phase, lambda row: row.scanner_name == "tooled")
+
+        results = _run(phase)
+
+        row = results.scanner_results["tooled"]
+        assert row.status == ScannerStatus.MISSING
+        assert row.dependencies_satisfied is False
+        assert row.missing_reason == "tool is absent"
+
+
 class TestSelectionRefusals:
     def test_a_self_cancelling_selection_is_refused_by_the_phase(self, ctx):
         phase = _phase(ctx, [_scanner_class("bandit"), _scanner_class("semgrep")])

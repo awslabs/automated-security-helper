@@ -1004,9 +1004,13 @@ class ScanPhase(EnginePhase):
                             duration=None,
                             errors=[construction_error],
                         )
-                        aggregated_results = self._process_results(
-                            results=container,
-                            aggregated_results=aggregated_results,
+                        # Guarded, as every other recorder of a scanner that did
+                        # not run: this write is inside the handler of the
+                        # constructor's own failure, so one failed write of the
+                        # row's file ended the whole phase from here. The row
+                        # below is the record.
+                        aggregated_results = self._write_results_guarded(
+                            failed_name, container, aggregated_results
                         )
                         aggregated_results.scanner_results[failed_name] = (
                             ScannerTargetStatusInfo(
@@ -1782,8 +1786,13 @@ class ScanPhase(EnginePhase):
                                 # SKIPPED; excluded stays False because nothing
                                 # deselected it, and dependencies_satisfied True
                                 # because the tool was not needed.
-                                aggregated_results = self._process_results(
-                                    results=ScanResultsContainer(
+                                # Guarded: unguarded, a failed write of the
+                                # row's file reached the handler of this
+                                # scanner's filtering, and a scanner that had
+                                # nothing to scan was recorded MISSING.
+                                aggregated_results = self._write_results_guarded(
+                                    display_name,
+                                    ScanResultsContainer(
                                         scanner_name=display_name,
                                         status=ScannerStatus.SKIPPED,
                                         duration=None,
@@ -1795,7 +1804,7 @@ class ScanPhase(EnginePhase):
                                         targets_failed=0,
                                         skipped_reason=stored_nothing_reason,
                                     ),
-                                    aggregated_results=aggregated_results,
+                                    aggregated_results,
                                 )
                                 aggregated_results.scanner_results[display_name] = (
                                     ScannerTargetStatusInfo(
@@ -1876,10 +1885,13 @@ class ScanPhase(EnginePhase):
                             if missing_reason:
                                 results_container.add_error(missing_reason)
 
-                            # Process the container through _process_results to store duration info
-                            aggregated_results = self._process_results(
-                                results=results_container,
-                                aggregated_results=aggregated_results,
+                            # Process the container through the guarded write to
+                            # store duration info: the row below is the record,
+                            # and a failed write of its file must not turn a
+                            # scanner whose dependencies are absent into the
+                            # unclassified MISSING of the reconciliation.
+                            aggregated_results = self._write_results_guarded(
+                                display_name, results_container, aggregated_results
                             )
 
                             # Do NOT add to completed scanners - this scanner didn't actually run due to missing dependencies
@@ -2176,9 +2188,8 @@ class ScanPhase(EnginePhase):
                     duration=None,
                     errors=[module_error],
                 )
-                aggregated_results = self._process_results(
-                    results=container,
-                    aggregated_results=aggregated_results,
+                aggregated_results = self._write_results_guarded(
+                    failed_module, container, aggregated_results
                 )
                 aggregated_results.scanner_results[failed_module] = (
                     ScannerTargetStatusInfo(
