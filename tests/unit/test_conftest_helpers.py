@@ -66,10 +66,13 @@ def environment_check(monkeypatch):
     instead: the variables whose value differs between the snapshot and the end of the
     test, which is what ``temp_env_vars`` set (and nothing the test did not ask for),
     then undoes the shared instance and asserts each of them is back to its snapshot
-    value. A ``temp_env_vars`` that set variables outside ``monkeypatch`` would leave
-    them in the footprint unrestored. The environment is left as the undo leaves it:
-    the guard's later undo finds nothing to do, and re-applying the snapshot would plant
-    the guard's values in every later test of the worker.
+    value. The guard's own variables (PATH, UV_CACHE_DIR, UV_TOOL_DIR) are outside the
+    footprint unless the test itself changes one of them, so this check does not
+    police the guard's keys. A ``temp_env_vars`` that set variables outside
+    ``monkeypatch`` would leave them in the footprint unrestored. The environment is
+    left as the undo leaves it: the guard's later undo finds nothing to do, and
+    re-applying the snapshot would plant the guard's values in every later test of the
+    worker.
     """
     os.environ.update({KEPT: "kept", OVERWRITTEN: "before"})
     before = _environment()
