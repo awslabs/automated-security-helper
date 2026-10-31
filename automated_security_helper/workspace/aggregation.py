@@ -173,6 +173,14 @@ from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 #: conventional SRCROOT rather than like an ASH-specific identifier.
 PROJECT_ROOT_URI_BASE_ID = "PROJECTROOT"
 
+#: The result property that carries a rebased location's path as plain text
+#: when its ``uri`` was written percent-encoded. A SARIF ``uri`` is a URI
+#: reference, so it is written encoded, while the flattened finding reads a
+#: relative ``uri`` as a literal path; the property is how the two agree.
+#: Spelled as ``flat_vulnerability.ARTIFACT_PATH_PROPERTY`` spells it (a test
+#: compares the two), because that module cannot be imported from here.
+ARTIFACT_PATH_PROPERTY = "workspace_artifact_path"
+
 #: Where per-project runs are spooled while the workspace runs. Under the
 #: workspace output directory rather than the work directory, because the work
 #: directory is ``converted`` and is itself a scan target. Named in
@@ -685,7 +693,8 @@ def rebase_run_for_project(
 
         workspace_uri: Optional[str] = None
         had_locatable_uri = False
-        for location in result.get("locations") or []:
+        literal_path: Optional[str] = None
+        for index, location in enumerate(result.get("locations") or []):
             artifact = _artifact_location(location)
             if artifact is None:
                 continue
@@ -736,8 +745,13 @@ def rebase_run_for_project(
                 placed = None
             else:
                 placed = reduced
-                artifact["uri"] = _artifact_uri_text(reduced, str(uri))
+                written = _artifact_uri_text(reduced, str(uri))
+                artifact["uri"] = written
                 rewritten = True
+                if index == 0 and written != reduced:
+                    # The flattened finding reads this location's uri as a
+                    # literal path, so it carries the path the uri names.
+                    literal_path = reduced
 
             if placed is None:
                 continue
@@ -760,6 +774,12 @@ def rebase_run_for_project(
                 artifact.setdefault("uriBaseId", PROJECT_ROOT_URI_BASE_ID)
             if workspace_uri is None:
                 workspace_uri = converted
+
+        # Always set from this run's own reading, so a value a scanner wrote
+        # under the same name is never taken for it.
+        properties.pop(ARTIFACT_PATH_PROPERTY, None)
+        if literal_path is not None:
+            properties[ARTIFACT_PATH_PROPERTY] = literal_path
 
         if workspace_uri is not None:
             properties["workspace_uri"] = workspace_uri
