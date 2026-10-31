@@ -436,6 +436,43 @@ def test_two_pairs_the_plan_cannot_resolve_are_compared_with_each_other_once():
     assert str(refused.value).count(">=2.0.0") == 1
 
 
+def test_a_version_a_pair_may_apply_is_held_against_the_other_pins_together():
+    """Each version fits each other project's pin on its own. ``>=1,<3`` beside
+    ``>=2,<4`` and ``!=2.*`` fits no version at once: the third pin removes all of
+    2.x, which is all the first two share."""
+    from automated_security_helper.workspace.resolver import _validate_unresolved_pins
+
+    projects = [
+        _held_pins("api"),
+        _held_pins("web", Snyk_Code=">=2,<4"),
+        _held_pins("docs", Snyk_Code="!=2.*"),
+    ]
+    held = {"api": {"Snyk_Code": _may_apply(">=1,<3", ">=1.5,<3")}}
+
+    with pytest.raises(WorkspaceDefinitionError) as refused:
+        _validate_unresolved_pins(projects, held)
+
+    text = str(refused.value)
+    assert "'api'" in text
+    assert "'>=1,<3'" in text
+    assert "'>=2,<4'" in text
+    assert "'!=2.*'" in text
+    assert "no one version satisfies all of them together" in text
+
+
+def test_control_versions_a_pair_may_apply_that_fit_the_other_pins_together_are_accepted():
+    from automated_security_helper.workspace.resolver import _validate_unresolved_pins
+
+    projects = [
+        _held_pins("api"),
+        _held_pins("web", Snyk_Code=">=2,<4"),
+        _held_pins("docs", Snyk_Code="!=3.*"),
+    ]
+    held = {"api": {"Snyk_Code": _may_apply(">=1,<3", ">=1.5,<3")}}
+
+    _validate_unresolved_pins(projects, held)
+
+
 def _project_of(key: str, order, versions: dict, scanner: str = SNYK_CODE):
     """A stand-in plan for a project, and the pairs it holds, built from its config.
 
@@ -638,6 +675,39 @@ def test_a_workspace_refuses_a_version_a_pair_may_apply_that_clashes_with_a_pin(
     text = str(refused.value)
     assert "'api'" in text
     assert "'web'" in text
+
+
+def test_a_pin_the_policy_switches_on_is_held_against_a_pair_another_project_may_apply(
+    tmp_path, monkeypatch
+):
+    """``web`` has semgrep off with a pin, and the workspace policy requires
+    semgrep, so ``web`` runs it with that pin. The pairs ``api`` may apply were
+    held against the pins as the plan recorded them before the policy was known,
+    and never against this one."""
+    from automated_security_helper.workspace import resolver
+
+    calls = iter([{"semgrep": _may_apply("<1.0.0")}, {}])
+    monkeypatch.setattr(resolver, "_unresolved_pins", lambda config: next(calls))
+    workspace = _workspace(
+        tmp_path,
+        {
+            "api": _SEMGREP_ON,
+            "web": _ONE_SECTION + "  semgrep:\n    enabled: false\n",
+        },
+        policy_scanners=("semgrep",),
+    )
+
+    with pytest.raises(WorkspaceDefinitionError) as refused:
+        resolve_workspace(
+            workspace,
+            config_overrides=("scanners.semgrep.options.tool_version=>=1.130.0",),
+        )
+
+    text = str(refused.value)
+    assert "'api'" in text
+    assert "'web'" in text
+    assert "<1.0.0" in text
+    assert ">=1.130.0" in text
 
 
 def test_control_a_workspace_of_one_project_plans_a_pair_whose_versions_differ(

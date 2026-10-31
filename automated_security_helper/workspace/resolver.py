@@ -563,6 +563,15 @@ def _pins_under_name(
     return sorted(versions), bool(pairs)
 
 
+def _recorded_pins_under_name(folded: str, project: ProjectPlan) -> List[str]:
+    """The pins *project* records for the scanner reduced to *folded*, under any spelling."""
+    return [
+        pin
+        for name, pin in project.scanner_pins.items()
+        if normalise_scanner_name(name) == folded
+    ]
+
+
 def _validate_unresolved_pins(
     projects: Sequence[ProjectPlan], unresolved: Dict[str, Dict[str, _PossiblePins]]
 ) -> None:
@@ -577,12 +586,21 @@ def _validate_unresolved_pins(
     spelling (``_pins_under_name``), and each version of a pair it holds under such
     a key. A project that no other project pins has nothing to be compared with,
     and a pair of two such projects is compared once.
+
+    Pairwise compatibility is not enough once two or more other projects pin the
+    scanner: a version that fits each of their pins on its own can fit no version
+    they allow together (``>=1,<3`` beside ``>=2,<4`` and ``!=2.*``). So each
+    version a pair may apply is also held against all the pins the other projects
+    record, at once (``compare_pin_set``), when no pairwise clash was found for it.
+    The versions another project's own pair may apply are compared pairwise, as
+    before: the scan applies only one of them.
     """
     by_key = {project.key: project for project in projects}
     problems: List[str] = []
     for key, by_name in sorted(unresolved.items()):
         for name, mine in sorted(by_name.items()):
             folded = normalise_scanner_name(name)
+            before = len(problems)
             for other in projects:
                 if other.key == key:
                     continue
@@ -606,6 +624,43 @@ def _validate_unresolved_pins(
                         (*by_key[key]._environment_values, *other._environment_values),
                     )
                 )
+            if len(problems) != before:
+                continue
+            fixed = sorted(
+                {
+                    pin
+                    for other in projects
+                    if other.key != key
+                    for pin in _recorded_pins_under_name(folded, other)
+                }
+            )
+            if len(fixed) < 2:
+                continue
+            for first in mine.pins:
+                together = compare_pin_set([first, *fixed])
+                if together is PinVerdict.COMPATIBLE:
+                    continue
+                explanation = (
+                    "no one version satisfies all of them together"
+                    if together is PinVerdict.INCOMPATIBLE
+                    else "ASH cannot prove one version satisfies all of them together"
+                )
+                problems.append(
+                    text_without_values(
+                        f"scanner '{name}': project '{key}' may apply '{first}' "
+                        f"(scanners.{' and scanners.'.join(mine.sections)} set "
+                        "different tool versions and the plan cannot tell which "
+                        "one the scan reads) and the other projects require "
+                        f"{', '.join(repr(pin) for pin in fixed)}; each of them can "
+                        f"be satisfied with it, but {explanation}",
+                        tuple(
+                            value
+                            for project in projects
+                            for value in project._environment_values
+                        ),
+                    )
+                )
+                break
 
     if problems:
         raise _refuse(
@@ -2092,9 +2147,11 @@ def resolve_workspace(
         scanner_twins=scanner_twins,
     )
     # A scanner the policy switches on keeps the pin of its off section, and the
-    # comparison above ran before the policy was known.
+    # comparisons above ran before the policy was known: the pairs a project's
+    # sections may apply are held against the new pin as well.
     if _record_pins_the_policy_turns_on(active, disabled_pins):
         _validate_scanner_pins(definition, active)
+        _validate_unresolved_pins(active, unresolved_pins)
 
     return WorkspacePlan(
         workspace_file=definition.path.as_posix(),
