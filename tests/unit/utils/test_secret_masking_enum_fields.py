@@ -169,13 +169,19 @@ class TestEnumFieldsOfOverlappingResults:
 class TestFreeTextFieldsNamedLikeAnEnum:
     def test_a_logical_locations_kind_is_still_masked(self):
         """``LogicalLocation.kind`` is free text that shares its name with
-        ``Result.kind``; only the enum member is left alone."""
+        ``Result.kind``; only the enum member is left alone. A second finding
+        on the line exposes ``fail``, so the result's own kind is a value it
+        could have been masked as."""
         value = _derived("free-text-kind-value", 12)
         neighbor = _result("B404", 5, "import", level="warning", kind="fail")
         neighbor["locations"][0]["logicalLocations"] = [
             {"name": "handler", "kind": f"function {value}"}
         ]
-        model = _results(_result("B105", 5, HARDCODED + f"'{value}'"), neighbor)
+        model = _results(
+            _result("B105", 5, HARDCODED + f"'{value}'"),
+            neighbor,
+            _result("B105", 5, HARDCODED + "'fail'"),
+        )
 
         mask_secrets_in_results(model)
 
@@ -237,16 +243,17 @@ class TestEnumFieldsOfAPlainJsonReport:
 
     def test_a_thread_flow_locations_state_is_still_masked(self):
         """``state`` is an enum only on a suppression; a thread flow location's
-        ``state`` is a free-text map that can carry the value a finding exposed."""
+        ``state`` is a free-text map that can carry the value a finding exposed.
+        Only this half can be shown: a suppression's ``state`` is a word of
+        letters alone, which no value or shape masks, so a check that it is kept
+        could not fail."""
         value = _derived("json-state-secret", 24)
         tree = {
             "results": [
                 {
-                    "level": "warning",
                     "codeFlows": [
                         {"threadFlows": [{"locations": [{"state": {"token": value}}]}]}
                     ],
-                    "suppressions": [{"kind": "inSource", "state": "accepted"}],
                 }
             ]
         }
@@ -256,8 +263,6 @@ class TestEnumFieldsOfAPlainJsonReport:
         result = tree["results"][0]
         location = result["codeFlows"][0]["threadFlows"][0]["locations"][0]
         assert location["state"]["token"] == _mask_secret_value(value)
-        assert result["suppressions"][0]["state"] == "accepted"
-        assert result["level"] == "warning"
 
     def test_a_free_text_kind_is_still_masked(self):
         """``kind`` is an enum on a result and a suppression only; a logical

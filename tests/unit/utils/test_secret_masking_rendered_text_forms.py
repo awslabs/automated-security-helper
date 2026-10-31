@@ -113,7 +113,7 @@ class TestTheMarkdownReportersSpelling:
         assert masked == (
             "| Finding | " + _as_markdown(_mask_secret_value(MARKDOWN_VALUE)) + " |"
         )
-        assert MARKDOWN_VALUE not in masked
+        assert _as_markdown(MARKDOWN_VALUE) not in masked
 
     def test_a_second_pass_recognizes_its_own_escaped_output(self):
         """A Markdown report is re-masked on every workspace pass; the masked
