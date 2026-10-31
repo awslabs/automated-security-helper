@@ -17,9 +17,7 @@ from __future__ import annotations
 import errno
 import os
 import sys
-import threading
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
@@ -33,6 +31,8 @@ from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigValidationError,
 )
+# The private name is kept: two other test modules still import it from here.
+from tests.utils.fifo_calls import returns_promptly as _returns_promptly
 from tests.utils.open_audit import record_opens
 
 pytestmark = pytest.mark.unit
@@ -51,32 +51,6 @@ needs_dev_null = pytest.mark.skipif(
 @pytest.fixture(autouse=True)
 def _no_ash_config_variable(monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-
-
-def _returns_promptly(call: Callable[[], object], fifo: Path) -> BaseException | None:
-    """Run ``call`` in a thread; fail when it is still running after 10 seconds.
-
-    A call blocked opening ``fifo`` for reading is released by opening its write
-    end, so a failing test does not leave a thread behind. Returns what ``call``
-    raised, or None.
-    """
-    outcome: dict = {}
-
-    def _run() -> None:
-        try:
-            outcome["value"] = call()
-        except BaseException as exc:  # recorded for the assertion below
-            outcome["error"] = exc
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    thread.join(10)
-    blocked = thread.is_alive()
-    if blocked:
-        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
-        thread.join(10)
-    assert not blocked, f"reading {fifo.name} blocked"
-    return outcome.get("error")
 
 
 class TestSpecialFilesAreNotRead:

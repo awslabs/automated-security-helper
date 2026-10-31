@@ -47,9 +47,10 @@ def test_the_reason_comes_from_the_lint_not_a_second_read(tmp_path, monkeypatch)
     def second_read(*_args, **_kwargs):
         raise AssertionError("the command read the config a second time")
 
-    # raising=False: the name is a stand-in that must not be called, and the test
-    # does not depend on the module still importing it.
-    monkeypatch.setattr(config_cli, "uses_env_references", second_read, raising=False)
+    # Without raising=False: the patch refuses a name the command no longer
+    # imports, so the test fails (it does not pass having patched nothing) when
+    # that import moves; update this line with it.
+    monkeypatch.setattr(config_cli, "uses_env_references", second_read)
 
     result = CliRunner().invoke(config_app, ["lint", "--config", str(config), "--fix"])
 

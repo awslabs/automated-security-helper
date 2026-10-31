@@ -25,7 +25,7 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.config import config_app
 from automated_security_helper.config.config_linter import ConfigLinter
-from tests.unit.config.test_config_file_reads import _returns_promptly
+from tests.utils.fifo_calls import returns_promptly
 
 pytestmark = pytest.mark.unit
 
@@ -72,7 +72,7 @@ def test_a_config_that_is_a_fifo_is_refused_before_the_lookup(tmp_path, lookups)
     """Red at the base: the lookup, which reads the config, ran first.
 
     The command runs on a thread that is waited for with a timeout
-    (``_returns_promptly``): a regression of the refusal makes the open block
+    (``returns_promptly``): a regression of the refusal makes the open block
     until something writes to the FIFO, and run on the test's own thread that
     would stall the suite to the CI timeout instead of failing this test.
     """
@@ -92,7 +92,7 @@ def test_a_config_that_is_a_fifo_is_refused_before_the_lookup(tmp_path, lookups)
             ]
         )
 
-    assert _returns_promptly(run, fifo) is None
+    assert returns_promptly(run, fifo) is None
     result = outcome["result"]
     assert result.exit_code == INVALID_CONFIG_EXIT, result.output
     assert lookups == []
