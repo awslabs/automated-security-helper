@@ -1221,10 +1221,11 @@ class AshAggregatedResults(RecordModel):
     # call it multiple times during rendering. It holds for as long as the
     # findings it was made from stand: _flat_cache_source says which (see
     # _flat_source), so a copy made with another sarif, or a sarif or
-    # additional_reports replaced or appended to since, is flattened again. An
-    # edit in place that keeps both objects and their counts (a suppression set
-    # on a result, a result replaced by index, masking) is not seen: code that
-    # makes one calls _invalidate_flat_cache().
+    # additional_reports replaced or appended to since, or results given or
+    # stripped of suppressions, is flattened again. An edit in place that keeps
+    # both objects and their counts (a result replaced by index, a suppression's
+    # status changed, masking) is not seen: code that makes one calls
+    # _invalidate_flat_cache().
     _flat_cache: Optional[List[FlatVulnerability]] = PrivateAttr(default=None)
     _flat_cache_source: Optional[tuple] = PrivateAttr(default=None)
 
@@ -1700,13 +1701,27 @@ class AshAggregatedResults(RecordModel):
     def _flat_source(self) -> tuple:
         """What to_flat_vulnerabilities flattens, as it stands now: the sarif and
         the additional_reports objects themselves (held, so that one replaced by
-        another is told by identity and never by a reused id), and how many
-        results and report entries they hold, which an append changes. An edit
-        that keeps both objects and both counts is not told: see
+        another is told by identity and never by a reused id), how many results
+        and report entries they hold, which an append changes, and how many
+        suppression records the results carry, which setting or clearing a
+        suppression changes. An edit that keeps all of these is not told (a
+        result replaced by another with as many suppressions, masking): see
         _invalidate_flat_cache."""
         sarif = self.sarif
         results = (
             sum(len(run.results or []) for run in sarif.runs)
+            if sarif is not None and sarif.runs
+            else 0
+        )
+        # How many suppression records the results carry: applying or clearing a
+        # suppression edits a result in place, which keeps both objects and the
+        # result count, and nothing but this told the cache that it happened.
+        suppressions = (
+            sum(
+                len(result.suppressions or [])
+                for run in sarif.runs
+                for result in (run.results or [])
+            )
             if sarif is not None and sarif.runs
             else 0
         )
@@ -1715,16 +1730,18 @@ class AshAggregatedResults(RecordModel):
             for value in self.additional_reports.values()
             if isinstance(value, list)
         )
-        return (sarif, self.additional_reports, results, entries)
+        return (sarif, self.additional_reports, results, entries, suppressions)
 
     def _invalidate_flat_cache(self) -> None:
         """Forget the flattened findings, so the next to_flat_vulnerabilities
         flattens again.
 
         For code that edits the findings in place without changing which sarif
-        and additional_reports the model holds or how many results and entries
-        they hold: setting or clearing a result's suppressions, replacing a
-        result by index, masking a value. Replacing and appending need no call.
+        and additional_reports the model holds, how many results and entries
+        they hold or how many suppression records the results carry: replacing
+        a result by index, changing a suppression's status, masking a value.
+        Replacing, appending, and setting or clearing a result's suppressions
+        need no call.
         """
         self._flat_cache = None
         self._flat_cache_source = None
