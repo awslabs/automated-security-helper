@@ -124,8 +124,10 @@ def test_a_stopping_scan_refusal_tells_only_its_owner_how_it_ended(
     """A cancelled scan still stopping keeps its directory busy.
 
     The refusal says "still stopping (cancelled)" only to the session that owns
-    the scan; any other session is told only that the directory is busy. Like
-    the scan id, the status is for the owner.
+    the scan; any other session is told only that the directory already has an
+    active scan, which is all it needs to know. Telling it the scan is stopping
+    rather than running would say that someone closed it. Like the scan id, the
+    status is for the owner.
     """
     target = tmp_path / "stopping"
     target.mkdir()
@@ -146,11 +148,14 @@ def test_a_stopping_scan_refusal_tells_only_its_owner_how_it_ended(
             directory_path=str(target), output_directory=str(target), session_id="owner"
         )
 
-    assert "still stopping" in str(other.value), other.value
+    assert "already has an active scan" in str(other.value), other.value
+    assert "stopping" not in str(other.value), other.value
+    assert "scan_id" not in other.value.context, other.value.context
     assert MCScanStatus.CANCELLED.value not in str(other.value), other.value
     assert MCScanStatus.CANCELLED.value not in str(other.value.context), (
         other.value.context
     )
+    assert "still stopping" in str(same.value), same.value
     assert MCScanStatus.CANCELLED.value in str(same.value), same.value
 
 
