@@ -1079,12 +1079,16 @@ def _populate_summary_stats_from_unified_metrics(
     )
 
     # Preserve timing information if it exists
-    existing_start = aggregated_results.metadata.summary_stats.start
-    existing_end = aggregated_results.metadata.summary_stats.end
-    existing_duration = aggregated_results.metadata.summary_stats.duration
+    held = aggregated_results.metadata.summary_stats
+    existing_start = held.start
+    existing_end = held.end
+    existing_duration = held.duration
 
-    # Create new summary stats with unified metrics
-    aggregated_results.metadata.summary_stats = SummaryStats(
+    # Build the summary stats from the unified metrics, then give the object the
+    # metadata holds the fields that were set on it. Replacing the object left
+    # every reference taken before the pass (a reporter's, a caller's) reading
+    # the counts from before it.
+    rebuilt = SummaryStats(
         start=(
             existing_start.isoformat(timespec="seconds")
             if isinstance(existing_start, datetime)
@@ -1110,12 +1114,31 @@ def _populate_summary_stats_from_unified_metrics(
         skipped=skipped_count,  # Add the missing skipped field
         error=error_count,
     )
+    _copy_set_fields(held, rebuilt)
 
     ASH_LOGGER.debug(
         f"Updated summary_stats: {total_actionable} actionable findings across {len(unified_metrics)} scanners"
     )
 
     return aggregated_results
+
+
+def _copy_set_fields(target: Any, source: Any) -> None:
+    """Give *target* the fields that were set on *source*, and its extra fields.
+
+    Only what *source* set is copied, so a key *source* did not set is not added to
+    *target*, and the dumps that leave unset fields out (the CloudWatch Logs and S3
+    payloads) carry the same keys as before. The severity counts are copied the
+    same way, into the counts object *target* holds.
+    """
+    for name in source.model_fields_set:
+        value = getattr(source, name)
+        if isinstance(value, ScannerSeverityCount):
+            _copy_set_fields(getattr(target, name), value)
+        else:
+            setattr(target, name, value)
+    for name, value in (source.model_extra or {}).items():
+        setattr(target, name, value)
 
 
 #: Fields of the legacy two-target row (ScannerStatusInfo) that consolidation replaces

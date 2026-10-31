@@ -1932,25 +1932,11 @@ class AshAggregatedResults(RecordModel):
             )
 
             # Populate summary_stats from unified metrics using the canonical
-            # module-level helper in core.unified_metrics. The helper builds a
-            # new SummaryStats and assigns it, so the values are copied back into
-            # the object the model held: a caller holding it (a reporter, a
-            # test) sees the final counts, and a save leaves the same object.
-            held = self.metadata.summary_stats
+            # module-level helper in core.unified_metrics. The helper updates the
+            # SummaryStats object the model holds, so a caller holding it (a
+            # reporter, a test) sees the final counts, and a save leaves the
+            # same object.
             _populate_summary_stats_from_unified_metrics(self, unified_metrics)
-            rebuilt = self.metadata.summary_stats
-            if rebuilt is not held:
-                for field_name in SummaryStats.model_fields:
-                    if field_name == "severity_counts":
-                        for severity in (*_SEVERITY_ORDER, "suppressed"):
-                            setattr(
-                                held.severity_counts,
-                                severity,
-                                getattr(rebuilt.severity_counts, severity),
-                            )
-                    else:
-                        setattr(held, field_name, getattr(rebuilt, field_name))
-                self.metadata.summary_stats = held
 
             ASH_LOGGER.debug(
                 f"Populated final metrics for {len(unified_metrics)} scanners"
