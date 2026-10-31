@@ -596,6 +596,10 @@ class _BoundedTarStream(io.RawIOBase):
         )
         # Where the header pass's last read started, and what it returned.
         self._last_read: Tuple[int, bytes] = (-1, b"")
+        #: Whether the source was a compressed stream whose decompressor read
+        #: without error, and the raw bytes were read as the tar instead
+        #: (_tar_stream): what the compression holds was never read.
+        self.compressed_payload_unread = False
 
     def readable(self) -> bool:
         return True
@@ -853,17 +857,27 @@ def _decompresses_to_a_tar_header(
     raises it, so convert() records a failure of the run's kind and no
     suppression accepts it. The handle is left at its start.
     """
+    block = _first_decompressed_block(opener, handle)
+    return block is not None and _is_tar_header(block, empty_is_tar=True)
+
+
+def _first_decompressed_block(
+    opener: Callable[[BinaryIO], Any], handle: BinaryIO
+) -> Optional[bytes]:
+    """The first block (up to 512 bytes) the decompressor ``opener`` reads from
+    ``handle``, or None when it refuses the stream with the archive's own error (a
+    damaged or invalid stream, as _failure_kind grades it). An error of the run is
+    raised. The handle is left at its start."""
     handle.seek(0)
     try:
         with opener(handle) as inner:
-            block = inner.read(tarfile.BLOCKSIZE)
+            return inner.read(tarfile.BLOCKSIZE)
     except Exception as error:
         if _failure_kind(error) == "tool":
             raise
-        return False
+        return None
     finally:
         handle.seek(0)
-    return _is_tar_header(block, empty_is_tar=True)
 
 
 @contextlib.contextmanager
@@ -891,18 +905,32 @@ def _tar_stream(handle: BinaryIO) -> Iterator[_BoundedTarStream]:
     each in turn. Content with no magic is read as an uncompressed tar.
     archive_kind probes a tar through this same stream, so what it accepts and
     what is extracted agree.
+
+    Where the raw bytes are read although the decompressor read the stream
+    without error, the stream's ``compressed_payload_unread`` is set: a consumer
+    that unpacks the compression skips a first block that is no header and
+    extracts the members that follow (GNU tar's "Skipping to next header",
+    node-tar's skipped TAR_ENTRY_INVALID entry), so what the compression holds
+    can be a tar this read never reaches, behind a header the raw bytes spell.
+    The caller records the archive. A stream the decompressor refuses is no such
+    case: a consumer fails on it too.
     """
     block = handle.read(tarfile.BLOCKSIZE)
     handle.seek(0)
     opener = _decompressor_for(block[:6])
     with contextlib.ExitStack() as stack:
         inner: Any = handle
-        if opener is not None and (
-            not _spells_a_tar_header(block)
-            or _decompresses_to_a_tar_header(opener, handle)
-        ):
-            inner = stack.enter_context(opener(handle))
-        yield _BoundedTarStream(inner)
+        payload_unread = False
+        if opener is not None:
+            if not _spells_a_tar_header(block) or _decompresses_to_a_tar_header(
+                opener, handle
+            ):
+                inner = stack.enter_context(opener(handle))
+            else:
+                payload_unread = _first_decompressed_block(opener, handle) is not None
+        stream = _BoundedTarStream(inner)
+        stream.compressed_payload_unread = payload_unread
+        yield stream
 
 
 def _admitted_size(member: tarfile.TarInfo, tar_ref: Any) -> int:
@@ -2940,6 +2968,22 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                 budget_spent=skipped_blocks.spent,
                                 ended=ended,
                                 archive_file=archive_file,
+                            )
+                        if tar_stream.compressed_payload_unread:
+                            # The first block the decompressor read is no tar
+                            # header, so the raw bytes, which spell one, were read
+                            # as the tar (_tar_stream). A consumer that unpacks
+                            # the compression skips that block and extracts what
+                            # follows, so a tar behind it reached no scanner. An
+                            # INPUT error: no tool is involved, and a reviewed
+                            # ash-unconverted-input suppression may accept the file.
+                            self.record_failed_input(
+                                archive_file,
+                                "its compressed data was not read: the file starts "
+                                "with a tar header, which was read as the tar "
+                                "instead, so no scanner reads what the compression "
+                                "holds",
+                                kind="input",
                             )
                     elif _named_kind(archive_file) is not None:
                         # Named as an archive the converter extracts, and none can

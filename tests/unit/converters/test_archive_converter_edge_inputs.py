@@ -351,6 +351,77 @@ def test_a_compressed_stream_that_holds_no_tar_falls_back_to_the_raw_bytes(
     assert probe(archive_converter._GzipMembersStream, io.BytesIO(gzip_of_tar)) is True
 
 
+def test_the_stream_says_when_it_read_raw_bytes_though_the_decompressor_read_fine(
+    monkeypatch,
+):
+    """GNU tar skips a first block that is no header ("Skipping to next header")
+    and node-tar skips an invalid entry (TAR_ENTRY_INVALID), then both extract
+    what follows. Read as the raw tar its first block spells, a compressed stream
+    whose decompressor read without error holds a tar this read never reaches.
+    The stream says so (``compressed_payload_unread``). The controls: a gzip of a
+    tar is read as the gzip, a gzip the decompressor refuses (cut short) is no such
+    case since a consumer fails on it too, and a plain tar has no decompressor.
+    The header test is forced, as the neighbors do, so no archive is hand-made."""
+    monkeypatch.setattr(archive_converter, "_spells_a_tar_header", lambda block: True)
+    gzip_of_text = gzip.compress(b"x = 1\n" * 100)
+    gzip_of_tar = tar_bytes({"a.py": "x = 1\n"}, gz=True)
+    cut_short = gzip_of_text[:12]
+
+    with archive_converter._tar_stream(io.BytesIO(gzip_of_text)) as stream:
+        assert stream.compressed_payload_unread is True
+    with archive_converter._tar_stream(io.BytesIO(gzip_of_tar)) as stream:
+        assert stream.compressed_payload_unread is False
+    with archive_converter._tar_stream(io.BytesIO(cut_short)) as stream:
+        assert stream.compressed_payload_unread is False
+    with archive_converter._tar_stream(
+        io.BytesIO(tar_bytes({"a.py": "x = 1\n"}))
+    ) as stream:
+        assert stream.compressed_payload_unread is False
+
+
+def test_an_archive_whose_compressed_data_was_not_read_is_a_failed_input(
+    test_plugin_context, monkeypatch
+):
+    """The tar the raw bytes spell is extracted, and the archive is recorded as a
+    failed input of kind input (a reviewed suppression may accept it), so it is
+    not counted as extracted whole and the completeness gate sees the loss. The
+    stream's answer is set by a stand-in for the same reason as above."""
+    real = archive_converter._tar_stream
+
+    @contextlib.contextmanager
+    def flagged(handle):
+        with real(handle) as stream:
+            stream.compressed_payload_unread = True
+            yield stream
+
+    monkeypatch.setattr(archive_converter, "_tar_stream", flagged)
+    raw = tar_bytes({"a.py": "x = 1\n"})
+
+    converter, results = _convert_one(test_plugin_context, monkeypatch, "src.tar", raw)
+
+    (extracted,) = results
+    assert sorted(p.name for p in extracted.iterdir()) == ["a.py"]
+    (failed,) = converter.failed_inputs
+    assert (failed.path, failed.kind, failed.accepted) == ("src.tar", "input", False)
+    assert failed.reason.startswith("its compressed data was not read")
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
+
+
+def test_a_plain_tar_is_recorded_whole_with_no_compressed_data_unread(
+    test_plugin_context, monkeypatch
+):
+    """The control: no decompressor was set aside, so nothing is recorded."""
+    raw = tar_bytes({"a.py": "x = 1\n"})
+
+    converter, results = _convert_one(test_plugin_context, monkeypatch, "src.tar", raw)
+
+    assert len(results) == 1
+    assert converter.failed_inputs == []
+    assert archive_converter.archives_extracted_whole(test_plugin_context) == {
+        "src.tar"
+    }
+
+
 # ---------------------------------------------------------------- gzip trailing bytes
 
 
