@@ -356,7 +356,7 @@ def test_a_symlink_at_the_install_path_is_not_an_installed_tool(monkeypatch, tmp
 
 
 def test_a_copy_that_fails_while_staging_raises_its_own_error_and_cleans_up(
-    monkeypatch, tmp_path
+    patch_module_os, tmp_path
 ):
     archive = tmp_path / "tool.zip"
     with zipfile.ZipFile(archive, "w") as zipped:
@@ -366,11 +366,14 @@ def test_a_copy_that_fails_while_staging_raises_its_own_error_and_cleans_up(
     real_fdopen = os.fdopen
 
     class _FullDisk:
-        def __init__(self, fd, mode):
-            self._file = real_fdopen(fd, mode)
+        def __init__(self, fd, mode="r", *args, **kwargs):
+            self._file = real_fdopen(fd, mode, *args, **kwargs)
 
         def write(self, chunk):
             raise OSError(errno.ENOSPC, "No space left on device")
+
+        def __getattr__(self, name):
+            return getattr(self._file, name)
 
         def __enter__(self):
             return self
@@ -379,7 +382,9 @@ def test_a_copy_that_fails_while_staging_raises_its_own_error_and_cleans_up(
             self._file.close()
             return False
 
-    monkeypatch.setattr(download_utils.os, "fdopen", _FullDisk)
+    # Only the module under test sees the full disk: patched on the shared ``os``
+    # module, every other reader of ``os.fdopen`` in the process would too.
+    patch_module_os(download_utils, fdopen=_FullDisk)
     with pytest.raises(OSError) as raised:
         download_utils._extract_single_member(archive, "tool", bin_dir / "tool")
     assert raised.value.errno == errno.ENOSPC
@@ -513,7 +518,7 @@ def test_the_internal_helpers_take_their_mode_as_a_required_keyword(helper):
 
 
 def test_a_directory_swapped_in_after_the_rename_is_a_typed_refusal(
-    tmp_path, monkeypatch
+    tmp_path, patch_module_os
 ):
     """The read-back asked what the landed path is only by reading it. A directory
     swapped in at the install path after the rename opens read-only on POSIX and
@@ -527,7 +532,7 @@ def test_a_directory_swapped_in_after_the_rename_is_a_typed_refusal(
         os.unlink(target)
         os.mkdir(target)
 
-    monkeypatch.setattr(download_utils.os, "replace", replace_then_swap)
+    patch_module_os(download_utils, replace=replace_then_swap)
     staging = tmp_path / ".tool.ash-partial"
     staging.write_bytes(_BODY)
     target = tmp_path / "tool"

@@ -360,7 +360,7 @@ def test_install_binary_from_url_lands_the_mode_on_the_staged_file(
 
 @POSIX_ONLY
 def test_a_link_swapped_in_at_the_target_after_the_rename_is_refused(
-    monkeypatch, tmp_path
+    patch_module_os, tmp_path
 ):
     payload = b"the verified bytes"
     staging = tmp_path / "staging"
@@ -370,12 +370,12 @@ def test_a_link_swapped_in_at_the_target_after_the_rename_is_refused(
     elsewhere.write_bytes(payload)
     real_replace = os.replace
 
-    def replace_then_swap(src, dst):
-        real_replace(src, dst)
+    def replace_then_swap(src, dst, *args, **kwargs):
+        real_replace(src, dst, *args, **kwargs)
         os.unlink(dst)
         os.symlink(elsewhere, dst)
 
-    monkeypatch.setattr(du.os, "replace", replace_then_swap)
+    patch_module_os(du, replace=replace_then_swap)
     with pytest.raises(ToolDownloadIntegrityError):
         du._finalize_staged(
             staging, target, hashlib.sha256(payload).hexdigest(), mode=0o755
