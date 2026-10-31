@@ -297,6 +297,15 @@ class TestTheServerConfigDirIsRefusedInAnotherCase:
         assert validate_scan_target_in_sandbox(mine, session_id=OWN) is None
 
 
+def _as_text(path) -> str:
+    """The name a recorder keeps for a call's first argument.
+
+    ``os.stat`` and ``os.lstat`` also take an open file descriptor, which
+    ``os.fspath`` refuses; its number is kept as text.
+    """
+    return str(path) if isinstance(path, int) else os.fspath(path)
+
+
 def _record_what_is_touched(monkeypatch):
     """Record the path handed to every call that can open a share given its name.
 
@@ -318,7 +327,7 @@ def _record_what_is_touched(monkeypatch):
         real = getattr(module, name)
 
         def recording(path, *args, _real=real, _name=name, **kwargs):
-            touched[_name].append(os.fspath(path))
+            touched[_name].append(_as_text(path))
             return _real(path, *args, **kwargs)
 
         monkeypatch.setattr(module, name, recording)
@@ -355,7 +364,7 @@ class TestWindowsRefusesBeforeResolving:
             real = getattr(module, name)
 
             def recording(path, *args, _real=real, **kwargs):
-                touched.append(os.fspath(path))
+                touched.append(_as_text(path))
                 return _real(path, *args, **kwargs)
 
             monkeypatch.setattr(module, name, recording)
