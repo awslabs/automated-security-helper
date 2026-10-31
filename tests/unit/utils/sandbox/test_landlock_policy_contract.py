@@ -13,8 +13,10 @@ check. No sandbox runs: the plan is built and parsed in-process.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
+from typing import Tuple
 
 import pytest
 
@@ -33,17 +35,22 @@ from automated_security_helper.utils.sandbox.policy import (  # noqa: E402
 pytestmark = pytest.mark.unit
 
 
-def _policy_argument(tmp_path: Path, cwd) -> str:
+def _policy_argument(tmp_path: Path, cwd) -> Tuple[str, Path, Path]:
+    """The ``--policy`` argument of a planned spawn, with the source tree and the
+    results directory it was planned for. The output directory exists, as in a scan
+    (a path that does not exist is left out of the policy)."""
     source = tmp_path / "src"
     source.mkdir(exist_ok=True)
     output = tmp_path / "out"
+    output.mkdir(exist_ok=True)
+    results = output / "scanners" / "probe"
     policy = build_scanner_policy(
         "probe",
         SandboxRequirements(),
         argv0="/bin/sh",
         source_dir=source,
         output_dir=output,
-        results_dir=output / "scanners" / "probe",
+        results_dir=results,
         scan_target=source,
         cwd=cwd,
         offline=True,
@@ -54,7 +61,7 @@ def _policy_argument(tmp_path: Path, cwd) -> str:
     )
     try:
         flag = plan.argv.index("--policy")
-        return plan.argv[flag + 1]
+        return plan.argv[flag + 1], source, results
     finally:
         plan.run_cleanup()
 
@@ -69,7 +76,7 @@ def test_the_backends_policy_document_passes_the_wrappers_check(tmp_path, with_c
     if cwd is not None:
         cwd.mkdir()
 
-    text = _policy_argument(tmp_path, cwd)
+    text, source, results = _policy_argument(tmp_path, cwd)
     document = json.loads(text)
     parsed = landlock_exec._parse_policy(text)
 
@@ -77,6 +84,10 @@ def test_the_backends_policy_document_passes_the_wrappers_check(tmp_path, with_c
     assert set(landlock_exec._REQUIRED_POLICY_KEYS) <= set(document)
     for key in ("read_only", "read_data", "writable"):
         assert all(Path(p).is_absolute() for p in document.get(key, []))
+    # The lists are not empty: the scanned tree is read, the results directory is
+    # written, and both are named as the wrapper will resolve them.
+    assert os.path.realpath(source) in document["read_only"] + document["read_data"]
+    assert os.path.realpath(results) in document["writable"]
     if with_cwd:
         assert "cwd" not in document
     else:
