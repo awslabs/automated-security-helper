@@ -1228,7 +1228,9 @@ def parse_error_kind(error: BaseException) -> str:
 class ConfigSource:
     """A config source discovery found: its path, its kind, and, under a
     caller's ``permit``, the identity of the file the path led to when the permit
-    checked it (``identity_to_hold``), None when no permit checked it.
+    checked it (the opened descriptor's, taken after the permit admitted the name;
+    ``ABSENT_FILE`` when the name led to no file, or to another than the one
+    judged), None when no permit checked it.
 
     The identity is what the caller's read is held to (``resolve_config`` hands
     it to the load as ``expect``, which ``read_config_bytes`` compares with the
@@ -1607,7 +1609,13 @@ def _link_chain_names_a_windows_share(path: Path) -> Optional[bool]:
     return None
 
 
-def _permitted(path: Path, permit: PermitBase) -> bool:
+def _resolved_if_permitted(path: Path, permit: PermitBase) -> Optional[Path]:
+    """The path ``path`` resolves to when ``permit`` admits it, else None.
+
+    Nothing is opened. The caller that reads the file takes its identity from a
+    descriptor opened after this judgment (``_identity_held_after_the_judgment``),
+    never from the name.
+    """
     if _on_windows() and _is_a_link(path):
         # Resolving a link on Windows can open a connection to the host a UNC
         # target names, so a link that leads to a share, or whose target cannot
@@ -1615,9 +1623,47 @@ def _permitted(path: Path, permit: PermitBase) -> bool:
         # leaves the root is (_resolve_base_path). A link that leads to a local
         # name is resolved below and judged as the file it names.
         if _link_chain_names_a_windows_share(path) is not False:
-            return False
+            return None
     # realpath reads links and opens nothing, and does not raise on a loop.
-    return permit(Path(os.path.realpath(path)))
+    resolved = Path(os.path.realpath(path))
+    return resolved if permit(resolved) else None
+
+
+def _permitted(path: Path, permit: PermitBase) -> bool:
+    return _resolved_if_permitted(path, permit) is not None
+
+
+def _identity_held_after_the_judgment(
+    path: Path, resolved: Path, held: Optional[List[OpenedConfig]]
+) -> FileIdentity:
+    """What a read of ``path`` is held to, once the permit admitted ``resolved``.
+
+    ``path`` is opened now, after the judgment (a name the permit refused is never
+    opened), and the identity is the descriptor's, when the descriptor leads to
+    the very path that was judged (``OpenedConfig.real``). The identity is never
+    looked up from the name again: that was a second lookup beside the one the
+    judgment made, so a link re-pointed between the two had its new target held as
+    the file judged. It is ``ABSENT_FILE`` when the name leads to no regular file
+    (a directory, a dangling link, an unreadable name), when it was made to lead
+    elsewhere before the open (the descriptor's path is not the judged one), and
+    when the descriptor's path cannot be told: no identity vouches for a file the
+    permit did not see, and a read held to ``ABSENT_FILE`` refuses whatever file
+    is at the name by then.
+
+    With ``held`` the descriptor is appended to it and stays open for the caller to
+    close, so the inode stays in use until a read has compared the identity: a
+    freed inode number can be given to a file made afterwards, which would pass a
+    compare made on a closed descriptor.
+    """
+    opened = open_config_for_judgment(path)
+    if opened is None:
+        return ABSENT_FILE
+    identity = opened.identity if opened.real == resolved else ABSENT_FILE
+    if held is not None:
+        held.append(opened)
+    else:
+        opened.close()
+    return identity
 
 
 def _existing_candidates(
@@ -1648,24 +1694,32 @@ def _existing_candidates(
 
 
 def _check_candidates(
-    candidates: List[ConfigSource], permit: Optional[PermitBase]
+    candidates: List[ConfigSource],
+    permit: Optional[PermitBase],
+    held: Optional[List[OpenedConfig]] = None,
 ) -> List[ConfigSource]:
     """``candidates``, each checked against ``permit`` and, when one checked,
     carrying the identity of the file its path led to at the check.
 
-    The identity (``identity_to_hold``, taken right after the permit judged the
-    resolved path) binds the caller's read to the file that was judged: the
-    permit alone left the milliseconds between its check and the open, in which
-    the name could be made to lead to a file outside the grant. Without a
-    permit nothing is checked and no identity is taken, as before.
+    The identity binds the caller's read to the file that was judged: the permit
+    alone left the milliseconds between its check and the open, in which the name
+    could be made to lead to a file outside the grant. It is the opened
+    descriptor's (``_identity_held_after_the_judgment``), taken after the permit
+    admitted the name and never looked up from the name afterwards, so the judged
+    file and the held file are one. A candidate the permit refuses is not opened.
+    ``held`` collects the descriptors, left open for the caller to close once its
+    reads have compared the identities. Without a permit nothing is checked and
+    no identity is taken, as before.
     """
     if permit is None:
         return list(candidates)
     checked: List[ConfigSource] = []
     for candidate in candidates:
-        if not _permitted(candidate.path, permit):
+        resolved = _resolved_if_permitted(candidate.path, permit)
+        if resolved is None:
             raise _not_permitted(candidate.path)
-        checked.append(replace(candidate, identity=identity_to_hold(candidate.path)))
+        identity = _identity_held_after_the_judgment(candidate.path, resolved, held)
+        checked.append(replace(candidate, identity=identity))
     return checked
 
 
@@ -1674,10 +1728,16 @@ def check_discovery_candidates(search_dir: Path, permit: Optional[PermitBase]) -
 
     The check ``discover_config_source(search_dir, permit=permit)`` makes before
     it opens anything, for a caller that refuses before a scan starts (MCP
-    ``scan_directory``). Opens nothing itself.
+    ``scan_directory``). Opens nothing itself: each candidate is judged by the
+    path it resolves to and no identity is taken, since the caller reads none.
     """
     search_dir = Path(search_dir)
-    _check_candidates(_existing_candidates(search_dir, permit), permit)
+    candidates = _existing_candidates(search_dir, permit)
+    if permit is None:
+        return
+    for candidate in candidates:
+        if not _permitted(candidate.path, permit):
+            raise _not_permitted(candidate.path)
 
 
 def discover_config_source(
@@ -1696,14 +1756,24 @@ def discover_config_source(
     source as found. Without it nothing is checked.
     """
     search_dir = Path(search_dir)
-    candidates = _check_candidates(_existing_candidates(search_dir, permit), permit)
+    # The descriptors each admitted source was held by stay open until this
+    # function returns, so the pyproject read below compares its identity while
+    # the inode is still in use.
+    held: List[OpenedConfig] = []
     found: List[ConfigSource] = []
     notes: List[str] = []
-    for candidate in candidates:
-        if candidate.kind != SOURCE_KIND_PYPROJECT or _pyproject_is_a_source(
-            candidate.path, found, notes, expect=candidate.identity
-        ):
-            found.append(candidate)
+    try:
+        candidates = _check_candidates(
+            _existing_candidates(search_dir, permit), permit, held
+        )
+        for candidate in candidates:
+            if candidate.kind != SOURCE_KIND_PYPROJECT or _pyproject_is_a_source(
+                candidate.path, found, notes, expect=candidate.identity
+            ):
+                found.append(candidate)
+    finally:
+        for opened in held:
+            opened.close()
     if not found:
         return ConfigDiscovery()
     return ConfigDiscovery(selected=found[0], ignored=found[1:], notes=notes)
