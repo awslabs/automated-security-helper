@@ -124,7 +124,9 @@ def test_report_names_an_empty_bucket_and_makes_no_call(mock_boto3, context, cap
         result = reporter.report(_model())
 
     assert result is None
-    mock_boto3.Session.assert_not_called()
+    # No call on any boto3 entry point (client, Session, resource), not only
+    # the one this reporter uses today.
+    assert mock_boto3.mock_calls == []
     assert "bucket_name" in caplog.text, caplog.text
 
 
@@ -136,7 +138,7 @@ def test_an_empty_bucket_fails_the_dependency_check(mock_boto3, context, caplog)
         satisfied = reporter.validate_plugin_dependencies()
 
     assert satisfied is False
-    mock_boto3.Session.assert_not_called()
+    assert mock_boto3.mock_calls == []
     assert "bucket_name" in caplog.text, caplog.text
 
 

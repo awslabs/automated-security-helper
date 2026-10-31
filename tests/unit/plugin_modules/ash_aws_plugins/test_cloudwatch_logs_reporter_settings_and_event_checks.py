@@ -135,7 +135,9 @@ def test_report_names_an_empty_log_group_and_makes_no_call(mock_boto3, context, 
         result = reporter.report(_model())
 
     assert result is None
-    mock_boto3.client.assert_not_called()
+    # No call on any boto3 entry point (client, Session, resource), not only
+    # the one this reporter uses today.
+    assert mock_boto3.mock_calls == []
     assert "log_group_name" in caplog.text, caplog.text
 
 
@@ -147,7 +149,7 @@ def test_an_empty_log_group_fails_the_dependency_check(mock_boto3, context, capl
         satisfied = reporter.validate_plugin_dependencies()
 
     assert satisfied is False
-    mock_boto3.client.assert_not_called()
+    assert mock_boto3.mock_calls == []
     assert "log_group_name" in caplog.text, caplog.text
 
 

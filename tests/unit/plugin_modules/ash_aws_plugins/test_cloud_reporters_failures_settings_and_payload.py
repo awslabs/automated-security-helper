@@ -136,7 +136,9 @@ def test_report_names_an_unset_log_group_and_makes_no_call(mock_boto3, context, 
         result = reporter.report(MagicMock())
 
     assert result is None
-    mock_boto3.client.assert_not_called()
+    # No call on any boto3 entry point (client, Session, resource), not only
+    # the one this reporter uses today.
+    assert mock_boto3.mock_calls == []
     assert "log_group_name" in caplog.text, caplog.text
 
 
@@ -153,7 +155,9 @@ def test_report_names_an_unset_bucket_and_makes_no_call(mock_boto3, context, cap
         result = reporter.report(MagicMock())
 
     assert result is None
-    mock_boto3.Session.assert_not_called()
+    # No call on any boto3 entry point (client, Session, resource), not only
+    # the one this reporter uses today.
+    assert mock_boto3.mock_calls == []
     assert "bucket_name" in caplog.text, caplog.text
 
 
