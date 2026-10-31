@@ -2524,11 +2524,13 @@ def _additional_entry_is_secret(entry: Dict[str, Any], scanner_name: Any) -> boo
 
 #: The text fields of an additional-report entry the flat model shows.
 _ENTRY_TEXTS = ("description", "title")
-#: The fields of an additional-report entry that identify it and place it: its
-#: id, its rule, and the file and lines the flat model reads it at. They are not
-#: text the entry reports, so a secret value they happen to equal (a file named
-#: by a value) is left in them; rewriting ``file_path`` lost the entry's place.
-_ENTRY_IDENTIFIERS = ("id", "rule_id", "file_path", "line_start", "line_end")
+#: The fields of an additional-report entry that place it: its rule, and the file
+#: and lines the flat model reads it at. They are not text the entry reports, so
+#: a secret value they happen to equal (a file named by a value) is left in them;
+#: rewriting ``file_path`` lost the entry's place. The entry's ``id`` is not among
+#: them: a hash-shaped field can hold a value a scanner matched, and masking it
+#: is the side that fails closed (the reasoning of ``_SKIPPED_FIELDS``).
+_ENTRY_IDENTIFIERS = ("rule_id", "file_path", "line_start", "line_end")
 
 
 def _mask_additional_entry(
