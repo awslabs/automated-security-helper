@@ -487,6 +487,13 @@ def _print_tables(
                         enabled_value = getattr(plugin_config, "enabled", True)
                     if refused:
                         enabled_value = False
+                        # The dump shows the reporter as a scan runs it: turned
+                        # off. A refused one is built from its section, which is
+                        # None when no section names it, so a reporter that ships
+                        # enabled was dumped as enabled beside a column that read
+                        # False.
+                        if isinstance(plugin_config, dict):
+                            plugin_config = {**plugin_config, "enabled": False}
 
                     # Assemble the row in column order. Version/Reachable are
                     # inserted only when the scanner version columns are shown.

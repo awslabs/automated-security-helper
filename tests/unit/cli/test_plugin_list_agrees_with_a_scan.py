@@ -124,6 +124,27 @@ class OffHostReporter(ReporterPluginBase[OffHostReporterConfig]):
         return json.dumps({"title": self.config.options.title})
 
 
+class ShippedOnOffHostReporterConfig(ReporterPluginConfigBase):
+    name: Literal["shipped-on-offhost"] = "shipped-on-offhost"
+    extension: str = "shipped-on.json"
+    enabled: bool = True
+    options: Annotated[_TitleOptions, Field()] = _TitleOptions()
+
+
+class ShippedOnOffHostReporter(ReporterPluginBase[ShippedOnOffHostReporterConfig]):
+    """Sends findings off the host and ships enabled, which no scan honors."""
+
+    sends_off_host: ClassVar[bool] = True
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = ShippedOnOffHostReporterConfig()
+        return super().model_post_init(context)
+
+    def report(self, model):
+        return json.dumps({"title": self.config.options.title})
+
+
 # The listing selects as a scan selects: a class whose module is neither ASH's
 # built-in package nor one the run's ash_plugin_modules names is left out. The
 # stand-in reporters are defined here, so they are given a built-in module name,
@@ -133,6 +154,7 @@ BUILTIN_REPORTERS_MODULE = (
 )
 OptInReporter.__module__ = BUILTIN_REPORTERS_MODULE
 OffHostReporter.__module__ = BUILTIN_REPORTERS_MODULE
+ShippedOnOffHostReporter.__module__ = BUILTIN_REPORTERS_MODULE
 
 
 def _listing(
@@ -389,3 +411,22 @@ def test_an_off_host_reporter_enabled_by_a_non_boolean_is_listed_off(tmp_path):
     assert result.exit_code == 0, result.output
     row = _row(result.output, "quiet-offhost")
     assert " False " in row, row
+
+
+def test_an_off_host_reporter_that_ships_enabled_is_dumped_off_with_no_section(
+    tmp_path,
+):
+    """No section turns it on, so a scan builds it off. It was built from nothing
+    and took its own default of enabled, so its config dump read ``true`` beside
+    an Enabled column of False."""
+    result = _listing(
+        tmp_path,
+        ["--no-color", "--include-plugin-config"],
+        reporters=[ShippedOnOffHostReporter],
+    )
+
+    assert result.exit_code == 0, result.output
+    row = _row(result.output, "shipped-on-offhost")
+    assert " False " in row, row
+    assert '"enabled": false' in result.output, result.output
+    assert '"enabled": true' not in result.output, result.output
