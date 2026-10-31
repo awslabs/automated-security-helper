@@ -8100,9 +8100,9 @@
   baseline lists, whichever detector made the finding, is not reported for that
   file, unless the baseline also holds that value outside its `hashed_secret`
   entries (under `notes`, say): a token written in both places is reported. The
-  worker is not handed the baseline's `is_baseline_file` filter, which
-  skips files by name and can name any file, unless the operator's own settings
-  carry it or the baseline is one the operator named outside the scanned tree.
+  worker is not handed a baseline's `is_baseline_file` filter, which
+  skips files by name and can name any file, whoever's baseline it is; only the
+  operator's own settings can carry it.
   When the configuration was also read from the repository's own files, an
   `is_baseline_file` entry or an exclude pattern counts as the operator's only
   where the operator's own configuration names the same entry. The baseline's
@@ -8117,9 +8117,11 @@
   word list filter, `detect_secrets.filters.wordlist.should_exclude_secret`, is
   a different filter and is not taken from a baseline the repository controls.
   The `is_baseline_file` entry of a baseline the operator named outside the
-  scanned tree is handed over as written, so one generated in a repository as
-  `.secrets.baseline` and moved out still skips every file of that name, the
-  repository's own baseline included, until its `filename` is edited.
+  scanned tree is not handed over either: it would skip every file of its
+  `filename`, and a baseline generated in a repository as `.secrets.baseline`
+  and moved out names exactly the file a repository commits. The operator's
+  baseline is left out of the scan by its path, and the repository's own file
+  of that name is scanned like any other.
 
   Two more changes to detect-secrets settings read from the repository's files.
   When a configuration was also read from the repository's own files, the

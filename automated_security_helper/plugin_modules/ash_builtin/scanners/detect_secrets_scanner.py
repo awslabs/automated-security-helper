@@ -2951,23 +2951,28 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         )
             if "filters_used" in scan_settings_dict:
                 # ASH never hands the worker a baseline, so the filter that
-                # skips the baseline by name has no job there. Read from a file
+                # skips the baseline by name has no job there. The filter
+                # compares file names alone, so it skips every file of that
+                # name in the tree, whichever file that is. Read from a file
                 # the repository controls it skips whatever file the
-                # repository names, the baseline (scanned above) included, so
-                # only an entry the operator's own settings carry survives. An
-                # entry of the configuration (a repository's own files can have
-                # written it: _operator_authored) is judged by its writer, one
-                # the baseline supplied by whose baseline it is. They are kept
-                # by the file name they skip, which is what the worker acts on.
+                # repository names, the baseline (scanned above) included. An
+                # operator's baseline generated in a repository names
+                # ``.secrets.baseline``, and handed on it would skip the
+                # scanned repository's own file of that name too, which is a
+                # file like any other once another baseline is in use (the
+                # operator's is already left out of the scan set above, by its
+                # path). So an entry a baseline supplied is never handed,
+                # whoever's baseline it is, and only an entry the operator's
+                # own settings carry survives. That entry is judged by its
+                # writer, because a repository's own files can have written
+                # part of the configuration (_operator_authored). They are
+                # kept by the file name they skip, which is what the worker
+                # acts on.
                 handed_names = [
                     getattr(item, "filename", None)
                     for item in self.config.options.scan_settings.filters_used
                     if item.path == IS_BASELINE_FILE_FILTER
-                    and (
-                        self._operator_authored(item)
-                        if id(item) in self._operator_filter_ids
-                        else known_entries_trusted
-                    )
+                    and self._operator_authored(item)
                 ]
                 kept_filters = [
                     item
@@ -2985,9 +2990,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 ):
                     self._plugin_log(
                         "Not handing the detect-secrets worker the "
-                        f"{IS_BASELINE_FILE_FILTER} filter: it came from a file "
-                        "the scanned repository controls, and it would skip "
-                        "files by name",
+                        f"{IS_BASELINE_FILE_FILTER} filter: it came from a "
+                        "baseline or a file the scanned repository controls, "
+                        "not from the operator's own settings, and it would "
+                        "skip files by name",
                         level=logging.VERBOSE,
                         target_type=target_type,
                     )

@@ -383,9 +383,13 @@ def test_the_operators_own_name_filter_still_reaches_the_worker(tmp_path, monkey
 
 
 @pytest.mark.unit
-def test_the_operators_own_baseline_keeps_its_name_filter(tmp_path, monkeypatch):
-    """A baseline the operator names outside the tree is the operator's file,
-    so what it carries is the operator's choice: the filter reaches the worker."""
+def test_the_operators_own_baseline_does_not_hand_its_name_filter_to_the_worker(
+    tmp_path, monkeypatch
+):
+    """A baseline the operator names outside the tree is left out of the scan
+    set by its path, so the filter it carries has no job in the worker, which
+    is never handed a baseline. The filter compares file names alone, so
+    handing it over would only skip other files of that name."""
     monkeypatch.chdir(tmp_path)
     context = _context(tmp_path)
     source = Path(context.source_dir)
@@ -407,7 +411,39 @@ def test_the_operators_own_baseline_keeps_its_name_filter(tmp_path, monkeypatch)
 
     scanner.scan(target=source, target_type="source")
 
-    assert IS_BASELINE_FILE_FILTER in seen["filters"]
+    assert IS_BASELINE_FILE_FILTER not in seen["filters"]
+    assert "kept.py" in seen["names"]
+
+
+@pytest.mark.unit
+def test_an_operator_baselines_default_name_filter_does_not_skip_the_trees_baseline(
+    tmp_path, monkeypatch
+):
+    """``detect-secrets scan --baseline .secrets.baseline`` writes a filter
+    naming that file, and the worker skips every file of that name. The
+    operator's baseline lives outside the tree under another name here, and the
+    scanned tree commits its own ``.secrets.baseline``, which is a file like any
+    other once another baseline is in use: it stays in the scan set and the
+    filter is not handed to the worker, so what the file holds is read."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    _write_baseline(source, notes=PLANTED)
+    operator = tmp_path / "operator.baseline"
+    _write_baseline(source, filters_used=[SKIP_BY_NAME], path=operator)
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(baseline_file=str(operator))
+        ),
+    )
+    assert scanner._baseline_entries_trusted() is True
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert BASELINE_NAME in seen["names"]
+    assert IS_BASELINE_FILE_FILTER not in seen["filters"]
 
 
 @pytest.mark.unit
