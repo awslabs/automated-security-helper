@@ -97,8 +97,12 @@ def test_a_configured_value_in_a_notification_is_redacted(tmp_path):
 
 def test_the_reader_redacts_before_the_cut(tmp_path):
     # A value that straddles the cut: redaction after the cut would leave its
-    # first half in the clear.
-    head = "x" * (_STDERR_EXCERPT_LIMIT - 10)
+    # first half in the clear. The head is computed from the marker's length, so
+    # the test does not depend on what the marker is: the raw value starts a few
+    # characters before the limit and runs past it, the redacted marker ends
+    # just inside it, and the " tail" after it pushes the text past the limit.
+    assert len(CANARY) > len(REDACTED) + 2, "the raw value must straddle the cut"
+    head = "x" * (_STDERR_EXCERPT_LIMIT - len(REDACTED) - 3)
     results = _results_file(tmp_path, f"{head} {CANARY} tail")
 
     shown = _error_notifications(results, [CANARY])
@@ -106,8 +110,8 @@ def test_the_reader_redacts_before_the_cut(tmp_path):
     assert CANARY not in shown, shown[-200:]
     assert "ENVCANARY" not in shown, shown[-200:]
     assert REDACTED in shown, shown[-200:]
-    # The redacted text is longer than the limit's remainder, so the cut always
-    # happens; a "tail" ending would mean the value was not redacted first.
+    # The redacted text is longer than the limit, so the cut always happens;
+    # a "tail" ending would mean the value was not redacted first.
     assert shown.endswith(" ...[truncated]"), shown[-60:]
     assert "/nonexist" not in shown, shown[-200:]
 
@@ -150,6 +154,10 @@ def test_the_hook_is_read_once_for_a_failure_that_quotes_both(tmp_path):
     scanner.exit_code = 2
     scanner.errors = []
     results = _results_file(tmp_path, f"rules file {CANARY} could not be read")
+    # The tool's stderr log sits beside the results, named for the scanner class;
+    # without it only the notifications are quoted, not both.
+    log = tmp_path / f"{type(scanner).__name__}.stderr.log"
+    log.write_text(f"error: cannot open {CANARY} LOGLINE-9d4\n", encoding="utf-8")
     hook = scanner._values_to_redact
 
     with patch.object(scanner, "_values_to_redact", side_effect=hook) as read:
@@ -157,3 +165,6 @@ def test_the_hook_is_read_once_for_a_failure_that_quotes_both(tmp_path):
 
     assert read.call_count == 1, read.call_args_list
     assert "reports:" in detail and CANARY not in detail, detail
+    # Both blocks quoted: the notification above, and the log's own line.
+    assert "LOGLINE-9d4" in detail, detail
+    assert "could not be read" in detail, detail
