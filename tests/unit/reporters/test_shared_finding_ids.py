@@ -185,6 +185,75 @@ class TestSharedIdsByPosition:
         assert not flat_describes_result(_flat("id", "R1", "app/main.py", 8), result)
         assert not flat_describes_result(_flat("id", "R1", "app/main.py", None), result)
 
+    def test_a_start_line_given_only_by_the_context_region_is_read(self):
+        """The flattening takes ``contextRegion.startLine`` when ``region`` names
+        no line, so its row carries the context line; a read of ``region`` alone
+        answered None and the result never paired with its own row."""
+        result = Result(
+            ruleId="R1",
+            level=Level.error,
+            message=Message(text="a"),
+            locations=[
+                Location(
+                    physicalLocation=PhysicalLocation(
+                        artifactLocation=ArtifactLocation(uri="app/main.py"),
+                        contextRegion=Region(startLine=12),
+                    )
+                )
+            ],
+        )
+
+        assert flat_describes_result(_flat("id", "R1", "app/main.py", 12), result)
+        assert not flat_describes_result(_flat("id", "R1", "app/main.py", None), result)
+
+    def test_the_region_line_wins_over_the_context_region_line(self):
+        result = Result(
+            ruleId="R1",
+            level=Level.error,
+            message=Message(text="a"),
+            locations=[
+                Location(
+                    physicalLocation=PhysicalLocation(
+                        artifactLocation=ArtifactLocation(uri="app/main.py"),
+                        region=Region(startLine=7),
+                        contextRegion=Region(startLine=5),
+                    )
+                )
+            ],
+        )
+
+        assert flat_describes_result(_flat("id", "R1", "app/main.py", 7), result)
+        assert not flat_describes_result(_flat("id", "R1", "app/main.py", 5), result)
+
+    def test_a_context_region_only_result_keeps_its_shared_id_end_to_end(
+        self, test_plugin_context
+    ):
+        """Through the model: the flattened row's ``line_start`` is the context
+        line, and the pairing gives the result that row's id."""
+        model = AshAggregatedResults()
+        model.sarif.runs[0].results = [
+            Result(
+                ruleId="R1",
+                level=Level.error,
+                message=Message(text="a"),
+                locations=[
+                    Location(
+                        physicalLocation=PhysicalLocation(
+                            artifactLocation=ArtifactLocation(uri="app/main.py"),
+                            contextRegion=Region(startLine=12),
+                        )
+                    )
+                ],
+            ),
+            _result("R2", "b"),
+        ]
+
+        flat = model.to_flat_vulnerabilities()
+        results = model.sarif.get_all_results()
+
+        assert [row.line_start for row in flat] == [12, 7]
+        assert shared_ids_by_position(flat, results) == [flat[0].id, flat[1].id]
+
 
 class TestBothReportersGiveTheFlattenedId:
     @pytest.fixture

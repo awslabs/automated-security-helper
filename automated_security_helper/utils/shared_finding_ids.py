@@ -95,16 +95,28 @@ def flat_describes_result(item: Any, result: Any) -> bool:
 
 
 def _first_start_line(result: Any) -> Optional[int]:
-    """The start line of the result's first location's region, as the flattening
-    records it; None when the result has no location or no region."""
+    """The start line of the result's first location, as the flattening records
+    it: the ``region``'s ``startLine``, else the ``contextRegion``'s (the
+    flattening's own fallback); None when the result has no location or
+    neither region names a line.
+
+    Reading ``region`` alone left a result whose only start line sits in its
+    ``contextRegion`` unpaired by the walk: the flattened row carried the
+    context line, this read None, and the result fell back to its legacy id.
+    """
     locations = getattr(result, "locations", None) or []
     if not locations:
         return None
     physical = getattr(locations[0], "physicalLocation", None)
     root = getattr(physical, "root", None)
-    region = getattr(root, "region", None) if root is not None else None
-    line = getattr(region, "startLine", None) if region is not None else None
-    return int(line) if line is not None else None
+    if root is None:
+        return None
+    for name in ("region", "contextRegion"):
+        region = getattr(root, name, None)
+        line = getattr(region, "startLine", None) if region is not None else None
+        if line is not None:
+            return int(line)
+    return None
 
 
 def _first_file_path(result: Any) -> Optional[str]:
