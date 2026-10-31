@@ -1958,7 +1958,7 @@ def lint(
     fix_refusal: str | None = None
     if would_fix and is_toml_file(config_path):
         fix_refusal = toml_refusal
-    elif would_fix and uses_env_references(config_path):
+    elif would_fix and lint_result.fix_refused_for_environment:
         fix_refusal = (
             f"❌ --fix rewrites the file from its parsed values, which would replace "
             f"each of the environment references (${{VAR}} or !ENV) in "

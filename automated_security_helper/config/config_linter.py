@@ -222,6 +222,11 @@ class LintResult:
     # list to refuse ``--fix`` with the reason when it was asked to rewrite
     # such a file and had a fix to make.
     fixes_refused: List[LintIssue] = field(default_factory=list)
+    # Whether ``--fix`` refused the file for reading the environment (rewriting
+    # it would replace each reference with its value). Read once, by the lint
+    # that un-marked the issues, so the CLI does not open and parse the file a
+    # second time to give the reason.
+    fix_refused_for_environment: bool = False
 
     def shown_path(self, path: Path) -> str:
         """How a message names ``path``, a file of ``chain``: ``<value>`` when
@@ -469,6 +474,12 @@ class ConfigLinter:
             if issue.fixable and refused(issue):
                 issue.fixable = False
                 result.fixes_refused.append(issue)
+                if (
+                    not toml
+                    and issue.category != LintCategory.SUPPRESSION_UNUSED
+                    and reads_environment
+                ):
+                    result.fix_refused_for_environment = True
 
     @classmethod
     def _merge_path_duplicates(cls, result: LintResult) -> None:
