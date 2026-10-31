@@ -887,7 +887,12 @@ def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceEr
     unfollowed), so ``C:\\granted\\lnk\\repo`` with ``lnk`` a link to a share
     opened the share at the check meant to prevent it. The walk goes from the
     anchor down; the first component that is a link is judged as the last one
-    was, and a local link is followed to judge the components under it.
+    was, and a local link is followed to judge the components under it. A
+    component the walk cannot examine at all (``os.lstat`` refuses it, or its
+    spelling cannot be given to the filesystem) is the third refusal: whether it
+    is a link cannot be told, and the doubt is refused rather than resolved. A
+    component that is not there ends the walk with nothing judged, and the gates
+    judge the path as they do on every other platform.
     """
     if not _running_on_windows():
         return None

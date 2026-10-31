@@ -34,9 +34,12 @@ open a link's own entry and never what it names:
   found. The first link met is judged by the chain reading; a local link is
   followed, since what it names is local and resolving reads through it; a link
   that leads to a share, or whose target cannot be read, is the answer. A
-  component that is not there, or cannot be examined, ends the walk with nothing
-  judged: nothing below it is there either, and the gates judge the path as they
-  do on every other platform.
+  component that is not there ends the walk with nothing judged: nothing below it
+  is there either, and the gates judge the path as they do on every other
+  platform. A component that IS there but cannot be examined (``os.lstat``
+  refuses it, or its spelling cannot be given to the filesystem) is the answer
+  too, marked unexaminable: it may be a link resolving would follow, and the
+  doubt is refused, never passed on as a local name.
 
 Nothing here decides a refusal's wording or its platform gate; the callers do
 (``_running_on_windows`` in the sandbox, ``_on_windows`` in the loader).
@@ -211,9 +214,11 @@ def _chain_names_a_windows_share(text: str, budget: _Hops) -> Optional[bool]:
         except (FileNotFoundError, NotADirectoryError):
             # Not there: a local name that resolving would open nothing for.
             return False
-        except OSError:
-            # Cannot be examined (a directory the process cannot search): the
-            # entry may itself be a link to a share, so the chain is unjudged.
+        except (OSError, ValueError):
+            # Cannot be examined (a directory the process cannot search, or a
+            # target spelling the filesystem refuses, such as an embedded NUL
+            # that ``os.lstat`` raises ValueError for): the entry may itself
+            # be a link to a share, so the chain is unjudged.
             return None
         if not is_link:
             return False

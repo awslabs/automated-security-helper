@@ -394,6 +394,30 @@ class TestAComponentThatCannotBeExaminedIsRefused:
         assert link_chain.first_unsafe_link(str(tmp_path / "missing" / "repo")) is None
         assert link_chain.first_unsafe_link(str(plain / "repo")) is None
 
+    def test_a_hops_target_whose_spelling_the_filesystem_refuses_is_unjudged(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the module as cut for the component walk: a hop target carrying
+        a NUL made ``os.lstat`` raise ValueError past the chain's ``except
+        OSError``, out through both callers. The chain is unjudged instead, and
+        the walk reports the link with its chain unread."""
+        link = tmp_path / "link"
+        link.symlink_to(tmp_path / "real")
+        real_readlink = os.readlink
+
+        def nul_target(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "link":
+                return "real\x00name"
+            return real_readlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "readlink", nul_target)
+
+        assert link_chain.link_chain_names_a_windows_share(str(link)) is None
+        found = link_chain.first_unsafe_link(str(link))
+        assert found is not None
+        assert found.reaches_a_share is None
+        assert found.unexaminable is False
+
     def test_an_unexaminable_parent_of_a_hops_target_leaves_the_chain_unjudged(
         self, tmp_path, monkeypatch
     ):
