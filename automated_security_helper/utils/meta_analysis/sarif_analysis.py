@@ -512,7 +512,14 @@ def _locations_equal(
 
 
 def _messages_agree(original_result: Dict, agg_result: Dict) -> bool:
-    """Whether two results' message texts are equal, when both carry a message."""
+    """Whether two results' message texts are equal, when both carry a message.
+
+    A result that states no message agrees with any message, since there is
+    nothing to compare. Of two such copies of one finding, the first original
+    takes the match and the second reads lost; the counts are the same either
+    way, and only which original carries the "message missing" field row
+    differs, because the copy has no text that could say whose it is.
+    """
     if not (original_result.get("message") and agg_result.get("message")):
         return True
     return get_message_text(original_result) == get_message_text(agg_result)
