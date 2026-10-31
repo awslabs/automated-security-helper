@@ -502,15 +502,17 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         extra.append(f"--secret-config={self._secret_config_file([config_token])}")
         # Each link leaving the target, and each path the global ignore paths ignore.
         # The operator's own skip entries are sized first and kept out of this share
-        # of the argument budget (TrivyScannerBase._skip_args_reserved): ASH's
+        # of the argument budget (TrivyScannerBase._operator_skip_plan): ASH's
         # tokens have a fallback when left out, the operator's have none.
-        reserved = self._skip_args_reserved(extra)
+        operator_skips = self._operator_skip_plan(extra)
         extra.extend(
-            self._link_skip_args(target, global_ignore_paths, reserved=reserved)
+            self._link_skip_args(
+                target, global_ignore_paths, reserved=operator_skips.reserved
+            )
         )
         # The operator's own skip lists, which ASH's skip flags would otherwise
         # replace (TrivyScannerBase._operator_skip_args).
-        extra.extend(self._operator_skip_args(extra))
+        extra.extend(self._operator_skip_args(extra, operator_skips))
         # Before the target, which _resolve_arguments places LAST (after the
         # options): the last token equal to the target's spelling, not the first,
         # so a relative target spelled like an earlier value ("sarif", "vuln",

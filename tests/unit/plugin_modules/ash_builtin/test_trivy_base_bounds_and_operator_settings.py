@@ -2120,6 +2120,108 @@ def test_control_a_list_that_fits_beside_the_short_entry_alone_is_still_given(
     assert not _operator_warnings(messages), messages
 
 
+# --- the operator's entries are sized once for a scan target -----------------------
+
+
+def _three_ignored_files(monkeypatch) -> None:
+    monkeypatch.setattr(
+        trivy_base, "trivy_skip_files", lambda *a, **k: _ignored_files(3)
+    )
+    monkeypatch.setattr(trivy_base, "trivy_skip_dirs", lambda *a, **k: [])
+
+
+def test_the_operators_config_lists_are_read_once_for_a_scan_target(
+    tmp_path, monkeypatch
+):
+    """Sizing the entries and giving them back were two passes, each opening and
+    parsing the operator's config file for both lists: four reads of the file, of
+    a large generated list, for one target. The entries are sized once and the
+    result is handed to the second step."""
+    _operator_config_in_env(
+        tmp_path, monkeypatch, "scan:\n  skip-files:\n    - secrets.txt\n"
+    )
+    _three_ignored_files(monkeypatch)
+    scanner = _builtin_scanner(tmp_path)
+    messages, logging_patch = _logged(scanner)
+
+    with (
+        logging_patch,
+        patch.object(
+            scanner, "_config_file_list", wraps=scanner._config_file_list
+        ) as reads,
+    ):
+        argv, _, _ = scanner._execute_scan(
+            Path(scanner.context.source_dir), "source", []
+        )
+
+    keys = [
+        call.args[2]
+        for call in reads.call_args_list
+        if call.args[2] in ("skip-dirs", "skip-files")
+    ]
+    assert keys == ["skip-dirs", "skip-files"], keys
+    assert "--skip-files=secrets.txt" in argv, argv
+    assert len([a for a in argv if a.startswith("--skip-files=ignored/")]) == 3, argv
+
+
+def test_an_operator_entry_equal_to_an_ignored_path_is_passed_once(
+    tmp_path, monkeypatch
+):
+    """The entries are sized before the links are built, so a link token can equal
+    one of them; the token is on the command line once."""
+    _three_ignored_files(monkeypatch)
+    scanner = _builtin_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_FILES": "ignored/000.txt,keep.txt"}
+
+    argv, _, _ = scanner._execute_scan(Path(scanner.context.source_dir), "source", [])
+
+    assert argv.count("--skip-files=ignored/000.txt") == 1, argv
+    assert "--skip-files=keep.txt" in argv, argv
+
+
+def test_control_a_line_break_entry_is_said_once_for_both_targets_of_a_scanner(
+    tmp_path, monkeypatch
+):
+    _three_ignored_files(monkeypatch)
+    _operator_config_in_env(
+        tmp_path, monkeypatch, 'scan:\n  skip-dirs:\n    - "zz\\nzz"\n    - vendor\n'
+    )
+    scanner = _builtin_scanner(tmp_path)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        for target_type in ("source", "converted"):
+            argv, _, _ = scanner._execute_scan(
+                Path(scanner.context.source_dir), target_type, []
+            )
+            assert "--skip-dirs=vendor" in argv, argv
+
+    (warning,) = [m for m in messages if "holds a line break" in m]
+    assert "entry 1 of scan.skip-dirs" in warning, warning
+
+
+def test_control_a_line_break_entry_is_not_said_when_ash_passes_no_skip_flag(
+    tmp_path, monkeypatch
+):
+    """With no skip flag of ASH's, trivy reads the operator's list itself and
+    nothing of it is left out, so there is nothing to report."""
+    monkeypatch.setattr(trivy_base, "trivy_skip_files", lambda *a, **k: [])
+    monkeypatch.setattr(trivy_base, "trivy_skip_dirs", lambda *a, **k: [])
+    _operator_config_in_env(
+        tmp_path, monkeypatch, 'scan:\n  skip-dirs:\n    - "zz\\nzz"\n    - vendor\n'
+    )
+    scanner = _builtin_scanner(tmp_path)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        argv, _, _ = scanner._execute_scan(
+            Path(scanner.context.source_dir), "source", []
+        )
+
+    assert _skip_tokens(argv) == [], argv
+    assert not [m for m in messages if "holds a line break" in m], messages
+
+
 # --- the operator's entries on a Windows command line ------------------------------
 
 

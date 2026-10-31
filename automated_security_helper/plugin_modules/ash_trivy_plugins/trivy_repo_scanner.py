@@ -390,9 +390,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             output_dir_args = self._output_dir_skip_args(target, target_type)
             # The operator's own skip entries are sized first and kept out of the
             # links' share of the argument budget
-            # (TrivyScannerBase._skip_args_reserved): ASH's tokens have a fallback
+            # (TrivyScannerBase._operator_skip_plan): ASH's tokens have a fallback
             # when left out, the operator's have none.
-            reserved = self._skip_args_reserved([*pinned, *output_dir_args])
+            operator_skips = self._operator_skip_plan([*pinned, *output_dir_args])
             inserted = [
                 f"--ignorefile={self._ignore_file()}",
                 f"--secret-config={self._secret_config_file(pinned)}",
@@ -403,12 +403,14 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 f"--timeout={trivy_timeout(self._effective_scan_timeout())}",
                 # Each link leaving the target (trivy follows no link), and each
                 # path the global ignore paths ignore.
-                *self._link_skip_args(target, global_ignore_paths, reserved=reserved),
+                *self._link_skip_args(
+                    target, global_ignore_paths, reserved=operator_skips.reserved
+                ),
                 *output_dir_args,
             ]
             # The operator's own skip lists, which ASH's skip flags would
             # otherwise replace (TrivyScannerBase._operator_skip_args).
-            inserted.extend(self._operator_skip_args(inserted))
+            inserted.extend(self._operator_skip_args(inserted, operator_skips))
             final_args[insert_at:insert_at] = inserted
             if self._offline():
                 final_args = self._offline_misconfig_args(final_args)

@@ -44,6 +44,7 @@ from typing import (
     Generic,
     List,
     Mapping,
+    NamedTuple,
     Optional,
     Set,
     Tuple,
@@ -285,6 +286,24 @@ def _skip_tokens_size(arguments: List[str]) -> int:
         for argument in arguments
         if argument.startswith(("--skip-dirs", "--skip-files"))
     )
+
+
+class _OperatorSkips(NamedTuple):
+    """The operator's skip entries sized against the budget (``_operator_skip_plan``).
+
+    ``tokens`` are the entries that fit beside the skip tokens the sizing was
+    given, ``over_budget`` counts those that do not, ``first_dropped`` is where the
+    first of them is (its source, the variable or the config file key, and its
+    position there), ``line_breaks`` lists the entries left out for holding a line
+    break (flag, source, position) and ``reserved`` is the part of the budget the
+    links must leave alone.
+    """
+
+    tokens: List[str]
+    over_budget: int
+    first_dropped: Optional[Tuple[str, int]]
+    line_breaks: List[Tuple[str, str, int]]
+    reserved: int
 
 
 def skip_args_budget(environment: Mapping[str, str]) -> int:
@@ -1110,7 +1129,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
 
         Bounded: the tokens together take at most ``skip_args_budget`` bytes for
         this host and the scan's environment, less ``reserved`` (what the caller
-        keeps for the skip tokens that are not these, see ``_skip_args_reserved``),
+        keeps for the skip tokens that are not these, see ``_operator_skip_plan``),
         so a tree with thousands of ignored files cannot push trivy's argument list
         past the size the OS starts a program with, nor crowd out the operator's own
         entries. The ``--skip-dirs`` tokens come first: each prunes a whole
@@ -1218,7 +1237,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             )
         return None
 
-    def _operator_skip_args(self, final_args: List[str]) -> List[str]:
+    def _operator_skip_args(
+        self, final_args: List[str], skips: Optional[_OperatorSkips] = None
+    ) -> List[str]:
         """The operator's own ``--skip-dirs`` and ``--skip-files`` entries, as tokens.
 
         trivy reads a list flag from one source only: a flag on the command line
@@ -1241,24 +1262,39 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         text, which the environment or the operator's file chose.
 
         Bounded with ASH's own skip tokens: together they take at most
-        ``skip_args_budget`` bytes. The operator's entries are sized first and
-        ``_link_skip_args`` is given what is left (``_skip_args_reserved``), since
-        ASH's tokens have a fallback (trivy reads the path and ASH drops its
-        findings after the scan) and the operator's have none. A large generated
-        list in the operator's config file would otherwise be moved onto the command
-        line whole, past the size the OS starts a program with (Windows holds the
-        whole command line to 32,767 characters). The entries that do not fit
-        beside the skip tokens already in ``final_args`` are left out, in order from
-        the first that overflows, with one warning that counts them; they do not
-        apply to this scan. A list that does not fit when ASH has no skip flag of its
-        own is not cut at all: ``_skip_args_reserved`` keeps the links from adding
-        one, so this returns nothing and trivy reads the whole list itself.
+        ``skip_args_budget`` bytes. The operator's entries are sized first, once per
+        target (``_operator_skip_plan``, passed in as ``skips``; sized here against
+        ``final_args`` when the caller gives none), and ``_link_skip_args`` is given
+        what is left (``_OperatorSkips.reserved``), since ASH's tokens have a
+        fallback (trivy reads the path and ASH drops its findings after the scan)
+        and the operator's have none. A large generated list in the operator's
+        config file would otherwise be moved onto the command line whole, past the
+        size the OS starts a program with (Windows holds the whole command line to
+        32,767 characters). The entries that do not fit beside the skip tokens
+        already in ``final_args`` are left out, in order from the first that
+        overflows, with one warning that counts them; they do not apply to this
+        scan. A list that does not fit when ASH has no skip flag of its own is not
+        cut at all: the reservation keeps the links from adding one, so this
+        returns nothing and trivy reads the whole list itself.
         """
         if not _carries_skip_flag(final_args):
             return []
-        tokens, over_budget, first_dropped = self._operator_skip_tokens(final_args)
-        if over_budget and first_dropped is not None:
-            source, position = first_dropped
+        if skips is None:
+            skips = self._operator_skip_plan(final_args)
+        for flag, source, position in skips.line_breaks:
+            refusal = f"operator-skip:line-break:{source}:{position}"
+            if refusal not in self._warned_inputs:
+                self._warned_inputs.add(refusal)
+                self._plugin_log(
+                    f"Not passing entry {position} of {source} to trivy as "
+                    f"{flag}: the value is read as one line, and the entry "
+                    "holds a line break, so trivy would skip a different "
+                    "path. That entry does not apply to this scan.",
+                    level=logging.WARNING,
+                )
+        over_budget = skips.over_budget
+        if over_budget and skips.first_dropped is not None:
+            source, position = skips.first_dropped
             # Keyed on where the overflow starts and how large it is, so a second
             # target (the converted copy after the source) or a changed list that
             # overflows differently is reported, and a repeat of the same one is not.
@@ -1278,44 +1314,38 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                     f"starts a program with. {subject} not apply to this scan.",
                     level=logging.WARNING,
                 )
-        return tokens
+        # The plan was made before the links were built, so a link token can now
+        # equal an entry of the operator's; one of them is enough.
+        return [token for token in skips.tokens if token not in final_args]
 
-    def _skip_args_reserved(self, final_args: List[str]) -> int:
-        """The bytes of the skip budget that ``_link_skip_args`` must leave alone.
+    def _operator_skip_plan(self, final_args: List[str]) -> _OperatorSkips:
+        """The operator's skip entries, sized once for a scan target.
 
-        The skip tokens already in ``final_args`` (the output directories) and the
-        operator's entries that fit beside them, as ``_operator_skip_args`` will give
-        them once ASH's tokens for the links and ignored paths are in. Said before
-        those are built, so a tree that fills ASH's share still carries the
-        operator's own ``--skip-dirs`` / ``--skip-files`` entries. Nothing is logged
-        here: the warnings are given where the tokens are.
+        ``final_args`` holds the skip tokens ASH has already built for the target
+        (the output directories) and the ``--config`` token the config file is
+        found by. The entries that fit beside those are in ``tokens``, in order,
+        with the count of the rest and where they start; ``reserved`` is what
+        ``_link_skip_args`` must leave of the budget, so a tree that fills ASH's
+        share still carries the operator's own ``--skip-dirs`` / ``--skip-files``
+        entries (the links then take at most budget less ``reserved``, so the
+        entries still fit beside them). The caller hands the plan to
+        ``_operator_skip_args`` after the links are in: the variables and the
+        operator's config file are read here only, once per target. Nothing is
+        logged here, since no skip flag of ASH's may follow (below) and the
+        warnings belong with the tokens ``_operator_skip_args`` gives.
 
-        When the operator's entries do not all fit and ``final_args`` carries no
-        skip flag of ASH's yet, the whole budget is reserved: the links add no skip
-        flag, ``_operator_skip_args`` then gives nothing back, and trivy reads the
+        When the entries do not all fit and ``final_args`` carries no skip flag of
+        ASH's yet, the whole budget is reserved: the links add no skip flag,
+        ``_operator_skip_args`` then gives nothing back, and trivy reads the
         operator's whole list itself from the variable or the config file. A flag
         of ASH's own would replace that list, and the few bytes the sizing left
         over would decide whether the tail of the list applies.
-        """
-        tokens, over_budget, _ = self._operator_skip_tokens(final_args, quiet=True)
-        if over_budget and not _carries_skip_flag(final_args):
-            return skip_args_budget(self._scan_environment())
-        return _skip_tokens_size([*final_args, *tokens])
-
-    def _operator_skip_tokens(
-        self, final_args: List[str], *, quiet: bool = False
-    ) -> Tuple[List[str], int, Optional[Tuple[str, int]]]:
-        """The operator's skip entries that fit beside ``final_args``' own skip
-        tokens, how many do not, and where the first of those is: its source (the
-        variable or the config file key) and its position there.
-
-        ``quiet`` leaves out the warning for an entry holding a line break, for a
-        caller that only sizes the entries (``_skip_args_reserved``).
         """
         used = _skip_tokens_size(final_args)
         budget = skip_args_budget(self._scan_environment())
         over_budget = 0
         first_dropped: Optional[Tuple[str, int]] = None
+        line_breaks: List[Tuple[str, str, int]] = []
         tokens: List[str] = []
         for flag, variable, key in (
             ("--skip-dirs", "TRIVY_SKIP_DIRS", "skip-dirs"),
@@ -1328,16 +1358,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 source = f"scan.{key} of the trivy config file"
             for position, entry in enumerate(entries, start=1):
                 if "\n" in entry or "\r" in entry:
-                    refusal = f"operator-skip:line-break:{source}:{position}"
-                    if not quiet and refusal not in self._warned_inputs:
-                        self._warned_inputs.add(refusal)
-                        self._plugin_log(
-                            f"Not passing entry {position} of {source} to trivy as "
-                            f"{flag}: the value is read as one line, and the entry "
-                            "holds a line break, so trivy would skip a different "
-                            "path. That entry does not apply to this scan.",
-                            level=logging.WARNING,
-                        )
+                    line_breaks.append((flag, source, position))
                     continue
                 token = f"{flag}={_csv_field(entry)}"
                 if token in final_args or token in tokens:
@@ -1350,7 +1371,11 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                     continue
                 used += size
                 tokens.append(token)
-        return tokens, over_budget, first_dropped
+        if over_budget and not _carries_skip_flag(final_args):
+            reserved = budget
+        else:
+            reserved = _skip_tokens_size([*final_args, *tokens])
+        return _OperatorSkips(tokens, over_budget, first_dropped, line_breaks, reserved)
 
     def _trivy_input_file(
         self,
