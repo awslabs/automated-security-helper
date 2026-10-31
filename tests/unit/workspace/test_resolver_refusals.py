@@ -298,11 +298,28 @@ class TestTheSessionComesFromOneSource:
             )
 
     def test_a_matching_session_or_one_source_is_accepted(self, tmp_path):
+        from automated_security_helper.config.ash_config import (
+            AshConfig,
+            RuntimeOverridesConfig,
+        )
+        from automated_security_helper.config.client_config_policy import (
+            ClientConfigRules,
+        )
+
         _project(tmp_path, "api")
         workspace = _workspace(tmp_path, ["api"])
+        rules = ClientConfigRules(
+            policy=RuntimeOverridesConfig(), base=AshConfig(), session_id="a"
+        )
 
         resolve_workspace(workspace, session_id="a")
         resolve_workspace(workspace)
+        # Both sources, naming the same session: the call is consistent, and a
+        # check that refused whenever both are given would refuse a caller that
+        # passes the session its rules already carry.
+        plan = resolve_workspace(workspace, client_config_rules=rules, session_id="a")
+
+        assert [project.key for project in plan.projects] == ["api"]
 
 
 class TestPinsAreCheckedAsASetNotPairwise:
