@@ -446,6 +446,22 @@ def scan_phase_completed(aggregated_results: Any) -> bool:
     )
 
 
+def _python_only_or_unanswered(plugin_instance: Any) -> bool:
+    """Whether a Python-only run may run *plugin_instance*.
+
+    True when the scanner says it is Python-only, and also when its check
+    raised: a check that raises is no answer, and the selection loop records
+    such a scanner as an ERROR carrying the failure, which the completeness
+    gate sees. Counted as left out, a run whose only selected scanner's check
+    raised was refused as "every scanner is left out by the Python-only run"
+    for a scanner nothing had left out.
+    """
+    try:
+        return bool(plugin_instance.is_python_only())
+    except Exception:  # noqa: BLE001 -- plugin code
+        return True
+
+
 class _NoProgress:
     """Stands in for a progress display the caller did not give.
 
@@ -1319,8 +1335,8 @@ class ScanPhase(EnginePhase):
                             name,
                             enabled_scanners=enabled_scanners,
                             excluded_scanners=excluded_scanners,
-                            python_only=True,
                         ).selected
+                        and _python_only_or_unanswered(instance)
                     ]
                     if wanted and not runnable:
                         raise ScannerSelectionError(
