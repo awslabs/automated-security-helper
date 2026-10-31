@@ -231,6 +231,27 @@ def test_a_withheld_note_is_said_once_per_scanned_tree(fresh, tmp_path, monkeypa
     ], logger.lines
 
 
+def test_a_second_scan_of_the_same_tree_writes_the_withheld_note_again(
+    fresh, tmp_path, monkeypatch
+):
+    """A long-lived MCP server scans one tree again and again: each scan's log
+    carries the note its settings earn, and the process keeps none of them."""
+    logger = _Logger()
+    monkeypatch.setattr(scope, "ASH_LOGGER", logger)
+    tree = tmp_path / "tree"
+    tree.mkdir()
+
+    for _ in range(2):
+        with subprocess_utils.scanning_tree(tree):
+            for _ in range(2):
+                scope._warn_withheld_once("tool", "network", "withheld for the tree")
+
+    withheld = [m for level, m in logger.lines if m.startswith("withheld")]
+    # Red at the base: one note for the process, so the second scan's log had none.
+    assert withheld == ["withheld for the tree", "withheld for the tree"]
+    assert scope._WARNED_WITHHELD == set()
+
+
 def test_a_cache_only_scanner_gets_no_read_path_advice_and_advice_comes_once(
     fresh, tmp_path, monkeypatch
 ):

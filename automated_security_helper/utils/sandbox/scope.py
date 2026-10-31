@@ -253,11 +253,14 @@ def _probe_failure_is_transient(refusal: SandboxUnavailable) -> bool:
 
 
 #: The (tree scope key, scanner name, setting) triples whose grant-withheld
-#: warning was written in this process. A scope is built for every spawn of a
-#: scanner (its probes, its scan, each converter run), so the warning repeated
-#: several times per scan; the scanned tree is part of the key because one
-#: process can scan several trees in turn (an MCP server), each under its own
-#: configuration, and the next tree's warning is not the last one's repeat.
+#: warning was written outside any scan, in this process. A scope is built for
+#: every spawn of a scanner (its probes, its scan, each converter run), so the
+#: warning repeated several times per scan. Inside a scan the triples live in the
+#: scan's own notes set (``_scan_notes``) instead and end with it: one process can
+#: scan trees in turn, or the same tree again (an MCP server), each scan under its
+#: own configuration, and a process-wide set made the second scan's log empty of a
+#: note its settings still earn, and was never pruned. The scanned tree stays in
+#: the key because a scan's nested scopes share one notes set.
 #: Read and written under ``_withheld_lock`` (``_warn_withheld_once``), a lock
 #: of its own: ``_probe_lock`` is held across a backend probe, which can run to
 #: the probe timeout, and a note must not queue behind one. ``clear_backend_cache``
@@ -620,15 +623,17 @@ def scanner_sandbox_scope(
 def _warn_withheld_once(
     name: str, key: str, message: str, level: int = logging.WARNING
 ) -> None:
-    """Write a grant-withheld note once per scanned tree, scanner and setting.
+    """Write a grant-withheld note once per scan, tree, scanner and setting.
 
     A scope is built for each spawn of a scanner (its probes, its scan, each
     converter run), so the same sentence otherwise repeated several times per
     scan; the setting it names does not change between them. It does change
-    between trees: one process can scan several in turn (an MCP server), each
-    under its own configuration, so the key carries the active scan's tree scope
-    (``tree_scope_key``; a scope built outside any scan carries the empty one),
-    and the second tree's note is written. Checked and added under
+    between scans: one process can scan several trees in turn, or the same tree
+    again (an MCP server), each under its own configuration, so the note is kept
+    in the active scan's own notes set (``_scan_notes``) and a later scan writes
+    it again; the key carries the tree scope (``tree_scope_key``; a scope built
+    outside any scan carries the empty one, and its notes are kept for the
+    process in ``_WARNED_WITHHELD``). Checked and added under
     ``_withheld_lock``, the set's own lock: the scanner threads build their
     scopes at the same moment, and ``_probe_lock`` is held across a backend
     probe, which can run to the probe timeout. ``level`` is INFO for the
@@ -640,10 +645,12 @@ def _warn_withheld_once(
     from automated_security_helper.utils.subprocess_utils import tree_scope_key
 
     entry = (tree_scope_key(), name, key)
+    notes = _scan_notes()
+    written = notes if notes is not None else _WARNED_WITHHELD
     with _withheld_lock:
-        if entry in _WARNED_WITHHELD:
+        if entry in written:
             return
-        _WARNED_WITHHELD.add(entry)
+        written.add(entry)
     write = ASH_LOGGER.info if level == logging.INFO else ASH_LOGGER.warning
     write(message)
 
