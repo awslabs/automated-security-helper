@@ -357,6 +357,13 @@
   whichever attempt it ran. When it is empty, the default, the report is downloaded by
   name, as before, so existing callers need no change. Pass it the scan job's
   `artifact-id` output, as the usage comment in `upload-ash-sarif.yml` shows.
+- **Plugin authors: `get_installation_commands` may return a `CustomCommand` as well
+  as an argument list.** The return type is `List[List[str] | CustomCommand]`. A
+  `custom_install_commands` entry comes back as the `CustomCommand` it was declared
+  as, so its `shell` flag reaches the installer. A plugin that overrides the method
+  and builds on `super()` should declare the same return type, and a caller that
+  indexes each item as an argument list should check for `CustomCommand` first.
+  The built-in cdk-nag and ferret-scan scanners declare it now.
 
 ### Breaking changes
 

@@ -50,7 +50,10 @@ from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
-from automated_security_helper.base.plugin_base import pep440_requirement
+from automated_security_helper.base.plugin_base import (
+    CustomCommand,
+    pep440_requirement,
+)
 from automated_security_helper.utils.uv_tool_runner import checked_requirement
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
@@ -1015,7 +1018,9 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         # Return default version constraint
         return DEFAULT_VERSION_CONSTRAINT
 
-    def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
+    def get_installation_commands(
+        self, platform: str, arch: str
+    ) -> List[List[str] | CustomCommand]:
         """Install ferret-scan under this plugin's declared version constraint.
 
         Before this existed the plugin declared a supported range but never

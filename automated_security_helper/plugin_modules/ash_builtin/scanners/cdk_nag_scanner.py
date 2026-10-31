@@ -17,6 +17,7 @@ from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -1186,7 +1187,9 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             )
         return super().missing_dependency_reason()
 
-    def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
+    def get_installation_commands(
+        self, platform: str, arch: str
+    ) -> List[List[str] | CustomCommand]:
         """Install the third-party packages behind ASH's ``cdk`` extra.
 
         Names aws-cdk-lib, cdk-nag and constructs directly rather than asking an
