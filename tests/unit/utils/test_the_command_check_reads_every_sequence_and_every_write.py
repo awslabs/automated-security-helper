@@ -70,14 +70,32 @@ def test_a_named_hash_command_colored_with_a_colon_form_sgr_is_broken():
     )
 
 
+def _best_write_time(run_length: int) -> float:
+    """The fastest of three writes of one line holding ``run_length`` backslashes
+    and no command, with the check's output compared with the line."""
+    line = "\\" * run_length + " and no command\n"
+    best = float("inf")
+    for _attempt in range(3):
+        stream, sink = _wrapped()
+        started = time.perf_counter()
+        stream.write(line)
+        best = min(best, time.perf_counter() - started)
+        assert sink.getvalue() == line
+    return best
+
+
 def test_a_long_run_of_backslashes_is_scanned_once():
-    stream, sink = _wrapped()
-    line = "\\" * 20000 + " and no command\n"
-    started = time.perf_counter()
-    stream.write(line)
-    elapsed = time.perf_counter() - started
-    assert sink.getvalue() == line
-    assert elapsed < 2.0, f"one line of backslashes took {elapsed:.1f}s to check"
+    """Eight times the run takes about eight times as long when each backslash is
+    scanned once, and sixty-four times as long when each scan walks the rest of the
+    run. The bound sits between: a fixed wall-clock limit passed or failed on the
+    host's load as much as on the scan, and the best of three runs cancels a
+    scheduling stall in either measurement."""
+    small = _best_write_time(10_000)
+    large = _best_write_time(80_000)
+    # The floor keeps a very fast small run from turning timer noise into a ratio.
+    assert large < 24 * max(small, 1e-3), (
+        f"8x the backslashes took {large / max(small, 1e-3):.0f}x as long to check"
+    )
 
 
 def test_the_backslashes_before_a_named_hash_command_are_still_doubled():
