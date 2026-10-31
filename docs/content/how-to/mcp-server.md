@@ -451,11 +451,10 @@ tree the same way for the whole workspace scan. The other way round, `run_ash_sc
 `run_ash_workspace_scan` are refused with the same `error_type` while one of those calls is
 changing the session's tree. Chunks are still accepted, because they land beside the tree.
 `set_source_zip_chunk` and `select_profile` are refused with `error_type`
-`session_workspace_busy` while an HTTP server removes the workspace of a session it does not
-hold as issued, such as a stateless server's, for being unused longer than
-`--session-workspace-ttl`. The upload and the bound profile go with the workspace, so the client
-selects the profile again and sends the upload again from chunk 0. A session the server holds as
-issued is kept until it ends; see [Clean up](#clean-up).
+`session_workspace_busy` while an HTTP server removes the workspace of a session for being
+unused longer than `--session-workspace-ttl`. The upload and the bound profile are removed with
+the workspace, so the client selects the profile again and sends the upload again from chunk 0.
+A session whose SSE event stream is open is kept until it ends; see [Clean up](#clean-up).
 ASH sets no quota on uploads per session or in total. The server's config limits how many scans run and
 for how long; see [Limit how many scans run and for how long](#limit-how-many-scans-run-and-for-how-long).
 
@@ -682,7 +681,11 @@ A client cannot add a profile.
   the server has seen it end: the MCP SDK drops an idle stateful session without telling the
   server, so the server cannot keep it on that account. Only a session whose SSE event stream
   is still open is kept whatever its age, and the sweep marks that workspace used so another
-  server sharing the root keeps it too.
+  server sharing the root keeps it too. On a stateful server that stream is the session's
+  standalone `GET` stream. A stateful session the sweep removes is ended: its next request
+  names no session the server holds, so the tools that need a session refuse it with
+  `error_type` `session_identity_required` and say that the session expired, and the client
+  opens a new session with `initialize`.
 - Servers that share one workspace root take a lock under the root before a sweep removes a
   session. A sweep that cannot take that lock within about a second, because another server
   holds it, removes nothing more and leaves the remaining sessions to its next sweep, so

@@ -470,11 +470,20 @@ def session_identity_refusal(
         )
     elif caller is not None and caller.server_mode == MODE_STATEFUL:
         # The server already issues sessions, so operator advice to change the
-        # mode would be noise; what works here is in the caller's hands.
+        # mode would be noise; what works here is in the caller's hands. A
+        # session the TTL sweep removed is told apart from an id the server never
+        # issued: the client chose that profile and sent that upload, and both
+        # went with it.
+        named = (
+            "That session expired: the server removes the workspace of a session "
+            "nobody used for --session-workspace-ttl seconds, and its bound "
+            "profile and uploads are removed with it. "
+            if caller.session_expired
+            else "An Mcp-Session-Id header the server did not issue does not name one. "
+        )
         error = (
             f"{operation} needs a session, and this call carries none the server "
-            f"issued. An Mcp-Session-Id header the server did not issue does not "
-            f"name one. {protocol_sentence}"
+            f"issued. {named}{protocol_sentence}"
             f"Open a session with initialize at a handshake protocol version and "
             f"send the Mcp-Session-Id it returns with that version."
         )

@@ -10240,11 +10240,11 @@ def test_a_sessions_profile_copy_holds_the_reference_and_its_scan_the_value(
 #: other servers.
 _BUSY_WHILE_THE_SWEEP_REMOVES = (
     "`set_source_zip_chunk` and `select_profile` are refused with `error_type` "
-    "`session_workspace_busy` while an HTTP server removes the workspace of a session it "
-    "does not hold as issued, such as a stateless server's, for being unused longer than "
-    "`--session-workspace-ttl`. The upload and the bound profile go with the workspace, "
-    "so the client selects the profile again and sends the upload again from chunk 0. A "
-    "session the server holds as issued is kept until it ends; see [Clean up](#clean-up)."
+    "`session_workspace_busy` while an HTTP server removes the workspace of a session for "
+    "being unused longer than `--session-workspace-ttl`. The upload and the bound profile "
+    "are removed with the workspace, so the client selects the profile again and sends "
+    "the upload again from chunk 0. A session whose SSE event stream is open is kept "
+    "until it ends; see [Clean up](#clean-up)."
 )
 _SWEEP_LOCK_WAIT_IS_BOUNDED = (
     "Servers that share one workspace root take a lock under the root before a sweep "
@@ -10262,7 +10262,14 @@ _AN_IDLE_STATEFUL_SESSION_IS_SWEPT = (
     "or not the server has seen it end: the MCP SDK drops an idle stateful session without "
     "telling the server, so the server cannot keep it on that account. Only a session whose "
     "SSE event stream is still open is kept whatever its age, and the sweep marks that "
-    "workspace used so another server sharing the root keeps it too."
+    "workspace used so another server sharing the root keeps it too. On a stateful server "
+    "that stream is the session's standalone `GET` stream."
+)
+_AN_EXPIRED_STATEFUL_SESSION_IS_REFUSED = (
+    "A stateful session the sweep removes is ended: its next request names no session the "
+    "server holds, so the tools that need a session refuse it with `error_type` "
+    "`session_identity_required` and say that the session expired, and the client opens a "
+    "new session with `initialize`."
 )
 #: The sweep's "about a second", and the TTL the sweep tests give the server.
 _SWEEP_LOCK_WAIT_SECONDS = 1
@@ -10333,7 +10340,9 @@ def _sweep_server(
     ``stateless`` starts it with ``--stateless-http --trust-upstream-session-id``: it
     issues no session and holds none, and the client's ``Mcp-Session-Id`` names the
     session, so a session unused past the TTL is the sweep's to remove. A stateful
-    server (the default) keeps every session it has issued and not seen end.
+    server (the default) holds the sessions it has issued and not seen end, and
+    keeps none of them on that account: an idle one is swept like any other, and
+    the server ends it (the idle stateful test below).
 
     Two servers started from one ``tmp_path`` share the workspace root.
     """
@@ -10714,11 +10723,15 @@ def test_an_idle_stateful_session_is_swept_past_the_ttl(tmp_path: Path) -> None:
     server still holds the first session as issued (it never saw a ``DELETE``), and
     that keeps nothing: the SDK drops an idle stateful session without telling the
     server, so a session kept for being issued stayed until shutdown. The workspace
-    and the profile's copy are gone, and the upload's next chunk is refused, so the
-    client sends it again from its first chunk. Together with the stateless case
-    above, the idle session is swept whichever mode issued it.
+    and the profile's copy are gone, and the server has ended the session with them:
+    the upload's next chunk and a ``select_profile`` on that session are refused with
+    ``session_identity_required`` and an error that says the session expired, instead
+    of running unbound. A new session's first chunk and its ``select_profile`` are
+    accepted, so the client starts again from chunk 0 under the new session. Together
+    with the stateless case above, the idle session is swept whichever mode issued it.
     """
     assert_on_page(MCP_SERVER, _AN_IDLE_STATEFUL_SESSION_IS_SWEPT)
+    assert_on_page(MCP_SERVER, _AN_EXPIRED_STATEFUL_SESSION_IS_REFUSED)
     process, port, lines, root, _profile = _sweep_server(tmp_path)
     chunk = base64.b64encode(_delivery_zip({"app.py": b"x = 1\n"})).decode("ascii")
     try:
@@ -10739,10 +10752,19 @@ def test_an_idle_stateful_session_is_swept_past_the_ttl(tmp_path: Path) -> None:
             data_b64=chunk,
             last=True,
         )
+        reselected = held.tool("select_profile", profile_name="page-claims")
+        # The control: the same two calls under a session opened now.
+        fresh = _session_with_a_workspace(port, "page-claims-upload")
+        fresh_workspace = _workspace(root, fresh)
     finally:
         _stop_server(process)
 
     assert next_chunk.get("success") is False, next_chunk
+    assert next_chunk.get("error_type") == "session_identity_required", next_chunk
+    assert "expired" in next_chunk.get("error", ""), next_chunk
+    assert reselected.get("error_type") == "session_identity_required", reselected
+    assert fresh_workspace != workspace
+    assert fresh_workspace.is_dir(), f"the new session has no {fresh_workspace}"
 
 
 @pytest.mark.e2e
