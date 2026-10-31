@@ -57,6 +57,13 @@ def _baseline_text() -> str:
 
 
 def _context(tmp_path: Path) -> PluginContext:
+    """A scan of ``tmp_path/src``, which is made its own git checkout.
+
+    The trust rules look for a checkout at or above the scanned directory, and
+    every directory above ``tmp_path`` is the host's. Making ``src`` the
+    nearest checkout fixes what "the repository" is for these tests, so a
+    ``.git`` that happens to sit in a parent of the temporary directory cannot
+    widen what they treat as the repository's."""
     context = PluginContext(
         source_dir=tmp_path / "src",
         output_dir=tmp_path / "out",
@@ -64,6 +71,7 @@ def _context(tmp_path: Path) -> PluginContext:
         config=get_default_config(),
     )
     context.source_dir.mkdir(parents=True, exist_ok=True)
+    _git_shaped_checkout(context.source_dir)
     context.output_dir.mkdir(parents=True, exist_ok=True)
     return context
 
