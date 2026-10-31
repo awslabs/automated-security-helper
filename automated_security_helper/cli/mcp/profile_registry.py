@@ -519,7 +519,26 @@ _session_state: Dict[str, SessionState] = {}
 #: writer, and a ``select_profile`` that runs on that thread meets the lock its own
 #: thread holds: a lock that cannot be taken twice waits on itself, and the call
 #: never returns. Another thread still waits for the holder.
-_binding_write_locks: Dict[str, "contextlib.AbstractContextManager[bool]"] = {}
+#:
+#: An entry exists only while a caller uses it (:class:`_BindingLock`), so a
+#: server that sees one new session id per client does not keep a lock for each
+#: id it has ever seen.
+_binding_write_locks: Dict[str, "_BindingLock"] = {}
+
+
+class _BindingLock:
+    """One session's binding-write lock and how many callers are using it.
+
+    ``users`` counts the callers that have taken a reference and not yet
+    released it, waiting or holding, and is read and written under
+    ``_session_lock``; the entry is dropped when it reaches zero.
+    """
+
+    __slots__ = ("lock", "users")
+
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.users = 0
 
 
 @contextlib.contextmanager
@@ -528,13 +547,23 @@ def binding_writes(session_id: Optional[str]) -> Iterator[None]:
 
     Every write of a session's ``config/`` and ``client-config/`` copies runs
     under this: ``select_profile``'s materialize-and-bind and the rewrite of a
-    gone file. One lock per session id, so sessions never wait on each other.
+    gone file. One lock per session id, so sessions never wait on each other,
+    and none is kept for a session nobody is writing.
     """
     sid = DEFAULT_SESSION_ID if session_id is None else session_id
     with _session_lock:
-        lock = _binding_write_locks.setdefault(sid, threading.RLock())
-    with lock:
-        yield
+        held = _binding_write_locks.get(sid)
+        if held is None:
+            held = _binding_write_locks[sid] = _BindingLock()
+        held.users += 1
+    try:
+        with held.lock:
+            yield
+    finally:
+        with _session_lock:
+            held.users -= 1
+            if held.users == 0 and _binding_write_locks.get(sid) is held:
+                del _binding_write_locks[sid]
 
 
 # When no session id can be resolved (e.g. a stdio client that doesn't expose
