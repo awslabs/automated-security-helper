@@ -695,15 +695,18 @@ def _scripted_wizard(monkeypatch, answers):
 def test_the_wizard_does_not_write_a_plugin_module_a_scan_refuses(
     tmp_path, monkeypatch
 ):
+    """A module a scan refuses is refused when it is typed and asked about
+    again (the blank answer ends the list), and is not in the file written."""
     monkeypatch.chdir(tmp_path)
     _scripted_wizard(monkeypatch, ["demo", "no_such_plugin_module_zz", ""])
     target = tmp_path / "new.yaml"
 
     result = _invoke(["wizard", "--config", str(target)])
 
-    assert result.exit_code == INVALID_CONFIG_EXIT, result.output
-    assert "Not writing" in result.output, result.output
-    assert not target.exists()
+    assert result.exit_code == 0, result.output
+    assert "The module is not added" in result.output, result.output
+    assert target.exists()
+    assert "no_such_plugin_module_zz" not in target.read_text(encoding="utf-8")
 
 
 def test_the_wizard_refuses_an_environment_module_before_the_first_prompt(

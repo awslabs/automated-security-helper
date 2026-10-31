@@ -221,6 +221,36 @@ def _refuse_a_config_a_scan_refuses(
         _refuse_in_the_editors_words(e, frame)
 
 
+def _typed_module_refusal(module: str) -> str | None:
+    """Why a scan refuses ``module`` as an ``ash_plugin_modules`` entry, or None.
+
+    The half of ``_refuse_a_config_a_scan_refuses`` that can never pass: a name
+    outside ASH's plugin namespace. A name inside it that no installed package
+    provides yet is admitted, as the wizard always admitted it (the operator may
+    install it next). The environment's entries are not judged here; they are
+    judged before the first prompt.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        replace_plugin_module_list,
+    )
+    from automated_security_helper.plugins.loader import (
+        PluginModuleError,
+        PluginModuleImportError,
+    )
+
+    probe = AshConfig()
+    replace_plugin_module_list(probe, [], [module])
+    try:
+        refuse_plugin_modules_a_scan_refuses(probe, [])
+    except PluginModuleImportError:
+        return None
+    except ASHConfigValidationError as error:
+        if isinstance(error, PluginModuleError):
+            return plugin_module_refusal_message(error)
+        return str(error)
+    return None
+
+
 def _refuse_in_the_editors_words(error: ASHConfigValidationError, frame: str) -> None:
     """Print ``error`` under ``frame`` as ``get`` and ``validate`` print it, exit 3.
 
@@ -2606,6 +2636,15 @@ def wizard(
         )
         if not new_mod.strip():
             break
+        # Judged as it is typed: a module a scan refuses is asked about again,
+        # where the check after the prompts threw every answer away (exit 3).
+        refusal = _typed_module_refusal(new_mod.strip())
+        if refusal is not None:
+            secho(
+                shown_on_one_line(f"❌ {refusal}. The module is not added."),
+                fg=typer.colors.RED,
+            )
+            continue
         added_modules.append(new_mod.strip())
 
     # A dropped entry moves every entry after it, so the references move to
