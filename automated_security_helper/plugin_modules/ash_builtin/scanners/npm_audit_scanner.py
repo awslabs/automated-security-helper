@@ -1697,6 +1697,38 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 emitted[(vuln_id, uri, version)] = result
                 results.append(result)
 
+    def _copies_outside_every_range(
+        self,
+        pkg_name: str,
+        vuln_info: Dict[str, Any],
+        via_items: List[Any],
+        lock_rel: str | None,
+        lock_index: NpmLockIndex | None,
+    ) -> Set[Any]:
+        """The listed copies of an npm entry that fall outside EVERY range of
+        its own advisories, by the lockfile's versions.
+
+        A copy is in the set only when every ranged advisory answers False for
+        it; an uncertain pairing (no version, an unreadable range) keeps it out.
+        Empty when the entry lists no copy or no advisory with a range.
+        """
+        nodes = vuln_info.get("nodes") or []
+        advisories = [
+            via for via in via_items if isinstance(via, dict) and via.get("range")
+        ]
+        if not nodes or not advisories:
+            return set()
+        outside: Set[Any] = set()
+        for node_path in nodes:
+            _, identity = self._node_place(pkg_name, node_path, lock_rel, lock_index)
+            version = identity.get(PACKAGE_VERSION_KEY)
+            if all(
+                _version_in_range(version, via.get("range")) is False
+                for via in advisories
+            ):
+                outside.add(node_path)
+        return outside
+
     def _disagreeing_copies(
         self,
         pkg_name: str,
@@ -1719,22 +1751,23 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         set only when every ranged advisory answers False for it; an uncertain
         pairing (no version, an unreadable range) keeps it on the ordinary
         path. Empty when the entry lists no copy or no advisory with a range.
+
+        Also empty when the entry's ``via`` holds a package name: such an entry
+        is vulnerable through a dependency as well, and npm lists a copy for
+        THAT reason too, so a copy outside its own advisories' ranges is not a
+        disagreement (``_dependency_only_copies``): giving it the own
+        advisory's rule, severity and fix text blamed it for a problem it does
+        not have.
         """
+        if any(isinstance(via, str) for via in via_items):
+            return set()
         nodes = vuln_info.get("nodes") or []
         advisories = [
             via for via in via_items if isinstance(via, dict) and via.get("range")
         ]
-        if not nodes or not advisories:
-            return set()
-        disagreeing: Set[Any] = set()
-        for node_path in nodes:
-            _, identity = self._node_place(pkg_name, node_path, lock_rel, lock_index)
-            version = identity.get(PACKAGE_VERSION_KEY)
-            if all(
-                _version_in_range(version, via.get("range")) is False
-                for via in advisories
-            ):
-                disagreeing.add(node_path)
+        disagreeing = self._copies_outside_every_range(
+            pkg_name, vuln_info, via_items, lock_rel, lock_index
+        )
         if disagreeing:
             named = ", ".join(sorted(str(path) for path in disagreeing))
             ASH_LOGGER.debug(
@@ -1745,6 +1778,37 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 extra=NO_MARKUP,
             )
         return disagreeing
+
+    def _dependency_only_copies(
+        self,
+        pkg_name: str,
+        vuln_info: Dict[str, Any],
+        via_items: List[Any],
+        lock_rel: str | None,
+        lock_index: NpmLockIndex | None,
+    ) -> List[Any]:
+        """The listed copies of an entry vulnerable through a dependency that
+        none of its own advisories covers, in the order npm lists them.
+
+        An entry whose ``via`` holds both an advisory and a package name is
+        vulnerable twice over: through its own advisory, for the copies the
+        advisory's range covers, and through the named dependency, for every
+        copy that depends on it. A copy that lies outside every own range is
+        listed only for the second reason, so it gets a transitive result and
+        none of the own advisory's. Empty for an entry with no package name in
+        its ``via`` (``_disagreeing_copies`` reads those) and for one with no
+        advisory object (all its copies are transitive).
+        """
+        if not any(isinstance(via, str) for via in via_items):
+            return []
+        outside = self._copies_outside_every_range(
+            pkg_name, vuln_info, via_items, lock_rel, lock_index
+        )
+        return [
+            node
+            for node in vuln_info.get("nodes") or []
+            if isinstance(node, str) and node in outside
+        ]
 
     @staticmethod
     def _widen_result(
@@ -1997,6 +2061,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 disagreeing = self._disagreeing_copies(
                     pkg_name, vuln_info, via_items, lock_rel, lock_index
                 )
+                # An entry vulnerable through a dependency as well as through
+                # its own advisory lists copies for the dependency's sake: one
+                # outside every own range is no disagreement, so the per-copy
+                # exclusion drops it from the own advisory's results, and it
+                # gets the transitive result below instead.
+                dependency_only = self._dependency_only_copies(
+                    pkg_name, vuln_info, via_items, lock_rel, lock_index
+                )
                 for via in via_items:
                     # Skip if it's just a string reference to another package
                     if isinstance(via, str):
@@ -2145,9 +2217,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
                 # Handle transitive-only vulnerabilities: all via entries
                 # are strings referencing other packages, so no Result was
-                # created above.  Build a minimal result from vuln_info.
+                # created above.  Build a minimal result from vuln_info. An
+                # entry with an advisory of its own as well gets one for each
+                # copy that advisory does not cover (``dependency_only``).
                 via_names = [v for v in via_items if isinstance(v, str)]
-                if not has_dict_via and via_names:
+                if via_names and (not has_dict_via or dependency_only):
                     vuln_id = f"npm-audit-transitive-{pkg_name}"
                     via_refs = ", ".join(via_names)
                     title = f"Transitive vulnerability in {pkg_name} (via {via_refs})"
@@ -2183,7 +2257,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         lock_rel,
                         lock_index,
                     )
-                    for node_path in vuln_info.get("nodes") or [None]:
+                    transitive_copies = (
+                        dependency_only
+                        if has_dict_via
+                        else vuln_info.get("nodes") or [None]
+                    )
+                    for node_path in transitive_copies:
                         pkg_location, identity = self._node_place(
                             pkg_name, node_path, lock_rel, lock_index
                         )

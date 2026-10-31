@@ -215,6 +215,98 @@ def test_a_listed_copy_no_range_covers_is_kept_as_a_disagreement(scanner, monkey
     assert odd in logged[0] and old not in logged[0], logged[0]
 
 
+def _mixed_report(nodes, own_range="<2.0.0", dependency="mkdirp"):
+    """An entry vulnerable twice over: through its own advisory (``own_range``)
+    and through a dependency (a package name in ``via``)."""
+    return {
+        "auditReportVersion": 2,
+        "vulnerabilities": {
+            "minimist": {
+                "name": "minimist",
+                "severity": "critical",
+                "isDirect": False,
+                "via": [_via(own_range), dependency],
+                "effects": [],
+                "range": own_range,
+                "nodes": list(nodes),
+                "fixAvailable": True,
+            }
+        },
+        "metadata": {"vulnerabilities": {"critical": 1}},
+    }
+
+
+def _by_rule(report):
+    return sorted(
+        (r.ruleId, r.properties.model_extra.get("package_path"))
+        for r in report.runs[0].results
+    )
+
+
+def test_a_copy_listed_only_for_its_dependency_is_not_blamed_for_the_own_advisory(
+    scanner, monkeypatch
+):
+    """``minimist`` has its own advisory (``<2.0.0``) and a vulnerable
+    dependency. The copy at 1.5.0 is covered by the advisory; the copy at 2.3.0
+    is listed because of the dependency, and the own advisory does not cover it.
+    That copy fell outside every range, was read as a disagreement, and kept the
+    own advisory's rule, severity and fix text: a false positive that tripped a
+    gate and let a suppression of the advisory hide the dependency's problem.
+    It gets a transitive result instead, and the advisory's result stays on the
+    copy it covers."""
+    covered, outside = "node_modules/a/node_modules/minimist", "node_modules/minimist"
+    _versions(monkeypatch, {covered: "1.5.0", outside: "2.3.0"})
+    messages, restore = _debug_messages(monkeypatch)
+    try:
+        report = scanner._convert_npm_audit_to_sarif(
+            _mixed_report([covered, outside]), scanner.context.source_dir
+        )
+    finally:
+        restore()
+
+    assert _by_rule(report) == sorted(
+        [
+            ("GHSA-xvch-5gv4-984h", covered),
+            ("npm-audit-transitive-minimist", outside),
+        ]
+    )
+    assert not [m for m in messages.texts if "fall outside every range" in m], (
+        messages.texts
+    )
+
+
+def test_every_copy_outside_the_own_range_of_a_mixed_entry_is_transitive(
+    scanner, monkeypatch
+):
+    """Control: when no copy is in the own advisory's range, none carries it;
+    every listed copy is the dependency's finding."""
+    one, two = "node_modules/a/node_modules/minimist", "node_modules/minimist"
+    _versions(monkeypatch, {one: "2.1.0", two: "3.0.0"})
+
+    report = scanner._convert_npm_audit_to_sarif(
+        _mixed_report([one, two]), scanner.context.source_dir
+    )
+
+    assert _by_rule(report) == sorted(
+        [("npm-audit-transitive-minimist", one), ("npm-audit-transitive-minimist", two)]
+    )
+
+
+def test_a_copy_of_a_mixed_entry_with_no_known_version_keeps_the_own_advisory(
+    scanner, monkeypatch
+):
+    """Control: with no installed version the answer is uncertain, so the copy
+    keeps the advisory and gets no transitive result."""
+    node = "node_modules/minimist"
+    _versions(monkeypatch, {})
+
+    report = scanner._convert_npm_audit_to_sarif(
+        _mixed_report([node]), scanner.context.source_dir
+    )
+
+    assert _by_rule(report) == [("GHSA-xvch-5gv4-984h", node)]
+
+
 def test_an_unknown_version_keeps_the_advisory_once_per_copy(scanner, monkeypatch):
     """Control: with no installed version the answer is uncertain, so the
     advisory is still reported on the copy. Once: the two via entries are one
