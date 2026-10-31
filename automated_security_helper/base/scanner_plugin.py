@@ -2263,7 +2263,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
     ### Methods that require implementation by plugins.
     def validate_plugin(self) -> bool:
-        """Validate scanner configuration and requirements."""
+        """Validate scanner configuration and requirements.
+
+        A standalone check for a plugin's author or a caller outside the scan:
+        no code in this package calls it (tests/unit/base/
+        test_validate_plugin_has_no_in_tree_caller.py names the callers and
+        fails when one appears). A scan asks ``validate_plugin_dependencies``
+        from ``_pre_scan`` instead and logs its own failure after it clears
+        ``errors``, so running this first changes nothing a scan reports.
+        """
         # A reason recorded while the scanner was built outranks any probe of
         # the tool, as in validate_plugin_dependencies: a tool that is present
         # does not make a scanner that refused to run satisfied.
