@@ -66,7 +66,10 @@ _COMPLETED_STATUSES = frozenset(
 
 
 def _completed_scanner_names(aggregated_results: AshAggregatedResults) -> list[str]:
-    """The scanners whose results row says they ran to completion: PASSED or FAILED.
+    """The scanners whose results row says they ran to completion.
+
+    A row recorded PASSED or FAILED, or SKIPPED and not excluded (a scanner that
+    ran and attempted nothing; an excluded row never ran).
 
     Read off a model that carries rows, a results file read back. Counting every
     row that was not ERROR took SKIPPED and MISSING rows as completed, and MISSING
@@ -366,11 +369,12 @@ class ScanResultProcessor:
         """Run the validate_execution_completion check, logging warnings on discrepancy.
 
         With no ``completed_scanner_names``, the completed scanners are read off
-        ``aggregated_results``: every scanner with a row recorded PASSED or FAILED
-        (``_completed_scanner_names``). Defaulting to none marked every queued
-        scanner as failed to complete; counting every non-ERROR row marked the
-        SKIPPED and MISSING ones as completed. A caller that holds the executor's
-        completed set (a live scan, whose scanners have no rows yet) passes it.
+        ``aggregated_results``: every scanner with a row recorded PASSED or FAILED,
+        or SKIPPED and not excluded (``_completed_scanner_names``). Defaulting to
+        none marked every queued scanner as failed to complete; counting every
+        non-ERROR row marked the MISSING and excluded ones as completed. A caller
+        that holds the executor's completed set (a live scan, whose scanners have
+        no rows yet) passes it.
         """
         try:
             names = (
