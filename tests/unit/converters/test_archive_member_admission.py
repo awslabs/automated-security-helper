@@ -35,6 +35,7 @@ import tarfile
 import time
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Dict, List, Tuple
 
 import pytest
@@ -472,12 +473,13 @@ def test_many_members_bound_for_one_path_are_renamed_in_bounded_time(
     names = [member.filename for member in admitted]
     assert len(names) == count and len(set(names)) == count
     assert names[:3] == ["m.js", "m~2/m.js", "m~3/m.js"]
-    # Linear, seven keys per renamed member: one before the loop (taken), one
-    # for its destination, one for the written key the rename counts from, two
-    # for the rename (the placement and its directory), one for the renamed
-    # destination and one for the renamed path's one directory; never a walk
-    # over every earlier counter. Measured 13,995 for 2,000 members (the first
-    # member costs two): the bound is the arithmetic, not a margin.
+    # Linear, six keys per renamed member: one before the loop (taken), one for
+    # its destination, one for the written key the rename counts from, two for
+    # the rename (the placement and its directory) and one for the renamed
+    # destination; never a walk over every earlier counter. The renamed path's
+    # directories are answered by component and cost no key, so the bound of
+    # seven per member keeps a margin of one over the six (2 + 6 * 1,999 =
+    # 11,996 for 2,000 members, the first member costing two).
     assert calls["n"] <= 7 * count, calls["n"]
     assert elapsed < 10, elapsed
     notices = [r.getMessage() for r in ash_log_records if r.levelno >= logging.WARNING]
@@ -492,11 +494,13 @@ def test_log_lines_naming_members_and_archives_are_not_read_as_markup(
     test_plugin_context, ash_records_at_every_level
 ):
     """A member's or an archive's name is the archive's own, and a ``[/x]`` in one
-    raises in the log handler when the line is read as markup, so the line is lost
-    (the neighboring record_*_input lines carry NO_MARKUP for this). Each line that
-    names a member or an archive carries it: a refusal with no archive, the detail
-    of a refusal under one, a rename, a member found, and an archive extracted only
-    in part. The lines are produced, so a missing one fails the test too."""
+    is a closing tag if a handler reads the line as markup. The handlers do not by
+    default, so the flag is defensive: it keeps the line text should that default
+    change, as the neighboring record_*_input lines do with NO_MARKUP. Each line
+    that names a member or an archive carries it: a refusal with no archive, the
+    detail of a refusal under one, a rename, a member found, and an archive
+    extracted only in part. The lines are produced, so a missing one fails the test
+    too."""
     records = ash_records_at_every_level
     converter = ArchiveConverter(
         context=test_plugin_context, config=ArchiveConverterConfig()
@@ -527,6 +531,76 @@ def test_log_lines_naming_members_and_archives_are_not_read_as_markup(
         ]
         assert lines, fragment
         assert all(getattr(r, "markup", True) is False for r in lines), fragment
+
+
+def _lines_naming(records, fragment):
+    """The records whose text holds ``fragment`` and a ``[/`` from a path."""
+    return [r for r in records if fragment in r.getMessage() and "[/" in r.getMessage()]
+
+
+def test_debug_lines_naming_a_scan_set_path_are_not_read_as_markup(
+    test_plugin_context, monkeypatch, ash_records_at_every_level
+):
+    """The debug lines that name a scan-set path carry the flag too, as the
+    warning and verbose lines beside them do: a directory skipped, and an archive
+    kept out by a global ignore path. The directory ``d[`` holds ``x]``, so the
+    path spells ``[/``, which a handler that read the line as markup would take
+    for a closing tag."""
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    directory = Path(test_plugin_context.source_dir) / "d[" / "x]"
+    directory.mkdir(parents=True)
+    ignored = Path(test_plugin_context.source_dir) / "d[" / "x].zip"
+    monkeypatch.setattr(
+        converter,
+        "_ignore_paths_skipping_scanning",
+        lambda: [SimpleNamespace(path="p", reason="[/r]")],
+    )
+    monkeypatch.setattr(archive_converter, "ignore_path_matches", lambda *_: True)
+
+    assert converter._skipped(str(directory)) is True
+    assert converter._skipped(str(ignored)) is True
+
+    for fragment in ("Skipping directory", "Skipping conversion of ignored path"):
+        lines = _lines_naming(ash_records_at_every_level, fragment)
+        assert lines, fragment
+        assert all(getattr(r, "markup", True) is False for r in lines), fragment
+
+
+def test_the_debug_line_for_an_archive_not_extracted_whole_is_not_read_as_markup(
+    test_plugin_context, monkeypatch, ash_records_at_every_level
+):
+    """An archive with a member no scanner reads is extracted without it, and the
+    debug line that says so names the archive. The archive sits in the directory
+    ``d[`` and is named ``x].zip``, so its displayed path spells ``[/``."""
+    archive = _zip(
+        Path(test_plugin_context.source_dir) / "d[" / "x].zip",
+        [("ok.js", b"ok\n"), ("assets/logo.png", b"\x89PNG\r\n\x1a\n")],
+    )
+
+    _convert(test_plugin_context, monkeypatch, archive)
+
+    lines = _lines_naming(ash_records_at_every_level, "not extracted whole")
+    assert lines
+    assert all(getattr(r, "markup", True) is False for r in lines)
+
+
+def test_the_debug_line_for_an_unsupported_archive_format_is_not_read_as_markup(
+    test_plugin_context, monkeypatch, ash_records_at_every_level
+):
+    """A file named like a gzip that holds something else is left to the
+    scanners as it is, and the debug line that says so names the file. It sits in
+    the directory ``d[`` and is named ``x].gz``, so its path spells ``[/``."""
+    path = Path(test_plugin_context.source_dir) / "d[" / "x].gz"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"plain text, not gzip data\n")
+
+    _convert(test_plugin_context, monkeypatch, path)
+
+    lines = _lines_naming(ash_records_at_every_level, "unsupported archive format")
+    assert lines
+    assert all(getattr(r, "markup", True) is False for r in lines)
 
 
 def test_a_member_left_out_costs_no_directory_strings(test_plugin_context, monkeypatch):

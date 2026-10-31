@@ -1940,6 +1940,12 @@ def _renamed_member_name(
             and directory_key not in taken
             and directory_key not in written
         ):
+            # Stored past the number just used, before the caller has checked the
+            # placement against the host's path length limit. A placement it then
+            # refuses keeps its number, so the next duplicate of this key is
+            # numbered after it (``~3`` where ``~2`` was refused): a number is
+            # skipped, and nothing that is written depends on the numbers being
+            # consecutive.
             counters[key] = counter
             return renamed
 
@@ -2276,7 +2282,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
     def _skipped(self, path: str) -> bool:
         """Whether ``path`` from the scan set is a directory or under an ignore path."""
         if Path(path).is_dir():
-            ASH_LOGGER.debug(f"Skipping directory: {path}")
+            ASH_LOGGER.debug(f"Skipping directory: {path}", extra=NO_MARKUP)
             return True
         ignore_paths = self._ignore_paths_skipping_scanning()
         if not ignore_paths:
@@ -2292,7 +2298,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         for ignore_path in ignore_paths:
             if ignore_path_matches(rel_path, ignore_path.path):
                 ASH_LOGGER.debug(
-                    f"Skipping conversion of ignored path: {path} due to global ignore_path '{ignore_path.path}' with reason '{ignore_path.reason}'"
+                    f"Skipping conversion of ignored path: {path} due to global ignore_path '{ignore_path.path}' with reason '{ignore_path.reason}'",
+                    extra=NO_MARKUP,
                 )
                 return True
         return False
@@ -2326,8 +2333,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # runs through): logged with the member, never part of the recorded reason,
         # which keys the per-reason listing cap.
         # NO_MARKUP on every line that names a member or an archive, as the
-        # record_*_input lines do: the names are the archive's own, and a "[/x]" in
-        # one raises in the log handler as markup and the line is lost.
+        # record_*_input lines do. The names are the archive's own, and a "[/x]" in
+        # one is a closing tag if a handler reads the line as markup. The handlers
+        # do not by default, so the flag changes nothing today; it keeps the line
+        # text should that default change.
         if archive is None:
             ASH_LOGGER.warning(
                 shown_on_one_line(
@@ -2363,7 +2372,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         the scan left out, and here what was left out is the tail, not a member.
         Where a member was refused, left out, or the listing ended early, the
         sentence would contradict that archive's other records, so the reason
-        says only that the gzip data was read to its end.
+        says only that the gzip data was read to its end. A notebook member counts
+        as left out in this reading: it is extracted as it is, but the jupyter
+        converter reads the scan set and not this output, so the archive is not
+        recorded whole for it either, and an archive whose only such member is a
+        notebook gets the second wording although every member was written.
         """
         if whole:
             opening = "every member of its gzip data was extracted; the "
@@ -3120,7 +3133,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         ASH_LOGGER.debug(
                             shown_on_one_line(
                                 f"Skipping unsupported archive format: {archive_file}"
-                            )
+                            ),
+                            extra=NO_MARKUP,
                         )
                         continue
 
@@ -3133,7 +3147,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         shown_on_one_line(
                             f"{archive_display} not extracted whole: no scanner "
                             f"reads {len(unscannable)} of its members as they are"
-                        )
+                        ),
+                        extra=NO_MARKUP,
                     )
                 if (
                     len(self.refused_inputs) == refused_before
@@ -3160,7 +3175,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 if Path(archive_file).is_dir():
                     # The scan-set entry is a directory: nothing to extract.
                     ASH_LOGGER.debug(
-                        shown_on_one_line(f"Skipping directory: {archive_file}")
+                        shown_on_one_line(f"Skipping directory: {archive_file}"),
+                        extra=NO_MARKUP,
                     )
                 else:
                     # A file named like a directory an earlier member made: the
