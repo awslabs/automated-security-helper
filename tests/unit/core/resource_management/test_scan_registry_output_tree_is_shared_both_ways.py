@@ -117,3 +117,61 @@ class TestARemovalSharesTheTreeWithEveryLiveScan:
 
         assert reason is None
         assert done is True
+
+
+class TestARemovalKeepsTheResultsOfALaterScanNestedInTheTree:
+    """A project that ran under a finished root scan's tree holds results there."""
+
+    def test_the_removal_of_a_root_is_refused_once_a_nested_project_completed(
+        self, tmp_path
+    ):
+        registry = ScanRegistry()
+        root = tmp_path / "out"
+        whole = _register(registry, tmp_path, "whole", root)
+        registry.update_scan_status(whole, MCScanStatus.COMPLETED)
+        web = _register(registry, tmp_path, "web", root / "projects" / "web")
+        registry.update_scan_status(web, MCScanStatus.RUNNING)
+        registry.update_scan_status(web, MCScanStatus.COMPLETED)
+        removed = []
+
+        reason, done = registry.remove_output_of_scan(
+            registry.get_scan(whole), lambda: removed.append(True) or True
+        )
+
+        # RED at the base: the project is not running, so the live-scan arm
+        # passes, and its id was never recorded on the root scan (supersession
+        # was recorded by exact directory), so the later-scan arm passed too and
+        # the remover deleted the completed project's results.
+        assert done is False
+        assert removed == []
+        assert "a later scan holds its results" in reason
+
+    def test_a_nested_project_that_never_ran_does_not_refuse_the_removal(
+        self, tmp_path
+    ):
+        """Control, green on both sides: a scan that claimed nothing holds nothing."""
+        registry = ScanRegistry()
+        root = tmp_path / "out"
+        whole = _register(registry, tmp_path, "whole", root)
+        registry.update_scan_status(whole, MCScanStatus.COMPLETED)
+        web = _register(registry, tmp_path, "web", root / "projects" / "web")
+        registry.update_scan_status(web, MCScanStatus.CANCELLED)
+
+        reason, done = registry.remove_output_of_scan(
+            registry.get_scan(whole), lambda: True
+        )
+
+        assert reason is None
+        assert done is True
+
+    def test_the_root_scans_own_results_are_not_read_as_superseded(self, tmp_path):
+        """Control, green on both sides: a project under the root does not write
+        the root's files, so the progress record stays an exact-directory one."""
+        registry = ScanRegistry()
+        root = tmp_path / "out"
+        whole = _register(registry, tmp_path, "whole", root)
+        registry.update_scan_status(whole, MCScanStatus.COMPLETED)
+        web = _register(registry, tmp_path, "web", root / "projects" / "web")
+        registry.update_scan_status(web, MCScanStatus.COMPLETED)
+
+        assert registry.get_scan(whole).later_scan_ids == []
