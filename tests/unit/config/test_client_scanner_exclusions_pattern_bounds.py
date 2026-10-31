@@ -552,7 +552,7 @@ def test_a_budget_keeps_one_balance_per_scan_timeout():
     assert budget.remaining(3.0) == 3.0
 
 
-def test_a_budget_with_no_bound_runs_in_the_worker_without_a_deadline():
+def test_a_budget_with_no_bound_runs_in_the_worker():
     budget = EvaluationBudget()
 
     pid = budget.evaluate(None, "s", "k", os.getpid)
@@ -562,6 +562,55 @@ def test_a_budget_with_no_bound_runs_in_the_worker_without_a_deadline():
     assert budget.timed_out == ()
     assert budget.remaining(1.0) == 1.0
     budget.close()
+
+
+def test_a_null_scan_timeout_gives_a_client_pattern_a_finite_wait():
+    """``scan_timeout: null`` is not a field a client is denied, so a delivered
+    config can pair it with a backtracking ``skip_path``. The worker was asked
+    to wait with no deadline (``poll(None)``), which parked the suppression pass
+    for as long as the pattern ran, its child at full CPU, and a cancel of the
+    scan did not reach the wait. The wait is now the scanners' default
+    ``scan_timeout``: finite, and within what the wait can take."""
+    asked: list = []
+
+    class _Recording:
+        pid = None
+        last_search_seconds = 0.0
+
+        def evaluate(self, wait, timeout, source, function, args):
+            asked.append((wait, timeout))
+            return function(*args)
+
+        def close(self, graceful: bool = True) -> None:
+            pass
+
+    budget = EvaluationBudget()
+    budget._worker = _Recording()
+
+    assert budget.evaluate(None, "s", "k", _five) == 5
+
+    assert len(asked) == 1
+    wait, timeout = asked[0]
+    assert wait is not None
+    assert 0 < wait <= exclusions_module._LARGEST_SCAN_TIMEOUT
+    assert timeout == wait
+
+
+def test_a_client_pattern_under_a_null_scan_timeout_is_stopped_at_the_ceiling(
+    monkeypatch, pass_budget
+):
+    """The same with the real worker: an evaluation under no timeout whose
+    search runs past the ceiling, here cut to half a second, kills the worker
+    and fails the pass where it waited for good before. ``time.sleep`` stands
+    for the search, since the call only needs to outlast the ceiling and a real
+    runaway pattern would hold a process at full CPU if the bound failed."""
+    monkeypatch.setattr(exclusions_module, "_unbounded_ceiling", lambda: TINY_TIMEOUT)
+
+    with pytest.raises(EvaluationTimedOut):
+        pass_budget.evaluate(None, "s", "slow", time.sleep, 10)
+
+    assert pass_budget.timed_out == ("slow",)
+    assert pass_budget.worker_pid is None
 
 
 def test_a_client_pattern_under_a_null_scan_timeout_never_runs_in_this_process():

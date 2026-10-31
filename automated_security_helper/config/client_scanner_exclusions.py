@@ -238,8 +238,9 @@ class ClientScannerExclusion(BaseModel):
     paths: Tuple[str, ...] = ()
     #: The scanner's ``scan_timeout`` when the entry was moved out of its
     #: options: the bound a regular expression of this entry runs under when
-    #: ASH evaluates it in its own process (``evaluated_within``). None leaves
-    #: it unbounded, as ``scan_timeout: null`` leaves the scanner.
+    #: ASH evaluates it in its own process (``evaluated_within``). None is
+    #: ``scan_timeout: null``, which leaves the scanner unbounded but gives the
+    #: client's pattern the scanners' default (``_unbounded_ceiling``).
     scan_timeout: Optional[float] = None
 
     @property
@@ -442,8 +443,10 @@ def evaluated_within(
     same bound. The call runs in a child process, which is killed at the
     deadline; its result, or the exception it raised, comes back as if the call
     had run inline. With ``timeout`` None (the scanner left unbounded) it runs
-    in the child too, with no deadline: inline, the matcher would hold this
-    process's interpreter lock for the whole search and freeze every thread.
+    in the child too, under the scanners' default scan_timeout
+    (``_unbounded_ceiling``) and not without a deadline: the pattern is the
+    client's. Inline, the matcher would hold this process's interpreter lock
+    for the whole search and freeze every thread.
 
     A thread cannot bound it. Python's matcher holds the interpreter lock for
     the whole of a search and returns to no one until it is done, so a thread
@@ -545,14 +548,17 @@ class EvaluationBudget:
     ) -> T:
         """``function(*args)`` within what is left of ``timeout``, or a ScannerError.
 
-        ``timeout`` None runs in the worker with no deadline (never inline: a
+        ``timeout`` None (the scanner left unbounded) is the scanners' default
+        scan_timeout here (``_unbounded_ceiling``), never no deadline: the
+        expression is the client's, and a delivered ``scan_timeout: null``
+        paired with a backtracking one parked the pass on a wait with no end and
+        its worker at full CPU. The search runs in the worker, never inline (a
         client's expression would hold this process's interpreter lock for the
-        whole search), and charges no balance. ``key`` names the entry for
-        the memory (the pattern as the option holds it); ``source`` names it
-        for the error.
+        whole search). ``key`` names the entry for the memory (the pattern as
+        the option holds it); ``source`` names it for the error.
         """
         if timeout is None:
-            return self._worker.evaluate(None, None, source, function, args)
+            timeout = _unbounded_ceiling()
         if key in self._timed_out:
             raise ScannerError(
                 f"A regular expression from {source} already ran past {timeout} "
@@ -819,8 +825,10 @@ def checkov_skips(
     gets what is left of the pass's one scan_timeout and an entry that ran out is
     not searched again; without one the search is bounded on its own
     (``evaluated_within``). A ``timeout`` of None (the scanner left unbounded)
-    searches in the child with no deadline: the pattern is the client's, and
-    inline it would hold this process's interpreter lock for the whole search.
+    searches in the child under the scanners' default scan_timeout
+    (``_unbounded_ceiling``): the pattern is the client's, so it gets a
+    deadline, and inline it would hold this process's interpreter lock for the
+    whole search.
     A literal pattern, or one that did not compile, is searched inline.
     """
     candidates = [absolute]
@@ -1445,6 +1453,27 @@ def _set(options: Any, option: str, value: Any) -> None:
 # limit of its platform (a C int of milliseconds for a poll on a pipe,
 # ``threading.TIMEOUT_MAX`` for a lock), and this ceiling sits under each.
 _LARGEST_SCAN_TIMEOUT = 2_147_483.0
+
+
+def _unbounded_ceiling() -> float:
+    """The seconds a client's pattern is given when its scanner's scan_timeout is null.
+
+    The scanners' default ``scan_timeout``, or ``_LARGEST_SCAN_TIMEOUT`` if the
+    default is ever not a number in range. The operator who sets a scanner's
+    timeout to null leaves the scanner's own tool unbounded; a pattern a client
+    delivered and ASH searches in its own process is held to a deadline of
+    ASH's choosing, whatever that setting says.
+    """
+    from automated_security_helper.base.options import ScannerOptionsBase
+
+    default = ScannerOptionsBase.model_fields["scan_timeout"].default
+    if (
+        isinstance(default, (int, float))
+        and not isinstance(default, bool)
+        and 0 < default <= _LARGEST_SCAN_TIMEOUT
+    ):
+        return float(default)
+    return _LARGEST_SCAN_TIMEOUT
 
 
 def _scan_timeout_of(options: Any) -> Optional[float]:
