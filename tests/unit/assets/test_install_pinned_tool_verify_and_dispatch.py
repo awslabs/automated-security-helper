@@ -65,6 +65,15 @@ installer = _load_script()
         ("tool 1.2.3.dev0", "1.2.3", False),
         ("tool 1.2.3.rc1", "1.2.3", False),
         ("tool 1.2.3.RC1", "1.2.3", False),
+        # The other dotted spellings of PEP 440, and a fourth release number.
+        ("tool 1.2.3.a1", "1.2.3", False),
+        ("tool 1.2.3.b1", "1.2.3", False),
+        ("tool 1.2.3.alpha1", "1.2.3", False),
+        ("tool 1.2.3.beta1", "1.2.3", False),
+        ("tool 1.2.3.c1", "1.2.3", False),
+        ("tool 1.2.3.pre1", "1.2.3", False),
+        ("tool 1.2.3.r1", "1.2.3", False),
+        ("tool 1.2.3.4", "1.2.3", False),
         # Debian joins a pre-release with a tilde.
         ("tool 1.2.3~rc1", "1.2.3", False),
         # Controls: a dot that ends a sentence is not a suffix.
