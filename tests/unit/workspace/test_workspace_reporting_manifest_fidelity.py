@@ -262,7 +262,8 @@ class TestAPreviousRunsWorkspaceReportDoesNotOutliveThisRun:
 
         assert not stale.exists()
         entry = _manifest(output_dir)["reporters"]["fake-empty"]
-        assert entry["error"] == "the reporter returned no content"
+        assert entry["note"] == "the reporter returned no content"
+        assert "error" not in entry
 
     def test_a_reporter_this_run_does_not_select_leaves_no_earlier_file(
         self, workspace
@@ -429,7 +430,8 @@ class TestAReporterThatReturnsNoneFailed:
         assert "fake-empty" not in outcome.failed_reporters
         reporters = _manifest(output_dir)["reporters"]
         assert "None" in reporters["fake-none"]["error"]
-        assert reporters["fake-empty"]["error"] == "the reporter returned no content"
+        assert reporters["fake-empty"]["note"] == "the reporter returned no content"
+        assert "error" not in reporters["fake-empty"]
         assert outcome.failed
 
 

@@ -1442,7 +1442,9 @@ def emit_workspace_reports(
             # Not an error: several reporters legitimately return nothing when
             # they have nothing to say. Recorded so that "returned nothing" is
             # distinguishable from "was never run". No artefact covers anything.
-            entry["error"] = "the reporter returned no content"
+            # A note, not an error: ``"error" in entry`` is what a consumer reads
+            # as the reporter having failed, and this is not a failure.
+            entry["note"] = "the reporter returned no content"
             ASH_LOGGER.verbose(f"Reporter {name} returned no content")
             continue
 
