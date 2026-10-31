@@ -704,8 +704,13 @@ def stop_grace_in_progress() -> Iterator[None]:
     """
     global _GRACE_WAITS
     entered = False
-    # The count is raised inside the try, so an interrupt that lands after the
-    # increment still reaches the finally, which lowers it only if it was raised.
+    # The count is raised inside the try, so an interrupt that lands while the
+    # lock is being taken or released cannot leave a raised count with no
+    # finally to lower it. That narrows the window to one boundary rather than
+    # closing it: an interrupt delivered between the store that raises the
+    # count and the store that sets ``entered`` reaches the finally with
+    # ``entered`` False, so the count stays one too high for the rest of the
+    # process. No test can reach it, and no guard is added around it.
     try:
         with _GRACE_WAITS_WRITE_LOCK:
             _GRACE_WAITS += 1
