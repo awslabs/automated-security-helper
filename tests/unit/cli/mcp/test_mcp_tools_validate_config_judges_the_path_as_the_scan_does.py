@@ -14,6 +14,7 @@ for a file the operator set aside). The validator now asks the scan's question.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict
 
@@ -105,6 +106,44 @@ def test_a_config_the_operator_set_aside_keeps_the_operators_trust(
     _capturing(seen, monkeypatch)
 
     _validate(named)
+
+    assert seen, "the validator never reached the file check"
+    assert seen["untrusted_config"] is False, seen
+
+
+def test_the_session_copy_of_a_bound_profile_keeps_the_operators_trust(
+    monkeypatch,
+) -> None:
+    """Everything under the shared workspace root is a client's delivery except
+    the profile files the server writes in a session's ``config/`` directory, so
+    the copy of a bound profile sits under that root and is still the operator's:
+    neither predicate calls it the client's, and the validator reports it
+    trusted. A validator that judged by the location alone, or by the file
+    existing under the root, would call it the client's and drop the operator's
+    settings from the answer."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        SESSION_CONFIG_FILENAME,
+    )
+    from automated_security_helper.cli.mcp.sandbox import (
+        CONFIG_DIR_NAME,
+        client_named_config_is_untrusted,
+        config_is_client_supplied,
+    )
+
+    copy = (
+        Path(os.environ["ASH_MCP_WORKSPACE_ROOT"])
+        / SESSION
+        / CONFIG_DIR_NAME
+        / SESSION_CONFIG_FILENAME
+    )
+    copy.parent.mkdir(parents=True)
+    copy.write_text("project_name: x\n", encoding="utf-8")
+    assert config_is_client_supplied(copy) is False
+    assert client_named_config_is_untrusted(copy, session_id=SESSION) is False
+    seen: Dict[str, Any] = {}
+    _capturing(seen, monkeypatch)
+
+    _validate(copy)
 
     assert seen, "the validator never reached the file check"
     assert seen["untrusted_config"] is False, seen
