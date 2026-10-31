@@ -619,27 +619,37 @@ class ScanExecutionEngine:
     ) -> None:
         """Raise ValueError when this engine's selection leaves the scanner out.
 
-        *names* are the lowercased spellings the scanner answers to, the
-        configured name among them. The exclusion list wins, as it does in
-        ScanPhase; an allowlist that was given and names none of them leaves the
-        scanner out too, and so does a configured section that disables the
-        scanner (ScanPhase records such a scanner SKIPPED, "disabled in the
-        configuration"). An empty allowlist means every scanner. *section* is
-        the configured section when the caller has read it already.
+        *names* are the lowercased spellings the scanner answers to when it is
+        looked up. The selection is judged by the one name ScanPhase matches it
+        by: the configured name, else the declared name
+        (``_selectable_scanner_name``). A scanner that has neither is judged by
+        every spelling in *names*, because its name is known only once the phase
+        constructs it. Judged by every spelling, a scanner the configuration
+        renamed was refused for an exclusion naming its declared name, or let
+        through an allowlist naming it, while the phase ran or left out the
+        scanner by the configured name alone. The exclusion list wins, as it
+        does in ScanPhase; an allowlist that was given and names the scanner
+        none of them leaves it out too, and so does a configured section that
+        disables the scanner (ScanPhase records such a scanner SKIPPED,
+        "disabled in the configuration"). An empty allowlist means every
+        scanner. *section* is the configured section when the caller has read
+        it already.
         """
+        if section is _UNREAD:
+            section = self._scanner_section(scanner_class)
+        configured = self._selectable_scanner_name(scanner_class, section)
+        judged = {configured.lower().strip()} if configured else names
         excluded = {name.lower().strip() for name in self._init_excluded_scanners}
-        if names & excluded:
+        if judged & excluded:
             raise ValueError(
                 f"Scanner {scanner_name} is not enabled: it is named by the "
                 "exclusion list"
             )
         enabled = {name.lower().strip() for name in self._init_enabled_scanners}
-        if enabled and not names & enabled:
+        if enabled and not judged & enabled:
             raise ValueError(
                 f"Scanner {scanner_name} is not enabled: the selection does not name it"
             )
-        if section is _UNREAD:
-            section = self._scanner_section(scanner_class)
         if not section_enabled(section):
             raise ValueError(
                 f"Scanner {scanner_name} is not enabled: its configuration "

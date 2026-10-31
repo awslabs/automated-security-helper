@@ -264,6 +264,29 @@ def test_get_scanner_refuses_a_scanner_excluded_by_its_configured_name(
         engine.get_scanner("fake-scan")
 
 
+def test_get_scanner_judges_the_selection_by_the_configured_name_alone(
+    tmp_path, monkeypatch
+):
+    """ScanPhase matches --scanners and --exclude-scanners against the configured
+    name, so a renamed scanner an exclusion names by its declared name still runs
+    there. Red at the base: the lookup judged every spelling the scanner answers
+    to, so it refused the scanner the phase runs and let through the one the phase
+    leaves out."""
+    monkeypatch.setattr(AshConfig, "get_plugin_config", _renamed_section)
+
+    excluded_by_declared_name = _engine(tmp_path, excluded_scanners=["fake-scan"])
+    excluded_by_declared_name.plugins["scanner"] = [_FakeScanner]
+    assert isinstance(
+        excluded_by_declared_name.get_scanner("renamed-scan"), _FakeScanner
+    )
+
+    left_out_by_allowlist = _engine(tmp_path)
+    left_out_by_allowlist.plugins["scanner"] = [_FakeScanner]
+    left_out_by_allowlist._init_enabled_scanners = ["fake-scan"]
+    with pytest.raises(ValueError, match="does not name it"):
+        left_out_by_allowlist.get_scanner("renamed-scan")
+
+
 def test_get_scanner_refuses_a_scanner_its_section_disables(tmp_path, monkeypatch):
     """ScanPhase records a scanner whose section says enabled: false as SKIPPED,
     so check_enabled refuses it; the documented opt-out still builds it."""
