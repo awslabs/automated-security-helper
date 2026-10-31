@@ -523,12 +523,15 @@ def _copy_manifest(
     for pnpm (``SuppressionsNotLiftable``), never copied as it is: pnpm may
     still parse it, ignore lists included, and the flag's promise is that
     nothing is suppressed. Only pnpm reads ``pnpm.auditConfig``, so for npm and
-    yarn there is nothing to lift: yarn's copy holds every ``package.json``
-    below the package, a parser's broken-input fixture or a template with
-    ``{{deps}}`` among them, and refusing the package for one of those failed
-    the audit of a workspace pnpm never reads.
+    yarn there is nothing to lift, and their copy is always the bytes as they
+    were: yarn's copy holds every ``package.json`` below the package, a
+    parser's broken-input fixture or a template with ``{{deps}}`` among them,
+    and refusing the package for one of those failed the audit of a workspace
+    pnpm never reads. A manifest that did parse and held the key was still
+    rewritten for them, which turned an invalid byte into U+FFFD and ``1e400``
+    into ``Infinity`` and failed an audit that had nothing to lift.
     """
-    if not ignore_suppressions:
+    if not ignore_suppressions or binary != "pnpm":
         _write_copy(target, data, private)
         return
     try:
@@ -549,11 +552,7 @@ def _copy_manifest(
         # included: copying the bytes as they were kept the repository's
         # ignore lists under the flag that lifts them. The package is refused
         # with the reason instead; the scan loop records it as the audit's
-        # failure, and the scan fails closed. npm and yarn read no
-        # ``pnpm.auditConfig``, so their copy is the bytes as they were.
-        if binary != "pnpm":
-            _write_copy(target, data, private)
-            return
+        # failure, and the scan fails closed.
         raise SuppressionsNotLiftable(
             f"{target.name} could not be parsed ({type(error).__name__}: {error}), "
             "so its pnpm.auditConfig cannot be removed under "

@@ -160,6 +160,41 @@ class TestADeeplyNestedManifest:
         assert copied["package.json"] == raw
 
 
+class TestANpmManifestHoldingThePnpmKey:
+    """Only pnpm reads ``pnpm.auditConfig``, so under the flag the other tools'
+    copy has nothing to lift and keeps the manifest's bytes."""
+
+    # A stray byte Node would decode as U+FFFD, and a number literal Node's
+    # JSON parser reads as Infinity and then refuses: both survive the bytes
+    # and neither survives a parse and dump.
+    RAW = (
+        b'{"name": "odd\xff", "big": 1e400, "pnpm": {"auditConfig": '
+        + json.dumps(AUDIT_CONFIG).encode()
+        + b"}}"
+    )
+
+    def test_is_copied_byte_for_byte_under_the_flag(self, tmp_path):
+        """The copy re-serialized any manifest that held the key, whichever
+        tool was auditing: the invalid byte became U+FFFD and ``1e400`` became
+        ``Infinity``, which npm refuses, so an audit with nothing to lift
+        failed on the rewritten file."""
+        package = _package(tmp_path / "repo" / "odd", "package-lock.json", self.RAW)
+
+        copied = _copy("npm", package, tmp_path, ignore_suppressions=True)
+
+        assert copied["package.json"] == self.RAW
+
+    def test_still_loses_the_key_when_pnpm_is_the_tool(self, tmp_path):
+        """Control: the same manifest, audited by pnpm, is parsed and loses the
+        key under the flag."""
+        package = _package(tmp_path / "repo" / "odd", "pnpm-lock.yaml", self.RAW)
+
+        copied = _copy("pnpm", package, tmp_path, ignore_suppressions=True)
+
+        assert "auditConfig" not in json.loads(copied["package.json"]).get("pnpm", {})
+        assert b"CVE-2026-0001" not in copied["package.json"]
+
+
 class TestAManifestWithAnInvalidByte:
     def test_loses_its_audit_config_under_the_flag(self, tmp_path):
         """Node decodes an invalid byte as U+FFFD and parses on, so the manifest
