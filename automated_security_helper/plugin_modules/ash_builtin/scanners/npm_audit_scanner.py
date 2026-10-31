@@ -1779,6 +1779,27 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             )
         return disagreeing
 
+    @staticmethod
+    def _entry_nodes(pkg_name: str, vuln_info: Dict[str, Any]) -> List[Any]:
+        """The installed-copy paths an entry's advisories are reported against,
+        or ``[None]`` for the package by name when npm lists none.
+
+        An item of ``nodes`` that is not a path (a report npm did not write: a
+        dict or a list) is logged and left out. It cannot be placed, and the
+        range exclusion keeps its copies in a set, so an item that cannot be
+        hashed raised ``TypeError`` there and failed the whole conversion as a
+        scanner error, where the neighbouring guards skip a malformed ``via``.
+        """
+        nodes = vuln_info.get("nodes") or []
+        usable = [node for node in nodes if isinstance(node, str)]
+        if len(usable) != len(nodes):
+            ASH_LOGGER.warning(
+                f"npm-audit: ignoring {len(nodes) - len(usable)} item(s) of the "
+                f"nodes of {pkg_name} that are not a path",
+                extra=NO_MARKUP,
+            )
+        return usable or [None]
+
     def _dependency_only_copies(
         self,
         pkg_name: str,
@@ -2069,6 +2090,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 dependency_only = self._dependency_only_copies(
                     pkg_name, vuln_info, via_items, lock_rel, lock_index
                 )
+                entry_nodes = self._entry_nodes(pkg_name, vuln_info)
                 for via in via_items:
                     # Skip if it's just a string reference to another package
                     if isinstance(via, str):
@@ -2143,7 +2165,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     # for the package by name when npm lists no node: the
                     # advisory is counted in the report's metadata, so a rule
                     # with no result silently dropped a finding.
-                    for node_path in vuln_info.get("nodes") or [None]:
+                    for node_path in entry_nodes:
                         # The URI keeps its historical shape, which existing
                         # path-based suppressions match; package_path holds
                         # the real install path.

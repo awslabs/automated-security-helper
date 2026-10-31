@@ -307,6 +307,29 @@ def test_a_copy_of_a_mixed_entry_with_no_known_version_keeps_the_own_advisory(
     assert _by_rule(report) == [("GHSA-xvch-5gv4-984h", node)]
 
 
+@pytest.mark.parametrize(
+    "nodes",
+    [
+        [{"path": "node_modules/minimist"}, "node_modules/minimist"],
+        [["node_modules/minimist"]],
+        [{"path": "node_modules/minimist"}],
+    ],
+    ids=["dict-beside-a-path", "a-list", "only-a-dict"],
+)
+def test_a_node_that_is_not_a_path_does_not_fail_the_conversion(scanner, nodes):
+    """The range exclusion keeps copies in a set, and an item of ``nodes`` that
+    is a dict or a list cannot be hashed: ``node_path not in disagreeing`` raised
+    ``TypeError`` and the whole conversion failed as a scanner error, where the
+    neighbouring code skips a malformed ``via``. Such an item is left out, and
+    the entry is still reported: against its path when it lists one, else by
+    package name."""
+    report = scanner._convert_npm_audit_to_sarif(
+        _report(nodes, ranges=("<2.0.0",)), scanner.context.source_dir
+    )
+
+    assert [r.ruleId for r in report.runs[0].results] == ["GHSA-xvch-5gv4-984h"]
+
+
 def test_an_unknown_version_keeps_the_advisory_once_per_copy(scanner, monkeypatch):
     """Control: with no installed version the answer is uncertain, so the
     advisory is still reported on the copy. Once: the two via entries are one
