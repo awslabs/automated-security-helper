@@ -301,6 +301,68 @@ def test_the_note_names_each_change_a_block_holds(test_plugin_context):
     assert "a backslash before text that reads as an escape is doubled" in note, note
 
 
+def test_the_note_does_not_say_a_backslash_before_plain_text_is_doubled(
+    test_plugin_context,
+):
+    """A backslash that comes before no escape is shown as it is, so the note
+    does not claim it was doubled.
+
+    RED at the base: the note added the doubling clause for any backslash in a
+    shown block, so a Windows path beside a command form was said to be doubled
+    when nothing in it was.
+    """
+    document = _render(
+        test_plugin_context,
+        [_snippet_result("::warning::C:\\Program Files")],
+    )
+
+    (note,) = _shown_notes(document)
+    assert "CI command forms are broken" in note, note
+    assert "backslash" not in note, note
+    assert "C:\\Program Files" in document
+
+
+def test_the_note_for_a_control_does_not_call_a_plain_backslash_doubled(
+    test_plugin_context,
+):
+    """The same, for a block shown because of a control character."""
+    document = _render(
+        test_plugin_context,
+        [_snippet_result("C:\\Program Files\x1b[31m")],
+    )
+
+    (note,) = _shown_notes(document)
+    assert "control characters are written as escapes" in note, note
+    assert "backslash" not in note, note
+
+
+def test_the_note_for_a_command_form_before_crlf_names_only_the_command_form(
+    test_plugin_context,
+):
+    """A carriage return before a line feed is layout, shown as it is, so a
+    block whose one change is a broken command form is not said to hold
+    control characters (a pin: the note reads the same at the base).
+    """
+    document = _render(test_plugin_context, [_snippet_result("::error::x\r\n")])
+
+    (note,) = _shown_notes(document)
+    assert "CI command forms are broken" in note, note
+    assert "control characters" not in note, note
+    assert "backslash" not in note, note
+
+
+def test_the_note_names_a_doubled_backslash_before_a_written_control(
+    test_plugin_context,
+):
+    """A backslash run before a control is doubled with the control written as
+    an escape, so the reader is told (green at the base and at the tip)."""
+    document = _render(test_plugin_context, [_snippet_result("a \\\x1b[31m")])
+
+    (note,) = _shown_notes(document)
+    assert "control characters are written as escapes" in note, note
+    assert "a backslash before text that reads as an escape is doubled" in note, note
+
+
 def test_one_predicate_takes_the_allowed_layout_as_a_parameter():
     from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
         _is_plain,

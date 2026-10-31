@@ -36,7 +36,9 @@ from automated_security_helper.utils.sarif_utils import (
 from automated_security_helper.utils.severity_ladder import SEVERITIES, result_severity
 from automated_security_helper.utils.terminal_text import (
     commands_broken,
+    controls_shown,
     is_shown_as_escape,
+    only_controls_shown,
     shown_not_obeyed,
     shown_on_one_line,
 )
@@ -86,28 +88,40 @@ def _shown_block(text: Any) -> tuple[str, str]:
     character the source does not hold. Any other text is shown, not obeyed,
     keeping its lines, and the note says so. A plain block, the common case,
     is read once.
+
+    Each clause of the note is read from what showing the block changed, in
+    the order :func:`shown_not_obeyed` makes the changes: controls written as
+    escapes, a backslash run doubled, then command forms broken. A backslash
+    before text that reads as no escape is left as it is and is not mentioned.
     """
     value = "" if text is None else str(text)
     if _is_plain(value, _TEXT_LAYOUT):
         return value, ""
-    return str(shown_not_obeyed(value)), _shown_note(value)
+    with_controls_written = only_controls_shown(value)
+    with_runs_doubled = controls_shown(value)
+    return str(shown_not_obeyed(value)), _shown_note(
+        controls=with_controls_written != value,
+        doubled=with_runs_doubled != with_controls_written,
+        commands=commands_broken(with_runs_doubled) != with_runs_doubled,
+    )
 
 
-def _shown_note(value: str) -> str:
+def _shown_note(*, controls: bool, doubled: bool, commands: bool) -> str:
     """The note that says a block was shown, not printed as written.
 
     Showing a block writes its controls as escapes, breaks its CI command
     forms, and doubles a backslash that comes before text reading as an escape,
     so a copy of the block is not the source. The reader is told, and the note
-    names only what the block holds: text whose one change is a broken command
-    form is not said to hold control characters.
+    names only what showing the block changed: text whose one change is a
+    broken command form is not said to hold control characters, and a
+    backslash that reads as no escape is not said to be doubled.
     """
     changes = []
-    if _has_controls(value, _TEXT_LAYOUT):
+    if controls:
         changes.append("control characters are written as escapes")
-    if commands_broken(value) != value:
+    if commands:
         changes.append("CI command forms are broken")
-    if "\\" in value:
+    if doubled:
         changes.append("a backslash before text that reads as an escape is doubled")
     return (
         '<p class="shown-note"><small>Shown, not as written: '
