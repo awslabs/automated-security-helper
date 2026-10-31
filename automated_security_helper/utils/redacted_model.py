@@ -41,6 +41,7 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    cast,
     get_args,
     get_origin,
     get_type_hints,
@@ -1827,10 +1828,10 @@ def _arm_structurally_takes(arm: Any, value: Any) -> bool:
             args = get_args(arm)
             return not args or Ellipsis in args or len(args) == len(value)
         if _is_named_tuple(holder):
-            required = sum(
+            required_count = sum(
                 _named_tuple_field_is_required(holder, name) for name in holder._fields
             )
-            return required <= len(value) <= len(holder._fields)
+            return required_count <= len(value) <= len(holder._fields)
         return True
     if not isinstance(value, dict):
         return True
@@ -2614,18 +2615,18 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
     be the caller's own object (:func:`_downcast_what_validation_kept`)."""
     if isinstance(node, BaseModel):
         changed = False
-        for entries in (node.__dict__, node.__pydantic_extra__):
-            for entry in (entries or {}).values():
+        for held in (node.__dict__, node.__pydantic_extra__):
+            for entry in (held or {}).values():
                 if done.get(id(entry), entry) is not entry:
                     changed = True
         if not changed:
             return node
         fresh = _copied_for_rebuild(node, node.model_copy)
-        for entries in (fresh.__dict__, fresh.__pydantic_extra__):
-            for name, entry in list((entries or {}).items()):
+        for held in (fresh.__dict__, fresh.__pydantic_extra__):
+            for name, entry in list((held or {}).items()):
                 replacement = done.get(id(entry), entry)
                 if replacement is not entry:
-                    entries[name] = replacement  # type: ignore[index]
+                    held[name] = replacement  # type: ignore[index]
         return fresh
     if isinstance(node, dict):
         items = [
@@ -2684,7 +2685,7 @@ def _rebuilt_kept(node: Any, done: Dict[int, Any]) -> Any:
         value_class = type(node)
         if isinstance(node, tuple):
             if hasattr(value_class, "_fields"):  # a NamedTuple class
-                return value_class._make(entries)
+                return cast(Any, value_class)._make(entries)
             if value_class is tuple:
                 return tuple(entries)
             try:
