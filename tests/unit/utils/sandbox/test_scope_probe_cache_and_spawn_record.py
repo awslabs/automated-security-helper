@@ -28,8 +28,11 @@ Popen, was never counted. A failed plan is now counted apart (``failed_spawns``,
 from __future__ import annotations
 
 import contextvars
+import errno
+import os
 import platform
 import shlex
+import subprocess
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,8 +41,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from automated_security_helper.utils import subprocess_utils
-from automated_security_helper.utils.sandbox import scope
-from automated_security_helper.utils.sandbox.backends import SpawnPlan
+from automated_security_helper.utils.sandbox import backends, scope
+from automated_security_helper.utils.sandbox.backends import SandboxBackend, SpawnPlan
 from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
     SandboxUnavailable,
@@ -118,7 +121,9 @@ def test_a_probe_that_timed_out_is_probed_again_after_the_window(
     """Inside the window the refusal is served from memory (one timeout per tree
     scope, not one per scanner); past it the next request probes again."""
     backend = _backend()
-    probes = _probe_answers(monkeypatch, [SandboxUnavailable(TIMED_OUT), backend])
+    probes = _probe_answers(
+        monkeypatch, [scope.TransientProbeFailure(TIMED_OUT), backend]
+    )
 
     with pytest.raises(scope.SandboxBackendUnavailable) as first:
         scope.resolve_backend("bwrap")
@@ -141,7 +146,7 @@ def test_a_busy_resource_is_probed_again_after_the_window(
     probes = _probe_answers(
         monkeypatch,
         [
-            SandboxUnavailable(
+            scope.TransientProbeFailure(
                 "bwrap probe failed: [Errno 11] Resource temporarily unavailable"
             ),
             backend,
@@ -164,7 +169,7 @@ def test_the_window_runs_from_the_end_of_a_slow_probe(fresh_cache, monkeypatch, 
     def slow_probe(name):
         probes.append(name)
         clock.advance(40.0)
-        raise SandboxUnavailable(TIMED_OUT)
+        raise scope.TransientProbeFailure(TIMED_OUT)
 
     monkeypatch.setattr(scope, "_probe_backend", slow_probe)
 
@@ -190,7 +195,7 @@ def test_inside_a_scan_a_transient_answer_is_kept_for_the_whole_scan(
     """Scanners start as the pool frees up, so one scan can outlast any window:
     a scanner that asks late must get the answer the first one got."""
     probes = _probe_answers(
-        monkeypatch, [SandboxUnavailable(TIMED_OUT), _backend("bwrap")]
+        monkeypatch, [scope.TransientProbeFailure(TIMED_OUT), _backend("bwrap")]
     )
 
     with subprocess_utils.scanning_tree(tmp_path):
@@ -207,7 +212,7 @@ def test_inside_a_scan_a_transient_answer_is_kept_for_the_whole_scan(
 def test_the_next_scan_of_the_same_tree_probes_again(
     fresh_cache, monkeypatch, tmp_path
 ):
-    probes = _probe_answers(monkeypatch, [SandboxUnavailable(TIMED_OUT)])
+    probes = _probe_answers(monkeypatch, [scope.TransientProbeFailure(TIMED_OUT)])
 
     with subprocess_utils.scanning_tree(tmp_path):
         with pytest.raises(scope.SandboxBackendUnavailable):
@@ -234,7 +239,7 @@ def test_under_auto_a_scan_keeps_the_fallback_past_the_window(
         scope, "AUTO_ORDER", {platform.system().lower(): ("bwrap", "firejail")}
     )
     firejail = _backend("firejail")
-    answers = {"bwrap": [SandboxUnavailable(TIMED_OUT), _backend("bwrap")]}
+    answers = {"bwrap": [scope.TransientProbeFailure(TIMED_OUT), _backend("bwrap")]}
     probes: list = []
 
     def probe(name):
@@ -261,7 +266,7 @@ def test_two_scanner_threads_of_one_scan_share_one_probe(
 ):
     """Both threads ask at the same moment (a barrier, not a sleep); whichever
     gets `_probe_lock` first probes, and the other is served its answer."""
-    probes = _probe_answers(monkeypatch, [SandboxUnavailable(TIMED_OUT)])
+    probes = _probe_answers(monkeypatch, [scope.TransientProbeFailure(TIMED_OUT)])
     barrier = threading.Barrier(2)
     refused: list = []
 
@@ -287,6 +292,108 @@ def test_two_scanner_threads_of_one_scan_share_one_probe(
     assert probes == ["bwrap"]
 
 
+class _OneProbeCommand(SandboxBackend):
+    """A backend with the real ``probe()``: its one probe command goes through
+    the module's own process helper, so what the patched ``subprocess.run``
+    raises or returns is what the real producer of the reason sees."""
+
+    name = "bwrap"
+    platforms = (platform.system().lower(),)
+
+    def _probe(self):
+        return backends._probe_run(["/usr/bin/true"])
+
+
+def _real_probe(monkeypatch, outcome):
+    """Route ``resolve_backend("bwrap")`` through ``_OneProbeCommand`` and make
+    its command end in *outcome* (an exception is raised, else returned)."""
+    runs: list = []
+
+    def run(argv, **kwargs):
+        runs.append(list(argv))
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setitem(scope.BACKENDS, "bwrap", _OneProbeCommand)
+    monkeypatch.setattr(backends.subprocess, "run", run)
+    return runs
+
+
+PASSING_CONDITIONS = [
+    pytest.param(subprocess.TimeoutExpired(["/usr/bin/true"], 20), id="timeout"),
+    pytest.param(
+        BlockingIOError(errno.EAGAIN, os.strerror(errno.EAGAIN)), id="no-process-yet"
+    ),
+    pytest.param(OSError(errno.EBUSY, os.strerror(errno.EBUSY)), id="resource-busy"),
+]
+
+LASTING_CONDITIONS = [
+    pytest.param(
+        FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT)), id="no-program"
+    ),
+    pytest.param(
+        subprocess.CompletedProcess(["/usr/bin/true"], 1, "", "operation timed out"),
+        id="the-tools-own-output-says-timed-out",
+    ),
+]
+
+
+@pytest.mark.parametrize("outcome", PASSING_CONDITIONS)
+def test_a_real_probe_that_hit_a_passing_condition_is_probed_again(
+    fresh_cache, monkeypatch, clock, outcome
+):
+    """The type and errno of what the probe raised decide, not its wording
+    (EAGAIN is 11 on Linux only, and EBUSY has no wording the old text matched)."""
+    runs = _real_probe(monkeypatch, outcome)
+
+    with pytest.raises(scope.SandboxBackendUnavailable):
+        scope.resolve_backend("bwrap")
+    with pytest.raises(scope.SandboxBackendUnavailable):
+        scope.resolve_backend("bwrap")
+    assert len(runs) == 1
+
+    clock.advance(PAST_THE_WINDOW)
+    with pytest.raises(scope.SandboxBackendUnavailable):
+        scope.resolve_backend("bwrap")
+    assert len(runs) == 2
+
+
+@pytest.mark.parametrize("outcome", LASTING_CONDITIONS)
+def test_a_real_probe_that_failed_lastingly_is_remembered_whatever_it_says(
+    fresh_cache, monkeypatch, clock, outcome
+):
+    """Red at the base for the tool's own output: its "timed out" matched the
+    text markers, so a reworded lasting failure was probed again and again."""
+    runs = _real_probe(monkeypatch, outcome)
+
+    for _ in range(2):
+        with pytest.raises(scope.SandboxBackendUnavailable):
+            scope.resolve_backend("bwrap")
+        clock.advance(PAST_THE_WINDOW)
+
+    assert len(runs) == 1
+
+
+def test_a_probe_that_works_after_a_failed_one_is_not_marked_transient():
+    """The flag is the last probe's own: a backend that timed out and then
+    answers is not remembered as transient."""
+    outcomes = [subprocess.TimeoutExpired(["/usr/bin/true"], 20), None]
+
+    class _Flaky(_OneProbeCommand):
+        def _probe(self):
+            outcome = outcomes.pop(0)
+            if outcome is not None:
+                raise outcome
+            return None
+
+    backend = _Flaky()
+    assert "probe failed" in (backend.probe() or "")
+    assert backend.probe_was_transient is True
+    assert backend.probe() is None
+    assert backend.probe_was_transient is False
+
+
 def test_a_missing_backend_is_remembered(fresh_cache, monkeypatch, clock):
     """A missing program has no window: it is remembered for the process."""
     probes = _probe_answers(monkeypatch, [SandboxUnavailable(NOT_INSTALLED)])
@@ -308,7 +415,7 @@ def test_under_auto_one_timed_out_member_is_probed_again(
     )
     backend = _backend()
     answers = {
-        "bwrap": [SandboxUnavailable(TIMED_OUT), backend],
+        "bwrap": [scope.TransientProbeFailure(TIMED_OUT), backend],
         "firejail": [SandboxUnavailable("firejail is not installed")],
     }
     probes: list = []
@@ -347,7 +454,7 @@ def test_under_auto_a_fallback_past_a_transient_skip_expires(
     bwrap = _backend("bwrap")
     firejail = _backend("firejail")
     answers = {
-        "bwrap": [SandboxUnavailable(TIMED_OUT), bwrap],
+        "bwrap": [scope.TransientProbeFailure(TIMED_OUT), bwrap],
         "firejail": [firejail],
     }
     probes: list = []

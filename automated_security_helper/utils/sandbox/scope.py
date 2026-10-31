@@ -174,17 +174,21 @@ _probe_lock = threading.Lock()
 # must not reuse a backend another scan's lookup chose.
 _resolved: Dict[Any, "SandboxBackend | SandboxUnavailable"] = {}
 
-#: Fragments of a probe's reason that name a passing condition, not a missing
-#: feature: the probe process ran past the backend's probe timeout (the text
-#: subprocess gives a TimeoutExpired, which ``SandboxBackend.probe`` keeps as
-#: the reason), or the kernel refused a resource for now (EAGAIN's strerror).
-#: An answer reached through such a condition (the refusal itself, or under auto
-#: a fallback chosen because the preferred backend met one) is remembered for
-#: ``_TRANSIENT_RETRY_SECONDS`` only, so the scanners of one scan share one
-#: answer and a later request probes again; a missing program or kernel
-#: feature, and a backend found with no transient skip, are remembered for the
-#: process.
-_TRANSIENT_REASON_MARKERS: Tuple[str, ...] = ("timed out", "temporarily unavailable")
+
+class TransientProbeFailure(SandboxUnavailable):
+    """A backend's probe failed through a passing condition, not a missing feature.
+
+    Raised when ``SandboxBackend.probe`` met a condition that can be gone by the
+    next request: the probe process ran past the backend's probe timeout, or the
+    system refused a resource for now (``EAGAIN``, ``EBUSY``). The backend sets
+    the fact where the exception was caught (``probe_was_transient``); nothing
+    here reads the reason's wording. An answer reached through such a failure
+    (the refusal itself, or under auto a fallback chosen because the preferred
+    backend met one) is remembered for the scan only (``_TransientHold``); a
+    missing program or kernel feature, and a backend found with no transient
+    skip, are remembered for the process.
+    """
+
 
 #: How long an answer reached through a transient condition is kept when no scan
 #: is running (a probe made outside any scan: ``ash dependencies``, a plugin
@@ -234,20 +238,18 @@ def _scan_notes() -> Optional[Set[Any]]:
     return tree.warned if tree is not None else None
 
 
-def _probe_reason_is_transient(refusal: SandboxUnavailable) -> bool:
+def _probe_failure_is_transient(refusal: SandboxUnavailable) -> bool:
     """Whether the probe that produced ``refusal`` could answer differently later.
 
-    Read from the reason's text: the backends report a probe that raised as text,
-    so the exception class is not available here. Under auto the reason joins
-    every backend's, and one transient member makes the whole answer transient,
-    which re-probes the others too. The cost is bounded by
-    ``_TRANSIENT_RETRY_SECONDS``: one probe per tree scope per window, each
-    bounded by the backend's probe timeout, for as long as the condition lasts,
-    where remembering a timeout for the process refused or downgraded every
-    later scan.
+    By type: ``_probe_backend`` raises a ``TransientProbeFailure`` for a probe the
+    backend marked transient, and ``_resolve_auto`` raises one when any backend it
+    tried was, so under auto one transient member makes the whole answer
+    transient, which re-probes the others too. The cost is bounded: one probe per
+    tree scope per scan (or per window outside a scan), each bounded by the
+    backend's probe timeout, for as long as the condition lasts, where
+    remembering a timeout for the process refused or downgraded every later scan.
     """
-    reason = str(refusal)
-    return any(marker in reason for marker in _TRANSIENT_REASON_MARKERS)
+    return isinstance(refusal, TransientProbeFailure)
 
 
 #: The (tree scope key, scanner name, setting) triples whose grant-withheld
@@ -297,6 +299,10 @@ def _probe_backend(name: str) -> SandboxBackend:
     backend = BACKENDS[name]()
     reason = backend.probe()
     if reason:
+        # ``is True``: a test double that answers any attribute must not make
+        # every refusal transient.
+        if getattr(backend, "probe_was_transient", False) is True:
+            raise TransientProbeFailure(reason)
         raise SandboxUnavailable(reason)
     return backend
 
@@ -306,7 +312,7 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
 
     Probed once per process and mode, under a lock, because parallel scanner threads
     ask at the same moment and each probe starts a process. An answer reached
-    through a transient condition (``_probe_reason_is_transient``: the refusal
+    through a transient condition (``_probe_failure_is_transient``: the refusal
     itself, or under auto a fallback taken because the preferred backend met one)
     is kept for the scan that reached it (``_TransientHold``), so every scanner of
     one scan gets one answer, and probed again by the next scan; reached outside
@@ -343,7 +349,7 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
                 # process's life, one stack per tree scope.
                 cached = e.with_traceback(None)
                 cached.__context__ = None
-                transient = _probe_reason_is_transient(cached)
+                transient = _probe_failure_is_transient(cached)
             _resolved[cache_key] = cached
             if transient:
                 # Kept for the scan that asked. Outside a scan the window is
@@ -386,8 +392,9 @@ def _resolve_auto() -> Tuple[SandboxBackend, bool]:
             return _probe_backend(name), transient
         except SandboxUnavailable as e:
             reasons.append(f"{name}: {e}")
-            transient = transient or _probe_reason_is_transient(e)
-    raise SandboxUnavailable(
+            transient = transient or _probe_failure_is_transient(e)
+    failure_type = TransientProbeFailure if transient else SandboxUnavailable
+    raise failure_type(
         "--sandbox auto found no working sandbox (" + "; ".join(reasons) + ")"
     )
 

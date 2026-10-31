@@ -180,6 +180,25 @@ class SpawnPlan:
                 ASH_LOGGER.debug(scope_shown_text(f"Sandbox cleanup failed: {e}"))
 
 
+#: The errnos that name a resource refused for now: the system had no process or
+#: memory to give, or the resource was busy. EWOULDBLOCK is EAGAIN on Linux and
+#: a different number elsewhere.
+_TRANSIENT_PROBE_ERRNOS = frozenset({errno.EAGAIN, errno.EWOULDBLOCK, errno.EBUSY})
+
+
+def _is_transient_probe_error(error: BaseException) -> bool:
+    """Whether a probe that raised ``error`` met a condition that may pass.
+
+    A probe process that outran its timeout, or an OS error whose errno says
+    the resource was refused for now. By the exception's type and errno, not by
+    its text: a reworded message, or a tool's own output saying "timed out",
+    names nothing about the next request.
+    """
+    if isinstance(error, subprocess.TimeoutExpired):
+        return True
+    return isinstance(error, OSError) and error.errno in _TRANSIENT_PROBE_ERRNOS
+
+
 class SandboxBackend:
     """Base class. Subclasses set ``name`` and implement ``_probe`` and ``plan``."""
 
@@ -195,13 +214,23 @@ class SandboxBackend:
         """
         return False
 
+    #: True when the last ``probe()`` failed through a passing condition: the probe
+    #: process outran its timeout, or the system refused a resource for now
+    #: (``_is_transient_probe_error``). Set where the exception is caught, because
+    #: the reason is text from then on; a reason that is only an exit status or a
+    #: missing program never sets it. The scope reads it to decide how long to
+    #: remember the refusal.
+    probe_was_transient = False
+
     def probe(self) -> Optional[str]:
         """None when the backend works here, otherwise why it does not."""
+        self.probe_was_transient = False
         if platform.system().lower() not in self.platforms:
             return f"{self.name} is not available on {platform.system()}"
         try:
             return self._probe()
         except Exception as e:
+            self.probe_was_transient = _is_transient_probe_error(e)
             return f"{self.name} probe failed: {e}"
 
     def _probe(self) -> Optional[str]:
