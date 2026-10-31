@@ -5,6 +5,7 @@ import functools
 import importlib
 import re
 import sys
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from threading import Lock, local
@@ -14,6 +15,7 @@ from typing import (
     Callable,
     Dict,
     Annotated,
+    FrozenSet,
     Iterable,
     Iterator,
     List,
@@ -57,6 +59,32 @@ def callback_display_name(callback: Any, *, strict: bool = False) -> str:
     except Exception:  # noqa: BLE001 -- a display name must never raise
         name = None
     return name if isinstance(name, str) else "anonymous"
+
+
+def declared_event_type(event_type: Any) -> Any:
+    """The event key *event_type* subscribes or notifies under.
+
+    An ``AshEventType`` member is itself. A string naming a member
+    (``"SCAN_COMPLETE"``) is that member, so a plugin that spells its
+    ``ASH_EVENT_HANDLERS`` keys as strings subscribes under the key
+    ``notify()`` uses. Any other key is returned as it is, with a WARNING: the
+    phases notify ``AshEventType`` members, so a handler under such a key fires
+    only when something notifies that exact key, and a misspelled one never
+    fires while the load reports clean. Not refused: a program embedding ASH
+    may notify its own event names through the manager.
+    """
+    if isinstance(event_type, AshEventType):
+        return event_type
+    if isinstance(event_type, str):
+        member = AshEventType.__members__.get(event_type)
+        if member is not None:
+            return member
+    ASH_LOGGER.warning(
+        f"Event key {event_type!r} is not an AshEventType member: ASH notifies "
+        "none of its events under it, so a handler subscribed there fires only "
+        "when something notifies that exact key"
+    )
+    return event_type
 
 
 def callable_module(callback: Any) -> str | None:
@@ -242,12 +270,67 @@ class AshPluginLibrary(BaseModel):
     ] = {}
 
 
+#: How long a resolution that failed to import a registered module is reused
+#: before the import is tried again, in seconds of ``time.monotonic``.
+#:
+#: A failed ``importlib.import_module`` leaves nothing in ``sys.modules``, so
+#: "the path is in sys.modules" alone never fires for a module whose missing
+#: dependency an operator installs, or whose file an operator fixes, in a
+#: long-lived process (the MCP server): the partial list would stand until
+#: something else imported the module. A bounded window retries on its own.
+#: Keying the memo on the module file's mtime and size would miss the missing
+#: dependency case (the file does not change); clearing the memo at the start
+#: of each MCP request would need every request path to know about it and would
+#: not cover a long CLI process. Within the window a module that keeps failing
+#: is neither re-imported (its top-level code and decorators re-run, a decorator
+#: subscribing a fresh function object each time) nor re-warned on every
+#: resolve: a scan's many reads of one kind cost one import attempt per window.
+FAILED_IMPORT_RETRY_SECONDS = 60.0
+
+#: The clock the retry window is measured on; a module attribute so a test can
+#: stand in a clock of its own.
+_monotonic = time.monotonic
+
+
+class _HandlerOwners:
+    """Who subscribed one event-handler callback (see ``_declared_handler_modules``).
+
+    ``declarers`` are the plugin modules that own it; ``program`` is True when
+    the program running the scan subscribed it itself. Mutable: owners are
+    added as subscribes arrive, in any order. The callback is kept so a reused
+    id is never read as this record.
+    """
+
+    __slots__ = ("callback", "declarers", "program")
+
+    def __init__(self, callback: Any) -> None:
+        self.callback = callback
+        self.declarers: Set[str] = set()
+        self.program = False
+
+
 class _Resolution(NamedTuple):
     """What ``plugin_modules`` resolved one plugin kind to, and from what."""
 
-    #: (name, module path, enabled) of each registration, in registry order.
-    registrations: Tuple[Tuple[str, str, bool], ...]
+    #: (name, module path, enabled, id of the registration object) of each
+    #: registration, in registry order. The id is part of the key: a module
+    #: refused and evicted, then imported again, registers under the same name,
+    #: path and flag, and a key of those three alone handed the evicted module's
+    #: class objects back from the memo. The objects themselves are kept beside
+    #: the key (``held``), so an id cannot be reused while the memo lives.
+    registrations: Tuple[Tuple[str, str, bool, int], ...]
     classes: List[type]
+    #: Module paths whose import failed in this resolution. The memo is reused
+    #: until one of them is in ``sys.modules`` (something imported it since: a
+    #: later scan naming it) or until ``FAILED_IMPORT_RETRY_SECONDS`` have passed
+    #: since ``failed_at``, whichever comes first; a resolution with no failure
+    #: is reused until the registrations change.
+    failed: Tuple[str, ...] = ()
+    #: The registration objects the key's ids belong to, kept so no id is
+    #: reused while the memo lives.
+    held: Tuple[Any, ...] = ()
+    #: ``_monotonic()`` when the failed imports were tried.
+    failed_at: float = 0.0
 
 
 class AshPluginManager(BaseModel):
@@ -268,6 +351,22 @@ class AshPluginManager(BaseModel):
     #: differently-configured scans against it concurrently, so subscribe and
     #: notify cannot both touch the same list unsynchronised.
     _event_lock: Lock = PrivateAttr(default_factory=Lock)
+    #: ``id(callback)`` -> :class:`_HandlerOwners` for every subscribed callback:
+    #: the plugin modules that own it (the module whose ``ASH_EVENT_HANDLERS``
+    #: listed it, which the loader subscribes with ``declared_by``, or the
+    #: module whose import subscribed it through a decorator inside a
+    #: :meth:`declaring_import` window) and whether the program running the
+    #: scan subscribed it itself (a subscribe with no declarer outside any
+    #: import window). A handler's ``__module__`` says where its function was
+    #: defined, not who subscribed it: a plugin module may list a function from
+    #: a helper library, or a functools.partial, and the same callable can be
+    #: both a module's and the program's. A scan's handler filter reads both
+    #: facts (:meth:`handler_owners`) and admits the program's handlers in every
+    #: scan and a module's only in a scan naming the module. The callback is
+    #: kept beside its record so a reused id is never read as a record of a
+    #: different object. Guarded by ``_event_lock``, with the handler lists it
+    #: describes.
+    _declared_handler_modules: dict = PrivateAttr(default_factory=dict)
     #: Which registrations an untrusted import made, so a scan is offered only
     #: the classes its own modules load (``plugins_loaded_by``). By plugin type
     #: and name: the module imported for an untrusted source, and the
@@ -298,8 +397,19 @@ class AshPluginManager(BaseModel):
             extra=NO_MARKUP,
         )
 
-    def subscribe(self, event_type, callback):
+    def subscribe(self, event_type, callback, *, declared_by: str | None = None):
         """Subscribe a callback to a specific event type, at most once.
+
+        ``declared_by`` names the plugin module whose ``ASH_EVENT_HANDLERS``
+        listed the callback, when the loader is the caller. A subscribe with no
+        declarer made while the loader imports a plugin module (inside
+        :meth:`declaring_import`, where the module's decorators run) belongs to
+        that module; one made outside any import window is the program's own.
+        Every owner is recorded (:meth:`handler_owners`), in whatever order the
+        subscribes arrive: a plugin's handler that its import subscribed
+        before the loader's declared subscribe is still the plugin's, not the
+        program's, and a callable both the program and a plugin module
+        subscribed is admitted in every scan as the program's.
 
         Idempotent, and locked, because both properties are load-bearing once
         more than one differently-configured scan runs in a process:
@@ -319,8 +429,31 @@ class AshPluginManager(BaseModel):
         two subscribers.
 
         Still returns the callback so decorator usage is unchanged.
+
+        The key is normalized by :func:`declared_event_type`: a string naming an
+        ``AshEventType`` member subscribes under the member, and a key no ASH
+        event uses is accepted with a warning instead of silently.
         """
+        event_type = declared_event_type(event_type)
+        # Read outside the lock: the window is this thread's own.
+        window = getattr(self._importing, "declaring", None)
         with self._event_lock:
+            # Every owner is recorded, never only the first: a decorator that
+            # runs while the loader imports a plugin module subscribes before
+            # the loader's declared subscribe, and a first-owner rule read that
+            # handler as the program's and ran it in every scan; the reverse
+            # order silenced a program handler a plugin module also listed.
+            record = self._declared_handler_modules.get(id(callback))
+            if record is None or record.callback is not callback:
+                record = _HandlerOwners(callback)
+                self._declared_handler_modules[id(callback)] = record
+            owner = (
+                declared_by if isinstance(declared_by, str) and declared_by else window
+            )
+            if owner:
+                record.declarers.add(owner)
+            else:
+                record.program = True
             handlers = self.plugin_library.event_handlers.setdefault(event_type, [])
             if callback in handlers:
                 ASH_LOGGER.debug(
@@ -335,6 +468,54 @@ class AshPluginManager(BaseModel):
         )
         return callback  # Return for decorator usage
 
+    def handler_owners(self, callback: Any) -> Tuple[FrozenSet[str], bool]:
+        """Who subscribed *callback*: ``(plugin modules, the program did)``.
+
+        The modules are the ones whose ``ASH_EVENT_HANDLERS`` listed it (the
+        loader's ``declared_by``) and the ones whose import subscribed it
+        through a decorator (:meth:`declaring_import`); the flag is True when a
+        subscribe with no declarer arrived outside any import window, the
+        program running the scan subscribing its own handler. Both can hold at
+        once. ``(frozenset(), False)`` for a callback never subscribed, or
+        whose record belongs to a different object with a reused id.
+        """
+        with self._event_lock:
+            record = self._declared_handler_modules.get(id(callback))
+            if record is None or record.callback is not callback:
+                return frozenset(), False
+            return frozenset(record.declarers), record.program
+
+    def handler_declared_by(self, callback: Any) -> str | None:
+        """One plugin module that owns *callback*, or None.
+
+        The first of :meth:`handler_owners`' modules in sorted order; None for
+        a callback only the program subscribed, and for one never subscribed.
+        A callback both the program and a module subscribed has a module here
+        AND the program flag in :meth:`handler_owners`, which is what a scan's
+        handler filter reads; this is the one-module view for logs and tests.
+        """
+        declarers, _program = self.handler_owners(callback)
+        return min(declarers) if declarers else None
+
+    @contextmanager
+    def declaring_import(self, module_name: str) -> Iterator[None]:
+        """Attribute what this thread subscribes inside the block to ``module_name``.
+
+        For the loader's import of a plugin module: the module's decorators
+        (``event_subscriber``) subscribe handlers with no declarer while it
+        imports, and without the window those subscribes read as the program's,
+        which admitted the module's handlers into every scan of the process.
+        Per thread, as :meth:`untrusted_import` is, and for the same reason;
+        the two windows are independent (an operator-named module is a
+        declaring import and not an untrusted one).
+        """
+        previous = getattr(self._importing, "declaring", None)
+        self._importing.declaring = module_name
+        try:
+            yield
+        finally:
+            self._importing.declaring = previous
+
     def notify(
         self,
         event_type,
@@ -346,47 +527,102 @@ class AshPluginManager(BaseModel):
         """Notify the subscribers of an event: those the given filters accept.
 
         Args:
-            event_type: The event to notify.
+            event_type: The event to notify, normalized as ``subscribe``
+                normalizes it (a string naming an ``AshEventType`` member is
+                that member).
             handler_filter: Which subscribers this notification reaches. A scan
-                passes its own (``plugins.loader.scan_handler_filter``), so a
-                handler registered by a plugin module only another scan named is
-                not called for it. None notifies every subscriber.
-            _scope: The filter for a scan's own plugin modules
-                (``loader.plugins_of``). Subscriptions are process-wide, so
-                without it an event handler that another scan's modules
-                subscribed ran in this one, and was handed this run's context
-                and results. ``_scope`` is not passed on to the handlers.
-                With both filters given, a subscriber is notified only when
-                both accept it.
+                passes its own (``plugins.loader.scan_handler_filter``) for its
+                engine-level events, and the phases it builds pass the same one
+                as their ``plugin_scope``, so a handler registered by a plugin
+                module only another scan named is not called for it, and a
+                handler the program running the scan subscribed is notified for
+                phase events as for execution events. None notifies every
+                subscriber.
+            _scope: A second filter a caller may add (``loader.plugins_of`` is
+                one shape), applied with ``handler_filter``: a subscriber is
+                notified only when both accept it. Subscriptions are
+                process-wide, so without a filter an event handler that another
+                scan's modules subscribed ran in this one, and was handed this
+                run's context and results. ``_scope`` is not passed on to the
+                handlers.
+
+        A filter is applied per callback under a guard: one subscribed
+        callable whose attribute reads make a filter raise used to abort the
+        whole notification for every subscriber of the event; such a callback
+        is left out of this notification instead, and the failure is logged.
+
+        The callbacks are called under a guard of the same shape: one raising
+        subscriber used to end the notification there, so every subscriber
+        after it in the list missed the event (a second plugin package's
+        completion logger, say, when the first package's handler raised). Now
+        every admitted subscriber is called; a raising one is logged at
+        WARNING by name, and the first exception is re-raised once the rest
+        have run, so a caller that reads a handler's failure as its own (a
+        *_PHASE_START notification ends the run with what the handler raised)
+        still does, and a caller that logs and moves on (the scan executor,
+        ``_notify_phase_complete``) still logs the same error.
         """
+        event_type = declared_event_type(event_type)
         if not hasattr(self.plugin_library, "event_handlers"):
             ASH_LOGGER.debug(
                 f"No event handlers dictionary exists for event {event_type}"
             )
             return []
 
-        if event_type not in self.plugin_library.event_handlers:
+        # Snapshot under the lock, the membership test included. An undo on
+        # another thread (undo_registrations_since) deletes an event's key once
+        # its last handler is gone, so a membership test outside the lock
+        # followed by an index inside it raised KeyError. A callback subscribed
+        # from another project's thread while this loop ran would otherwise
+        # raise "list changed size during iteration", and the same handler list
+        # is shared by every project in a workspace.
+        with self._event_lock:
+            handlers = list(self.plugin_library.event_handlers.get(event_type, ()))
+        if not handlers:
             ASH_LOGGER.debug(f"No subscribers for event {event_type}")
             return []
-
-        # Snapshot under the lock. A callback subscribed from another project's
-        # thread while this loop ran would otherwise raise "list changed size
-        # during iteration", and the same handler list is shared by every project
-        # in a workspace.
-        with self._event_lock:
-            handlers = list(self.plugin_library.event_handlers[event_type])
-        if handler_filter is not None:
-            handlers = [callback for callback in handlers if handler_filter(callback)]
-        if _scope is not None:
-            handlers = [callback for callback in handlers if _scope(callback)]
+        for admits in (handler_filter, _scope):
+            if admits is None:
+                continue
+            admitted = []
+            for callback in handlers:
+                try:
+                    accepted = admits(callback)
+                except Exception as filter_error:  # noqa: BLE001 -- one callback cannot break the notify
+                    ASH_LOGGER.warning(
+                        "The handler filter raised on subscriber "
+                        f"{callback_display_name(callback)} of event {event_type}; "
+                        f"it is left out of this notification: {filter_error!r}"
+                    )
+                    continue
+                if accepted:
+                    admitted.append(callback)
+            handlers = admitted
 
         ASH_LOGGER.debug(f"Notifying {len(handlers)} subscribers of event {event_type}")
         results = []
+        first_error: BaseException | None = None
         for callback in handlers:
             ASH_LOGGER.debug(
                 f"Calling subscriber callback {callback_display_name(callback)}"
             )
-            results.append(callback(*args, **kwargs))
+            try:
+                results.append(callback(*args, **kwargs))
+            except Exception as handler_error:  # noqa: BLE001 -- the other subscribers still get the event
+                # The exception's text is plugin output and can quote anything
+                # (a value the run's configuration read from the environment
+                # included); the callers that catch the re-raised error redact
+                # it before logging, so this line names only the type and the
+                # subscriber and leaves the message to them.
+                ASH_LOGGER.warning(
+                    f"Subscriber {callback_display_name(callback)} of event "
+                    f"{event_type} raised {type(handler_error).__name__}; the "
+                    "remaining subscribers are still notified"
+                )
+                if first_error is None:
+                    first_error = handler_error
+        if first_error is not None:
+            raise first_error
 
         return results
 
@@ -433,19 +669,31 @@ class AshPluginManager(BaseModel):
             return
 
         registrations = self._registrations(plugin_type)
+        if registrations is None:
+            # Said, not silently dropped: the log used to read "Registered
+            # plugin module" for a type with no registry, and the plugin was
+            # nowhere.
+            ASH_LOGGER.warning(
+                without_masked_modules(
+                    f"Plugin module '{plugin_module_name}' from "
+                    f"'{plugin_module_path}' declares the unknown plugin type "
+                    f"{plugin_type!r} (converter, scanner or reporter expected); "
+                    "it is not registered."
+                )
+            )
+            return
+        untrusted = getattr(self._importing, "module", None)
         with self._registry_lock:
             key = plugin_module_name
-            existing = None
-            if registrations is not None:
+            existing = registrations.get(key)
+            if (
+                existing is not None
+                and existing.plugin_module_path != plugin_module_path
+            ):
+                key = f"{plugin_module_path}:{plugin_module_name}"
                 existing = registrations.get(key)
-                if (
-                    existing is not None
-                    and existing.plugin_module_path != plugin_module_path
-                ):
-                    key = f"{plugin_module_path}:{plugin_module_name}"
-                    existing = registrations.get(key)
             already_registered = existing is not None
-            if registrations is not None and not already_registered:
+            if not already_registered:
                 registration = AshPluginRegistration(
                     name=plugin_module_name,
                     plugin_module_path=plugin_module_path,
@@ -454,6 +702,20 @@ class AshPluginManager(BaseModel):
                 )
                 registration._masked_forms = _MASKED_MODULE_FORMS.get()
                 registrations[key] = registration
+                # By the key it was registered under, which plugins_loaded_by
+                # reads back. Recorded before the registry lock is released:
+                # plugins_loaded_by copies the untrusted record and then reads
+                # the registry, so a record written after the release let a
+                # concurrent reader see the registration without its
+                # attribution and keep a class its scan should not be offered.
+                # The provenance lock nests inside the registry lock here and
+                # nowhere is the order reversed.
+                if untrusted is not None:
+                    with self._provenance_lock:
+                        self._untrusted_registrations[(plugin_type, key)] = (
+                            untrusted,
+                            registration,
+                        )
         if already_registered:
             ASH_LOGGER.warning(
                 without_masked_modules(
@@ -462,15 +724,6 @@ class AshPluginManager(BaseModel):
                 )
             )
             return
-
-        # By the key it was registered under, which plugins_loaded_by reads back.
-        untrusted = getattr(self._importing, "module", None)
-        if untrusted is not None and registrations is not None:
-            with self._provenance_lock:
-                self._untrusted_registrations[(plugin_type, key)] = (
-                    untrusted,
-                    registrations[key],
-                )
 
         ASH_LOGGER.verbose(f"Registered plugin module '{plugin_module_name}'")
 
@@ -541,24 +794,40 @@ class AshPluginManager(BaseModel):
                         registry.pop(name, None)
         with self._event_lock:
             handlers_by_event = self.plugin_library.event_handlers
+            removed: List[Any] = []
             for event_type in list(handlers_by_event):
                 kept = events_before.get(event_type, [])
-                handlers_by_event[event_type] = [
-                    callback
-                    for callback in handlers_by_event[event_type]
-                    if any(callback is held for held in kept)
-                    or not _owned_handler(callback)
-                ]
+                remaining = []
+                for callback in handlers_by_event[event_type]:
+                    if any(callback is held for held in kept) or not _owned_handler(
+                        callback
+                    ):
+                        remaining.append(callback)
+                    else:
+                        removed.append(callback)
+                handlers_by_event[event_type] = remaining
                 if (
                     not handlers_by_event[event_type]
                     and event_type not in events_before
                 ):
                     del handlers_by_event[event_type]
+            # The declared-by record of a removed handler goes with it: the
+            # refused module's declarations are undone whole, and a callback
+            # object subscribed again later is recorded again by that load.
+            still_subscribed = {
+                id(callback)
+                for callbacks in handlers_by_event.values()
+                for callback in callbacks
+            }
+            for callback in removed:
+                if id(callback) not in still_subscribed:
+                    self._declared_handler_modules.pop(id(callback), None)
 
     def remove_plugin_module_registration(
         self,
         plugin_type: Literal["converter", "scanner", "reporter"],
         plugin_module_name: str,
+        plugin_module_path: str | None = None,
     ) -> bool:
         """Remove one plugin-module registration; True when it was there.
 
@@ -567,12 +836,32 @@ class AshPluginManager(BaseModel):
         manager's API rather than its state. Under the same lock as
         registration, and the resolved memo follows the registrations, so no
         cache needs touching.
+
+        ``plugin_module_path`` picks the registration when two modules
+        registered a class of the same name: the second is stored under
+        ``<module path>:<name>``, and popping by the bare name removed the
+        OTHER module's registration. With the path given, the registration
+        whose path it is goes, under whichever key it was stored; without it,
+        the bare name is popped as before.
         """
         registry = self._registrations(plugin_type)
         if registry is None:
             return False
         with self._registry_lock:
-            return registry.pop(plugin_module_name, None) is not None
+            if plugin_module_path is None:
+                return registry.pop(plugin_module_name, None) is not None
+            for key in (
+                plugin_module_name,
+                f"{plugin_module_path}:{plugin_module_name}",
+            ):
+                registration = registry.get(key)
+                if (
+                    registration is not None
+                    and registration.plugin_module_path == plugin_module_path
+                ):
+                    del registry[key]
+                    return True
+            return False
 
     def _registrations(self, plugin_type) -> Dict[str, AshPluginRegistration] | None:
         """The registration dict for *plugin_type*, or None for an unknown type."""
@@ -848,17 +1137,41 @@ class AshPluginManager(BaseModel):
         # "dictionary changed size during iteration".
         with self._registry_lock:
             registered = list(registrations.items())
-        resolved_from = tuple(
-            (name, registration.plugin_module_path, registration.enabled)
-            for name, registration in registered
-        )
+        resolved_from = self._resolution_key(registered)
         cached = self._resolved_plugins.get(cache_key)
-        if cached is not None and cached.registrations == resolved_from:
+        now = _monotonic()
+        retry_failed = (
+            cached is not None
+            and bool(cached.failed)
+            and (
+                any(path in sys.modules for path in cached.failed)
+                or now - cached.failed_at >= FAILED_IMPORT_RETRY_SECONDS
+            )
+        )
+        if (
+            cached is not None
+            and cached.registrations == resolved_from
+            and not retry_failed
+        ):
+            # The memo stands, failures included, until a failed path shows up
+            # in sys.modules (something imported it since) or the retry window
+            # has passed (FAILED_IMPORT_RETRY_SECONDS says why there is one), so
+            # a module that keeps failing is neither re-imported nor re-warned
+            # on every resolve, and one an operator has since fixed is loaded
+            # by the next resolve after the window without a restart.
             return self.filter_plugin_modules(
                 cached.classes, filter_callback, *args, **kwargs
             )
+        if retry_failed:
+            # The module file or its dependency may have appeared in a
+            # directory the import system listed before it existed (a package
+            # installed into a new site directory, a plugin file written
+            # beside the config); the finders' directory caches are dropped so
+            # the retry sees it.
+            importlib.invalidate_caches()
 
         plugins: List[type] = []
+        failed: List[str] = []
         for _name, registration in registered:
             if not registration.enabled:
                 continue
@@ -879,18 +1192,50 @@ class AshPluginManager(BaseModel):
                     ):
                         plugins.append(attr)
             except ImportError as e:
+                failed.append(registration.plugin_module_path)
                 ASH_LOGGER.warning(
                     registration.hide_masked_modules(
                         f"Failed to import plugin module {registration.plugin_module_path}: {e}"
                     )
                 )
 
-        # Memoise the unfiltered result, keyed by the registrations it came from,
-        # so repeat calls skip the import work until something new registers
-        self._resolved_plugins[cache_key] = _Resolution(resolved_from, plugins)
+        # Memoise the unfiltered result, keyed by the registrations it came from
+        # and carrying the paths that failed and when, so repeat calls skip the
+        # import work until something new registers, a failed module is
+        # imported, or the retry window passes.
+        # Not when the registry changed while the imports ran: the loader can
+        # evict a refused module and undo its registrations between the copy
+        # above and the import of it here, and a memo of that resolution would
+        # hand the re-executed module's classes to every later reader under a
+        # key the current registry no longer matches.
+        with self._registry_lock:
+            still_registered = list(registrations.items())
+        if self._resolution_key(still_registered) == resolved_from:
+            self._resolved_plugins[cache_key] = _Resolution(
+                resolved_from,
+                plugins,
+                tuple(failed),
+                tuple(registration for _name, registration in registered),
+                failed_at=now if failed else 0.0,
+            )
 
         # Apply filter callback
         return self.filter_plugin_modules(plugins, filter_callback, *args, **kwargs)
+
+    @staticmethod
+    def _resolution_key(
+        registered: List[Tuple[str, AshPluginRegistration]],
+    ) -> Tuple[Tuple[str, str, bool, int], ...]:
+        """The memo key of *registered*: name, path, flag and the object's identity."""
+        return tuple(
+            (
+                name,
+                registration.plugin_module_path,
+                registration.enabled,
+                id(registration),
+            )
+            for name, registration in registered
+        )
 
 
 #: The module attributes that list a plugin package's classes.

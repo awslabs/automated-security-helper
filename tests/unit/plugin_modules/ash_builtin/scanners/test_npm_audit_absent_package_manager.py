@@ -343,17 +343,24 @@ def test_a_bracketed_directory_name_does_not_crash_the_scan(
     # the scan did not crash, and the finding survived.
     assert row.status == ScannerStatus.FAILED, row
     assert row.finding_count == 1, row
-    assert "[/x]/yarn.lock" in markup_console.getvalue()
+    # The refusal line names the lockfile with the platform's separator, so the
+    # expected text is built from the path's parts: "[/x]/yarn.lock" where the
+    # separator is a slash (the Rich closing-tag shape this test is named for),
+    # a backslash-joined path on Windows, where no such tag can arise.
+    assert str(Path("[") / "x]" / "yarn.lock") in markup_console.getvalue()
 
 
 def test_an_audit_naming_a_bracketed_path_keeps_its_findings(
     context, monkeypatch, markup_console
 ):
-    """npm-audit logs each audit's result dict, stdout included, at INFO.
+    """npm-audit used to log each audit's result dict, stdout included, at INFO.
 
     A successful audit whose JSON names "pkgs/[/x]/node_modules/left-pad" raised
     MarkupError out of that log call; the scanner caught it as "the audit raised",
-    and that lockfile's findings were discarded (scan() raised ScannerError).
+    and that lockfile's findings were discarded (scan() raised ScannerError). The
+    raw response is no longer logged (a one-line redacted summary is, at DEBUG),
+    so the bracketed path reaches the console only through the lockfile list,
+    and the finding keeps the path in its properties.
 
     scan() is called directly. Through the executor the result processor's
     suppression matcher logs the finding's path with markup on too, which is the
@@ -396,12 +403,22 @@ def test_an_audit_naming_a_bracketed_path_keeps_its_findings(
     finally:
         ASH_LOGGER.removeHandler(file_log)
 
-    assert len(report.runs[0].results) == 1, report.runs[0].results
+    (result,) = report.runs[0].results
     assert (scanner.targets_attempted, scanner.targets_failed) == (1, 0)
-    assert "pkgs/[/x]/node_modules/left-pad" in markup_console.getvalue()
+    assert "pkgs/[/x]/node_modules/left-pad" in result.model_dump_json()
+    # The console shows the package's path with its brackets intact.
+    console = markup_console.getvalue()
+    assert "pkgs/[/x]/package.json" in console
     # The lockfile list reaches ash.log as the paths are, not escaped for Rich.
     (listed,) = [m for m in file_log.messages if "package locks" in m]
     assert "pkgs/[/x]/package.json" in listed and "\\[" not in listed, listed
+    # The raw response stays out of both sinks: neither its node path nor a key
+    # of the audit document is on the console or in ash.log. A stdout dump put
+    # back with markup off would not crash, so the absences are asserted.
+    assert "node_modules/left-pad" not in console, console
+    assert '"fixAvailable"' not in console, console
+    assert not any("node_modules/left-pad" in m for m in file_log.messages)
+    assert not any('"fixAvailable"' in m for m in file_log.messages)
 
 
 @pytest.mark.parametrize(

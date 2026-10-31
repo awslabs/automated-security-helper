@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import functools
+import inspect
 import json
 import logging
 import os
@@ -52,6 +53,7 @@ from automated_security_helper.core.cancellation import raise_if_cancelled
 from automated_security_helper.core.previous_results import (
     HELD_DIR_NAME,
     RESTORED_MARKER_NAME,
+    RESTORING_DIR_NAME,
     PreviousResults,
     holds_restored_results,
 )
@@ -124,6 +126,7 @@ from automated_security_helper.interactions.run_ash_container import (
 from automated_security_helper.interactions.run_ash_nix import (
     ASH_IN_NIX_ENV_VAR,
     NixModeRefused,
+    nix_executable_for_this_run,
     run_ash_nix,
 )
 from automated_security_helper.models.asharp_model import (
@@ -174,13 +177,12 @@ from automated_security_helper.utils.inner_run_outcome import (
     release_records_completion,
     report_file_written_as,
 )
-from automated_security_helper.utils.sarif_utils import _resolve_result_severity
-from automated_security_helper.utils.scan_output_dirs import WORKING_DIR_NAMES
-from automated_security_helper.utils.severity_ladder import (
-    SEVERITIES,
-    sarif_level_fails_threshold,
-    severity_fails_threshold,
+from automated_security_helper.utils.sarif_utils import (
+    _resolve_result_severity,
+    is_result_suppressed,
 )
+from automated_security_helper.utils.scan_output_dirs import WORKING_DIR_NAMES
+from automated_security_helper.utils.severity_ladder import severity_fails_threshold
 from automated_security_helper.workspace.plan import WorkspacePlan
 
 if TYPE_CHECKING:
@@ -628,15 +630,29 @@ def scanners_with_nothing_to_scan(
 _IGNORE_PATTERNS_SHOWN = 3
 
 
+#: The gate's way out of the nothing-to-scan exit, appended to the message when
+#: the gate is what clears it.
+_NOTHING_TO_SCAN_ACCEPT_REMEDY = (
+    " To accept a run that scanned nothing, set fail_on_incomplete_scanners: "
+    "false or pass --no-fail-on-incomplete-scanners."
+)
+
+
 def nothing_to_scan_message(
-    results: Optional[AshAggregatedResults], names: List[str]
+    results: Optional[AshAggregatedResults],
+    names: List[str],
+    *,
+    accept_remedy: bool = True,
 ) -> str:
     """Why a run whose scanners all had nothing to scan exits 1, and the remedy.
 
     Names global_settings.ignore_paths when the recorded config sets it, since
     ignored paths are left out of what each scanner reads and so can leave it
     nothing. The patterns may come from a config in the scanned tree, so each is
-    shown with its control characters escaped.
+    shown with its control characters escaped. The one text serves the log line
+    and the console, so the two cannot disagree; *accept_remedy* False leaves the
+    gate's way out off, for a console arm that adds it only when the gate is what
+    clears the exit (:func:`print_incompleteness_message`).
     """
     message = (
         f"No selected scanner had a file to scan: {', '.join(names)} "
@@ -660,10 +676,7 @@ def nothing_to_scan_message(
             "path it matches out of what the scanners read, which can leave them "
             "nothing to scan; narrow it to have those files scanned."
         )
-    return message + (
-        " To accept a run that scanned nothing, set fail_on_incomplete_scanners: "
-        "false or pass --no-fail-on-incomplete-scanners."
-    )
+    return message + (_NOTHING_TO_SCAN_ACCEPT_REMEDY if accept_remedy else "")
 
 
 def _partial_coverage(metric) -> tuple[int, int] | None:
@@ -1032,6 +1045,11 @@ def incomplete_converters(
        those refuse one input or member that is not to be read at all, and the
        scan reports them without failing on them.
     4. ``dependencies_satisfied`` is False -- its external tool was not available.
+       Read as "it never ran" is an inference of this function, not a promise of
+       the writer, so the one exemption (``candidate_inputs`` an explicit 0) is
+       taken only for a row that shows no sign of a run: no converted paths, no
+       failed-input records of any kind and no refused inputs. The reason listed
+       is the row's own ``dependency_unavailable_reason`` when it carries one.
 
     ``excluded`` is checked first and wins over all of them. It is the converter-side
     counterpart of a SKIPPED scanner: work the run was never meant to do, which is
@@ -1120,14 +1138,54 @@ def incomplete_converters(
             # missing information. ``is 0`` rather than ``== 0`` to keep False out:
             # ``bool`` is an ``int`` subclass and ``False == 0``, so a row carrying a
             # boolean would otherwise silence the gate.
+            #
+            # And the count exempts only a row that shows no sign of a run. "Never
+            # ran" is this function's inference from ``dependencies_satisfied``, not
+            # a promise of the writer: ConvertPhase asks the dependency check more
+            # than once, so a converter whose first answer was False can still run,
+            # and a shard row can come from any producer. A row with converted
+            # paths, with failed-input records of any kind (an accepted one too), or
+            # with refused inputs describes a converter that ran, and for such a row
+            # a count of 0 answers a question that was not asked; it keeps the
+            # strict answer every row had before the field existed.
             candidates = getattr(row, "candidate_inputs", None)
+            ran = bool(
+                (getattr(row, "converted_paths", None) or [])
+                or (getattr(row, "failed_inputs", None) or [])
+                or (getattr(row, "refused_inputs", None) or [])
+            )
             if candidates is not None and not isinstance(candidates, bool):
-                if candidates == 0:
+                if candidates == 0 and not ran:
                     continue
+            # The row's own reason when it carries one (the dependency check's
+            # words, which the phase redacts and writes with the home directory
+            # as ~), shown as a failure's text is; the fixed line otherwise, for a
+            # row written before the field existed or assembled without it.
+            reason = getattr(row, "dependency_unavailable_reason", None)
             listed.append(
-                IncompleteConverter(name, "dependencies unavailable, so it never ran")
+                IncompleteConverter(
+                    name,
+                    shown_on_one_line(str(reason))
+                    if isinstance(reason, str) and reason
+                    else "dependencies unavailable, so it never ran",
+                )
             )
     return listed
+
+
+def _gate_clears_the_exit(
+    could_not_stop: Sequence[object],
+    unevaluated_rules: Sequence[object],
+    stale_database_records: Sequence[object],
+) -> bool:
+    """Whether declining ``fail_on_incomplete_scanners`` would clear the exit.
+
+    A tool ASH could not halt, a rule that could not be evaluated and a stale
+    content database each fail the run whatever the gate says. The console's
+    gated advice and the log line's remedy both ask this, so they offer the
+    gate flag in the same runs.
+    """
+    return not (could_not_stop or unevaluated_rules or stale_database_records)
 
 
 def print_incompleteness_message(
@@ -1137,11 +1195,19 @@ def print_incompleteness_message(
     *,
     no_scanner_ran: bool = False,
     observed: Sequence[tuple[str, str]] = (),
+    nothing_to_scan: Optional[str] = None,
     unevaluated_rules: Sequence[str] = (),
     missing_reasons: Optional[Dict[str, str]] = None,
     could_not_stop: Sequence[tuple[str, str]] = (),
 ) -> None:
     """Explain an exit code of 1 in terms of what actually caused it.
+
+    *nothing_to_scan* is the log line's own text for scanners SKIPPED with no
+    file to scan (``nothing_to_scan_message`` with ``accept_remedy=False``), or
+    None. When every scanner was skipped and that text is given, the
+    no-scanner-ran arm prints it, with the gate's way out when the gate clears
+    the exit, instead of the selection-mistake advice, which would contradict
+    the log.
 
     WHY THIS IS A FUNCTION RATHER THAN THREE BRANCHES INLINE
     ------------------------------------------------------
@@ -1197,8 +1263,8 @@ def print_incompleteness_message(
     # content database each fail the run whatever the gate says
     # (_compute_exit_code; their own arms below name what clears them), so
     # beside any of them the gated advice ends without the flag.
-    gate_clears_the_exit = not (
-        could_not_stop or unevaluated_rules or stale_database_records
+    gate_clears_the_exit = _gate_clears_the_exit(
+        could_not_stop, unevaluated_rules, stale_database_records
     )
 
     def ways_out(*ways: str) -> str:
@@ -1322,11 +1388,22 @@ def print_incompleteness_message(
         )
         for _name, _status in observed:
             print(f"  [red]{escape_markup(_name)}: {escape_markup(_status)}[/red]")
-        print(
-            "[yellow]Each scanner's skipped_reason in ash_aggregated_results.json "
-            "says why. The usual cause is --scanners naming no scanner this platform "
-            "supports, or --exclude-scanners leaving nothing to run.[/yellow]"
-        )
+        if nothing_to_scan:
+            # The selected scanners had no file to scan: the cause is what they
+            # were given, not which were selected. The text is the log line's
+            # (nothing_to_scan_message: the config's ignore_paths named only when
+            # it sets them, each pattern shown inert), so console and log agree;
+            # the gate's way out follows only when the gate is what clears the
+            # exit, as the scanner arm offers it.
+            remedy = _NOTHING_TO_SCAN_ACCEPT_REMEDY if gate_clears_the_exit else ""
+            print(f"[yellow]{escape_markup(nothing_to_scan + remedy)}[/yellow]")
+        else:
+            print(
+                "[yellow]Each scanner's skipped_reason in ash_aggregated_results.json "
+                "says why. The usual cause is --scanners naming no scanner this "
+                "platform supports, or --exclude-scanners leaving nothing to "
+                "run.[/yellow]"
+            )
         _print_in_tree_refusals()
     elif incomplete_converter_rows:
         # Names the converter, because that is the actionable part -- the fix is
@@ -1431,6 +1508,23 @@ def _print_in_tree_refusals() -> None:
     print(f"[yellow]{escape_markup(message)}[/yellow]")
 
 
+def _result_rule_id(result) -> str:
+    """The rule a SARIF result names: ``ruleId``, else ``rule.id``.
+
+    SARIF lets a result name its rule either way (3.27.5 ``ruleId`` and 3.27.6
+    ``rule``, a reference whose ``id`` is the rule's), and a tool that writes only
+    the reference is as valid as one that writes the id. A gate that read ``ruleId``
+    alone could not pair such a result with its notification, so a suppression of
+    its not-evaluated results did not reach the gate. Empty when neither is set.
+    """
+    rule_id = getattr(result, "ruleId", None)
+    if rule_id:
+        return str(rule_id)
+    reference = getattr(result, "rule", None)
+    referenced = getattr(getattr(reference, "root", None), "id", None)
+    return str(referenced) if referenced else ""
+
+
 def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
     """Every rule a scanner reported, at run level, that it could not evaluate.
 
@@ -1500,7 +1594,10 @@ def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
     So a rule is reported only when at least one of its not-evaluated results is
     unsuppressed. The results are what suppression applies to, and consulting them
     is what lets the existing mechanism reach a fact recorded somewhere it cannot
-    be attached.
+    be attached. Unsuppressed is read as every other consumer reads it
+    (``utils.sarif_utils.is_result_suppressed``): a suppression whose state is
+    ``rejected`` or ``underReview`` has not taken effect (SARIF 3.35.4) and does
+    not quiet the rule.
 
     ``kind`` is the filter rather than the cdk-nag property bag, so this stays
     generic to SARIF. Restricting to not-evaluated rows matters: one rule can throw
@@ -1532,9 +1629,13 @@ def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
             kind = getattr(result, "kind", None)
             if getattr(kind, "value", kind) != "notApplicable":
                 continue
-            rule_id = str(getattr(result, "ruleId", "") or "")
+            rule_id = _result_rule_id(result)
             has_result.add(rule_id)
-            if not getattr(result, "suppressions", None):
+            # Suppressed means a suppression IN EFFECT, the one reading every
+            # consumer makes: a suppression whose state is rejected or
+            # underReview (SARIF 3.35.4) was never an approval, so the throw it
+            # sits on still reports the rule, the fail-closed side.
+            if not is_result_suppressed(result):
                 unsuppressed.add(rule_id)
 
         for invocation in getattr(run, "invocations", None) or []:
@@ -1856,10 +1957,14 @@ def scan_incompleteness(
     # with, so a bool counter (an int subclass) is no partial claim here either
     # and a metrics row that does not model counts raises nothing. Total loss
     # (failed >= attempted) is a partial claim for neither reader.
+    # A negative count in either position is _partial_coverage's "untrustworthy
+    # counters" answer, which incomplete_scanners lists as such; it is no partial
+    # audit, so it is not also claimed as one here.
     partial_audits = {
         metric.scanner_name: metric
         for metric in get_unified_scanner_metrics(results)
-        if (counts := _partial_coverage(metric)) is not None and counts[1] < counts[0]
+        if (counts := _partial_coverage(metric)) is not None
+        and 0 <= counts[1] < counts[0]
     }
     partial_coverage = tuple(name for name in partial_audits if name in row_names)
     # An ERROR scanner that audited some targets ran, whether or not it is listed
@@ -2028,6 +2133,11 @@ def _read_back_inner_results(
         logger.error(
             f"Failed to parse results file {output_file}: {describe_results_error(e)}"
         )
+    except OSError as e:
+        # A file that exists but cannot be opened or read (a permission the inner
+        # run set, a device that fails the read) is the same exit, worded, not a
+        # traceback.
+        logger.error(f"Could not read results file {output_file}: {error_text(e)}")
     sys.exit(1)
 
 
@@ -2240,10 +2350,125 @@ def _severity_filters_finding(result, min_sev_rank: int) -> bool:
     graded ``low`` through its own default -- adding an ``info`` rank of 0 would
     change what ``--min-severity low`` accepts and would have to be mirrored in
     ``workspace.aggregation`` to keep the two paths answering alike.
+
+    A suppressed result is one with a suppression IN EFFECT
+    (``utils.sarif_utils.is_result_suppressed``): a suppression whose state is
+    ``rejected`` or ``underReview`` has not taken effect (SARIF 3.35.4) and hides
+    nothing, so the finding it sits on keeps the count standing, as it does for
+    the per-scanner counts, the flat finding and the workspace verdict.
     """
-    if result.suppressions:
+    if is_result_suppressed(result):
         return False
     return _SEVERITY_RANK.get(_resolve_result_severity(result), 1) >= min_sev_rank
+
+
+def _scanner_threshold_lookup(results) -> Callable[[object], str]:
+    """The threshold governing a scanner, by name, memoised for one exit-code read.
+
+    The scanner's own ``options.severity_threshold`` when it has one, else
+    ``global_settings.severity_threshold``
+    (``ScannerStatisticsCalculator.get_scanner_threshold_info``, which dumps the
+    whole scanners config on every call, so one read of a large report asks it
+    once per scanner, not once per result). An empty or missing name is passed
+    through to the same resolver rather than short-circuited: it matches no
+    scanner config key, so the resolver answers with the global threshold, and a
+    result whose scanner cannot be identified is judged as every result was
+    judged before per-scanner thresholds reached this gate instead of being
+    skipped, which would remove a finding from the exit code.
+    """
+    cache: Dict[str, str] = {}
+
+    def threshold_for(scanner_name: object) -> str:
+        key = scanner_name if isinstance(scanner_name, str) else ""
+        if key not in cache:
+            cache[key] = ScannerStatisticsCalculator.get_scanner_threshold_info(
+                results, key
+            )[0]
+        return cache[key]
+
+    return threshold_for
+
+
+def _run_tool_name(run) -> Optional[str]:
+    """The tool a SARIF run names as its driver, model or JSON form."""
+    tool = run.get("tool") if isinstance(run, dict) else getattr(run, "tool", None)
+    driver = (
+        tool.get("driver") if isinstance(tool, dict) else getattr(tool, "driver", None)
+    )
+    name = (
+        driver.get("name")
+        if isinstance(driver, dict)
+        else getattr(driver, "name", None)
+    )
+    return name if isinstance(name, str) and name else None
+
+
+def _result_scanner_name(result, run=None) -> Optional[str]:
+    """The scanner a SARIF result belongs to, model or JSON form.
+
+    ``properties.scanner_name`` when the result carries one, else the tool of
+    the *run* that holds it (``utils.sarif_utils`` reads a result's scanner the
+    same way for the client exclusions). A result named only by its run fell
+    to the global threshold, so a scanner the operator relaxed had its findings
+    counted as actionable by the scanner metrics and then judged non-actionable
+    here, and the run exited 0 over them.
+    """
+    props = (
+        result.get("properties")
+        if isinstance(result, dict)
+        else getattr(result, "properties", None)
+    )
+    name = None
+    if props is not None:
+        name = (
+            props.get("scanner_name")
+            if isinstance(props, dict)
+            else getattr(props, "scanner_name", None)
+        )
+    if isinstance(name, str) and name:
+        return name
+    return _run_tool_name(run) if run is not None else None
+
+
+def _result_fails_its_scanner_threshold(result, threshold_for, run=None) -> bool:
+    """Whether *result* (a SARIF ``Result`` or its JSON form) fails the gate of
+    the scanner that reported it: the ONE actionability rule of the exit code.
+
+    The count over the written report and the ``--min-severity`` filter over the
+    model's results both read it, with the same *threshold_for* (from
+    ``_scanner_threshold_lookup``) and the same severity reading, the ladder's
+    ``result_severity`` through ``_resolve_result_severity``:
+    ``properties.issue_severity`` when it names a severity, else the SARIF level.
+    Two readings (one upper-casing ``issue_severity`` against ``SEVERITIES`` and
+    falling back to the level, one resolving the result) could disagree on a
+    result with only a level or a non-standard ``issue_severity``.
+
+    *run* is the SARIF run that holds the result: it names the scanner of a
+    result that carries no ``scanner_name`` of its own.
+    """
+    return severity_fails_threshold(
+        _resolve_result_severity(result),
+        threshold_for(_result_scanner_name(result, run)),
+    )
+
+
+def _actionable_under_its_scanner_threshold(
+    result,
+    results,
+    threshold_for: Optional[Callable[[object], str]] = None,
+    run=None,
+) -> bool:
+    """Whether *result* fails the gate of the scanner that reported it.
+
+    A result the scanner's threshold made non-actionable was not counted, so
+    the ``--min-severity`` filter must not read it as the finding that keeps the
+    count standing. *threshold_for* is the exit-code read's shared lookup; a
+    caller without one gets a fresh lookup over *results*. *run* is the SARIF
+    run that holds the result.
+    """
+    if threshold_for is None:
+        threshold_for = _scanner_threshold_lookup(results)
+    return _result_fails_its_scanner_threshold(result, threshold_for, run)
 
 
 # ---------------------------------------------------------------------------
@@ -2625,10 +2850,15 @@ def _host_config_value(opts: ScanOptions, name: str) -> Any:
 
 
 def _print_invalid_config(error: Exception) -> None:
-    """The message a scan prints for a config it refuses with exit 3, in every run mode."""
+    """The message a scan prints for a config it refuses with exit 3, in every run mode.
+
+    The text is ``error_text``'s, as :func:`_printed_config_refusal` prints the
+    same class of error: a pydantic ValidationError in the chain is described
+    without its input, so a value the file held is not repeated on the console.
+    """
     print(
         f"[bold red]ERROR (3) Invalid configuration: "
-        f"{escape_markup(str(error))}[/bold red]"
+        f"{escape_markup(error_text(error))}[/bold red]"
     )
 
 
@@ -3192,6 +3422,20 @@ def _refuse_a_named_config_that_is_not_a_file(config: str) -> None:
     raise not_a_regular_file_refusal(Path(config))
 
 
+def _names_the_same_file(first: str, second: str) -> bool:
+    """Whether two paths name one file, however each is spelled.
+
+    By identity (``os.path.samefile``) when both can be read, so a link, a
+    ``..`` segment or a relative spelling of the file ``ASH_CONFIG`` names still
+    counts as that file; by text when either cannot be, which is what the
+    comparison was before and all that is left to compare.
+    """
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return Path(first) == Path(second)
+
+
 def _selected_config_is_a_link_loop(selected: Optional[str]) -> bool:
     """Whether the config file a scan selects (*selected*, as
     :func:`_selected_config_path` answered) is a symbolic link loop, by one
@@ -3207,6 +3451,49 @@ def _selected_config_is_a_link_loop(selected: Optional[str]) -> bool:
         return False
     answer = stat_named_path(selected)
     return isinstance(answer, StatProblem) and answer.kind == LOOP
+
+
+def _discovered_config_refusal(
+    selected: str, error: OSError
+) -> ASHConfigValidationError:
+    """The refusal for a DISCOVERED config file whose read raised *error*.
+
+    The pre-run gate defers the OSError of a named file to the checks that own
+    ``--config`` (container mode's handover check, nix mode's
+    :func:`_unusable_nix_config`). Neither judges a file discovery selected, so
+    a discovered ``.ash.yaml`` that cannot be read passed the gate: the previous
+    run's output was cleared and the shell or container started before the scan
+    inside refused it, and the scan inside a container, running as root, read
+    it. Worded as a local scan words the same read of the same file
+    (``resolve_config``'s handler for an OSError the load raises): the file as
+    the scan named it, then the error without its own copy of that name.
+    """
+    from automated_security_helper.config.config_sources import describe_config_path
+    from automated_security_helper.utils.error_text import os_error_without_named_file
+
+    path = Path(selected)
+    refusal = ASHConfigValidationError(
+        f"could not read {describe_config_path(path)}: "
+        f"{os_error_without_named_file(error, path)}"
+    )
+    refusal.ash_config_file = path
+    return refusal
+
+
+def _names_the_failed_file(error: OSError, selected: str) -> bool:
+    """Whether *error*'s own filename is *selected*, the config file the gate's
+    load was reading: the OSError the open of that file raised names it, while
+    one the checkout walk or another read raised names some other path or none,
+    and is not the config file's to word. The two are compared as
+    :func:`_names_the_same_file` compares them, so a relative spelling, a link
+    or another prefix of the same file still counts as that file."""
+    filename = error.filename
+    if not isinstance(filename, (str, bytes, os.PathLike)):
+        return False
+    try:
+        return _names_the_same_file(os.fsdecode(filename), selected)
+    except TypeError:
+        return False
 
 
 def _unusable_nix_config(opts: ScanOptions) -> Optional[ASHConfigValidationError]:
@@ -3372,7 +3659,10 @@ def _outer_mode_config_load(opts: ScanOptions) -> _OuterModeConfigLoad:
     :func:`_image_ash_revision_differs` (its narrow cause) decides whose
     answer a model refusal is. A file given as ``--config`` that
     is MISSING or UNREADABLE raises an ``OSError`` the gate does not word
-    itself. It returns :func:`_unusable_nix_config`'s answer: in nix mode a
+    itself (a file DISCOVERY selected is the one exception: no owner of that
+    shape judges it, so the gate words it as a local scan does,
+    :func:`_discovered_config_refusal`). It returns
+    :func:`_unusable_nix_config`'s answer: in nix mode a
     refusal with exit 3 before the previous run's output is cleared, and in
     container mode none, because the handover check owns that shape and
     refuses a config it cannot hand over, with exit 3. The file ``ASH_CONFIG``
@@ -3542,9 +3832,10 @@ def _outer_mode_config_load(opts: ScanOptions) -> _OuterModeConfigLoad:
                 # model skew is the scan inside's to judge in every
                 # may-differ state, as it is when the same file is read as
                 # the base alone.
-                selected_is_the_env_config = env_config is not None and Path(
-                    selected_path
-                ) == Path(env_config)
+                selected_is_the_env_config = (
+                    env_config is not None
+                    and _names_the_same_file(selected_path, env_config)
+                )
                 if refused is not None and not selected_is_the_env_config:
                     if not another_revision:
                         raise refused
@@ -3601,13 +3892,21 @@ def _outer_mode_config_load(opts: ScanOptions) -> _OuterModeConfigLoad:
                 selected = _exit_fields_of(applied)
     except ASHConfigValidationError as exc:
         refusal: Optional[ASHConfigValidationError] = exc
-        if reading == "selected" and _selected_config_is_a_link_loop(selected_path):
+        if (
+            reading == "selected"
+            and opts.config is not None
+            and _selected_config_is_a_link_loop(selected_path)
+        ):
             # Before Python 3.13 resolve() raises RuntimeError for a path that
             # is a symbolic link loop, and the load words that as its own
             # refusal; from 3.13 resolve() answers, the open raises the ELOOP
             # OSError, and the handler below defers to _unusable_nix_config.
             # The file that was being read is the loop, so both interpreters
-            # take that deferral and the words are a local scan's.
+            # take that deferral and the words are a local scan's. Only for a
+            # NAMED file: the deferral's owners (container mode's handover check,
+            # nix mode's _unusable_nix_config) judge --config alone, so a loop
+            # discovery selected keeps the load's own refusal, or the run would
+            # clear the previous output before the scan inside refused it.
             refusal = _unusable_nix_config(opts)
         return _OuterModeConfigLoad(
             refusal, selected, loaded, document, image_may_differ, own_model
@@ -3659,6 +3958,27 @@ def _outer_mode_config_load(opts: ScanOptions) -> _OuterModeConfigLoad:
             refusal.ash_config_file = Path(unparsed_file)
             return _OuterModeConfigLoad(
                 refusal, selected, loaded, document, image_may_differ, own_model
+            )
+        if (
+            isinstance(exc, OSError)
+            and reading == "selected"
+            and opts.config is None
+            and selected_path is not None
+            and _names_the_failed_file(exc, selected_path)
+        ):
+            # A DISCOVERED file the load could not open. The deferral below
+            # judges --config alone, so this file passed the gate and the run
+            # cleared the previous output before the scan inside refused it.
+            # Refused here, in a local scan's words (_discovered_config_refusal).
+            # Only when the error names the selected file: an OSError the
+            # checkout walk or another read raised keeps the deferral.
+            return _OuterModeConfigLoad(
+                _discovered_config_refusal(selected_path, exc),
+                selected,
+                loaded,
+                document,
+                image_may_differ,
+                own_model,
             )
         return _OuterModeConfigLoad(
             _unusable_nix_config(opts),
@@ -4148,7 +4468,11 @@ def _setup_logger(opts: ScanOptions):
             show_progress=_live_progress_enabled(opts),
             use_color=opts.color,
             simple_format=simple_logging,
-            truncate_log=opts.existing_results is None,
+            # Truthiness, as every other reader of existing_results: an empty
+            # string asks for no existing results (run_ash_container appends
+            # --use-existing under `if existing_results:`), so a fresh scan
+            # starts a fresh ash.log.
+            truncate_log=not opts.existing_results,
         )
     except OutputDirLinkRefused as refused:
         # The family's base: a symlink or a file another name refers to.
@@ -4318,11 +4642,28 @@ def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
         # inner scan to read nothing. Exempting it here on `is not None` would keep the
         # stale file AND leave it unread by the container -- the read-back then answers
         # from it, which is the exact failure this function closes.
+        #
+        # The restore marker stays with them for now. It says the results here
+        # were put back by a scan that ended without its own; this scan reads
+        # them on purpose, so _refuse_restored_results stands aside for it, and
+        # the marker is dropped only once the read-back has accepted the inner
+        # run's own results (_drop_restore_marker_after_a_completed_run). Dropped
+        # here, before the image build and the container start, a build that
+        # fails or a container that never starts would leave the put-back set
+        # looking like the last scan's to every reader of the marker.
         return
 
+    # Every entry core/previous_results.py keeps or stages beside the results
+    # while a scan runs: the held set, its staging directory, the directory a
+    # resumed restore moves entries back from, and the marker.
     kept_entries = [
         opts.output_dir / name
-        for name in (HELD_DIR_NAME, HELD_DIR_NAME + ".partial", RESTORED_MARKER_NAME)
+        for name in (
+            HELD_DIR_NAME,
+            HELD_DIR_NAME + ".partial",
+            RESTORING_DIR_NAME,
+            RESTORED_MARKER_NAME,
+        )
     ]
     try:
         PreviousResults(opts.output_dir).discard()
@@ -4643,14 +4984,40 @@ def _sandbox_modes_requested(opts: ScanOptions) -> List[str]:
     )
 
 
-def _refuse_restored_results(output_dir: Path, where: str, logger) -> None:
+def _names_the_output_directorys_own_results(opts: ScanOptions) -> bool:
+    """Whether ``existing_results`` is the file a ``--use-existing`` run reads.
+
+    The scan inside a container or a shell reads one file, the output
+    directory's own ``ash_aggregated_results.json``, whatever path the caller
+    named, so only that path is a request for the file the inner run read. The
+    two are compared resolved, so the file spelled through a link or a relative
+    path counts.
+    """
+    if not opts.existing_results:
+        return False
+    named = Path(opts.existing_results).resolve()
+    own = (Path(opts.output_dir) / "ash_aggregated_results.json").resolve()
+    return named == own
+
+
+def _refuse_restored_results(
+    output_dir: Path, where: str, logger, *, kept_on_purpose: bool = False
+) -> None:
     """Exit 1 when the output directory says its results were put back.
 
     A scan that kept the previous results and ended without its own puts them back
     with a marker beside them (core/previous_results.py). The results file is then
     a complete, parseable earlier run, and reading it back would report that run as
     this one.
+
+    *kept_on_purpose* is a ``--use-existing`` run: it asked for that file and the
+    inner run read it, so the marker refuses nothing here; it is dropped once the
+    read-back accepts the inner run's results as this run's
+    (:func:`_drop_restore_marker_after_a_completed_run`), as a local
+    ``--use-existing`` run accepts them.
     """
+    if kept_on_purpose:
+        return
     if holds_restored_results(output_dir):
         _logged_refusal(
             logger,
@@ -4658,6 +5025,33 @@ def _refuse_restored_results(output_dir: Path, where: str, logger) -> None:
             f"The scan in {where} ended without results: {output_dir.as_posix()} holds "
             "the results of an earlier scan, which ASH put back, so they are not "
             "being read back as this scan's.",
+        )
+
+
+def _drop_restore_marker_after_a_completed_run(opts: ScanOptions, logger) -> None:
+    """Remove the restore marker once a ``--use-existing`` run's read-back is accepted.
+
+    The marker kept through the run (see :func:`_discard_prior_run_artifacts`)
+    said the results were an earlier scan's put back; the inner run has now
+    completed over them and the file is this run's, so the marker is no longer
+    true. Only under ``--use-existing``: without it the marker was removed with
+    the previous output before the run.
+    """
+    if not opts.existing_results:
+        return
+    try:
+        (opts.output_dir / RESTORED_MARKER_NAME).unlink(missing_ok=True)
+    except OSError as error:
+        # Said at the level an operator sees: a marker left beside this run's
+        # results makes a later reader (holds_restored_results) take them for an
+        # earlier scan's put back, and the run itself reported nothing wrong.
+        logger.warning(
+            shown_on_one_line(
+                f"Could not remove {RESTORED_MARKER_NAME} from the output "
+                f"directory ({error}); a later run that reads these results may "
+                "take them for an earlier scan's, which ASH put back. Remove "
+                "the file."
+            )
         )
 
 
@@ -4689,7 +5083,14 @@ def _container_config_to_parse(opts: ScanOptions) -> Optional[Path]:
 
     if opts.config:
         path = Path(opts.config)
-        return path if path.is_file() else None
+        try:
+            is_file = path.is_file()
+        except OSError:
+            # Before Python 3.14 is_file raises for a path under a directory this
+            # user cannot search. What to say about it is the run's own refusal,
+            # as for a missing path, so the parse check stands aside here too.
+            is_file = False
+        return path if is_file else None
     return find_config_file(search_dir=Path(opts.source_dir))
 
 
@@ -4739,7 +5140,10 @@ def _refuse_a_container_config_that_does_not_parse(opts: ScanOptions) -> None:
         return
     try:
         if is_json_file(path):
-            json.loads(path.read_text(encoding="utf-8"))
+            # utf-8-sig, as the scan's own JSON reader decodes the file: a
+            # leading byte order mark is dropped, which json.loads rejects, so
+            # a marked file the scan loads is not refused here.
+            json.loads(path.read_text(encoding="utf-8-sig"))
         elif is_toml_file(path):
             # The text the scan's own reader hands the parser: _read_toml_text
             # drops a leading UTF-8 byte order mark, which tomllib rejects, so
@@ -4944,7 +5348,10 @@ def _run_container_mode(
         try:
             check_operator_config(opts.config, opts.workspace_plan.workspace_root)
         except ASHConfigValidationError as exc:
-            print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
+            # The shared printer escapes the error's text, which names a path:
+            # printed raw, a bracket sequence in it raised MarkupError out of
+            # this handler instead of exiting 3.
+            _print_invalid_config(exc)
             sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
     effective_fail_on_findings = (
         opts.fail_on_findings
@@ -4957,43 +5364,18 @@ def _run_container_mode(
         else resolved_fail_on_incomplete_scanners
     )
 
-    # The policy the host resolved for the plan. The container resolves the workspace
-    # again, and on its own it would find only a policy inside the root, so one named
-    # with --workspace-config elsewhere would not apply. It is handed over by the
-    # name it was given or found under, not the resolved path the plan holds, so a
-    # policy named inside the workspace's tree that links out of it is refused as an
-    # in-tree --config that links out is; the mount itself is of the real file.
-    workspace_config = None
-    plan = opts.workspace_plan
-    if plan is not None and plan.workspace_config_source is not None:
-        from automated_security_helper.workspace.policy import (
-            named_workspace_policy_path,
-        )
-
-        named = named_workspace_policy_path(
-            plan.workspace_root, opts.workspace_config_as_named
-        )
-        workspace_config = (
-            named.as_posix() if named is not None else plan.workspace_config_source
-        )
+    # The policy handed to the container is the one _workspace_policy_for_the_container
+    # computed above, checked against the file the plan read. It is not computed
+    # again here: a second computation without that check handed discovery's find
+    # over for a plan built without the as-named spelling, so an ash-workspace.yaml
+    # the repository wrote replaced the operator's policy in the container.
 
     if opts.run:
-        # The inputs before the previous run's output: a scan refused for its config
-        # or for a path the runner cannot mount never starts, so it must not delete
-        # the reports of one that did. Exit 3, as run_ash_container would.
-        refusal = container_input_refusal(
-            opts.source_dir,
-            opts.output_dir,
-            opts.config,
-            workspace_config,
-            _workspace_relative_file(opts),
-        )
-        if refusal is not None:
-            secho(refusal, fg=typer.colors.RED)
-            sys.exit(3)
-        # The build inputs too: IDs that are not numbers, a revision the build cannot
-        # take, and a non-root build as UID or GID 0, which is the default outcome on
-        # a root host that does not pass --build-target ci. With the host IDs
+        # The scan inputs were checked once, above, before anything else of this
+        # function ran; nothing between there and here changes them. The build
+        # inputs too: IDs that are not numbers, a revision the build cannot take,
+        # and a non-root build as UID or GID 0, which is the default outcome on a
+        # root host that does not pass --build-target ci. With the host IDs
         # unreadable, run_ash_container reports that itself.
         from automated_security_helper.utils import subprocess_utils
 
@@ -5082,6 +5464,10 @@ def _run_container_mode(
         allow_missing_projects=opts.allow_missing_projects,
         shard_index=opts.shard_index,
         shard_count=opts.shard_count,
+        # Applied inside only in workspace mode, whose exit code the host
+        # returns as the container computed it (below); a one-directory scan's
+        # exit code is recomputed on the host, where --min-severity is applied.
+        min_severity=opts.min_severity,
         # The policy the host resolved into the plan, mounted for the workspace
         # scan inside as --config is (_host_file_in_container).
         workspace_config=workspace_config,
@@ -5119,7 +5505,21 @@ def _run_container_mode(
         # is the refusal's own; a failed build keeps the runner's code.
         sys.exit(getattr(container_result, "returncode", 1) or 1)
 
-    if hasattr(container_result, "returncode") and container_result.returncode != 0:
+    container_returncode_now = getattr(container_result, "returncode", 0)
+    if container_returncode_now in (0, 2):
+        if container_returncode_now == 2:
+            # 2 is the scan inside saying it found something, a status it reaches
+            # only after writing its results file, which this process re-derives
+            # below; its output already streamed to the terminal as it ran, so it
+            # is neither a failure to report nor stderr to print again. 1 is NOT
+            # quieted: an incomplete scan and a crash share it, and a crash that
+            # exits 1 before writing the results file has only this error and the
+            # captured stderr to explain itself.
+            logger.debug(
+                f"The container exited with {container_returncode_now}, a status "
+                "re-derived from the results file below"
+            )
+    else:
         logger.error(
             f"Container execution failed with code {container_result.returncode}"
         )
@@ -5207,7 +5607,16 @@ def _run_container_mode(
 
     _refuse_links_left_in_reports(opts)
     _refuse_an_inner_run_that_was_refused(opts, outer_run_id)
-    _refuse_restored_results(opts.output_dir, "the container", logger)
+    # Kept on purpose only when the caller named the file the inner run reads. A
+    # path outside the output directory is not read by the container (it reads
+    # the directory's own file), so a restore marker beside that file still
+    # means the results are an earlier scan's put back.
+    _refuse_restored_results(
+        opts.output_dir,
+        "the container",
+        logger,
+        kept_on_purpose=_names_the_output_directorys_own_results(opts),
+    )
 
     output_file = opts.output_dir / "ash_aggregated_results.json"
     if container_returncode == 2 and not output_file.exists():
@@ -5244,16 +5653,214 @@ def _run_container_mode(
         _refuse_an_inner_run_that_did_not_complete(
             results, opts, outer_run_id, "container", output_file, logger
         )
+        _drop_restore_marker_after_a_completed_run(opts, logger)
         _take_own_values_for_record(results, opts, image_may_differ=image_may_differ)
         return results
     else:
-        logger.error(f"Results file not found at {output_file}")
+        # The container's own status beside the missing file, as nix mode names the
+        # shell's: with nothing to read back it is the only diagnostic left.
+        logger.error(
+            f"Results file not found at {output_file}. The container exited with "
+            f"code {container_returncode}."
+        )
         sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
 # _run_nix_mode
 # ---------------------------------------------------------------------------
+
+
+def _no_workspace_payload_message(mode: RunMode) -> str:
+    """The error for an outer mode whose inner run returned no workspace payload,
+    naming the thing that ran: the container, or the Nix shell. One text named
+    the container for a Nix run too."""
+    ran = "Nix shell" if mode == RunMode.nix else "container"
+    return (
+        f"The {ran} produced no workspace payload, so no per-project exit code "
+        "is available."
+    )
+
+
+def _refuse_a_results_file_the_shell_cannot_be_handed(
+    opts: ScanOptions, logger
+) -> None:
+    """Refuse a Nix run whose ``existing_results`` is not the output directory's own.
+
+    The scan CLI has no option that names a results file: ``--use-existing``
+    reads ``<output-dir>/ash_aggregated_results.json``, and that is all the
+    inner command line can say. A library caller naming another file
+    (``existing_results="/elsewhere/results.json"``) was handed that flag, so the
+    scan inside the shell read the output directory's file from an earlier run,
+    or refused for want of one, and the caller's file was never read. Exit 3,
+    before the preflight and before the previous run's output is cleared
+    (``_discard_prior_run_artifacts`` keeps that file when ``existing_results``
+    is set, so nothing of the caller's is lost). The two paths are compared
+    resolved, so the output directory's own file spelled through a link or a
+    relative path is accepted.
+    """
+    if not opts.existing_results:
+        return
+    named = Path(opts.existing_results).resolve()
+    own = (Path(opts.output_dir) / "ash_aggregated_results.json").resolve()
+    if named == own:
+        return
+    _logged_refusal(
+        logger,
+        3,
+        "Scan refused: --mode nix reads existing results from the output "
+        f"directory's own file, {shown_on_one_line(str(own))}, which is all the "
+        "scan inside the shell can be told; the results file named, "
+        f"{shown_on_one_line(str(named))}, is another file. Pass the output "
+        "directory that holds the file, or run the report phase with --mode local.",
+    )
+
+
+def _nix_inner_argv(opts: ScanOptions) -> List[str]:
+    """The command line of the scan inside the Nix shell, built from this call.
+
+    From the options, not from this process's ``sys.argv``. A library caller's
+    ``run_ash_scan(mode=RunMode.nix, ...)`` has no command line of its own, and
+    forwarding the host program's arguments ran the inner scan on whatever that
+    program was started with (another directory, another scanner set, another
+    output directory) and read that run's results back as this call's.
+
+    Every ScanOptions field is one of three things here, and
+    tests/unit/interactions/test_run_ash_scan_nix_inner_arguments.py lists the
+    fields by name so a field added later has to be placed:
+
+    * FORWARDED, as the flag the scan CLI reads it by (the body below).
+      ``--mode`` is left to ``rewrite_mode_args``, which appends ``--mode local``.
+      ``--cli-json-input`` never reaches the inner scan: its document was read
+      into these options already, and the shell's standard input is empty.
+      ``--config`` is forwarded unless it is the file ``ASH_CONFIG`` names: the
+      scan CLI reads the option from that variable when none is typed, and the
+      shell keeps the variable, so the inner CLI reads it the same way.
+    * REFUSED before this point, in ``run_ash_scan``, because the scan CLI has
+      no flag for them and the scan inside the shell cannot be given them:
+      ``config_base_gate``, ``untrusted_config``, ``client_config_policy``,
+      ``remote_client``, ``severity_threshold_restriction``,
+      ``keep_previous_results`` and ``trusted_config_path``.
+    * NOT FORWARDED on purpose: ``mode`` (rewritten), ``workspace_plan`` (its
+      definition and policy are forwarded as ``--workspace`` and
+      ``--workspace-config``), ``workspace_config_as_named`` (container mode's
+      hand-over spelling; the shell shares this filesystem and gets the
+      resolved path), ``client_overrides`` and ``selection_origin`` (who gave
+      the options on this side; the inner scan's own are the CLI's), and the
+      container-only fields (``build``, ``run``, ``force``, ``oci_runner``,
+      ``build_target``, ``container_uid``, ``container_gid``,
+      ``container_network``, ``ash_revision_to_install``,
+      ``custom_containerfile``, ``custom_build_arg``), which no shell reads.
+
+    The host's own environment is kept out of the inner scan's option reading
+    by ``run_ash_nix`` (``INNER_SCAN_OPTION_VARIABLES``), so what this function
+    leaves off the command line is the default, not the host's setting.
+    """
+
+    def value_of(member: Any) -> str:
+        return str(member.value if hasattr(member, "value") else member)
+
+    argv: List[str] = ["scan"]
+    plan = opts.workspace_plan
+    if plan is not None:
+        # The workspace scan runs inside the shell, as it runs inside the
+        # container: the definition and the policy the plan applied are named to
+        # it, on this same filesystem. --source-dir is mutually exclusive with
+        # --workspace; the workspace root is the plan's.
+        argv.extend(["--workspace", str(plan.workspace_file)])
+        if plan.workspace_config_source is not None:
+            argv.extend(["--workspace-config", str(plan.workspace_config_source)])
+        if opts.allow_missing_projects:
+            argv.append("--allow-missing-projects")
+    else:
+        argv.extend(["--source-dir", str(opts.source_dir)])
+    argv.extend(["--output-dir", str(opts.output_dir)])
+    # The scan CLI fills --config from ASH_CONFIG when none is typed (the
+    # option's envvar), and run_ash_nix keeps that variable for the shell, so
+    # the inner CLI reads it the same way. The command names a config only when
+    # the caller named one: forwarded, the file ASH_CONFIG names reached the
+    # inner scan as if the operator had typed it, against what install.md says
+    # of a scan with no --config.
+    if opts.config and str(opts.config) != os.environ.get("ASH_CONFIG"):
+        argv.extend(["--config", str(opts.config)])
+    for override in opts.config_overrides or []:
+        argv.extend(["--config-overrides", override])
+    for scanner in opts.scanners or []:
+        argv.extend(["--scanners", scanner])
+    for scanner in opts.excluded_scanners or []:
+        argv.extend(["--exclude-scanners", scanner])
+    for module in opts.ash_plugin_modules or []:
+        argv.extend(["--ash-plugin-modules", module])
+    for fmt in opts.output_formats or []:
+        argv.extend(["--output-formats", value_of(fmt)])
+    for phase in opts.phases or []:
+        argv.extend(["--phases", value_of(phase)])
+    argv.extend(["--strategy", value_of(opts.strategy)])
+    if opts.offline:
+        argv.append("--offline")
+    if opts.offline_semgrep_rulesets != "p/ci":
+        argv.extend(["--offline-semgrep-rulesets", opts.offline_semgrep_rulesets])
+    if not opts.progress:
+        argv.append("--no-progress")
+    if not opts.color:
+        argv.append("--no-color")
+    if not opts.show_summary:
+        argv.append("--no-show-summary")
+    for flag, given in (
+        ("--quiet", opts.quiet),
+        ("--verbose", opts.verbose),
+        ("--debug", opts.debug),
+        ("--simple", opts.simple),
+        ("--cleanup", opts.cleanup),
+        ("--inspect", opts.inspect),
+        ("--python-based-plugins-only", opts.python_based_plugins_only),
+        ("--ignore-suppressions", opts.ignore_suppressions),
+    ):
+        if given:
+            argv.append(flag)
+    log_level = value_of(opts.log_level)
+    if log_level != AshLogLevel.INFO.value:
+        argv.extend(["--log-level", log_level])
+    if opts.fail_on_findings is not None:
+        argv.append(
+            "--fail-on-findings" if opts.fail_on_findings else "--no-fail-on-findings"
+        )
+    if opts.fail_on_incomplete_scanners is not None:
+        argv.append(
+            "--fail-on-incomplete-scanners"
+            if opts.fail_on_incomplete_scanners
+            else "--no-fail-on-incomplete-scanners"
+        )
+    if opts.min_severity.lower() != "low":
+        argv.extend(["--min-severity", opts.min_severity])
+    if opts.changed_files_only:
+        argv.extend(["--changed-files-only", "--base-ref", opts.base_ref])
+    if opts.existing_results:
+        # The CLI resolves --use-existing to the output directory's own results
+        # file. _refuse_a_results_file_the_shell_cannot_be_handed, run before
+        # this, has checked that the file this option names IS that file; the
+        # shell shares this filesystem, so the inner scan resolves the same one.
+        argv.append("--use-existing")
+    # Each value on its own: ScanPhase is the one place that refuses an unusable
+    # pair (see the ScanOptions comment on shard_index), and it can refuse only
+    # what reaches it. Forwarding the pair only when both were set turned a
+    # caller's half pair into an unsharded whole scan that came back as a
+    # normal result.
+    if opts.shard_index is not None:
+        argv.extend(["--shard-index", str(opts.shard_index)])
+    if opts.shard_count is not None:
+        argv.extend(["--shard-count", str(opts.shard_count)])
+    return argv
+
+
+# The two refusals of Nix mode (`nix` missing, the recursion guard), asked by
+# _run_nix_mode before it clears the previous run's output: a refused run starts no
+# shell, so it must not delete the reports of one that did. A module-level name of
+# its own, asked whatever stands in for run_ash_nix: a test or caller that replaces
+# the runner with something that starts no shell replaces this too, on purpose
+# (monkeypatch.setattr(run_ash_scan, "nix_preflight", lambda: None)), so the refusal
+# is never lifted by a stand-in that merely lacks a check of its own.
+nix_preflight = nix_executable_for_this_run
 
 
 def _run_nix_mode(
@@ -5268,6 +5875,12 @@ def _run_nix_mode(
     the inner run is an ordinary local scan. Simpler than container mode in one respect,
     since a development shell changes PATH but not the filesystem, so there is no mount
     translation and none of that path-mapping logic belongs here.
+
+    Two module-level names are read at call time and are the seams a test replaces:
+    ``run_ash_nix``, the runner, and ``nix_preflight``, the refusals asked before the
+    clear. A stand-in runner that starts no shell sets ``nix_preflight`` to a no-op as
+    well; left alone, the preflight refuses on a host without `nix` whatever the runner
+    is, and the stand-in is never reached.
     """
     # The shell writes into the output directory this process was given, so a report left
     # by an earlier run sits exactly where a successful one would. run_ash_nix returns a
@@ -5277,15 +5890,25 @@ def _run_nix_mode(
     # A container an earlier container-mode run left behind may still be writing into
     # this output directory, so it is removed before the clear, as container mode does.
     # A host with no container runtime has nothing to remove and its records stay.
-    sweep_leftovers_before_run(opts.oci_runner)
-    sweep_env_dirs()
-    _discard_prior_run_artifacts(opts, logger)
+    #
+    # Before the preflight and the clear: a refused run deletes nothing.
+    _refuse_a_results_file_the_shell_cannot_be_handed(opts, logger)
 
-    # Written into the results file by the inner run when it completes, so a file it
-    # did not finish is not read back as a verdict. See utils/inner_run_outcome.py.
-    outer_run_id = new_outer_run_id()
     try:
-        nix_result = run_ash_nix(debug=opts.debug, outer_run_id=outer_run_id)
+        # The two refusals of Nix mode (`nix` missing, the recursion guard), asked
+        # first: a refused run starts no shell, so it must not delete the reports of a
+        # run that did. run_ash_nix asks them again for a caller that reaches it directly.
+        nix_preflight()
+        sweep_leftovers_before_run(opts.oci_runner)
+        sweep_env_dirs()
+        _discard_prior_run_artifacts(opts, logger)
+
+        # Written into the results file by the inner run when it completes, so a file it
+        # did not finish is not read back as a verdict. See utils/inner_run_outcome.py.
+        outer_run_id = new_outer_run_id()
+        nix_result = run_ash_nix(
+            argv=_nix_inner_argv(opts), debug=opts.debug, outer_run_id=outer_run_id
+        )
     except NixModeRefused as e:
         # `nix` missing, or the recursion guard. A message and exit 1, not a traceback.
         # 1 rather than the usage-error code: the command line is valid, and what is
@@ -5307,43 +5930,58 @@ def _run_nix_mode(
         # ash.log.
         logger.warning(f"Nix shell exited with code {nix_result.returncode}")
 
+    # One of ASH's own codes outside the three a results file decides (3 for an
+    # input or config the scan inside refused, 4 for a workspace error, 5 for a
+    # usage error) is the inner ASH's answer: it refused before scanning and its
+    # own output says what. Carried as the host's exit code, as in container mode,
+    # BEFORE any read-back: a results file left in the directory (one
+    # --use-existing kept, say) is an earlier run's, and reading it back would
+    # re-word the refusal as "did not complete" with exit 1. 0, 1 and 2 are
+    # re-derived from the results file below, and any other status is nix's own
+    # (it exits 1 for most failures and 100 and up for build failures), a shell
+    # that never ran ASH.
+    shell_code = nix_result.returncode
+    ash_meaning = (
+        None
+        if shell_code in _CONTAINER_VERDICT_EXIT_CODES
+        else ASH_EXIT_CODES.get(shell_code)
+    )
+    if ash_meaning is not None:
+        logger.error(
+            f"The scan inside the Nix shell exited with {shell_code} ({ash_meaning}), "
+            "which means nothing was scanned; its own output above says what it "
+            "refused, and no results file is read back as this run's."
+        )
+        sys.exit(shell_code)
+
     _refuse_links_left_in_reports(opts)
     _refuse_an_inner_run_that_was_refused(opts, outer_run_id)
 
     # The inner scan wrote to the same output directory this process was given, so unlike
     # container mode there is no path to translate back.
-    _refuse_restored_results(opts.output_dir, "the Nix shell", logger)
+    _refuse_restored_results(
+        opts.output_dir,
+        "the Nix shell",
+        logger,
+        kept_on_purpose=bool(opts.existing_results),
+    )
     output_file = opts.output_dir / "ash_aggregated_results.json"
     results = _read_back_inner_results(output_file, logger)
     if results is not None:
         _refuse_an_inner_run_that_did_not_complete(
             results, opts, outer_run_id, "nix", output_file, logger
         )
+        _drop_restore_marker_after_a_completed_run(opts, logger)
         _take_own_values_for_record(results, opts, image_may_differ=image_may_differ)
         return results
     else:
         # No results file means the inner scan never got far enough to write one, so the
         # shell's own exit code is the only diagnostic available. Reporting it here is the
-        # difference between an actionable error and a bare "file not found".
-        #
-        # When that code is one of ASH's own non-verdicts -- an invalid config, a
-        # workspace error, a usage error -- the inner ASH refused before scanning, and the
-        # code says which, so it is the host's exit code too, as in container mode.
-        # Anything else is nix's own status (it exits 1 for most failures and 100 and up
-        # for build failures) and is reported as 1, a scan that did not run.
-        shell_code = nix_result.returncode
-        ash_meaning = (
-            None
-            if shell_code in _CONTAINER_VERDICT_EXIT_CODES
-            else ASH_EXIT_CODES.get(shell_code)
-        )
-        if ash_meaning is not None:
-            logger.error(
-                f"Results file not found at {output_file}. The scan inside the Nix shell "
-                f"exited with {shell_code} ({ash_meaning}), which means nothing was "
-                "scanned."
-            )
-            sys.exit(shell_code)
+        # difference between an actionable error and a bare "file not found". One of
+        # ASH's own refusal codes was carried above, before the read-back; what
+        # reaches here is a results-file code with no file, or nix's own status (it
+        # exits 1 for most failures and 100 and up for build failures), reported as
+        # 1, a scan that did not run.
         logger.error(
             f"Results file not found at {output_file}. The Nix shell exited with "
             f"code {shell_code}."
@@ -5434,6 +6072,27 @@ def _changed_file_set_for(
     }
 
 
+def _refuse_an_unknown_severity_restriction(restriction: Optional[str]) -> None:
+    """Refuse a severity restriction that names no threshold, with exit 3.
+
+    The restriction is an option the caller hands the scan (an MCP client's
+    ``severity_threshold``). The orchestrator refuses an unknown one with an
+    ``ASHValidationError``, which this module's generic handler reads as a
+    crash and exits 1 for; it is an input ASH cannot use, as an invalid
+    configuration is, so it is refused here, before anything is built, as the
+    configuration refusal (exit 3). A blank value means no restriction.
+    """
+    from automated_security_helper.utils.severity_ladder import normalize_threshold
+
+    if restriction is None or not restriction.strip():
+        return
+    if normalize_threshold(restriction) is None:
+        raise ASHConfigValidationError(
+            f"The severity threshold {restriction!r} is not one of ALL, LOW, "
+            "MEDIUM, HIGH or CRITICAL."
+        )
+
+
 def _run_local_mode(
     opts: ScanOptions, logger
 ) -> tuple[AshAggregatedResults, Optional[bool]]:
@@ -5477,6 +6136,7 @@ def _run_local_mode(
         config = opts.config
         if config is not None:
             _refuse_a_named_config_that_is_not_a_file(config)
+        _refuse_an_unknown_severity_restriction(opts.severity_threshold_restriction)
 
         if opts.config_overrides:
             logger.info(
@@ -5562,10 +6222,13 @@ def _run_local_mode(
             config_environment_values,
         )
 
+        # The values to hide in the git-root problem clause are the LOADED
+        # config's environment reads (the orchestrator's model), not the --config
+        # path string ``config`` holds, which has none to give.
         _changed_file_set = _changed_file_set_for(
             opts,
             logger,
-            values=config_environment_values(config) if config is not None else (),
+            values=config_environment_values(getattr(orchestrator, "config", None)),
         )
         if _changed_file_set is not None:
             orchestrator.restrict_to_changed_files(_changed_file_set)
@@ -5654,7 +6317,8 @@ def _run_local_mode(
         # code 3" and the fields named only in the server log.
         if opts.client_config_policy is not None:
             raise
-        print(f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]")
+        # The shared printer escapes the text, which names fields and a path.
+        _print_invalid_config(e)
         sys.exit(3)
     except ASHConfigValidationError as e:
         _printed_config_refusal(3, e)
@@ -5981,7 +6645,10 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
     try:
         settings = build_project_scan_settings(opts)
     except ASHConfigValidationError as exc:
-        print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
+        # The shared printer escapes the error's text, which names a path:
+        # printed raw, a bracket sequence in it raised MarkupError out of this
+        # handler instead of exiting 3.
+        _print_invalid_config(exc)
         sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
 
     # Held and released through utils/process_env.py; see _run_local_mode.
@@ -6253,8 +6920,14 @@ def _compute_exit_code(
     config_fail_on_findings: Optional[bool] = None,
     config_fail_on_incomplete_scanners: Optional[bool] = None,
     report_sarif_written_this_run: Optional[bool] = None,
+    actionable_count: Optional[int] = None,
 ) -> int:
     """The exit code for *results*.
+
+    *actionable_count* is :func:`_gating_actionable_count`'s answer when the
+    caller has read it already (``run_ash_scan`` reads it once for the exit code,
+    the summary and the legend together); None reads it here, as ``ash merge``
+    has it read.
 
     *report_sarif_written_this_run* says whether ``reports/ash.sarif`` is this
     run's (see ``report_sarif_identity``). False keeps the gate off the file, so
@@ -6422,7 +7095,18 @@ def _compute_exit_code(
             ran = ", ".join(f"{name} ({status})" for name, status in observed)
             ASH_LOGGER.error(
                 shown_on_one_line(
-                    nothing_to_scan_message(results, nothing_to_scan)
+                    nothing_to_scan_message(
+                        results,
+                        nothing_to_scan,
+                        # The console's rule for the same remedy
+                        # (print_incompleteness_message): the gate's way out is
+                        # offered only when declining the gate clears the exit.
+                        accept_remedy=_gate_clears_the_exit(
+                            incompleteness.could_not_stop,
+                            incompleteness.unevaluated_rules,
+                            incompleteness.stale_content_databases,
+                        ),
+                    )
                     if nothing_to_scan
                     else f"Scan ran no scanners: {ran}. Every scanner was skipped, "
                     "so this run has shown the target to be neither clean nor dirty "
@@ -6615,6 +7299,44 @@ def _compute_exit_code(
     if not final_fail_on_findings:
         return 0
 
+    if actionable_count is None:
+        actionable_count = _gating_actionable_count(
+            results, opts, report_sarif_written_this_run
+        )
+    if actionable_count > 0:
+        return 2
+    return 0
+
+
+def _is_a_regular_report_file(path: Path) -> bool:
+    """Whether *path* is itself a regular file, read with lstat.
+
+    stat, which ``Path.exists`` uses, follows a link, so a link to a file that
+    exists answered True and a link to a pipe could be opened, and a pipe
+    without a writer blocks the open.
+    """
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def _gating_actionable_count(
+    results: AshAggregatedResults,
+    opts: ScanOptions,
+    report_sarif_written_this_run: Optional[bool] = None,
+) -> int:
+    """The actionable-finding count the exit code is derived from.
+
+    One function, so the summary and the exit-code legend name the number that
+    gated: read from the persisted SARIF report when this run wrote it, each
+    result judged under its own scanner's threshold, and zeroed when nothing at
+    or above ``--min-severity`` is actionable. Printed from the in-memory metrics
+    instead, "Exiting due to N actionable findings" could name a different N than
+    the one that decided the exit.
+    """
+    reports_dir = Path(opts.output_dir).joinpath("reports")
+    sarif_name = report_file_written_as(results, "sarif")
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
     actionable_findings = sum(item.actionable for item in scanner_metrics)
 
@@ -6645,87 +7367,104 @@ def _compute_exit_code(
     # container and nix mode another process wrote.
     from automated_security_helper.base.reporter_plugin import confined_report_path
 
+    # Indexed, not .get() with a default: ScanOptions only holds a ranked value.
+    min_sev_rank = _SEVERITY_RANK[opts.min_severity.lower()]
+    # One threshold lookup for this read, shared by the count over the written
+    # report and the --min-severity filter over the model: one resolver call per
+    # scanner, and one actionability rule (_result_fails_its_scanner_threshold).
+    threshold_for = _scanner_threshold_lookup(results)
+    # Set when the count below is taken from the written report: whether that
+    # report holds a counted result at or above --min-severity. None when the
+    # count comes from the model's own results, which are then judged instead.
+    counted_in_file: Optional[bool] = None
+
     sarif_file = confined_report_path(reports_dir, sarif_name) if sarif_name else None
+    # A file in reports/ and not a link to one: the name is the results file's, and
+    # a link at it (to a report beside it, or to a pipe, which blocks the open) is
+    # refused by _compute_exit_code's link check, which runs after this count is
+    # read. Opening it here would read the file it points to first.
     if (
         sarif_file is not None
-        and sarif_file.exists()
+        and _is_a_regular_report_file(sarif_file)
         and report_sarif_written_this_run is not False
     ):
         try:
             with open(sarif_file, encoding="utf-8") as f:
                 sarif_json = json.load(f)  # nosec
 
-            # Memoised because get_scanner_threshold_info dumps the whole scanners
-            # config on every call, and a large ash.sarif carries one result per
-            # finding.
-            _threshold_cache: Dict[str, str] = {}
-
-            def _threshold_for(scanner_name: object) -> str:
-                """The threshold governing *scanner_name*, global when it has none.
-
-                An empty name is passed through to the same resolver rather than
-                short-circuited: it matches no scanner config key, so the resolver
-                answers with the global threshold. That keeps one threshold
-                resolution site for both cases, and it means a result whose scanner
-                cannot be identified is judged exactly as every result was judged
-                before this change instead of being skipped -- dropping it would
-                remove a finding from the verdict.
-                """
-                key = scanner_name if isinstance(scanner_name, str) else ""
-                if key not in _threshold_cache:
-                    _threshold_cache[key] = (
-                        ScannerStatisticsCalculator.get_scanner_threshold_info(
-                            results, key
-                        )[0]
-                    )
-                return _threshold_cache[key]
-
             sarif_active = 0
+            # The --min-severity question is answered on the file the count is
+            # taken from. The model's own results can hold other findings: a
+            # report phase over saved results writes this run's report from
+            # them, and in container and Nix mode the inner run wrote the file.
+            # Judging the model's results against a count made from the file
+            # read a run whose only finding sat in the file as having none.
+            file_has_qualifying = False
             for sarif_run in sarif_json.get("runs", []):
                 for r in sarif_run.get("results", []):
-                    if r.get("suppressions"):
+                    # A suppression hides the result only when it is in effect:
+                    # one whose state is rejected or underReview (SARIF 3.35.4)
+                    # was never an approval, so the finding counts and the scan
+                    # exits non-zero, as the per-scanner counts, the flat finding
+                    # and the workspace verdict already read it.
+                    if is_result_suppressed(r):
                         continue
-                    props = r.get("properties", {}) or {}
-                    threshold = _threshold_for(
-                        props.get("scanner_name") if isinstance(props, dict) else None
-                    )
-                    issue_severity = (
-                        (props.get("issue_severity") or "").upper()
-                        if isinstance(props, dict)
-                        else ""
-                    )
-                    if issue_severity in SEVERITIES:
-                        if severity_fails_threshold(issue_severity, threshold):
-                            sarif_active += 1
-                    elif sarif_level_fails_threshold(r.get("level"), threshold):
-                        sarif_active += 1
+                    # The one actionability rule, with the shared lookup: the
+                    # same threshold and the same severity reading the
+                    # --min-severity filter below applies to the model's results.
+                    if not _result_fails_its_scanner_threshold(
+                        r, threshold_for, sarif_run
+                    ):
+                        continue
+                    sarif_active += 1
+                    # Rank as _severity_filters_finding ranks a model result:
+                    # the one severity rule (utils.severity_ladder.result_severity)
+                    # reads a result's JSON form too.
+                    if (
+                        _SEVERITY_RANK.get(_resolve_result_severity(r), 1)
+                        >= min_sev_rank
+                    ):
+                        file_has_qualifying = True
             actionable_findings = sarif_active
+            counted_in_file = file_has_qualifying
         except Exception:  # nosec B110
             pass  # Fall through to the unified-metrics count
 
-    # Indexed, not .get() with a default: ScanOptions only holds a ranked value.
-    min_sev_rank = _SEVERITY_RANK[opts.min_severity.lower()]
     if min_sev_rank > 0 and actionable_findings > 0:
-        has_qualifying = False
-        try:
-            sarif = getattr(results, "sarif", None)
-            if sarif is None or not getattr(sarif, "runs", None):
-                has_qualifying = True
-            for run in getattr(sarif, "runs", []) if not has_qualifying else []:
-                for result in getattr(run, "results", []):
-                    if _severity_filters_finding(result, min_sev_rank):
-                        has_qualifying = True
+        if counted_in_file is not None:
+            # The count came from the written report, and so does the answer:
+            # every counted result there passed its own scanner's threshold,
+            # so a counted one at or above the minimum is a qualifying one.
+            has_qualifying = counted_in_file
+        else:
+            has_qualifying = False
+            try:
+                sarif = getattr(results, "sarif", None)
+                if sarif is None or not getattr(sarif, "runs", None):
+                    has_qualifying = True
+                for run in getattr(sarif, "runs", []) if not has_qualifying else []:
+                    for result in getattr(run, "results", []):
+                        # A qualifying result is an ACTIONABLE one at or above
+                        # the minimum: one its own scanner's threshold made
+                        # non-actionable is not counted above, so it cannot be
+                        # the reason the count stands, and reading it as
+                        # qualifying kept exit 2 for actionable findings below
+                        # --min-severity.
+                        if _severity_filters_finding(
+                            result, min_sev_rank
+                        ) and _actionable_under_its_scanner_threshold(
+                            result, results, threshold_for, run
+                        ):
+                            has_qualifying = True
+                            break
+                    if has_qualifying:
                         break
-                if has_qualifying:
-                    break
-        except Exception:
-            has_qualifying = True
+            except Exception:
+                has_qualifying = True
         if not has_qualifying:
             actionable_findings = 0
 
-    if actionable_findings > 0:
-        return 2
-    return 0
+    return actionable_findings
 
 
 # ---------------------------------------------------------------------------
@@ -6793,7 +7532,15 @@ def _print_summary(
             if config_warnings:
                 print("\n[bold yellow]⚠️  CONFIGURATION WARNING ⚠️[/bold yellow]")
                 for cw in config_warnings:
-                    _print_text((f"  {cw['message']}", "yellow"))
+                    # A checkpoint read back from a results file another process
+                    # or version wrote may carry no message; the summary runs
+                    # after the exit code is computed and must not raise there.
+                    _print_text(
+                        (
+                            f"  {cw.get('message') or '(no message recorded)'}",
+                            "yellow",
+                        )
+                    )
                 print("")
 
         print(
@@ -6842,12 +7589,19 @@ def _in_scanned_tree_from_arguments(run):
     workspace root when a workspace plan is given.
     """
 
+    signature = inspect.signature(run)
+
     @functools.wraps(run)
     def wrapper(*args, **kwargs):
         from automated_security_helper.utils.subprocess_utils import scanning_tree
 
-        plan = kwargs.get("workspace_plan")
-        source_dir = kwargs.get("source_dir")
+        # Bound against the signature, so a target given positionally
+        # (``run_ash_scan(source_dir)``) is read as well as one given by name;
+        # read from kwargs alone, a positional call registered the working
+        # directory instead of the scanned tree.
+        arguments = signature.bind_partial(*args, **kwargs).arguments
+        plan = arguments.get("workspace_plan")
+        source_dir = arguments.get("source_dir")
         if plan is not None:
             root = Path(plan.workspace_root)
         elif source_dir is not None:
@@ -7047,6 +7801,22 @@ def run_ash_scan(
         # builder.
         ("client_config_policy", opts.client_config_policy, True),
         ("remote_client", opts.remote_client, True),
+        # The MCP server's two: the threshold it tightens the scan to, which only
+        # the local orchestrator applies, and the kept previous results, which the
+        # local orchestrator and each workspace project's orchestrator settle.
+        # Container and nix mode hand neither to the ASH they run, so a caller
+        # that sets one there is told, as for the three above, instead of
+        # scanning with it dropped: the scan CLI has no flag for either, a
+        # restriction dropped on the way is a gate loosened without a word, and a
+        # kept-results request dropped deletes what the caller asked to keep.
+        ("severity_threshold_restriction", opts.severity_threshold_restriction, False),
+        ("keep_previous_results", opts.keep_previous_results, True),
+        # The operator's trusted config path has no scan CLI flag either, so the
+        # scan a container or a shell runs cannot be given it, and the grants it
+        # names would go unread. Refused for the two modes that re-execute ASH;
+        # what workspace mode on the host does with it is that mode's own and is
+        # not changed by this line.
+        ("trusted_config_path", opts.trusted_config_path, True),
     ):
         if value and (
             opts.mode in (RunMode.container, RunMode.nix)
@@ -7140,11 +7910,17 @@ def _run_with_options(
     logger = _setup_logger(opts)
     _ignore_output_dir_in_git(opts)
 
-    if opts.workspace_plan is not None and opts.mode != RunMode.container:
+    if opts.workspace_plan is not None and opts.mode not in (
+        RunMode.container,
+        RunMode.nix,
+    ):
         # Workspace mode owns its own verdict and its own summary. It does not go
         # through _compute_exit_code, which answers for one directory against one
         # threshold and has no way to express "project A failed, project B did
-        # not".
+        # not". Container mode and Nix mode re-execute the workspace scan inside
+        # their own environment and read its payload back below: a plan here
+        # with --mode nix ran the workspace scan on the host, never entering
+        # the shell, so every scanner the flake supplies was MISSING.
         workspace_result = _run_workspace_mode(opts, logger)
         if opts.show_summary:
             _print_workspace_summary(workspace_result, opts, scan_start_time)
@@ -7242,40 +8018,37 @@ def _run_with_options(
             else int(WorkspaceExitCode.INTERNAL_ERROR)
         )
         if workspace_payload is None:
-            logger.error(
-                "The container produced no workspace payload, so no per-project "
-                "verdict is available."
-            )
+            logger.error(_no_workspace_payload_message(opts.mode))
         if exit_code != 0:
             sys.exit(exit_code)
         return results
 
     report_sarif_after = report_sarif_identity(opts.output_dir)
+    report_sarif_written_this_run = (
+        report_sarif_after is not None and report_sarif_after != report_sarif_before
+    )
+    # The actionable count the exit code gates on, read ONCE (it parses the
+    # persisted SARIF report) and handed to the exit code, the summary and the
+    # legend alike, so the three name one number and cannot disagree about it.
+    actionable_findings = (
+        _gating_actionable_count(results, opts, report_sarif_written_this_run)
+        if results is not None
+        else 0
+    )
     exit_code = _compute_exit_code(
         results,
         opts,
         config_fail_on_findings,
         config_fail_on_incomplete_scanners,
-        report_sarif_written_this_run=(
-            report_sarif_after is not None and report_sarif_after != report_sarif_before
-        ),
+        report_sarif_written_this_run=report_sarif_written_this_run,
+        actionable_count=actionable_findings,
     )
 
     if opts.show_summary:
-        scanner_metrics = (
-            get_unified_scanner_metrics(asharp_model=results) if results else []
-        )
-        actionable_findings = sum(item.actionable for item in scanner_metrics)
         _print_summary(results, opts, scan_start_time, actionable_findings)
 
         if exit_code == 2 and not opts.quiet:
-            actionable_count = sum(
-                item.actionable
-                for item in (
-                    get_unified_scanner_metrics(asharp_model=results) if results else []
-                )
-            )
-            print_exit_code_legend(opts, actionable_count)
+            print_exit_code_legend(opts, actionable_findings)
 
     _incompleteness = ScanIncompleteness()
     if exit_code == 1:
@@ -7300,12 +8073,18 @@ def _run_with_options(
                 opts.shard_index is not None or opts.shard_count is not None
             ),
         )
+        nothing_to_scan = scanners_with_nothing_to_scan(results)
         print_incompleteness_message(
             list(_incompleteness.scanners),
             list(_incompleteness.converters),
             list(_incompleteness.stale_content_databases),
             no_scanner_ran=_incompleteness.no_scanner_ran,
             observed=list(_incompleteness.observed),
+            nothing_to_scan=(
+                nothing_to_scan_message(results, nothing_to_scan, accept_remedy=False)
+                if nothing_to_scan
+                else None
+            ),
             unevaluated_rules=list(_incompleteness.unevaluated_rules),
             missing_reasons=dict(_incompleteness.missing_reasons),
             could_not_stop=list(_incompleteness.could_not_stop),

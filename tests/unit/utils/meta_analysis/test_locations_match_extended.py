@@ -41,11 +41,45 @@ def test_locations_match_different_start_lines():
 
 
 def test_locations_match_different_end_lines():
-    """Test locations_match with different end_line values."""
+    """Two ranges with the same start line overlap whatever their end lines are:
+    one scanner reports the statement, another the block. Ranges whose start
+    lines differ by up to 5 are accepted, so these, closer than that, are too."""
     loc1 = {"file_path": "test.py", "start_line": 10, "end_line": 15}
     loc2 = {"file_path": "test.py", "start_line": 10, "end_line": 16}
 
-    assert locations_match(loc1, loc2) is False
+    assert locations_match(loc1, loc2) is True
+
+
+def test_a_file_uri_matches_the_relative_path_aggregation_writes():
+    """Aggregation rewrites a file:// URI to a path relative to the scan root, so
+    a preserved finding compared as raw text read as unmatched."""
+    loc1 = {"file_path": "file:///work/app/src/a.py", "start_line": 10}
+    loc2 = {"file_path": "src/a.py", "start_line": 10}
+
+    assert locations_match(loc1, loc2) is True
+
+
+def test_an_absolute_path_matches_its_relative_tail_at_a_component_boundary():
+    assert locations_match(
+        {"file_path": "/work/app/src/a.py", "start_line": 1},
+        {"file_path": "src/a.py", "start_line": 1},
+    )
+    # "a.py" is not the tail "ba.py" of "/work/app/ba.py".
+    assert not locations_match(
+        {"file_path": "/work/app/ba.py", "start_line": 1},
+        {"file_path": "a.py", "start_line": 1},
+    )
+
+
+def test_two_relative_paths_are_compared_whole():
+    assert not locations_match(
+        {"file_path": "src/a.py", "start_line": 1},
+        {"file_path": "other/src/a.py", "start_line": 1},
+    )
+    assert locations_match(
+        {"file_path": "./src/a.py", "start_line": 1},
+        {"file_path": "src/a.py", "start_line": 1},
+    )
 
 
 def test_locations_match_no_common_fields():

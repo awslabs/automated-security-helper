@@ -249,12 +249,24 @@ class TestTheUvToolPathIsAlsoBounded:
         from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 
         class _Probe(UVToolMixin):
-            """Minimal host: the mixin only needs these three from its owner."""
+            """Minimal host: what the dispatch reads from its owner on the run path."""
 
             command = "bandit"
             use_uv_tool = True
+            # The package that provides the command when it is named apart from
+            # it; the dispatch reads this attribute at its run_tool call. A host
+            # without it raised inside the dispatch's try, which answered "could
+            # not start" and never reached run_tool, so no timeout was captured
+            # and the test read as a dropped timeout.
+            uv_tool_package_name = None
 
             def _plugin_log(self, *args, **kwargs):
+                return None
+
+            def _process_command_response(self, response):
+                # The dispatch hands the run's response to its owner; a host
+                # without the hook raised inside the handler and the run read
+                # as a failure after the timeout had already been forwarded.
                 return None
 
             def _get_tool_package_extras(self):
@@ -279,17 +291,22 @@ class TestTheUvToolPathIsAlsoBounded:
 
                 return _Result()
 
+        probe = _Probe()
         with patch.object(runner_module, "get_uv_tool_runner", return_value=_Runner()):
-            _Probe()._try_uv_tool_execution(
+            probe._try_uv_tool_execution(
                 ["bandit", "--version"],
                 tmp_path,
                 results_dir=tmp_path,
                 timeout=_TIMEOUT_SECONDS,
             )
 
+        # The dispatch's own reason rides along: a run it refused before the
+        # launch (a host missing an attribute it reads) leaves no timeout to
+        # capture, and that reads the same as a timeout dropped at the seam.
         assert captured.get("timeout") == _TIMEOUT_SECONDS, (
             "_try_uv_tool_execution accepted a timeout but did not pass it to "
-            f"run_tool: {captured!r}"
+            f"run_tool: {captured!r}; the dispatch's own reason, if it refused "
+            f"the uv route: {probe._uv_run_failure!r}"
         )
 
 

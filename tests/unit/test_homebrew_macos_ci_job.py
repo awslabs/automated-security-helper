@@ -24,7 +24,7 @@ written.
 
 What this file asserts
 ----------------------
-* The job: on ``macos-14``, ``permissions: contents: read``, no secrets, every
+* The job: on ``macos-15``, ``permissions: contents: read``, no secrets, every
   action pinned to a full commit SHA, gated by required-checks, and installing
   through validate-install with ``method: homebrew``.
 * Each link of the install path: the action's homebrew steps run homebrew.sh on a
@@ -89,7 +89,7 @@ def _logical_lines(path: Path) -> List[str]:
 class TestTheJob:
     def test_it_runs_on_a_pinned_macos_image(self):
         runs_on = _job()["runs-on"]
-        assert runs_on == "macos-14", (
+        assert runs_on == "macos-15", (
             f"{JOB} runs on {runs_on!r}; it has to name a macOS image, not a moving "
             "label such as macos-latest"
         )

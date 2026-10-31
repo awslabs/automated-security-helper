@@ -713,7 +713,7 @@ class TestFerretScanScannerScanning:
             ),
             patch("pathlib.Path.exists", return_value=True),
         ):
-            mock_subprocess.return_value = {"stdout": "", "stderr": ""}
+            mock_subprocess.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
 
             result = scanner.scan(target=mock_target_directory, target_type="source")
 
@@ -746,7 +746,7 @@ class TestFerretScanScannerScanning:
         with (
             patch.object(scanner, "_pre_scan", return_value=True) as mock_pre_scan,
             patch.object(scanner, "_post_scan"),
-            patch.object(scanner, "_run_subprocess"),
+            patch.object(scanner, "_run_subprocess", return_value={"returncode": 0}),
             patch.object(scanner, "_plugin_log"),
             patch(
                 "builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))
@@ -890,7 +890,7 @@ class TestFerretScanScannerErrorHandling:
             patch("builtins.open", mock_open(read_data="not valid json")),
             patch("pathlib.Path.exists", return_value=True),
         ):
-            mock_subprocess.return_value = {"stdout": "", "stderr": ""}
+            mock_subprocess.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
 
             result = scanner.scan(target=mock_target_directory, target_type="source")
 
@@ -924,7 +924,7 @@ class TestFerretScanScannerErrorHandling:
             patch.object(scanner, "_run_subprocess") as mock_subprocess,
             patch.object(scanner, "_plugin_log"),
         ):
-            mock_subprocess.return_value = {"stdout": "", "stderr": ""}
+            mock_subprocess.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
 
             result = scanner.scan(target=mock_target_directory, target_type="source")
 
@@ -990,9 +990,10 @@ class TestFerretScanScannerVersionSupport:
             parse_version,
         )
 
-        assert parse_version("1.0.0") == (1, 0, 0)
-        assert parse_version("2.3.4") == (2, 3, 4)
-        assert parse_version("10.20.30") == (10, 20, 30)
+        # A release carries a trailing 0, the place a pre-release's -1 takes.
+        assert parse_version("1.0.0") == (1, 0, 0, 0)
+        assert parse_version("2.3.4") == (2, 3, 4, 0)
+        assert parse_version("10.20.30") == (10, 20, 30, 0)
 
     def test_parse_version_with_prerelease(self):
         """Test parsing version strings with pre-release suffixes."""
@@ -1000,10 +1001,13 @@ class TestFerretScanScannerVersionSupport:
             parse_version,
         )
 
-        assert parse_version("1.0.0-beta") == (1, 0, 0)
-        assert parse_version("2.0.0-rc1") == (2, 0, 0)
-        assert parse_version("1.2.3-alpha.1") == (1, 2, 3)
-        assert parse_version("1.0.0+build123") == (1, 0, 0)
+        # A pre-release sorts below its release: a -1 marks it where the release
+        # carries 0, and the numbers in its label follow, so rc1 is older than rc2.
+        assert parse_version("1.0.0-beta") == (1, 0, 0, -1)
+        assert parse_version("2.0.0-rc1") == (2, 0, 0, -1, 1)
+        assert parse_version("1.2.3-alpha.1") == (1, 2, 3, -1, 1)
+        # Build metadata ranks with its release.
+        assert parse_version("1.0.0+build123") == (1, 0, 0, 0)
 
     def test_compare_versions(self):
         """Test version comparison."""
@@ -1499,7 +1503,7 @@ class TestFerretSarifShapeAcrossVersions:
             out = Path(command[command.index("--output") + 1])
             out.write_text(json.dumps(sarif), encoding="utf-8")
             scanner.exit_code = 0
-            return {"stdout": "", "stderr": ""}
+            return {"returncode": 0, "stdout": "", "stderr": ""}
 
         with (
             patch.object(scanner, "_pre_scan", return_value=True),

@@ -11,8 +11,11 @@ expensive tier. Every test carries one of ``unit``, ``integration`` or ``e2e``, 
 three families of jobs, one job per runner pool so that each pool carries its own
 ``max-parallel`` cap, run one tier each:
 
-* ``unit-test-linux``, ``-macos`` and ``-windows`` run ``-m unit``, unsharded: the
-  in-process tests take minutes on one runner, so the tier has no shard axis;
+* ``unit-test-linux``, ``-macos`` and ``-windows`` run ``-m unit`` in four shards per OS
+  and Python version: the tier first ran unsharded on the reading that its in-process
+  tests take minutes on one runner, and the first tiered run of main measured the
+  unsharded legs at 1837 to 1972 s with 13 of the 20 non-arm legs cancelled at the
+  30-minute timeout, so it took the integration tier's shard axis;
 * ``integration-test-linux``, ``-macos`` and ``-windows`` run ``-m integration`` in
   four shards per OS and Python version, because the tests that start real tools carry
   about 6,300 serial seconds by the classification and the per-file medians of one run
@@ -21,9 +24,10 @@ three families of jobs, one job per runner pool so that each pool carries its ow
 * ``e2e-test-linux``, ``-macos`` and ``-windows`` run ``-m e2e`` once per runner image
   on one Python version, unsharded.
 
-Four things have to agree for the integration tier to run every test exactly once:
+Four things have to agree for the unit and integration tiers to run every test exactly
+once:
 
-* the ``shard`` axis in each of the three integration jobs, one literal list whose
+* the ``shard`` axis in each of the six unit and integration jobs, one literal list whose
   entries each carry the total they were cut for (``3of4``);
 * ``tests/utils/sharding.py``, a ``pytest_ignore_collect`` hook that ignores the test
   modules another shard owns, so pytest's own ``testpaths``, ``python_files`` and ignore
@@ -32,8 +36,9 @@ Four things have to agree for the integration tier to run every test exactly onc
   shard otherwise, and names its artifact after the tier and the shard;
 * the ``unit-coverage`` job, which downloads the unit tier's artifacts of one OS family
   and applies the 80% gate to their data, failing when a shard is missing or
-  unreadable. (The unit tier is one artifact, ``shard1of1``, a complete set of one; the
-  check still guards a set that was sharded.)
+  unreadable. (The unit tier is four artifacts, ``shard1of4`` to ``shard4of4``; a set
+  of one, ``shard1of1``, is still admitted as complete, which is what an unsharded run
+  uploads.)
 
 A shard dropped from the axis would silently stop running its slice of the suite, and
 every remaining shard would still pass. The first test below is that guard. A split made
@@ -48,8 +53,13 @@ measurement the CI run makes. An empty shard is handled in code: a shard that ow
 modules but holds no test of the tier is admitted (pytest would exit 5; the hook turns
 that into 0 and says so), while a shard that collects nothing at all keeps exit 5. Both
 cases are run in a real pytest below. Whether the whole tier is empty is not checked by
-any one leg; the tier's other legs and the unit and e2e tiers would still exit 5 on
-their own.
+any one leg, and the other tiers do not catch it either: every integration leg deselects
+the unit modules and is admitted, so a tier empty as a whole would read green across
+its legs (tests/utils/sharding.py says the same). What guards against it is the
+collection hook in tests/conftest.py, which refuses a session where any test carries
+no tier marker or two (pinned by tests/unit/test_every_test_carries_one_tier_marker.py),
+and tests/unit/test_unit_test_step_gates.py, which pins that the action's pytest step
+selects each tier of the contract with ``-m <marker>``.
 """
 
 from __future__ import annotations
@@ -96,11 +106,46 @@ COVERAGE_RUNNERS = [
 ]
 COVERAGE_PYTHON = "3.12"
 
-#: The shard axis of the integration tier. Four is a reading from the real classification
-#: and the per-file medians of one run of the earlier layout (eight was the figure before
-#: the tests were classified), so the first run of the tier jobs is what may move it; the
-#: list is written out here so that moving it is a change to this file in the same diff.
+#: The one event-conditioned matrix entry the workflow uses: on a pull_request event it
+#: is the quoted value and drops the combinations it matches; on every other event it is
+#: the empty string and matches no combination (the note on ensure-cache in the workflow).
+PULL_REQUEST_COVER_PREFIX = "${{ github.event_name == 'pull_request' && '"
+PULL_REQUEST_COVER_SUFFIX = "' || '' }}"
+
+
+def _static_axes(matrix: dict[str, Any]) -> list[str]:
+    """The axes GitHub takes the product of: every key but include and exclude."""
+    return [k for k in matrix if k not in ("include", "exclude")]
+
+
+def _assert_only_the_pull_request_cover(job_id: str, matrix: dict[str, Any]) -> None:
+    """Every exclude entry on a tier job is the pull-request cover and nothing else.
+
+    A static exclude would change the leg count on every event, and the job counts in
+    the workflow comments are checked against the static axes; the cover changes it on a
+    pull request only, where tests/unit/test_unified_ci_job_counts.py resolves it.
+    """
+    for entry in matrix.get("exclude") or []:
+        for key, value in entry.items():
+            assert (
+                isinstance(value, str)
+                and value.startswith(PULL_REQUEST_COVER_PREFIX)
+                and value.endswith(PULL_REQUEST_COVER_SUFFIX)
+            ), (
+                f"{job_id} carries a static exclude ({key}: {value!r}); only the "
+                "pull-request cover is admitted on a tier job"
+            )
+
+
+#: The shard axis of the unit and integration tiers. For the integration tier four is a
+#: reading from the real classification and the per-file medians of one run of the earlier
+#: layout (eight was the figure before the tests were classified); for the unit tier it is
+#: the measured cure for the unsharded legs that timed out on the first tiered run of main
+#: (two shards would have read about 950 s on x86_64, four about 480 s). The list is
+#: written out here so that moving it is a change to this file in the same diff.
 INTEGRATION_SHARDS = ["1of4", "2of4", "3of4", "4of4"]
+#: The six jobs that carry the shard axis: the three unit and the three integration jobs.
+SHARDED_TIER_JOB_IDS = (*UNIT_TEST_JOB_IDS, *INTEGRATION_TEST_JOB_IDS)
 
 
 def _load_script(filename: str) -> ModuleType:
@@ -132,9 +177,9 @@ def _action_inputs() -> dict[str, Any]:
 
 
 def _shard_axes() -> dict[str, list[str]]:
-    """The ``shard`` axis of each integration-test job, by job id."""
+    """The ``shard`` axis of each unit-test and integration-test job, by job id."""
     axes = {}
-    for job_id in INTEGRATION_TEST_JOB_IDS:
+    for job_id in SHARDED_TIER_JOB_IDS:
         axis = _workflow_job(job_id)["strategy"]["matrix"]["shard"]
         assert isinstance(axis, list), (job_id, axis)
         axes[job_id] = [str(entry) for entry in axis]
@@ -142,11 +187,11 @@ def _shard_axes() -> dict[str, list[str]]:
 
 
 def _shard_axis() -> list[str]:
-    """The one shard axis the three integration-test jobs share; they must not differ."""
+    """The one shard axis the six sharded tier jobs share; they must not differ."""
     axes = _shard_axes()
-    first = axes[INTEGRATION_TEST_JOB_IDS[0]]
+    first = axes[SHARDED_TIER_JOB_IDS[0]]
     assert all(axis == first for axis in axes.values()), (
-        f"the integration-test jobs disagree on the shard axis: {axes}"
+        f"the unit-test and integration-test jobs disagree on the shard axis: {axes}"
     )
     return first
 
@@ -170,7 +215,7 @@ def _clean_env(**extra: str) -> dict[str, str]:
         k: v
         for k, v in os.environ.items()
         if not k.startswith(("PYTEST_", "COV_CORE_", "COVERAGE_"))
-        and k != sharding.ENV_VAR
+        and k not in (sharding.ENV_VAR, sharding.FLOOR_ENV_VAR)
     }
     env.update(extra)
     return env
@@ -202,7 +247,7 @@ def _rendered_artifact_name(
 
 @pytest.mark.unit
 class TestTheShardAxis:
-    @pytest.mark.parametrize("job_id", INTEGRATION_TEST_JOB_IDS)
+    @pytest.mark.parametrize("job_id", SHARDED_TIER_JOB_IDS)
     def test_it_lists_every_shard_of_one_total_once(self, job_id):
         """Dropping, repeating or renumbering an entry leaves part of the suite unrun."""
         axis = _shard_axes()[job_id]
@@ -225,25 +270,33 @@ class TestTheShardAxis:
         assert uses["with"]["shard"] == "${{ matrix.shard }}"
         assert uses["with"]["marker"] == "integration"
 
-    @pytest.mark.parametrize("job_id", INTEGRATION_TEST_JOB_IDS)
+    @pytest.mark.parametrize("job_id", SHARDED_TIER_JOB_IDS)
     def test_the_job_name_carries_the_shard(self, job_id):
         """Two legs with one name collide in the checks list and in artifacts."""
         assert "matrix.shard" in _workflow_job(job_id)["name"]
 
     @pytest.mark.parametrize("job_id", UNIT_TEST_JOB_IDS)
-    def test_the_unit_jobs_are_not_sharded(self, job_id):
-        """The unit tier fits one job per leg, so a shard axis would only repeat setup."""
+    def test_the_unit_jobs_hand_their_shard_and_their_tier_to_the_action(self, job_id):
+        """The unit tier is sharded like the integration tier (the module docstring).
+
+        An unsharded unit leg did not fit the 30-minute timeout on the hosted x86_64,
+        macOS and Windows runners, so each unit job carries the shard axis and hands its
+        shard to the action; a job that dropped the axis would run the whole tier again.
+        """
         job = _workflow_job(job_id)
-        assert "shard" not in job["strategy"]["matrix"]
-        assert "shard" not in job["name"]
+        assert job["strategy"]["matrix"]["shard"] == INTEGRATION_SHARDS, job["strategy"]
         uses = _uses_the_action(job_id)
-        assert "shard" not in uses["with"], uses
+        assert uses["with"]["shard"] == "${{ matrix.shard }}"
         assert uses["with"]["marker"] == "unit"
 
     @pytest.mark.parametrize("job_id", E2E_TEST_JOB_IDS)
     def test_the_e2e_jobs_run_one_python_and_are_not_sharded(self, job_id):
         job = _workflow_job(job_id)
-        assert sorted(job["strategy"]["matrix"]) == ["os"], job["strategy"]
+        assert sorted(_static_axes(job["strategy"]["matrix"])) == ["os"], job[
+            "strategy"
+        ]
+        assert "include" not in job["strategy"]["matrix"], job["strategy"]
+        _assert_only_the_pull_request_cover(job_id, job["strategy"]["matrix"])
         assert "shard" not in job["name"]
         uses = _uses_the_action(job_id)
         assert uses["with"]["python-version"] == "3.12"
@@ -283,6 +336,35 @@ class TestTheShardFilter:
         sizes = [owners.count(index) for index in range(1, count + 1)]
         assert min(sizes) > 0.5 * (1000 / count), sizes
         assert max(sizes) < 1.5 * (1000 / count), sizes
+
+    def test_the_real_module_list_splits_about_evenly(self):
+        """The crc32 split is about even in module count over the real module paths.
+
+        ``owner`` assigns a module to a shard by a hash of its path, so evenness is a
+        property of the names and not of the design; the synthetic names above do not
+        say how the real names fall. This counts every ``test_*.py`` file under
+        tests/ with ``rglob``, so all tiers and every directory are in it, and
+        pytest's ``norecursedirs`` is not applied. That is wider than what one tier
+        run collects. The check is on module counts only. It does not measure how
+        long any shard runs, so it cannot catch a split that makes one integration
+        leg slower than the others; a check weighted by runtime would be a different
+        test. The bounds are 0.75 and 1.25 times the mean module count per shard, so
+        they leave room for growth; the failure message prints the current sizes."""
+        count = sharding.parse_shard(_shard_axis()[0])[1]
+        patterns = _pytest_ini_patterns("python_files")
+        modules = sorted(
+            path.relative_to(REPO_ROOT).as_posix()
+            for path in (REPO_ROOT / "tests").rglob("*.py")
+            if sharding.matches_python_files(path, patterns)
+        )
+        assert len(modules) > 1000, len(modules)
+        sizes = [0] * count
+        for module in modules:
+            sizes[sharding.owner(module, count) - 1] += 1
+        mean = len(modules) / count
+        detail = f"shard sizes {sizes} of {len(modules)} modules, mean {mean:.1f}"
+        assert max(sizes) <= 1.25 * mean, detail
+        assert min(sizes) >= 0.75 * mean, detail
 
     def test_a_file_pytest_does_not_take_as_a_test_module_is_left_alone(self):
         """The filter reads python_files from pytest.ini, so it never ignores data files."""
@@ -324,12 +406,24 @@ class TestTheShardFilter:
         with pytest.raises(ValueError):
             sharding.shard_from_env({sharding.ENV_VAR: text})
 
-    def test_the_root_conftest_registers_the_hook(self):
-        text = ROOT_CONFTEST.read_text(encoding="utf-8")
-        assert "from tests.utils.sharding import (" in text
-        assert "    pytest_ignore_collect,\n" in text
-        assert "    pytest_configure_node,\n" in text
-        assert "sharding.configure(config)" in text
+    def test_the_root_conftest_registers_the_hook(self, pytestconfig):
+        """Read from this session's plugin manager, not from the conftest's source
+        text: the root conftest is the plugin that carries the sharding hooks, and
+        ``configure`` ran for this config (the shard setting is in its stash)."""
+        manager = pytestconfig.pluginmanager
+        root = [
+            plugin
+            for plugin in manager.get_plugins()
+            if getattr(plugin, "__file__", None)
+            and Path(plugin.__file__).resolve() == ROOT_CONFTEST
+        ]
+        assert len(root) == 1, root
+        (conftest,) = root
+        assert conftest.pytest_ignore_collect is sharding.pytest_ignore_collect
+        assert conftest.pytest_configure_node is sharding.pytest_configure_node
+        impls = manager.hook.pytest_ignore_collect.get_hookimpls()
+        assert any(impl.function is sharding.pytest_ignore_collect for impl in impls)
+        assert sharding._SHARD_KEY in pytestconfig.stash
 
 
 @pytest.mark.integration
@@ -590,6 +684,9 @@ class TestAnEmptyShardOfATierRunInARealPytest:
         done = self._run(tmp_path, index, "-m", "integration", "-n", "2")
         assert done.returncode == 0, done.stdout + done.stderr
         assert f"shard {index}of{self.COUNT} holds no test selected by" in done.stdout
+        # Both workers deselected the one unit test; the line names it once, not the
+        # sum of the workers' counts (which would read "(2 deselected)" here).
+        assert "(1 deselected); admitted" in done.stdout, done.stdout
 
     def test_a_shard_that_collects_nothing_at_all_exits_5_under_xdist_too(
         self, tmp_path
@@ -617,6 +714,477 @@ class TestAnEmptyShardOfATierRunInARealPytest:
         )
         done = self._run(tmp_path, self._owner("integration"), "-m", "integration")
         assert done.returncode == 1, done.stdout + done.stderr
+
+
+@pytest.mark.integration
+class TestATierRunThatRanNothingInARealPytest:
+    """The exit status of pytest itself for a tier leg whose only test is skipped.
+
+    The planted tree uses the wiring conftest of
+    TestAnEmptyShardOfATierRunInARealPytest and one unit module holding a single
+    ``@pytest.mark.skip`` test. The run is the unsharded unit leg of CI: ``-m unit`` with
+    ``ASH_TEST_TIER_FLOOR=1`` in the child's environment, as the run-unit-tests action
+    sets it, and no shard.
+    """
+
+    CONFTEST = TestAnEmptyShardOfATierRunInARealPytest.CONFTEST
+    LINE = (
+        "tier run executed no test: 1 collected, 1 skipped, 0 executed; "
+        "a leg that runs nothing is not green"
+    )
+    COUNTED_LINE = (
+        "tier run executed no test: 2 collected, 1 skipped, 1 leg assertion not "
+        "counted, 0 executed; a leg that runs nothing is not green"
+    )
+    ANNOTATION_START = "::error title=tier run executed no test::"
+
+    def _plant(
+        self, root: Path, *, leg_assertion: bool = False, real_test: bool = False
+    ) -> None:
+        """One skipped test, plus a passing leg assertion and/or a passing real test."""
+        (root / "conftest.py").write_text(self.CONFTEST, encoding="utf-8")
+        (root / "pytest.ini").write_text(
+            "[pytest]\ntestpaths = suite\npython_files = test_*.py\n"
+            "markers =\n    unit: the unit tier\n    leg_assertion: asserts a leg\n",
+            encoding="utf-8",
+        )
+        (root / "suite").mkdir()
+        (root / "suite" / "test_only_skipped.py").write_text(
+            "import pytest\n\npytestmark = pytest.mark.unit\n\n\n"
+            '@pytest.mark.skip(reason="the tool is absent")\n'
+            "def test_it():\n    pass\n",
+            encoding="utf-8",
+        )
+        if leg_assertion:
+            (root / "suite" / "test_the_leg_has_its_tools.py").write_text(
+                "import pytest\n\n"
+                "pytestmark = [pytest.mark.unit, pytest.mark.leg_assertion]\n\n\n"
+                "def test_the_leg_has_its_tools():\n    pass\n",
+                encoding="utf-8",
+            )
+        if real_test:
+            (root / "suite" / "test_a_real_one.py").write_text(
+                "import pytest\n\npytestmark = pytest.mark.unit\n\n\n"
+                "def test_a_real_one():\n    pass\n",
+                encoding="utf-8",
+            )
+
+    def _run(
+        self,
+        root: Path,
+        *,
+        under_ci: bool,
+        extra: tuple[str, ...] = (),
+        shard: str = "",
+    ):
+        env = _clean_env(PYTHONPATH=str(REPO_ROOT))
+        if under_ci:
+            env[sharding.FLOOR_ENV_VAR] = "1"
+        if shard:
+            env[sharding.ENV_VAR] = shard
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-c",
+                str(root / "pytest.ini"),
+                "--rootdir",
+                str(root),
+                "--confcutdir",
+                str(root),
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "no:randomly",
+                "-m",
+                "unit",
+                *extra,
+            ],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+    def test_a_ci_unit_leg_whose_only_test_is_skipped_exits_1_and_says_so(
+        self, tmp_path
+    ):
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=True)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert self.LINE in done.stdout, done.stdout
+
+    def test_a_failing_floor_prints_an_error_annotation_at_the_start_of_a_line(
+        self, tmp_path
+    ):
+        """GitHub reads a workflow command only at the start of a line.
+
+        ``-vv`` against the helper's ``-q`` is the verbose output CI runs with (the
+        repository's addopts has ``--verbose``), where the reporter ends a test's line.
+        """
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=True, extra=("-vv",))
+        assert done.returncode == 1, done.stdout + done.stderr
+        starts = [
+            line
+            for line in done.stdout.splitlines()
+            if line.startswith(self.ANNOTATION_START)
+        ]
+        assert starts == [self.ANNOTATION_START + self.LINE], done.stdout
+
+    def test_the_error_annotation_is_printed_under_xdist_too(self, tmp_path):
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, leg_assertion=True)
+        done = self._run(tmp_path, under_ci=True, extra=("-vv", "-n", "2"))
+        assert done.returncode == 1, done.stdout + done.stderr
+        starts = [
+            line
+            for line in done.stdout.splitlines()
+            if line.startswith(self.ANNOTATION_START)
+        ]
+        assert starts == [self.ANNOTATION_START + self.COUNTED_LINE], done.stdout
+
+    def test_a_leg_that_executed_a_test_prints_no_annotation(self, tmp_path):
+        self._plant(tmp_path, leg_assertion=True, real_test=True)
+        done = self._run(tmp_path, under_ci=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "::error" not in done.stdout, done.stdout
+
+    def test_a_passing_leg_assertion_does_not_hide_an_all_skipped_leg(self, tmp_path):
+        """The e2e tools test passes on every leg that has its tools; it must not count."""
+        self._plant(tmp_path, leg_assertion=True)
+        done = self._run(tmp_path, under_ci=True)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert self.COUNTED_LINE in done.stdout, done.stdout
+
+    def test_the_floor_fires_under_xdist_where_the_controller_collects_nothing(
+        self, tmp_path
+    ):
+        """As CI runs it, ``-n 2``: the controller learns the counts from the workers.
+
+        It relies on two xdist internals the unit cases only mock: the controller
+        receives each worker's reports through ``pytest_runtest_logreport``, and sets
+        ``session.testscollected`` itself.
+        """
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=True, extra=("-n", "2"))
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert self.LINE in done.stdout, done.stdout
+
+    def test_a_passing_leg_assertion_does_not_hide_an_all_skipped_leg_under_xdist(
+        self, tmp_path
+    ):
+        """The marker name travels in ``report.keywords``, which xdist sends along."""
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, leg_assertion=True)
+        done = self._run(tmp_path, under_ci=True, extra=("-n", "2"))
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert self.COUNTED_LINE in done.stdout, done.stdout
+
+    def test_the_same_leg_with_a_real_passing_test_stays_green_under_xdist(
+        self, tmp_path
+    ):
+        """The control for the two cases above: a worker's pass is counted."""
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, leg_assertion=True, real_test=True)
+        done = self._run(tmp_path, under_ci=True, extra=("-n", "2"))
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "executed no test" not in done.stdout, done.stdout
+
+    def test_the_same_leg_with_a_real_passing_test_stays_green(self, tmp_path):
+        """The control for the case above: one executed test is enough."""
+        self._plant(tmp_path, leg_assertion=True, real_test=True)
+        done = self._run(tmp_path, under_ci=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "executed no test" not in done.stdout, done.stdout
+
+    def test_the_same_run_on_a_developer_machine_stays_green(self, tmp_path):
+        """The control: without the opt-in, a skipped test is a skip."""
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=False)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "1 skipped" in done.stdout, done.stdout
+        assert "executed no test" not in done.stdout, done.stdout
+
+    def test_a_shard_alone_does_not_turn_the_floor_on(self, tmp_path):
+        """A developer's ``ASH_TEST_SHARD=1of1 pytest -m unit``: the same skip, exit 0.
+
+        The shard owns the planted module (one shard owns everything), so the run
+        collects the skipped test and executes nothing, exactly as the failing case
+        above; only the opt-in differs.
+        """
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=False, shard="1of1")
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "1 skipped" in done.stdout, done.stdout
+        assert "executed no test" not in done.stdout, done.stdout
+
+    def test_a_shard_with_the_opt_in_still_fails_a_leg_that_ran_nothing(self, tmp_path):
+        """The control for the case above: the opt-in is what turns the floor on."""
+        self._plant(tmp_path)
+        done = self._run(tmp_path, under_ci=True, shard="1of1")
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert self.LINE in done.stdout, done.stdout
+
+
+@pytest.mark.integration
+class TestSkipifLegsAndWarnModeInARealPytest:
+    """The floor on a planted tree whose tests skip for different reasons.
+
+    The tree's conftest wires the sharding module as the one in
+    TestAnEmptyShardOfATierRunInARealPytest does, and adds what tests/conftest.py adds
+    to every test of the integration tier: a ``--run-integration`` option and a ``skip``
+    mark with the gate's text when it is absent. The runs are the sharded integration
+    leg of CI: ``-m integration``, the opt-in in the child's environment, shard 1of1
+    (which owns every module), with and without ``-n 2``. The conftest gate is the one
+    skip the floor must keep failing on; a ``skipif`` whose condition held is admitted.
+    """
+
+    GATE_REASON = sharding.GATE_SKIP_REASONS[1]
+    GATE = textwrap.dedent(
+        f"""\
+
+
+        def pytest_addoption(parser):
+            parser.addoption("--run-integration", action="store_true", default=False)
+
+
+        def pytest_collection_modifyitems(config, items):
+            if not config.getoption("--run-integration"):
+                gate = pytest.mark.skip(reason={GATE_REASON!r})
+                for item in items:
+                    if item.get_closest_marker("integration"):
+                        item.add_marker(gate)
+        """
+    )
+    CONFTEST = TestAnEmptyShardOfATierRunInARealPytest.CONFTEST + GATE
+    SKIPIF_REASON = "not supported on this runner"
+
+    def _plant(
+        self, root: Path, *, skipif: int = 0, gated: int = 0, absent_tool: int = 0
+    ) -> None:
+        """Modules of integration tests: skipif(True) ones, plain ones, ones that
+        ``pytest.skip`` in the body. The plain ones are the gate's when it is closed."""
+        (root / "conftest.py").write_text(self.CONFTEST, encoding="utf-8")
+        (root / "pytest.ini").write_text(
+            "[pytest]\ntestpaths = suite\npython_files = test_*.py\n"
+            "markers =\n    integration: the integration tier\n",
+            encoding="utf-8",
+        )
+        (root / "suite").mkdir()
+        plain_top = "import pytest\n\npytestmark = pytest.mark.integration\n\n\n"
+        skipif_top = (
+            "import pytest\n\n"
+            "pytestmark = [\n    pytest.mark.integration,\n"
+            f"    pytest.mark.skipif(True, reason={self.SKIPIF_REASON!r}),\n]\n\n\n"
+        )
+        modules = {
+            "test_skipif.py": (skipif, skipif_top, "    pass\n"),
+            "test_plain.py": (gated, plain_top, "    pass\n"),
+            "test_absent_tool.py": (
+                absent_tool,
+                plain_top,
+                "    pytest.skip('bandit is absent')\n",
+            ),
+        }
+        for name, (count, top, body) in modules.items():
+            if count:
+                tests = "".join(f"def test_{i}():\n{body}\n\n" for i in range(count))
+                (root / "suite" / name).write_text(top + tests, encoding="utf-8")
+
+    def _run(
+        self,
+        root: Path,
+        *,
+        floor: str = "1",
+        gate_open: bool,
+        extra: tuple[str, ...] = (),
+    ):
+        env = _clean_env(PYTHONPATH=str(REPO_ROOT))
+        env[sharding.ENV_VAR] = "1of1"
+        if floor:
+            env[sharding.FLOOR_ENV_VAR] = floor
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-c",
+                str(root / "pytest.ini"),
+                "--rootdir",
+                str(root),
+                "--confcutdir",
+                str(root),
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "no:randomly",
+                "-m",
+                "integration",
+                *(("--run-integration",) if gate_open else ()),
+                *extra,
+            ],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+    ADMITTED = (
+        "tier run executed no test; admitted, because every skip is a skipif "
+        "condition that held: 2 skipped (2 x 'not supported on this runner')"
+    )
+    NOTICE = f"::notice title=tier run admitted on skipif skips::{ADMITTED}"
+    ADMITTED_WARNING = f"::warning title=tier run admitted on skipif skips::{ADMITTED}"
+
+    def test_a_leg_whose_every_test_is_a_skipif_that_held_is_admitted(self, tmp_path):
+        self._plant(tmp_path, skipif=2)
+        done = self._run(tmp_path, gate_open=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert self.ADMITTED in done.stdout, done.stdout
+        assert self.NOTICE in done.stdout.splitlines(), (
+            "the notice starts its own line, which is where GitHub reads it"
+        )
+        assert "executed no test: " not in done.stdout, done.stdout
+        assert "::error" not in done.stdout and "::warning" not in done.stdout
+
+    def test_the_same_leg_in_warn_mode_is_admitted_with_a_warning(self, tmp_path):
+        """Warn mode: the admitted line, then a warning annotation and no notice."""
+        self._plant(tmp_path, skipif=2)
+        done = self._run(tmp_path, floor="warn", gate_open=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert self.ADMITTED in done.stdout, done.stdout
+        assert self.ADMITTED_WARNING in done.stdout.splitlines(), (
+            "the warning starts its own line, which is where GitHub reads it"
+        )
+        assert "::notice" not in done.stdout and "::error" not in done.stdout
+
+    def test_the_same_leg_is_admitted_under_xdist(self, tmp_path):
+        """The keywords and the skip's place cross the worker boundary in the reports."""
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, skipif=2)
+        done = self._run(tmp_path, gate_open=True, extra=("-n", "2"))
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert self.ADMITTED in done.stdout, done.stdout
+        assert self.NOTICE in done.stdout.splitlines(), done.stdout
+
+    def test_a_skipif_beside_the_gate_skip_mark_is_not_admitted(self, tmp_path):
+        """With the gate closed, the tests carry a held ``skipif`` and the gate's ``skip``.
+
+        pytest evaluates ``skipif`` first, so the reason is the ``skipif``'s, but the
+        report's keywords also hold ``skip`` and a report cannot say which mark fired.
+        The leg fails, which is the safe direction; in CI the gate is open and the
+        admitted case above applies.
+        """
+        self._plant(tmp_path, skipif=2)
+        done = self._run(tmp_path, gate_open=False)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "2 collected, 2 skipped, 0 executed" in done.stdout, done.stdout
+        assert "admitted, because" not in done.stdout, done.stdout
+
+    def test_a_leg_the_conftest_gate_skipped_fails(self, tmp_path):
+        self._plant(tmp_path, gated=2)
+        done = self._run(tmp_path, gate_open=False)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert (
+            "tier run executed no test: 2 collected, 2 skipped, 0 executed; "
+            "a leg that runs nothing is not green"
+        ) in done.stdout, done.stdout
+        assert "admitted, because" not in done.stdout, done.stdout
+
+    def test_a_leg_the_conftest_gate_skipped_fails_under_xdist(self, tmp_path):
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, gated=2)
+        done = self._run(tmp_path, gate_open=False, extra=("-n", "2"))
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "2 collected, 2 skipped, 0 executed" in done.stdout, done.stdout
+
+    def test_a_mixed_leg_of_skipif_and_gate_skips_fails(self, tmp_path):
+        self._plant(tmp_path, skipif=2, gated=1)
+        done = self._run(tmp_path, gate_open=False)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "3 collected, 3 skipped, 0 executed" in done.stdout, done.stdout
+        assert "admitted, because" not in done.stdout, done.stdout
+        assert "::notice" not in done.stdout, "a failed leg is not an admitted one"
+
+    def test_a_mixed_leg_of_skipif_and_gate_skips_fails_under_xdist(self, tmp_path):
+        import xdist  # noqa: F401 - the run below needs the plugin
+
+        self._plant(tmp_path, skipif=2, gated=1)
+        done = self._run(tmp_path, gate_open=False, extra=("-n", "2"))
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "3 collected, 3 skipped, 0 executed" in done.stdout, done.stdout
+
+    def test_a_mixed_leg_of_skipif_and_a_missing_tool_skip_fails(self, tmp_path):
+        """The gate is open; one test finds its tool absent and skips itself."""
+        self._plant(tmp_path, skipif=2, absent_tool=1)
+        done = self._run(tmp_path, gate_open=True)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "3 collected, 3 skipped, 0 executed" in done.stdout, done.stdout
+
+    def test_warn_mode_prints_the_prefixed_line_and_exits_0(self, tmp_path):
+        self._plant(tmp_path, absent_tool=1)
+        done = self._run(tmp_path, floor="warn", gate_open=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        line = (
+            "tier run executed no test: 1 collected, 1 skipped, 0 executed; "
+            "a leg that runs nothing is not green"
+        )
+        assert sharding.WARN_PREFIX + line in done.stdout, done.stdout
+        warning = f"::warning title=tier run executed no test::{line}"
+        assert warning in done.stdout.splitlines(), (
+            "the annotation starts its own line, which is where GitHub reads it"
+        )
+        assert "::error" not in done.stdout, "a warning is not an error annotation"
+
+    def test_the_value_1_on_the_same_tree_exits_1(self, tmp_path):
+        """The control for warn mode: only the value differs."""
+        self._plant(tmp_path, absent_tool=1)
+        done = self._run(tmp_path, floor="1", gate_open=True)
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert sharding.WARN_PREFIX not in done.stdout, done.stdout
+        assert "::error title=tier run executed no test::" in done.stdout, done.stdout
+
+    def test_any_other_value_is_a_usage_error(self, tmp_path):
+        """A mistyped value ends the run as a malformed ASH_TEST_SHARD does."""
+        self._plant(tmp_path, absent_tool=1)
+        done = self._run(tmp_path, floor="WARN", gate_open=True)
+        assert done.returncode == int(pytest.ExitCode.USAGE_ERROR), (
+            done.stdout + done.stderr
+        )
+        assert int(pytest.ExitCode.USAGE_ERROR) == 4
+        assert (
+            "ASH_TEST_TIER_FLOOR: 'WARN' is not accepted; "
+            "use 1, warn, or 0 (off), or leave it empty" in done.stdout + done.stderr
+        ), done.stdout + done.stderr
+        assert "executed no test" not in done.stdout, done.stdout
+
+    @pytest.mark.parametrize("value", ["0", "false", "off", "OFF"])
+    def test_an_off_spelling_runs_the_suite_with_the_floor_not_armed(
+        self, tmp_path, value
+    ):
+        """``ASH_TEST_TIER_FLOOR=0`` is what a developer exports to say no floor.
+
+        The same tree that fails under ``1`` and ends in a usage error for ``WARN``
+        exits 0 here and prints no floor line.
+        """
+        self._plant(tmp_path, absent_tool=1)
+        done = self._run(tmp_path, floor=value, gate_open=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert "executed no test" not in done.stdout, done.stdout
+        assert "is not accepted" not in done.stdout + done.stderr
 
 
 @pytest.mark.unit
@@ -702,47 +1270,775 @@ class TestAShardThatHoldsNoTestOfTheTierIsAdmitted:
         manager = pytest.PytestPluginManager()
         config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
         sharding.configure(config)
-        first = manager.get_plugin("ash-shard-empty-admitted")
+        first = manager.get_plugin("ash-tier-run-outcome")
         assert first is not None
         sharding.configure(config)
-        assert manager.get_plugin("ash-shard-empty-admitted") is first
+        assert manager.get_plugin("ash-tier-run-outcome") is first
 
     def test_configure_registers_nothing_for_a_whole_run(self, monkeypatch):
+        """No shard and no floor opt-in: a developer's plain ``pytest``."""
         monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.delenv(sharding.FLOOR_ENV_VAR, raising=False)
         manager = pytest.PytestPluginManager()
         sharding.configure(SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager))
-        assert manager.get_plugin("ash-shard-empty-admitted") is None
+        assert manager.get_plugin("ash-tier-run-outcome") is None
 
-    def test_the_plugin_counts_what_the_run_and_its_workers_deselected(self):
-        plugin = sharding._AdmitAnEmptyShard()
+    def test_the_plugin_counts_what_the_run_deselected(self):
+        plugin = sharding._TierRunOutcome()
         plugin.pytest_deselected([object(), object()])
         plugin.pytest_deselected([object()])
-        finished = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: 3})
-        plugin.pytest_testnodedown(finished, None)
+        assert plugin.deselected == 3
+
+    def test_the_controller_keeps_its_workers_count_once_not_their_sum(self):
+        """Every xdist worker deselects the same modules, so the controller sees one
+        number once per worker; summed, ``-n 2`` would print twice the real count."""
+        plugin = sharding._TierRunOutcome()
+        for count in (3, 3):
+            finished = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: count})
+            plugin.pytest_testnodedown(finished, None)
         crashed = SimpleNamespace(workeroutput=None)
         plugin.pytest_testnodedown(crashed, RuntimeError("worker crashed"))
-        assert plugin.deselected == 6
+        assert plugin.deselected == 3
 
     def test_a_worker_reports_its_count_and_leaves_the_exit_status_alone(self):
         written: list[str] = []
         session = self._session("3of8", "integration", written)
         session.config.workeroutput = {}
-        plugin = sharding._AdmitAnEmptyShard()
+        plugin = sharding._TierRunOutcome()
         plugin.pytest_deselected([object(), object()])
         plugin.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
         assert session.config.workeroutput == {sharding.WORKEROUTPUT_KEY: 2}
         assert session.exitstatus == 5 and not written
 
-    def test_the_controller_admits_on_the_sum_of_its_workers_counts(self):
+    def test_the_controller_admits_on_its_workers_count_and_prints_it_once(self):
+        """Two workers that each deselected the one test: admitted, "(1 deselected)",
+        not the "(2 deselected)" a sum of the workers' counts would print."""
         written: list[str] = []
         session = self._session("3of8", "integration", written)
-        plugin = sharding._AdmitAnEmptyShard()
+        plugin = sharding._TierRunOutcome()
         for count in (1, 1):
             node = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: count})
             plugin.pytest_testnodedown(node, None)
         plugin.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
         assert session.exitstatus == pytest.ExitCode.OK
-        assert "(2 deselected)" in written[0], written
+        assert "(1 deselected)" in written[0], written
+
+
+@pytest.mark.unit
+class TestATierRunThatExecutedNoTestFails:
+    """A CI leg that selected tests and ran none of them is not green.
+
+    Every selected test skipped (a tool is absent, a gate is off) exits 0 and reads green
+    while it measured nothing. ``fail_a_tier_run_that_executed_no_test`` turns that
+    into ``TESTS_FAILED`` for a CI tier run only, and leaves the admitted empty shard,
+    a run that executed something and a plain local ``pytest`` alone. The real pytest
+    run of the failing case is in TestATierRunThatRanNothingInARealPytest.
+    """
+
+    LINE = (
+        "tier run executed no test: 3 collected, 3 skipped, 0 executed; "
+        "a leg that runs nothing is not green"
+    )
+    ANNOTATION = "::error title=tier run executed no test::" + LINE
+    WARNING = "::warning title=tier run executed no test::" + LINE
+
+    @staticmethod
+    def _session(
+        written: list[str],
+        *,
+        expression: str = "unit",
+        text: str = "",
+        under_ci: bool = True,
+        warn: bool = False,
+        collected: int = 3,
+        status: Any = pytest.ExitCode.OK,
+        **options: Any,
+    ) -> SimpleNamespace:
+        stash = pytest.Stash()
+        stash[sharding._TEXT_KEY] = text
+        stash[sharding._FLOOR_KEY] = under_ci
+        stash[sharding._FLOOR_WARN_KEY] = warn
+        values = {"markexpr": expression, **options}
+        reporter = SimpleNamespace(write_line=written.append)
+        config = SimpleNamespace(
+            stash=stash,
+            getoption=lambda name, default="": values.get(name, default),
+            pluginmanager=SimpleNamespace(get_plugin=lambda name: reporter),
+        )
+        return SimpleNamespace(
+            config=config, exitstatus=status, testscollected=collected
+        )
+
+    def test_every_selected_test_skipped_fails_the_run_and_says_so(self):
+        written: list[str] = []
+        session = self._session(written)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert written == [self.LINE, self.ANNOTATION]
+
+    def test_the_failure_line_counts_leg_assertions_apart_and_says_so(self):
+        written: list[str] = []
+        session = self._session(written, collected=3)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 2, None, 1)
+        line = (
+            "tier run executed no test: 3 collected, 2 skipped, 1 leg assertion not "
+            "counted, 0 executed; a leg that runs nothing is not green"
+        )
+        assert written == [line, f"::error title={sharding.FAILURE_TITLE}::{line}"]
+
+    def test_the_clause_says_leg_assertions_for_more_than_one(self):
+        written: list[str] = []
+        session = self._session(written, collected=3)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 1, None, 2)
+        assert "1 skipped, 2 leg assertions not counted, 0 executed" in written[0]
+
+    def test_the_clause_is_left_out_when_there_is_no_leg_assertion(self):
+        written: list[str] = []
+        session = self._session(written)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3, None, 0)
+        assert written[0] == self.LINE and "leg assertion" not in written[0]
+
+    def test_the_annotation_carries_the_same_text_as_the_line(self):
+        written: list[str] = []
+        session = self._session(written)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        prefix = f"::error title={sharding.FAILURE_TITLE}::"
+        assert sharding.FAILURE_TITLE == "tier run executed no test"
+        assert written[1] == prefix + written[0]
+
+    def test_a_run_that_executed_a_test_prints_no_annotation(self):
+        written: list[str] = []
+        session = self._session(written)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 1, 2)
+        assert not any(line.startswith("::") for line in written), written
+
+    def test_an_admitted_leg_prints_a_notice_with_the_admitted_line(self):
+        """In ``1`` mode (the default of ``_session``) an admitted leg shows as a notice.
+
+        It is never an error; warn mode writes a warning for it instead.
+        """
+        written: list[str] = []
+        session = self._session(written)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(
+            session, 0, 3, {"not supported on this runner": 3}
+        )
+        admitted = (
+            "tier run executed no test; admitted, because every skip is a skipif "
+            "condition that held: 3 skipped (3 x 'not supported on this runner')"
+        )
+        assert written == [
+            admitted,
+            f"::notice title={sharding.ADMITTED_TITLE}::{admitted}",
+        ]
+        assert sharding.ADMITTED_TITLE == "tier run admitted on skipif skips"
+        assert session.exitstatus == pytest.ExitCode.OK
+
+    def test_warn_mode_prints_a_warning_annotation_and_never_an_error_one(self):
+        """The run page shows a warning for each warn-mode leg that executed no test."""
+        written: list[str] = []
+        session = self._session(written, warn=True)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        annotations = [line for line in written if line.startswith("::")]
+        assert annotations == [self.WARNING], written
+        assert annotations[0] == (
+            f"::warning title={sharding.FAILURE_TITLE}::{self.LINE}"
+        )
+        assert not any(line.startswith("::error") for line in written), written
+
+    def test_a_run_that_executed_a_test_is_left_alone(self):
+        written: list[str] = []
+        session = self._session(written)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 1, 2)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    def test_an_admitted_empty_shard_stays_ok(self):
+        """Nothing collected and 4 deselected: the admission, not the floor, decides."""
+        written: list[str] = []
+        session = self._session(
+            written,
+            expression="integration",
+            text="3of8",
+            under_ci=False,
+            collected=0,
+            status=pytest.ExitCode.NO_TESTS_COLLECTED,
+        )
+        plugin = sharding._TierRunOutcome()
+        plugin.pytest_deselected([object()] * 4)
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
+        assert session.exitstatus == pytest.ExitCode.OK
+        assert len(written) == 1 and "admitted" in written[0], written
+
+    def test_a_run_that_is_not_a_ci_tier_run_is_left_alone(self):
+        """A developer's ``pytest -m unit``: no floor opt-in and no shard."""
+        written: list[str] = []
+        session = self._session(written, under_ci=False)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    def test_a_shard_alone_does_not_turn_the_floor_on(self):
+        """The opt-in is the only trigger.
+
+        ``ASH_TEST_SHARD=3of4 pytest -m integration`` without ``--run-integration`` skips
+        every test at the conftest gate; that run must not exit 1 for it.
+        """
+        written: list[str] = []
+        session = self._session(written, text="2of4", under_ci=False)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    def test_a_shard_with_the_opt_in_is_still_a_ci_tier_run(self):
+        written: list[str] = []
+        session = self._session(written, text="2of4", under_ci=True)
+        assert sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+
+    def test_an_xdist_worker_never_applies_the_floor(self):
+        """A worker's share can be all skips while the run executed hundreds."""
+        written: list[str] = []
+        session = self._session(written)
+        session.config.workerinput = {}
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            pytest.param({}, True, id="under-ci"),
+            pytest.param({"under_ci": False, "text": "2of4"}, False, id="shard-alone"),
+            pytest.param({"text": "2of4"}, True, id="shard-and-opt-in"),
+            pytest.param({"under_ci": False}, False, id="neither"),
+            pytest.param({"expression": ""}, False, id="no-marker-expression"),
+            pytest.param(
+                {"under_ci": False, "text": "2of4", "expression": ""},
+                False,
+                id="shard-without-marker-expression",
+            ),
+        ],
+    )
+    def test_is_ci_tier_run_is_the_one_definition(self, kwargs, expected):
+        """The floor and the tests that assert a leg's provisioning share it."""
+        session = self._session([], **kwargs)
+        assert sharding.is_ci_tier_run(session.config) is expected
+
+    def test_a_run_without_a_marker_expression_is_left_alone(self):
+        written: list[str] = []
+        session = self._session(written, expression="")
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    @pytest.mark.parametrize(
+        "option",
+        [
+            "collectonly",
+            "setupplan",
+            "setuponly",
+            "showfixtures",
+            "show_fixtures_per_test",
+        ],
+    )
+    def test_a_run_that_runs_no_test_by_design_is_left_alone(self, option):
+        written: list[str] = []
+        session = self._session(written, **{option: True})
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            pytest.ExitCode.TESTS_FAILED,
+            pytest.ExitCode.INTERRUPTED,
+            pytest.ExitCode.INTERNAL_ERROR,
+            pytest.ExitCode.USAGE_ERROR,
+            pytest.ExitCode.NO_TESTS_COLLECTED,
+        ],
+    )
+    def test_no_other_status_is_touched(self, status):
+        written: list[str] = []
+        session = self._session(written, status=status)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == status and not written
+
+    def test_a_run_that_collected_nothing_is_left_to_exit_5(self):
+        written: list[str] = []
+        session = self._session(written, collected=0)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 0)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    @staticmethod
+    def _report(when: str, outcome: str, **extra: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            when=when,
+            failed=outcome == "failed",
+            skipped=outcome == "skipped",
+            **extra,
+        )
+
+    def test_the_plugin_counts_executed_and_skipped_tests_from_their_reports(self):
+        plugin = sharding._TierRunOutcome()
+        reports = [
+            # passed: setup, call, teardown
+            self._report("setup", "passed"),
+            self._report("call", "passed"),
+            self._report("teardown", "passed"),
+            # a mark.skip: skipped in setup, no call
+            self._report("setup", "skipped"),
+            # pytest.skip() in the body
+            self._report("setup", "passed"),
+            self._report("call", "skipped"),
+            # a fixture error: failed in setup, no call
+            self._report("setup", "failed"),
+            # an expected failure ran its body
+            self._report("setup", "passed"),
+            self._report("call", "skipped", wasxfail="reason"),
+        ]
+        for report in reports:
+            plugin.pytest_runtest_logreport(report)
+        assert (plugin.executed, plugin.skipped) == (3, 2)
+
+    def test_a_leg_assertion_report_is_left_out_of_both_counts(self):
+        """The marker name in ``report.keywords`` is all the controller has."""
+        plugin = sharding._TierRunOutcome()
+        marked = {"unit": 1, "e2e": 1, sharding.LEG_ASSERTION_MARKER: 1}
+        for when, outcome in (("setup", "passed"), ("call", "passed")):
+            plugin.pytest_runtest_logreport(
+                self._report(when, outcome, keywords=marked)
+            )
+        plugin.pytest_runtest_logreport(
+            self._report("call", "skipped", keywords=marked)
+        )
+        assert (plugin.executed, plugin.skipped) == (0, 0)
+        # The control: the same reports without the marker name are counted.
+        plugin.pytest_runtest_logreport(self._report("call", "passed"))
+        assert (plugin.executed, plugin.skipped) == (1, 0)
+
+    def test_a_report_whose_keywords_hold_other_markers_is_counted(self):
+        """Only the leg assertion's own name leaves a report out of the counts."""
+        plugin = sharding._TierRunOutcome()
+        others = {"unit": 1, "slow": 1, "skipif": 1, "not_a_leg_assertion": 1}
+        plugin.pytest_runtest_logreport(self._report("call", "passed", keywords=others))
+        plugin.pytest_runtest_logreport(
+            self._report("call", "skipped", keywords=others)
+        )
+        assert (plugin.executed, plugin.skipped) == (1, 1)
+
+    def test_the_plugin_adds_nothing_to_a_report(self):
+        """A user property would be published in the JUnit XML inside the testcase."""
+        plugin = sharding._TierRunOutcome()
+        assert not hasattr(plugin, "pytest_runtest_makereport")
+        assert not hasattr(sharding, "LEG_ASSERTION_PROPERTY")
+        report = self._report(
+            "call", "passed", keywords={sharding.LEG_ASSERTION_MARKER: 1}
+        )
+        report.user_properties = []
+        plugin.pytest_runtest_logreport(report)
+        assert report.user_properties == []
+
+    def test_a_leg_whose_only_pass_is_a_leg_assertion_still_fails_the_floor(self):
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._TierRunOutcome()
+        marked = {sharding.LEG_ASSERTION_MARKER: 1}
+        plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
+        plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
+        for when in ("setup", "call", "teardown"):
+            plugin.pytest_runtest_logreport(
+                self._report(when, "passed", keywords=marked)
+            )
+        assert plugin.leg_assertions == 1, "one test has one setup report"
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert "2 skipped, 1 leg assertion not counted, 0 executed" in written[0], (
+            written
+        )
+
+    def test_leg_assertions_are_counted_by_setup_report_and_never_as_skips(self):
+        """One test passes setup and skips in the body; another skips in setup."""
+        plugin = sharding._TierRunOutcome()
+        marked = {sharding.LEG_ASSERTION_MARKER: 1}
+        plugin.pytest_runtest_logreport(
+            self._report("setup", "passed", keywords=marked)
+        )
+        plugin.pytest_runtest_logreport(
+            self._report("call", "skipped", keywords=marked)
+        )
+        plugin.pytest_runtest_logreport(
+            self._report("setup", "skipped", keywords=marked)
+        )
+        assert (plugin.executed, plugin.skipped, plugin.leg_assertions) == (0, 0, 2)
+
+    def test_a_controller_counts_the_reports_xdist_forwards_once(self):
+        """The workers' own counts are not summed too: that would count each test twice."""
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._TierRunOutcome()
+        for _ in range(3):
+            plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
+        node = SimpleNamespace(workeroutput={sharding.WORKEROUTPUT_KEY: 0})
+        plugin.pytest_testnodedown(node, None)
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert written == [self.LINE, self.ANNOTATION]
+
+    @staticmethod
+    def _skip(
+        reason: str = "not supported on this runner",
+        *,
+        when: str = "setup",
+        keywords: tuple[str, ...] = ("integration", "skipif"),
+        prefix: str = "Skipped: ",
+        path: str = "/root/suite/test_x.py",
+        line: int = 11,
+        location: Any = ("suite/test_x.py", 10, "test_x"),
+        **extra: Any,
+    ) -> SimpleNamespace:
+        """A skipped report as pytest builds it for a mark at an item defined on line 11."""
+        return SimpleNamespace(
+            when=when,
+            failed=False,
+            skipped=True,
+            keywords=dict.fromkeys(keywords, 1),
+            longrepr=(path, line, prefix + reason),
+            location=location,
+            **extra,
+        )
+
+    @pytest.mark.parametrize(
+        ("report", "expected"),
+        [
+            pytest.param(
+                _skip.__func__(),
+                "not supported on this runner",
+                id="skipif-at-the-item",
+            ),
+            pytest.param(
+                _skip.__func__(prefix=""),
+                "not supported on this runner",
+                id="reason-without-the-prefix",
+            ),
+            pytest.param(
+                _skip.__func__(
+                    "condition: os.name == 'nt'", keywords=("skipif", "unit")
+                ),
+                "condition: os.name == 'nt'",
+                id="the-reason-pytest-makes-up-for-a-bare-condition",
+            ),
+            pytest.param(
+                _skip.__func__(
+                    path="C:\\root\\suite\\test_x.py",
+                    location=("suite\\test_x.py", 10, "test_x"),
+                ),
+                "not supported on this runner",
+                id="windows-separators",
+            ),
+            pytest.param(
+                _skip.__func__("Need --run-integration option to run"),
+                None,
+                id="gate-text-on-a-test-that-also-carries-a-skipif",
+            ),
+            pytest.param(
+                _skip.__func__("Need --run-slow option to run"),
+                None,
+                id="slow-gate-text",
+            ),
+            pytest.param(
+                _skip.__func__(keywords=("integration", "skip")),
+                None,
+                id="a-skip-mark-is-not-a-skipif",
+            ),
+            pytest.param(
+                _skip.__func__("broken, see the tracker", keywords=("skipif", "skip")),
+                None,
+                id="a-skip-mark-beside-a-non-firing-skipif",
+            ),
+            pytest.param(
+                _skip.__func__(when="call", prefix="Skipped: "),
+                None,
+                id="a-skip-in-the-call-phase",
+            ),
+            pytest.param(
+                _skip.__func__(line=57),
+                None,
+                id="raised-at-another-line-as-by-a-fixture",
+            ),
+            pytest.param(
+                _skip.__func__(path="/root/suite/conftest.py"),
+                None,
+                id="raised-in-another-file",
+            ),
+            pytest.param(
+                _skip.__func__(wasxfail="reason"), None, id="an-expected-failure"
+            ),
+            pytest.param(_skip.__func__(location=None), None, id="no-location"),
+            pytest.param(
+                SimpleNamespace(
+                    when="setup",
+                    failed=False,
+                    skipped=True,
+                    keywords={"skipif": 1},
+                    longrepr="a string",
+                    location=("suite/test_x.py", 10, "test_x"),
+                ),
+                None,
+                id="a-longrepr-that-is-not-the-skip-tuple",
+            ),
+            pytest.param(
+                SimpleNamespace(
+                    when="setup", failed=False, skipped=False, keywords={"skipif": 1}
+                ),
+                None,
+                id="not-skipped",
+            ),
+        ],
+    )
+    def test_skipif_reason_tells_a_skipif_skip_from_every_other_skip(
+        self, report, expected
+    ):
+        assert sharding.skipif_reason(report) == expected
+
+    def test_the_gate_texts_are_the_ones_the_root_conftest_uses(self):
+        """The discriminator copies two strings; this fails if the conftest changes them."""
+        source = ROOT_CONFTEST.read_text(encoding="utf-8")
+        assert len(sharding.GATE_SKIP_REASONS) == 2
+        for reason in sharding.GATE_SKIP_REASONS:
+            assert f'reason="{reason}"' in source, reason
+
+    def test_a_leg_whose_every_skip_is_a_skipif_is_admitted_with_the_reasons(self):
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._TierRunOutcome()
+        for reason in (
+            "not supported on Windows",
+            "needs a newer tool",
+            "not supported on Windows",
+        ):
+            plugin.pytest_runtest_logreport(self._skip(reason))
+        assert plugin.skipif_reasons == {
+            "not supported on Windows": 2,
+            "needs a newer tool": 1,
+        }
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.OK
+        admitted = (
+            "tier run executed no test; admitted, because every skip is a skipif "
+            "condition that held: 3 skipped "
+            "(2 x 'not supported on Windows', 1 x 'needs a newer tool')"
+        )
+        assert written == [
+            admitted,
+            f"::notice title={sharding.ADMITTED_TITLE}::{admitted}",
+        ]
+
+    def test_a_gate_skip_among_skipif_skips_keeps_the_failure(self):
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._TierRunOutcome()
+        plugin.pytest_runtest_logreport(self._skip())
+        plugin.pytest_runtest_logreport(self._skip())
+        plugin.pytest_runtest_logreport(
+            self._skip(
+                "Need --run-integration option to run", keywords=("integration", "skip")
+            )
+        )
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert written == [self.LINE, self.ANNOTATION]
+
+    def test_a_skip_in_the_call_phase_among_skipif_skips_keeps_the_failure(self):
+        """A missing tool found by the test body is not a declared condition."""
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._TierRunOutcome()
+        plugin.pytest_runtest_logreport(self._skip())
+        plugin.pytest_runtest_logreport(self._skip())
+        plugin.pytest_runtest_logreport(self._skip("bandit is absent", when="call"))
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert written == [self.LINE, self.ANNOTATION]
+
+    def test_a_leg_that_only_gate_skipped_keeps_the_failure(self):
+        written: list[str] = []
+        session = self._session(written)
+        plugin = sharding._TierRunOutcome()
+        for _ in range(3):
+            plugin.pytest_runtest_logreport(
+                self._skip(
+                    "Need --run-integration option to run",
+                    keywords=("integration", "skip"),
+                )
+            )
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert written == [self.LINE, self.ANNOTATION]
+
+    def test_a_leg_with_no_skip_at_all_is_not_admitted(self):
+        """Selected items that were all leg assertions: nothing was skipped, nothing ran.
+
+        The reports are the ones a real run sends: a leg assertion's setup, call and
+        teardown. It is counted once, on its setup report, so the line says so.
+        """
+        written: list[str] = []
+        session = self._session(written, collected=1)
+        plugin = sharding._TierRunOutcome()
+        marked = {sharding.LEG_ASSERTION_MARKER: 1}
+        for when in ("setup", "call", "teardown"):
+            plugin.pytest_runtest_logreport(
+                self._report(when, "passed", keywords=marked)
+            )
+        assert plugin.leg_assertions == 1, "one test has one setup report"
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        assert (
+            "1 collected, 0 skipped, 1 leg assertion not counted, 0 executed"
+            in written[0]
+        ), written
+        assert "admitted, because" not in written[0], written
+
+    def test_warn_mode_prints_the_line_with_a_prefix_and_leaves_the_status(self):
+        written: list[str] = []
+        session = self._session(written, warn=True)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 0, 3)
+        assert session.exitstatus == pytest.ExitCode.OK
+        assert written == [sharding.WARN_PREFIX + self.LINE, self.WARNING]
+        assert sharding.WARN_PREFIX.startswith("warning")
+
+    def test_warn_mode_through_the_plugin_leaves_the_status(self):
+        written: list[str] = []
+        session = self._session(written, warn=True)
+        plugin = sharding._TierRunOutcome()
+        for _ in range(3):
+            plugin.pytest_runtest_logreport(self._report("setup", "skipped"))
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.OK
+        assert written == [sharding.WARN_PREFIX + self.LINE, self.WARNING]
+
+    def test_warn_mode_says_nothing_about_a_run_that_executed_a_test(self):
+        written: list[str] = []
+        session = self._session(written, warn=True)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(session, 1, 2)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    def test_warn_mode_marks_an_admitted_skipif_leg_with_a_warning(self):
+        """An admitted leg executed no test, so warn mode reports it as a warning.
+
+        The run page then shows every e2e leg that still ran nothing, admitted or
+        not, and one annotation is written per leg: the warning replaces the notice
+        that ``1`` mode writes (the test above this one runs in ``1`` mode).
+        """
+        written: list[str] = []
+        session = self._session(written, warn=True)
+        assert not sharding.fail_a_tier_run_that_executed_no_test(
+            session, 0, 3, {"not supported on this runner": 3}
+        )
+        assert session.exitstatus == pytest.ExitCode.OK
+        admitted = (
+            "tier run executed no test; admitted, because every skip is a skipif "
+            "condition that held: 3 skipped (3 x 'not supported on this runner')"
+        )
+        assert written == [
+            admitted,
+            f"::warning title={sharding.ADMITTED_TITLE}::{admitted}",
+        ], written
+        assert not any(line.startswith("::error") for line in written), written
+        assert not any(line.startswith("::notice") for line in written), written
+
+    def test_a_worker_leaves_the_exit_status_to_the_controller(self):
+        written: list[str] = []
+        session = self._session(written)
+        session.config.workeroutput = {}
+        plugin = sharding._TierRunOutcome()
+        plugin.pytest_sessionfinish(session, pytest.ExitCode.OK)
+        assert session.exitstatus == pytest.ExitCode.OK and not written
+
+    def test_configure_registers_the_plugin_for_a_run_that_opted_in(self, monkeypatch):
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "1")
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        sharding.configure(config)
+        assert manager.get_plugin("ash-tier-run-outcome") is not None
+        assert config.stash[sharding._FLOOR_KEY] is True
+
+    @pytest.mark.parametrize(
+        "value", ["true", "yes", "WARN", "Warn", "warning", " 1", "1 ", "warn "]
+    )
+    def test_only_the_values_1_and_warn_opt_a_run_in(self, monkeypatch, value):
+        """Any value that is neither an opt-in nor an off spelling is a usage error.
+
+        It is never a silently off floor: ``WARN`` and ``true`` do not read as ``warn``
+        and ``1``, and the message names the spellings that are accepted.
+        """
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, value)
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        with pytest.raises(pytest.UsageError) as raised:
+            sharding.configure(config)
+        message = str(raised.value)
+        assert sharding.FLOOR_ENV_VAR in message, message
+        assert repr(value) in message, message
+        assert "1" in message and sharding.FLOOR_WARN_VALUE in message, message
+        assert "0 (off)" in message, message
+        assert "\n" not in message, "a one-line message"
+        assert manager.get_plugin("ash-tier-run-outcome") is None
+        assert sharding.FLOOR_ENV_VAR not in os.environ
+
+    def test_an_empty_value_leaves_the_floor_off(self, monkeypatch):
+        """An empty value is the same as no value."""
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "")
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        sharding.configure(config)
+        assert manager.get_plugin("ash-tier-run-outcome") is None
+        assert config.stash[sharding._FLOOR_KEY] is False
+        assert config.stash[sharding._FLOOR_WARN_KEY] is False
+
+    @pytest.mark.parametrize(
+        "value", ["0", "false", "off", "OFF", "Off", "False", " 0", "off "]
+    )
+    def test_an_off_spelling_leaves_the_floor_off(self, monkeypatch, value):
+        """``0``, ``false`` and ``off`` (any case, blanks ignored) are explicit off."""
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, value)
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        sharding.configure(config)
+        assert manager.get_plugin("ash-tier-run-outcome") is None
+        assert config.stash[sharding._FLOOR_KEY] is False
+        assert config.stash[sharding._FLOOR_WARN_KEY] is False
+        assert sharding.FLOOR_ENV_VAR not in os.environ
+
+    def test_the_value_warn_opts_a_run_in_as_a_report_only_floor(self, monkeypatch):
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "warn")
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        sharding.configure(config)
+        assert manager.get_plugin("ash-tier-run-outcome") is not None
+        assert config.stash[sharding._FLOOR_KEY] is True
+        assert config.stash[sharding._FLOOR_WARN_KEY] is True
+        assert sharding.FLOOR_ENV_VAR not in os.environ
+
+    def test_the_value_1_is_the_failing_floor_and_not_the_warning_one(
+        self, monkeypatch
+    ):
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "1")
+        config = SimpleNamespace(stash=pytest.Stash())
+        sharding.configure(config)
+        assert config.stash[sharding._FLOOR_KEY] is True
+        assert config.stash[sharding._FLOOR_WARN_KEY] is False
+
+    def test_github_actions_alone_does_not_opt_a_run_in(self, monkeypatch):
+        """``act`` and any other pytest under Actions set it too; the opt-in is explicit."""
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.delenv(sharding.FLOOR_ENV_VAR, raising=False)
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        manager = pytest.PytestPluginManager()
+        config = SimpleNamespace(stash=pytest.Stash(), pluginmanager=manager)
+        sharding.configure(config)
+        assert manager.get_plugin("ash-tier-run-outcome") is None
+        assert config.stash[sharding._FLOOR_KEY] is False
 
 
 class TestTheSettingStaysInTheRunThatWasGivenIt:
@@ -840,6 +2136,36 @@ class TestTheSettingStaysInTheRunThatWasGivenIt:
         sharding.configure(worker)
         assert worker.stash[sharding._SHARD_KEY] == (2, 3)
         assert sharding.ENV_VAR not in os.environ
+
+    @pytest.mark.unit
+    def test_configure_removes_the_floor_opt_in_from_the_environment(self, monkeypatch):
+        """A child pytest a test starts must not inherit it, or its floor differs by venue."""
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.setenv(sharding.FLOOR_ENV_VAR, "1")
+        config = self._config()
+        sharding.configure(config)
+        assert sharding.FLOOR_ENV_VAR not in os.environ
+        assert config.stash[sharding._FLOOR_KEY] is True
+
+    @pytest.mark.unit
+    def test_a_worker_takes_the_floor_opt_in_from_its_workerinput(self, monkeypatch):
+        """The e2e tools test runs in a worker and asks ``is_ci_tier_run`` there."""
+        monkeypatch.delenv(sharding.ENV_VAR, raising=False)
+        monkeypatch.delenv(sharding.FLOOR_ENV_VAR, raising=False)
+        controller = self._config()
+        controller.stash[sharding._TEXT_KEY] = ""
+        controller.stash[sharding._FLOOR_KEY] = True
+        node = SimpleNamespace(config=controller, workerinput={})
+        sharding.pytest_configure_node(node)
+        assert node.workerinput[sharding.WORKERINPUT_FLOOR_KEY] is True
+
+        worker = self._config(
+            workerinput=dict(node.workerinput), getoption=lambda name, default="": "e2e"
+        )
+        sharding.configure(worker)
+        assert worker.stash[sharding._FLOOR_KEY] is True
+        assert sharding.is_ci_tier_run(worker) is True
+        assert sharding.FLOOR_ENV_VAR not in os.environ
 
     @pytest.mark.unit
     def test_a_malformed_setting_is_a_usage_error(self, monkeypatch):
@@ -951,6 +2277,31 @@ class TestTheActionRunsATier:
         assert sharding.ENV_VAR == "ASH_TEST_SHARD"
         assert step["env"]["MARKER"] == "${{ inputs.marker }}"
         assert '-m "$MARKER"' in str(step["run"])
+
+    def test_the_step_opts_the_run_in_to_the_executed_test_floor(self):
+        """Without the variable the floor never runs, on any leg.
+
+        The value is read the way GitHub reads ``cond && a || b``: ``warn`` on the e2e
+        legs, until a hosted run shows each of them executing a real test, and ``1``
+        everywhere else. When the e2e legs switch to ``1`` the expression becomes the
+        literal ``"1"``, which this ``re.fullmatch`` pattern does not match, so the
+        pattern and the expectation change together with the expression. The pin stays
+        on the current expression until then.
+        """
+        step = _action_step("Run PyTest")
+        assert sharding.FLOOR_ENV_VAR == "ASH_TEST_TIER_FLOOR"
+        value = str(step["env"][sharding.FLOOR_ENV_VAR])
+        match = re.fullmatch(
+            r"\$\{\{ inputs\.marker == '(\w+)' && '(\w+)' \|\| '(\w+)' \}\}", value
+        )
+        assert match is not None, value
+        tier, when_true, otherwise = match.groups()
+        by_tier = {
+            marker: when_true if marker == tier else otherwise
+            for marker in ("unit", "integration", "e2e")
+        }
+        assert by_tier == {"unit": "1", "integration": "1", "e2e": "warn"}, value
+        assert sharding.FLOOR_WARN_VALUE == "warn"
 
     def test_the_step_names_no_test_file_on_the_command_line(self):
         """A file named there skips pytest's ignore rules and its python_files match."""
@@ -1126,6 +2477,63 @@ class TestTheCoverageJobReadsWhatTheUnitRunsUpload:
 
 
 @pytest.mark.unit
+class TestTheCombineCommandRequiresTheTier:
+    """``--marker`` names the tier whose artifacts the gate combines, and has no default.
+
+    The gate rebuilds the artifact name from its options; the tier segment is the one that
+    tells the unit tier's artifacts from another tier's. Before the option was required,
+    a command line that left it out rebuilt the untiered name (which no job uploads) and
+    combined whatever set it found under it, so a combine over an unmarked shard set
+    could run to a result without having read the unit tier at all.
+    """
+
+    def _main(self, monkeypatch, results: Path, *extra: str) -> int:
+        monkeypatch.setenv("RUNNER_ARCH", "X64")
+        return COMBINE.main(
+            [
+                "--results-dir",
+                str(results),
+                "--os",
+                "ubuntu-latest",
+                "--python-version",
+                COVERAGE_PYTHON,
+                "--fail-under",
+                "80",
+                *extra,
+            ]
+        )
+
+    def test_a_run_without_a_marker_is_a_usage_error_before_any_artifact_is_read(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Exit 64 and a line naming --marker; the planted untiered set is never opened.
+
+        At the old shape this call looked for the untiered name, found the planted
+        directory, and returned 1 for its missing data file: the set was read.
+        """
+        results = tmp_path / "results"
+        untiered = COMBINE.artifact_prefix("ubuntu-latest", COVERAGE_PYTHON, "X64")
+        (results / f"{untiered}-shard1of1").mkdir(parents=True)
+        assert self._main(monkeypatch, results) == 64
+        err = capsys.readouterr().err
+        assert "--marker" in err, err
+        assert "shard" not in err, err
+
+    def test_the_same_run_with_the_tier_named_reads_the_set(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """The control: with --marker unit the gate gets as far as the unit tier's set."""
+        results = tmp_path / "results"
+        results.mkdir()
+        assert self._main(monkeypatch, results, "--marker", "unit") == 1
+        assert "no shard artifacts found" in capsys.readouterr().err
+
+    def test_the_self_test_still_needs_no_marker(self):
+        """Why the requirement is not argparse's required=True (which would refuse this)."""
+        assert COMBINE.main(["--self-test"]) == 0
+
+
+@pytest.mark.unit
 class TestTheUnitTestMatrixIsSplitByOs:
     """The three unit-test jobs are one test matrix cut by runner pool, and stay one.
 
@@ -1191,20 +2599,27 @@ class TestTheUnitTestMatrixIsSplitByOs:
         first = values[UNIT_TEST_JOB_IDS[0]]
         assert all(value == first for value in values.values()), values
 
-    def test_the_matrices_have_the_same_axes_and_no_include_or_exclude(self):
+    def test_the_matrices_have_the_same_axes_and_no_static_include_or_exclude(self):
         keys = {
-            job_id: sorted(job["strategy"]["matrix"])
+            job_id: sorted(_static_axes(job["strategy"]["matrix"]))
             for job_id, job in self._jobs().items()
         }
         first = keys[UNIT_TEST_JOB_IDS[0]]
         assert all(value == first for value in keys.values()), keys
-        assert first == ["os", "python-version"], (
-            "the unit tier is unsharded, so its matrix is the OS and Python axes only"
+        assert first == ["os", "python-version", "shard"], (
+            "the unit tier is the OS, Python and shard axes, the integration tier's shape"
         )
-        assert not {"include", "exclude"} & set(first), (
-            "an include or an exclude changes the leg count, and the job counts in the "
-            f"workflow comments are checked against it: {keys}"
-        )
+        for job_id, job in self._jobs().items():
+            matrix = job["strategy"]["matrix"]
+            assert "include" not in matrix, (
+                "an include changes the leg count, and the job counts in the workflow "
+                f"comments are checked against it: {job_id}"
+            )
+            # The one exclude admitted is the pull-request cover: every entry carries the
+            # event-conditioned expression, so the push and merge-queue counts the
+            # comments state are the static axes, and test_unified_ci_job_counts.py
+            # resolves the overlay for the pull-request figures.
+            _assert_only_the_pull_request_cover(job_id, matrix)
 
     def test_the_steps_are_the_same_in_all_three(self):
         steps = {job_id: job["steps"] for job_id, job in self._jobs().items()}
@@ -1366,10 +2781,14 @@ class TestTheCombineGate:
         index: int,
         calls: list[str],
         *,
-        marker: str | None = None,
+        marker: str | None = "unit",
         count: int = 2,
     ):
-        """An artifact whose data came from running the named functions."""
+        """An artifact whose data came from running the named functions.
+
+        The name is the tiered one CI uploads today (``...-<tier>-shard<i>of<n>``);
+        ``marker=None`` builds the legacy marker-less name, which no job uploads.
+        """
         prefix = COMBINE.artifact_prefix(
             "ubuntu-latest", COVERAGE_PYTHON, "X64", marker
         )
@@ -1407,7 +2826,7 @@ class TestTheCombineGate:
         monkeypatch,
         results: Path,
         *,
-        marker: str | None = None,
+        marker: str | None = "unit",
     ) -> int:
         for name in list(os.environ):
             if name.startswith(("COV_CORE_", "COVERAGE_")):
@@ -1458,6 +2877,30 @@ class TestTheCombineGate:
         self._shard(tmp_path, results, 1, ["a", "b", "c", "d"])
         broken = self._shard(tmp_path, results, 2, ["a"])
         (broken / COMBINE.DATA_FILE).write_bytes(b"not a coverage data file")
+        assert self._gate(tmp_path, monkeypatch, results) == 1
+
+    def test_the_unit_tiers_one_artifact_missing_fails(self, tmp_path, monkeypatch):
+        """An unsharded unit run that uploaded nothing is not a passing tier.
+
+        The gate's failure paths are tested here against the ``-unit-shard1of1`` name
+        the action uploads, not only against a two-shard set.
+        """
+        results = tmp_path / "results"
+        results.mkdir()
+        assert self._gate(tmp_path, monkeypatch, results) == 1
+
+    def test_the_unit_tiers_one_artifact_unreadable_fails(self, tmp_path, monkeypatch):
+        results = tmp_path / "results"
+        broken = self._shard(tmp_path, results, 1, ["a", "b", "c", "d"], count=1)
+        (broken / COMBINE.DATA_FILE).write_bytes(b"not a coverage data file")
+        assert self._gate(tmp_path, monkeypatch, results) == 1
+
+    def test_the_legacy_marker_less_name_is_not_the_unit_tiers_set(
+        self, tmp_path, monkeypatch
+    ):
+        """The gate reads the tiered name; an artifact in the old shape is not found."""
+        results = tmp_path / "results"
+        self._shard(tmp_path, results, 1, ["a", "b", "c", "d"], marker=None, count=1)
         assert self._gate(tmp_path, monkeypatch, results) == 1
 
     def test_the_unit_tiers_one_artifact_is_a_complete_set(self, tmp_path, monkeypatch):

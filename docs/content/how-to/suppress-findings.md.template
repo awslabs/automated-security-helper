@@ -93,7 +93,7 @@ When the extra is missing, the scan warning and `ash config lint` print a comman
 
 <!-- doctest: illustrative reason="shows the command the warning prints, with a placeholder for the interpreter path" -->
 ```bash
-<python> -m uv pip install --python <python> 'tree-sitter>=0.26,<0.27' 'tree-sitter-java>=0.23.5,<0.24' 'tree-sitter-javascript>=0.25,<0.26' 'tree-sitter-python>=0.25,<0.26' 'tree-sitter-typescript>=0.23.2,<0.24'
+<python> -m uv pip install --no-config --python <python> 'tree-sitter>=0.26,<0.27' 'tree-sitter-java>=0.23.5,<0.24' 'tree-sitter-javascript>=0.25,<0.26' 'tree-sitter-python>=0.25,<0.26' 'tree-sitter-typescript>=0.23.2,<0.24'
 ```
 
 A plain `pip install` of those packages does not do the same: environments made by uv have no pip, so `pip` runs whichever pip comes next on `PATH`, usually another Python's.

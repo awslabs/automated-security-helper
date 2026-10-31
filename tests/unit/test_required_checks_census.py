@@ -66,13 +66,6 @@ CENSUS_SCRIPT = REPO_ROOT / ".github" / "scripts" / "assert-required-checks-cens
 
 GATE_JOB = "required-checks"
 
-#: The job-level condition of the six integration-test and e2e-test jobs, written once
-#: here. Those jobs wait only for ensure-cache. The first term keeps a cancelled run from
-#: starting them; the second skips them when a leg of ensure-cache failed, which spares
-#: 105 legs of a run that is already red and keeps a re-run of failed jobs from paying
-#: for them twice. Both skips are ones the gate sees (see _jobs_skippable_unseen).
-TIER_JOB_CONDITION = "${{ !cancelled() && needs.ensure-cache.result == 'success' }}"
-
 # The floor exists so a workflow that lost its jobs -- or a scanner that stopped finding
 # them -- cannot satisfy the agreement tests by finding nothing on both sides.
 _MINIMUM_JOBS_IN_UNIFIED_CI = 8
@@ -244,14 +237,6 @@ class TestTheGateCoversItsWorkflow:
 #: The two job-level conditions that keep a gated job running after a dependency failed.
 _STATUS_CONDITIONS = ("${{!cancelled()}}", "${{always()}}")
 
-#: `!cancelled()` followed only by `&& needs.<dep>.result == 'success'` terms (whitespace
-#: already removed), and the pattern that pulls each dependency name out of the terms.
-#: An `||` term, a non-`success` comparison or any other term does not match.
-_SUCCESS_TERM = r"&&needs\.([A-Za-z0-9_-]+)\.result=='success'"
-_NARROWED_STATUS_CONDITION = re.compile(
-    r"^\$\{\{!cancelled\(\)((?:" + _SUCCESS_TERM + r")+)\}\}$"
-)
-
 
 def _jobs_skippable_unseen(jobs: dict[str, Any], gated: list[str]) -> list[str]:
     """Gated jobs that can be skipped without the run being cancelled or a gated job failing.
@@ -263,10 +248,10 @@ def _jobs_skippable_unseen(jobs: dict[str, Any], gated: list[str]) -> list[str]:
     last two. ensure-cache is that kind of dependency. Any other dependency is not
     enough: an ungated one reports to nobody, one with an `if:` can be skipped quietly,
     and one with `needs:` of its own can be skipped by a failure the gate never reads.
-    Those jobs have to run under `!cancelled()` or `always()` themselves, or under
-    `!cancelled()` narrowed by `needs.<dep>.result == 'success'` terms, each naming a
-    dependency of the kind the gate sees (the skip such a term causes is the dependency's
-    own failure, which is in the gate's `needs`).
+    Those jobs have to run under `!cancelled()` or `always()` themselves. No other
+    job-level `if:` is admitted: a `!cancelled() && needs.<dep>.result == 'success'`
+    spells the default out at greater length and adds no case the default lacks, so a
+    job that waits only for a dependency of the kind the gate sees carries none.
     """
 
     def always_runs(name: str) -> bool:
@@ -281,11 +266,6 @@ def _jobs_skippable_unseen(jobs: dict[str, Any], gated: list[str]) -> list[str]:
         needs = [needs] if isinstance(needs, str) else list(needs)
         if condition in _STATUS_CONDITIONS:
             continue
-        narrowed = _NARROWED_STATUS_CONDITION.match(condition)
-        if narrowed:
-            deps = re.findall(_SUCCESS_TERM, narrowed.group(1))
-            if all(dep in needs and always_runs(dep) for dep in deps):
-                continue
         if not condition and all(always_runs(dep) for dep in needs):
             continue
         bad.append(f"  {name}: needs={job.get('needs')} if={condition!r}")
@@ -712,24 +692,29 @@ class TestTheGateActuallyRunsTheScript:
     def test_a_tier_job_waits_only_for_ensure_cache_and_is_skipped_only_with_it(
         self, name
     ):
-        """The one place the tier jobs' `needs:` and `if:` are pinned.
+        """The one place the tier jobs' `needs:` are pinned, with no `if:` beside them.
 
         The integration-test and e2e-test jobs run beside the unit-test jobs, not after
         them: a wait on the unit jobs would add their slowest leg to the critical path
         and save nothing, since a failed unit leg must not skip the other tiers' signal.
-        What does save runners is skipping the tiers when ensure-cache failed, and the
-        condition does that. The gate sees that skip through ensure-cache, which is in
-        its own `needs`.
+        What does save runners is skipping the tiers when ensure-cache failed, and
+        `needs` alone does that: a job with `needs` and no status function in its `if:`
+        is skipped when a dependency fails. The gate sees that skip through ensure-cache,
+        which is in its own `needs`. An `if:` spelling the same rule out
+        (`!cancelled() && needs.ensure-cache.result == 'success'`) is what the unit jobs
+        never carried and these six jobs carried for a while; it is refused here as it
+        is for the unit jobs, so the census does not learn a second spelling of the
+        default.
         """
         jobs = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))["jobs"]
         assert name in _needs_of(UNIFIED_CI, GATE_JOB), (
             f"{GATE_JOB} does not wait for {name}"
         )
         assert jobs[name]["needs"] == ["ensure-cache"], jobs[name]["needs"]
-        condition = re.sub(r"\s+", "", str(jobs[name]["if"]))
-        assert condition == re.sub(r"\s+", "", TIER_JOB_CONDITION), (
-            f"{name} has if: {condition!r}; without the ensure-cache term it runs every "
-            "leg of a run whose cache warm-up failed"
+        assert "if" not in jobs[name], (
+            f"{name} has if: {jobs[name]['if']!r}; `needs: [ensure-cache]` alone skips it "
+            "when the cache warm-up failed, so a job-level condition is a second spelling "
+            "of the default"
         )
 
     def test_a_job_that_waits_on_an_always_running_gated_job_may_skip_with_it(self):
@@ -765,19 +750,10 @@ class TestTheGateActuallyRunsTheScript:
         }
         assert _jobs_skippable_unseen(jobs, ["leaf"]) == []
 
-    def test_a_success_term_on_an_always_running_gated_job_is_accepted(self):
-        jobs = {
-            "base": {},
-            "leaf": {
-                "needs": ["base"],
-                "if": "${{ !cancelled() && needs.base.result == 'success' }}",
-            },
-        }
-        assert _jobs_skippable_unseen(jobs, ["base", "leaf"]) == []
-
     @pytest.mark.parametrize(
         "condition",
         [
+            "${{ !cancelled() && needs.base.result == 'success' }}",
             "${{ !cancelled() && needs.base.result == 'failure' }}",
             "${{ !cancelled() || needs.base.result == 'success' }}",
             "${{ !cancelled() && needs.base.result == 'success' && github.ref == 'x' }}",
@@ -785,32 +761,19 @@ class TestTheGateActuallyRunsTheScript:
             "${{ !cancelled() && needs.other.result == 'success' }}",
         ],
     )
-    def test_a_condition_that_is_not_a_success_term_on_a_dependency_is_caught(
-        self, condition
-    ):
+    def test_any_other_condition_on_a_job_with_needs_is_caught(self, condition):
+        """No gated job may carry a job-level `if:` other than the two status conditions.
+
+        The first case is the one the census admitted for a while, a `!cancelled()`
+        narrowed by a `needs.<dep>.result == 'success'` term. It is the default's own
+        rule written out (a job with `needs` and no status function is skipped when the
+        dependency fails), so admitting it taught the census a second spelling of the
+        default and nothing else; the six tier jobs that carried it carry no `if:` now,
+        like the unit jobs.
+        """
         jobs = {"base": {}, "other": {}, "leaf": {"needs": ["base"], "if": condition}}
         problems = _jobs_skippable_unseen(jobs, ["base", "other", "leaf"])
         assert [p.strip().split(":")[0] for p in problems] == ["leaf"], problems
-
-    @pytest.mark.parametrize(
-        "base",
-        [
-            {"if": "github.event_name == 'push'"},
-            {"needs": ["root"]},
-        ],
-    )
-    def test_a_success_term_on_a_dependency_the_gate_cannot_see_is_caught(self, base):
-        """The skip is only seen when the named dependency always runs and has no needs."""
-        jobs = {
-            "root": {},
-            "base": base,
-            "leaf": {
-                "needs": ["base"],
-                "if": "${{ !cancelled() && needs.base.result == 'success' }}",
-            },
-        }
-        problems = _jobs_skippable_unseen(jobs, ["root", "base", "leaf"])
-        assert "leaf" in [p.strip().split(":")[0] for p in problems], problems
 
     def test_unit_test_carries_the_census_to_the_gate(self):
         """The drift half of the census reaches the gate through unit-test.

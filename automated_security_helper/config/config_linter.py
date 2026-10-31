@@ -14,11 +14,23 @@ Provides lint checks that go beyond basic validation, including:
 import json
 import logging
 import re
+import stat
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Collection,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    cast,
+)
 
 import yaml
 
@@ -26,9 +38,12 @@ from automated_security_helper.config.config_sources import (
     is_config_parse_error,
     is_json_file,
     is_toml_file,
+    load_config_document,
     parse_config_text,
+    read_config_bytes,
     read_config_file_literally,
     read_config_text,
+    refuse_unless_a_file,
     unparsed_config_reason,
     uses_env_references,
 )
@@ -59,6 +74,11 @@ from automated_security_helper.base.plugin_config import _options_class
 from automated_security_helper.config.config_validator import (
     _built_in_section_classes,
 )
+from automated_security_helper.config.plugin_section_names import (
+    PLUGIN_SEGMENT_KEYS,
+    declared_section_names,
+    folded_section_name,
+)
 from automated_security_helper.utils.unknown_keys import (
     INTERNAL_FIELD_MESSAGE,
     INTERNAL_SECTION_FIELDS,
@@ -81,19 +101,6 @@ _INTERNAL_FIELD_SENTENCE = re.compile(
     INTERNAL_FIELD_MESSAGE.pattern
     + r"(?:; if you meant [^,;]+, put it under options)?\.\s*"
 )
-
-
-def _starts_list_item(stripped: str) -> bool:
-    """Whether a line, without its indent, starts a YAML block list entry.
-
-    That is `- ` followed by the entry, or a `-` alone on the line with the
-    entry's fields on the lines below it. `rstrip` takes a dash followed only
-    by blanks as alone too, a tab among them, which `- ` does not cover (a
-    CRLF file has no `\\r` left here: fix_unused reads it with read_text,
-    whose universal newlines drop them). Whether a line is an entry of the
-    suppressions list also depends on its indent; see _comment_out_suppressions.
-    """
-    return stripped.startswith("- ") or stripped.rstrip() == "-"
 
 
 class LintSeverity(str, Enum):
@@ -125,6 +132,10 @@ class LintCategory(str, Enum):
     # A value the AshConfig model refuses, so a scan refuses the config.
     SCHEMA_ERROR = "schema-error"
     PLUGIN_OPTIONS_UNCHECKED = "plugin-options-unchecked"
+    # What ConfigValidator reports in words lint has no category for, an error
+    # or a warning. Not SYNTAX_ERROR: that category says the file did not load,
+    # and the CLI skips the fixers for a file that has one.
+    OTHER = "other"
 
 
 @dataclass
@@ -147,6 +158,12 @@ class LintIssue:
     # True when the file could not be read at all (OSError), one of the
     # ignored_by_scan cases: the verdict then says read, not parse.
     could_not_read: bool = False
+    # For a suppression issue: the id (models/core.suppression_id) of the entry
+    # the issue is about, as the lint read it. A fixer addresses the entry by
+    # the index in ``path`` and checks this id against the entry now at that
+    # index, so an issue computed before a confirmation prompt never deletes or
+    # narrows an entry that moved into its place. Not shown, not compared.
+    entry_id: Optional[str] = field(default=None, repr=False, compare=False)
     # For an IGNORE_PATH_ISSUE: the path as the config holds it, before any value
     # read from the environment is shown, so _merge_path_duplicates tells apart
     # two paths whose messages both read `<value>`. Never shown, so not in the
@@ -198,6 +215,32 @@ class LintResult:
     # (ConfigCheck.resolved_data and shown_resolved).
     resolved_data: Any = None
     shown_resolved: Any = None
+    # The issues a fixer would have fixed in another file, un-marked by
+    # ``_clear_fixable_a_fixer_refuses`` because the fixer refuses this one (a
+    # TOML file, a JSON file for --fix-unused, a YAML file that reads the
+    # environment for --fix). ``fixable_issues`` leaves them out, so nothing
+    # tells the operator to run a fixer that then refuses; the CLI reads this
+    # list to refuse ``--fix`` with the reason when it was asked to rewrite
+    # such a file and had a fix to make.
+    fixes_refused: List[LintIssue] = field(default_factory=list)
+    # Whether ``--fix`` refused the file for reading the environment (rewriting
+    # it would replace each reference with its value). Read once, by the lint
+    # that un-marked the issues, so the CLI does not open and parse the file a
+    # second time to give the reason.
+    fix_refused_for_environment: bool = False
+    # The unused suppressions report the lint found (``check_unused``), or None
+    # when it found none or did not look (``unused_report_checked`` tells which).
+    # The age read and ``--fix-unused`` take this file and do not name a report a
+    # second time: they resolved the chain again without the scanned tree
+    # (``--source-dir``), which can name another report than the one lint listed
+    # the entries from.
+    unused_report_path: Optional[Path] = None
+    # Whether the lint looked for the report (``check_unused``). With
+    # ``unused_report_path`` None this is the difference between "looked and
+    # found none" and "did not look": ``--fix-unused`` stops at the first, where
+    # a second lookup of its own could find a report the operator was never
+    # shown and comment entries out of it.
+    unused_report_checked: bool = False
 
     def shown_path(self, path: Path) -> str:
         """How a message names ``path``, a file of ``chain``: ``<value>`` when
@@ -252,12 +295,27 @@ class LintResult:
         return sum(1 for i in self.issues if i.severity == LintSeverity.INFO)
 
 
+class UnusedSuppressionsNotEditable(ValueError):
+    """``fix_unused_suppressions`` found entries to comment out but cannot edit
+    the file's suppressions list line by line: the list is a flow sequence
+    (``[{...}]``), an alias of a list written elsewhere, a list anchored in
+    place (``&name``, shared by every alias), a key written more than once
+    (the loader keeps the last, a text walk would edit the first), or a list
+    whose entries the tokens and the node count differently. The
+    message says which; the file is left as it is, and the caller tells the
+    operator the file could not be edited instead of reporting nothing to do.
+    """
+
+
 class ConfigLinter:
     """Lints ASH configuration files for issues and can auto-fix them."""
 
     # Default output directory relative to project root
     DEFAULT_OUTPUT_DIR = ".ash/ash_output"
     UNUSED_SUPPRESSIONS_REPORT = "reports/ash.unused-suppressions.json"
+    #: The reporter's section name as a scan spells it (the canonical spelling,
+    #: which wins where two spellings of the section both set a key).
+    UNUSED_SUPPRESSIONS_SECTION = "unused-suppressions"
 
     # Maximum age (in seconds) for the unused suppressions report before warning
     MAX_REPORT_AGE_SECONDS = 3600  # 1 hour
@@ -365,8 +423,77 @@ class ConfigLinter:
         if check_unused:
             cls._check_unused_suppressions(config_path, config_data, output_dir, result)
 
+        cls._clear_fixable_a_fixer_refuses(config_path, result)
         cls._merge_path_duplicates(result)
         return result
+
+    @classmethod
+    def _clear_fixable_a_fixer_refuses(
+        cls, config_path: Path, result: LintResult
+    ) -> None:
+        """Mark no issue auto-fixable that the fixer would refuse the file for.
+
+        ``--fix`` rewrites the file from its parsed values, so it refuses a TOML
+        file (the rewrite would replace every other table of pyproject.toml) and
+        a YAML one that reads the environment (it would replace each reference
+        with its value). ``--fix-unused`` edits the text instead, so it refuses
+        TOML and JSON only. Left marked, the issues told the operator to run a
+        fixer that then refuses the file.
+
+        Each un-marked issue is kept in ``result.fixes_refused``: the CLI still
+        refuses ``--fix`` on such a file, with the reason, when the lint found
+        something ``--fix`` would have rewritten (a TOML file with nothing to
+        fix passes ``lint --fix``, as the documented pre-commit invocation runs
+        it). Clearing the marks alone made that refusal silent: the CLI read no
+        fixable issue, found nothing to fix, and exited 0 where it refused.
+
+        The issue's ``fix_description`` is kept: it is the remedy the operator
+        applies by hand once ``--fix`` has refused the file (``line_end = 7``
+        beside a bare ``line_start``), and it names a value read from the
+        environment as the message does, never by its value. The CLI prints
+        the description only for the issues it is about to fix, so an un-marked
+        issue's description reaches the operator through the issue listing.
+        """
+
+        toml = is_toml_file(config_path)
+        json_file = is_json_file(config_path)
+        # Whether the file reads the environment is read once, when the first
+        # issue needs it: ``uses_env_references`` opens and parses the file, and
+        # it ran once per fixable issue (fifty expired entries, fifty parses). A
+        # file that cannot be read again keeps the marks the lint set: the
+        # fixer reports its own refusal where a traceback escaped here.
+        reads_environment: Optional[bool] = None
+
+        def refused(issue: LintIssue) -> bool:
+            nonlocal reads_environment
+            unused = issue.category == LintCategory.SUPPRESSION_UNUSED
+            if toml:
+                return True
+            if unused:
+                # --fix-unused edits the text, so it refuses TOML and JSON only,
+                # whatever the file reads from the environment.
+                return json_file
+            # --fix rewrites the file from its parsed values, so it refuses a
+            # file that reads the environment. (A JSON file is not interpolated,
+            # so uses_env_references is False for one; the check costs nothing
+            # there and keeps this in step with fix() for every format.)
+            if reads_environment is None:
+                try:
+                    reads_environment = uses_env_references(config_path)
+                except (OSError, ValueError, RecursionError):
+                    reads_environment = False
+            return reads_environment
+
+        for issue in result.issues:
+            if issue.fixable and refused(issue):
+                issue.fixable = False
+                result.fixes_refused.append(issue)
+                if (
+                    not toml
+                    and issue.category != LintCategory.SUPPRESSION_UNUSED
+                    and reads_environment
+                ):
+                    result.fix_refused_for_environment = True
 
     @classmethod
     def _merge_path_duplicates(cls, result: LintResult) -> None:
@@ -402,30 +529,78 @@ class ConfigLinter:
         located = {advice(i) for i in result.issues if i.path and advice(i)}
         result.issues = [i for i in result.issues if i.path or advice(i) not in located]
 
+    #: The issue categories whose fixer edits one entry of
+    #: ``global_settings.suppressions``; their issues carry ``entry_id``.
+    _SUPPRESSION_FIX_CATEGORIES = frozenset(
+        {
+            LintCategory.SUPPRESSION_LINE_RANGE,
+            LintCategory.SUPPRESSION_MULTILINE_REASON,
+            LintCategory.SUPPRESSION_EXPIRED,
+        }
+    )
+
     @classmethod
     def fix(
         cls,
         config_path: Path,
         issues: Optional[List[LintIssue]] = None,
+        output_dir: Optional[Path] = None,
+        source_dir: Optional[Path] = None,
     ) -> Tuple[str, List[LintIssue]]:
         """Auto-fix fixable issues in the config file.
 
         Args:
             config_path: Path to the configuration file
             issues: Pre-computed issues to fix (if None, will re-lint)
+            output_dir: The ASH output directory the caller's lint used
+            source_dir: The source directory the caller's lint used, which
+                bounds where ``extends`` bases may be; passed to the fresh
+                lint below so it reads the same chain the caller's did
 
         Returns:
             Tuple of (fixed_content, list_of_fixed_issues)
+
+        The given issues were computed before the caller's confirmation
+        prompt, and the file is read again here. A fresh lint of that read
+        decides which of them still hold: a suppression issue is kept when the
+        fresh lint raises the same category for the same entry (by the entry's
+        id), and the fresh issue, whose path names the entry's index NOW, is
+        the one applied; any other issue is kept when the fresh lint raises it
+        unchanged. So an entry the operator removed, un-expired or rewrote
+        while the prompt waited is not edited on the strength of the old
+        reading, and an edit the operator made meanwhile is not undone.
         """
         cls._refuse_to_rewrite_toml(config_path)
         cls._refuse_to_rewrite_env_references(config_path)
         config_data, raw_content = cls._load_config_and_text(config_path)
 
+        fresh = cls.lint(
+            config_path, output_dir=output_dir, source_dir=source_dir
+        ).fixable_issues
         if issues is None:
-            lint_result = cls.lint(config_path)
-            issues = lint_result.fixable_issues
+            issues = fresh
+        else:
+            given = issues
+            issues = cls._issues_still_raised(given, fresh)
+            if len(issues) < len(given):
+                # Said, so a caller that confirmed "Fixing N issue(s)" and then
+                # reads "No issues were fixed" has the reason on record.
+                logger.info(
+                    "%d of %d issue(s) changed while the prompt waited and were "
+                    "skipped: the fresh lint no longer raises them as given",
+                    len(given) - len(issues),
+                    len(given),
+                )
 
         fixed_issues: List[LintIssue] = []
+
+        # The suppressions as loaded, each with the id lint would have recorded
+        # for it. Every fixer resolves its entry against this snapshot, never
+        # against the list as the earlier fixers have changed it: a fix that
+        # sets line_end or collapses a reason changes the entry's id, and a
+        # later fix for the same entry (its removal, say) would no longer find
+        # it, or could find another entry that now carries the id it looks for.
+        loaded = cls._loaded_suppressions(config_data)
 
         # Separate removal operations from in-place modifications.
         # Removals must be processed in reverse index order to avoid shifting.
@@ -451,11 +626,11 @@ class ConfigLinter:
                     fixed_issues.append(issue)
 
             elif issue.category == LintCategory.SUPPRESSION_LINE_RANGE:
-                if cls._fix_suppression_line_range(config_data, issue):
+                if cls._fix_suppression_line_range(config_data, issue, loaded):
                     fixed_issues.append(issue)
 
             elif issue.category == LintCategory.SUPPRESSION_MULTILINE_REASON:
-                if cls._fix_suppression_reason_newline(config_data, issue):
+                if cls._fix_suppression_reason_newline(config_data, issue, loaded):
                     fixed_issues.append(issue)
 
             elif issue.category == LintCategory.LEGACY_NAME_VARIANT:
@@ -468,7 +643,7 @@ class ConfigLinter:
         )
         for issue in removal_issues:
             if issue.category == LintCategory.SUPPRESSION_EXPIRED:
-                if cls._fix_expired_suppression(config_data, issue):
+                if cls._fix_expired_suppression(config_data, issue, loaded):
                     fixed_issues.append(issue)
 
         # Generate the fixed content
@@ -483,8 +658,18 @@ class ConfigLinter:
         cls,
         config_path: Path,
         output_dir: Optional[Path] = None,
-    ) -> Tuple[str, List[LintIssue], Optional[datetime]]:
+        report_config: Any = None,
+        report_path: Optional[Path] = None,
+    ) -> Tuple[Optional[str], List[LintIssue], Optional[datetime]]:
         """Comment out unused suppressions in the config based on the unused suppressions report.
+
+        The content is None when the config could not be read or parsed (lint
+        reported that); every other return carries the file's text, changed
+        only where the returned issues say. Raises
+        ``UnusedSuppressionsNotEditable`` when entries are to be commented out
+        but the list cannot be edited line by line (a flow sequence, an alias,
+        an anchored list, a repeated key); the caller reports that instead of
+        nothing to do.
 
         Instead of removing unused suppressions entirely, this method comments them out
         with a note including the date and reason. This is safer because a suppression
@@ -494,6 +679,14 @@ class ConfigLinter:
         Args:
             config_path: Path to the configuration file
             output_dir: Path to the ASH output directory
+            report_config: The configuration that names the report (the merged
+                one lint read, ``LintResult.resolved_data``). Passed, the fixer
+                reads the report lint named; without it the chain is resolved
+                here, which can name another report when lint resolved it with
+                a scanned tree (``--source-dir``) this call does not know.
+            report_path: The report file lint read (``LintResult.unused_report_path``).
+                Passed, that file is the report and none is looked for, so the
+                entries commented out are the ones lint listed from it.
 
         Returns:
             Tuple of (fixed_content, list_of_commented_suppressions, report_timestamp)
@@ -505,31 +698,72 @@ class ConfigLinter:
                 f"--fix-unused comments suppressions out, which JSON cannot hold; "
                 f"remove them from {config_path} by hand"
             )
-        config_data, raw_content = cls._load_config_and_text(config_path)
+        # A path that is not a regular file (a FIFO, a directory, a device) is
+        # refused as every config reader refuses it, before the read below:
+        # ``read_config_bytes`` reports the same shape as an OSError from its
+        # fstat, which the except below would take for an unreadable file and
+        # answer with "nothing to comment out". ``fix`` refuses it the same way.
+        refuse_unless_a_file(config_path)
+        # A file that does not parse, or cannot be read, has nothing to comment
+        # out: ``lint`` reported it (SYNTAX_ERROR, exit 3), and this returns
+        # with no changes rather than raising the parser's own error a second
+        # time, after lint's result was printed.
+        try:
+            # With its line breaks as written: the text goes back to the file.
+            config_data, raw_content = cls._load_config_and_text(
+                config_path, keep_line_breaks=True
+            )
+        except (OSError, ValueError, yaml.YAMLError, ASHConfigSourceError):
+            # No content: there is no text this could hand back as the file's
+            # own, and an empty string in its place would read as one.
+            return None, [], None
 
-        # Find the unused suppressions report
-        report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
+        # Find the unused suppressions report, under the name the merged
+        # configuration gives it (the chain is resolved in _find_unused_report):
+        # a scan reads the merged configuration, so an extension an `extends`
+        # base sets names the report it writes, and the fixer, which named it
+        # from this file's own data, found no report of that scan.
+        report_path, report_timestamp = cls._unused_report_to_read(
+            config_path, output_dir, report_config, report_path
+        )
 
         if report_path is None:
             return raw_content, [], None
 
-        # Load the report
-        with open(report_path, "r", encoding="utf-8") as f:
-            report_data = json.load(f)
+        # Load the report. A report lint already said it could not read (not
+        # JSON, not a JSON object, truncated, a directory, not UTF-8) comments
+        # nothing out.
+        try:
+            report_data = cls._read_unused_report(report_path)
+        except (ValueError, OSError):
+            return raw_content, [], report_timestamp
+
+        # A report that cannot be edited from (its scan evaluated no suppression,
+        # or it lists scanners that did not run) comments nothing out. The
+        # command asks ``unused_report_blocker`` the same question before it
+        # asks about the report's age, so the reason is told once and the two
+        # cannot disagree.
+        if cls._report_blocker(report_data) is not None:
+            return raw_content, [], report_timestamp
 
         unused_suppressions = report_data.get("unused_suppressions", [])
-        if not unused_suppressions:
+        if not isinstance(unused_suppressions, list) or not unused_suppressions:
             return raw_content, [], report_timestamp
 
         # Build a set of unused suppression identifiers for matching
         unused_ids = set()
         for unused in unused_suppressions:
-            unused_id = cls._make_suppression_id(unused)
-            unused_ids.add(unused_id)
+            if isinstance(unused, dict):
+                unused_ids.add(cls._make_suppression_id(unused))
 
-        # Work with the raw YAML lines to comment out unused suppressions
+        # Work with the raw YAML lines to comment out unused suppressions.
+        # ``_suppressions_of``: a null ``global_settings`` or ``suppressions``,
+        # or a document that is not a mapping, holds no entries, where
+        # ``.get`` on the null raised.
         fixed_issues: List[LintIssue] = []
-        suppressions = config_data.get("global_settings", {}).get("suppressions", [])
+        suppressions = cls._suppressions_of(config_data)
+        if not suppressions:
+            return raw_content, [], report_timestamp
         # The path and rule_id each message quotes can be values the file read
         # from the environment: they are quoted from the copy in which each is
         # <value> at its own place, as in every other lint message.
@@ -552,194 +786,696 @@ class ConfigLinter:
         )
 
         # Identify which suppression indices are unused
+        written_ids = {
+            cls._make_suppression_id(written)
+            for written in written_suppressions
+            if isinstance(written, dict)
+        }
         unused_indices = set()
         for i, (suppression, written) in enumerate(
             zip(suppressions, written_suppressions)
         ):
-            ids = cls._suppression_ids(suppression, written)
-            if ids & unused_ids:
+            if cls._is_listed_unused(suppression, written, unused_ids, written_ids):
                 unused_indices.add(i)
-                # Past the shown copy's end, None: _shown_entry then shows every
-                # value as read from the environment, never as resolved.
-                shown = shown_suppressions[i] if i < len(shown_suppressions) else None
-                shown = cls._shown_entry(suppression, shown)
-                fixed_issues.append(
-                    LintIssue(
-                        severity=LintSeverity.INFO,
-                        category=LintCategory.SUPPRESSION_UNUSED,
-                        message=f"Commented out unused suppression: path='{shown.get('path', '')}', rule_id='{shown.get('rule_id', '*')}'",
-                        path=f"global_settings.suppressions[{i}]",
-                        fixable=True,
-                        fix_description="Comment out unused suppression",
-                    )
-                )
 
         if not unused_indices:
             return raw_content, [], report_timestamp
 
         # Comment out the unused suppressions in the raw YAML
         today = datetime.now().strftime("%Y-%m-%d")
-        fixed_content = cls._comment_out_suppressions(
-            raw_content, suppressions, unused_indices, today
+        fixed_content, commented = cls._comment_out_suppressions(
+            raw_content, unused_indices, today
         )
 
+        # An entry is reported commented out only once the text walker has
+        # commented it: a list it cannot edit (a flow sequence on one line, an
+        # alias of a list written elsewhere, an anchored list) raises
+        # UnusedSuppressionsNotEditable before any line changes, and a report
+        # of a change that was not made would send the operator on to the next
+        # scan believing the file changed.
+        for i in sorted(commented):
+            suppression = suppressions[i]
+            # Past the shown copy's end, None: _shown_entry then shows every
+            # value as read from the environment, never as resolved.
+            shown = shown_suppressions[i] if i < len(shown_suppressions) else None
+            shown = cls._shown_entry(suppression, shown)
+            fixed_issues.append(
+                LintIssue(
+                    severity=LintSeverity.INFO,
+                    category=LintCategory.SUPPRESSION_UNUSED,
+                    message=f"Commented out unused suppression: path='{shown.get('path', '')}', rule_id='{cls._rule_shown(shown)}'",
+                    path=f"global_settings.suppressions[{i}]",
+                    fixable=True,
+                    fix_description="Comment out unused suppression",
+                )
+            )
+
         return fixed_content, fixed_issues, report_timestamp
+
+    @classmethod
+    def _is_listed_unused(
+        cls,
+        entry: Any,
+        written: Any,
+        unused_ids: Set[str],
+        written_ids: Set[str],
+    ) -> bool:
+        """Whether the report lists ``entry``, a suppression of the file.
+
+        By its written form's id, the one the report carries since the reference
+        record, or by its resolved id, which a report written before it holds. A
+        resolved id that some entry of the file writes as its own written id is
+        that entry's: an entry whose environment value is itself reference text
+        resolves to another entry's written form, and matching it by that would
+        comment out an entry the report never listed.
+        """
+        written_form = written if isinstance(written, dict) else entry
+        if (
+            isinstance(written_form, dict)
+            and cls._make_suppression_id(written_form) in unused_ids
+        ):
+            return True
+        if not isinstance(entry, dict):
+            return False
+        resolved_id = cls._make_suppression_id(entry)
+        return resolved_id in unused_ids and resolved_id not in written_ids
+
+    @staticmethod
+    def _scanners_not_run_of(report_data: Dict[str, Any]) -> List[str]:
+        """The scanners the unused suppressions report says did not run
+        (``scanners_not_run``); empty when it names none.
+
+        Any non-empty value counts, whatever its shape: a report this reads is a
+        file, and a value it cannot take for a list is still a statement that
+        the scan was partial.
+        """
+        listed = report_data.get("scanners_not_run")
+        if not listed:
+            return []
+        if isinstance(listed, (list, tuple)):
+            return [str(name) for name in listed]
+        return [str(listed)]
+
+    @classmethod
+    def _report_blocker(cls, report_data: Dict[str, Any]) -> Optional[str]:
+        """Why nothing is commented out of a report that was read, else None.
+
+        A report whose scan evaluated no suppression (it ran with
+        --ignore-suppressions) lists none as unused and says so; nothing is
+        commented out on its account.
+
+        A report that lists scanners which did not run cannot say which of its
+        entries belong to them: a suppression carries no scanner name, and the
+        findings it would have matched were never reported. Every entry it
+        lists is then in doubt, and commenting out a suppression that is in
+        force makes the next full scan fail, so none is commented out. The
+        reporter lists a scanner only when a later full scan would run it (tool
+        missing, error, excluded for that run); one with nothing to scan or
+        turned off in the configuration is not listed, so this does not fire on
+        a scan where every scanner that could run did.
+        """
+        if report_data.get("not_evaluated"):
+            return (
+                "the unused suppressions report evaluated no suppression: the "
+                "scan ran with --ignore-suppressions. Run a scan without it, "
+                "then run --fix-unused again."
+            )
+        not_run = cls._scanners_not_run_of(report_data)
+        if not_run:
+            return (
+                "the unused suppressions report lists scanners that did not run "
+                f"({', '.join(not_run)}), and it does not record which "
+                "suppressions belong to them. Run a scan in which those scanners "
+                "run, then run --fix-unused again."
+            )
+        return None
+
+    @classmethod
+    def unused_report_blocker(cls, report_path: Path) -> Optional[str]:
+        """Why ``--fix-unused`` comments nothing out of the report at
+        ``report_path``, as a sentence; None when it can be edited from.
+
+        Public for the command, which says so before it asks about a report's
+        age: the fixer comments nothing out of an unreadable report, a
+        ``not_evaluated`` one or one that lists scanners which did not run
+        (``fix_unused_suppressions`` asks ``_report_blocker`` the same
+        question), and the command reported each of them as the green "nothing
+        to comment out" after the age question.
+        """
+        try:
+            report_data = cls._read_unused_report(report_path)
+        except (ValueError, OSError) as exc:
+            return (
+                f"the unused suppressions report could not be read ({exc}). "
+                "Run a scan to write it again, then run --fix-unused again."
+            )
+        return cls._report_blocker(report_data)
+
+    @classmethod
+    def unused_report_scanners_not_run(cls, report_path: Path) -> List[str]:
+        """The scanners the report at ``report_path`` says did not run; empty when
+        it names none or cannot be read.
+
+        Public for ``--fix-unused``, which says why it comments nothing out
+        before it asks about a report's age: the fixer comments nothing out of a
+        report that lists such a scanner (``fix_unused_suppressions``), and the
+        command reported that as nothing to do.
+        """
+        try:
+            return cls._scanners_not_run_of(cls._read_unused_report(report_path))
+        except (ValueError, OSError):
+            return []
+
+    @staticmethod
+    def _rule_shown(entry: Dict[str, Any]) -> Any:
+        """``entry``'s ``rule_id`` as a message names it: ``*`` for an entry that
+        has none, whether the key is absent or null (a report writes ``null``)."""
+        rule_id = entry.get("rule_id")
+        return "*" if rule_id is None else rule_id
+
+    @classmethod
+    def _read_unused_report(cls, report_path: Path) -> Dict[str, Any]:
+        """The unused suppressions report as a JSON object.
+
+        Raises ``ValueError`` (``json.JSONDecodeError`` and ``UnicodeDecodeError``
+        are subclasses) for a file that is not JSON or not UTF-8, for one
+        whose JSON is not an object, and for one whose ``unused_suppressions``
+        is present and is not a list, and ``OSError`` for one that cannot be
+        read. One reader for the lint check and for ``--fix-unused``, so a
+        report the check tolerates with a warning never crashes the fix, and
+        one the fix refuses never crashes the check.
+        """
+        with open(report_path, "r", encoding="utf-8") as f:
+            report_data = json.load(f)
+        if not isinstance(report_data, dict):
+            raise ValueError(
+                f"{report_path} does not hold a JSON object "
+                f"(got {type(report_data).__name__})"
+            )
+        listed = report_data.get("unused_suppressions", [])
+        if not isinstance(listed, list):
+            raise ValueError(
+                f"{report_path} holds 'unused_suppressions' that is not a list "
+                f"(got {type(listed).__name__})"
+            )
+        return report_data
 
     @classmethod
     def _comment_out_suppressions(
         cls,
         raw_content: str,
-        suppressions: List[Dict[str, Any]],
-        unused_indices: set,
+        unused_indices: Set[int],
         date_str: str,
-    ) -> str:
-        """Comment out specific suppressions in the raw YAML content.
+    ) -> Tuple[str, Set[int]]:
+        """Comment out the entries at ``unused_indices`` of
+        ``global_settings.suppressions`` in the raw YAML text.
 
-        Finds each suppression block in the YAML and comments it out with a note.
-        A list whose every entry is commented out becomes `suppressions: []`:
+        Returns the text and the indices that were commented out.
+
+        The list is located by its place in the document, through the node
+        positions PyYAML's composer records (``_locate_suppressions_list``),
+        never by line text: a text search for a line starting
+        ``suppressions:`` found the key of any other mapping (a plugin's
+        option, another section's list), a line of a block scalar that happened
+        to start with the word, and counted their entries as the global list's,
+        so the wrong entries were commented out and the file could no longer
+        parse. Each entry's lines run from its own ``-`` to the next
+        entry's, or to the end of the list, as the scanner places them, so a
+        ``-`` inside a block scalar or a nested list is never an entry.
+
+        A list whose every entry is commented out becomes ``suppressions: []``:
         with only comments under it the key would hold null, which a scan
         refuses (exit 3).
+
+        A list this cannot edit line by line (a flow sequence, ``[{...}]``; an
+        alias of a list written elsewhere, or a list anchored in place, whose
+        edit would change every other use of the anchor; a repeated key) is
+        left as it is and ``UnusedSuppressionsNotEditable`` says which; the
+        caller reports that, never a change that was not made.
         """
-        lines = raw_content.split("\n")
-        result_lines: List[str] = []
-        # For each `suppressions:` line (by its index in result_lines), how many
-        # entries its list had and how many of them were commented out.
-        entries_seen: Dict[int, int] = {}
-        entries_commented: Dict[int, int] = {}
-        section_line = -1
-
-        # Find the suppressions list in the YAML by locating suppression entries
-        # Each suppression starts with "- path:" at the appropriate indentation
-        in_suppressions_section = False
-        current_suppression_idx = -1
-        suppression_indent = None
-        key_indent = 0
-        i = 0
-
-        while i < len(lines):
-            line = lines[i]
-            stripped = line.lstrip()
-
-            # Detect entry into the suppressions section
-            if stripped.startswith("suppressions:") and not stripped.startswith("#"):
-                in_suppressions_section = True
-                current_suppression_idx = -1
-                suppression_indent = None
-                key_indent = len(line) - len(stripped)
-                section_line = len(result_lines)
-                entries_seen[section_line] = 0
-                entries_commented[section_line] = 0
-                result_lines.append(line)
-                i += 1
-                continue
-
-            # If we're in the suppressions section, look for list items
-            if in_suppressions_section:
-                # The section ends at a non-comment line indented less than the
-                # `suppressions:` key, or at the key's own indent when it is not
-                # a list item: a list may be indented under the key or written
-                # at the key's indent (`  suppressions:` then `  - path: ...`),
-                # and the next key (`  ignore_paths:`) is at the key's indent.
-                if stripped and not stripped.startswith("#"):
-                    line_indent = len(line) - len(line.lstrip())
-                    if line_indent < key_indent or (
-                        line_indent == key_indent and not _starts_list_item(stripped)
-                    ):
-                        # We've left the suppressions section
-                        in_suppressions_section = False
-                        result_lines.append(line)
-                        i += 1
-                        continue
-
-                # Detect a new suppression entry ("- ...", or "-" alone). Once
-                # the first entry set the list's indent, only a list item at
-                # that indent starts one: a `-` or `- x` line deeper is part of
-                # an entry, such as a line of a block `reason: |`.
-                line_indent = len(line) - len(line.lstrip())
-                if _starts_list_item(stripped) and (
-                    suppression_indent is None or line_indent == suppression_indent
-                ):
-                    current_suppression_idx += 1
-                    entries_seen[section_line] += 1
-                    if suppression_indent is None:
-                        suppression_indent = len(line) - len(line.lstrip())
-
-                    if current_suppression_idx in unused_indices:
-                        entries_commented[section_line] += 1
-                        # Comment out this entire suppression block
-                        comment_note = f"{' ' * suppression_indent}# [ash-lint {date_str}] Commented out: unused suppression (not matched in last scan)"
-                        result_lines.append(comment_note)
-
-                        # Comment out the first line of the suppression
-                        result_lines.append(f"{' ' * suppression_indent}# {stripped}")
-                        i += 1
-
-                        # Comment out continuation lines (indented more than the "- " line)
-                        while i < len(lines):
-                            next_line = lines[i]
-                            next_stripped = next_line.lstrip()
-                            next_indent = len(next_line) - len(next_line.lstrip())
-
-                            # Stop if we hit another list item at same level, a blank line
-                            # followed by non-continuation, or less indentation
-                            if next_stripped == "":
-                                result_lines.append(next_line)
-                                i += 1
-                                continue
-                            if (
-                                _starts_list_item(next_stripped)
-                                and next_indent <= suppression_indent
-                            ):
-                                break
-                            if (
-                                next_indent <= suppression_indent
-                                and not next_stripped.startswith("#")
-                            ):
-                                break
-
-                            # Comment out this continuation line
-                            result_lines.append(
-                                f"{' ' * suppression_indent}# {next_stripped}"
-                            )
-                            i += 1
-                        continue
-                    else:
-                        result_lines.append(line)
-                        i += 1
-                        continue
-                else:
-                    result_lines.append(line)
-                    i += 1
-                    continue
-            else:
-                result_lines.append(line)
-                i += 1
-                continue
-
-        for line_idx, seen in entries_seen.items():
-            if seen and entries_commented[line_idx] == seen:
-                result_lines[line_idx] = result_lines[line_idx].replace(
-                    "suppressions:", "suppressions: []", 1
+        lines = cls._yaml_lines(raw_content)
+        located = cls._locate_suppressions_list(raw_content, lines)
+        if located is None or not located[1]:
+            if unused_indices:
+                # The caller found the entries in the loaded document and this
+                # walk cannot find their lines: a list supplied through a merge
+                # key (``global_settings: {<<: *base}``, which the composer does
+                # not flatten), or a text the pure-Python composer does not
+                # read. "Nothing to do" here contradicted the lint that had
+                # just listed the entries, which is what the refusal is for.
+                raise UnusedSuppressionsNotEditable(
+                    "the entries of 'global_settings.suppressions' were found in "
+                    "the loaded configuration but their lines were not found in "
+                    "the text (a list supplied through a merge key, or a text "
+                    "this walk does not read); comment them out by hand"
                 )
-        return "\n".join(result_lines)
+            return raw_content, set()
+        key_line, dash_positions, list_end_line, key_column = located
+        dash_column = dash_positions[0][1]
+        indent = " " * dash_column
+        line_break = next((ending for _text, ending in lines if ending), "\n")
+
+        # The line ranges about to be commented out, checked before any line
+        # changes: an anchor defined inside one that an alias outside it refers
+        # to would leave the file unparseable ("found undefined alias").
+        ranges = [
+            (
+                dash_line,
+                dash_positions[index + 1][0]
+                if index + 1 < len(dash_positions)
+                else list_end_line,
+            )
+            for index, (dash_line, _column) in enumerate(dash_positions)
+            if index in unused_indices
+        ]
+        cls._refuse_an_anchor_a_kept_line_uses(raw_content, ranges)
+
+        commented: Set[int] = set()
+        # The lines of entry i run from its dash line up to the next entry's
+        # dash line, or the list's end. Every content line in the range is
+        # commented; blank lines stay blank and comment lines stay as they are.
+        for index, (dash_line, _column) in enumerate(dash_positions):
+            if index not in unused_indices:
+                continue
+            next_dash_line = (
+                dash_positions[index + 1][0]
+                if index + 1 < len(dash_positions)
+                else list_end_line
+            )
+            text, ending = lines[dash_line]
+            note = (
+                f"{indent}# [ash-lint {date_str}] Commented out: unused "
+                "suppression (not matched in last scan)"
+            )
+            # A dash on the file's last line, with no line break after it,
+            # still gets one between the note and the entry (the file's own
+            # kind of break), or the two would share a line.
+            note_break = ending or line_break
+            lines[dash_line] = (f"{note}{note_break}{indent}# {text.lstrip()}", ending)
+            for line_no in range(dash_line + 1, min(next_dash_line, len(lines))):
+                text, ending = lines[line_no]
+                stripped = text.lstrip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                # The comment marker sits at the dash's column and the line keeps
+                # what it had beyond that column inside the comment, so taking the
+                # marker off restores the entry as it was. Flush to the marker, a
+                # line lost its own indentation, and the entry did not parse.
+                kept = (
+                    text[dash_column:]
+                    if len(text) - len(stripped) >= dash_column
+                    else stripped
+                )
+                lines[line_no] = (f"{indent}# {kept}", ending)
+            commented.add(index)
+
+        if commented and len(commented) == len(dash_positions):
+            text, ending = lines[key_line]
+            colon = text.find(":", key_column)
+            if colon != -1:
+                lines[key_line] = (
+                    text[: colon + 1] + " []" + text[colon + 1 :],
+                    ending,
+                )
+        fixed = "".join(text + ending for text, ending in lines)
+        cls._refuse_an_edit_that_misreads_the_list(
+            fixed,
+            len(dash_positions) - len(commented),
+            original=raw_content,
+            commented=commented,
+        )
+        return fixed, commented
+
+    @staticmethod
+    def _refuse_an_anchor_a_kept_line_uses(
+        raw_content: str, ranges: Sequence[Tuple[int, int]]
+    ) -> None:
+        """Refuse when a line in ``ranges`` (the entries to be commented out,
+        each a half-open line range) defines an anchor that an alias on a line
+        outside them refers to.
+
+        ``reason: &shared "text"`` in an unused entry and ``reason: *shared``
+        in a kept one (or ``- &b101 {...}`` and ``- <<: *b101``): commenting
+        the first out took its anchor with it, the alias then pointed at
+        nothing, and the file no longer parsed ("found undefined alias"). The
+        CLI had written it by then, and the next lint exited 3 on a file the
+        fixer broke. An alias inside the commented lines is commented out with
+        them, so it is not counted.
+        """
+
+        def inside(line: int) -> bool:
+            return any(start <= line < end for start, end in ranges)
+
+        try:
+            tokens = list(yaml.scan(raw_content, Loader=yaml.SafeLoader))
+        except yaml.YAMLError:
+            return
+        defined = {
+            token.value
+            for token in tokens
+            if isinstance(token, yaml.AnchorToken) and inside(token.start_mark.line)
+        }
+        used_elsewhere = {
+            token.value
+            for token in tokens
+            if isinstance(token, yaml.AliasToken) and not inside(token.start_mark.line)
+        }
+        shared = sorted(defined & used_elsewhere)
+        if shared:
+            names = ", ".join(f"&{name}" for name in shared)
+            raise UnusedSuppressionsNotEditable(
+                f"an unused entry defines the anchor {names} that a kept line "
+                "refers to (*name), so commenting it out would leave a file that "
+                "does not parse; move the anchor to a kept entry, or comment the "
+                "entry out by hand"
+            )
+
+    @classmethod
+    def _refuse_an_edit_that_misreads_the_list(
+        cls,
+        fixed: str,
+        expected: int,
+        original: Optional[str] = None,
+        commented: Collection[int] = (),
+    ) -> None:
+        """Refuse when the edited text does not compose, or its list does not
+        hold exactly the ``expected`` remaining entries, each as it was.
+
+        The anchor check names the one layout known to break the file; this
+        reads the result itself, so any layout the token walk misreads (an
+        entry whose lines were not all commented, a kept entry caught in a
+        range) is refused before the caller writes the text.
+
+        The count alone does not tell: a line of a commented-out entry that is
+        still active (its ``reason:``, say) joins the kept entry above it as a
+        repeated key, the last value wins, and the list still has the expected
+        number of entries with one of them rewritten. With ``original``, the
+        text before the edit, and ``commented``, the indices of the entries
+        commented out, each remaining entry must also equal the entry of the
+        original at its place.
+        """
+        try:
+            root = yaml.compose(fixed, Loader=yaml.SafeLoader)
+        except yaml.YAMLError as exc:
+            reason = " ".join(str(exc).split())
+            raise UnusedSuppressionsNotEditable(
+                "commenting the entries out would leave a file that does not "
+                f"parse ({reason}); comment them out by hand"
+            ) from exc
+        settings = (
+            cls._mapping_value(root, "global_settings")
+            if isinstance(root, yaml.MappingNode)
+            else None
+        )
+        sequence = (
+            cls._mapping_value(settings, "suppressions")
+            if isinstance(settings, yaml.MappingNode)
+            else None
+        )
+        remaining = (
+            len(sequence.value) if isinstance(sequence, yaml.SequenceNode) else None
+        )
+        if remaining != expected:
+            found = "no list" if remaining is None else f"{remaining} entries"
+            raise UnusedSuppressionsNotEditable(
+                f"commenting the entries out would leave {found} under "
+                f"'global_settings.suppressions' where {expected} should remain, "
+                "so the entries' lines were not told apart; comment them out by "
+                "hand"
+            )
+        if original is None:
+            return
+        before = cls._suppression_entries_as_loaded(original)
+        after = cls._suppression_entries_as_loaded(fixed)
+        if before is None or after is None:
+            return
+        kept = [
+            repr(entry) for index, entry in enumerate(before) if index not in commented
+        ]
+        if kept != [repr(entry) for entry in after]:
+            raise UnusedSuppressionsNotEditable(
+                "commenting the entries out would change an entry that stays "
+                "(a line of a commented-out entry is still active and joins "
+                "it); comment them out by hand"
+            )
+
+    @staticmethod
+    def _suppression_entries_as_loaded(text: str) -> Optional[List[Any]]:
+        """``global_settings.suppressions`` of the YAML ``text`` as a plain load
+        reads it (a repeated key keeps its last value), or None when the text
+        does not load or holds no such list.
+
+        A tag the safe loader has no constructor for (``!ENV``, which a scan
+        reads, is the one a config holds) loads as the plain scalar, sequence
+        or mapping it tags. Only the entries are compared, so what the tag
+        would resolve to does not matter; a load that raised on the tag would
+        leave the comparison unmade for exactly the files a scan accepts."""
+
+        class _TagBlindLoader(yaml.SafeLoader):
+            pass
+
+        def _construct_untagged(
+            loader: yaml.SafeLoader, tag_suffix: str, node: yaml.Node
+        ) -> Any:
+            if isinstance(node, yaml.MappingNode):
+                return loader.construct_mapping(node, deep=True)
+            if isinstance(node, yaml.SequenceNode):
+                return loader.construct_sequence(node, deep=True)
+            return loader.construct_scalar(cast(yaml.ScalarNode, node))
+
+        # The empty prefix matches every tag. The loader's own constructors are
+        # tried first, so only a tag it does not know reaches this one.
+        _TagBlindLoader.add_multi_constructor("", _construct_untagged)
+        try:
+            loaded = yaml.load(text, Loader=_TagBlindLoader)  # nosec B506 - a SafeLoader
+        except (yaml.YAMLError, ValueError, RecursionError):
+            return None
+        settings = loaded.get("global_settings") if isinstance(loaded, dict) else None
+        entries = settings.get("suppressions") if isinstance(settings, dict) else None
+        return entries if isinstance(entries, list) else None
+
+    # The line breaks PyYAML's reader counts (reader.py, ``forward``): LF, CRLF,
+    # a lone CR, NEL (U+0085), LINE SEPARATOR (U+2028) and PARAGRAPH SEPARATOR
+    # (U+2029). Split on these, so the line numbers the composer reports index
+    # the list ``_yaml_lines`` returns. The three non-ASCII ones are spelled by
+    # code point so the source holds no invisible character.
+    _YAML_LINE_BREAK = re.compile(
+        "\r\n|[\r\n" + chr(0x85) + chr(0x2028) + chr(0x2029) + "]"
+    )
+
+    @classmethod
+    def _yaml_lines(cls, text: str) -> List[Tuple[str, str]]:
+        """``text`` as (line, its line break) pairs, numbered as YAML numbers them.
+
+        The last pair's break is empty when the text does not end in one.
+        """
+        lines: List[Tuple[str, str]] = []
+        start = 0
+        for match in cls._YAML_LINE_BREAK.finditer(text):
+            lines.append((text[start : match.start()], match.group(0)))
+            start = match.end()
+        if start < len(text) or not lines:
+            lines.append((text[start:], ""))
+        return lines
+
+    @classmethod
+    def _locate_suppressions_list(
+        cls, raw_content: str, lines: List[Tuple[str, str]]
+    ) -> Optional[Tuple[int, List[Tuple[int, int]], int, int]]:
+        """Where ``global_settings.suppressions`` is in the YAML text.
+
+        Returns ``(key_line, dash_positions, list_end_line, key_column)``:
+        the line of the ``suppressions`` key, the (line, column) of each
+        entry's ``-``, in entry order, and the line the list ends before, all
+        0-based; or None when the document holds no such list (no
+        ``global_settings`` mapping, no ``suppressions`` key under it, a value
+        that is not a sequence), or when the text does not compose (its parse
+        failure was reported before this runs). A list that is there but
+        cannot be edited line by line (a flow sequence, an alias of a sequence
+        anchored elsewhere, a sequence anchored in place, a repeated key, a
+        dash count that disagrees with the node) raises
+        ``UnusedSuppressionsNotEditable`` naming the reason.
+
+        The composer places the sequence node at its first ``-`` and ends it
+        where the next key of the enclosing mapping starts, and the scanner
+        emits one BlockEntryToken per ``-`` of a block sequence at that
+        sequence's column, so the entries are the block-entry tokens at the
+        sequence's column inside its span. A ``-`` inside a block scalar is
+        text, not a token; one of a nested sequence is at a deeper column.
+        """
+        try:
+            root = yaml.compose(raw_content, Loader=yaml.SafeLoader)
+            tokens = list(yaml.scan(raw_content, Loader=yaml.SafeLoader))
+        except yaml.YAMLError:
+            return None
+        if not isinstance(root, yaml.MappingNode):
+            return None
+        # A repeated key: the constructor keeps the last mapping, this walk
+        # would edit the first, and the two lists can hold the same count.
+        # Nothing is edited on a document whose list cannot be told apart,
+        # and the caller is told why rather than that there was nothing to do.
+        if cls._key_count(root, "global_settings") > 1:
+            raise UnusedSuppressionsNotEditable(
+                "the key 'global_settings' is written more than once, so the "
+                "suppressions list to edit cannot be told apart; keep one"
+            )
+        settings = cls._mapping_value(root, "global_settings")
+        if not isinstance(settings, yaml.MappingNode):
+            return None
+        if cls._key_count(settings, "suppressions") > 1:
+            raise UnusedSuppressionsNotEditable(
+                "the key 'global_settings.suppressions' is written more than "
+                "once, so the list to edit cannot be told apart; keep one"
+            )
+        key_node = None
+        for key, _value in settings.value:
+            if isinstance(key, yaml.ScalarNode) and key.value == "suppressions":
+                key_node = key
+                break
+        if key_node is None:
+            return None
+        sequence = cls._mapping_value(settings, "suppressions")
+        if not isinstance(sequence, yaml.SequenceNode):
+            return None
+        if sequence.flow_style:
+            raise UnusedSuppressionsNotEditable(
+                "'global_settings.suppressions' is a flow sequence ([{...}]), "
+                "which cannot be commented out entry by entry; write it as a "
+                "block list (one '- ' per entry)"
+            )
+        key_line = key_node.start_mark.line
+        # An alias: the list's text is somewhere before the key that refers
+        # to it, and belongs to every other alias of the anchor too.
+        if (sequence.start_mark.line, sequence.start_mark.column) < (
+            key_node.start_mark.line,
+            key_node.start_mark.column,
+        ):
+            raise UnusedSuppressionsNotEditable(
+                "'global_settings.suppressions' is an alias of a list written "
+                "elsewhere in the file, which every other use of the anchor "
+                "shares; write the list under the key"
+            )
+        # An anchor on the list itself (``suppressions: &shared``): every alias
+        # of the anchor shares the entries, so commenting one out here would
+        # change each of those uses too. The composer places an anchored node
+        # at its anchor token, not at its first ``-``, so without this read the
+        # dash count below would refuse it for the wrong reason.
+        anchor = next(
+            (
+                token.value
+                for token in tokens
+                if isinstance(token, yaml.AnchorToken)
+                and (token.start_mark.line, token.start_mark.column)
+                == (sequence.start_mark.line, sequence.start_mark.column)
+            ),
+            None,
+        )
+        if anchor is not None:
+            raise UnusedSuppressionsNotEditable(
+                f"'global_settings.suppressions' is anchored (&{anchor}), and "
+                "every alias of the anchor shares its entries; write the list "
+                "without the anchor, or comment the entries out by hand"
+            )
+        # A tag on the list (``suppressions: !!seq``) places the node at the tag
+        # as an anchor does; the dash count below would then read "N entries
+        # but 0 list dashes", which says nothing about the tag.
+        tag = next(
+            (
+                token.value
+                for token in tokens
+                if isinstance(token, yaml.TagToken)
+                and (token.start_mark.line, token.start_mark.column)
+                == (sequence.start_mark.line, sequence.start_mark.column)
+            ),
+            None,
+        )
+        if tag is not None:
+            handle, suffix = tag
+            raise UnusedSuppressionsNotEditable(
+                f"'global_settings.suppressions' carries a tag ({handle or ''}"
+                f"{suffix}) on the list, whose entries this cannot tell apart; "
+                "write the list without the tag, or comment the entries out by hand"
+            )
+        column = sequence.start_mark.column
+        first_line = sequence.start_mark.line
+        end_line = sequence.end_mark.line
+        # A list that runs to the end of a text with no final line break ends
+        # ON the last line (the stream end sits there), not after it; the last
+        # entry's lines then run to the end of the text. Settled before the
+        # dashes are collected, so a last entry whose own `-` sits on that
+        # line is counted (its line is the unadjusted end line, which the
+        # half-open range below would leave out).
+        if sequence.end_mark.index >= len(raw_content) or end_line >= len(lines):
+            end_line = len(lines)
+        dash_positions = [
+            (token.start_mark.line, token.start_mark.column)
+            for token in tokens
+            if isinstance(token, yaml.BlockEntryToken)
+            and token.start_mark.column == column
+            and first_line <= token.start_mark.line < max(end_line, first_line + 1)
+        ]
+        if len(dash_positions) != len(sequence.value):
+            # The tokens and the node disagree on the entry count; nothing is
+            # edited on a reading this cannot check.
+            raise UnusedSuppressionsNotEditable(
+                f"'global_settings.suppressions' has {len(sequence.value)} "
+                f"entries but {len(dash_positions)} list dashes were found at "
+                "its column, so the entries' lines cannot be told apart"
+            )
+        return key_line, dash_positions, end_line, key_node.start_mark.column
+
+    @staticmethod
+    def _mapping_value(node: yaml.MappingNode, key: str) -> Optional[yaml.Node]:
+        """The value node of ``key`` in ``node``; None when no scalar key matches."""
+        for key_node, value_node in node.value:
+            if isinstance(key_node, yaml.ScalarNode) and key_node.value == key:
+                return value_node
+        return None
+
+    @staticmethod
+    def _key_count(node: yaml.MappingNode, key: str) -> int:
+        """How many scalar keys of ``node`` read ``key``."""
+        return sum(
+            1
+            for key_node, _value in node.value
+            if isinstance(key_node, yaml.ScalarNode) and key_node.value == key
+        )
 
     @classmethod
     def get_unused_report_age(
         cls,
         config_path: Path,
         output_dir: Optional[Path] = None,
+        report_config: Any = None,
+        report_path: Optional[Path] = None,
     ) -> Optional[Tuple[Path, datetime, float]]:
         """Get the age of the unused suppressions report.
+
+        ``report_config`` is the configuration that names the report, and
+        ``report_path`` the report file lint read; both as for
+        ``fix_unused_suppressions``.
 
         Returns:
             Tuple of (report_path, report_timestamp, age_in_seconds) or None if not found
         """
-        report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
+        report_path, report_timestamp = cls._unused_report_to_read(
+            config_path, output_dir, report_config, report_path
+        )
         if report_path is None or report_timestamp is None:
             return None
 
-        age_seconds = (datetime.now() - report_timestamp).total_seconds()
-        return report_path, report_timestamp, age_seconds
+        return report_path, report_timestamp, cls._seconds_since(report_timestamp)
+
+    @staticmethod
+    def _seconds_since(moment: datetime) -> float:
+        """Seconds from ``moment``, a naive local time, to now.
+
+        Both are put on the timeline first. Two naive local times subtract as
+        wall-clock readings, and across a daylight-saving change an hour is
+        missing from them or counted twice, so a report was an hour older or
+        younger than it was and a staleness warning fired or was missed.
+        """
+        return (datetime.now().astimezone() - moment.astimezone()).total_seconds()
 
     # -------------------------------------------------------------------------
     # Private helpers
@@ -757,10 +1493,27 @@ class ConfigLinter:
         return cls._load_config_and_text(config_path)[0]
 
     @classmethod
-    def _load_config_and_text(cls, config_path: Path) -> Tuple[Dict[str, Any], str]:
+    def _load_config_and_text(
+        cls, config_path: Path, keep_line_breaks: bool = False
+    ) -> Tuple[Dict[str, Any], str]:
         """_load_config, and the text it was parsed from: one read, so what a
-        command rewrites and redacts with is the file it parsed."""
-        text = read_config_text(config_path)
+        command rewrites and redacts with is the file it parsed.
+
+        ``keep_line_breaks`` reads the file with its line breaks as they are.
+        read_config_text opens the file in text mode, whose universal newlines
+        turn every break of a CRLF file into LF, so a fixer that edits this
+        text and writes it back would rewrite every line of a Windows file. The
+        bytes are read through ``read_config_bytes``, the reader every config
+        load uses (a regular file, read without blocking, bounded by
+        ASH_CONFIG_MAX_FILE_BYTES), and decoded as read_config_file decodes a
+        YAML file; a plain ``open`` here skipped those checks. It is for a YAML
+        file only: fix_unused_suppressions refuses a TOML or JSON config before
+        it reads.
+        """
+        if keep_line_breaks:
+            text = read_config_bytes(config_path).decode("utf-8")
+        else:
+            text = read_config_text(config_path)
         return parse_config_text(config_path, text) or {}, text
 
     @classmethod
@@ -979,11 +1732,17 @@ class ConfigLinter:
         if value is None:
             # A null pins nothing, whichever plugin it is under.
             return None
-        config_class = (
-            _built_in_section_classes(segment_name).get(section_name)
-            if segment_name in INTERNAL_SECTION_FIELDS
-            else None
-        )
+        config_class = None
+        if segment_name in INTERNAL_SECTION_FIELDS:
+            classes = _built_in_section_classes(segment_name)
+            config_class = classes.get(section_name)
+            if config_class is None:
+                # A scan reads any spelling of a built-in plugin's section as
+                # its section (plugin_section_names): `Bandit`, `CDK_NAG`.
+                declared = declared_section_names(segment_name).get(
+                    folded_section_name(section_name)
+                )
+                config_class = classes.get(declared) if declared else None
         if config_class is None:
             return (
                 "its plugin is not loaded here, so whether it declares this "
@@ -1092,10 +1851,13 @@ class ConfigLinter:
                 message=error,
             )
 
-        # Fallback: unknown error format — surface as generic error
+        # Fallback: words lint does not know, from a file that parsed (a parse
+        # failure is reported by lint()'s own read handler, the only place
+        # SYNTAX_ERROR comes from). As SYNTAX_ERROR the CLI took the file for
+        # one it could not load and skipped both fixers.
         return LintIssue(
             severity=LintSeverity.ERROR,
-            category=LintCategory.SYNTAX_ERROR,
+            category=LintCategory.OTHER,
             message=error,
         )
 
@@ -1204,6 +1966,7 @@ class ConfigLinter:
                             f"Narrow the suppression to line {shown_line_start} "
                             f"alone by setting line_end = {shown_line_start}"
                         ),
+                        entry_id=cls._make_suppression_id(suppression),
                     )
                 )
 
@@ -1238,6 +2001,7 @@ class ConfigLinter:
                         path=path_prefix,
                         fixable=True,
                         fix_description="Collapse the reason onto a single line",
+                        entry_id=cls._make_suppression_id(suppression),
                     )
                 )
 
@@ -1248,6 +2012,7 @@ class ConfigLinter:
                 "Suppression",
                 result,
                 shown=shown.get("expiration", ENVIRONMENT_VALUE_SHOWN),
+                entry_id=cls._make_suppression_id(suppression),
             )
 
     # Ignore-path entries outside suppressions, by where they sit in the config.
@@ -1259,25 +2024,64 @@ class ConfigLinter:
     def _check_ignore_path_expirations(
         cls, config_data: Dict[str, Any], result: LintResult, shown_data: Any = None
     ) -> None:
-        """Report ignore-path entries that have expired or carry a bad date."""
+        """Report ignore-path entries that have expired or carry a bad date.
+
+        A scanner's section is found under any spelling the file gives it, as a
+        scan finds it (``plugin_section_names``): an expired entry under
+        ``Bandit:`` is applied as one under ``bandit:`` and is reported the same.
+        A message names the entry by the declared spelling, never by a key the
+        file may have read from the environment.
+
+        Two spellings of one section are merged by a scan key by key, the
+        canonical spelling winning where both set a key, so when both hold the
+        list the canonical one is the list applied and the only one reported:
+        reported for each spelling, one entry drew two messages at one path, one
+        of them about a list the scan never reads.
+        """
         for keys, subject in cls._IGNORE_PATH_LISTS:
-            entries: Any = config_data
-            for key in keys:
-                entries = entries.get(key) if isinstance(entries, dict) else None
-            if not isinstance(entries, list):
-                continue
-            shown_entries = cls._shown_entries(entries, shown_data, keys)
-            for i, (entry, shown) in enumerate(zip(entries, shown_entries)):
-                if isinstance(entry, dict):
-                    cls._check_expiration(
-                        entry.get("expiration"),
-                        f"{'.'.join(keys)}[{i}]",
-                        subject,
-                        result,
-                        shown=cls._shown_entry(entry, shown).get(
-                            "expiration", ENVIRONMENT_VALUE_SHOWN
-                        ),
-                    )
+            lists = []
+            for spelled in cls._as_the_file_spells(config_data, keys):
+                entries: Any = config_data
+                for key in spelled:
+                    entries = entries.get(key) if isinstance(entries, dict) else None
+                if isinstance(entries, list):
+                    lists.append((spelled, entries))
+            if len(lists) > 1 and any(spelled == keys for spelled, _ in lists):
+                lists = [
+                    (spelled, entries) for spelled, entries in lists if spelled == keys
+                ]
+            for spelled, entries in lists:
+                shown_entries = cls._shown_entries(entries, shown_data, spelled)
+                for i, (entry, shown) in enumerate(zip(entries, shown_entries)):
+                    if isinstance(entry, dict):
+                        cls._check_expiration(
+                            entry.get("expiration"),
+                            f"{'.'.join(keys)}[{i}]",
+                            subject,
+                            result,
+                            shown=cls._shown_entry(entry, shown).get(
+                                "expiration", ENVIRONMENT_VALUE_SHOWN
+                            ),
+                        )
+
+    @staticmethod
+    def _as_the_file_spells(
+        config_data: Any, keys: Tuple[str, ...]
+    ) -> List[Tuple[str, ...]]:
+        """The key paths of ``config_data`` that ``keys`` names, with a known
+        plugin's section taken under every spelling the file gives it. Any other
+        path is ``keys`` as it is."""
+        if len(keys) < 2 or keys[0] not in PLUGIN_SEGMENT_KEYS:
+            return [keys]
+        segment = config_data.get(keys[0]) if isinstance(config_data, dict) else None
+        if not isinstance(segment, dict):
+            return []
+        wanted = folded_section_name(keys[1])
+        return [
+            (keys[0], name, *keys[2:])
+            for name in segment
+            if isinstance(name, str) and folded_section_name(name) == wanted
+        ]
 
     @classmethod
     def _check_expiration(
@@ -1287,8 +2091,12 @@ class ConfigLinter:
         subject: str,
         result: LintResult,
         shown: Any = None,
+        entry_id: Optional[str] = None,
     ) -> None:
         """Report ``expiration`` by the rule a scan applies, ``expiration_has_passed``.
+
+        ``entry_id`` is the suppression entry's id (``LintIssue.entry_id``), which
+        the fixer checks before it removes the entry at the issue's index.
 
         A message quotes it as ``shown``, ``<value>`` when it was read from the
         environment; None quotes it as it is.
@@ -1323,6 +2131,7 @@ class ConfigLinter:
                     path=path_prefix,
                     fixable=True,
                     fix_description="Remove expired suppression",
+                    entry_id=entry_id,
                 )
             )
         else:
@@ -1462,17 +2271,31 @@ class ConfigLinter:
 
         # Checked first: joined to the root, an absolute path is itself, so the
         # directory check would advise a spelling of it under itself.
-        advice = absolute_path_warning(
-            path_pattern,
-            project_root,
-            ignore_path=ignore_path,
-            shown_pattern=shown_pattern,
-        ) or path_pattern_advice(
-            path_pattern,
-            project_root,
-            ignore_path=ignore_path,
-            shown_pattern=shown_pattern,
-        )
+        # The helpers probe the filesystem (``is_dir`` on the path joined to
+        # the root). A path the OS refuses to look at (a name past NAME_MAX, a
+        # directory this user cannot search, an embedded NUL, which is a
+        # ValueError) is no reason to end the whole lint run: such a path
+        # matches nothing, and the model and the validator's own check report
+        # what they report about it.
+        try:
+            advice = absolute_path_warning(
+                path_pattern,
+                project_root,
+                ignore_path=ignore_path,
+                shown_pattern=shown_pattern,
+            ) or path_pattern_advice(
+                path_pattern,
+                project_root,
+                ignore_path=ignore_path,
+                shown_pattern=shown_pattern,
+            )
+        except (OSError, ValueError) as exc:
+            logger.debug(
+                "The path check could not probe the pattern at %s: %s",
+                path_prefix,
+                exc,
+            )
+            return
         if advice is not None:
             result.issues.append(
                 LintIssue(
@@ -1493,7 +2316,20 @@ class ConfigLinter:
         result: LintResult,
     ) -> None:
         """Check for unused suppressions based on the report."""
-        report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
+        # The report's name follows the reporter section a scan reads, which an
+        # `extends` base can set: the merged configuration where this lint has
+        # it, the file's own data otherwise. Read from the file alone, an
+        # extension set in a base made lint report no report found.
+        named_by = (
+            result.resolved_data
+            if isinstance(result.resolved_data, dict)
+            else config_data
+        )
+        report_path, report_timestamp = cls._find_unused_report(
+            config_path, output_dir, named_by
+        )
+        result.unused_report_path = report_path
+        result.unused_report_checked = True
 
         if report_path is None:
             result.issues.append(
@@ -1507,9 +2343,8 @@ class ConfigLinter:
 
         # Load the report
         try:
-            with open(report_path, "r", encoding="utf-8") as f:
-                report_data = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
+            report_data = cls._read_unused_report(report_path)
+        except (ValueError, OSError) as e:
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.WARNING,
@@ -1519,9 +2354,26 @@ class ConfigLinter:
             )
             return
 
+        # The report of a scan run with --ignore-suppressions evaluated none of
+        # them and says so; it lists none as unused, and --fix-unused comments
+        # nothing out on its account.
+        if report_data.get("not_evaluated"):
+            result.issues.append(
+                LintIssue(
+                    severity=LintSeverity.INFO,
+                    category=LintCategory.SUPPRESSION_UNUSED,
+                    message=(
+                        "The unused suppressions report evaluated no suppression: "
+                        "the scan ran with --ignore-suppressions. Run a scan "
+                        "without it before --fix-unused."
+                    ),
+                )
+            )
+            return
+
         # Report age warning
         if report_timestamp:
-            age_seconds = (datetime.now() - report_timestamp).total_seconds()
+            age_seconds = cls._seconds_since(report_timestamp)
             if age_seconds > cls.MAX_REPORT_AGE_SECONDS:
                 age_hours = age_seconds / 3600
                 result.issues.append(
@@ -1531,6 +2383,27 @@ class ConfigLinter:
                         message=f"Unused suppressions report is {age_hours:.1f} hours old. Consider re-running a scan for accurate results.",
                     )
                 )
+
+        # A scan that did not run some scanner cannot say which of the entries it
+        # lists belong to that scanner, so none of them is offered to
+        # --fix-unused (the fixer reads the same key and comments nothing out).
+        not_run = cls._scanners_not_run_of(report_data)
+        if not_run:
+            result.issues.append(
+                LintIssue(
+                    severity=LintSeverity.INFO,
+                    category=LintCategory.SUPPRESSION_UNUSED,
+                    message=redact_values(
+                        "The unused suppressions report lists scanners that did "
+                        f"not run ({', '.join(not_run)}). It does not record "
+                        "which suppressions belong to them, so none is offered "
+                        "to --fix-unused; run a scan in which those scanners "
+                        "run first (a scanner with nothing to scan, or turned "
+                        "off in the configuration, is not listed).",
+                        result.environment_values,
+                    ),
+                )
+            )
 
         unused_suppressions = report_data.get("unused_suppressions", [])
         # The report holds the suppressions as the scan read them. Each one is
@@ -1542,26 +2415,36 @@ class ConfigLinter:
         shown_by_id = cls._shown_suppressions_by_id(
             result.resolved_data, result.shown_resolved, result.references
         )
+        # --fix-unused edits the checked file's own list only. An entry that an
+        # extends base or a patch operation supplies, or one the config no longer
+        # holds, is reported but is not something the fixer can comment out.
+        own_ids = cls._own_suppression_ids(config_data, result.file_references)
         for unused in unused_suppressions:
             if not isinstance(unused, dict):
                 continue
-            shown = shown_by_id.get(cls._make_suppression_id(unused))
+            unused_id = cls._make_suppression_id(unused)
+            shown = shown_by_id.get(unused_id)
             message = (
                 f"Unused suppression: path='{(shown or unused).get('path', '')}', "
-                f"rule_id='{(shown or unused).get('rule_id', '*')}'"
+                f"rule_id='{cls._rule_shown(shown or unused)}'"
             )
             if shown is None:
                 # An entry the config no longer holds names no place in it:
                 # free text, with what the chain read from the environment
                 # redacted.
                 message = redact_values(message, result.environment_values)
+            fixable = unused_id in own_ids and not not_run
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.INFO,
                     category=LintCategory.SUPPRESSION_UNUSED,
                     message=message,
-                    fixable=True,
-                    fix_description="Remove unused suppression (use --fix-unused)",
+                    fixable=fixable,
+                    fix_description=(
+                        "Remove unused suppression (use --fix-unused)"
+                        if fixable
+                        else ""
+                    ),
                 )
             )
 
@@ -1578,6 +2461,24 @@ class ConfigLinter:
             ids.add(cls._make_suppression_id(entry))
         if isinstance(written, dict):
             ids.add(cls._make_suppression_id(written))
+        return ids
+
+    @classmethod
+    def _own_suppression_ids(
+        cls, config_data: Any, references: List[EnvironmentReference]
+    ) -> Set[str]:
+        """The ids (_suppression_ids) of the suppressions ``config_data``, the
+        checked file as parsed, holds itself: the entries ``--fix-unused`` can
+        comment out. ``references`` are what the file read from the environment."""
+        entries = cls._suppressions_of(config_data)
+        written = cls._suppressions_of(
+            record_environment_references(config_data, references)
+        )
+        ids: Set[str] = set()
+        for index, entry in enumerate(entries):
+            ids |= cls._suppression_ids(
+                entry, written[index] if index < len(written) else None
+            )
         return ids
 
     @classmethod
@@ -1614,16 +2515,103 @@ class ConfigLinter:
         return entries if isinstance(entries, list) else []
 
     @classmethod
+    def _unused_report_name(cls, config_data: Any) -> str:
+        """The report's path below the output directory.
+
+        ``UNUSED_SUPPRESSIONS_REPORT``, unless the file sets the reporter's
+        ``extension`` (``reporters.unused-suppressions.extension``): the reporter
+        then writes ``reports/ash.<extension>``, and a lookup of the default name
+        found nothing of that scan. The section is read under any spelling a scan
+        reads (plugin_section_names). An extension that is not a file name is
+        the reporter's to refuse, and the default stands.
+        """
+        reporters = (
+            config_data.get("reporters") if isinstance(config_data, dict) else None
+        )
+        if isinstance(reporters, dict):
+            folded = folded_section_name(cls.UNUSED_SUPPRESSIONS_SECTION)
+            sections = [
+                (key, section)
+                for key, section in reporters.items()
+                if isinstance(key, str) and folded_section_name(key) == folded
+            ]
+            # Two spellings set (``unused_suppressions`` beside
+            # ``unused-suppressions``): a scan merges them key by key with the
+            # canonical spelling winning where both set a key, so the canonical
+            # section's extension names the report, and the other's only where
+            # the canonical one sets none. A null section (``unused-suppressions:``
+            # alone, to enable the reporter with its defaults) sets none.
+            sections.sort(key=lambda item: item[0] != cls.UNUSED_SUPPRESSIONS_SECTION)
+            for _key, section in sections:
+                if not isinstance(section, dict):
+                    continue
+                extension = section.get("extension")
+                if (
+                    isinstance(extension, str)
+                    and extension not in ("", ".", "..")
+                    and "/" not in extension
+                    and "\\" not in extension
+                ):
+                    return f"reports/ash.{extension}"
+        return cls.UNUSED_SUPPRESSIONS_REPORT
+
+    @classmethod
+    def find_unused_report(
+        cls,
+        config_path: Path,
+        output_dir: Optional[Path] = None,
+        config_data: Any = None,
+    ) -> Tuple[Optional[Path], Optional[datetime]]:
+        """The unused-suppressions report a lint of ``config_path`` reads, under
+        the name the config gives it (``reporters.unused-suppressions.extension``),
+        and the report's modification time; ``(None, None)`` when there is none.
+
+        With ``output_dir`` the report is looked for there only; without it, in
+        the usual places beside the config. ``config_data`` is the configuration
+        that names the report, the merged one where the caller holds it; without
+        it the chain is resolved here (``_find_unused_report``). Public for the
+        CLI's --source-dir check, which looked under the default name alone and
+        so never found a report written under a configured extension.
+        """
+        return cls._find_unused_report(config_path, output_dir, config_data)
+
+    @classmethod
     def _find_unused_report(
         cls,
         config_path: Path,
         output_dir: Optional[Path],
+        config_data: Any = None,
     ) -> Tuple[Optional[Path], Optional[datetime]]:
         """Find the unused suppressions report file.
+
+        ``config_data`` is the configuration that names the report
+        (``_unused_report_name``): the merged one where the caller holds it
+        (lint's ``resolved_data``, which the CLI passes on to the age read and
+        the fixer so all three name the same report). When the caller holds none, the chain is resolved here
+        (``load_config_document``: ``extends`` and ``patch`` applied, no model
+        built), so an extension set in a base names the report, as it names the
+        file a scan writes; a chain that cannot be resolved falls back to the
+        file alone, and a file that cannot be read to the default name.
 
         Returns:
             Tuple of (report_path, report_modification_time) or (None, None)
         """
+        if config_data is None:
+            try:
+                config_data = load_config_document(config_path)
+            except (
+                OSError,
+                ValueError,
+                yaml.YAMLError,
+                ASHConfigSourceError,
+                RecursionError,
+            ):
+                try:
+                    config_data = cls._load_config(config_path)
+                except (OSError, ValueError, yaml.YAMLError, ASHConfigSourceError):
+                    # The caller's own load reports why; the default name stands.
+                    config_data = None
+        report_name = cls._unused_report_name(config_data)
         # Determine the output directory
         if output_dir is not None:
             search_dirs = [output_dir]
@@ -1641,14 +2629,50 @@ class ConfigLinter:
             ]
 
         for search_dir in search_dirs:
-            report_path = search_dir / cls.UNUSED_SUPPRESSIONS_REPORT
-            if report_path.exists():
-                # Get the modification time of the report
-                mtime = report_path.stat().st_mtime
-                report_timestamp = datetime.fromtimestamp(mtime)
+            report_path = search_dir / report_name
+            report_timestamp = cls._regular_file_mtime(report_path)
+            if report_timestamp is not None:
                 return report_path, report_timestamp
 
         return None, None
+
+    @staticmethod
+    def _regular_file_mtime(report_path: Path) -> Optional[datetime]:
+        """When the regular file at ``report_path`` was written, else None.
+
+        One stat answers both "is there a report" and "when was it written".
+        ``Path.exists`` before Python 3.14 re-raises every error but "not
+        found", so a directory the user cannot search ended the lint in a
+        traceback; an unreadable path has no report to read, as for
+        ``is_regular_file``. Nor has a name that is a directory, a FIFO or a
+        device: the reader would be handed it (a FIFO's open waits for a
+        writer).
+        """
+        try:
+            status = report_path.stat()
+        except (OSError, ValueError):
+            return None
+        if not stat.S_ISREG(status.st_mode):
+            return None
+        return datetime.fromtimestamp(status.st_mtime)
+
+    @classmethod
+    def _unused_report_to_read(
+        cls,
+        config_path: Path,
+        output_dir: Optional[Path],
+        report_config: Any,
+        report_path: Optional[Path],
+    ) -> Tuple[Optional[Path], Optional[datetime]]:
+        """The report the age read and the fixer take: ``report_path`` when the
+        caller holds the file lint read (``LintResult.unused_report_path``),
+        else the one ``_find_unused_report`` names."""
+        if report_path is None:
+            return cls._find_unused_report(config_path, output_dir, report_config)
+        timestamp = cls._regular_file_mtime(Path(report_path))
+        if timestamp is None:
+            return None, None
+        return Path(report_path), timestamp
 
     @classmethod
     def _check_suppression_symbol(
@@ -1822,9 +2846,31 @@ class ConfigLinter:
             ):
                 shown_keys = list(shown_segment)
             else:
-                shown_keys = [ENVIRONMENT_VALUE_SHOWN] * len(segment_data)
+                # The copy does not line up with the segment: two keys read from
+                # the environment are both `<value>` in it, so they are one key
+                # of it. Each key is then shown as itself unless the file's record
+                # says it read that key from the environment; with no such
+                # record, every key is shown as read from it.
+                read_from_environment = {
+                    reference.resolved
+                    for reference in result.file_references
+                    if reference.key
+                    and tuple(str(part) for part in reference.path) == (segment_name,)
+                }
+                if read_from_environment:
+                    shown_keys = [
+                        ENVIRONMENT_VALUE_SHOWN if key in read_from_environment else key
+                        for key in segment_data
+                    ]
+                else:
+                    shown_keys = [ENVIRONMENT_VALUE_SHOWN] * len(segment_data)
 
             for key, shown_key in zip(list(segment_data), shown_keys):
+                if not isinstance(key, str):
+                    # An unquoted `on:`, `true:` or `1:` is a bool or a number;
+                    # it is no spelling of a plugin name, and the string checks
+                    # below would raise on it.
+                    continue
                 env_read_key = shown_key != key
                 if env_read_key:
                     # Named by its written reference (``${VAR}``), the form the
@@ -1846,9 +2892,12 @@ class ConfigLinter:
                     continue  # not a built-in variant; let it pass
 
                 # Collision: BOTH the legacy variant AND the canonical
-                # form are present. A scan accepts the file and reads the
-                # canonical form, so this is a warning; --fix does not
-                # rename the key, since that would drop one of the two.
+                # form are present. A scan accepts the file and merges the
+                # two sections key by key, the canonical form winning where
+                # both set the same key (_PluginConfigSegment's before-
+                # validator), so a key only the legacy section sets, such as
+                # `enabled: false`, still applies. This is a warning; --fix
+                # does not rename the key, since that would drop one of the two.
                 if swapped in segment_data:
                     result.issues.append(
                         LintIssue(
@@ -1860,9 +2909,11 @@ class ConfigLinter:
                             message=(
                                 f"'{segment_name}.{shown_key}' (the legacy form) "
                                 f"and '{segment_name}.{swapped}' are both set; a "
-                                f"scan reads '{swapped}' and ignores "
-                                f"'{shown_key}'. Remove or merge one of them by "
-                                f"hand: `ash config lint --fix` does not rename it"
+                                f"scan merges them key by key, and where both "
+                                f"set a key '{swapped}' wins, so a key only "
+                                f"'{shown_key}' sets still applies. Remove or "
+                                f"merge one of them by hand: `ash config lint "
+                                f"--fix` does not rename it"
                             ),
                             fixable=False,
                         )
@@ -1952,11 +3003,13 @@ class ConfigLinter:
     @classmethod
     def _fix_internal_field(cls, config_data: Dict[str, Any], issue: LintIssue) -> bool:
         """Remove an internal-only field from a scanner/reporter/converter."""
-        parts = issue.path.split(".")
-        if len(parts) != 3:
+        # ``<segment>.<plugin>.<field>``: the segment and the field hold no dot,
+        # the plugin's name may.
+        section, _, rest = issue.path.partition(".")
+        plugin_name, _, field_name = rest.rpartition(".")
+        if not (section and plugin_name and field_name):
             return False
 
-        section, plugin_name, field_name = parts
         if section in config_data and isinstance(config_data[section], dict):
             plugin_config = config_data[section].get(plugin_name)
             if isinstance(plugin_config, dict) and field_name in plugin_config:
@@ -1977,24 +3030,128 @@ class ConfigLinter:
 
     @classmethod
     def _fix_suppression_line_range(
-        cls, config_data: Dict[str, Any], issue: LintIssue
+        cls,
+        config_data: Dict[str, Any],
+        issue: LintIssue,
+        loaded: Optional[List[Tuple[Any, Optional[str]]]] = None,
     ) -> bool:
         """Fix a suppression with line_start but missing line_end."""
-        # Parse the path: global_settings.suppressions[N]
-        idx = cls._parse_suppression_index(issue.path)
+        suppressions = cls._suppressions_of(config_data)
+        idx = cls._suppression_index_for(suppressions, issue, loaded)
         if idx is None:
             return False
-
-        suppressions = config_data.get("global_settings", {}).get("suppressions", [])
-        if idx < len(suppressions):
-            suppression = suppressions[idx]
-            if (
-                isinstance(suppression, dict)
-                and suppression.get("line_start") is not None
-            ):
-                suppression["line_end"] = suppression["line_start"]
-                return True
+        suppression = suppressions[idx]
+        if isinstance(suppression, dict) and suppression.get("line_start") is not None:
+            suppression["line_end"] = suppression["line_start"]
+            return True
         return False
+
+    @classmethod
+    def _issues_still_raised(
+        cls, given: List[LintIssue], fresh: List[LintIssue]
+    ) -> List[LintIssue]:
+        """The given issues a fresh lint of the file still raises, each as the
+        fresh lint raised it.
+
+        A suppression issue (``_SUPPRESSION_FIX_CATEGORIES``) that carries an
+        entry id matches a fresh issue of the same category and id, whatever
+        its index now: the fresh issue is returned, so the fixer edits the
+        entry where it sits in the file as read. An entry whose fields changed
+        has another id and is not matched; one whose expiration moved into the
+        future raises no fresh issue and is not matched. Any other issue is
+        kept when a fresh issue equals it.
+
+        Each fresh issue is matched at most once: two entries written the same
+        way carry one id and raise two fresh issues, and the second given issue
+        takes the second fresh one, so both entries are fixed. Before this,
+        both given issues matched the first fresh issue, and the second fix
+        resolved to the entry the first had already removed and was reported
+        not fixed.
+        """
+        kept: List[LintIssue] = []
+        unmatched = list(fresh)
+        for issue in given:
+            if (
+                issue.category in cls._SUPPRESSION_FIX_CATEGORIES
+                and issue.entry_id is not None
+            ):
+                for position, candidate in enumerate(unmatched):
+                    if (
+                        candidate.category == issue.category
+                        and candidate.entry_id == issue.entry_id
+                    ):
+                        kept.append(unmatched.pop(position))
+                        break
+            elif issue in fresh:
+                kept.append(issue)
+        return kept
+
+    @classmethod
+    def _loaded_suppressions(
+        cls, config_data: Dict[str, Any]
+    ) -> List[Tuple[Any, Optional[str]]]:
+        """The suppressions list as loaded, each entry with its id as loaded.
+
+        Taken once, before any fixer runs, so the fixers resolve their entries
+        against the ids lint recorded, not against entries other fixers have
+        changed since (a changed entry has a different id).
+        """
+        return [
+            (entry, cls._entry_id_of(entry))
+            for entry in cls._suppressions_of(config_data)
+        ]
+
+    @classmethod
+    def _suppression_index_for(
+        cls,
+        suppressions: List[Any],
+        issue: LintIssue,
+        loaded: Optional[List[Tuple[Any, Optional[str]]]] = None,
+    ) -> Optional[int]:
+        """The index of the entry ``issue`` is about in ``suppressions``, the
+        list as it is now, or None when it cannot be found.
+
+        The issue's path names an index in the list its lint read, and the
+        file is read again before the fix, after the caller's confirmation
+        prompt. The entry at that index is used only when its id
+        (``LintIssue.entry_id``) is the one the lint recorded; an entry that
+        moved is found by that id when exactly one entry carries it; an entry
+        that is gone, or an id two entries share, means no fix. An issue made
+        without an id (a caller's own) is applied by index, once ``fix`` has
+        kept it: ``fix`` keeps a caller's issue only when the fresh lint raises
+        it unchanged (``_issues_still_raised``), and logs the ones it drops.
+
+        ``loaded`` is the list as it was loaded with each entry's id at that
+        moment (``_loaded_suppressions``). Given, the ids are compared against
+        it, so an entry an earlier fixer changed in place (its id has moved)
+        is still found, and the result is that entry's index in
+        ``suppressions`` now (an entry an earlier removal popped is gone).
+        Without it the ids are computed from ``suppressions`` as they are.
+        """
+        idx = cls._parse_suppression_index(issue.path)
+        if idx is None:
+            return None
+        if issue.entry_id is None:
+            return idx if idx < len(suppressions) else None
+        if loaded is None:
+            loaded = [(entry, cls._entry_id_of(entry)) for entry in suppressions]
+        if idx < len(loaded) and loaded[idx][1] == issue.entry_id:
+            found = loaded[idx][0]
+        else:
+            matches = [
+                entry for entry, entry_id in loaded if entry_id == issue.entry_id
+            ]
+            if len(matches) != 1:
+                return None
+            found = matches[0]
+        for current_index, entry in enumerate(suppressions):
+            if entry is found:
+                return current_index
+        return None
+
+    @classmethod
+    def _entry_id_of(cls, entry: Any) -> Optional[str]:
+        return cls._make_suppression_id(entry) if isinstance(entry, dict) else None
 
     @staticmethod
     def _collapse_reason_whitespace(reason: str) -> str:
@@ -2010,15 +3167,15 @@ class ConfigLinter:
 
     @classmethod
     def _fix_suppression_reason_newline(
-        cls, config_data: Dict[str, Any], issue: LintIssue
+        cls,
+        config_data: Dict[str, Any],
+        issue: LintIssue,
+        loaded: Optional[List[Tuple[Any, Optional[str]]]] = None,
     ) -> bool:
         """Collapse a multi-line suppression reason onto a single line."""
-        idx = cls._parse_suppression_index(issue.path)
+        suppressions = cls._suppressions_of(config_data)
+        idx = cls._suppression_index_for(suppressions, issue, loaded)
         if idx is None:
-            return False
-
-        suppressions = config_data.get("global_settings", {}).get("suppressions", [])
-        if idx >= len(suppressions):
             return False
 
         suppression = suppressions[idx]
@@ -2040,18 +3197,18 @@ class ConfigLinter:
 
     @classmethod
     def _fix_expired_suppression(
-        cls, config_data: Dict[str, Any], issue: LintIssue
+        cls,
+        config_data: Dict[str, Any],
+        issue: LintIssue,
+        loaded: Optional[List[Tuple[Any, Optional[str]]]] = None,
     ) -> bool:
         """Remove an expired suppression."""
-        idx = cls._parse_suppression_index(issue.path)
+        suppressions = cls._suppressions_of(config_data)
+        idx = cls._suppression_index_for(suppressions, issue, loaded)
         if idx is None:
             return False
-
-        suppressions = config_data.get("global_settings", {}).get("suppressions", [])
-        if idx < len(suppressions):
-            suppressions.pop(idx)
-            return True
-        return False
+        suppressions.pop(idx)
+        return True
 
     @classmethod
     def _parse_suppression_index(cls, path: str) -> Optional[int]:
@@ -2081,8 +3238,10 @@ class ConfigLinter:
             return json.dumps(config_data, indent=2) + "\n"
         config_strings = []
 
-        # Preserve the schema reference if it exists in the original file
-        for line in raw_content.split("\n"):
+        # Preserve the schema reference if it exists in the original file. A
+        # leading byte order mark is not whitespace to ``strip``, so it hid the
+        # first line's comment and the default reference replaced it.
+        for line in raw_content.removeprefix(chr(0xFEFF)).split("\n"):
             stripped = line.strip()
             if stripped.startswith("#") and "schema" in stripped.lower():
                 config_strings.append(line)

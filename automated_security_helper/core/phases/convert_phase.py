@@ -5,19 +5,31 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from automated_security_helper.base.engine_phase import EnginePhase
-from automated_security_helper.base.plugin_config import plugin_config_key
+from automated_security_helper.base.plugin_config import (
+    declared_plugin_name,
+    plugin_config_key,
+    section_enabled,
+)
 from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ConverterStatusInfo,
+    FailedInputInfo,
+    RefusedInputInfo,
     waives_gate,
 )
-from automated_security_helper.utils.error_text import error_text, traceback_text
+from automated_security_helper.utils.error_text import (
+    config_environment_values,
+    error_text,
+    plugin_environment_values,
+    traceback_text,
+)
 from automated_security_helper.utils.log import ASH_LOGGER, escape_markup
 from automated_security_helper.utils.sandbox.scope import (
     converter_run_scope,
     plugin_probe_scope,
+    scope_shown_text,
 )
 
 
@@ -34,25 +46,284 @@ def _converter_display_name(plugin_instance: Any) -> str:
     return name or plugin_instance.__class__.__name__
 
 
+def _constructor_failure_name(plugin_class: Any) -> str:
+    """The name a converter whose constructor raised is recorded under.
+
+    A constructed converter's row is keyed by its config's ``name``, which is the
+    name its config class declares. There is no instance to ask here, so the
+    declared name is read off the class, as ``plugin_config_key`` does, and only a
+    converter that declares none falls back to its class name. Keyed on the class
+    always, one converter was filed under two names: its class when the
+    constructor raised and its configured name when it was built.
+    """
+    try:
+        declared = declared_plugin_name(plugin_class)
+    except Exception:  # noqa: BLE001 -- a plugin class can be anything
+        declared = None
+    return declared or str(getattr(plugin_class, "__name__", "Unknown"))
+
+
+def _unused_key(preferred: str, taken: Any, qualifier: str) -> str:
+    """``preferred`` as a ``converter_results`` key no other converter holds.
+
+    The rows are a dict keyed by display name, and nothing made the names unique:
+    two registered converters sharing a config name (or, with no config, a class
+    name) wrote one row, the later one over the earlier, so a failure row could be
+    replaced by a clean one and the completeness gate never saw it. A taken name
+    is qualified with the converter's own identity (``qualifier``), then
+    numbered, so every converter keeps a row of its own.
+    """
+    if preferred not in taken:
+        return preferred
+    qualified = f"{preferred} ({qualifier})"
+    if qualified not in taken:
+        return qualified
+    index = 2
+    while f"{qualified} #{index}" in taken:
+        index += 1
+    return f"{qualified} #{index}"
+
+
+def _row_keys(converter_instances: List[Any], taken: set[str]) -> Dict[int, str]:
+    """The ``converter_results`` key of each instance, by ``id``, each unique.
+
+    Computed once, after the filter and before any row is written, so the row a
+    converter's run writes, the row its exception handler writes and the row
+    the filtered-out pass writes all land under one key, and under a key no
+    other converter of this run (a converter whose constructor raised included)
+    is recorded under. The same key names the converter in its progress rows
+    and in its CONVERT_START and CONVERT_COMPLETE events, so two converters
+    sharing a display name are told apart there too.
+
+    ``taken`` is the keys THIS run has claimed so far (the constructor-failure
+    rows it wrote), and each key chosen here is added to it. It is not seeded
+    from the rows the results object already held: a phase run again over the
+    same object would file every converter under its long key and leave the
+    earlier run's row under the short one, a stale failure included, for the
+    completeness check and the reports. A row of an earlier run under a key
+    this run uses is overwritten, as it was before keys were made unique.
+    """
+    keys: Dict[int, str] = {}
+    for plugin_instance in converter_instances:
+        cls = plugin_instance.__class__
+        key = _unused_key(
+            _converter_display_name(plugin_instance),
+            taken,
+            f"{cls.__module__}.{cls.__name__}",
+        )
+        taken.add(key)
+        keys[id(plugin_instance)] = key
+    return keys
+
+
+def _redaction_values(plugin_instance: Any, run_config: Any) -> tuple[Any, ...]:
+    """The values a converter's error text is redacted with: the run's
+    configuration's environment values and the converter's own, as the
+    dependency reason's are (``_dependency_unavailable_reason``)."""
+    return plugin_environment_values(
+        plugin_instance, config_environment_values(run_config)
+    )
+
+
+def _failure_text(error: BaseException, values: Any) -> str:
+    """``'<type>: <message>'`` for a converter's row, redacted with ``values``.
+
+    The text goes to the results file, ``to_simple_dict`` (sent off-host by
+    some reporters), the HTML report's coverage notice, the progress row and
+    ash.log, and every consumer treats it as already redacted. A converter's
+    exception can quote a value its config read from the environment, so it is
+    redacted here, once, before it is recorded anywhere.
+    """
+    return f"{type(error).__name__}: {error_text(error, values)}"
+
+
+def _records(holder: Any, name: str, model: Any) -> List[Any]:
+    """``holder``'s ``name`` records, each dict read as the record it becomes.
+
+    The row's own validation turns a dict into a ``model`` record, so a dict
+    that said ``accepted: true`` waived the completeness gate, while the
+    progress text and the suppression bookkeeping read it with ``getattr``,
+    found no ``accepted`` and called reviewed work a failure. Reading both
+    from the same record keeps the text, the registered suppression and the
+    gate in agreement. A dict the model refuses is left as given: the row's
+    validation refuses it too and records why (``_execute_phase``'s handler).
+    """
+    records: List[Any] = []
+    for record in getattr(holder, name, None) or []:
+        if isinstance(record, dict):
+            try:
+                record = model.model_validate(record)
+            except Exception:  # noqa: BLE001 -- the row's validation reports it
+                pass
+        records.append(record)
+    return records
+
+
+def _refused_over_limit(plugin_instance: Any) -> str:
+    """``"1 archive refused over an extraction limit"`` for the refusals the
+    completeness gate counts, or ``""``.
+
+    A refusal that names a ``limit`` is an archive refused whole, so none of
+    its contents reached the scanners: the gate fails the run on it
+    (``incomplete_converters``), and the progress row and the CONVERT_COMPLETE
+    message have to say so instead of "No files to convert", which is the
+    message a tree without archives gets. A refusal without a limit (a link, a
+    nested archive) refuses one input that is not to be read and does not
+    count, here as in the gate.
+    """
+    count = sum(
+        1
+        for record in _records(plugin_instance, "refused_inputs", RefusedInputInfo)
+        if getattr(record, "limit", None)
+    )
+    if not count:
+        return ""
+    noun = "archive" if count == 1 else "archives"
+    return f"{count} {noun} refused over an extraction limit"
+
+
 def _conversion_failure(run_scope: Any) -> str | None:
     """Why a converter that returned normally still lost coverage, or None.
 
-    The spawns the scanner sandbox refused while its ``convert()`` ran, which
-    converted nothing. The inputs a converter itself could not convert are its
-    ``failed_inputs`` (``_input_record_fields``).
+    The spawns the scanner sandbox refused while its ``convert()`` ran, and the
+    ones whose sandbox plan failed some other way (a program the backend could
+    not find, a private directory it could not make); either converted nothing.
+    The two are named apart: only the first is the sandbox's refusal, and a
+    failed plan is the error the spawn would have raised unsandboxed. The inputs
+    a converter itself could not convert are its ``failed_inputs``
+    (``_input_record_fields``).
     """
     refused = getattr(run_scope, "refused_spawns", 0) or 0
-    if not refused:
+    failed = getattr(run_scope, "failed_spawns", 0) or 0
+    if not refused and not failed:
         return None
-    return (
-        f"could not convert: the scanner sandbox refused {refused} process(es) it "
-        f"started ({getattr(run_scope, 'last_refusal', None) or 'no reason given'})"
-    )
+    reasons = []
+    if refused:
+        reasons.append(
+            f"the scanner sandbox refused {refused} process(es) it started "
+            f"({getattr(run_scope, 'last_refusal', None) or 'no reason given'})"
+        )
+    if failed:
+        reasons.append(
+            f"the sandbox could not plan {failed} process(es) it started "
+            f"({getattr(run_scope, 'last_failure', None) or 'no reason given'})"
+        )
+    return "could not convert: " + "; ".join(reasons)
+
+
+def _shown_loss(text: str, values: Any) -> str:
+    """``_conversion_failure``'s text as every sink may show it.
+
+    The scope's ``last_refusal`` is the sandbox's own sentence and its
+    ``last_failure`` is a planning exception's text, so either can quote a value
+    the converter's config read from the environment, or a path under the home
+    directory. The text goes to the row, the progress row and the CONVERT_COMPLETE
+    message, which reach the results file, the reports and the event subscribers,
+    so it is redacted once here with the values every other failure text of this
+    phase is redacted with (``scope_shown_text``, which also hides the values the
+    scope held), and the home directory is written as ``~`` as the dependency
+    reason's is (``_dependency_unavailable_reason``): ``scope_shown_text`` does
+    not fold the home directory itself.
+    """
+    if not text:
+        return text
+    from automated_security_helper.utils.get_shortest_name import home_as_tilde
+
+    return home_as_tilde(scope_shown_text(text, values))
 
 
 def _failure_field(failure: str | None) -> Dict[str, Any]:
     """The ``failure`` keyword for a converter's row, or nothing when there is none."""
     return {"failure": failure} if failure else {}
+
+
+def _converted_path_list(result: Any) -> List[str]:
+    """The paths a converter's ``convert()`` returned, as posix strings.
+
+    ``convert()`` is declared to return a list, but a converter that hands back a
+    tuple, a set or a generator of the paths it wrote did convert them. Each of
+    those was wrapped whole and given to ``Path()``, which raised ``TypeError``:
+    a successful conversion was recorded as a failure with its outputs dropped. A
+    single path (a string or a path object) is still one path, a set is sorted
+    so the order does not depend on hashing, and an empty string names no file
+    (it became the path ``.``) and is left out. Anything else that is not
+    iterable still reaches ``Path()`` and fails there, loudly.
+    """
+    if result is None:
+        return []
+    if isinstance(result, (str, bytes, Path)) or not hasattr(result, "__iter__"):
+        items: List[Any] = [result]
+    elif isinstance(result, (set, frozenset)):
+        items = sorted(result, key=str)
+    elif isinstance(result, dict):
+        # A mapping is no list of paths; Path() refuses it by name below.
+        items = [result]
+    else:
+        items = list(result)
+    return [Path(item).as_posix() for item in items if item is not None and item != ""]
+
+
+def _redaction_values_or(plugin_instance: Any, run_config: Any, fallback: Any) -> Any:
+    """``_redaction_values``, or ``fallback`` when the converter cannot answer.
+
+    Used where the text being redacted is already an error out of the converter,
+    so its own failure to name its values must not replace the error.
+    """
+    try:
+        return _redaction_values(plugin_instance, run_config)
+    except Exception:  # noqa: BLE001 -- plugin code
+        return fallback
+
+
+def _unproductive_reason(row: Any) -> str | None:
+    """Why a converter's row explains an empty conversion, or None.
+
+    The row's ``failure``; else the archives it refused whole over an extraction
+    limit (a loss the completeness gate counts too); else the count of its failed
+    inputs that are not accepted (the gate's count); else the reason its tool was
+    unavailable. The refusal was left out, so a run whose only converter refused
+    an archive logged the bare "No files were converted by any converter
+    plugins" beside a gate that fails the run on that very row. So was the last,
+    for a run whose only converter had been dropped for a missing tool.
+
+    None for a row marked ``excluded``, whatever else it carries: the run was
+    never meant to use that converter (the config turned it off, or the run
+    declined it), and the completeness gate skips such a row first. A turned-off
+    converter whose constructor raised carries a ``failure`` and is excluded, so
+    reading the failure first listed it as a converter that "did not start".
+    """
+    if getattr(row, "excluded", False):
+        return None
+    failure = getattr(row, "failure", None)
+    if failure:
+        return str(failure)
+    refused = _refused_over_limit(row)
+    if refused:
+        return refused
+    unaccepted = _unaccepted_failed_inputs(row)
+    if unaccepted:
+        return f"{len(unaccepted)} could not be converted"
+    if getattr(row, "dependencies_satisfied", True) is False:
+        return str(
+            getattr(row, "dependency_unavailable_reason", None)
+            or "its dependencies are unavailable"
+        )
+    return None
+
+
+def _why_no_converter_ran(aggregated_results: AshAggregatedResults) -> List[str]:
+    """``"name (reason)"`` for each converter row that explains why none ran.
+
+    A row with a ``failure``, or one whose tool was unavailable and that was not
+    turned off. The reasons are the rows' own, already redacted. Used so the
+    phase does not say "No enabled converter plugins found", the message for
+    conversion turned off, when converters were configured and failed to start.
+    """
+    return [
+        f"{name} ({reason})"
+        for name, row in aggregated_results.converter_results.items()
+        if (reason := _unproductive_reason(row))
+    ]
 
 
 def _dependency_unavailable_reason(
@@ -65,11 +336,7 @@ def _dependency_unavailable_reason(
     values the run's configuration and the converter read from the environment,
     and with the home directory written as ``~``: the console's warning is where
     the converter's own words, paths included, are kept."""
-    from automated_security_helper.utils.error_text import (
-        config_environment_values,
-        plugin_environment_values,
-        text_without_values,
-    )
+    from automated_security_helper.utils.error_text import text_without_values
     from automated_security_helper.utils.get_shortest_name import home_as_tilde
 
     try:
@@ -84,9 +351,7 @@ def _dependency_unavailable_reason(
             "converter's own message"
         )
     )
-    values = plugin_environment_values(
-        plugin_instance, config_environment_values(run_config)
-    )
+    values = _redaction_values(plugin_instance, run_config)
     return home_as_tilde(text_without_values(str.__str__(reason), values))
 
 
@@ -138,7 +403,7 @@ def _register_accepted_suppressions(
     try:
         records = [
             record
-            for record in (getattr(plugin_instance, "failed_inputs", None) or [])
+            for record in _records(plugin_instance, "failed_inputs", FailedInputInfo)
             if getattr(record, "accepted", False)
             and getattr(record, "kind", None) == "input"
         ]
@@ -211,14 +476,14 @@ def _unaccepted_failed_inputs(holder: Any) -> List[Any]:
     """
     return [
         record
-        for record in (getattr(holder, "failed_inputs", None) or [])
+        for record in _records(holder, "failed_inputs", FailedInputInfo)
         if not waives_gate(record)
     ]
 
 
 def _accepted_inputs(plugin_instance: Any) -> str:
     """``"1 input accepted by a suppression"`` for the accepted records, or ``""``."""
-    count = len(list(getattr(plugin_instance, "failed_inputs", None) or [])) - len(
+    count = len(_records(plugin_instance, "failed_inputs", FailedInputInfo)) - len(
         _unaccepted_failed_inputs(plugin_instance)
     )
     if not count:
@@ -294,6 +559,10 @@ class ConvertPhase(EnginePhase):
         all_converter_instances: List[Any],
         filtered_instances: List[Any],
         python_based_plugins_only: bool,
+        row_keys: Dict[int, str] | None = None,
+        dependency_answers: Dict[int, bool] | None = None,
+        filter_failures: Dict[int, str] | None = None,
+        python_only_answers: Dict[int, bool] | None = None,
     ) -> None:
         """Write a ``converter_results`` row for each converter the filter dropped.
 
@@ -301,8 +570,36 @@ class ConvertPhase(EnginePhase):
         kept apart deliberately, matching ``ScannerStatusInfo`` where ``excluded``
         is the authoritative signal for SKIPPED and ``dependencies_satisfied`` for
         MISSING. "Turned off" must not send an operator looking for a tool to
-        install, and "tool absent" must not read as a deliberate exclusion.
+        install, and "tool absent" must not read as a deliberate exclusion. A
+        converter the config turned off never had its dependency check run, so
+        its row says nothing about its tool (``dependencies_satisfied`` True, no
+        reason), as a SKIPPED scanner's row does.
+
+        ``row_keys`` is the key each instance's row is written under
+        (``_row_keys``); an instance it does not name is keyed by its display name.
+
+        ``dependency_answers`` is the one answer each checked converter's
+        dependency check gave, by ``id``; an instance it does not name is read
+        from its ``dependencies_satisfied`` attribute, which a converter that
+        refuses the assignment never carries.
+
+        ``filter_failures`` is what ``filter_enabled_plugins`` recorded for each
+        instance whose own enabled or Python-only check raised, by ``id``
+        (already redacted). Such an instance was dropped without any question
+        answered, so its row is a failure that says which check raised, and it
+        says nothing about the converter's tool unless a dependency answer was
+        recorded for it.
+
+        ``python_only_answers`` is the one Python-only answer each converter the
+        config left on gave on a Python-only run, by ``id``. An instance it does
+        not name, and that ``filter_failures`` does not name either, is asked
+        here (a caller that builds the rows itself); a converter the config
+        turned off is not asked, since it is excluded whatever it would answer.
         """
+        row_keys = row_keys or {}
+        dependency_answers = dependency_answers or {}
+        filter_failures = filter_failures or {}
+        python_only_answers = python_only_answers or {}
         # Identity, not membership. A converter instance is a pydantic model, whose
         # __eq__ compares field values, so `instance in filtered_instances` would
         # report a dropped converter as surviving whenever another instance of the
@@ -314,37 +611,72 @@ class ConvertPhase(EnginePhase):
                 continue
 
             display_name = _converter_display_name(plugin_instance)
-            enabled = bool(
-                getattr(getattr(plugin_instance, "config", None), "enabled", True)
-            )
+            row_key = row_keys.get(id(plugin_instance), display_name)
+            enabled = section_enabled(getattr(plugin_instance, "config", None))
             declined_by_python_only = False
-            if python_based_plugins_only:
-                try:
-                    declined_by_python_only = not plugin_instance.is_python_only()
-                except Exception:
-                    # is_python_only is plugin-supplied, so the exception set is
-                    # open. An unanswerable question is not an exclusion; the
-                    # unexplained-drop arm below is what such an instance lands in.
-                    declined_by_python_only = False
-            dependencies_satisfied = bool(
-                getattr(plugin_instance, "dependencies_satisfied", False)
+            if python_based_plugins_only and enabled:
+                if id(plugin_instance) in python_only_answers:
+                    declined_by_python_only = not python_only_answers[
+                        id(plugin_instance)
+                    ]
+                elif id(plugin_instance) not in filter_failures:
+                    try:
+                        declined_by_python_only = not plugin_instance.is_python_only()
+                    except Exception:
+                        # is_python_only is plugin-supplied, so the exception set
+                        # is open. An unanswerable question is not an exclusion.
+                        # The text of what it raised is not read here: a caller
+                        # that asked recorded it, redacted, in ``filter_failures``,
+                        # which is read below.
+                        declined_by_python_only = False
+            raised = filter_failures.get(id(plugin_instance))
+            # The pre-filter loop asks the dependency question of an enabled
+            # converter that the Python-only filter keeps, and of no other. A
+            # converter the config turned off, one a Python-only run declined, and
+            # one whose Python-only or enabled check raised (it is skipped there
+            # too) never had its check run, so True here is "not asked", not a
+            # claim about its tool.
+            if id(plugin_instance) in dependency_answers:
+                checked = dependency_answers[id(plugin_instance)]
+            else:
+                checked = bool(
+                    getattr(plugin_instance, "dependencies_satisfied", False)
+                )
+            not_asked = (
+                not enabled
+                or declined_by_python_only
+                or (
+                    raised is not None and id(plugin_instance) not in dependency_answers
+                )
             )
+            dependencies_satisfied = not_asked or checked
 
             drop_is_explained = (
                 not enabled or declined_by_python_only or not dependencies_satisfied
             )
             failure = None
-            if not drop_is_explained:
-                # Dropped although every predicate this method can evaluate says it
-                # should have survived, which leaves one cause: the instance's own
-                # enabled or dependency check raised inside filter_enabled_plugins,
-                # which logs at debug and drops it. Recorded as a failure rather
-                # than left as a row that reads "ran and found nothing to convert",
-                # because the whole point of these rows is that a converter which
-                # did not run says so.
+            if raised is not None:
+                # The filter recorded the exception its own check raised, so the
+                # drop has a cause that can be named. Recorded as a failure: a
+                # converter that could not say whether a Python-only run wants it
+                # may have held files the scanners then never saw.
                 failure = (
-                    "dropped by the enabled/dependency filter, although its own "
-                    "dependency check reported satisfied"
+                    "dropped by the filter: its enabled or is_python_only() check "
+                    f"raised {raised}"
+                )
+            elif not drop_is_explained:
+                # Dropped although every predicate this method can evaluate says it
+                # should have survived, and the filter recorded no exception. The
+                # filter and these predicates disagree (an answer that changes
+                # between two calls). The filter makes no dependency check here:
+                # the phase made it once before the filter and passed
+                # check_dependencies=False. Recorded as a failure rather than left
+                # as a row that reads "ran and found nothing to convert", because
+                # the whole point of these rows is that a converter which did not
+                # run says so.
+                failure = (
+                    "dropped by the enabled filter, although its own dependency "
+                    "check reported satisfied"
                 )
 
             # Asked even though this converter is about to disappear, and that is the
@@ -357,17 +689,28 @@ class ConvertPhase(EnginePhase):
             # Wrapped because this calls into plugin code, including third-party
             # converters. A count that raised has not shown the tree to be empty, so it
             # must not resolve to 0 -- that would exempt the row from the gate on the
-            # strength of a failure. None is the strict answer.
+            # strength of a failure. None is the strict answer. The answer's type is
+            # checked inside the same guard: the row's field is an int, so an answer
+            # of another type (a str, a float, a Mock) failed the row's validation
+            # outside the try and aborted the convert phase, and the scan with it.
             try:
                 candidate_inputs = plugin_instance.candidate_input_count()
+                if candidate_inputs is not None and (
+                    isinstance(candidate_inputs, bool)
+                    or not isinstance(candidate_inputs, int)
+                ):
+                    raise TypeError(
+                        "candidate_input_count() returned a "
+                        f"{type(candidate_inputs).__name__}, not an int"
+                    )
             except Exception as exc:
                 ASH_LOGGER.debug(
-                    f"Candidate-input count for converter {display_name} raised "
+                    f"Candidate-input count for converter {row_key} raised "
                     f"{exc!r}; recording no count so the completeness gate stays strict"
                 )
                 candidate_inputs = None
 
-            aggregated_results.converter_results[display_name] = ConverterStatusInfo(
+            aggregated_results.converter_results[row_key] = ConverterStatusInfo(
                 dependencies_satisfied=dependencies_satisfied,
                 dependency_unavailable_reason=(
                     None
@@ -402,11 +745,29 @@ class ConvertPhase(EnginePhase):
 
         # Get all converter plugins
         converter_classes = self.plugins
+        run_config = getattr(self.plugin_context, "config", None)
+        # The values every failure text below is redacted with: the run's
+        # configuration's environment values, before any converter adds its own.
+        run_values = config_environment_values(run_config)
+
+        # The row keys this run has claimed. Rows an earlier run left in the
+        # results object are not in it (see _row_keys).
+        keys_in_use: set[str] = set()
 
         # Create all converter instances upfront, then filter via the shared helper.
         all_converter_instances = []
         for plugin_class in converter_classes:
+            # Resolved before the constructor, so the handler can read the
+            # section's `enabled` off it: a converter the config turned off whose
+            # constructor raised is recorded excluded, as the config asked, and not
+            # as a failure the completeness gate fails the run on.
+            plugin_config = None
             try:
+                if self.plugin_context.config is not None:
+                    plugin_config = self.plugin_context.config.get_plugin_config(
+                        plugin_type="converter",
+                        plugin_name=plugin_config_key(plugin_class),
+                    )
                 # Under a sandbox, what a converter runs while it is constructed and
                 # validated (nbconvert's version probe, its dependency check) runs
                 # sandboxed, as a scanner's probes do, and installs nothing. The
@@ -420,21 +781,29 @@ class ConvertPhase(EnginePhase):
                 ):
                     plugin_instance = plugin_class(
                         context=self.plugin_context,
-                        config=(
-                            self.plugin_context.config.get_plugin_config(
-                                plugin_type="converter",
-                                plugin_name=plugin_config_key(plugin_class),
-                            )
-                            if self.plugin_context.config is not None
-                            else None
-                        ),
+                        config=plugin_config,
                     )
                 all_converter_instances.append(plugin_instance)
             except Exception as e:
-                failed_name = getattr(plugin_class, "__name__", "Unknown")
-                ASH_LOGGER.error(
-                    f"Error creating converter {failed_name}: {error_text(e)}"
+                # Keyed on the name the class declares (the one a constructed
+                # instance's row carries), else on the class, with no instance to
+                # ask; a second class of the same name is told apart by its module.
+                # Qualified as a built converter's key is (module.Class), so the
+                # key of a converter does not change with whether another
+                # plugin's constructor raised.
+                failed_name = _unused_key(
+                    _constructor_failure_name(plugin_class),
+                    keys_in_use,
+                    f"{getattr(plugin_class, '__module__', 'unknown module')}."
+                    f"{getattr(plugin_class, '__name__', 'Unknown')}",
                 )
+                keys_in_use.add(failed_name)
+                # Redacted with the config's environment values, as the scan
+                # phase redacts a scanner's construction error: the text goes to
+                # the results file, the HTML report, the progress row and ash.log,
+                # and can name an option the config read from the environment.
+                failure = _failure_text(e, run_values)
+                ASH_LOGGER.error(f"Error creating converter {failed_name}: {failure}")
                 # The third way a converter can produce nothing without saying so,
                 # and the only one where there is no instance to ask for a name, so
                 # the row is keyed on the class. Recorded for the same reason as the
@@ -446,12 +815,18 @@ class ConvertPhase(EnginePhase):
                 # either way: the check never ran, so neither value would be a
                 # measurement. failure is the signal here.
                 aggregated_results.converter_results[failed_name] = ConverterStatusInfo(
-                    excluded=False,
-                    failure=f"{type(e).__name__}: {error_text(e)}",
+                    excluded=not section_enabled(plugin_config),
+                    failure=failure,
                     converted_paths=[],
                 )
 
-        # Assigned before filtering, and on the instance rather than in a local,
+        # One key per converter, computed before any row or log line below, so two
+        # converters sharing a display name do not write one row over the other
+        # and are told apart in every line this phase logs about them.
+        row_keys = _row_keys(all_converter_instances, keys_in_use)
+
+        # Assigned before filtering, and kept in the local ``dependency_answers`` by
+        # converter (also set on the instance, for the code that reads it there),
         # because filter_enabled_plugins returns only the survivors: a converter
         # dropped for unsatisfied dependencies never reaches the loop below, which
         # is the only site that writes converter_results. Recording the answer here
@@ -461,40 +836,119 @@ class ConvertPhase(EnginePhase):
         # was unreachable -- nothing in the tree assigned a converter's
         # dependencies_satisfied, so the field could not be False.
         #
-        # Mirrors ScannerPluginBase._pre_scan, which assigns the same field from the
-        # same call after the same filter has run; the check is therefore made twice
-        # per converter here too. That is deliberate rather than overlooked: making
-        # filter_enabled_plugins read the stored value instead of calling would
-        # change the scan and report phases, which share it.
+        # The check is made here, once, and the filter below is told not to make it
+        # again (check_dependencies=False). Made twice, a check that resolves and
+        # installs a tool (the jupyter converter's resolves nbconvert through uv)
+        # ran its install attempt, with its retries and its timeout, twice per
+        # scan; and a check that answered differently the second time recorded
+        # one answer in the row and acted on another. The one answer is the local
+        # ``dependency_answers``, which is the source of truth; the instance's copy
+        # is for the code that reads it there.
+        #
+        # Not for a converter the config turned off, and not for a non-Python
+        # converter on a Python-only run. The filter below drops both before
+        # asking about their dependencies, and a dependency check can resolve
+        # and install a tool (the jupyter converter's resolves nbconvert through
+        # uv), which a run that left the converter out asked it not to do.
+        #
+        # The Python-only question is made once too, for the same reason: asked
+        # by the loop below, by the filter and by the row builder, a plugin that
+        # answered differently each time was skipped by the first, admitted by
+        # the second and described by the third as a converter whose check never
+        # ran. The one answer is kept by converter in ``python_only_answers``;
+        # the one failure goes into ``filter_failures``, where the row builder
+        # reads what a check that raised said, and the filter below is told not
+        # to ask. A converter the config turned off is not asked.
+        # What an instance's own check raised, by ``id`` (already redacted): the
+        # Python-only question asked here, and the enabled check the filter below
+        # makes. Read by the row builder to name the check in a dropped row.
+        filter_failures: Dict[int, str] = {}
+        python_only_answers: Dict[int, bool] = {}
+        if python_based_plugins_only:
+            for plugin_instance in all_converter_instances:
+                if not section_enabled(getattr(plugin_instance, "config", None)):
+                    continue
+                try:
+                    python_only_answers[id(plugin_instance)] = bool(
+                        plugin_instance.is_python_only()
+                    )
+                except Exception as e:  # noqa: BLE001 -- plugin code
+                    # An unanswerable question is not an exclusion: the converter
+                    # is dropped and its row says its check raised. Said at
+                    # warning, as the filter says a check that raises.
+                    described = _failure_text(
+                        e, _redaction_values_or(plugin_instance, run_config, run_values)
+                    )
+                    filter_failures[id(plugin_instance)] = described
+                    ASH_LOGGER.warning(
+                        "Excluding converter "
+                        f"{row_keys.get(id(plugin_instance), '?')}: its "
+                        "is_python_only() check raised "
+                        f"{described}"
+                    )
+
+        dependency_answers: Dict[int, bool] = {}
         for plugin_instance in all_converter_instances:
+            if not section_enabled(getattr(plugin_instance, "config", None)):
+                continue
+            if python_based_plugins_only and not python_only_answers.get(
+                id(plugin_instance), False
+            ):
+                continue
             try:
                 with plugin_probe_scope(plugin_instance, self.plugin_context):
-                    plugin_instance.dependencies_satisfied = (
-                        plugin_instance.validate_plugin_dependencies()
-                    )
+                    # bool(): the row's field is a bool, and a check that answers
+                    # with a truthy non-bool (a tool's path) passed the filter and
+                    # then failed the row's validation, so a converter that ran
+                    # was recorded as failed.
+                    answer = bool(plugin_instance.validate_plugin_dependencies())
             except Exception as e:
                 # Fail closed. A dependency check that raised has not shown the
-                # dependency to be present, and filter_enabled_plugins drops the
-                # instance on the same exception, so False is what actually happens.
-                ASH_LOGGER.debug(
-                    f"Dependency check for converter "
-                    f"{_converter_display_name(plugin_instance)} raised {e!r}; "
-                    f"recording its dependencies as unsatisfied"
+                # dependency to be present. Said at warning, as the filter says a
+                # check that raises, because the converter is dropped here and a
+                # debug line is not seen on a default run.
+                values = _redaction_values_or(plugin_instance, run_config, run_values)
+                ASH_LOGGER.warning(
+                    f"Excluding converter {row_keys.get(id(plugin_instance), '?')}: "
+                    f"its dependency check raised {_failure_text(e, values)}"
                 )
-                plugin_instance.dependencies_satisfied = False
+                answer = False
+            dependency_answers[id(plugin_instance)] = answer
+            # Separate from the check: a converter that refuses the assignment
+            # (a frozen model, a property) must not turn a recorded answer into a
+            # second failure, which the old assignment in the except arm did.
+            try:
+                plugin_instance.dependencies_satisfied = answer
+            except Exception as e:  # noqa: BLE001 -- plugin code
+                ASH_LOGGER.debug(
+                    f"Converter {row_keys.get(id(plugin_instance), '?')} did not "
+                    f"take its dependency answer: {type(e).__name__}"
+                )
 
-        # One at a time, so the dependency check the filter repeats runs in that
-        # converter's own probe scope too.
+        # What the filter decides is the enabled flag and python-only mode, which
+        # are in-process questions, so it needs no probe scope of its own: the
+        # scope was there for the dependency check it no longer makes, and an
+        # error opening it aborted the whole phase. A converter survives only
+        # with the one dependency answer above True.
         filtered_instances = []
         for plugin_instance in all_converter_instances:
-            with plugin_probe_scope(plugin_instance, self.plugin_context):
-                filtered_instances.extend(
-                    self.filter_enabled_plugins(
-                        plugin_instances=[plugin_instance],
-                        plugin_context=self.plugin_context,
-                        python_only=python_based_plugins_only,
-                    )
-                )
+            # python_only is False here: the Python-only question was asked once
+            # above, and its answer is applied below. The filter records what its
+            # own enabled check raised in ``filter_failures``, so a row can name
+            # the check instead of guessing a cause.
+            admitted = self.filter_enabled_plugins(
+                plugin_instances=[plugin_instance],
+                plugin_context=self.plugin_context,
+                python_only=False,
+                check_dependencies=False,
+                failures=filter_failures,
+            )
+            if python_based_plugins_only and not python_only_answers.get(
+                id(plugin_instance), False
+            ):
+                continue
+            if admitted and dependency_answers.get(id(plugin_instance)) is True:
+                filtered_instances.extend(admitted)
 
         # A row for every converter the filter dropped, so a converter that did not
         # run is present in the machine-readable output instead of being absent from
@@ -505,11 +959,16 @@ class ConvertPhase(EnginePhase):
             all_converter_instances=all_converter_instances,
             filtered_instances=filtered_instances,
             python_based_plugins_only=python_based_plugins_only,
+            row_keys=row_keys,
+            dependency_answers=dependency_answers,
+            filter_failures=filter_failures,
+            python_only_answers=python_only_answers,
         )
 
         enabled_converters = [inst.__class__ for inst in filtered_instances]
         enabled_converter_names = [
-            _converter_display_name(inst) for inst in filtered_instances
+            row_keys.get(id(inst), _converter_display_name(inst))
+            for inst in filtered_instances
         ]
 
         ASH_LOGGER.verbose(
@@ -518,9 +977,21 @@ class ConvertPhase(EnginePhase):
         converted_paths = []
 
         if not enabled_converters:
-            ASH_LOGGER.warning(
-                "No enabled converter plugins found, skipping conversion phase"
-            )
+            # "No enabled converter plugins" is what a run that turned conversion
+            # off, or registered no converter, has to say. Converters that were
+            # wanted and did not start (a constructor that raised, a tool that was
+            # absent) are named with their reasons, so the line does not read as a
+            # choice. Their rows say the same, and the completeness gate counts them.
+            not_started = _why_no_converter_ran(aggregated_results)
+            if not_started:
+                ASH_LOGGER.warning(
+                    "No converter ran, and at least one did not start, so "
+                    f"conversion is skipped: {', '.join(not_started)}"
+                )
+            else:
+                ASH_LOGGER.warning(
+                    "No enabled converter plugins found, skipping conversion phase"
+                )
             return aggregated_results  # Return aggregated_results, not converted_paths!
 
         # Create task for conversion - this is the main phase task
@@ -554,6 +1025,9 @@ class ConvertPhase(EnginePhase):
             # NameError and took the whole phase with it.
             plugin_name = plugin_instance.__class__.__name__
             display_name = _converter_display_name(plugin_instance)
+            row_key = row_keys.get(id(plugin_instance), display_name)
+            # Redaction values for everything this converter's failure can quote.
+            values = _redaction_values_or(plugin_instance, run_config, run_values)
             converter_task = None
             try:
                 ASH_LOGGER.debug(f"Initializing converter: {plugin_name}")
@@ -572,11 +1046,11 @@ class ConvertPhase(EnginePhase):
                     phase=ExecutionPhase.CONVERT,
                     task_id=converter_task,
                     completed=50,
-                    description=f"Running converter: {escape_markup(display_name)}",
+                    description=f"Running converter: {escape_markup(row_key)}",
                 )
 
                 # Call convert method directly - converters should handle finding their own targets
-                ASH_LOGGER.debug(f"Calling convert() on {display_name}")
+                ASH_LOGGER.debug(f"Calling convert() on {row_key}")
 
                 # Notify converter start
                 try:
@@ -584,13 +1058,16 @@ class ConvertPhase(EnginePhase):
 
                     self.notify_event(
                         AshEventType.CONVERT_START,
-                        converter=display_name,
+                        converter=row_key,
                         converter_class=plugin_instance.__class__.__name__,
-                        message=f"Starting converter: {display_name}",
+                        message=f"Starting converter: {row_key}",
                     )
                 except Exception as event_error:
+                    # error_text, not str(): a handler's ValidationError quotes its
+                    # input values, and the text can carry escape sequences.
                     ASH_LOGGER.error(
-                        f"Failed to notify converter start event: {str(event_error)}"
+                        "Failed to notify converter start event: "
+                        f"{error_text(event_error, values)}"
                     )
 
                 # convert() takes no argument; a converter that asks for one, the old
@@ -601,42 +1078,48 @@ class ConvertPhase(EnginePhase):
                 ) as run_scope:
                     convert_result_initial = _call_convert(plugin_instance)
                 # Ensure all convert_result are strings in case some are Paths
-                convert_result = []
-                if convert_result_initial is not None:
-                    convert_result = [
-                        Path(item).as_posix()
-                        for item in (
-                            convert_result_initial
-                            if isinstance(convert_result_initial, list)
-                            else [convert_result_initial]
-                        )
-                    ]
+                convert_result = _converted_path_list(convert_result_initial)
+                # Read here, before any progress row or event below says how the
+                # run went: the spawns the sandbox refused while convert() ran
+                # converted nothing, and "No files to convert" is not what a
+                # converter whose tool was refused has to report. Redacted here,
+                # once, like every other text a converter's row carries
+                # (``_failure_text``): the sandbox keeps the refusal's and the
+                # failed plan's own words, which can quote the argv it did not
+                # run, and a converter's argv can hold a value its config read
+                # from the environment. The scope is closed by now, so the
+                # values are this converter's, passed.
+                sandbox_loss = _shown_loss(_conversion_failure(run_scope) or "", values)
 
-                if isinstance(convert_result, list) and len(convert_result) > 0:
+                if len(convert_result) > 0:
                     ASH_LOGGER.debug(
-                        f"Converter {display_name} returned {len(convert_result)} paths"
+                        f"Converter {row_key} returned {len(convert_result)} paths"
                     )
                     plugin_converted_paths.extend(convert_result)
                     converted_paths.extend(convert_result)
                     not_converted = _could_not_convert(plugin_instance)
+                    refused = _refused_over_limit(plugin_instance)
                     accepted = _accepted_inputs(plugin_instance)
                     # Both when both, in this branch too: an acceptance stays
                     # visible beside the converted count rather than vanishing
-                    # whenever anything was converted.
+                    # whenever anything was converted. An archive refused whole
+                    # is lost coverage like a failed input, and is said with it.
                     outcome = "; ".join(
-                        part for part in (not_converted, accepted) if part
+                        part
+                        for part in (not_converted, refused, sandbox_loss, accepted)
+                        if part
                     )
                     also = f", {outcome}" if outcome else ""
 
                     # Update converter task to 100%. Each description is written
                     # inline, every value it quotes escaped once.
-                    if not_converted:
+                    if not_converted or refused or sandbox_loss:
                         self.progress_display.update_task(
                             phase=ExecutionPhase.CONVERT,
                             task_id=converter_task,
                             completed=100,
                             description=(
-                                f"[yellow]({escape_markup(display_name)}) Converted "
+                                f"[yellow]({escape_markup(row_key)}) Converted "
                                 f"{len(convert_result)} files, "
                                 f"{escape_markup(outcome)}"
                             ),
@@ -647,7 +1130,7 @@ class ConvertPhase(EnginePhase):
                             task_id=converter_task,
                             completed=100,
                             description=(
-                                f"[green]({escape_markup(display_name)}) Converted "
+                                f"[green]({escape_markup(row_key)}) Converted "
                                 f"{len(convert_result)} files, "
                                 f"{escape_markup(accepted)}"
                             ),
@@ -658,7 +1141,7 @@ class ConvertPhase(EnginePhase):
                             task_id=converter_task,
                             completed=100,
                             description=(
-                                f"[green]({escape_markup(display_name)}) Converted "
+                                f"[green]({escape_markup(row_key)}) Converted "
                                 f"{len(convert_result)} files"
                             ),
                         )
@@ -671,44 +1154,54 @@ class ConvertPhase(EnginePhase):
 
                         self.notify_event(
                             AshEventType.CONVERT_COMPLETE,
-                            converter=display_name,
+                            converter=row_key,
                             converter_class=plugin_instance.__class__.__name__,
                             converted_files=convert_result,
                             file_count=len(convert_result),
                             message=(
-                                f"Converter {display_name} completed: "
+                                f"Converter {row_key} completed: "
                                 f"{len(convert_result)} files converted{also}"
                             ),
                         )
                     except Exception as event_error:
                         ASH_LOGGER.error(
-                            f"Failed to notify converter complete event: {str(event_error)}"
+                            "Failed to notify converter complete event: "
+                            f"{error_text(event_error, values)}"
                         )
                 else:
                     ASH_LOGGER.debug(
-                        f"Converter {display_name} returned None or empty result"
+                        f"Converter {row_key} returned None or empty result"
                     )
                     not_converted = _could_not_convert(plugin_instance)
+                    refused = _refused_over_limit(plugin_instance)
                     accepted = _accepted_inputs(plugin_instance)
                     # Both when both: an acceptance stays visible beside other
-                    # failures rather than vanishing whenever anything failed.
+                    # failures rather than vanishing whenever anything failed. An
+                    # archive refused whole over an extraction limit is a loss the
+                    # completeness gate fails the run on, so it is said here too,
+                    # not reported as "No files to convert". The same for a run
+                    # whose tool the scanner sandbox refused to start.
                     outcome = "; ".join(
-                        part for part in (not_converted, accepted) if part
+                        part
+                        for part in (not_converted, refused, sandbox_loss, accepted)
+                        if part
                     )
                     if not outcome:
-                        converters_with_no_files.append(display_name)
+                        # The row's key, which tells two converters of one name
+                        # apart as their rows and events do.
+                        converters_with_no_files.append(row_key)
 
                     # Update converter task to 100%. A converter whose every input
                     # failed says so, rather than what a tree with none gets; one
                     # whose inputs were accepted by a suppression says that, in
                     # the acceptance's color rather than a failure's.
-                    if not_converted:
+                    if not_converted or refused or sandbox_loss:
                         self.progress_display.update_task(
                             phase=ExecutionPhase.CONVERT,
                             task_id=converter_task,
                             completed=100,
                             description=(
-                                f"[red]({escape_markup(display_name)}) "
+                                f"[red]({escape_markup(row_key)}) "
                                 f"{escape_markup(outcome)}"
                             ),
                         )
@@ -718,7 +1211,7 @@ class ConvertPhase(EnginePhase):
                             task_id=converter_task,
                             completed=100,
                             description=(
-                                f"[yellow]({escape_markup(display_name)}) "
+                                f"[yellow]({escape_markup(row_key)}) "
                                 f"{escape_markup(accepted)}"
                             ),
                         )
@@ -727,7 +1220,7 @@ class ConvertPhase(EnginePhase):
                             phase=ExecutionPhase.CONVERT,
                             task_id=converter_task,
                             completed=100,
-                            description=f"[yellow]({escape_markup(display_name)}) No files to convert",
+                            description=f"[yellow]({escape_markup(row_key)}) No files to convert",
                         )
 
                     # Notify converter complete (no files)
@@ -738,37 +1231,44 @@ class ConvertPhase(EnginePhase):
 
                         self.notify_event(
                             AshEventType.CONVERT_COMPLETE,
-                            converter=display_name,
+                            converter=row_key,
                             converter_class=plugin_instance.__class__.__name__,
                             converted_files=[],
                             file_count=0,
                             message=(
-                                f"Converter {display_name} completed: "
+                                f"Converter {row_key} completed: "
                                 f"{outcome or 'no files to convert'}"
                             ),
                         )
                     except Exception as event_error:
                         ASH_LOGGER.error(
-                            f"Failed to notify converter complete event: {str(event_error)}"
+                            "Failed to notify converter complete event: "
+                            f"{error_text(event_error, values)}"
                         )
 
-                aggregated_results.converter_results[display_name] = (
-                    ConverterStatusInfo(
-                        dependencies_satisfied=plugin_instance.dependencies_satisfied,
-                        excluded=not plugin_instance.config.enabled or False,
-                        converted_paths=plugin_converted_paths,
-                        **_input_record_fields(plugin_instance),
-                        # Omitted when nothing was lost, like refused_inputs.
-                        **_failure_field(_conversion_failure(run_scope)),
-                    )
+                # This converter survived the filter, whose enabled check passed it,
+                # and its one dependency check (above) answered True, so its row
+                # says so: True and False here are what the phase decided, not a
+                # read of config.enabled (which a converter without a config has
+                # not got).
+                aggregated_results.converter_results[row_key] = ConverterStatusInfo(
+                    dependencies_satisfied=True,
+                    excluded=False,
+                    converted_paths=plugin_converted_paths,
+                    **_input_record_fields(plugin_instance),
+                    # Omitted when nothing was lost, like refused_inputs.
+                    **_failure_field(sandbox_loss),
                 )
                 _register_accepted_suppressions(
                     plugin_instance, self.plugin_context, aggregated_results
                 )
 
             except Exception as e:
-                ASH_LOGGER.error(f"Error in converter {plugin_name}: {error_text(e)}")
-                ASH_LOGGER.debug(f"Converter exception traceback: {traceback_text()}")
+                failure = _failure_text(e, values)
+                ASH_LOGGER.error(f"Error in converter {row_key}: {failure}")
+                ASH_LOGGER.debug(
+                    f"Converter exception traceback: {traceback_text(values=values)}"
+                )
 
                 # The failure is recorded where the success is recorded, and this is
                 # the whole point of the handler. Every statement that wrote a row
@@ -785,36 +1285,92 @@ class ConvertPhase(EnginePhase):
                 # the phase's converted_paths with those entries and the row should
                 # agree with what the phase actually collected.
                 #
-                # excluded is False because reaching this loop means the converter
-                # survived filter_enabled_plugins, and dependencies_satisfied is read
-                # with getattr so that recording a failure cannot itself raise.
-                aggregated_results.converter_results[display_name] = (
-                    ConverterStatusInfo(
-                        dependencies_satisfied=bool(
-                            getattr(plugin_instance, "dependencies_satisfied", False)
-                        ),
-                        excluded=False,
-                        failure=f"{type(e).__name__}: {error_text(e)}",
-                        converted_paths=plugin_converted_paths,
+                # excluded is False and dependencies_satisfied True because reaching
+                # this loop means the converter survived the filter, which admits
+                # only a converter whose one dependency check answered True; neither
+                # is read off the instance, so recording a failure cannot itself
+                # raise.
+                #
+                # The row is built twice at most. The exception being handled can
+                # be the success row's own validation refusing one of this
+                # converter's failed_inputs or refused_inputs records, and a row
+                # built here with the same records raised the same way, out of
+                # the handler, so one malformed record aborted the whole scan. The
+                # second attempt leaves the records out and says so in the
+                # failure, so the converter's failure is recorded whatever shape
+                # its records are in.
+                row_fields: Dict[str, Any] = {
+                    "dependencies_satisfied": True,
+                    "excluded": False,
+                    "converted_paths": plugin_converted_paths,
+                }
+                try:
+                    row = ConverterStatusInfo(
+                        failure=failure,
+                        **row_fields,
                         **_input_record_fields(plugin_instance),
                     )
-                )
+                except Exception as row_error:
+                    ASH_LOGGER.error(
+                        f"Could not record the input records of converter "
+                        f"{row_key}: {error_text(row_error, values)}"
+                    )
+                    row = ConverterStatusInfo(
+                        failure=(
+                            f"{failure}; its failed and refused input records could "
+                            f"not be recorded: {error_text(row_error, values)}"
+                        ),
+                        **row_fields,
+                    )
+                aggregated_results.converter_results[row_key] = row
                 _register_accepted_suppressions(
                     plugin_instance, self.plugin_context, aggregated_results
                 )
 
-                # Update converter task to show error. Skipped when add_task itself
-                # is what raised, because there is no task id to update.
-                if converter_task is not None:
-                    self.progress_display.update_task(
-                        phase=ExecutionPhase.CONVERT,
-                        task_id=converter_task,
-                        completed=100,
-                        description=(
-                            f"[red]({escape_markup(display_name)}) Failed: "
-                            f"{escape_markup(error_text(e))}"
-                        ),
+                # A subscriber that saw CONVERT_START is told this converter ended,
+                # as a reporter that raised is (ERROR in place of CONVERT_COMPLETE,
+                # which is how a subscriber learns a converter succeeded or found
+                # nothing). Guarded like the other two notifications: the handler
+                # runs inside the phase, and a subscriber that raises must not end
+                # the phase's other converters.
+                try:
+                    from automated_security_helper.plugins.events import AshEventType
+
+                    self.notify_event(
+                        AshEventType.ERROR,
+                        message=f"Error in converter {row_key}: {failure}",
+                        converter=row_key,
+                        converter_class=plugin_instance.__class__.__name__,
+                        phase="convert",
                     )
+                except Exception as event_error:
+                    ASH_LOGGER.error(
+                        "Failed to notify converter error event: "
+                        f"{error_text(event_error, values)}"
+                    )
+
+                # Update converter task to show error. Skipped when add_task itself
+                # is what raised, because there is no task id to update. The same
+                # call may be what raised in the try above (a progress display that
+                # fails), and a second raise from here escaped the phase and ended
+                # the scan, so a display that fails is logged and the next converter
+                # goes on.
+                if converter_task is not None:
+                    try:
+                        self.progress_display.update_task(
+                            phase=ExecutionPhase.CONVERT,
+                            task_id=converter_task,
+                            completed=100,
+                            description=(
+                                f"[red]({escape_markup(row_key)}) Failed: "
+                                f"{escape_markup(error_text(e, values))}"
+                            ),
+                        )
+                    except Exception as display_error:
+                        ASH_LOGGER.error(
+                            f"Could not update the progress row of converter "
+                            f"{row_key}: {error_text(display_error, values)}"
+                        )
 
         # Log a summary warning if no files were converted.
         #
@@ -825,17 +1381,19 @@ class ConvertPhase(EnginePhase):
         if not converted_paths:
             # An accepted record is not "did not finish": the row's count here
             # is the gate's count, so the warning and the exit code agree.
-            unproductive = [
-                f"{name} ({row.failure})"
-                if getattr(row, "failure", None)
-                else f"{name} ({len(_unaccepted_failed_inputs(row))} could not be converted)"
-                for name, row in aggregated_results.converter_results.items()
-                if getattr(row, "failure", None) or _unaccepted_failed_inputs(row)
-            ]
+            #
+            # An archive refused whole over a limit is a loss the gate counts too,
+            # so the warning names it instead of the generic "nothing to convert".
+            # A converter dropped because its tool was unavailable explains an
+            # empty result as well as a crash does, and the gate counts it (its
+            # row has dependencies_satisfied False and is not excluded), so it is
+            # listed with its reason instead of leaving the bare wording.
+            unproductive = _why_no_converter_ran(aggregated_results)
             if unproductive:
                 ASH_LOGGER.warning(
                     "No files were converted, and at least one converter did not "
-                    f"finish: {', '.join(unproductive)}"
+                    "finish (it failed, was missing its tool, or refused an "
+                    f"archive): {', '.join(unproductive)}"
                 )
             else:
                 ASH_LOGGER.warning("No files were converted by any converter plugins")

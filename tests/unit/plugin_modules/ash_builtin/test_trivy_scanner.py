@@ -216,9 +216,29 @@ def _assert_expected(report: SarifReport) -> None:
 
 @pytest.fixture(autouse=True)
 def _online(monkeypatch):
-    """No test here inherits ASH_OFFLINE, or a TRIVY_CONFIG, from the shell running it."""
+    """No test here inherits ASH_OFFLINE, or a TRIVY_CONFIG, from the shell running it.
+
+    This module is a probe subject (tests/unit/conftest.py PROBE_SUBJECT_MODULES) for
+    trivy's version probe, which its staleness tests reach under their own doubles,
+    so the unit guard's probe stand-ins are not installed here. No test here reads
+    trivy's ``--help``, and building a trivy-repo scanner runs it (the default
+    misconfig scanners, ``trivy_default_misconfig_scanners``), which the guard records
+    as a tool start on a host without trivy. The memo it reads first is replaced
+    the way the guard replaces it elsewhere, so no ``--help`` runs.
+    """
+    from tests.utils.tool_guard import _NoDefaultMisconfigScanners
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        _trivy_scanner_base,
+    )
+
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     monkeypatch.delenv("TRIVY_CONFIG", raising=False)
+    monkeypatch.setattr(
+        _trivy_scanner_base,
+        "_DEFAULT_MISCONFIG_SCANNERS",
+        _NoDefaultMisconfigScanners(),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -504,13 +524,57 @@ def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
     assert "symbolic link" in caplog.text
 
 
-@pytest.mark.parametrize("option", ["config_file", "ignore_file", "secret_config_file"])
-def test_a_configured_trivy_file_that_does_not_exist_fails_the_scan(tmp_path, option):
+@pytest.mark.parametrize(
+    ("option", "scanners"),
+    [
+        pytest.param("config_file", ["vuln"], id="config_file"),
+        pytest.param("ignore_file", ["vuln"], id="ignore_file"),
+        # Only a scan that runs the secret scanner reads the secret config; a
+        # vulnerability-only scan gets ASH's empty file with a warning instead
+        # (TrivyScannerBase._secret_config_file).
+        pytest.param("secret_config_file", ["vuln", "secret"], id="secret_config_file"),
+    ],
+)
+def test_a_configured_trivy_file_that_does_not_exist_fails_the_scan(
+    tmp_path, option, scanners
+):
     scanner = _scanner(
-        tmp_path, operator=True, **{option: str(tmp_path / "operator" / "nope.yaml")}
+        tmp_path,
+        operator=True,
+        scanners=scanners,
+        **{option: str(tmp_path / "operator" / "nope.yaml")},
     )
     with pytest.raises(ScannerError, match=option):
         _argv(scanner, scanner.context.source_dir)
+
+
+def test_a_vulnerability_only_scan_warns_about_a_missing_secret_config_and_runs(
+    tmp_path, caplog, monkeypatch
+):
+    """The other half of the ``secret_config_file`` case above: a scan without the
+    ``secret`` scanner never opens the secret config, so a configured file that does
+    not exist does not fail it. trivy gets ASH's own empty file and the key is named
+    in a warning (``TrivyScannerBase._secret_config_file``, ``required`` false)."""
+    monkeypatch.delenv("TRIVY_SECRET_CONFIG", raising=False)
+    scanner = _scanner(
+        tmp_path,
+        operator=True,
+        scanners=["vuln"],
+        secret_config_file=str(tmp_path / "operator" / "nope.yaml"),
+    )
+
+    with caplog.at_level("WARNING"):
+        argv = _argv(scanner, scanner.context.source_dir)
+
+    (value,) = [
+        a[len("--secret-config=") :] for a in argv if a.startswith("--secret-config=")
+    ]
+    assert _ashs_own(scanner, value)
+    assert Path(value).name == "trivy-secret-empty.yaml"
+    assert (
+        "scanners.trivy.options.secret_config_file does not name a file" in caplog.text
+    )
+    assert "do not include secret" in caplog.text
 
 
 @pytest.mark.parametrize("cls", [TrivyScanner, TrivyRepoScanner])
@@ -1607,9 +1671,13 @@ def test_the_scan_skips_the_update_it_ran_first(tmp_path, monkeypatch):
     # The update gets the empty config ASH ships, not one from where ASH runs.
     assert Path(_value(update, "--config")) == refresh.EMPTY_TOOL_CONFIG
     (final,) = ran
-    assert final[:6] == [
+    # The command built here carries no mode flag, so the scan-time reconciliation
+    # adds the online one before the skip flags; a scanner's own command already
+    # carries it from construction.
+    assert final[: 6 + len(trivy_base.ONLINE_FLAGS)] == [
         "trivy",
         "fs",
+        *trivy_base.ONLINE_FLAGS,
         "--skip-db-update",
         "--skip-java-db-update",
         _cache_flag(tmp_path),
@@ -1681,7 +1749,8 @@ def test_misconfig_also_fetches_the_checks_bundle_and_skips_it(tmp_path, monkeyp
 
     assert [c[1] for c in fake.calls] == ["image", "config"]
     assert Path(fake.calls[1][-1]).name == "empty-target"
-    assert ran[0][2:6] == [
+    assert ran[0][2 : 6 + len(trivy_base.ONLINE_FLAGS)] == [
+        *trivy_base.ONLINE_FLAGS,
         "--skip-db-update",
         "--skip-java-db-update",
         "--skip-check-update",
@@ -1747,6 +1816,11 @@ def test_the_staleness_probe_reads_the_cache_the_scan_was_given(
     monkeypatch.delenv("TRIVY_CACHE_DIR")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    # The default cache reads XDG_CACHE_HOME before HOME (Go's os.UserCacheDir,
+    # github.com/adrg/xdg), and the unit fixture points that variable into the
+    # fixture's own home; left as is, the update's lock lands there and the
+    # fixture's HOME-hygiene check reports it. The whole home moves together.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "home" / ".cache"))
     monkeypatch.setattr(refresh.sys, "platform", platform)
     scanner = _scanner(tmp_path) if kind == "trivy" else _repo_scanner(tmp_path)
     command = ["trivy", "fs" if kind == "trivy" else "repository", "/t"]
@@ -1818,11 +1892,14 @@ def test_offline_runs_no_update(tmp_path, monkeypatch):
 
     assert fake.calls == []
     # Still pointed at the cache: the sandbox drops XDG_CACHE_HOME, so trivy left to
-    # its own default could read another one.
+    # its own default could read another one. The command built here carries no
+    # mode flag, so the scan-time reconciliation adds the offline ones, which an
+    # offline scan never lacks.
     assert ran == [
         [
             "trivy",
             "fs",
+            *trivy_base.OFFLINE_FLAGS,
             _cache_flag(tmp_path),
             "--cache-backend=memory",
             "--exit-code=0",
@@ -1877,7 +1954,10 @@ def test_the_update_runs_outside_the_scanner_sandbox(tmp_path, monkeypatch):
 
     assert seen == [None]
     assert after is sandbox, "the scanner's own spawn runs back inside its sandbox"
-    assert ran[0][2] == "--skip-db-update"
+    assert ran[0][2 : 3 + len(trivy_base.ONLINE_FLAGS)] == [
+        *trivy_base.ONLINE_FLAGS,
+        "--skip-db-update",
+    ]
 
 
 def test_a_failed_update_fails_the_scan_with_trivys_reason(tmp_path, monkeypatch):

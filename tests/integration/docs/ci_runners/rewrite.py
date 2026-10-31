@@ -22,12 +22,17 @@ these rules:
     release tag becomes a call of the pull request's copy, ``./.github/workflows/<file>``.
 ``ash-version``
     The scan workflow's ``ash-version`` becomes the head commit, and ``ash-repo`` the
-    base repository, on the line after it.
+    base repository, on the line after it. The commit is written quoted and followed
+    by ``# pragma: allowlist secret``: a forty-digit hex value on a user's own
+    workflow line is what detect-secrets reads as a high-entropy string, and the
+    pragma is the marker ASH's own files use for a value that is not a secret.
 ``artifact-actions`` (github-actions)
     ``actions/upload-artifact`` and ``actions/download-artifact`` at any ref become the
     pinned v4 releases (ACT_UPLOAD_ARTIFACT, ACT_DOWNLOAD_ARTIFACT), because act 0.2.89
     cannot take the v6 and later releases' requests (see _rewrite_artifact_actions).
-    The page keeps naming the current releases.
+    The page keeps naming the current releases. The same rule runs on the copy of
+    run-ash-security-scan.yml a block calls (rewrite_called_workflow), whose own
+    artifact steps act serves no better.
 ``serial-matrix`` (github-actions)
     Every ``strategy:`` with a ``matrix:`` gets ``max-parallel: 1``, because act runs
     the entries of a matrix at once and its action cache races on them (see
@@ -1126,9 +1131,14 @@ def _rewrite_ash_version(
         + re.escape(f"v{ctx.version}")
         + r"(?P=q)[ \t]*$"
     )
+    # The commit id is written with detect-secrets' allowlist pragma: the rewritten
+    # workflow sits in the scanned tree, and a 40-hex value is a high-entropy string
+    # to that scanner, so without the pragma the rewrite plants an actionable finding
+    # the page's fixture does not count (measured on the hosted act legs).
+    pragma = "# pragma: allowlist secret"
     text, count = line.subn(
         lambda m: (
-            f'{m["indent"]}ash-version: "{ctx.head_sha}"\n'
+            f'{m["indent"]}ash-version: "{ctx.head_sha}" {pragma}\n'
             f'{m["indent"]}ash-repo: "{ctx.repository}"'
         ),
         text,
@@ -1138,7 +1148,7 @@ def _rewrite_ash_version(
             Applied(
                 "ash-version",
                 f"ash-version: v{ctx.version}",
-                f'ash-version: "{ctx.head_sha}"\nash-repo: "{ctx.repository}"',
+                f'ash-version: "{ctx.head_sha}" {pragma}\nash-repo: "{ctx.repository}"',
                 count,
             )
         )
@@ -3840,10 +3850,28 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
     step uses, so a pin bump passes and what the bumped action does is left to the
     review of that bump, as for the repository's other workflows. Any other file is
     returned as it is, with no records.
+
+    Before the print is placed, the workflow's ``actions/upload-artifact`` and
+    ``actions/download-artifact`` steps are moved to the v4 releases act can serve
+    (rule ``artifact-actions``, _rewrite_artifact_actions), as a block's own steps
+    are: the workflow's current pins send the request act's artifact server refuses,
+    so its ``ash`` job would fail at the upload and the jobs that need the artifact
+    would never run. The swap changes a ``uses:`` line only, so the step list the
+    print is placed in is that of the given text.
     """
     if PurePosixPath(file_name).name != CALLED_SCAN_WORKFLOW:
         return RewriteResult(text=text, applied=(), original=text)
+    original = text
+    applied: list[Applied] = []
+    text = _rewrite_artifact_actions(text, where, applied)
     document = _load(text, where)
+    # The action pins are checked on the text as given: the swap above has already
+    # moved the two artifact actions to their pinned releases, so a tag or a branch on
+    # either ("@v4", "@main") would pass a check of the swapped text.
+    original_document = _load(original, where)
+    original_jobs = (
+        original_document.get("jobs") if isinstance(original_document, dict) else None
+    )
     root = _compose(text, where)
     env = document.get("env") if isinstance(document, dict) else None
     source = env.get("ASH_UVX_SOURCE") if isinstance(env, dict) else None
@@ -3941,13 +3969,18 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
                 'ASH only through uvx --from "${ASH_UVX_SOURCE}", so this '
                 "could run an ASH other than the one the print records"
             )
-    for job_id, body in parsed_jobs.items():
+    checked_jobs = original_jobs if isinstance(original_jobs, dict) else parsed_jobs
+    for job_id, body in checked_jobs.items():
+        if not isinstance(body, dict):
+            continue
         if "uses" in body:
             raise RewriteError(
                 f"{where}: the job {job_id} uses {body['uses']}, a workflow whose "
                 "steps the checks do not read"
             )
         for step in body.get("steps") or ():
+            if not isinstance(step, dict):
+                continue
             uses = step.get("uses")
             name, at, pin = str(uses).rpartition("@")
             if uses is not None and not (
@@ -3999,7 +4032,6 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
         matrix=matrix,
         condition=AFTER_THE_SCAN if reinstalls else None,
     )
-    applied: list[Applied] = []
     rewritten = _apply_insertions(text, [insertion], applied)
     new_steps = (_load(rewritten, where).get("jobs") or {}).get(job_id, {}).get("steps")
     names = [s.get("name") for s in new_steps or () if isinstance(s, dict)]
@@ -4012,7 +4044,7 @@ def rewrite_called_workflow(file_name: str, text: str, *, where: str) -> Rewrite
             f"{where}: the provenance step did not land right after the uvx step that "
             "builds the environment the scan runs in"
         )
-    return RewriteResult(text=rewritten, applied=tuple(applied), original=text)
+    return RewriteResult(text=rewritten, applied=tuple(applied), original=original)
 
 
 # ---------------------------------------------------------------------------

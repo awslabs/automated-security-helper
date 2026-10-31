@@ -1,7 +1,7 @@
 """Module containing the PluginContext class for sharing context between plugins."""
 
+import os
 import secrets
-import threading
 import warnings
 from pathlib import Path
 from pydantic import (
@@ -9,12 +9,14 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    ValidationError,
     field_validator,
     model_validator,
 )
 from pydantic.json_schema import SkipJsonSchema
 from typing import Annotated, Any, Dict, Optional, TYPE_CHECKING
 
+from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugins.plugin_manager import AshPluginManager
 
@@ -29,12 +31,87 @@ def _repoints(current: Any, value: Any) -> bool:
     Compared as paths rather than by ``!=`` because an assignment may spell the
     current value as a ``str`` while the stored value is a ``Path``, and those never
     compare equal; a plugin writing the same directory back would otherwise look
-    like a move.
+    like a move. Two spellings that resolve to one directory (a relative and an
+    absolute one, or one through a symlink) are not a move either.
     """
     try:
-        return Path(current) != Path(value)
+        current_path, value_path = Path(current), Path(value)
     except TypeError:
         return True
+    if current_path == value_path:
+        return False
+    try:
+        return current_path.resolve() != value_path.resolve()
+    except (OSError, RuntimeError):
+        return True
+
+
+#: The fields typed Path that a plugin may assign a str to.
+_DIRECTORY_FIELDS = ("source_dir", "output_dir", "work_dir", "workspace_output_dir")
+
+
+def _as_path(name: str, value: Any) -> Any:
+    """``value`` as a Path when ``name`` is a directory field given a str or other
+    path-like, otherwise as it is.
+
+    The model does not validate assignments, ``model_copy`` or ``model_construct``,
+    so a str given to a directory field by any of them was stored as a str and
+    every later plugin that called a Path method on it crashed. Validation
+    coerces at construction; this does the same on the routes that skip it.
+    """
+    if (
+        name in _DIRECTORY_FIELDS
+        and value is not None
+        and not isinstance(value, Path)
+        and isinstance(value, (str, os.PathLike))
+    ):
+        return Path(value)
+    return value
+
+
+def _shown(value: Any) -> str:
+    """``value`` as a POSIX path for a message, or its type when it is no path."""
+    try:
+        return Path(value).as_posix()
+    except TypeError:
+        return f"a value of type {type(value).__name__}"
+
+
+def _register_output_dir(holder: Any, output_dir: Any) -> None:
+    """Register ``output_dir`` with fs_guard for as long as ``holder`` lives.
+
+    ASH's own writes below the output directory never follow a symlink, with
+    or without a sandbox: the default output directory is inside the scanned
+    tree. See utils/sandbox/fs_guard.py:open_for_write. Released when the holder
+    is collected, or when the scan that made it ends (fs_guard.run_roots), so a
+    process that runs many scans does not keep every output directory it ever
+    had registered. Raises OutputLinkRefused for a directory that is a link.
+    """
+    if output_dir is None:
+        return
+    from automated_security_helper.utils.sandbox.fs_guard import (
+        register_writable_root,
+        release_with_holder,
+    )
+
+    release_with_holder(holder, register_writable_root(output_dir))
+
+
+def _raise_link_refusal(error: ValidationError) -> None:
+    """Raise the output-directory link refusal ``error`` wraps, if that is all it holds.
+
+    A validator that raises OutputLinkRefused, a ValueError, reaches the caller of
+    ``PluginContext(...)`` as a pydantic ValidationError, which a caller handling
+    OutputDirLinkRefused (the exit-3 refusal) never sees.
+    """
+    from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+
+    errors = error.errors()
+    if len(errors) != 1:
+        return
+    refused = (errors[0].get("ctx") or {}).get("error")
+    if isinstance(refused, OutputDirLinkRefused):
+        raise refused from error
 
 
 # One PluginContext is built per run and handed to every converter, scanner and
@@ -125,17 +202,29 @@ class PluginContext(BaseModel):
     # _resolve_forward_refs at the bottom of this module.
     def __init__(self, /, **data: Any) -> None:
         _resolve_forward_refs()
-        super().__init__(**data)
+        try:
+            super().__init__(**data)
+        except ValidationError as error:
+            _raise_link_refusal(error)
+            raise
 
     @classmethod
     def model_validate(cls, *args: Any, **kwargs: Any) -> "PluginContext":
         _resolve_forward_refs()
-        return super().model_validate(*args, **kwargs)
+        try:
+            return super().model_validate(*args, **kwargs)
+        except ValidationError as error:
+            _raise_link_refusal(error)
+            raise
 
     @classmethod
     def model_validate_json(cls, *args: Any, **kwargs: Any) -> "PluginContext":
         _resolve_forward_refs()
-        return super().model_validate_json(*args, **kwargs)
+        try:
+            return super().model_validate_json(*args, **kwargs)
+        except ValidationError as error:
+            _raise_link_refusal(error)
+            raise
 
     @classmethod
     def model_rebuild(cls, *args: Any, **kwargs: Any) -> bool | None:
@@ -187,19 +276,40 @@ class PluginContext(BaseModel):
         assigns ``work_dir`` itself on every context built without one, which is
         every context ASH builds.
         """
+        # The directory fields are typed Path, but the model does not validate
+        # assignments, so a str assigned to one (``context.work_dir = "/tmp/x"``)
+        # was stored as a str and every later plugin that called a Path method
+        # on it crashed. Coerced here, as validation would have at construction.
+        value = _as_path(name, value)
         if name == "work_dir":
             current = getattr(self, name, None)
-            if current is not None and _repoints(current, value):
-                warnings.warn(
-                    f"Assigning to PluginContext.work_dir replaces {Path(current).as_posix()} "
-                    f"with {Path(value).as_posix()} for every plugin in this run, not "
+            # Asked once: each answer costs two filesystem resolutions.
+            moved = current is not None and _repoints(current, value)
+            if current is not None and not moved:
+                # The same directory under another spelling is no change, so it
+                # is not stored either: a relative spelling would depend on the
+                # current directory from then on, and a link spelling would
+                # replace the plain path.
+                return
+            if moved:
+                message = (
+                    f"Assigning to PluginContext.work_dir replaces {_shown(current)} "
+                    f"with {_shown(value)} for every plugin in this run, not "
                     f"just for the one making the assignment. A plugin that needs its "
                     f"own directory should read the results_dir its base class derives "
                     f"under the shared work_dir. This assignment is deprecated and "
-                    f"will be refused in a future release.",
-                    DeprecationWarning,
-                    stacklevel=2,
+                    f"will be refused in a future release."
                 )
+                warnings.warn(message, DeprecationWarning, stacklevel=2)
+                # Python hides a DeprecationWarning raised for code outside
+                # __main__ unless a filter turns it on, and a plugin is such code,
+                # so the warning alone leaves an ordinary run silent.
+                from automated_security_helper.utils.log import ASH_LOGGER
+
+                ASH_LOGGER.warning(message, extra={"markup": False})
+        if name == "output_dir" and isinstance(value, Path):
+            # Before the store: a directory that is a link is refused, not kept.
+            _register_output_dir(self, value)
         super().__setattr__(name, value)
         if name in ("work_dir", "output_dir", "workspace_output_dir", "config"):
             _record_derived_roots_on_config(self)
@@ -210,8 +320,13 @@ class PluginContext(BaseModel):
         ``model_copy`` runs neither the validators nor ``__setattr__``, the two
         places a built context records its output, work and workspace output
         directories (``_record_derived_roots_on_config``), so a copy that
-        moves one of them would leave it unrecorded."""
+        moves one of them would leave it unrecorded. The copy registers its own
+        output directory with fs_guard as well, so it stays guarded when the
+        original is collected or the copy moves the directory."""
+        if update:
+            update = {key: _as_path(key, value) for key, value in update.items()}
         copied = super().model_copy(update=update, deep=deep)
+        _register_output_dir(copied, getattr(copied, "output_dir", None))
         _record_derived_roots_on_config(copied)
         return copied
 
@@ -223,28 +338,18 @@ class PluginContext(BaseModel):
     ) -> "PluginContext":
         """A context built without validation, its directories recorded on its
         configuration as a validated one's are (``model_construct`` skips the
-        validators that record them)."""
+        validators that record them), and its output directory registered with
+        fs_guard."""
+        values = {key: _as_path(key, value) for key, value in values.items()}
         built = super().model_construct(_fields_set, **values)
+        _register_output_dir(built, getattr(built, "output_dir", None))
         _record_derived_roots_on_config(built)
         return built
 
     @model_validator(mode="after")
     def _guard_output_dir(self) -> "PluginContext":
-        # ASH's own writes below the output directory never follow a symlink, with
-        # or without a sandbox: the default output directory is inside the
-        # scanned tree. See utils/sandbox/fs_guard.py:open_for_write.
-        # Registered for as long as this context exists: released when it is
-        # collected, or when the scan that made it ends (fs_guard.run_roots), so a
-        # process that runs many scans does not keep every output directory it ever
-        # had registered.
-        output_dir = getattr(self, "output_dir", None)
-        if output_dir is not None:
-            from automated_security_helper.utils.sandbox.fs_guard import (
-                register_writable_root,
-                release_with_holder,
-            )
-
-            release_with_holder(self, register_writable_root(output_dir))
+        # Registered for as long as this context exists; see _register_output_dir.
+        _register_output_dir(self, getattr(self, "output_dir", None))
         return self
 
     @model_validator(mode="after")
@@ -296,35 +401,36 @@ def _record_derived_roots_on_config(context: Any) -> None:
 # group from inside a half-imported module), so a process that has imported the
 # models but not the config would fail on its first PluginContext with
 # PydanticUserError. So the reference is also resolved
-# on first use, the way models/asharp_model.py resolves AshAggregatedResults'; the
-# comments there explain the binding into globals() and the lock.
-_forward_refs_lock = threading.RLock()
-_forward_refs_resolved = False
+# on first use, the way models/asharp_model.py resolves AshAggregatedResults'. Both
+# use the one OnceOnlyResolver in base/forward_refs.py, whose docstring explains
+# the binding into globals() and the lock.
+#: The one once-only resolver both models share (base/forward_refs.py); this
+#: module and models/asharp_model.py each carried a copy of its lock, flag and
+#: double-checked rebuild before.
+_forward_refs: OnceOnlyResolver[type] = OnceOnlyResolver()
+
+
+def _import_ash_config() -> type:
+    from automated_security_helper.config.ash_config import AshConfig
+
+    return AshConfig
+
+
+def _bind_ash_config(ash_config: type) -> None:
+    globals()["AshConfig"] = ash_config
+    # The base class's rebuild: PluginContext.model_rebuild would call the
+    # resolver again.
+    super(PluginContext, PluginContext).model_rebuild()
 
 
 def _resolve_forward_refs() -> None:
-    """Bind AshConfig into this module and rebuild PluginContext on it.
+    """Bind AshConfig into this module and rebuild PluginContext on it, once.
 
     Cheap to call repeatedly, and a no-op while AshConfig is still unimportable
-    (config.ash_config is mid-import and has not defined it yet).
+    (config.ash_config is mid-import and has not defined it yet). The import
+    runs outside the resolver's lock; see base/forward_refs.py for why.
     """
-    global _forward_refs_resolved
-    if _forward_refs_resolved:
-        return
-
-    with _forward_refs_lock:
-        if _forward_refs_resolved:
-            return
-        try:
-            from automated_security_helper.config.ash_config import AshConfig
-        except ImportError:
-            return
-
-        globals()["AshConfig"] = AshConfig
-        # The base class's rebuild: PluginContext.model_rebuild would call this
-        # function again.
-        super(PluginContext, PluginContext).model_rebuild()
-        _forward_refs_resolved = True
+    _forward_refs.resolve(_import_ash_config, _bind_ash_config)
 
 
 AshPluginManager.model_rebuild()

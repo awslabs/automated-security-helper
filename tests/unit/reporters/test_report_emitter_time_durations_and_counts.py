@@ -1,0 +1,928 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Facts the shared report emitter states: when, how long, and how many.
+
+* ``time_delta`` is the age of the scan. It dropped the scan time's UTC offset
+  and read the local wall time as UTC, so it was wrong by the offset, and it was
+  never computed for the layout that names UTC outright.
+* A scanner that did not run, and a scanner of a merged workspace file (which
+  records no per-scanner duration), took no measured time; their rows read
+  ``<1ms`` as though they had run and been fast.
+* The masthead's "unavailable" figure counted a scanner that also counted as
+  completed, so completed, disabled and unavailable could add up to more than
+  the scanners there are.
+* Findings an additional report lists reach the cards and the hotspots, and the
+  headline summary left them out.
+* A coverage gap beside findings at the gate read as a warning.
+* A snippet SARIF puts under a location's region was never recovered.
+* A negative limit sliced the findings from the end.
+"""
+
+import json
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+
+import pytest
+
+from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.workspace import (
+    ProjectRunStatus,
+    WorkspaceProjectResult,
+    WorkspaceResults,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    ReportContentEmitter,
+    coverage_shortfall_text,
+    parse_scan_time,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter import (
+    TextReporter,
+)
+from automated_security_helper.schemas.sarif_schema_model import (
+    Message,
+    PropertyBag,
+    Result,
+    SarifReport,
+)
+from automated_security_helper.utils.secret_masking import (
+    MASKED_LINE,
+    mask_secrets_in_results,
+)
+from automated_security_helper.utils.severity_ladder import (
+    result_severity,
+    severity_fails_threshold,
+)
+from tests.utils.scanner_thresholds import without_scanner_thresholds
+
+pytestmark = pytest.mark.unit
+
+
+def _model(reports: dict) -> AshAggregatedResults:
+    model = AshAggregatedResults()
+    model.additional_reports = reports
+    return model
+
+
+def _rows(model: AshAggregatedResults, *, human: bool = True) -> dict:
+    return {
+        row["scanner_name"]: row
+        for row in ReportContentEmitter(
+            model, human_presentation=human
+        ).get_scanner_results()
+    }
+
+
+class TestAShortfallNeverReadsBelowZero:
+    def test_a_failed_count_above_the_attempted_count_is_not_negative(self):
+        text = coverage_shortfall_text(2, 5)
+        # The whole sentence, not its prefix. It is the reading the renderer has
+        # today for an inconsistent record: the evaluated count is clamped to
+        # zero and the failed count is printed as recorded. Whether such a record
+        # should read "coverage unknown" instead is a design question this
+        # test does not decide; it fails when the sentence changes, so a change
+        # is made on purpose.
+        assert text == "evaluated 0 of 2 target(s); 5 could not be evaluated", text
+        assert "-" not in text, text
+
+    def test_an_ordinary_shortfall_is_unchanged(self):
+        assert (
+            coverage_shortfall_text(4, 1)
+            == "evaluated 3 of 4 target(s); 1 could not be evaluated"
+        )
+
+
+class TestTheAgeOfTheScanKeepsItsOffset:
+    def test_a_scan_time_with_an_offset_is_the_instant_it_names(self):
+        scanned_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        model = AshAggregatedResults()
+        model.metadata.generated_at = scanned_at.astimezone(
+            timezone(timedelta(hours=-5))
+        ).isoformat(timespec="seconds")
+
+        delta = ReportContentEmitter(model).get_metadata()["time_delta"]
+
+        # The offset used to be dropped and the local wall time read as UTC,
+        # which made this six hours.
+        assert timedelta(hours=1) <= delta < timedelta(hours=1, minutes=2), delta
+
+    def test_a_utc_scan_time_is_unchanged(self):
+        scanned_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+        model = AshAggregatedResults()
+        model.metadata.generated_at = scanned_at.isoformat(timespec="seconds")
+
+        delta = ReportContentEmitter(model).get_metadata()["time_delta"]
+
+        assert timedelta(minutes=30) <= delta < timedelta(minutes=32), delta
+
+    @pytest.mark.parametrize(
+        ("text", "instant"),
+        [
+            (
+                "2026-01-15T12:00:00+05:30",
+                datetime(2026, 1, 15, 6, 30, tzinfo=timezone.utc),
+            ),
+            (
+                "2026-01-15T12:00:00-05:00",
+                datetime(2026, 1, 15, 17, 0, tzinfo=timezone.utc),
+            ),
+            ("2026-01-15T12:00:00Z", datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)),
+            (
+                "2026-01-15T12:00:00.987654Z",
+                datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc),
+            ),
+            ("2026-01-15 12:00:00", datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)),
+            (
+                "2026-01-15 - 12:00 (UTC)",
+                datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc),
+            ),
+        ],
+    )
+    def test_each_layout_is_read_as_an_aware_instant(self, text, instant):
+        parsed = parse_scan_time(text)
+        assert parsed is not None, text
+        assert parsed.utcoffset() is not None, "the instant carries its zone"
+        # Compared to the second: the parser drops fractional seconds today, and
+        # a parser that kept them would not be wrong.
+        assert parsed.replace(microsecond=0) == instant
+
+    @pytest.mark.parametrize(
+        ("text", "instant"),
+        [
+            (
+                "2026-01-15T12:00:00.123456+00:00",
+                datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc),
+            ),
+            (
+                "2026-01-15T12:00:00.123456+05:30",
+                datetime(2026, 1, 15, 6, 30, tzinfo=timezone.utc),
+            ),
+            (
+                "2026-01-15T12:00:00.123456-05:00",
+                datetime(2026, 1, 15, 17, 0, tzinfo=timezone.utc),
+            ),
+        ],
+    )
+    def test_a_fraction_followed_by_an_offset_keeps_its_zone(self, text, instant):
+        """What ``datetime.isoformat()`` writes for an aware time with
+        microseconds, the shape a scan most likely records: a parser that cut
+        the text at the seconds before looking for an offset would lose the
+        zone here and read the wall time as UTC."""
+        parsed = parse_scan_time(text)
+        assert parsed is not None, text
+        assert parsed.replace(microsecond=0) == instant
+
+    def test_the_age_of_a_scan_time_written_with_a_fraction_and_an_offset(self):
+        scanned_at = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(
+            microsecond=123456
+        )
+        model = AshAggregatedResults()
+        model.metadata.generated_at = scanned_at.astimezone(
+            timezone(timedelta(hours=-5))
+        ).isoformat()
+        assert model.metadata.generated_at.endswith("-05:00")
+        assert ".123456" in model.metadata.generated_at
+
+        delta = ReportContentEmitter(model).get_metadata()["time_delta"]
+
+        assert timedelta(hours=1) <= delta < timedelta(hours=1, minutes=2), delta
+
+    def test_text_that_is_no_time_is_none(self):
+        assert parse_scan_time("yesterday afternoon") is None
+        assert parse_scan_time("2026-01-15T12:00:00+99:00") is None
+
+
+class TestADurationIsOnlyWhatWasMeasured:
+    @staticmethod
+    def _reports() -> dict:
+        return {
+            "bandit": {
+                "source": {
+                    "scanner_name": "bandit",
+                    "status": "PASSED",
+                    "duration": 90.0,
+                }
+            },
+            "cdk-nag": {
+                "source": {
+                    "scanner_name": "cdk-nag",
+                    "status": "SKIPPED",
+                    "excluded": True,
+                    "dependencies_satisfied": True,
+                    "duration": 0.0,
+                }
+            },
+            "grype": {
+                "source": {
+                    "scanner_name": "grype",
+                    "status": "MISSING",
+                    "dependencies_satisfied": False,
+                    "duration": 0.0,
+                }
+            },
+        }
+
+    def test_a_scanner_that_did_not_run_has_no_duration(self):
+        rows = _rows(_model(self._reports()))
+        assert rows["bandit"]["duration"] == 90.0
+        assert rows["cdk-nag"]["duration"] is None, rows["cdk-nag"]
+        assert rows["grype"]["duration"] is None, rows["grype"]
+
+    def test_a_machine_readable_export_keeps_the_recorded_number(self):
+        rows = _rows(_model(self._reports()), human=False)
+        assert rows["bandit"]["duration"] == 90.0
+        assert rows["cdk-nag"]["duration"] == 0.0, rows["cdk-nag"]
+        assert rows["grype"]["duration"] == 0.0, rows["grype"]
+
+    def test_the_text_report_shows_not_available_for_them(self, test_plugin_context):
+        report = TextReporter(context=test_plugin_context).report(
+            _model(self._reports())
+        )
+        lines = report.splitlines()
+        header = next(
+            line for line in lines if line.startswith("Scanner") and "Duration" in line
+        )
+        # The duration column is right-aligned under its heading; the table ends
+        # at the first blank line, so a later line that starts with a scanner's
+        # name (a coverage note, an attention list) cannot replace its row.
+        end = header.index("Duration") + len("Duration")
+        durations = {}
+        for line in lines[lines.index(header) + 2 :]:
+            if not line.strip():
+                break
+            durations[line.split()[0]] = line[end - 10 : end].strip()
+        for name, shown in {
+            "bandit": "1m 30s",
+            "cdk-nag": "N/A",
+            "grype": "N/A",
+        }.items():
+            assert durations.get(name) == shown, durations
+
+    def test_a_workspace_scan_records_no_scanner_duration(self):
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 0.0,
+                    }
+                }
+            }
+        )
+        # The control: a single-directory scan keeps the measured zero it was given.
+        assert _rows(model)["bandit"]["duration"] == 0.0
+
+        model.workspace = WorkspaceResults(
+            workspace_file="/w/.ash-workspace.yaml",
+            workspace_root="/w",
+            exit_code=0,
+            projects=[
+                WorkspaceProjectResult(
+                    project="api",
+                    relative_path="api",
+                    display_label="api",
+                    status=ProjectRunStatus.COMPLETED,
+                    severity_threshold="MEDIUM",
+                    output_path="projects/api",
+                )
+            ],
+        )
+        assert _rows(model)["bandit"]["duration"] is None
+        assert _rows(model, human=False)["bandit"]["duration"] == 0.0
+
+
+class TestTheMastheadCountsEachScannerOnce:
+    def test_a_scanner_that_ran_and_is_named_for_attention_is_not_also_unavailable(
+        self, monkeypatch
+    ):
+        # A scanner that completed, and that the completeness record also names
+        # (one tree lacked its dependency), is listed for attention.
+        #
+        # The record names grype too, whose row is ERROR, as the real function
+        # does for a scanner that did not complete: a record that listed only
+        # bandit described a state a scan cannot produce.
+        incompleteness = SimpleNamespace(
+            scanners=[("bandit", "MISSING"), ("grype", "ERROR")],
+            converters=[],
+            unevaluated_rules=[],
+            no_scanner_ran=False,
+            could_not_stop=[],
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_scan.scan_incompleteness",
+            lambda *args, **kwargs: incompleteness,
+        )
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "grype": {
+                    "source": {
+                        "scanner_name": "grype",
+                        "status": "ERROR",
+                        "duration": 1.0,
+                    }
+                },
+            }
+        )
+
+        summary = ReportContentEmitter(model).get_scan_summary()
+
+        assert summary["completed"] == 1, summary
+        assert "bandit" in summary["unavailable"], "it is still named for attention"
+        assert "grype" in summary["unavailable"], summary
+        # Only grype did not complete.
+        assert summary["unavailable_count"] == 1, summary
+        # The fixture has two scanners, and each is counted once: the three
+        # figures add up to exactly them, so a miscount in either direction fails.
+        assert summary["scanners"] == 2, summary
+        assert (
+            summary["completed"] + summary["skipped"] + summary["unavailable_count"]
+            == summary["scanners"]
+        ), summary
+
+
+class TestFindingsAnAdditionalReportListsAreCounted:
+    def test_the_headline_counts_what_the_cards_show(self):
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {
+                        "title": "Hard-coded endpoint",
+                        "description": "A plugin's own finding.",
+                        "severity": "HIGH",
+                        "file_path": "app.py",
+                        "line_start": 3,
+                    }
+                ],
+            }
+        )
+        emitter = ReportContentEmitter(model)
+        cards = [
+            vuln for vuln in emitter.flat_vulns if emitter.is_finding_actionable(vuln)
+        ]
+        assert len(cards) == 1, "the finding reaches the cards as actionable"
+
+        summary = emitter.get_scan_summary()
+
+        assert summary["actionable"] == 1, summary
+        assert summary["counts"]["high"] == 1, summary
+        assert summary["title"] == "Review required", summary
+
+    def test_a_listed_finding_rated_outside_the_ladder_is_counted_as_medium(self):
+        """A listed finding whose severity text is none of the five levels.
+
+        The flattening reads a plugin's own rating as the gate reads a SARIF
+        result with an unknown level, so the finding reaches the summary as
+        MEDIUM: it is actionable under the default threshold and counted in the
+        medium bucket, and the counts have the five names and no sixth. An
+        earlier shape of this test expected an ``unknown`` bucket, which the
+        model never produces.
+        """
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {
+                        "title": "Hard-coded endpoint",
+                        "description": "A plugin's own finding.",
+                        "severity": "HIGH",
+                        "file_path": "app.py",
+                        "line_start": 3,
+                    },
+                    {
+                        "title": "An odd rating",
+                        "description": "A plugin's own finding, rated outside ASH's levels.",
+                        "severity": "UNRATED",
+                        "file_path": "app.py",
+                        "line_start": 9,
+                    },
+                ],
+            }
+        )
+        emitter = ReportContentEmitter(model)
+        assert [vuln.severity for vuln in emitter.flat_vulns] == ["HIGH", "MEDIUM"]
+        assert all(
+            emitter.is_finding_actionable(vuln) for vuln in emitter.flat_vulns
+        ), "both listed findings are at or above the default threshold"
+
+        summary = emitter.get_scan_summary()
+
+        assert summary["actionable"] == 2, summary
+        assert summary["counts"]["high"] == 1, summary
+        assert summary["counts"]["medium"] == 1, summary
+        assert "unknown" not in summary["counts"], summary
+        assert summary["active"] == 2, summary
+        assert summary["below_threshold"] == 0, summary
+
+    def test_a_listed_finding_rated_outside_the_ladder_follows_the_gate_under_high(
+        self,
+    ):
+        """The default MEDIUM gate cannot tell reading an unrated finding as
+        MEDIUM from failing it closed: both make it actionable. Under a HIGH
+        gate they differ. The finding is read as the gate reads a SARIF result
+        with a level it does not know (MEDIUM), so it is below HIGH here, as that
+        result is in the exit code; the listed HIGH finding stays actionable."""
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {
+                        "title": "Hard-coded endpoint",
+                        "description": "A plugin's own finding.",
+                        "severity": "HIGH",
+                        "file_path": "app.py",
+                        "line_start": 3,
+                    },
+                    {
+                        "title": "An odd rating",
+                        "description": "A plugin's own finding, rated outside ASH's levels.",
+                        "severity": "UNRATED",
+                        "file_path": "app.py",
+                        "line_start": 9,
+                    },
+                ],
+            }
+        )
+        model.ash_config = get_default_config()
+        without_scanner_thresholds(model)
+        model.ash_config.global_settings.severity_threshold = "HIGH"
+        emitter = ReportContentEmitter(model)
+
+        graded = {
+            vuln.title: emitter.is_finding_actionable(vuln)
+            for vuln in emitter.flat_vulns
+        }
+        gate_fails_unknown_level = severity_fails_threshold(
+            result_severity({"level": "not-a-level"}), "HIGH"
+        )
+
+        assert graded == {
+            "Hard-coded endpoint": True,
+            "An odd rating": gate_fails_unknown_level,
+        }, graded
+        assert gate_fails_unknown_level is False
+        summary = emitter.get_scan_summary()
+        assert summary["actionable"] == 1, summary
+        assert summary["below_threshold"] == 1, summary
+
+    def test_a_row_marked_with_its_source_report_is_read_by_the_mark_not_its_place(
+        self,
+    ):
+        """Rows that carry ``source_report`` are selected by that key.
+
+        The additional-report findings were read as the last N flat rows,
+        checked only by scanner name, so a SARIF row of the same scanner that
+        sat in the tail was counted twice and a listed finding that sat
+        elsewhere was dropped. With the marker, the two listed findings are
+        found between the SARIF rows, and the SARIF rows of the same scanner
+        are not.
+        """
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {"title": "a", "severity": "HIGH", "file_path": "app.py"},
+                    {"title": "b", "severity": "LOW", "file_path": "app.py"},
+                ],
+            }
+        )
+        emitter = ReportContentEmitter(model)
+
+        def row(severity: str, source_report: "str | None") -> SimpleNamespace:
+            return SimpleNamespace(
+                scanner="custom-plugin",
+                severity=severity,
+                is_suppressed=False,
+                workspace_project=None,
+                source_report=source_report,
+            )
+
+        # The marked stand-ins carry severities the model's own list (HIGH and
+        # LOW above) does not: a reader that ignored ``flat_vulns`` and
+        # flattened ``additional_reports`` again, or kept a copy from
+        # construction, would answer HIGH and LOW and pass a test whose
+        # stand-ins said the same.
+        emitter.flat_vulns = [
+            row("CRITICAL", None),
+            row("MEDIUM", "custom-plugin"),
+            row("CRITICAL", None),
+            row("INFO", "custom-plugin"),
+        ]
+
+        extras = emitter._additional_report_findings()
+
+        assert [vuln.severity for vuln in extras] == ["MEDIUM", "INFO"], extras
+        summary = emitter.get_scan_summary()
+        assert summary["counts"]["medium"] == 1, summary
+        assert summary["counts"]["info"] == 1, summary
+        assert summary["counts"]["high"] == 0, summary
+        assert summary["counts"]["low"] == 0, summary
+        assert summary["counts"]["critical"] == 0, summary
+
+    def test_the_flattening_marks_each_listed_row_and_the_summary_reads_the_mark(
+        self,
+    ):
+        """The rows ``to_flat_vulnerabilities`` builds carry the marker.
+
+        Two SARIF results and one listed finding share a scanner name. Read by
+        position and count, the listed finding was the last row only while it
+        happened to be last; read by the mark it is found wherever it sits,
+        and the SARIF rows of the same scanner are never taken for it.
+        """
+        model = _model(
+            {
+                "custom-plugin": [
+                    {"title": "a", "severity": "LOW", "file_path": "app.py"}
+                ]
+            }
+        )
+        model.sarif.runs[0].results = [
+            Result(
+                ruleId=f"R{index}",
+                level="error",
+                message=Message(text=f"Finding {index}"),
+                properties=PropertyBag(scanner_name="custom-plugin"),
+            )
+            for index in range(2)
+        ]
+        flat = model.to_flat_vulnerabilities()
+        assert [row.source_report for row in flat] == [None, None, "custom-plugin"]
+        listed = flat[-1]
+
+        emitter = ReportContentEmitter(model)
+        emitter.flat_vulns = list(reversed(flat))
+
+        assert emitter._additional_report_findings() == [listed]
+        assert emitter.get_scan_summary()["counts"]["low"] == 1
+
+    def test_a_row_without_the_mark_is_a_sarif_row_whatever_its_place(self):
+        """A row that carries no marker is never read as a listed finding, even
+        when it is the last row and its scanner is the listed report's key: the
+        reading by position and count is gone."""
+        model = _model(
+            {
+                "custom-plugin": [
+                    {"title": "a", "severity": "LOW", "file_path": "app.py"}
+                ]
+            }
+        )
+        emitter = ReportContentEmitter(model)
+        emitter.flat_vulns = [
+            SimpleNamespace(
+                scanner="custom-plugin",
+                severity="LOW",
+                is_suppressed=False,
+                workspace_project=None,
+            )
+        ]
+
+        assert emitter._additional_report_findings() == []
+
+    def test_the_buckets_are_the_five_levels_when_every_severity_is_known(self):
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {
+                        "title": "Hard-coded endpoint",
+                        "description": "A plugin's own finding.",
+                        "severity": "HIGH",
+                        "file_path": "app.py",
+                        "line_start": 3,
+                    }
+                ],
+            }
+        )
+        summary = ReportContentEmitter(model).get_scan_summary()
+        assert set(summary["counts"]) == {"critical", "high", "medium", "low", "info"}
+
+    def test_a_stand_in_row_with_no_severity_counts_under_unknown(self):
+        """A row that bypasses the flattening and carries no severity.
+
+        The grading reads it as UNKNOWN and fails it closed, so the count names
+        it so: it was counted under an empty name, which the masthead rendered
+        as an unnamed chip with the class ``severity-``.
+
+        RED at the base: the bucket's name was the empty string.
+        """
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {"title": "a", "severity": "HIGH", "file_path": "app.py"}
+                ],
+            }
+        )
+        emitter = ReportContentEmitter(model)
+        emitter.flat_vulns = [
+            SimpleNamespace(
+                scanner="custom-plugin",
+                severity=None,
+                is_suppressed=False,
+                workspace_project=None,
+                source_report="custom-plugin",
+            )
+        ]
+
+        summary = emitter.get_scan_summary()
+
+        assert summary["counts"]["unknown"] == 1, summary
+        assert "" not in summary["counts"], summary
+
+    def test_a_stand_in_row_rated_outside_the_ladder_keeps_its_own_bucket(self):
+        """A row that bypasses the flattening and carries a sixth name.
+
+        The model never builds one (every flattened severity is read through
+        the ladder), so this is the count's own promise: such a row is counted
+        under its own lowercased name rather than dropped, which once made the
+        actionable count exceed the active count.
+        """
+        model = _model(
+            {
+                "bandit": {
+                    "source": {
+                        "scanner_name": "bandit",
+                        "status": "PASSED",
+                        "duration": 1.0,
+                    }
+                },
+                "custom-plugin": [
+                    {"title": "a", "severity": "HIGH", "file_path": "app.py"}
+                ],
+            }
+        )
+        emitter = ReportContentEmitter(model)
+        emitter.flat_vulns = [
+            SimpleNamespace(
+                scanner="custom-plugin",
+                severity="MODERATE",
+                is_suppressed=False,
+                workspace_project=None,
+                source_report="custom-plugin",
+            )
+        ]
+
+        summary = emitter.get_scan_summary()
+
+        assert summary["counts"]["moderate"] == 1, summary
+        assert "unknown" not in summary["counts"], summary
+
+
+class TestACoverageGapBesideFindingsIsADanger:
+    @staticmethod
+    def _model(with_finding: bool) -> AshAggregatedResults:
+        model = AshAggregatedResults(ash_config=get_default_config())
+        # ``get_default_config`` honours ASH_CONFIG: a threshold it set for bandit
+        # would grade the finding by itself and not by the gate named below.
+        without_scanner_thresholds(model)
+        # The same gate in both variants, so the two differ in the finding alone.
+        model.ash_config.global_settings.severity_threshold = "CRITICAL"
+        if with_finding:
+            model.sarif.runs[0].results = [
+                Result(
+                    ruleId="R1",
+                    level="error",
+                    message=Message(text="Review the fixture"),
+                    properties=PropertyBag(scanner_name="bandit"),
+                )
+            ]
+        model.additional_reports["bandit"] = {
+            "source": {
+                "scanner_name": "bandit",
+                "status": "PASSED",
+                "duration": 1.0,
+                "targets_attempted": 4,
+                "targets_failed": 2,
+            }
+        }
+        return model
+
+    def test_actionable_findings_and_a_gap_read_as_danger(self):
+        emitter = ReportContentEmitter(self._model(True))
+        # The premise, stated: the finding is graded by the gate's rule (an
+        # ``error`` result is CRITICAL), and the cards show the same count the
+        # headline does, so the headline is not 1 over cards marked below the
+        # threshold.
+        assert [vuln.severity for vuln in emitter.flat_vulns] == ["CRITICAL"]
+        cards = sum(emitter.is_finding_actionable(vuln) for vuln in emitter.flat_vulns)
+
+        summary = emitter.get_scan_summary()
+
+        assert summary["title"] == "Scan incomplete", summary
+        assert summary["actionable"] == 1 == cards, summary
+        assert summary["tone"] == "danger", summary
+
+    def test_a_gap_alone_stays_a_warning(self):
+        summary = ReportContentEmitter(self._model(False)).get_scan_summary()
+        assert summary["title"] == "Scan incomplete", summary
+        assert summary["actionable"] == 0, summary
+        assert summary["tone"] == "warning", summary
+
+
+class TestASnippetIsFoundWhereSarifPutsIt:
+    @staticmethod
+    def _snippet(raw: dict) -> str | None:
+        vuln = FlatVulnerability(
+            id="f-1",
+            title="t",
+            description="d",
+            severity="HIGH",
+            scanner="bandit",
+            scanner_type="SAST",
+            raw_data=json.dumps(raw),
+        )
+        return ReportContentEmitter(AshAggregatedResults())._extract_code_snippet(vuln)
+
+    @staticmethod
+    def _location(snippet_key: str) -> dict:
+        return {
+            "physicalLocation": {
+                "artifactLocation": {"uri": "app.py"},
+                snippet_key: {"startLine": 3, "snippet": {"text": "eval(user_input)"}},
+            }
+        }
+
+    def test_a_snippet_in_a_results_region(self):
+        assert (
+            self._snippet({"locations": [self._location("region")]})
+            == "eval(user_input)"
+        )
+
+    def test_a_snippet_in_a_results_context_region(self):
+        raw = {"locations": [self._location("contextRegion")]}
+        assert self._snippet(raw) == "eval(user_input)"
+
+    def test_a_snippet_in_a_code_flow_location(self):
+        raw = {
+            "codeFlows": [
+                {
+                    "threadFlows": [
+                        {"locations": [{"location": self._location("region")}]}
+                    ]
+                }
+            ]
+        }
+        assert self._snippet(raw) == "eval(user_input)"
+
+    def test_the_context_region_is_read_before_the_region(self):
+        """A location with both reads as the flattener reads the first one.
+
+        The flattener prefers the context region's snippet, which exists to
+        give a viewer the surrounding lines; the fallback for the locations it
+        did not read took the region's first, so a finding showed different
+        text depending on which location the snippet sat in.
+
+        RED at the base: the region's text was returned.
+        """
+        location = {
+            "physicalLocation": {
+                "artifactLocation": {"uri": "app.py"},
+                "region": {"startLine": 3, "snippet": {"text": "region text"}},
+                "contextRegion": {"startLine": 2, "snippet": {"text": "context text"}},
+            }
+        }
+        assert self._snippet({"locations": [location]}) == "context text"
+
+    def test_a_secret_findings_second_location_reaches_the_report_masked(self):
+        """The snippet of a secret finding's other locations is the masked text.
+
+        Pins the layer the report relies on: the masker covers every physical
+        location of a secret finding, so the fallback that reads the second
+        location and a code flow's locations never sees the value.
+        """
+        value = "ql9x4v7kz2m8"
+        model = AshAggregatedResults()
+        model.sarif = SarifReport.model_validate(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "test"}},
+                        "results": [
+                            {
+                                "ruleId": "SECRET-KEYWORD",
+                                "level": "warning",
+                                "message": {
+                                    "text": "Secret of type 'Keyword' detected"
+                                },
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": "app.py"},
+                                            "region": {"startLine": 2, "endLine": 2},
+                                        }
+                                    },
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": "other.py"},
+                                            "region": {
+                                                "startLine": 7,
+                                                "endLine": 7,
+                                                "snippet": {
+                                                    "text": f'token = "{value}"\n'
+                                                },
+                                            },
+                                        }
+                                    },
+                                ],
+                                "properties": {
+                                    "scanner_name": "detect-secrets",
+                                    "tags": ["detect-secrets"],
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        mask_secrets_in_results(model)
+        emitter = ReportContentEmitter(model)
+        (vuln,) = emitter.flat_vulns
+
+        snippet = emitter._extract_code_snippet(vuln)
+
+        assert snippet is not None
+        assert value not in snippet, snippet
+        assert MASKED_LINE in snippet, snippet
+
+    def test_a_result_with_no_snippet_is_none(self):
+        assert self._snippet({"locations": [{"physicalLocation": {}}]}) is None
+
+    def test_a_fenced_message_yields_the_code_without_its_info_string(self):
+        """The fence's language name is not code. The flattener's reader leaves it
+        out; the emitter's own read of the same message kept it, and the trailing
+        newline with it, so a report built from a record flattened without a
+        snippet showed ``python`` as the first line of the code."""
+        raw = {"message": {"text": "Found:\n```python\neval(user_input)\n```\n"}}
+        assert self._snippet(raw) == "eval(user_input)"
+
+    def test_a_bare_fence_yields_its_stripped_block(self):
+        raw = {"message": {"text": "```\neval(user_input)\n```"}}
+        assert self._snippet(raw) == "eval(user_input)"
+
+    def test_a_message_with_one_fence_marker_is_none(self):
+        assert self._snippet({"message": {"text": "unterminated ``` here"}}) is None
+
+
+class TestANegativeLimitListsNone:
+    def test_a_negative_limit_does_not_slice_from_the_end(self):
+        model = AshAggregatedResults(ash_config=get_default_config())
+        model.sarif.runs[0].results = [
+            Result(
+                ruleId=f"R{index}",
+                level="error",
+                message=Message(text=f"Finding {index}"),
+                properties=PropertyBag(scanner_name="bandit"),
+            )
+            for index in range(3)
+        ]
+        emitter = ReportContentEmitter(model)
+
+        assert len(emitter.get_detailed_findings(2)) == 2
+        assert emitter.get_detailed_findings(-1) == []

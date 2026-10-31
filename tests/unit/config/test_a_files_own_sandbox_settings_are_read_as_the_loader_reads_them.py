@@ -41,6 +41,7 @@ from automated_security_helper.config.resolve_config import (
     _own_sandbox_read,
     _own_sandbox_settings,
 )
+from automated_security_helper.utils.sandbox.policy import DEFAULT_ENVIRONMENT
 
 pytestmark = pytest.mark.unit
 
@@ -229,9 +230,11 @@ def test_the_grants_a_rewritten_section_carries_are_not_adopted(tmp_path):
             {
                 "extra_read_paths": ["/opt/c"],
                 # The rewrite carries no other grant list, so the file's config ends
-                # with the empty one there: a limit to nothing.
+                # with the model's default there: the empty list for the two scanner
+                # lists, the proxy and CA names for the environment list.
                 "read_path_scanners": [],
                 "env_scanners": [],
+                "environment": list(DEFAULT_ENVIRONMENT),
             },
             id="a-rewritten-section-that-carries-a-list",
         ),

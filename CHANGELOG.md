@@ -357,9 +357,27 @@
   whichever attempt it ran. When it is empty, the default, the report is downloaded by
   name, as before, so existing callers need no change. Pass it the scan job's
   `artifact-id` output, as the usage comment in `upload-ash-sarif.yml` shows.
+- **Plugin authors: `get_installation_commands` may return a `CustomCommand` as well
+  as an argument list.** The return type is `List[List[str] | CustomCommand]`. A
+  `custom_install_commands` entry comes back as the `CustomCommand` it was declared
+  as, so its `shell` flag reaches the installer. A plugin that overrides the method
+  and builds on `super()` should declare the same return type, and a caller that
+  indexes each item as an argument list should check for `CustomCommand` first.
+  The built-in cdk-nag and ferret-scan scanners declare it now.
 
 ### Breaking changes
 
+- **`set_source_git` clones only from the hosts `ASH_MCP_GIT_ALLOWED_HOSTS` names.**
+  The variable is unset by default, so a server whose operator has not set it clones
+  from no host and answers every `set_source_git` call with `error_type`
+  `clone_host_not_permitted`. An operator whose clients clone with the tool sets it to
+  the hosts they clone from: comma- or whitespace-separated `[scheme://]host[:port]`
+  entries, matched without regard to case, where a bare host stands for its scheme's
+  default port (https 443, ssh 22) on either scheme, `host:port` names the port, and
+  `https://` or `ssh://` the scheme. The tool also refuses every `ssh_key_id` with
+  `error_type` `ssh_key_not_registered`: the server registers no SSH keys and never
+  accepts a private key over MCP, so a repository that needs one cannot be delivered
+  this way.
 - **A configured plugin module that fails to import refuses the run with
   exit 3.** `ash scan`, `ash report`, `ash merge`, `ash dependencies install`
   and `ash plugin list` used to log a WARNING and continue without the module's
@@ -1327,8 +1345,88 @@
   the schema sees it; the schema does not enforce it, so a depth outside the range
   reaches the tool and gets its own answer.
 
+- **A detect-secrets baseline entry audited as a real secret (`is_secret: true`)
+  is reported as an ordinary finding, whichever baseline lists it.** A
+  `baseline_file` the operator's own settings name used to remove every
+  candidate it listed from the report, audited real or not, so a confirmed
+  secret still in its file was cleared by the record of it. A gate that passed
+  on such a baseline can now fail: remove the secret, or audit the entry as a
+  false positive if it is one. An entry audited as a false positive, or not
+  audited, is still removed by an operator-named baseline.
+
+- **`./ash` and `Invoke-ASH` place the default output directory inside the scanned
+  directory (`<source>/.ash/ash_output`), as `ash scan` does, rather than under the
+  working directory.** Two consequences for a caller that relied on the old place: a
+  CI step that runs `./ash --source-dir app` (or `Invoke-ASH -SourceDir app`) from
+  the repository root and then uploads `./.ash/ash_output` still passes the scan but
+  uploads an empty directory, because the reports are now in `app/.ash/ash_output`;
+  and a scanned directory that cannot be written (a read-only checkout) is refused
+  with exit 5 unless `--output-dir` (`-OutputDir`) names a writable place.
+  `Invoke-ASH` works the default out once `-SourceDir` has passed its checks (a
+  default worked out while the parameters bound failed on an empty `-SourceDir`
+  ahead of the refusal) and takes a `-SourceDir` that is itself a link under the
+  working directory, the one link shape this loosens: a link above `-SourceDir` on the
+  way to the output (`work-link/src`) is still refused, where `./ash` accepts every
+  link at or above its source, so the two wrappers' rules differ there, and an
+  `-OutputDir` that is the source link itself is refused as a linked output
+  directory, as `./ash` refuses one wherever it is. A refusal of the default output directory (a
+  file at the path, a directory that cannot be created, entered or written, or one
+  reached through a link the repository commits) gives the reason and names
+  `--output-dir`, or `-OutputDir`, as the way to write elsewhere; a refusal of an
+  output directory the operator gave does not.
+
+- **The Bedrock summary reporter's `top_p` must be from 0 to 1.** The option now has the
+  range Bedrock's Converse API documents, as `temperature` does. A configuration that set
+  `top_p` above 1, below 0 or to a value that is not a finite number used to load, and the
+  service refused every summary request that carried it; it is now refused when the
+  configuration is read, as a configuration error (exit 3). Set `top_p` to a value from 0
+  to 1, or remove it to use the default of 0.9.
+
 ### Behavior changes
 
+- `run_ash_scan()` raises `ValueError` for `severity_threshold_restriction` and
+  `keep_previous_results` in container and nix mode, as it does for the other
+  options only the local orchestrator applies (`untrusted_config`,
+  `client_config_policy`, `remote_client`). A caller that set one of them there
+  was scanning with it silently dropped; the MCP server, the two options' only
+  caller, sets them in local and workspace mode only.
+- In nix mode an exit code of ASH's own that no results file decides (3 for a
+  refused input or config, 4 for a workspace error, 5 for a usage error) is
+  carried out of the shell before any read-back, as container mode carries the
+  container's. A `--use-existing` run kept the earlier results file, read it back
+  and reported such a refusal as exit 1, "did not complete".
+- The scan summary's actionable count and the exit-code legend name the number the
+  exit code gates on: the persisted SARIF report this run wrote, each result under
+  its own scanner's threshold, with `--min-severity` applied. They printed the
+  in-memory metrics total, which can differ from it. One consequence: with
+  `--min-severity` above every finding the summary omits its "Actionable findings
+  detected" block, as the exit code is 0 for them, while every report still lists
+  them.
+- `./ash scan -v` and `./ash report -v` now reach the subcommand as its `--verbose`,
+  as the CLI defines `-v`; the wrapper read `-v` anywhere on the line as its own
+  `--version` and exited without scanning. `./ash -v` with no subcommand before it
+  still prints the version and exits, so a habit or a health check never builds an
+  image; `./ash -v`, `./ash --version` and `./ash --help` exit with the host CLI's
+  own status, so a health check sees a host CLI that cannot run. The wrapper also
+  takes its own value options in both spellings (`--source-dir=DIR` as well as
+  `--source-dir DIR`, and `-oRUNNER`, `-uUID`, `-gGID` as well as the spaced short
+  forms), accepts the CLI's `--oci` and `--runner` aliases for `--oci-runner`, and
+  writes its own status lines and the image build's output to stderr so that
+  `./ash report ... > file` holds the report alone. `./ash get-genai-guide -o
+  guide.md` and `./ash config -o DIR` now reach those subcommands' own `-o`
+  (`--output`, `--output-dir`) instead of naming the container runtime; those two
+  are the only subcommands that define an `-o` of their own, so everywhere else
+  (`-o` with no subcommand, after `scan`, whose `-o` is the CLI's own alias of
+  `--oci-runner`, after `build-image`, `report`, `merge`, `mcp`, `inspect`,
+  `dependencies` and `plugin`) `-o` is still the wrapper's runner, and
+  `./ash scan -o podman` picks podman as it always did.
+- `./ash` exits 5, the usage-error code, for a value option given no value, where
+  it exited 3; `Invoke-ASH` exits 5 for a parameter given an empty or blank value,
+  as `./ash` does.
+- `./ash` keeps the container's stdin open only for the subcommands that read it
+  (`mcp`, `inspect`, `config`) and for a run given `--cli-json-input -`; a scan no
+  longer consumes the caller's stdin, so `while read` loops and job scripts fed to
+  bash on stdin run every line.
 - Redaction matches a value's JSON spelling with non-ASCII kept raw as well: a
   message that embeds a value as a JSON body written with `ensure_ascii=False`
   (an HTTP client quoting the body it could not send) escapes the value's
@@ -2525,6 +2623,65 @@
   text: a code span per refusal in `ash.summary.md`, and control and
   bidirectional-formatting characters escaped in the text summary, on the console
   and in the log.
+
+- **npm-audit's rule ids for advisories that carry no URL, or share one, now end in
+  the audit tool's advisory id.** An advisory with no usable URL had the rule id
+  `npm-<package>` whatever the advisory, so two of them on one package folded into one
+  result and the second one's severity, CWE and CVSS were dropped. Where the tool
+  gives an advisory id (npm's `source`, or the id of a yarn or pnpm record) the rule
+  id is now `npm-<package>-<id>`. An advisory behind a collection URL, one that ends
+  in a slash, always takes the same `-<id>` ending after the URL's last segment, so its
+  rule id does not change with the other advisories in the scan. Advisories of
+  different titles that share any other URL segment take it too, and for those the
+  ending is only added while both are in the scan. Both advisories now show as
+  results. A suppression whose `rule_id` names the old id
+  (`npm-left-pad`) no longer matches, so the finding it hid is reported again until
+  the suppression names the new id, which the finding shows. A package whose name ends
+  in `-<number>` and another package's advisory id can spell the same rule id; that is
+  a limit of the id's shape and is unchanged here.
+
+- **npm-audit reports a copy that only a dependency makes vulnerable as a transitive
+  finding, graded by that dependency.** An npm entry can be vulnerable through an
+  advisory of its own and through a package named in its `via` list. A copy outside
+  every range of the entry's own advisories used to keep that advisory's rule id,
+  severity and fix text, although the advisory does not cover it, and a suppression of
+  the advisory then hid the dependency's problem. Such a copy now gets an
+  `npm-audit-transitive-<package>` result, graded at the highest severity of the
+  entries it depends on, and the advisory's result stays on the copies it covers. The
+  transitive result is traced to its dependencies' advisories only, so suppressing
+  those advisories suppresses it. A suppression whose `rule_id` names the entry's own
+  advisory no longer reaches that copy.
+
+- **npm-audit fails the audit of a package when a file it admitted cannot be copied,
+  instead of auditing part of the workspace.** The private copy opens each input and
+  judges the open file. A file that turned out not to be a regular file, to lie outside
+  the scanned tree, or to have been swapped for a link after the check was left out of
+  the copy without a record, and the package manager audited what was left. The audit
+  now fails with a message naming the file and the reason, the way an unreadable input
+  already did. For yarn, a workspace member found below a linked directory is now
+  listed under the link's name too, since yarn reaches it through that path; a package
+  that would list more than 10,000 such manifests is refused, with the reason given for
+  one that reaches too many linked directories.
+
+- **With `--ignore-suppressions`, only pnpm's copy of `package.json` is parsed.** A
+  manifest the parser could not read failed the package's audit with a message about
+  `pnpm.auditConfig`, although only pnpm reads that key, so one broken `package.json`
+  fixture anywhere in a yarn workspace failed the whole audit. npm and yarn now get the
+  manifest's bytes unchanged, and a manifest that held the key is no longer rewritten
+  for them. pnpm still refuses a manifest it cannot read.
+
+- **When two lockfiles report one advisory, the merged rule keeps the higher score.**
+  The first lockfile's score used to win, so scores of 5.0 and 7.5 graded both results
+  MEDIUM or both HIGH depending on the order the lockfiles were walked in. The merged
+  `dependencies` total in the scan's metadata is recounted from its counts when only one
+  report gave a total.
+
+- **A `pnpm-workspace.yaml` member glob with a brace group is left out of the audit's
+  copy.** pnpm expands `{a,b}` into patterns of its own, so `{..,x}/*` reaches a path
+  above the package although no part of it is `..` as written. Absolute globs and
+  globs with a parent step were already left out. Each glob left out is now named in
+  the debug log with the reason, and leaving out a negated glob (`!pattern`) can add
+  members to the audit, which the line says.
 
 - **npm-audit's package managers read none of the scanned repository's settings
   files, and run no file it names.** npm, pnpm and yarn ran in the package's
@@ -4021,8 +4178,10 @@
   - A uv command other than `uv tool` or `uvx` also gets `UV_NO_PROJECT=1` and
     `UV_PYTHON` set to ASH's interpreter, because uv looks for a project and a
     `.venv` in every parent directory too. A command that names `--project`,
-    `--python`, `-p` or `--system` keeps its own choice, and so does a `UV_PYTHON` or
-    `UV_SYSTEM_PYTHON` you set.
+    `--python`, `-p` or `--system` keeps its own choice, and so does a `UV_PYTHON` you
+    set. A `UV_SYSTEM_PYTHON` you set counts only for `uv pip`, the one subcommand that
+    reads it; `uv run` and the others ignore it, so they still get ASH's interpreter
+    and do not fall back to a `.venv` in the scanned tree.
   - `ASH_BIN_PATH` is made absolute where ASH reads it, so a relative value names
     the same directory for every command. An empty value now counts as unset; it
     used to mean the current directory. `--bin-path` shows its default as
@@ -5357,7 +5516,154 @@
   directory such as `node_modules/.bin`, put that directory on PATH by its absolute
   path.
 
+- **The candidates a repository's own detect-secrets baseline lists stay in the
+  report as suppressed findings.** A `.secrets.baseline` or
+  `.ash/.secrets.baseline` found in the scanned tree, or a `baseline_file` named
+  by a config the operator did not write, is the repository's record: its known
+  candidates are reported suppressed, with the baseline named as the reason, so
+  the count stays visible and a repository cannot hide a secret still in its
+  files by listing the hash in a file it commits. They used to be removed from
+  the report. Only a `baseline_file` the operator's own settings name
+  (`--config-overrides` included) removes its known candidates. A baseline read
+  through an in-tree link into the enclosing checkout (a monorepo's
+  `service/.secrets.baseline` pointing at the checkout's own baseline) has its
+  result keys and `should_exclude_file` patterns read relative to the directory
+  the baseline sits in, as detect-secrets wrote them; a link that leaves the
+  nearest checkout is not read. The worker is never seeded with the baseline,
+  so an entry whose secret has left its file is not reported at the baseline's
+  stale line, and a `--slim` baseline's entries no longer fail the scan.
+
 ### Fixes
+
+- **A certificate setting you made is readable inside every sandbox backend.** Only
+  sandbox-exec granted reading the file `SSL_CERT_FILE` names. Under bwrap, firejail
+  and Landlock a bundle kept under the home directory was passed through and could
+  not be opened, and `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`
+  and `SSL_CERT_DIR` were granted by none. All four backends now grant, read-only,
+  the files and directories named by the values ASH started with, or by a
+  `NAME=value` entry of the environment list, to a scanner that has a network (one
+  with none verifies no peer and is granted no read). A `SSL_CERT_DIR` entry that is a home directory or
+  holds one is not granted, with a warning. The proxy and certificate names are now
+  one environment list that every backend reads, in the shape of a docker-compose
+  `environment` list (a name passes the value ASH has, `NAME=value` sets it); a name
+  that marks a credential is refused with its name.
+
+- **Choose which environment variables sandboxed scanners are passed with
+  `sandbox.environment`.** The list is the docker-compose shape described above and
+  defaults to the proxy and certificate variables. A list you write replaces the
+  default, so list the proxy and certificate variables you still want. Override it for
+  one run with `--config-overrides 'sandbox.environment=[...]'`. Like
+  `sandbox.extra_read_paths`, it is honored only from `--config-overrides` and from
+  config files outside every git checkout and the scanned directory, because a
+  `NAME=value` entry sets a variable in every sandboxed scanner. A name that marks a
+  credential, `TMPDIR`, `TEMP`, `TMP`, `HOME`, and a `NAME=value` entry whose value
+  is a URL with a user name and password are refused with the variable named. A
+  string where a list belongs is refused with its shape named, and an entry that
+  does not start with a variable name (a name with a trailing newline, or a value
+  pasted without its name) with its position in the list. No refusal shows a value.
+  The URL case used to be accepted and then dropped from every scanner without a
+  message, so a proxy written that way left the scanners without one.
+
+- **A `--cli-json-input` number where the parameter takes true/false or a whole
+  number is refused with a usage error that names the key.** A JSON number for a
+  true/false parameter (`"verbose": 1`) ended in an AttributeError traceback, 0 and
+  1 included: the click that typer bundles reads a boolean from a JSON boolean or
+  from text only. A number with a fraction or an exponent for a whole-number
+  parameter (`"shard_index": 1.9`) was truncated by `int()` without a word, so
+  shard 1 ran, and so did `2.0` and `1e2`, which `--shard-index 2.0` refuses.
+  Both are usage errors now (exit 5) that name the key; `true`, `false`, whole
+  numbers and the text forms click already read are unchanged. `Infinity`,
+  `-Infinity`, `NaN` and an integer with more digits than Python reads make the
+  document invalid JSON, which is a usage error too, with no traceback.
+
+- **`--cli-json-input` reads a document as tools write it.** A UTF-8 byte order
+  mark on a file or on stdin is accepted; stdin is read as UTF-8 whatever the
+  process locale, and a read that fails is the usage refusal a file gets, not a
+  traceback. A `file:///` or `file://localhost/` URI is percent-decoded as a URI
+  is; any other text after `file://` is a path exactly as written, relative or
+  absolute, as the AWS CLI reads the prefix, so a `%` in a file's name stays a
+  `%`. It used to be parsed as a URI, so `file://params.json` was refused as a
+  remote host and a `#` in a file's name cut the name. A document nested too deeply to parse, a number too large for a
+  whole-number parameter and a file name with a null byte (`file://a%00b`) are
+  usage refusals, not tracebacks. `--help` and
+  `--generate-cli-skeleton` run before the document is read, so a bad document
+  blocks neither. The document's values rank above environment variables, as
+  documented: an environment value the parameter's type refused used to fail the
+  run even when the document set that parameter. The skeleton writes `null` for a
+  parameter that is required or that an environment variable backs, so an
+  unedited skeleton no longer overrides the variable with the default; its
+  `--generate-cli-skeleton` help says so.
+
+- **`ash plugin list` lists what a scan with the configuration loads, on or off,
+  built as the scan builds it.** It listed every class registered in the process, so
+  plugins no scan of the configuration would run (a module the configuration does
+  not name, an off-host reporter a trusted module does not load) were listed and
+  had their options checked; the listing now follows the scan's selection. Each
+  plugin is built from its own section, so the Enabled column follows the
+  plugin's model default where the section leaves the key out (an opt-in plugin
+  whose section sets options only is listed off, as a scan runs it), a section
+  without `name` shows the plugin's declared name, and an off-host reporter's row
+  shows the section the report phase reads, with Enabled true only for an
+  `enabled: true` there. `--show-versions` matches each scanner to its inventory
+  entry by position, so a scanner whose config name differs from its class name
+  no longer reads Unknown; its help no longer calls the default listing fast, since
+  the default listing builds every plugin too.
+
+- **`ash build-image` stops its container scan on SIGTERM and exits as terminated.**
+  The scan that follows the build ran outside the SIGTERM shutdown scope `ash scan`
+  uses, so a SIGTERM killed the process at once with no word; the scan now runs
+  inside that scope, the runner is stopped through the launcher's interrupt path,
+  and the command exits with the terminated code and one line saying so. Ctrl-C
+  cancels the scope before the command exits, and a SIGTERM that lands where
+  nothing in the run polls the event still ends the command as terminated. The
+  command also applies `--quiet`, `--verbose` and `--debug` to records logged
+  before the scan attaches its handlers, and shows the scan's summary and
+  exit-code legend when a scan runs, which the host used to suppress along with
+  the container's copy.
+
+- **A workspace policy suppression's `package_path` is read relative to the
+  workspace, like the entry's `path`, and pushed down into each project with it.**
+  `api/node_modules/left-pad` applies in `api` as `node_modules/left-pad` and is
+  dropped from every other project the `path` reaches, silently, as the entry is
+  right. A value written relative to a project (`node_modules/left-pad`) names no
+  project's copy once it is pushed down, so the policy is refused (exit 4) naming the
+  entry and the value, instead of the suppression vanishing from every project with a
+  log line to show for it; a value that names a copy only in a project the run skips
+  is logged once and not refused. A policy an MCP client delivered is refused by the
+  entry's position, its value withheld.
+- **`download_file` lands what it downloads at mode `0o644`, not `0o755`, and takes
+  `mode=`.** The public helper used to make every downloaded file executable. What
+  it downloads is data (a rules bundle, a release archive), so the default is now
+  least privilege; a plugin that calls it to fetch a program it then runs passes
+  `mode=0o755`, and the bit is set on the staged file before it lands, as
+  `install_binary_from_url` does for the binaries it installs.
+- **What an archive does to itself is an input error; what the run does is a tool
+  error, and only the first can be accepted.** The archive converter graded every
+  failure as a tool error, so no `ash-unconverted-input` suppression on an archive's
+  path took effect. A damaged, truncated or misnamed archive, an encrypted zip
+  member, a member compressed with a method zipfile does not read, a damaged
+  compressed stream inside a tar, a member name the filesystem refuses, and a member
+  under a path an earlier member made a file are input errors now: a reviewed
+  suppression on the archive's path accepts the record, which keeps the record in the
+  results with the reason it was accepted for (`accepted_reason`, beside
+  `accepted_by`), and the completeness gate leaves it out. A failure of the run (a
+  full, over-quota, read-only or forbidden work directory, or a defect) stays a tool
+  error that no suppression accepts. A suppression a client delivered with its own
+  tree accepts nothing. An empty tar (end-of-archive blocks only, with or without
+  gzip) is a valid archive with no members, extracted to nothing and recorded whole,
+  instead of a failed input. A scan-set path not lexically under the source tree no
+  longer raises when ignore paths are set.
+
+- **Two archive members bound for one path are both extracted and scanned.** A later
+  member written to the same path as an earlier one (`vendor//m.js` after
+  `vendor/m.js`, a tar's repeated name, or two spellings of one name on a
+  case-insensitive filesystem) used to be refused, so the bytes one unpacker produces
+  were never scanned. It is written beside the earlier member under a numbered name
+  (`vendor/m~2.js`) that no member of the archive is named by, with a warning naming
+  both; past the first 20 in one archive, one line counts the rest. An environment
+  file with a stage suffix (`.env.local`, `.env.production`) is extracted as `.env`
+  is. A notebook member whose name is written in another case, or that cannot be
+  encoded by the filesystem, keeps a distinct converted output.
 
 - **ASH now requires uv 0.13.4 or later, and the container image pins uv
   0.13.4.** uv before 0.13.4 is affected by GHSA-hq85-5cpj-mr62 (critical). The
@@ -7752,7 +8058,200 @@
   parenthesized block, with each argument ASH accepts and compares what the program
   receives.
 
+- **A non-absolute `GITLEAKS_CONFIG` is read where the operator set it.**
+  gitleaks resolves a relative path against its working directory, which ASH
+  sets to the scanned source directory, so `GITLEAKS_CONFIG=rules.toml` was read
+  from the scanned tree: the repository supplied the config. The same held for
+  `GITLEAKS_CONFIG=~/rules.toml`, which a CI `env:` block, a `.env` file or
+  `--env-file` leaves unexpanded and gitleaks does not expand either. Outside the
+  scanner sandbox such a value is now anchored to the directory ASH runs in,
+  with `~` expanded, and passed as `--config`; the re-scan of the ignore file's
+  copies uses the same anchor. An absolute `GITLEAKS_CONFIG`, and
+  `GITLEAKS_CONFIG_TOML`, are left to gitleaks as before.
+
+- **What the gitleaks re-scan of the tree's `.gitleaksignore` can now report.**
+  gitleaks applies `<scan path>/.gitleaksignore` whatever ASH passes, so ASH
+  copies the files it names and scans them again. A run can now end differently
+  in these cases. The re-scan copies at most 1 GiB in all (there is no option
+  for it): a file that does not fit is skipped, the files after it are still
+  re-scanned, and the scan is reported as incomplete (exit 1). It reads at most
+  100,000 names from the file, and one line of colons no longer makes a name for
+  each colon: names no file can have are not built, and what is left unread makes
+  the scan incomplete. A name repeated on several lines counts once, and a name
+  is measured in UTF-16 code units on every platform, as NTFS, exFAT, vfat and
+  HFS+ bound it, so a name that fits one of those file systems is not dropped
+  on a host that mounts it. The report gives the files not re-scanned, which
+  are real files and not every name a colon split makes, and the names left
+  unread as two separate counts. A `.gitleaksignore` that changed while
+  gitleaks ran fails the scan, and so does an empty re-scan report or one with
+  no run, where each used to read as no dropped findings. Results under an
+  earlier run's `.ash/ash_output` are dropped even when `--output-dir` points
+  elsewhere, as they are under this run's. A `.gitleaksignore` that is a symlink
+  to a directory, or a dangling one, is read as no ignore file instead of
+  stopping the scan. On a case-insensitive filesystem a `.gitleaksignore`
+  committed as `.GITLEAKSIGNORE` is re-scanned as the ignore file it is, and an
+  entry spelled in another case, which hid no finding, is skipped.
+
+- **The operator's own `file://` detect-secrets filters keep the operator's
+  judgment beside a baseline's filters.** Authorship of a `filters_used` entry
+  was judged per option: once the baseline in use had any filter, every retained
+  operator `file://` filter was checked as the baseline's, so one under the
+  scan's own output or work directory, which the operator's configuration may
+  name, was refused with a warning. Each entry is now judged by its own writer.
+
+- **A detect-secrets baseline the repository controls is scanned like any other
+  file.** A baseline found in the scanned tree (`.secrets.baseline`,
+  `.ash/.secrets.baseline`), or named by a config the operator did not write, was
+  left out of the scan, so anything a repository put in a file of that name was
+  never read. It is now in the scan set. A detector that reads back a hash the
+  baseline lists, whichever detector made the finding, is not reported for that
+  file, unless the baseline also holds that value outside its `hashed_secret`
+  entries (under `notes`, say): a token written in both places is reported. The
+  worker is not handed a baseline's `is_baseline_file` filter, which
+  skips files by name and can name any file, whoever's baseline it is; only the
+  operator's own settings can carry it.
+  When the configuration was also read from the repository's own files, an
+  `is_baseline_file` entry or an exclude pattern counts as the operator's only
+  where the operator's own configuration names the same entry. The baseline's
+  `should_exclude_file` patterns apply to every file except the
+  baseline itself. A `baseline_file` the operator names that resolves inside the
+  scanned tree, or inside a git checkout holding it, is read as the repository's
+  record too: its known candidates stay in the report as suppressed findings,
+  where they used to be removed. The baseline's
+  `detect_secrets.filters.regex.should_exclude_line` and
+  `detect_secrets.filters.regex.should_exclude_secret` patterns still apply to
+  every file it covers, the baseline included, as its other exclusions do. The
+  word list filter, `detect_secrets.filters.wordlist.should_exclude_secret`, is
+  a different filter and is not taken from a baseline the repository controls.
+  The `is_baseline_file` entry of a baseline the operator named outside the
+  scanned tree is not handed over either: it would skip every file of its
+  `filename`, and a baseline generated in a repository as `.secrets.baseline`
+  and moved out names exactly the file a repository commits. The operator's
+  baseline is left out of the scan by its path, and the repository's own file
+  of that name is scanned like any other.
+
+  Two more changes to detect-secrets settings read from the repository's files.
+  When a configuration was also read from the repository's own files, the
+  operator's word list (`detect_secrets.filters.wordlist.should_exclude_secret`)
+  is confined: a `file_name` that resolves outside the directory of the file
+  that names it and outside the scanned tree is refused with a warning, and the
+  candidates its word list would have excluded are reported, unless the
+  operator's own configuration names the same absolute path. The global ignore
+  paths are matched against each file's path relative to the source directory,
+  as they are written, so a relative, linked or Windows source directory no
+  longer leaves every path uncut; a converted file keeps the source directory as
+  its anchor and reads `.ash/ash_output/converted/x` when the output sits in the
+  scanned tree.
+
 ### Reporting changes
+
+- **GitLab SAST reports a finding with several locations at its first located
+  one.** The `location` of a vulnerability used to blend the locations: the last
+  location's file with an earlier location's line and source excerpt, a position
+  that exists in neither. It is now the first location with a file, with that
+  location's own line and excerpt. GitLab's location fingerprint changes for such
+  a vulnerability, so one pipeline marks the existing one as no longer detected
+  and opens it anew at its real position; a vulnerability with one location is
+  unchanged. The `id` and the ASH finding-id identifier of every vulnerability
+  are now the finding's `id` in `ash.flat.json` (see the entry on that id below),
+  so they change once with it.
+
+- **Every OCSF `finding_info.uid` changes once, and then stays.** It was a fresh
+  random UUID on every run, so no SIEM could match a finding across two scans. It
+  is now derived (UUID version 5) from the finding's `id` in `ash.flat.json`, the
+  same id the GitLab SAST report carries, so the same finding has the same uid in
+  every scan of the same tree and the same identity across the reports. A finding
+  the flattening cannot vouch for is keyed on the result alone: scanner, workspace
+  project, rule, message, file and lines, with two identical results numbered.
+  The message in that key is read as every other report reads it (its text, else
+  its markdown, else the id of the message string), so two findings at one site
+  whose messages are given in markdown or by id are no longer numbered as repeats
+  of one another, and a result that states no finding takes no number. A record
+  the reporter builds in its reduced form carries the uid its whole record would
+  have, and only its degraded label tells the two apart. A finding whose title and
+  description could not be built is written with a minimal finding info; that
+  record carries the same uid and the degraded label too, where it used to carry
+  a uid of its own.
+
+- **The OCSF report leaves out results that state no failing finding, and says
+  when its array is short.** A result whose SARIF `kind` is `pass`, `notApplicable`
+  or `informational` (a cdk-nag rule that was not evaluated) is left out of
+  `ash.ocsf.json`, as it is left out of `ash.ghas.sarif`; such results stay in
+  every other report. A finding the OCSF builder could not convert used to be
+  dropped with a log line, and the array looked complete. The array now carries
+  one extra record when that happens: `status_id` 99 with `status` `Incomplete`,
+  severity Informational, an empty `vulnerabilities` array, a `finding_info.uid`
+  derived from the scanned project's configured name (the same across runs of
+  one named project, different for differently named projects; scans that keep
+  the default name share one) and the label `ash_row_type:conversion_shortfall`,
+  which is the stable way to select the record: the uid is not the fixed string
+  `ash-ocsf-conversion-shortfall`, and a SIEM rule that matches that string
+  finds nothing. Its `status_detail` says how many findings
+  are absent and how many were built by the fallback path, and those fallback
+  records carry the label `ash_row_type:degraded_finding`. A reader that takes
+  `vulnerabilities[0]` from every record skips the shortfall record by its label.
+
+- **The GitLab SAST report's `scan.status` reads `failure` whenever the scan was
+  incomplete, and `scan.messages` says why.** The status used to read `success`
+  unless a scanner had failed outright, so a scan that lost a converter, could
+  not evaluate a rule or ran against a content database past its age bound was
+  uploaded as a complete, successful scan. The status now follows the same
+  incompleteness facts the exit code reads, and each fact adds one `warn`
+  message naming the scanner, converter, rule or database and what is absent
+  from the report because of it. Two findings of one
+  rule at one line that the flattening could not pair used to share one `id` and
+  one ASH finding-id identifier; they now carry distinct ones: the first keeps
+  the id it always had, the second is numbered. GitLab merges vulnerabilities
+  that share a location and any identifier other than CWE or WASC, so two such
+  findings that both carry the scanner's rule identifier still read as one
+  there; the distinct ids keep apart those that carry no rule identifier.
+
+- **The GitLab SAST and OCSF reports read a result's rule and message as the
+  SARIF schema allows.** A result that names its rule as `rule.id` instead of
+  `ruleId` had no `name`, an empty rule-id detail and no rule identifier in the
+  GitLab report (OCSF already read it); it now reads as a rule named either way.
+  A message of whitespace alone was written as the description; it is now read
+  as absent, so the GitLab description is empty and the OCSF title and
+  description read "No description", as for a message with no text. Both
+  reports take these readings, and the kinds that state no finding, from one
+  shared definition, so they cannot drift apart again.
+
+- **The GitLab SAST description of a result whose message is given by id is read
+  from the rule in its own run and scanner.** Such a message names a string of
+  its rule, and the description is that string. The rules were looked up by bare
+  rule id over every run and every scanner, keeping the first, so a rule id that
+  two scanners declare (grype and trivy on a CVE) took the first scanner's string
+  for both. The lookup now takes the rule from the run the result is in and, in
+  it, from the scanner component the result names, and reads a string the
+  component declares for all its rules (`globalMessageStrings`) when the rule
+  declares none of its own. The description of such a result can change from the
+  other scanner's text to its own.
+
+- **The Markdown report's project line puts adjacent references in one code
+  span.** A project name written as `${ORG}${REPO}`, or a reference written
+  against a mention or a URL, was printed as two code spans back to back, and
+  Markdown showed the backticks between them as text. Pieces that touch now
+  share one span.
+
+- **The Markdown report escapes `$` in scanner and project text.** GitHub reads a
+  pair of dollar signs as a formula, so text such as a shell snippet holding two
+  `$` characters rendered as math. Each `$` outside a written `${NAME}`
+  reference now carries a backslash like the other Markdown syntax characters.
+
+- **The GitHub GHAS report leaves out results that state no failing finding, and
+  names its category only when asked.** A result whose SARIF `kind` is `pass`,
+  `open`, `review`, `notApplicable` or `informational` (a cdk-nag rule that was
+  not evaluated) is left out of `ash.ghas.sarif` and out of its rules' scores;
+  GitHub reads no `kind`, so uploaded it opened an alert like a failing result.
+  Such results stay in every other report. The new reporter option
+  `emit_automation_details` (off by default) writes `runAutomationDetails.id`
+  `ash/<project key>/` into a workspace project's own report so that the
+  per-project uploads for one repository are filed under separate categories; it
+  is off by default because an id in the file takes precedence over the `category`
+  the `upload-sarif` action is given, and turning it on moves existing uploads to
+  a new category, leaving the old analysis's alerts open until they are closed by
+  hand. The report also keeps a chained `originalUriBaseIds` entry's own
+  `uriBaseId`, and writes a suppression's `kind` only when it has one.
 
 - **A converter whose dependencies were unavailable says why in the results.**
   Its `converter_results` row in `ash_aggregated_results.json` carries
@@ -7966,6 +8465,36 @@
   `diff_scan_results` baseline, no longer match; take a new baseline. An
   `additional_reports` entry that carries its own `id` keeps it.
 
+- **A finding from a scanner only the workspace policy added is reported as "Not
+  gating" when its project's `policy_scanners_gate` is off, not as "Below
+  threshold".** Such a finding is left out of the project's outcome whatever its
+  severity, and the reports filed it with the low-severity findings the threshold
+  sets aside, so a CRITICAL one was hidden by the HTML report's default view. It
+  now has its own status in the HTML report, its own "Not gating" figure in the
+  masthead and in the Markdown and text summary lines, and a "Not gating"
+  choice in the HTML scope menu; the default view shows it. The Markdown report
+  lists it in a "Not gating (workspace policy)" table, and the text report does
+  when it lists detailed findings. The scan summary carries the count as
+  `policy_not_gating`, and `below_threshold` no longer includes these findings, so
+  it is no longer `active` minus `actionable` when any are present. When no
+  finding counts toward the outcome and some were left out, the headline sentence
+  says so instead of saying that no finding reached its threshold. A report with
+  no such finding differs only by the extra choice in the HTML scope menu.
+- **A workspace project that completed with a skip reason, and also exceeds its
+  threshold or has an incomplete scan, reads `FAILED` in the project table.** It
+  read `SKIPPED (<reason>)` while the run's exit code failed for it. The row now
+  reads `FAILED`, or `FAILED (incomplete)`, as the exit code does, and shows the
+  project's finding counts instead of `n/a`. A project that completed with a skip
+  reason and neither condition still reads `SKIPPED (<reason>)`.
+- **The HTML report prints a scan text block as written when nothing in it needs
+  changing, and says what it changed when something does.** A snippet or
+  description that holds no control character and no CI command form is printed
+  as it is, where a code sample's `\x41` used to print as `\\x41`. A block that is
+  shown instead carries a note naming what showing it changed: control characters
+  written as escapes, CI command forms broken, and a backslash run doubled before
+  text that reads as an escape. A backslash before text that reads as no escape
+  is left as it is and is not mentioned.
+
 ### Configuration sources
 
 - **`pyproject.toml [tool.ash]` and `ashrc` files are config sources (#313).**
@@ -8111,6 +8640,29 @@ These affect working on ASH, not the installed package.
   jupyter converter tests can build the Windows configuration, which pins nbconvert to
   one version, on any host, and a test reads the version the convert phase's converter
   is asked for.
+
+## v3.7.1 (2026-09-03)
+
+### BREAKING CHANGE
+
+- a requested cdk-nag pack whose name cannot be resolved now raises instead
+of being skipped with a logged error, so a configuration naming a pack that does not exist
+fails the scan rather than silently evaluating a subset of the requested rules. Separately,
+`include_compliant_checks` no longer has any effect: cdk-nag 3.x reports through CDK's
+policy validation framework, whose report contains violations only, so the compliant and
+suppressed records 2.x listed alongside them are no longer available at any setting.
+- a scanner that attempted at least one target and failed on all
+of them now reports ERROR with a non-zero exit code and SARIF
+executionSuccessful=false, where it previously reported PASSED with zero
+findings. Pipelines running a scanner that cannot execute will begin failing
+rather than completing.
+
+### Fix
+
+- **backport**: keep v3.7.0's own lockfile, not main's
+- **cdk-nag**: count a template with no validation report as a failed target
+- **cdk-nag**: hold the v3 migration to a test suite that can fail
+- **cdk-nag**: migrate to cdk-nag 3.x and report per-target failures
 
 ## v3.7.0 (2026-08-27)
 

@@ -2,23 +2,29 @@
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import platform
-from typing import List, Literal, Mapping, Optional, Set
+import time
+from typing import Any, Collection, List, Literal, Mapping, Optional, Set, Tuple
 
 
 from automated_security_helper.base.plugin_config import (
+    declared_plugin_name,
     plugin_config_key,
+    section_enabled,
     split_plugin_names,
 )
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.cancellation import (
     ScanCancelled,
     raise_if_cancelled,
+    shutdown_requested,
 )
 from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
+from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.scanner_selection import (
+    community_scanner_refusal,
     refuse_selection_matching_no_scanner,
     selection_after_exclusions,
 )
@@ -65,6 +71,11 @@ from automated_security_helper.utils.error_text import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+#: Passed for a scanner's configured section when the caller has not read it,
+#: so the helpers below read it once; None is a real answer (no section).
+_UNREAD: Any = object()
+
+
 class ScanExecutionEngine:
     """Manages the execution of security scanners."""
 
@@ -108,8 +119,11 @@ class ScanExecutionEngine:
                 projects): merged with this config's own map, the masked form
                 winning, so a name another project read from the environment is
                 never printed by this engine's log lines.
-            enabled_scanners: List of scanner names to enable. If None, all scanners are enabled.
-                If empty list, no scanners are enabled.
+            enabled_scanners: The scanner names to run, the ``--scanners`` allowlist.
+                None and an empty list mean the same thing, no narrowing: every
+                scanner runs. Nothing can be selected by an empty list; running
+                nothing is refused instead (core.scanner_selection), because a
+                scan that checked nothing would report itself clean.
             shard_index: Zero-based index of this shard, when one scan is split
                 across several executors. Requires shard_count. Carried verbatim to
                 ScanPhase, which validates the pair and computes the partition.
@@ -151,6 +165,12 @@ class ScanExecutionEngine:
         if context is None:
             raise ValueError("Context must be provided")
 
+        # Whether this engine built its results model, which decides whether
+        # ensure_initialized may stamp the run's configuration onto it: a model
+        # a caller passed (one loaded from an existing results file by
+        # --use-existing, a library caller's own) records the configuration of
+        # the scan that produced it, which this run's is not.
+        self._built_model = asharp_model is None
         if asharp_model is None:
             asharp_model = AshAggregatedResults(
                 name=f"ASH Scan {datetime.now().isoformat()}",
@@ -298,11 +318,15 @@ class ScanExecutionEngine:
                     values=config_environment_values(self._context.config),
                 )
                 # Discover plugins from specified modules, past the ones the
-                # loader already failed (refused below on the record).
+                # loader already failed (refused below on the record). With the
+                # run's env-read values: a failure raised here is a new
+                # exception object, carrying none of the values the loader
+                # redacts with, so its warning line is redacted from these.
                 discover_plugins(
                     plugin_modules=operator_plugin_modules,
                     shown=shown or None,
                     failed=run_record,
+                    values=config_environment_values(self._context.config),
                 )
             for module_name in untrusted_plugin_modules:
                 with ash_plugin_manager.untrusted_import(module_name):
@@ -316,6 +340,7 @@ class ScanExecutionEngine:
                         plugin_modules=[module_name],
                         shown=shown or None,
                         failed=run_record,
+                        values=config_environment_values(self._context.config),
                     )
             # A configured module that failed to import refuses the scan, as a
             # misnamed one does above: the run has none of the plugins the
@@ -398,18 +423,21 @@ class ScanExecutionEngine:
         # selects this scan's share of the registry. The handler filter decides
         # which event handlers it notifies: those of the same plugins, plus
         # handlers the program running the scan subscribed from outside the
-        # plugin namespace. plugins_of is the one-callable scope form the phase
-        # objects consume as plugin_scope.
+        # plugin namespace. The phases this engine builds take the same handler
+        # filter as their plugin_scope, so a phase-level event (SCAN_START,
+        # SCAN_COMPLETE, every *_PHASE_START and *_PHASE_COMPLETE) reaches the
+        # same handlers EXECUTION_START and EXECUTION_COMPLETE reach. The
+        # phases used to be given plugins_of instead, which admits only the
+        # plugin namespace, so a handler the program subscribed saw the
+        # execution events and never a phase event.
         from automated_security_helper.plugins.loader import (
             masked_module_scope,
-            plugins_of,
             scan_handler_filter,
             scan_plugin_filter,
         )
 
         self._plugin_filter = scan_plugin_filter(combined_plugin_modules)
         self._handler_filter = scan_handler_filter(combined_plugin_modules)
-        self._plugin_scope = plugins_of(combined_plugin_modules)
         # The registry is the process's, so the lines its reads write name a
         # plugin's module as the plugin recorded it. A module an entry read
         # from the environment is, or sits inside or above, is named by its
@@ -513,8 +541,16 @@ class ScanExecutionEngine:
         """Get a scanner instance by name.
 
         Args:
-            scanner_name: Name of the scanner to retrieve
-            check_enabled: If True, validate against enabled scanners list first
+            scanner_name: Name of the scanner to retrieve: its declared name
+                (``bandit``, the key its config is looked up by), the name its
+                configured section gives it (``scanners.bandit.name``, the name
+                ScanPhase selects and reports it by) or its class name
+                (``BanditScanner``), compared case-insensitively.
+            check_enabled: If True, refuse a scanner this engine's selection
+                leaves out: one named by the exclusion list, one the allowlist
+                (when there is one) does not name, or one whose configured
+                section disables it (``enabled: false``), which ScanPhase
+                records SKIPPED.
 
         Returns:
             Scanner instance configured with current engine paths
@@ -531,26 +567,155 @@ class ScanExecutionEngine:
         # Get all scanner plugins
         scanner_plugins = self.plugins.get("scanner", [])
 
-        # Find the scanner by name
+        # Find the scanner by name. Every spelling is accepted: the lookup used
+        # to compare the lowercased class name only, so get_scanner("bandit"),
+        # the name every other surface uses, raised "not found"; and it read the
+        # declared name only, so a scanner the configuration renames
+        # (scanners.bandit.name: my-bandit), which ScanPhase selects and reports
+        # as my-bandit and which ensure_initialized judges the selection by, was
+        # "not found" under that name and judged against the wrong one.
         for scanner_class in scanner_plugins:
-            scanner_class_name = getattr(scanner_class, "__name__", "Unknown").lower()
-            if scanner_class_name == lookup_name:
+            names = {
+                getattr(scanner_class, "__name__", "Unknown").lower(),
+                plugin_config_key(scanner_class).lower(),
+            }
+            # The configured section is read once per class and handed to the
+            # name, the refusal and the constructor: read by each, the one call
+            # the lookup used to make became three, which a caller counting the
+            # config reads (and a config whose lookup is costly) sees. A read
+            # that raised is kept with it (section_error), not read again.
+            section, section_error = self._read_scanner_section(scanner_class)
+            configured = self._selectable_scanner_name(scanner_class, section)
+            if configured is not None:
+                names.add(configured.lower().strip())
+            if lookup_name in names:
+                # The documented check: the parameter was accepted and never
+                # read, so an excluded or unselected scanner was returned.
+                if check_enabled:
+                    self._refuse_unselected_scanner(
+                        scanner_name, names, scanner_class, section
+                    )
+                if section_error is not None:
+                    # The lookup raised, and the refusal above judged the scanner
+                    # as one with no section (it names nothing and disables
+                    # nothing). The constructor's own read raised for this, as
+                    # it did before the section was shared, and so does this:
+                    # reading it a second time could return a section the
+                    # refusal never saw, an `enabled: false` among them, and
+                    # build a scanner the refusal let through.
+                    raise section_error
                 # Create and return the scanner instance
-                scanner = scanner_class(
-                    context=self._context,
-                    config=(
-                        self._context.config.get_plugin_config(
-                            plugin_type="scanner",
-                            plugin_name=plugin_config_key(scanner_class),
-                        )
-                        if self._context.config
-                        else None
-                    ),
-                )
+                scanner = scanner_class(context=self._context, config=section)
                 return scanner
 
         # If we get here, the scanner wasn't found
         raise ValueError(f"Scanner {lookup_name} not found")
+
+    def _refuse_unselected_scanner(
+        self,
+        scanner_name: str,
+        names: Set[str],
+        scanner_class: type,
+        section: Any = _UNREAD,
+    ) -> None:
+        """Raise ValueError when this engine's selection leaves the scanner out.
+
+        *names* are the lowercased spellings the scanner answers to when it is
+        looked up. The selection is judged by the one name ScanPhase matches it
+        by: the configured name, else the declared name
+        (``_selectable_scanner_name``). A scanner that has neither is judged by
+        every spelling in *names*, because its name is known only once the phase
+        constructs it. Judged by every spelling, a scanner the configuration
+        renamed was refused for an exclusion naming its declared name, or let
+        through an allowlist naming it, while the phase ran or left out the
+        scanner by the configured name alone. The exclusion list wins, as it
+        does in ScanPhase; an allowlist that was given and does not name it
+        leaves it out too, and so does a configured section that
+        disables the scanner (ScanPhase records such a scanner SKIPPED,
+        "disabled in the configuration"). An empty allowlist means every
+        scanner. *section* is the configured section when the caller has read
+        it already.
+        """
+        if section is _UNREAD:
+            section = self._scanner_section(scanner_class)
+        configured = self._selectable_scanner_name(scanner_class, section)
+        judged = {configured.lower().strip()} if configured else names
+        excluded = {name.lower().strip() for name in self._init_excluded_scanners}
+        if judged & excluded:
+            raise ValueError(
+                f"Scanner {scanner_name} is not enabled: it is named by the "
+                "exclusion list"
+            )
+        enabled = {name.lower().strip() for name in self._init_enabled_scanners}
+        if enabled and not judged & enabled:
+            raise ValueError(
+                f"Scanner {scanner_name} is not enabled: the selection does not name it"
+            )
+        if not section_enabled(section):
+            raise ValueError(
+                f"Scanner {scanner_name} is not enabled: its configuration "
+                "disables it (enabled: false)"
+            )
+
+    def _scanner_section(self, plugin_class: type) -> Any:
+        """The configured section of *plugin_class*, or None when there is none.
+
+        A section that cannot be read (a config whose lookup raises) is None
+        too: it names nothing and disables nothing, so the declared name and
+        the enabled default stand, as ``_selectable_scanner_name`` reads them.
+        """
+        section, _error = self._read_scanner_section(plugin_class)
+        return section
+
+    def _read_scanner_section(
+        self, plugin_class: type
+    ) -> Tuple[Any, Optional[Exception]]:
+        """``(section, error)`` for *plugin_class*: one read of the configuration.
+
+        *section* is what ``_scanner_section`` answers, None for no section and
+        for a lookup that raised. *error* is the exception the lookup raised, or
+        None, so a caller can tell the two apart without reading again: a second
+        read can answer differently from the first.
+        """
+        config = self._context.config
+        if config is None:
+            return None, None
+        try:
+            return (
+                config.get_plugin_config(
+                    plugin_type="scanner", plugin_name=plugin_config_key(plugin_class)
+                ),
+                None,
+            )
+        except Exception as error:  # noqa: BLE001 -- a section that cannot be read names nothing
+            return None, error
+
+    def _selectable_scanner_name(
+        self, plugin_class: type, section: Any = _UNREAD
+    ) -> Optional[str]:
+        """The name ``--scanners`` selects *plugin_class* by, or None.
+
+        ScanPhase matches the selection against ``config.name`` on each
+        instance, which the operator's configuration can set to something other
+        than the name the class declares. The construction-time refusal has to
+        compare the same names, so the configured section's ``name`` is read
+        first (a dict section as well as a model) and the declared name is the
+        fallback; a class that declares none answers None, which defers the
+        refusal to the phase (see ensure_initialized). *section* is the
+        configured section when the caller has read it already.
+        """
+        declared = declared_plugin_name(plugin_class)
+        if section is _UNREAD:
+            section = self._scanner_section(plugin_class)
+        if section is None:
+            return declared
+        if isinstance(section, dict):
+            name = section.get("name")
+        else:
+            name = getattr(section, "name", None)
+        if isinstance(name, str) and name:
+            return name
+        return declared
 
     def ensure_initialized(self, config: Optional[AshConfig] = None) -> None:
         """Ensure scanner factory and scanners are properly initialized.
@@ -570,6 +735,19 @@ class ScanExecutionEngine:
                 )
             if not isinstance(self._context.config, AshConfig):
                 raise ValueError("Configuration must be an AshConfig instance")
+            # The results model was built in __init__ with the context's config
+            # as it was then. A run that had none records the configuration it
+            # actually ran with, the default substituted just above, instead of
+            # None beside a run that used ASH's defaults. Only the model this
+            # engine built: a model a caller passed records the configuration of
+            # the scan that produced it (a results file whose ash_config is null
+            # loads as None), and this run's configuration is not that one.
+            if (
+                self._built_model
+                and self._asharp_model is not None
+                and getattr(self._asharp_model, "ash_config", None) is None
+            ):
+                self._asharp_model.ash_config = self._context.config
 
             # Process excluded scanners - this takes precedence over enabled scanners
             if self._init_excluded_scanners:
@@ -588,20 +766,45 @@ class ScanExecutionEngine:
             # An allowlist that names no registered scanner, refused here as well as
             # in ScanPhase: ASHScanOrchestrator builds the engine before it asks git
             # anything or clears the output directory, so a command line refused
-            # here starts no process and deletes nothing. The class keys are the
-            # names ScanPhase matches (plugin_config_key); the workspace
-            # pre-check (workspace.execution.refuse_unresolvable_scanner_selection)
-            # reads declared_plugin_name instead and, when any scanner in
-            # scope declares no name, defers the whole selection to this check.
+            # here starts no process and deletes nothing. The names compared are
+            # the ones ScanPhase matches as config.name on the instance: the
+            # configured section's name where the operator set one, else the
+            # name each class declares (_selectable_scanner_name). Compared
+            # against the declared names alone, a scanner the configuration
+            # renamed was refused as a misspelling of a name the phase accepts.
+            #
+            # Deferred to ScanPhase in the one shape only the phase can judge:
+            # when any scanner class in scope declares no name, its selectable
+            # name is config.name on an instance the phase alone constructs, so a
+            # check keyed on the lowercased class name would refuse the configured
+            # name the phase accepts; the workspace pre-check
+            # (workspace.execution.refuse_unresolvable_scanner_selection) defers
+            # the same way. A request naming a community scanner whose module
+            # this run did not load is refused HERE, before anything is cleared,
+            # with the module to add rather than spelling advice, in the one
+            # text ScanPhase's backstop also raises
+            # (core.scanner_selection.community_scanner_refusal), which names
+            # any misspelled name beside the module. Nothing registered means
+            # nothing to judge against: deferred, as every selection refusal
+            # defers that case.
             if self._init_enabled_scanners:
-                refuse_selection_matching_no_scanner(
-                    self._init_enabled_scanners,
-                    (
-                        plugin_config_key(plugin_class)
-                        for plugin_class in self.plugins.get("scanner", [])
-                    ),
-                    self._selection_origin,
-                )
+                scanner_classes = list(self.plugins.get("scanner", []))
+                selectable = [
+                    self._selectable_scanner_name(plugin_class)
+                    for plugin_class in scanner_classes
+                ]
+                declared_names = [name for name in selectable if name is not None]
+                if scanner_classes and len(declared_names) == len(selectable):
+                    refusal = community_scanner_refusal(
+                        self._init_enabled_scanners, declared_names, scanner_classes
+                    )
+                    if refusal:
+                        raise ScannerSelectionError(refusal)
+                    refuse_selection_matching_no_scanner(
+                        self._init_enabled_scanners,
+                        declared_names,
+                        self._selection_origin,
+                    )
 
             # Mark initialization complete
             self._initialized = True
@@ -629,11 +832,117 @@ class ScanExecutionEngine:
         from automated_security_helper.utils.changed_files import (
             filter_results_to_changed_files,
         )
+        from automated_security_helper.utils.scan_output_dirs import (
+            converted_sources_of,
+        )
 
+        # A finding in a converted file (a notebook's Python, an archive member)
+        # is placed by the source the converter read, which the converters
+        # recorded beside their output; the converted file itself is in the
+        # output directory and never in the changed set.
         self._results = filter_results_to_changed_files(
-            self._results, self._changed_files, self._context.source_dir
+            self._results,
+            self._changed_files,
+            self._context.source_dir,
+            converted_sources=converted_sources_of(self._context),
         )
         self._asharp_model = self._results
+
+    def _apply_final_suppressions(self) -> None:
+        """The aggregated suppression pass, then the metrics that read it.
+
+        Final suppression pass on the merged SARIF before anything reads it: the
+        per-scanner passes can miss findings whose paths only become matchable
+        after merge and normalization in the aggregated context. Run once per
+        execution, at the end of the last phase that shapes the findings: the
+        report arm when the run reports, else the scan arm, so a run without a
+        report phase writes the same suppressed results a full scan does and
+        takes its exit code from them. With --ignore-suppressions the pass lifts
+        suppressions and ignore paths, not the exclusion of ASH's own output
+        directory.
+
+        The --changed-files-only narrowing runs AFTER the pass, here, and not
+        before it: the pass records which suppressions matched, and a finding
+        outside the changed files that was dropped first left its suppression
+        recorded as unused (and warned about) although it matched the finding
+        the scanner reported. The metrics are then rebuilt from what is left.
+        """
+        if self._results and self._results.sarif:
+            from automated_security_helper.utils.sarif_utils import (
+                apply_suppressions_to_sarif,
+                exclude_output_dir_results,
+            )
+
+            if not self._context.ignore_suppressions:
+                self._results.sarif = apply_suppressions_to_sarif(
+                    sarif_report=self._results.sarif,
+                    plugin_context=self._context,
+                    used_suppressions=getattr(self._results, "used_suppressions", None),
+                )
+                # After the last suppression pass, once: a suppression path
+                # ending in "/" matches no file.
+                from automated_security_helper.utils.suppression_matcher import (
+                    warn_unmatched_directory_suppressions,
+                )
+
+                # With the config: the warning quotes a path the config read
+                # from the environment by its reference, as every other
+                # message about a suppression does. Without it the record was
+                # never built and this one warning printed the value.
+                warn_unmatched_directory_suppressions(
+                    self._context.config.global_settings.suppressions or [],
+                    getattr(self._results, "used_suppressions", None) or (),
+                    config=self._context.config,
+                )
+            else:
+                self._results.sarif = exclude_output_dir_results(
+                    sarif_report=self._results.sarif,
+                    plugin_context=self._context,
+                )
+
+        # The --changed-files-only set, after the pass has seen every finding.
+        self._drop_findings_outside_changed_files()
+
+        # Refresh metrics after the final suppression pass so the exit code
+        # reflects the post-suppression state.
+        self._results = populate_metrics_from_unified_source(
+            aggregated_results=self._results
+        )
+        self._asharp_model = self._results
+
+    def _stamp_scan_timing(
+        self,
+        scan_start_time: datetime,
+        scan_end_time: datetime,
+        ordered_phases: Collection[str],
+    ) -> float:
+        """Record this run's start, end and duration on the results; return the duration.
+
+        A run that scanned stamps its own timing. A report over existing
+        results (--use-existing) describes a scan that already ran, whose timing
+        the stored summary carries; stamping the report run's own clock over it
+        lost the scan's start, end and duration when the CLI rewrote the
+        aggregated results file. Called before the report phase renders the
+        model as well as when the run ends: the reporters read the model as it
+        is, and stamped only at the end, every report written during a scan
+        recorded start None, end None and duration 0.0 while the results file
+        written afterwards carried the real values. A stamp this run made is
+        this run's to stamp over: the pre-report stamp sets ``start``, so
+        without that the final stamp of a report-only run over fresh results
+        read ``start`` as set and left the pre-report end in place.
+        """
+        scan_duration = (scan_end_time - scan_start_time).total_seconds()
+        stats = self._results.metadata.summary_stats
+        if (
+            "scan" in ordered_phases
+            or stats.start is None
+            or getattr(self, "_run_stamped_timing", False)
+        ):
+            stats.start = scan_start_time
+            stats.end = scan_end_time
+            stats.duration = scan_duration
+            self._run_stamped_timing = True
+        return scan_duration
 
     def execute_phases(
         self,
@@ -672,8 +981,17 @@ class ScanExecutionEngine:
         ASH_LOGGER.info("===== ASH Security Scan Starting =====")
         ASH_LOGGER.info(f"Executing phases: {', '.join(ordered_phases)}")
 
-        # Record the start time for calculating scan duration
+        # Record the start time for calculating scan duration. The monotonic
+        # mark beside it gives the pre-report stamp its elapsed time without a
+        # second wall-clock read: the run's clock is read exactly twice, at the
+        # start and in the finally block, which is the contract the duration
+        # tests pin with a two-value clock.
         scan_start_time = datetime.now(timezone.utc)
+        scan_start_mark = time.monotonic()
+        # Whether this run has stamped its timing yet (see _stamp_scan_timing):
+        # a report over existing results keeps the stored timing, a stamp this
+        # run made is stamped over by the final one.
+        self._run_stamped_timing = False
         # Initialize duration variables so the finally block can reference
         # them even when the try block raises before computing them.
         hours = minutes = seconds = 0
@@ -698,36 +1016,61 @@ class ScanExecutionEngine:
         # an error leaving this method carries them for the run's handlers.
         values = config_environment_values(self._context.config)
 
-        # Notify execution start
-        try:
-            from automated_security_helper.plugins.events import AshEventType
-            from automated_security_helper.plugins import ash_plugin_manager
-
-            ash_plugin_manager.notify(
-                AshEventType.EXECUTION_START,
-                handler_filter=self._handler_filter,
-                phases=ordered_phases,
-                plugin_context=self._context,
-                source_dir=self._context.source_dir,
-                output_dir=self._context.output_dir,
-                enabled_scanners=self._init_enabled_scanners,
-                excluded_scanners=self._init_excluded_scanners,
-                python_based_plugins_only=self._python_only,
-                strategy=self._strategy,
-                message=f"Starting ASH execution with phases: {', '.join(ordered_phases)}",
-            )
-        except Exception as event_error:
-            ASH_LOGGER.error(
-                f"Failed to notify execution start event: "
-                f"{error_text(event_error, values)}"
-            )
-
         # Ctrl-C: the scan did not complete, so the finally block below says
         # neither that it did nor what it found.
         interrupted = False
+        # A phase that raised: the run failed, and the finally block says so
+        # instead of announcing a completed scan over partial results.
+        failed = False
+        # Set as the try's last statement. A SystemExit from a plugin or a
+        # reporter is neither an Exception nor an interrupt, so neither arm
+        # below marks it, and the finally block announced a completed run over
+        # an exit that was still propagating.
+        completed = False
         try:
+            # Notify execution start. Inside this try, whose finally is the one
+            # place the Live display started above is stopped: a Ctrl-C or a
+            # cancel while a start handler ran used to escape before the try and
+            # leave the display running. A handler that raises anything else is
+            # logged and the run goes on, as before.
+            try:
+                from automated_security_helper.plugins.events import AshEventType
+                from automated_security_helper.plugins import ash_plugin_manager
+
+                ash_plugin_manager.notify(
+                    AshEventType.EXECUTION_START,
+                    handler_filter=self._handler_filter,
+                    phase="execution",
+                    phases=ordered_phases,
+                    plugin_context=self._context,
+                    source_dir=self._context.source_dir,
+                    output_dir=self._context.output_dir,
+                    enabled_scanners=self._init_enabled_scanners,
+                    excluded_scanners=self._init_excluded_scanners,
+                    python_based_plugins_only=self._python_only,
+                    strategy=self._strategy,
+                    message=f"Starting ASH execution with phases: {', '.join(ordered_phases)}",
+                )
+            except (KeyboardInterrupt, ScanCancelled):
+                raise
+            except Exception as event_error:
+                ASH_LOGGER.error(
+                    f"Failed to notify execution start event: "
+                    f"{error_text(event_error, values)}"
+                )
+
             # Execute each phase in order using the new phase classes
             self._results = self._asharp_model
+            # Recorded on the results, not only in this run's context: under
+            # --ignore-suppressions no suppression is matched in any phase, and a
+            # results file re-rendered later by `ash report`, whose context
+            # carries no such flag, has to read the same way (the
+            # unused-suppressions reporter reads metadata.suppressions_ignored
+            # beside its context). Written before the phases so a run that stops
+            # at the scan phase records it too; never written False, so a saved
+            # record survives a later report-only run.
+            if self._context.ignore_suppressions:
+                self._results.metadata.suppressions_ignored = True
             for phase_name in ordered_phases:
                 # A scan cancelled during one phase does not start the next, so a
                 # cancel during the scan phase writes no reports. A no-op outside
@@ -745,7 +1088,6 @@ class ScanExecutionEngine:
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
                         )
-                        convert_phase.plugin_scope = self._plugin_scope
                         self._results = convert_phase.execute(
                             aggregated_results=self._results,
                             python_based_plugins_only=self._python_only,
@@ -761,7 +1103,6 @@ class ScanExecutionEngine:
                             asharp_model=self._asharp_model,
                         )
 
-                        scan_phase.plugin_scope = self._plugin_scope
                         # The completed scanners are stored for metrics display
                         # even when the phase ends by raising (a cancel is a
                         # ScanCancelled), so the ones that finished before the
@@ -808,58 +1149,33 @@ class ScanExecutionEngine:
                         if scan_phase._shard_assignment is not None:
                             self._results.metadata.shard = scan_phase._shard_assignment
                         # A run without a report phase writes these results and
-                        # takes its verdict from them, so they are narrowed here.
-                        self._drop_findings_outside_changed_files()
+                        # takes its exit code from them, so they are given the
+                        # aggregated suppression pass (which narrows them to the
+                        # --changed-files-only set after it) here: the pass used
+                        # to run only in the report arm, so a run whose phases
+                        # omit report wrote a results file and took an exit code
+                        # that counted findings a full scan suppresses. A run
+                        # that goes on to report takes the pass there, once.
+                        if "report" not in ordered_phases:
+                            self._apply_final_suppressions()
 
                     case "report":
                         # Before the counts and the reporters, so that every
                         # report, the summary and the verdict describe one set of
                         # findings. Also here, not only after "scan", for a report
                         # run over existing results.
-                        self._drop_findings_outside_changed_files()
-                        # Final suppression pass on the merged SARIF before reporters read it.
-                        # Per-scanner suppression passes may miss findings whose paths only
-                        # become matchable after merge/normalization in the aggregated context.
-                        if self._results and self._results.sarif:
-                            from automated_security_helper.utils.sarif_utils import (
-                                apply_suppressions_to_sarif,
-                                exclude_output_dir_results,
-                            )
-
-                            if not self._context.ignore_suppressions:
-                                self._results.sarif = apply_suppressions_to_sarif(
-                                    sarif_report=self._results.sarif,
-                                    plugin_context=self._context,
-                                    used_suppressions=getattr(
-                                        self._results, "used_suppressions", None
-                                    ),
-                                )
-                                # After the last suppression pass, once: a
-                                # suppression path ending in "/" matches no file.
-                                from automated_security_helper.utils.suppression_matcher import (
-                                    warn_unmatched_directory_suppressions,
-                                )
-
-                                warn_unmatched_directory_suppressions(
-                                    self._context.config.global_settings.suppressions
-                                    or [],
-                                    getattr(self._results, "used_suppressions", None)
-                                    or (),
-                                )
-                            else:
-                                # The flag lifts suppressions and ignore paths,
-                                # not the exclusion of ASH's own output directory.
-                                self._results.sarif = exclude_output_dir_results(
-                                    sarif_report=self._results.sarif,
-                                    plugin_context=self._context,
-                                )
-
-                        # Refresh metrics after final suppression pass so exit code
-                        # reflects the post-suppression state.
-                        self._results = populate_metrics_from_unified_source(
-                            aggregated_results=self._results
+                        self._apply_final_suppressions()
+                        # And the timing so far, so the reports the phase writes
+                        # carry a start and a duration instead of None and 0.0;
+                        # the finally block stamps the final values. The end so
+                        # far is the start plus the monotonic elapsed time, not a
+                        # second wall-clock read (see scan_start_mark).
+                        self._stamp_scan_timing(
+                            scan_start_time,
+                            scan_start_time
+                            + timedelta(seconds=time.monotonic() - scan_start_mark),
+                            ordered_phases,
                         )
-                        self._asharp_model = self._results
 
                         # Create and execute the Report phase
                         report_phase = ReportPhase(
@@ -869,7 +1185,6 @@ class ScanExecutionEngine:
                             progress_display=self.progress_display,
                             asharp_model=self._results,
                         )
-                        report_phase.plugin_scope = self._plugin_scope
                         self._results = report_phase.execute(
                             report_dir=self._context.output_dir.joinpath("reports"),
                             cli_output_formats=self._output_formats or None,
@@ -887,14 +1202,15 @@ class ScanExecutionEngine:
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
                         )
-                        inspect_phase.plugin_scope = self._plugin_scope
                         self._results = inspect_phase.execute(
                             aggregated_results=self._results,
                             python_based_plugins_only=self._python_only,
                         )
                         self._asharp_model = self._results
 
+            completed = True
         except Exception as e:
+            failed = True
             carry_environment_values(e, values)
             ASH_LOGGER.error(f"Execution failed: {error_text(e)}")
             ASH_LOGGER.info(f"\nExecution failed: {error_text(e)}")
@@ -912,6 +1228,13 @@ class ScanExecutionEngine:
                     exception=e,
                     message=f"ASH execution failed: {error_text(e)}",
                 )
+            except (KeyboardInterrupt, ScanCancelled):
+                # A Ctrl-C or a cancel while the error handlers ran: the sibling
+                # arm below does not see an interrupt raised inside this one,
+                # so it is marked here, or the finally block would notify
+                # EXECUTION_COMPLETE and print the closing banner.
+                interrupted = True
+                raise
             except Exception as event_error:
                 ASH_LOGGER.error(
                     f"Failed to notify execution error event: "
@@ -925,7 +1248,22 @@ class ScanExecutionEngine:
             # rebuild below.
             interrupted = True
             raise
+        except SystemExit:
+            # An exit raised while a shutdown signal has asked the scans to end
+            # (an embedder's SIGTERM handler, chained before ASH's own, calling
+            # sys.exit) is the process going down, as the scanner executor reads
+            # it (_exit_is_the_shutdowns): the run is interrupted, not failed,
+            # so it sends no EXECUTION_COMPLETE with succeeded False and prints
+            # no "Failed" banner. Any other exit (a plugin's own sys.exit) is a
+            # failure of this run, and is left to the finally block below.
+            if shutdown_requested():
+                interrupted = True
+            raise
         finally:
+            # A run that left the try without finishing it and without being
+            # interrupted ended in an exit the arms above do not name: it failed.
+            if not completed and not interrupted:
+                failed = True
             # Notify execution complete (whether successful or not), unless it was
             # interrupted: then it did not complete, and the caller says so.
             try:
@@ -933,23 +1271,29 @@ class ScanExecutionEngine:
                 from automated_security_helper.plugins import ash_plugin_manager
 
                 scan_end_time = datetime.now(timezone.utc)
-                scan_duration = (scan_end_time - scan_start_time).total_seconds()
+                scan_duration = self._stamp_scan_timing(
+                    scan_start_time, scan_end_time, ordered_phases
+                )
                 minutes, seconds = divmod(int(scan_duration), 60)
                 hours, minutes = divmod(minutes, 60)
 
-                self._results.metadata.summary_stats.start = scan_start_time
-                self._results.metadata.summary_stats.end = scan_end_time
-                self._results.metadata.summary_stats.duration = scan_duration
-
                 if not interrupted:
+                    # Notified for a failed run too (the handlers see every run
+                    # end), but saying so: the message read "completed" over a
+                    # run whose phase raised, and nothing in the event said
+                    # otherwise.
+                    outcome = "failed after" if failed else "completed in"
                     ash_plugin_manager.notify(
                         AshEventType.EXECUTION_COMPLETE,
                         handler_filter=self._handler_filter,
+                        phase="execution",
+                        plugin_context=self._context,
                         phases=ordered_phases,
                         results=self._results,
                         duration=scan_duration,
+                        succeeded=not failed,
                         completed_scanners=getattr(self, "_completed_scanners", []),
-                        message=f"ASH execution completed in {scan_duration:.1f}s",
+                        message=f"ASH execution {outcome} {scan_duration:.1f}s",
                     )
             except Exception as event_error:
                 ASH_LOGGER.error(
@@ -964,7 +1308,8 @@ class ScanExecutionEngine:
                 ):
                     self.progress_display.stop(interrupted=interrupted)
 
-                # Display the final metrics table
+                # The closing banner. A failed run says it failed: the banner
+                # read "Completed" over a run whose phase raised.
                 if not self._simple_mode and not interrupted:
                     if hours > 0:
                         duration_str = f"{hours}h {minutes}m {seconds}s"
@@ -973,41 +1318,58 @@ class ScanExecutionEngine:
                     else:
                         duration_str = f"{seconds}s"
 
-                    ASH_LOGGER.info(
-                        f"===== ASH Security Scan Completed in {duration_str} ====="
-                    )
-
-                if self._asharp_model and not interrupted:
-                    # Populate final metrics before displaying the table
-                    # This ensures the metrics table shows the correct aligned data
-                    updated_asharp_model = populate_metrics_from_unified_source(
-                        aggregated_results=self._asharp_model
-                    )
-                    self._asharp_model = updated_asharp_model
-                    # self._asharp_model._populate_final_metrics()
-
-                    # Get color setting from progress display
-                    use_color = True
-                    if hasattr(self.progress_display, "console") and hasattr(
-                        self.progress_display.console, "color_system"
-                    ):
-                        use_color = (
-                            self.progress_display.console.color_system is not None
+                    if failed:
+                        ASH_LOGGER.info(
+                            f"===== ASH Security Scan Failed after {duration_str} ====="
+                        )
+                    else:
+                        ASH_LOGGER.info(
+                            f"===== ASH Security Scan Completed in {duration_str} ====="
                         )
 
-                    # Always display the metrics table if show_summary is True
-                    if self.show_summary:
-                        display_metrics_table(
-                            asharp_model=self._asharp_model,
-                            source_dir=os.environ.get(
-                                "ASH_ACTUAL_SOURCE_DIR",
-                                self._context.source_dir.as_posix(),
-                            ),
-                            output_dir=os.environ.get(
-                                "ASH_ACTUAL_OUTPUT_DIR",
-                                self._context.output_dir.as_posix(),
-                            ),
-                            use_color=use_color,
+                # The final metrics table, for a run that completed: the table
+                # of a failed run's partial results read as that run's outcome
+                # (a scanner that never ran showed no findings), and the
+                # exception that is propagating is the run's report. Guarded,
+                # because this runs inside a finally: an exception from the
+                # metrics rebuild or the rendering replaced the one the run was
+                # propagating, and turned a completed run into a failed one.
+                if self._asharp_model and not interrupted and not failed:
+                    try:
+                        # Populate final metrics before displaying the table
+                        # This ensures the metrics table shows the correct aligned data
+                        updated_asharp_model = populate_metrics_from_unified_source(
+                            aggregated_results=self._asharp_model
+                        )
+                        self._asharp_model = updated_asharp_model
+
+                        # Get color setting from progress display
+                        use_color = True
+                        if hasattr(self.progress_display, "console") and hasattr(
+                            self.progress_display.console, "color_system"
+                        ):
+                            use_color = (
+                                self.progress_display.console.color_system is not None
+                            )
+
+                        # Always display the metrics table if show_summary is True
+                        if self.show_summary:
+                            display_metrics_table(
+                                asharp_model=self._asharp_model,
+                                source_dir=os.environ.get(
+                                    "ASH_ACTUAL_SOURCE_DIR",
+                                    self._context.source_dir.as_posix(),
+                                ),
+                                output_dir=os.environ.get(
+                                    "ASH_ACTUAL_OUTPUT_DIR",
+                                    self._context.output_dir.as_posix(),
+                                ),
+                                use_color=use_color,
+                            )
+                    except Exception as table_error:  # noqa: BLE001 -- a summary must not fail the run
+                        ASH_LOGGER.error(
+                            "The final metrics table could not be built or shown: "
+                            f"{error_text(table_error, values)}"
                         )
 
         return self._results

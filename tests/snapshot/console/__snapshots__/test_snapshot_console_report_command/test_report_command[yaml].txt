@@ -235,6 +235,7 @@ ash_config:
       extension: ghas.sarif
       name: github-ghas
       options:
+        emit_automation_details: false
         exclude_suppressed: true
     gitlab-cyclonedx:
       enabled: true
@@ -312,6 +313,20 @@ ash_config:
       options: {}
   sandbox:
     env_scanners: []
+    environment:
+    - ALL_PROXY
+    - HTTPS_PROXY
+    - HTTP_PROXY
+    - NO_PROXY
+    - all_proxy
+    - http_proxy
+    - https_proxy
+    - no_proxy
+    - SSL_CERT_FILE
+    - REQUESTS_CA_BUNDLE
+    - CURL_CA_BUNDLE
+    - NODE_EXTRA_CA_CERTS
+    - SSL_CERT_DIR
     extra_read_paths: []
     mode: 'off'
     network_scanners: null
@@ -340,7 +355,7 @@ ash_config:
         offline: false
         scan_timeout: 1800
         severity_threshold: null
-        tool_version: '>=1.7.0,<2.0.0'
+        tool_version: '>=1.7.8,<2.0.0'
     cdk-nag:
       enabled: true
       name: cdk-nag
@@ -1678,7 +1693,7 @@ scanner_results:
   grype:
     actionable_finding_count: 0
     dependencies_satisfied: false
-    duration: 0.0
+    duration: null
     excluded: false
     exit_code: null
     finding_count: 0
@@ -1751,7 +1766,7 @@ scanner_results:
   syft:
     actionable_finding_count: 0
     dependencies_satisfied: true
-    duration: 0.0
+    duration: null
     excluded: true
     exit_code: null
     finding_count: 0

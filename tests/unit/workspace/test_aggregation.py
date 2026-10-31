@@ -178,9 +178,12 @@ class TestAbsoluteScannerUris:
         [
             # bandit: absolute, rooted.
             ("/ws/api/src/insecure_app.py", "api/src/insecure_app.py"),
-            # checkov: absolute with the leading separator already stripped
-            # upstream. No leading-separator test can catch this one.
-            ("ws/api/src/insecure_bucket.tf", "api/src/insecure_bucket.tf"),
+            # Unrooted: project-relative, whatever its components spell. checkov's
+            # separator-stripped absolute shape does not reach the aggregator in
+            # workspace mode (sanitize_sarif_paths relativizes it against the
+            # project first), and reading an unrooted URI as absolute relocated
+            # the routine src-layout finding below.
+            ("ws/api/src/insecure_bucket.tf", "api/ws/api/src/insecure_bucket.tf"),
             # detect-secrets: relative to the process cwd, which we cannot know.
             ("../../../../ws/api/src/app.py", None),
             # The ordinary case, unchanged.
@@ -229,18 +232,20 @@ class TestAbsoluteScannerUris:
         assert project_relative_uri("/elsewhere/a.py", "/ws/api") is None
         assert project_relative_uri("src/a.py", "/ws/api") is NOT_ABSOLUTE
 
-    def test_the_ambiguous_nesting_is_read_as_absolute(self):
+    def test_an_unrooted_uri_spelling_the_projects_path_stays_relative(self):
         """Documented, not accidental.
 
-        A project at /ws/api containing its own path as a subtree -- ws/api/src
+        A project at /ws/api whose files spell its own absolute path -- ws/api/src
         under /ws/api -- makes a project-relative 'ws/api/src/x.py' textually
-        identical to a separator-stripped absolute one. Resolved in favour of
-        absolute, because that nesting is pathological while checkov's shape is
-        routine. No filesystem check: aggregation must not depend on the tree
-        still being present, and reading the same SARIF twice must not give two
-        answers.
+        identical to a separator-stripped absolute one. Read as project-relative:
+        the stripped shape does not reach the aggregator in workspace mode, while
+        this nesting is the routine container layout (the workspace mounted at
+        /src, a src-layout project at /src/api holding src/api/x.py). No
+        filesystem check: aggregation must not depend on the tree still being
+        present, and reading the same SARIF twice must not give two answers.
         """
-        assert project_relative_uri("ws/api/src/x.py", "/ws/api") == "src/x.py"
+        assert project_relative_uri("ws/api/src/x.py", "/ws/api") is NOT_ABSOLUTE
+        assert project_relative_uri("src/api/x.py", "/src/api") is NOT_ABSOLUTE
 
 
 class TestProjectRootUri:
@@ -618,10 +623,19 @@ class TestParityWithComputeExitCode:
         opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path)
         return _compute_exit_code(model, opts, None)
 
-    def _mine(self, results, threshold, min_severity="low"):
-        """The workspace verdict for one project, as the executor derives it."""
-        actionable = count_actionable_results(results, threshold)
-        if actionable and not has_finding_at_min_severity(results, min_severity):
+    def _mine(self, results, threshold, min_severity="low", threshold_for=None):
+        """The workspace verdict for one project, as the executor derives it.
+
+        The ``--min-severity`` gate is handed the same two thresholds the count
+        used, as ``_scan_one_project`` hands them, so a finding its own scanner's
+        threshold made non-actionable cannot be the one that keeps the count.
+        """
+        actionable = count_actionable_results(
+            results, threshold, threshold_for=threshold_for
+        )
+        if actionable and not has_finding_at_min_severity(
+            results, min_severity, threshold, threshold_for=threshold_for
+        ):
             actionable = 0
         return actionable
 
@@ -667,6 +681,143 @@ class TestParityWithComputeExitCode:
         assert standalone == 0
         assert self._mine([], threshold) == 0
 
+    @pytest.mark.parametrize(
+        ("scanners", "standalone_expected"),
+        [
+            (["bandit"], 0),
+            (["semgrep"], 2),
+            (["bandit", "semgrep"], 2),
+        ],
+        ids=["own-stricter", "project-wide", "both"],
+    )
+    def test_a_scanners_own_threshold_agrees_through_real_config(
+        self, tmp_path, scanners, standalone_expected
+    ):
+        """The per-scanner arm, read from a recorded config and not a monkeypatch.
+
+        bandit's own ``options.severity_threshold`` is CRITICAL under a
+        project-wide MEDIUM; a HIGH from bandit passes and a HIGH from semgrep
+        fails. ``_compute_exit_code`` on the left, the workspace counter with the
+        executor's resolver on the right, both reading the same ``AshConfig``.
+        """
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.core.enums import ScannerStatus
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+        )
+        from automated_security_helper.models.asharp_model import (
+            AshAggregatedResults,
+            ScannerTargetStatusInfo,
+        )
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+        from automated_security_helper.workspace.aggregation import (
+            actionable_results_by_scanner,
+        )
+        from automated_security_helper.workspace.execution import (
+            _scanner_threshold_resolver,
+        )
+
+        results = [
+            _result(level="warning", severity="HIGH", scanner=name) for name in scanners
+        ]
+        document = {"version": "2.1.0", "runs": [_run(*results)]}
+        reports = tmp_path / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "ash.sarif").write_text(json.dumps(document), encoding="utf-8")
+        config = AshConfig()
+        config.global_settings.severity_threshold = "MEDIUM"
+        config.scanners.bandit.options.severity_threshold = "CRITICAL"
+        model = AshAggregatedResults(ash_config=config)
+        model.sarif = SarifReport.model_validate(document)
+        for name in scanners:
+            model.scanner_results[name] = ScannerTargetStatusInfo(
+                status=ScannerStatus.PASSED, excluded=False, dependencies_satisfied=True
+            )
+
+        standalone = _compute_exit_code(
+            model, ScanOptions(source_dir=tmp_path, output_dir=tmp_path), None
+        )
+        project = _plan(tmp_path, "api").projects[0]
+        mine = actionable_results_by_scanner(
+            results, "MEDIUM", threshold_for=_scanner_threshold_resolver(model, project)
+        )
+
+        assert standalone == standalone_expected
+        assert (standalone == 2) == (sum(mine.values()) > 0)
+        assert mine.get("bandit", 0) == 0
+        assert mine.get("semgrep", 0) == (1 if "semgrep" in scanners else 0)
+
+    @pytest.mark.parametrize(
+        ("bandit_threshold", "standalone_expected"),
+        [("CRITICAL", 0), (None, 2)],
+        ids=["below-its-scanners-threshold", "control-no-own-threshold"],
+    )
+    def test_a_result_at_the_minimum_below_its_scanners_threshold_keeps_no_count(
+        self, tmp_path, bandit_threshold, standalone_expected
+    ):
+        """``--min-severity medium`` over a semgrep LOW and a bandit MEDIUM.
+
+        The semgrep LOW is actionable under the project-wide LOW and below the
+        minimum; the bandit MEDIUM meets the minimum. With bandit's own
+        ``options.severity_threshold`` CRITICAL that MEDIUM was never counted, so
+        no counted finding meets the minimum and the single scan exits 0. The
+        workspace gate read the bandit MEDIUM by severity alone and kept the
+        semgrep count standing, exit 2, for the same project. The control, with no
+        own threshold, has the bandit MEDIUM counted and qualifying on both sides.
+        """
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.core.enums import ScannerStatus
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+        )
+        from automated_security_helper.models.asharp_model import (
+            AshAggregatedResults,
+            ScannerTargetStatusInfo,
+        )
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+        from automated_security_helper.workspace.execution import (
+            _scanner_threshold_resolver,
+        )
+
+        results = [
+            _result(level="note", scanner="semgrep"),
+            _result(level="warning", scanner="bandit"),
+        ]
+        document = {"version": "2.1.0", "runs": [_run(*results)]}
+        reports = tmp_path / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "ash.sarif").write_text(json.dumps(document), encoding="utf-8")
+        config = AshConfig()
+        config.global_settings.severity_threshold = "LOW"
+        if bandit_threshold is not None:
+            config.scanners.bandit.options.severity_threshold = bandit_threshold
+        model = AshAggregatedResults(ash_config=config)
+        model.sarif = SarifReport.model_validate(document)
+        for name in ("semgrep", "bandit"):
+            model.scanner_results[name] = ScannerTargetStatusInfo(
+                status=ScannerStatus.PASSED, excluded=False, dependencies_satisfied=True
+            )
+
+        standalone = _compute_exit_code(
+            model,
+            ScanOptions(
+                source_dir=tmp_path, output_dir=tmp_path, min_severity="medium"
+            ),
+            None,
+        )
+        project = _plan(tmp_path, "api").projects[0]
+        mine = self._mine(
+            results,
+            "LOW",
+            min_severity="medium",
+            threshold_for=_scanner_threshold_resolver(model, project),
+        )
+
+        assert standalone == standalone_expected
+        assert (standalone == 2) == (mine > 0)
+
 
 class TestCompletenessParityWithComputeExitCode:
     """The other half of the same invariant, on the pass that was not mirrored.
@@ -684,14 +835,16 @@ class TestCompletenessParityWithComputeExitCode:
     """
 
     @staticmethod
-    def _model(scanner_statuses):
+    def _model(scanner_statuses, invocations=None):
         """One project's results, with ``scanner_results`` as a real scan writes it.
 
         ``scanner_statuses`` maps scanner name to ``(status, excluded,
         dependencies_satisfied)``. A finding is attributed to each scanner because
         ``ScannerStatisticsCalculator`` enumerates from both the SARIF and
         ``scanner_results``, and a scanner present in only one of them exercises a
-        different branch than a real scan reaches.
+        different branch than a real scan reaches. ``invocations`` replaces the
+        run's ``invocations`` list when given, for the run-level notifications a
+        rule that could not be evaluated leaves.
         """
         from automated_security_helper.config.ash_config import AshConfig
         from automated_security_helper.models.asharp_model import (
@@ -707,9 +860,10 @@ class TestCompletenessParityWithComputeExitCode:
         config = AshConfig()
         config.global_settings.severity_threshold = "CRITICAL"
         model = AshAggregatedResults(ash_config=config)
-        model.sarif = SarifReport.model_validate(
-            {"version": "2.1.0", "runs": [_run(*entries)]}
-        )
+        run = _run(*entries)
+        if invocations is not None:
+            run["invocations"] = invocations
+        model.sarif = SarifReport.model_validate({"version": "2.1.0", "runs": [run]})
         for name, (status, excluded, satisfied) in scanner_statuses.items():
             model.scanner_results[name] = ScannerTargetStatusInfo(
                 status=status,
@@ -807,6 +961,8 @@ class TestCompletenessParityWithComputeExitCode:
             "incomplete_scanner_details": {},
             "partial_coverage_scanners": [],
             "no_scanner_ran": False,
+            "unevaluated_rules": [],
+            "unstoppable_tools": {},
         }
 
     @pytest.mark.parametrize(
@@ -877,7 +1033,13 @@ class TestCompletenessParityWithComputeExitCode:
             "incomplete_scanner_details",
             "partial_coverage_scanners",
             "no_scanner_ran",
+            "unevaluated_rules",
+            "unstoppable_tools",
         }
+        # The two exit-1 arms the gate does not govern ride in the same read and
+        # are empty in every case here, so the gated arms alone decide the verdict.
+        assert fields["unevaluated_rules"] == []
+        assert fields["unstoppable_tools"] == {}
         assert (standalone == 1) == bool(
             fields["incomplete_scanners"] or fields["no_scanner_ran"]
         )
@@ -887,6 +1049,50 @@ class TestCompletenessParityWithComputeExitCode:
         assert (
             list(fields["incomplete_scanner_details"]) == fields["incomplete_scanners"]
         )
+
+    def test_an_unevaluated_rule_is_seen_by_both_derivations_with_the_gate_off(
+        self, tmp_path
+    ):
+        """The exit-1 arm no setting silences, on the field that carries it.
+
+        A run-level error notification naming a rule is ``unevaluated_rules`` to
+        ``_coverage_fields`` and exit 1 to ``_compute_exit_code`` with the
+        completeness gate OFF; the control, the same scanners with no
+        notification, is empty and 0. Pinned as an agreement, as the other cases
+        of this class are, so neither side can stop answering alone.
+        """
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+        )
+
+        statuses = {"cdk-nag": ("PASSED", False, True)}
+        raised = [
+            {
+                "executionSuccessful": True,
+                "toolExecutionNotifications": [
+                    {
+                        "level": "error",
+                        "message": {"text": "AwsSolutions-S1 could not be evaluated"},
+                        "associatedRule": {"id": "AwsSolutions-S1"},
+                    }
+                ],
+            }
+        ]
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path,
+            fail_on_incomplete_scanners=False,
+        )
+
+        with_rule = self._model(statuses, invocations=raised)
+        clean = self._model(statuses)
+
+        assert _compute_exit_code(with_rule, opts, None) == 1
+        assert _coverage_fields(with_rule)["unevaluated_rules"] == ["AwsSolutions-S1"]
+        assert _coverage_fields(with_rule)["incomplete_scanners"] == []
+        assert _compute_exit_code(clean, opts, None) == 0
+        assert _coverage_fields(clean)["unevaluated_rules"] == []
 
     def test_a_project_whose_every_scanner_was_skipped_is_seen_by_both(self, tmp_path):
         """The set-level half, which the per-entry helper structurally cannot see.
@@ -1026,7 +1232,9 @@ class TestAggregatorOutput:
         spool = tmp_path / "out" / ".workspace-spool"
         spool.mkdir(parents=True)
         victim = tmp_path / "victim.json"
-        (spool / "api.run.json").symlink_to(victim)
+        # The first spool written carries ordinal 0000; the name is the one add()
+        # will write, so the link sits exactly where the write would land.
+        (spool / "0000-api.run.json").symlink_to(victim)
         aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
 
         with pytest.raises(OutputDirLinkRefused):
@@ -1093,7 +1301,9 @@ class TestAggregatorOutput:
 
         plan = _plan(tmp_path, "api")
         aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
-        spool = aggregator.spool_dir / "api.run.json"
+        # Spool names carry an ordinal prefix so two keys that differ only in case
+        # stay two files on a case-insensitive volume; the first add() writes 0000.
+        spool = aggregator.spool_dir / "0000-api.run.json"
         present_while_written = []
         dump = json.dump
 
@@ -1352,6 +1562,66 @@ class TestAggregatorOutput:
         assert parsed["scanner_results"]["bandit"]["actionable_finding_count"] == 1
         assert parsed["scanner_results"]["bandit"]["finding_count"] == 2
 
+    def test_the_fallback_rollup_grades_each_scanner_by_its_own_threshold(
+        self, tmp_path
+    ):
+        """Red at the base: without a carried split, every scanner was graded by the
+        project gate, so a bandit MEDIUM counted under bandit's own CRITICAL and the
+        rollup exceeded the project's actionable_finding_count it claims to sum."""
+        plan = _plan(tmp_path, "api")
+        plan.projects[0].severity_threshold = "MEDIUM"
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+        results = [
+            _result(level="warning", scanner="bandit"),
+            _result("iac/main.tf", level="error", scanner="checkov"),
+        ]
+        aggregator.add(
+            self._outcome(
+                "api",
+                scanners={"bandit": "FAILED", "checkov": "FAILED"},
+                actionable_finding_count=1,
+                scanner_thresholds={"bandit": "CRITICAL"},
+            ),
+            _run(*results),
+            plan.projects[0],
+        )
+        parsed = json.loads(
+            aggregator.write(exit_code=2, wall_clock_seconds=1.0).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert parsed["scanner_results"]["bandit"]["actionable_finding_count"] == 0
+        assert parsed["scanner_results"]["checkov"]["actionable_finding_count"] == 1
+
+    def test_the_fallback_rollup_leaves_policy_findings_out_when_the_gate_is_off(
+        self, tmp_path
+    ):
+        """Red at the base: a policy-origin finding counted though the verdict excluded it."""
+        plan = _plan(tmp_path, "api")
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+        policy = _result(level="error", scanner="bandit")
+        policy["properties"]["origin"] = "workspace-policy"
+        results = [policy, _result("src/two.py", level="error", scanner="semgrep")]
+        aggregator.add(
+            self._outcome(
+                "api",
+                scanners={"bandit": "FAILED", "semgrep": "FAILED"},
+                actionable_finding_count=1,
+                policy_scanners_gate=False,
+            ),
+            _run(*results),
+            plan.projects[0],
+        )
+        parsed = json.loads(
+            aggregator.write(exit_code=2, wall_clock_seconds=1.0).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert parsed["scanner_results"]["bandit"]["actionable_finding_count"] == 0
+        assert parsed["scanner_results"]["semgrep"]["actionable_finding_count"] == 1
+        # Reported, as the project's own finding_count reports it.
+        assert parsed["scanner_results"]["bandit"]["finding_count"] == 1
+
     def test_scanner_results_takes_the_worst_status(self, tmp_path):
         plan = _plan(tmp_path, "api", "web")
         aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
@@ -1398,8 +1668,20 @@ class TestStampingARunRecord:
         before.pop("validation_checkpoints")
         assert after == before
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows refuses to replace a file another handle holds open, so the "
+        "stamp returns False there by design and the inode swap has no counterpart",
+    )
     def test_the_file_is_replaced_rather_than_rewritten_in_place(self, tmp_path):
-        """A reader that opened the file before the stamp keeps reading it whole."""
+        """A reader that opened the file before the stamp keeps reading it whole.
+
+        POSIX only: the property is that the replace swaps the inode under a
+        reader. Windows will not replace a file this process still holds open
+        (``stamp_run_record`` closes its own source handle before the replace for
+        that reason), so with the test's reader open the stamp returns False and
+        leaves the file unchanged, which is the documented refusal, not the swap.
+        """
         from automated_security_helper.workspace.aggregation import stamp_run_record
 
         path = self._written(tmp_path)

@@ -7,13 +7,90 @@
 
 from __future__ import annotations
 
+import heapq
+from contextvars import ContextVar
 from datetime import datetime
 from enum import Enum
-from typing import List, Literal, Optional, Union
+from typing import Annotated, Any, List, Literal, Optional, Union
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, EmailStr, Field, RootModel
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    StringConstraints,
+    model_validator,
+)
 
 from . import spdx
+
+# Not from the codegen: an OWASP OpenCRE identifier, the pattern the schema
+# puts on each entry of Requirement.openCre. The codegen put it on the list
+# field itself, where pydantic cannot apply a string pattern, so any BOM that
+# carried openCre, an empty list included, raised TypeError instead of
+# validating.
+OpenCreIdentifier = Annotated[str, StringConstraints(pattern=r"^CRE:[0-9]+-[0-9]+$")]
+
+
+def _spdx_id_text(value: object) -> object:
+    """A license id as text: a member of the SPDX enum becomes its value."""
+    return value.value if isinstance(value, Enum) else value
+
+
+# Not from the codegen: a license id as text (see the license note below). The
+# schema still lists the ids the bundled SPDX list knows; a string is a string
+# whether or not the list has it, so an id a newer ASH wrote still loads.
+LicenseId = Annotated[Union[spdx.Schema, str], AfterValidator(_spdx_id_text)]
+
+# Not from the codegen: the two members of a 0 - 1 number field
+# (ComponentIdentityEvidence.confidence, Conformance.score, Method.confidence,
+# Confidence.score), each with the schema's bounds, so a BOM's integer stays an
+# integer and its fraction a float. Every 0 - 1 field of the module uses them;
+# typed float alone, a BOM's integer 1 was re-emitted as 1.0.
+ZeroToOneInt = Annotated[int, Field(ge=0, le=1)]
+ZeroToOneFloat = Annotated[float, Field(ge=0.0, le=1.0)]
+
+# Not from the codegen: every model below that declares an aliased field
+# (`bom-ref`, `mime-type`) carries serialize_by_alias=True and
+# validate_by_name=True. pydantic resolves a dump's by_alias per model, from
+# each model's own config, when the caller passes none, so the flag on
+# CycloneDXReport alone left a nested `bom_ref` under its Python name in a
+# default dump, and the dumped document then failed re-validation under
+# extra="forbid". Results files written before that fix hold the nested Python
+# name, so the models also load a field by its Python name; the alias stays
+# what a dump writes. tests/unit/schemas/test_cyclonedx_aliased_models_round_trip.py
+# walks every model for the pair, so a regeneration that drops them fails
+# there; after regenerating, re-apply the edits this header lists.
+#
+# Not from the codegen: a BOM is a scanner's document that ASH stores and
+# re-emits, so the model keeps its values as written.
+# - Contact and action e-mails are text (the schema's format is idn-email, an
+#   annotation). The codegen's EmailStr refused what email-validator calls
+#   undeliverable (a dotless or special-use domain) and rewrote what it accepted
+#   (the domain casefolded), so one such address refused the whole BOM or changed
+#   it on the way through, and the refusal quoted the address.
+# - A spec default on an optional field ("required" for Component.scope,
+#   "affected" for Versions.status, "text/plain" for Attachment.contentType, the
+#   Volume mode and the Swid defaults) is a consumer's assumption, not a value the
+#   BOM carries, so those fields default to None. As plain strings on enum-typed
+#   fields they raised a serializer warning on every dump, and the full dump a
+#   results file keeps wrote them, so the SBOM `ash report` re-emitted stated
+#   fields the scanner never wrote.
+# - LicenseChoice entries are typed (LicenseEntry, LicenseExpression) where the
+#   codegen left a bare list, so a license's fields are validated; a license id,
+#   known to the SPDX list in this snapshot or not, is kept as the text the BOM
+#   carries (the schema still lists the known ids), because the SPDX list grows
+#   faster than this snapshot and a scanner's BOM may carry a newer id. An entry
+#   that fits neither form is kept as it was written, with a warning, whatever
+#   its type (an object with other keys, a bare string, a number), because a
+#   results file written by another ASH version can hold anything the bare list
+#   accepted, and one entry must not refuse the component that carries it. The spec's
+#   rule that a BOM holds either license entries or exactly one expression is
+#   not enforced: a scanner may write several expression entries, and that BOM
+#   still loads.
+# - Signer.algorithm is text where the codegen used AnyUrl, which re-emitted a
+#   URI normalized (a trailing slash added to a path-less one).
 
 
 class BomFormat(str, Enum):
@@ -25,12 +102,10 @@ class Confidence(BaseModel):
         extra="forbid",
     )
 
-    score: Optional[float] = Field(
+    score: Optional[Union[ZeroToOneInt, ZeroToOneFloat]] = Field(
         None,
         description="The confidence of the claim between and inclusive of 0 and 1, where 1 is 100% confidence.",
         title="Score",
-        ge=0.0,
-        le=1.0,
     )
     rationale: Optional[str] = Field(
         None, description="The rationale for the confidence score.", title="Rationale"
@@ -108,6 +183,8 @@ class Lifecycles1(BaseModel):
 class OrganizationalContact(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -122,7 +199,7 @@ class OrganizationalContact(BaseModel):
         examples=["Contact name"],
         title="Name",
     )
-    email: Optional[EmailStr] = Field(
+    email: Optional[str] = Field(
         None,
         description="The email address of the contact.",
         examples=["firstname.lastname@example.com"],
@@ -168,7 +245,7 @@ class Attachment(BaseModel):
     )
 
     contentType: Optional[str] = Field(
-        "text/plain",
+        None,
         description="Specifies the format and nature of the data being attached, helping systems correctly interpret and process the content. Common content type examples include `application/json` for JSON data and `text/plain` for plan text documents.\n [RFC 2045 section 5.1](https://www.ietf.org/rfc/rfc2045.html#section-5.1) outlines the structure and use of content types. For a comprehensive list of registered content types, refer to the [IANA media types registry](https://www.iana.org/assignments/media-types/media-types.xhtml).",
         examples=["text/plain", "application/json", "image/png"],
         title="Content-Type",
@@ -237,12 +314,149 @@ class LicenseAcknowledgementEnumeration(str, Enum):
     concluded = "concluded"
 
 
+class LicenseEntry(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    license: License = Field(
+        ...,
+        description="A license by SPDX identifier or by name, with its optional details.",
+        title="License",
+    )
+
+
+class LicenseExpression(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
+    )
+
+    expression: str = Field(
+        ...,
+        description="A valid SPDX license expression.\nRefer to https://spdx.org/specifications for syntax requirements",
+        examples=[
+            "Apache-2.0 AND (MIT OR GPL-2.0-only)",
+            "GPL-3.0-only WITH Classpath-exception-2.0",
+        ],
+        title="SPDX License Expression",
+    )
+    acknowledgement: Optional[LicenseAcknowledgementEnumeration] = None
+    bom_ref: Optional[RefType] = Field(
+        None,
+        alias="bom-ref",
+        description="An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
+        title="BOM Reference",
+    )
+
+
 class LicenseChoice(RootModel):
-    root: List = Field(
+    # The typed forms come first and are tried in order (left_to_right), because
+    # in the default smart mode a dict would match the last member exactly and
+    # win. An entry that fits neither form is kept as it was written, with a
+    # warning (below), whatever its type: a results file written by another ASH
+    # version can hold anything the old bare list accepted (an object with other
+    # keys, a bare "MIT", a number), and one entry must not refuse the component
+    # that carries it.
+    root: List[
+        Annotated[
+            Union[LicenseEntry, LicenseExpression, Any],
+            Field(union_mode="left_to_right"),
+        ]
+    ] = Field(
         ...,
         description="EITHER (list of SPDX licenses and/or named licenses) OR (tuple of one SPDX License Expression)",
         title="License Choice",
     )
+
+    @model_validator(mode="after")
+    def _warn_about_entries_kept_as_written(self) -> "LicenseChoice":
+        # Once per entry shape per BOM load. A validator runs on every
+        # component, a BOM can carry thousands of components with the same
+        # stray entry, and a smart-mode union (Metadata.tools, say) can
+        # validate one list more than once, so a warning per entry per
+        # validation repeated one line without end. The shape (the entry's
+        # keys, or its type) is what an operator can search a BOM for; the list
+        # has no view of the component that carries it. The shapes seen are
+        # kept for one load of a CycloneDXReport and dropped with it, so a
+        # long-running server that loads a BOM per project warns again for the
+        # next BOM instead of going quiet after the first. A list validated
+        # outside a load deduplicates within itself.
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        seen = _LICENSE_SHAPES_WARNED.get()
+        if seen is None:
+            seen = set()
+        for index, entry in enumerate(self.root):
+            if isinstance(entry, (LicenseEntry, LicenseExpression)):
+                continue
+            shape = _license_entry_shape(entry)
+            if shape in seen:
+                continue
+            if len(seen) >= _SHAPES_WARNED_PER_LOAD:
+                # None marks that the summing-up line was written. A BOM whose
+                # every entry differs would otherwise log one line per entry and
+                # grow the set with it.
+                if None not in seen:
+                    seen.add(None)
+                    ASH_LOGGER.warning(
+                        "More than "
+                        f"{_SHAPES_WARNED_PER_LOAD} different license entry "
+                        "shapes fit neither license form in this BOM; further "
+                        "shapes are kept as written without a warning."
+                    )
+                continue
+            seen.add(shape)
+            ASH_LOGGER.warning(
+                f"License entry {index} of a CycloneDX license list is {shape}, "
+                "which fits neither license form (a license, or an SPDX "
+                "expression); it is kept as written. Further entries of this "
+                "shape are kept without a warning."
+            )
+        return self
+
+
+#: The shapes of license entries already warned about in the CycloneDXReport
+#: being validated (LicenseChoice._warn_about_entries_kept_as_written), or None
+#: outside a load. A ContextVar, so loads on different threads or tasks of one
+#: server never share it.
+_LICENSE_SHAPES_WARNED: ContextVar = ContextVar("_LICENSE_SHAPES_WARNED", default=None)
+
+
+#: Limits on the description of stray license entries, which is scanned content:
+#: how many keys one description lists, how many characters of each key, and how
+#: many different shapes one load describes before the rest are summed up in one
+#: line (LicenseChoice._warn_about_entries_kept_as_written).
+_SHAPE_KEYS_LISTED = 8
+_SHAPE_KEY_CHARS = 40
+_SHAPES_WARNED_PER_LOAD = 50
+
+
+def _license_entry_shape(entry: Any) -> str:
+    """How a stray license entry is described: its keys, or its type.
+
+    The keys come from the BOM, so each is quoted with ``repr`` (a newline or a
+    terminal escape in a key cannot reach the log as itself) and cut to
+    :data:`_SHAPE_KEY_CHARS`, and at most :data:`_SHAPE_KEYS_LISTED` of them are
+    listed, the rest counted.
+    """
+    if isinstance(entry, dict):
+        if not entry:
+            return "an empty object"
+        keys = heapq.nsmallest(
+            _SHAPE_KEYS_LISTED, (str(key)[: _SHAPE_KEY_CHARS + 1] for key in entry)
+        )
+        listed = ", ".join(
+            repr(key[:_SHAPE_KEY_CHARS])
+            + ("..." if len(key) > _SHAPE_KEY_CHARS else "")
+            for key in keys
+        )
+        more = len(entry) - len(keys)
+        return f"an object with the keys {listed}" + (
+            f", and {more} more" if more > 0 else ""
+        )
+    return f"a value of type {type(entry).__name__}"
 
 
 class Type1(str, Enum):
@@ -336,7 +550,7 @@ class IdentifiableAction(BaseModel):
         description="The name of the individual who performed the action",
         title="Name",
     )
-    email: Optional[EmailStr] = Field(
+    email: Optional[str] = Field(
         None,
         description="The email address of the individual who performed the action",
         title="E-mail",
@@ -431,6 +645,8 @@ class Copyright(BaseModel):
 class Occurrence(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1015,6 +1231,8 @@ class EnergySource(str, Enum):
 class PostalAddress(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1101,7 +1319,7 @@ class Volume(BaseModel):
         None, description="The name of the volume instance", title="Name"
     )
     mode: Optional[Mode] = Field(
-        "filesystem", description="The mode for the volume instance.", title="Mode"
+        None, description="The mode for the volume instance.", title="Mode"
     )
     path: Optional[str] = Field(
         None,
@@ -1235,12 +1453,10 @@ class Method(BaseModel):
         description="The technique used in this method of analysis.",
         title="Technique",
     )
-    confidence: float = Field(
+    confidence: Union[ZeroToOneInt, ZeroToOneFloat] = Field(
         ...,
         description="The confidence of the evidence from 0 - 1, where 1 is 100% confidence. Confidence is specific to the technique used. Each technique of analysis can have independent confidence.",
         title="Confidence",
-        ge=0.0,
-        le=1.0,
     )
     value: Optional[str] = Field(
         None, description="The value or contents of the evidence.", title="Value"
@@ -1257,12 +1473,15 @@ class ComponentIdentityEvidence(BaseModel):
         description="The identity field of the component which the evidence describes.",
         title="Field",
     )
-    confidence: Optional[int] = Field(
+    # Not from the codegen: a number, as the schema types it. Typed int, a
+    # fractional confidence (the documented 0 - 1 range, 0.85 say) refused the
+    # whole SBOM; typed float alone, a BOM's integer 1 was re-emitted as 1.0. In
+    # the default smart union an int stays an int and a float a float, so the
+    # value is kept as written; the bounds sit on each member.
+    confidence: Optional[Union[ZeroToOneInt, ZeroToOneFloat]] = Field(
         None,
         description="The overall confidence of the evidence from 0 - 1, where 1 is 100% confidence.",
         title="Confidence",
-        ge=0.0,
-        le=1.0,
     )
     concludedValue: Optional[str] = Field(
         None,
@@ -1284,6 +1503,8 @@ class ComponentIdentityEvidence(BaseModel):
 class Level(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1683,12 +1904,12 @@ class Conformance(BaseModel):
         extra="forbid",
     )
 
-    score: Optional[int] = Field(
+    # Not from the codegen: a number kept as written, as the schema types it (see
+    # ComponentIdentityEvidence.confidence).
+    score: Optional[Union[ZeroToOneInt, ZeroToOneFloat]] = Field(
         None,
         description="The conformance of the claim between and inclusive of 0 and 1, where 1 is 100% conformance.",
         title="Score",
-        ge=0.0,
-        le=1.0,
     )
     rationale: Optional[str] = Field(
         None, description="The rationale for the conformance score.", title="Rationale"
@@ -1752,6 +1973,8 @@ class Contents(BaseModel):
 class OrganizationalEntity(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1796,15 +2019,15 @@ class Swid(BaseModel):
         ..., description="Maps to the name of a SoftwareIdentity.", title="Name"
     )
     version: Optional[str] = Field(
-        "0.0", description="Maps to the version of a SoftwareIdentity.", title="Version"
+        None, description="Maps to the version of a SoftwareIdentity.", title="Version"
     )
     tagVersion: Optional[int] = Field(
-        0,
+        None,
         description="Maps to the tagVersion of a SoftwareIdentity.",
         title="Tag Version",
     )
     patch: Optional[bool] = Field(
-        False, description="Maps to the patch of a SoftwareIdentity.", title="Patch"
+        None, description="Maps to the patch of a SoftwareIdentity.", title="Patch"
     )
     text: Optional[Attachment] = Field(
         None,
@@ -1977,6 +2200,8 @@ class Licensing(BaseModel):
 class License1(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -1985,7 +2210,7 @@ class License1(BaseModel):
         description="An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
         title="BOM Reference",
     )
-    id: spdx.Schema = Field(
+    id: LicenseId = Field(
         ...,
         description="A valid SPDX license identifier. If specified, this value must be one of the enumeration of valid SPDX license identifiers defined in the spdx.schema.json (or spdx.xml) subschema which is synchronized with the official SPDX license list.",
         examples=["Apache-2.0"],
@@ -2173,6 +2398,8 @@ class Licensing1(BaseModel):
 class License2(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2181,7 +2408,7 @@ class License2(BaseModel):
         description="An optional identifier which can be used to reference the license elsewhere in the BOM. Every bom-ref must be unique within the BOM.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
         title="BOM Reference",
     )
-    id: Optional[spdx.Schema] = Field(
+    id: Optional[LicenseId] = Field(
         None,
         description="A valid SPDX license identifier. If specified, this value must be one of the enumeration of valid SPDX license identifiers defined in the spdx.schema.json (or spdx.xml) subschema which is synchronized with the official SPDX license list.",
         examples=["Apache-2.0"],
@@ -2446,7 +2673,7 @@ class Versions(BaseModel):
         title="Version Range",
     )
     status: Optional[AffectedStatus] = Field(
-        "affected",
+        None,
         description="The vulnerability status for the version or range of versions.",
         title="Status",
     )
@@ -2466,7 +2693,7 @@ class Versions1(BaseModel):
         title="Version Range",
     )
     status: Optional[AffectedStatus] = Field(
-        "affected",
+        None,
         description="The vulnerability status for the version or range of versions.",
         title="Status",
     )
@@ -2545,6 +2772,8 @@ class GraphicsCollection(BaseModel):
 class EnergyProvider(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2642,6 +2871,8 @@ class ResourceReferenceChoice(RootModel):
 class Requirement(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -2666,11 +2897,10 @@ class Requirement(BaseModel):
         description="The supplemental text that provides additional guidance or context to the requirement, but is not directly part of the requirement.",
         title="Descriptions",
     )
-    openCre: Optional[List[str]] = Field(
+    openCre: Optional[List[OpenCreIdentifier]] = Field(
         None,
         description="The Common Requirements Enumeration (CRE) identifier(s). CRE is a structured and standardized framework for uniting security standards and guidelines. CRE links each section of a resource to a shared topic identifier (a Common Requirement). Through this shared topic link, all resources map to each other. Use of CRE promotes clear and unambiguous communication among stakeholders.",
         title="OWASP OpenCRE Identifier(s)",
-        pattern=r"^CRE:[0-9]+-[0-9]+$",
     )
     parent: Optional[RefLinkType] = Field(
         None,
@@ -2694,7 +2924,7 @@ class Signer(BaseModel):
         extra="forbid",
     )
 
-    algorithm: Union[Algorithm, AnyUrl]
+    algorithm: Union[Algorithm, str]
     keyId: Optional[str] = Field(
         None,
         description="Optional. Application specific string identifying the signature key.",
@@ -2891,6 +3121,8 @@ class CryptoProperties(BaseModel):
 class Assessor(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3010,6 +3242,8 @@ class EnergyConsumption(BaseModel):
 class Workspace(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: RefType = Field(
@@ -3527,6 +3761,8 @@ class ServiceData(BaseModel):
 class ComponentData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3583,6 +3819,8 @@ class EnvironmentalConsiderations(BaseModel):
 class Trigger(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: RefType = Field(
@@ -3678,6 +3916,8 @@ class Attestation(BaseModel):
 class Claim(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3731,6 +3971,8 @@ class Claim(BaseModel):
 class EvidenceItem(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3851,6 +4093,8 @@ class Affirmation(BaseModel):
 class Service(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -3941,6 +4185,8 @@ class Service(BaseModel):
 class Compositions(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4057,6 +4303,8 @@ class Considerations(BaseModel):
 class ModelCard(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4090,6 +4338,8 @@ class ModelCard(BaseModel):
 class Task(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: RefType = Field(
@@ -4171,6 +4421,8 @@ class Task(BaseModel):
 class Standard(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4232,6 +4484,8 @@ class Definitions(BaseModel):
 class Workflow(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: RefType = Field(
@@ -4492,6 +4746,8 @@ class Pedigree(BaseModel):
 class Component(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     type: Type = Field(
@@ -4564,7 +4820,7 @@ class Component(BaseModel):
         title="Component Description",
     )
     scope: Optional[Scope] = Field(
-        "required",
+        None,
         description="Specifies the scope of the component. If scope is not specified, 'required' scope SHOULD be assumed by the consumer of the BOM.",
         title="Component Scope",
     )
@@ -4666,6 +4922,8 @@ class Component(BaseModel):
 class Vulnerability(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4855,6 +5113,8 @@ class Annotator3(BaseModel):
 class Annotations(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4891,6 +5151,8 @@ class Annotations(BaseModel):
 class Formula(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
     )
 
     bom_ref: Optional[RefType] = Field(
@@ -4926,6 +5188,7 @@ class CycloneDXReport(BaseModel):
         extra="forbid",
         use_enum_values=True,
         serialize_by_alias=True,
+        validate_by_name=True,
         # Not from the codegen: a refused value can be scanned content, which an
         # error does not quote.
         hide_input_in_errors=True,
@@ -5028,7 +5291,22 @@ class CycloneDXReport(BaseModel):
         title="Signature",
     )
 
+    # Not from the codegen: one load of a BOM is the scope of the license-shape
+    # warnings (LicenseChoice._warn_about_entries_kept_as_written).
+    @model_validator(mode="wrap")
+    @classmethod
+    def _one_load_warns_once_per_license_shape(
+        cls, data: Any, handler: Any
+    ) -> "CycloneDXReport":
+        token = _LICENSE_SHAPES_WARNED.set(set())
+        try:
+            return handler(data)
+        finally:
+            _LICENSE_SHAPES_WARNED.reset(token)
 
+
+LicenseEntry.model_rebuild()
+LicenseChoice.model_rebuild()
 Service.model_rebuild()
 Targets.model_rebuild()
 CycloneDXReport.model_rebuild()

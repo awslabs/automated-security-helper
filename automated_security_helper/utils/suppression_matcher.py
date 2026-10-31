@@ -3,8 +3,11 @@
 
 """Utility functions for matching findings against suppression rules."""
 
+import bisect
+import codecs
 import fnmatch
 import re
+import weakref
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -18,7 +21,9 @@ from automated_security_helper.models.core import (
     expiration_has_passed,
 )
 from automated_security_helper.utils.path_matching import (
+    _match_form,
     _path_pattern_matches,
+    _pattern_components,
     directory_spelling,
     ignore_path_pattern,
 )
@@ -37,17 +42,287 @@ from automated_security_helper.utils.symbol_spans import SymbolResolver
 # Supported formats (slash-style for JS/TS/Java/C#/Go):
 #   // ash-ignore: RULE-ID [reason]
 #   // ash-ignore-next-line: RULE-ID [reason]
-_HASH_INLINE_PATTERN = re.compile(r"#\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE)
-_HASH_NEXT_LINE_PATTERN = re.compile(
-    r"#\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+# The blanks after the marker and after the rule id are spaces and tabs only,
+# not ``\s``: ``\s`` matches a carriage return, and under the line-feed-only
+# count a lone CR is inside the line, so ``# ash-ignore: R1\r...`` had its
+# reason start after the CR (the text of the next CR-line, which ``_reason``
+# then could not cut) and ``# ash-ignore:\rR1`` took ``R1`` from the next
+# CR-line as its rule id. A directive ends at the CR either way, and the blank
+# between the comment marker and the word is the same class: ``#\rash-ignore:``
+# is a bare ``#`` on one CR-line and a directive-shaped text on the next, not a
+# comment that holds a directive.
+_HASH_INLINE_PATTERN = re.compile(
+    r"#[ \t]*ash-ignore:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
 )
-_SLASH_INLINE_PATTERN = re.compile(r"//\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE)
+_HASH_NEXT_LINE_PATTERN = re.compile(
+    r"#[ \t]*ash-ignore-next-line:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
+)
+_SLASH_INLINE_PATTERN = re.compile(
+    r"//[ \t]*ash-ignore:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
+)
 _SLASH_NEXT_LINE_PATTERN = re.compile(
-    r"//\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+    r"//[ \t]*ash-ignore-next-line:[ \t]*(\S+)[ \t]*(.*)?$", re.IGNORECASE
 )
 
 _INLINE_PATTERNS = [_HASH_INLINE_PATTERN, _SLASH_INLINE_PATTERN]
 _NEXT_LINE_PATTERNS = [_HASH_NEXT_LINE_PATTERN, _SLASH_NEXT_LINE_PATTERN]
+
+# The part of each pattern up to the rule id: where a directive can begin. The
+# patterns end in ``(.*)?$``, so one match attempt reads to the end of the line,
+# and an attempt per marker inside a string cost the line's length each. A
+# marker is found with these, and the full pattern is tried only at a marker
+# that lies outside every string (``_search_comment``).
+_MARKER_OF = {
+    _HASH_INLINE_PATTERN: re.compile(r"#[ \t]*ash-ignore:", re.IGNORECASE),
+    _HASH_NEXT_LINE_PATTERN: re.compile(r"#[ \t]*ash-ignore-next-line:", re.IGNORECASE),
+    _SLASH_INLINE_PATTERN: re.compile(r"//[ \t]*ash-ignore:", re.IGNORECASE),
+    _SLASH_NEXT_LINE_PATTERN: re.compile(
+        r"//[ \t]*ash-ignore-next-line:", re.IGNORECASE
+    ),
+}
+
+# The characters that open and close a quoted string on one line: double, single
+# or backtick quotes, a backslash escaping the next character. A quote that never
+# closes on its line (an apostrophe in prose, say) is no string, so it hides
+# nothing; nor does a quote glued to the word before it (``Bob's``, ``isn't``),
+# unless that word is a string prefix (``f"..."``, ``rb'...'``).
+_QUOTE_CHARACTERS = ('"', "'", "`")
+_STRING_PREFIX_LETTERS = frozenset("rRbBfFuU")
+
+
+def _is_word_character(character: str) -> bool:
+    """What ``\\w`` matches in a ``str`` pattern: a letter, a digit or ``_``."""
+    return character.isalnum() or character == "_"
+
+
+def _opens_a_string(line: str, index: int) -> bool:
+    """Whether the quote at ``index`` can open a string.
+
+    A quote glued to the end of a word is an apostrophe, not a delimiter: in
+    ``Description: Bob's bucket  # ash-ignore: X logging isn't needed`` (a YAML
+    plain scalar with a comment) the two apostrophes once opened and closed a
+    "string" that held the marker, and the directive, which the plain search
+    found, went unseen with no warning: an existing suppression stopped working.
+    So a quote preceded by a word character opens nothing, with one exception:
+    the word is a string prefix of one or two letters from ``rRbBfFuU`` (Python's
+    ``f"..."``, ``b'...'``, ``rb"..."`` and their spellings), itself at a word
+    start, so ``f"# ash-ignore: X"`` is still a string and hides its marker.
+    Three or more word characters before the quote, or a letter outside the set,
+    is a word (``Bob``, ``isn``, ``it``), never a prefix. The walk back is at most
+    three characters, so the check is constant per quote.
+    """
+    start = index
+    while start > 0 and index - start < 3 and _is_word_character(line[start - 1]):
+        start -= 1
+    prefix = line[start:index]
+    if not prefix:
+        return True
+    return len(prefix) <= 2 and all(c in _STRING_PREFIX_LETTERS for c in prefix)
+
+
+def _is_between_word_characters(line: str, index: int) -> bool:
+    """Whether the character at ``index`` has a word character on both sides.
+
+    A quote there is an apostrophe inside a word (``it's``), which cannot end a
+    string any more than it can open one (``_opens_a_string``): ``it's`` in a
+    directive's reason closed a string opened before the marker, and hid it.
+
+    A closer is the exception where a keyword or a ``_`` follows it
+    (``_is_followed_by_what_follows_a_string``): ``"x"in env`` ends its string,
+    and a quote read as an apostrophe there left the string open until a quote
+    in the directive's reason, which put the marker inside it.
+    """
+    return (
+        0 < index < len(line) - 1
+        and _is_word_character(line[index - 1])
+        and _is_word_character(line[index + 1])
+    )
+
+
+#: Words that follow a string literal directly in common languages (Python,
+#: JavaScript, SQL and Visual Basic among them: ``"x"in env``,
+#: ``'a'if cond else 'b'``, ``'a'or 'b'``, ``"a"As Text``), and so tell a closing
+#: quote from an apostrophe: a word of prose rarely continues an apostrophe
+#: with one of these (``it's``, ``don't``, ``rock'n'roll``). They are compared
+#: without regard to case, since SQL and Visual Basic keywords are written in
+#: any (``'x'OR 1=1``, ``"a"And b``). The list is not every language's: a
+#: keyword missing from it leaves the quote read as an apostrophe.
+_WORDS_AFTER_A_STRING = frozenset(
+    {
+        "in",
+        "is",
+        "or",
+        "and",
+        "not",
+        "if",
+        "else",
+        "for",
+        "of",
+        "instanceof",
+        "as",
+        "then",
+        "unless",
+        "do",
+    }
+)
+#: The longest of them, so the walk to the end of a word stops there.
+_LONGEST_WORD_AFTER_A_STRING = max(map(len, _WORDS_AFTER_A_STRING))
+
+
+def _is_followed_by_what_follows_a_string(line: str, index: int) -> bool:
+    """Whether the text after the quote at ``index`` can follow a string literal.
+
+    A keyword (``_WORDS_AFTER_A_STRING``, in any case) that ends at a non-word
+    character or at the end of the line, or a ``_``: the suffix of a
+    user-defined literal (``"abc"_s``). Called for a quote between two word
+    characters, so
+    ``line[index + 1]`` exists; the walk is at most one character past the
+    longest keyword, so the check is constant per quote.
+    """
+    start = index + 1
+    if line[start] == "_":
+        return True
+    end = start
+    while (
+        end < len(line)
+        and end - start <= _LONGEST_WORD_AFTER_A_STRING
+        and _is_word_character(line[end])
+    ):
+        end += 1
+    return line[start:end].lower() in _WORDS_AFTER_A_STRING
+
+
+def _quoted_spans(line: str) -> List[Tuple[int, int]]:
+    """The ``[start, end)`` spans of the quoted strings in ``line``, left to right.
+
+    A string opens at a quote character that ``_opens_a_string`` admits and
+    closes at the next quote character of the same kind that no odd run of
+    backslashes precedes and that is not between two word characters
+    (``_is_between_word_characters``), unless what follows it is what follows a
+    string (``_is_followed_by_what_follows_a_string``: ``"x"in env``,
+    ``'a'or 'b'``, ``"abc"_s``); a quote with no such closer on the line
+    opens nothing, and the scan goes on from the next character. That is what the regular
+    expression this replaced found (the word-character rule added), but the
+    expression was tried afresh at every quote in the line, and each attempt
+    from a quote that never closes ran to the end of the line: a line of many
+    escaped quotes (a scanned tree holds whatever its author wrote, and under
+    the line-feed count a CR-only or minified file is one line) took time
+    quadratic in its length. Here the closers of each kind are listed in one
+    pass and the opener's scan consumes each one at most once, so the work is
+    linear in the line.
+    """
+    # The positions at which a string of each kind can close: a quote that an
+    # even run of backslashes precedes (within the string, a backslash escapes
+    # the character after it, and the run cannot reach back past the opener,
+    # which is a quote and not a backslash).
+    closers: Dict[str, List[int]] = {quote: [] for quote in _QUOTE_CHARACTERS}
+    backslashes = 0
+    for index, character in enumerate(line):
+        if character == "\\":
+            backslashes += 1
+            continue
+        if (
+            character in closers
+            and backslashes % 2 == 0
+            and (
+                not _is_between_word_characters(line, index)
+                or _is_followed_by_what_follows_a_string(line, index)
+            )
+        ):
+            closers[character].append(index)
+        backslashes = 0
+    spans: List[Tuple[int, int]] = []
+    next_closer = dict.fromkeys(_QUOTE_CHARACTERS, 0)
+    index = 0
+    while index < len(line):
+        character = line[index]
+        if character not in closers or not _opens_a_string(line, index):
+            index += 1
+            continue
+        candidates = closers[character]
+        pointer = next_closer[character]
+        while pointer < len(candidates) and candidates[pointer] <= index:
+            pointer += 1
+        next_closer[character] = pointer
+        if pointer == len(candidates):
+            # No closer of this kind follows: the quote opens nothing.
+            index += 1
+            continue
+        end = candidates[pointer] + 1
+        spans.append((index, end))
+        index = end
+    return spans
+
+
+def _search_comment(pattern: "re.Pattern[str]", line: str) -> Optional["re.Match[str]"]:
+    """The first match of ``pattern`` in ``line`` that begins outside a quoted string.
+
+    Every pattern starts with the comment marker (``#`` or ``//``), so a match
+    inside a string literal is text that looks like a directive, not a comment:
+    ``x = "# ash-ignore: B101"`` suppresses nothing. A marker inside a string
+    never ends the search: the next one, if there is one, is looked at in turn.
+    The spans are found once per line (``_quoted_spans``) and each marker is
+    placed among them by bisection. Markers are found with the pattern's marker
+    alone (``_MARKER_OF``), which stops where the marker does, and the full
+    pattern, which reads to the end of the line, is tried only at a marker
+    outside every string: a line of many markers inside many strings costs the
+    line's length once, not once per marker.
+    """
+    marker = _MARKER_OF.get(pattern, pattern)
+    starts: Optional[List[int]] = None
+    ends: List[int] = []
+    position = 0
+    while True:
+        candidate = marker.search(line, position)
+        if candidate is None:
+            return None
+        if starts is None:
+            spans = _quoted_spans(line)
+            starts = [begin for begin, _ in spans]
+            ends = [end for _, end in spans]
+        start = candidate.start()
+        # The spans are in order and do not overlap, so the only span that can
+        # hold ``start`` is the last one that begins at or before it.
+        within = bisect.bisect_right(starts, start) - 1
+        if within < 0 or start >= ends[within]:
+            match = pattern.match(line, start)
+            if match is not None:
+                return match
+        position = start + 1
+
+
+def _reason(match: "re.Match[str]") -> str:
+    r"""The directive's reason: the text after its rule id, up to the line's end
+    or the first carriage return, whichever comes first.
+
+    Lines are split at line feeds alone (``find_inline_suppressions``), so a
+    lone CR is inside a line, and the reason group (``(.*)?$``) ran past it: on
+    a CR-only file the reason was the rest of the file, and the reason is copied
+    into the SARIF justification of every finding the directive suppresses, so
+    source text (a secret among it, say) landed in the results. The reason is
+    cut at the first CR whatever the line numbering decides about it. The
+    patterns' blanks after the rule id are spaces and tabs only, so a CR right
+    after the rule id is the first character of the reason group and the cut
+    leaves the default reason; with ``\s*`` there the CR was consumed before
+    the group began and the next CR-line's text was the reason.
+    """
+    return (match.group(2) or "").split("\r", 1)[0].strip()
+
+
+def _decode_source(data: bytes) -> str:
+    """``data`` as text: UTF-32 or UTF-16 when it starts with that encoding's byte
+    order mark, else UTF-8, with anything undecodable replaced.
+
+    A source file saved as UTF-16 (a Windows editor's "Unicode") read as UTF-8
+    is a NUL between every two characters, so no directive in it was ever found.
+    A file with no byte order mark is read as UTF-8, as before: its encoding
+    cannot be told from its bytes.
+    """
+    if data.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        return data.decode("utf-32", errors="replace")
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return data.decode("utf-16", errors="replace")
+    return data.decode("utf-8", errors="replace")
 
 
 @dataclass(frozen=True)
@@ -120,7 +395,10 @@ def ignore_path_matches(file_path: Optional[str], ignore_path: str) -> bool:
 
 
 def warn_unmatched_directory_suppressions(
-    suppressions: Iterable[AshSuppression], used_ids: Iterable[str]
+    suppressions: Iterable[AshSuppression],
+    used_ids: Iterable[str],
+    recorded: Optional[Dict[int, Dict[str, Any]]] = None,
+    config: Any = None,
 ) -> None:
     """Warn once for each suppression whose path ends in ``/`` and matched nothing.
 
@@ -132,7 +410,24 @@ def warn_unmatched_directory_suppressions(
     file below the directory and not a file named ``build``, which ``build/**``
     would also cover. Called after the scan's last suppression pass, with the ids
     of the suppressions that pass used.
+
+    A path whose last component is ``**`` (``build/**/``) is not literal: the
+    matcher reads the trailing slash after ``**`` as part of it
+    (``path_matching._pattern_components``), so it is ``build/**``, which matches
+    files, and the warning does not apply to it.
+
+    ``recorded`` is ``recorded_suppressions(config)``. The warning then quotes a
+    path the config file read from the environment by its reference, as every
+    other message about a suppression does, and never by its value. A caller
+    that holds the config passes it as ``config`` instead and the record is
+    built here, from the same list it is keyed by: the scan's caller passed
+    neither, so a path read from the environment was printed by its value in
+    this one warning. The record is keyed by ``id()``, so ``suppressions`` are
+    the config's own instances (``config.global_settings.suppressions``), not
+    copies; with ``config`` given that is what the record is built from.
     """
+    if recorded is None and config is not None:
+        recorded = recorded_suppressions(config)
     used = set(used_ids)
     for suppression in suppressions:
         path = getattr(suppression, "path", None) or ""
@@ -141,6 +436,33 @@ def warn_unmatched_directory_suppressions(
         directory = path.rstrip("/\\")
         if not directory:
             continue
+        # As the matcher reads it: one slash after a trailing ``**`` is part of
+        # it (``build/**/`` is ``build/**``), a second is a component of its own
+        # that no path has (``build/**//`` matches nothing and is warned about).
+        if _pattern_components(_match_form(path))[-1] == "**":
+            continue
+        written = (recorded or {}).get(id(suppression), {}).get("path")
+        if (
+            isinstance(written, str)
+            and written != path
+            and not written.endswith(("/", "\\"))
+        ):
+            # The slash comes from the value the config read from the
+            # environment, not from what the file wrote (``${DIR}``, say). The
+            # written form cannot be shown with the slash, and advice that
+            # spelled ``${DIR}/**/*`` would resolve to ``dir//**/*``, which
+            # matches nothing: so no spelling is advised.
+            ASH_LOGGER.warning(
+                f"The suppression with path '{written}' matched no finding: the "
+                "path it reads ends in '/', and a suppression path ending in '/' "
+                "matches only that literal path, not the files in the directory. "
+                "To suppress the findings below the directory, make the path "
+                "name it without the trailing '/' and append '/**/*'."
+            )
+            continue
+        if isinstance(written, str) and written.rstrip("/\\"):
+            path = written
+            directory = written.rstrip("/\\")
         # A plain message: the log sinks show it, values included, once. Escaping
         # the values for Rich here showed them a second time.
         ASH_LOGGER.warning(
@@ -238,6 +560,13 @@ def should_suppress_finding(
     return False, None
 
 
+#: The entries _has_expired has warned about, by ``id()``. Weak, so the id a
+#: collected entry leaves behind is never read as a later entry's.
+_WARNED_UNREADABLE_EXPIRATION: "weakref.WeakValueDictionary[int, Any]" = (
+    weakref.WeakValueDictionary()
+)
+
+
 def _has_expired(entry: IgnorePathWithReason, where: str) -> bool:
     """Whether ``entry`` no longer applies because its ``expiration`` has passed.
 
@@ -266,10 +595,19 @@ def _has_expired(entry: IgnorePathWithReason, where: str) -> bool:
     try:
         expired = expiration_has_passed(entry.expiration)
     except ValueError:
-        ASH_LOGGER.warning(
-            f"Invalid expiration date format for {where}. Use YYYY-MM-DD; "
-            "the entry is not applied."
-        )
+        # Once for an entry: should_suppress_finding asks about every entry for
+        # every finding, so a warning per call wrote one line per finding for one
+        # bad date. An entry of a configuration loaded again is a new object and
+        # is warned about again.
+        if _WARNED_UNREADABLE_EXPIRATION.get(id(entry)) is not entry:
+            try:
+                _WARNED_UNREADABLE_EXPIRATION[id(entry)] = entry
+            except TypeError:
+                pass  # not weak-referenceable: warned about on every call
+            ASH_LOGGER.warning(
+                f"Invalid expiration date format for {where}. Use YYYY-MM-DD; "
+                "the entry is not applied."
+            )
         return True
     if expired:
         ASH_LOGGER.debug(f"{where} has expired")
@@ -312,6 +650,14 @@ def accepting_unconverted_input(
     ``expiration`` take part: an expired entry, or one kept from a results file
     with unknown keys, accepts nothing (_has_expired, _has_unknown_keys).
 
+    Only the operator's entries accept. An entry a delivered tree's own config
+    or a workspace policy file supplied (``client_supplied``) is left to the
+    finding step, where it marks results suppressed and the results show what
+    the client's config hid; it never waives scan coverage, as a client-supplied
+    ignore path never skips scanning (``ignore_paths_that_skip_scanning``).
+    Without this a tree could carry a suppression that waives the completeness
+    gate for an archive or notebook the tree itself made unreadable.
+
     Consulted only for an input error, the record of a file that is not one the
     converter could hand to its tool. A tool failure never reaches this, so a
     broken tool cannot be suppressed into a complete scan.
@@ -319,6 +665,9 @@ def accepting_unconverted_input(
     for index, suppression in enumerate(suppressions or []):
         rule_id = suppression.rule_id
         if rule_id is None or rule_id.lower() != UNCONVERTED_INPUT_RULE:
+            continue
+        # Read with getattr: a record built outside this model carries no flag.
+        if getattr(suppression, "client_supplied", False) is True:
             continue
         location = f"{where}[{index}]"
         if _has_expired(suppression, location) or _has_unknown_keys(
@@ -364,12 +713,17 @@ def _expiring_within(
     """Entries whose expiration is today or within ``days_threshold`` days.
 
     One whose date does not parse is named by its location in ``where``, the
-    list's location, as in _has_expired.
+    list's location, as in _has_expired. One kept from a results file with a key
+    it does not declare is left out: it is never applied (_has_unknown_keys), so
+    it does not expire.
     """
     expiring = []
     today = current_date()
 
     for index, entry in enumerate(entries):
+        # ``is True``: a record built outside the model carries no such flag.
+        if getattr(entry, "has_unknown_keys", False) is True:
+            continue
         if entry.expiration:
             try:
                 expiration_date = datetime.strptime(entry.expiration, "%Y-%m-%d").date()
@@ -558,6 +912,20 @@ def find_inline_suppressions(
     * ``// ash-ignore: <rule-id> [reason]``  --  same (JS/TS/Java/C#/Go).
     * ``// ash-ignore-next-line: <rule-id> [reason]``  --  same.
 
+    A directive is a comment: the marker must begin outside a quoted string on
+    its line, so ``x = "# ash-ignore: B101"`` suppresses nothing. A file that
+    starts with a UTF-16 or UTF-32 byte order mark is read in that encoding, any
+    other as UTF-8.
+
+    Lines are counted by line feed, as a scanner's SARIF ``startLine`` counts
+    them (a CRLF file's carriage return belongs to the line before it; a lone
+    CR is not a line break). That is the contract for a file with no line feed
+    at all (classic Mac CR-only line endings): it is one line here, so at most
+    one directive is found, the first on the line, it names line 1 (line 2 for
+    ``ash-ignore-next-line``), and its reason ends at the first carriage return
+    after it (``_reason``), not at the end of the file; a scanner that numbers
+    such a file by CR reports lines these directives never match.
+
     Args:
         file_path: Path to the source file to scan.
         scan_root: The scanned tree. When given, the file is read under the
@@ -573,31 +941,49 @@ def find_inline_suppressions(
     """
     suppressions: List[InlineSuppression] = []
     try:
+        # Both paths read the bytes as they are, so the two number lines the
+        # same way (read_text's universal newlines would have folded CR and
+        # CRLF on one path only).
         if scan_root is None:
-            text = file_path.read_text(encoding="utf-8", errors="replace")
+            data = file_path.read_bytes()
         else:
             with open_in_scanned_tree(
                 file_path, scan_root, follow_links_inside=True
             ) as handle:
-                text = handle.read().decode("utf-8", errors="replace")
+                data = handle.read()
+        text = _decode_source(data)
     except TreeInputRefused as refused:
         ASH_LOGGER.warning(
             f"Inline suppressions in '{refused.path}' were not read: {refused.reason}"
         )
         return suppressions
-    except (OSError, UnicodeDecodeError) as exc:
+    except (OSError, ValueError) as exc:
+        # ValueError covers UnicodeDecodeError, and the two refusals the OS
+        # layer gives a path before opening it: an embedded NUL, and a lone
+        # surrogate the file-system encoding cannot encode (UnicodeEncodeError).
+        # Either is one unreadable file, not a reason to drop every other
+        # file's suppressions with it.
         ASH_LOGGER.debug(f"Could not read {file_path} for inline suppressions: {exc}")
         return suppressions
 
-    for line_num_0, line in enumerate(text.splitlines()):
+    # Lines are counted as a scanner's SARIF startLine counts them: by line
+    # feed, with a CRLF file's carriage return belonging to the line before
+    # it. A lone CR is not a line break here (the scanners whose results these
+    # suppressions match are not all Python, and they count LF), and neither
+    # is anything str.splitlines would also break at (a form feed, a vertical
+    # tab, NEL, LINE SEPARATOR, PARAGRAPH SEPARATOR, the \x1c-\x1e
+    # separators), which once attached every later directive to a line number
+    # the SARIF results never carry.
+    text = text.replace("\r\n", "\n")
+    for line_num_0, line in enumerate(text.split("\n")):
         line_num = line_num_0 + 1  # 1-based
 
         matched = False
         for pattern in _INLINE_PATTERNS:
-            match = pattern.search(line)
+            match = _search_comment(pattern, line)
             if match:
                 rule_id = match.group(1)
-                reason = (match.group(2) or "").strip()
+                reason = _reason(match)
                 suppressions.append(
                     InlineSuppression(
                         line_number=line_num,
@@ -611,10 +997,10 @@ def find_inline_suppressions(
             continue
 
         for pattern in _NEXT_LINE_PATTERNS:
-            match = pattern.search(line)
+            match = _search_comment(pattern, line)
             if match:
                 rule_id = match.group(1)
-                reason = (match.group(2) or "").strip()
+                reason = _reason(match)
                 suppressions.append(
                     InlineSuppression(
                         line_number=line_num + 1,

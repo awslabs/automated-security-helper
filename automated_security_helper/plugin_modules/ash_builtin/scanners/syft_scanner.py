@@ -3,10 +3,11 @@
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, ClassVar, List, Literal, Set
+from typing import Annotated, Any, ClassVar, List, Literal, Set
 
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, ValidationError, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
@@ -30,12 +31,20 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.config.path_trust import (
     cwd_outside_scanned_tree,
     honored_path,
+    resolved_path,
 )
 from automated_security_helper.utils.link_exclusions import syft_excludes
-from automated_security_helper.utils.error_text import text_without_values
+from automated_security_helper.utils.error_text import (
+    text_without_values,
+    traceback_text,
+)
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.subprocess_utils import (
+    COULD_NOT_STOP_ENDING,
+    WAS_KILLED_ENDING,
+)
 from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 
 
@@ -113,6 +122,11 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     # scanners don't race on os.environ.
     extra_env: Annotated[dict, Field(default_factory=dict)]
 
+    # The config-file warnings already given: _process_config_options runs at
+    # construction and again on every scan() (the ToolArgs rebuild there drops
+    # what it added), and the same missing or refused file need be said once.
+    _config_warnings_given: Set[str] = PrivateAttr(default_factory=set)
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = SyftScannerConfig()
@@ -164,8 +178,14 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         # for .syft.yaml by name: its exclude would let the repository decide what
         # the SBOM lists. With none, scan() passes syft an empty one, so syft does
         # not read one from its working directory on its own.
+        # A blank value names no file: Path("") joined to the source directory is
+        # the source directory itself, which exists, so the probe below would read
+        # it as a configured file (refused, with no refusal line to point at).
+        # Blank reads as unset.
         possible_config_paths = [
-            item for item in [self.config.options.config_file] if item is not None
+            item
+            for item in [self.config.options.config_file]
+            if item is not None and str(item).strip()
         ]
 
         # Resolve config candidates against source_dir, not the process working
@@ -203,10 +223,18 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         context_config = getattr(self.context, "config", None)
         for index, conf_path in enumerate(possible_config_paths):
             configured = index == 0 and self.config.options.config_file is not None
-            candidate = Path(conf_path)
-            if not candidate.is_absolute():
-                candidate = source_dir / candidate
-            if candidate.exists():
+            # As syft will read it: "~" expanded, a relative path taken from the
+            # source directory (path_trust.resolved_path, the resolution
+            # honored_path checks). Joining the value as written under the
+            # source directory read a "~/..." path as a file below the scanned
+            # tree, so the operator's home config was judged missing and an
+            # empty one passed in its place.
+            candidate = resolved_path(conf_path, source_dir)
+            # os.path.exists, not Path.exists: under a directory this process
+            # cannot search, Path.exists raises PermissionError on Python
+            # 3.10-3.13, out of the scanner's construction; os.path.exists
+            # answers False on any OSError, which takes the missing-file path.
+            if os.path.exists(candidate):
                 honored = honored_path(
                     conf_path,
                     source_dir=source_dir,
@@ -226,13 +254,24 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 )
                 if honored is None:
                     if configured:
+                        # honored_path has logged why (inside the scanned tree,
+                        # delivered by an MCP client, or a work product derived
+                        # from the repository), but it logs each refusal once per
+                        # process while this line is given once per scanner
+                        # instance: in a long-lived process (the MCP server) a
+                        # later scan's instance gives this line with that one
+                        # long past. So this line names the key and the three
+                        # reasons itself and does not point at another line.
                         self._use_empty_config()
-                        ASH_LOGGER.warning(
-                            "Configured syft config file was not used because "
-                            "it is a work product derived from the scanned "
-                            "repository. Syft will run with an empty config "
-                            "file that ASH writes; no config file is "
-                            "discovered from the scanned tree in its place."
+                        self._warn_once(
+                            "Configured syft config file was not used "
+                            "(scanners.syft.options.config_file): it is inside "
+                            "the scanned tree, was delivered by an MCP client, or "
+                            "was derived from the repository, and the first scan "
+                            "in this process to meet it logged which. Syft will "
+                            "run with an empty config file that ASH writes; no "
+                            "config file is discovered from the scanned tree in "
+                            "its place."
                         )
                         break
                     continue
@@ -245,7 +284,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 # replacement (config/path_trust.py, "Configured tool inputs
                 # that are refused or missing").
                 self._use_empty_config()
-                ASH_LOGGER.warning(
+                self._warn_once(
                     text_without_values(
                         f"Configured syft config file does not exist: "
                         f"{self.config.options.config_file}. Syft will run "
@@ -280,6 +319,31 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 
         return super()._process_config_options()
 
+    def _warn_once(self, message: str) -> None:
+        """Log ``message`` as a warning the first time it is given, and not on the
+        later ``_process_config_options`` runs that every ``scan()`` makes."""
+        if message in self._config_warnings_given:
+            return
+        self._config_warnings_given.add(message)
+        ASH_LOGGER.warning(message)
+
+    def _base_path(self, target: Path) -> Path:
+        """What syft gets as ``--base-path``: the source directory for a target
+        inside it, else the target itself.
+
+        syft reports paths relative to the base path and follows no link above
+        it. The source target is the source directory. The converted target lives
+        under the output directory, which is inside the source tree by default
+        (``.ash/ash_output``) but is wherever ``--output-dir`` put it, and a base
+        path that does not contain the scanned directory would make syft spell
+        every path from a directory the scan is not under.
+        """
+        source_dir = Path(os.path.abspath(self.context.source_dir))
+        scanned = Path(os.path.abspath(target))
+        if scanned == source_dir or source_dir in scanned.parents:
+            return source_dir
+        return scanned
+
     def _working_directory(self, target: Path, results_dir: Path) -> Path:
         """A working directory outside the scanned tree, online and offline.
 
@@ -298,6 +362,55 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         raise NotImplementedError(
             f"{self.__class__.__name__} overrides scan() directly."
         )
+
+    def _refuse_flagged_response(self, response: object, timeout: float | None) -> None:
+        """Raise for a run the subprocess layer flagged, before its file is read.
+
+        The same four readings ``ScannerPluginBase.scan`` makes for every
+        template scanner, which this override of ``scan()`` left out: a killed
+        tool writes no results file, so the error would otherwise be "No such
+        file or directory" instead of the timeout; a tool that could not start
+        the same; a tool that ran while ASH could not record its output (exit 0,
+        results file possibly complete) is not graded on that file; a tool a
+        signal ASH did not send ended did not finish.
+        """
+        if not isinstance(response, dict):
+            return
+        name = self.__class__.__name__
+        if response.get("timed_out"):
+            limit = self._timeout_limit_token(timeout)
+            if self.scan_could_not_stop is not None:
+                ending = f"{COULD_NOT_STOP_ENDING}. It produced no"
+            else:
+                ending = f"{WAS_KILLED_ENDING}, so it produced no"
+            raise ScannerError(
+                text_without_values(
+                    f"{name} timed out after {limit}{ending} results file. Raise "
+                    f"scanners.{getattr(self.config, 'name', '<scanner>')}.options"
+                    ".scan_timeout if this target legitimately needs longer, or set "
+                    "it to null to leave this scanner unbounded.",
+                    self._values_to_redact(),
+                )
+            )
+        if response.get("spawn_failed"):
+            raise ScannerError(
+                f"{name} could not start its tool, so it produced no results file."
+            )
+        if response.get("post_run_error"):
+            raise ScannerError(
+                text_without_values(
+                    f"{name} ran, but ASH could not record the scanner's output: "
+                    f"{response.get('error')}",
+                    self._values_to_redact(),
+                )
+            )
+        if response.get("signaled"):
+            raise ScannerError(
+                text_without_values(
+                    f"{name} did not finish: {response.get('error')}",
+                    self._values_to_redact(),
+                )
+            )
 
     def scan(
         self,
@@ -319,10 +432,13 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
-        # Per target; see ScannerPluginBase.scan().
+        # Per target; see ScannerPluginBase.scan(). The tool lines too, so a
+        # failed converted-target run does not quote the source target's stderr.
         self.exit_code = 0
+        self.output = []
+        self._reset_errors()
         # Check if the target directory is empty or doesn't exist
-        if not target.exists() or not any(target.iterdir()):
+        if _target_is_empty(target):
             message = (
                 f"Target directory {target} is empty or doesn't exist. Skipping scan."
             )
@@ -332,6 +448,10 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 level=logging.INFO,
                 append_to_stream="stderr",
             )
+            # No tool runs for this target, so its record starts and ends now: a
+            # start time left from the previous target would give it that
+            # target's duration.
+            self.start_time = None
             self._post_scan(
                 target=target,
                 target_type=target_type,
@@ -373,7 +493,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 extra_args=[
                     ToolExtraArg(
                         key="--base-path",
-                        value=Path(os.path.abspath(self.context.source_dir)).as_posix(),
+                        value=self._base_path(target).as_posix(),
                     ),
                 ],
             )
@@ -429,18 +549,20 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             subprocess_env = (
                 {**snapshot_environ(), **self.extra_env} if self.extra_env else None
             )
+            effective_timeout = self._effective_scan_timeout()
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 cwd=self._working_directory(target, target_results_dir),
                 env=subprocess_env,
-                timeout=self._effective_scan_timeout(),
+                timeout=effective_timeout,
             )
 
             self._post_scan(
                 target=target,
                 target_type=target_type,
             )
+            self._refuse_flagged_response(response, effective_timeout)
             self._record_target_exit_code(response)
             self._refuse_rejected_exit_code(results_file)
 
@@ -449,34 +571,91 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 syft_results = json.load(f)
             try:
                 sbom_report = CycloneDXReport.model_validate(syft_results)
-            except Exception as e:
-                ASH_LOGGER.warning(
-                    f"Failed to parse {self.__class__.__name__} results as CycloneDX: {str(e)}"
+            except ValidationError as e:
+                # Not returned as it is: the declared result is a CycloneDXReport
+                # or a bool, and a raw dict reaches the executor as a result it
+                # cannot grade, reported as "not SARIF and carries no status",
+                # which names neither syft nor the cause. The error's count, not
+                # its text: the text quotes the document's values.
+                raise ScannerError(
+                    f"{self.__class__.__name__} wrote a results file that is not "
+                    f"CycloneDX ASH can read ({e.error_count()} validation "
+                    "error(s)), so its SBOM could not be recorded"
                 )
-                sbom_report = syft_results
 
             return sbom_report
 
         except Exception as e:
-            # Check if there are useful error details
-            raise ScannerError(f"{self.__class__.__name__} scan failed: {str(e)}")
+            # The run is over for this target, however it ended: the executor
+            # records end_time, and one left from the previous target would give
+            # this one an end before its start.
+            self.end_time = datetime.now(timezone.utc)
+            # Redacted, as the module's other error paths are: the text can quote
+            # a path the configuration read from the environment.
+            values = self._values_to_redact()
+            failure = text_without_values(
+                f"{self.__class__.__name__} scan failed: {str(e)}", values
+            )
+            # The new error carries no traceback (below), so a bug inside the try
+            # (an AttributeError in ASH's own code, say) would leave only the
+            # one-line message. The stack goes to the debug log, redacted the way
+            # the message is.
+            ASH_LOGGER.debug(
+                f"{self.__class__.__name__} scan failed; the original traceback:\n"
+                + traceback_text(e, values=values),
+                extra=NO_MARKUP,
+            )
+        # Raised outside the except block, so the original exception, whose text
+        # is not redacted, is attached to the new one neither as __context__ nor
+        # as __cause__: `raise ... from None` would only hide it from the default
+        # traceback while leaving it readable on the object.
+        raise ScannerError(failure)
+
+
+def _target_is_empty(target: Path) -> bool:
+    """Whether ``target`` is missing, or a directory with nothing in it.
+
+    A target that is a file is not empty, and a directory that cannot be listed
+    is left to the tool: the probe used to raise ``NotADirectoryError`` or
+    ``PermissionError`` out of ``scan()`` before its error handling began.
+    """
+    try:
+        if not target.exists():
+            return True
+        return target.is_dir() and not any(target.iterdir())
+    except OSError:
+        return False
+
+
+def _demo_main(source_dir: Path, output_dir: Path) -> Path:
+    """Scan ``source_dir`` with syft and write the SBOM under ``output_dir``.
+
+    What ``python -m`` on this module does: a scanner with the plugin context the
+    executor would give it, one source scan, and the CycloneDX document written as
+    ``syft.cdx.json`` (the name the scanner writes). A result that is not a report
+    (True for an empty target, False when syft cannot run) is written as JSON too.
+    Returns the file written.
+    """
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.default_config import get_default_config
+
+    context = PluginContext(
+        source_dir=source_dir, output_dir=output_dir, config=get_default_config()
+    )
+    scanner = SyftScanner(context=context)
+    report: Any = scanner.scan(target=source_dir, target_type="source")
+    if hasattr(report, "model_dump_json"):
+        report_json = report.model_dump_json(
+            indent=2, by_alias=True, exclude_unset=True
+        )
+    else:
+        report_json = json.dumps(report, indent=2)
+    destination = output_dir.joinpath("syft.cdx.json")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with open_for_write(destination, encoding=None, errors=None) as f:
+        f.write(report_json)
+    return destination
 
 
 if __name__ == "__main__":
-    scanner = SyftScanner(  # type: ignore[call-arg]
-        source_dir=Path.cwd(),
-        output_dir=Path.cwd().joinpath(".ash", "ash_output"),
-    )
-    report = scanner.scan(target=scanner.source_dir)
-
-    report_json = report.model_dump_json(
-        indent=2,
-        by_alias=True,
-        exclude_unset=True,
-    )
-    with open_for_write(
-        Path.cwd().joinpath(".ash", "ash_output").joinpath("cfn_nag_results.sarif"),
-        encoding=None,
-        errors=None,
-    ) as f:
-        f.write(report_json)
+    _demo_main(Path.cwd(), Path.cwd().joinpath(".ash", "ash_output"))

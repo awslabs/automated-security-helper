@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import yaml
 
@@ -47,7 +47,8 @@ class _EnvTagged(str):
 
 class _Reference(str):
     """A reference a file wrote untagged (``${VAR}``), written plain so that the
-    loader's implicit resolver reads it as one again."""
+    loader's implicit resolver reads it as one again, or with the ``!ENV`` tag
+    where the emitter cannot write it plain (_represent_reference)."""
 
     __slots__ = ()
 
@@ -72,6 +73,22 @@ def _represent_text(dumper: yaml.Dumper, value: str) -> yaml.ScalarNode:
     return dumper.represent_str(value)
 
 
+def _represent_reference(dumper: yaml.Dumper, value: str) -> yaml.ScalarNode:
+    """A reference the file wrote untagged, plain where the emitter writes it so.
+
+    The loader's implicit resolver reads only a plain scalar as a reference. Text
+    the emitter would quote (a non-ASCII character, ``' #'``, ``': '``, a line
+    break, or a ``'::'`` after a blank, which NoCommandLineDumper quotes) would
+    read back as a literal, so it is written with the explicit ``!ENV`` tag,
+    which the loader resolves however the scalar is quoted.
+    """
+    text = str(value)
+    node = dumper.represent_str(text)
+    if node.style is None and dumper.analyze_scalar(text).allow_block_plain:
+        return node
+    return dumper.represent_scalar("!ENV", text)
+
+
 # Every writer dumping with this class (config update's render_config_file,
 # the linter's --fix) keeps a reference-shaped literal quoted, as the save
 # path does; a plain dump would turn it into a reference the next load reads.
@@ -86,10 +103,51 @@ class _AsWrittenYamlDumper(IndentableYamlDumper):
 _AsWrittenYamlDumper.add_representer(
     _EnvTagged, lambda dumper, value: dumper.represent_scalar("!ENV", str(value))
 )
-_AsWrittenYamlDumper.add_representer(
-    _Reference, lambda dumper, value: dumper.represent_str(str(value))
-)
+_AsWrittenYamlDumper.add_representer(_Reference, _represent_reference)
 _AsWrittenYamlDumper.add_representer(str, _represent_text)
+
+
+def _paths_in_record(
+    rewrites: List[Any], path: Tuple[Any, ...]
+) -> List[Tuple[Any, ...]]:
+    """The places the record can hold the value a rewrite names at ``path``.
+
+    A value's path names a key its files read from the environment by the value
+    it resolved to, and record_of_config renames that key to the reference its
+    file wrote after it has recorded the values. Each such segment is looked up
+    as the key written: as the text the file wrote (the record of a JSON file),
+    and as the typed key a marked record holds (_as_reference, which leaves an
+    explicit tag off).
+    """
+    renamed = {
+        (tuple(rewrite.path), rewrite.resolved): rewrite.written
+        for rewrite in rewrites
+        if rewrite.kind == "key"
+    }
+    as_written: List[Any] = []
+    as_typed: List[Any] = []
+    for index, segment in enumerate(path):
+        written = renamed.get((tuple(path[:index]), segment))
+        as_written.append(segment if written is None else written)
+        as_typed.append(segment if written is None else _as_reference(written))
+    places = [tuple(as_written)]
+    if as_typed != as_written:
+        places.append(tuple(as_typed))
+    return places
+
+
+def _without_references(text: str, rewrite: Any) -> str:
+    """``text`` without the reference ``rewrite`` records, as the file wrote it
+    and as the part of it a variable stands for.
+
+    A reference can hold its variable's value itself, as its default
+    (``${VAR:value}``), and the record of a JSON file holds each reference as a
+    plain string, which no type marks. What remains is text the record kept.
+    """
+    for reference in (rewrite.written, rewrite.reference):
+        if reference:
+            text = text.replace(reference, "")
+    return text
 
 
 def _refuse_a_value_left_as_text(data: Any, ash_config: AshConfig) -> None:
@@ -101,7 +159,10 @@ def _refuse_a_value_left_as_text(data: Any, ash_config: AshConfig) -> None:
     its rewrite names. One left there as text (a string the record could not
     write as the reference) would be a literal the scan reads and no redaction
     knows: not written, then, rather than written so. Only those locations are
-    looked at. A runtime patch keeps the rewrites whose value is still where
+    looked at, and the reference itself is taken out of a string before it is
+    compared with the value, since its default can be the value. A location
+    under a key read from the environment is looked up under the key as
+    written. A runtime patch keeps the rewrites whose value is still where
     they were followed to, drops those an op wrote over, and is refused when a
     value moved anywhere else (runtime_patch._ReferencesThroughPatch), so a
     default, or a client's string, equal to a value is not one: comparing every
@@ -121,7 +182,11 @@ def _refuse_a_value_left_as_text(data: Any, ash_config: AshConfig) -> None:
     for rewrite in rewrites:
         if rewrite.kind != "value" or not rewrite.path:
             continue
-        leaf = recorded_value_at(ash_config, data, rewrite.path)
+        leaf = None
+        for place in _paths_in_record(rewrites, rewrite.path):
+            leaf = recorded_value_at(ash_config, data, place)
+            if leaf is not None:
+                break
         if isinstance(leaf, (_EnvTagged, _Reference)) or leaf is None:
             continue
         if not isinstance(leaf, str):
@@ -132,7 +197,8 @@ def _refuse_a_value_left_as_text(data: Any, ash_config: AshConfig) -> None:
             )
         else:
             left = leaf == rewrite.resolved or bool(
-                rewrite.environment_part and rewrite.environment_part in leaf
+                rewrite.environment_part
+                and rewrite.environment_part in _without_references(leaf, rewrite)
             )
         if left:
             raise RuntimeError(
@@ -160,6 +226,9 @@ def render_config_file_as_written(
     if is_json_file(config_path):
         data = record_of_config(ash_config, user_config_data(ash_config))
         _refuse_a_value_left_as_text(data, ash_config)
+        # A JSON config is read with no interpolation (config_sources), so each
+        # reference is written as the text the file wrote; the value is never
+        # written in its place.
         return json.dumps(data, indent=2) + "\n"
     # Marked where record_of_config writes a reference, by location: matching
     # the text instead tagged a literal that read like a reference elsewhere.

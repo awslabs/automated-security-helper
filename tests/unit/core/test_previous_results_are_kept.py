@@ -331,6 +331,39 @@ def test_run_ash_scan_with_keep_previous_results_that_fails_puts_them_back(tmp_p
 
 
 @pytest.mark.unit
+def test_a_results_write_that_fails_puts_them_back(tmp_path):
+    """The write runs after the phases, outside the arm that puts the previous
+    results back on a failed phase; a write that fails is a failed scan all the
+    same, and puts them back itself."""
+    from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    source, output = _with_previous_results(tmp_path)
+
+    def refuse(self, output_dir):
+        raise OSError(28, "No space left on device", str(output_dir))
+
+    with (
+        patch(_ENGINE, side_effect=lambda *a, **k: AshAggregatedResults()),
+        patch.object(AshAggregatedResults, "save_model", refuse),
+    ):
+        with pytest.raises(SystemExit) as exited:
+            run_ash_scan(
+                source_dir=str(source),
+                output_dir=str(output),
+                progress=False,
+                show_summary=False,
+                quiet=True,
+                keep_previous_results=True,
+            )
+    assert exited.value.code == 1
+    # Red at the base: the error left the orchestrator raw, the previous results
+    # stayed set aside, and nothing was marked restored.
+    assert _contents(output) == PREVIOUS
+    assert _marked(output)
+
+
+@pytest.mark.unit
 def test_run_ash_scan_with_keep_previous_results_whose_set_up_fails(tmp_path):
     """A failure in initialize after they were set aside: they are put back."""
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator

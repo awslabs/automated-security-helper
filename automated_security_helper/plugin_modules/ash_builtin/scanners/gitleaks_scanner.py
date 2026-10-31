@@ -49,8 +49,13 @@ which are both, so the scanned tree does not configure gitleaks:
   scanned directory, ``utils/config_trust.py``), else ``GITLEAKS_CONFIG`` or ``GITLEAKS_CONFIG_TOML``
   from the operator's environment (outside the scanner sandbox, which does not
   pass them in), else a config ASH writes that extends gitleaks' default rules and
-  adds nothing. It is always passed as ``--config`` except in the environment
-  case, so gitleaks never falls through to ``<target>/.gitleaks.toml``. A
+  adds nothing. It is passed as ``--config`` in every case but one, so gitleaks
+  never falls through to ``<target>/.gitleaks.toml``: an absolute
+  ``GITLEAKS_CONFIG``, or ``GITLEAKS_CONFIG_TOML``, is left to gitleaks, which
+  reads the variable itself; a ``GITLEAKS_CONFIG`` that is not absolute as given
+  (``rules.toml``, ``~/rules.toml``) is anchored to the directory ASH runs in and
+  passed as ``--config``, because gitleaks would resolve it against its working
+  directory, the scanned tree. A
   ``config_file`` or ``baseline_path`` set by a config inside a git checkout or the
   scanned directory is ignored with a warning, and a ``.gitleaks.toml`` or ``.ash/.gitleaks.toml`` in
   the tree with a note. An operator's file that does not exist fails the scan
@@ -68,19 +73,27 @@ which are both, so the scanned tree does not configure gitleaks:
   reached through a symlink, nothing that is not a regular file, nothing ASH
   wrote under its output directory, not the operator's baseline. A failed re-run
   fails the scan rather than reporting the first run alone, and the copies are
-  removed when it ends. It copies at most ``MAX_RESCAN_FILES`` files, and its
-  runs share one ``scan_timeout``; names past the limit are reported as not
-  evaluated, which makes the scan incomplete.
+  removed when it ends. It copies at most ``MAX_RESCAN_FILES`` files and
+  ``MAX_RESCAN_BYTES`` bytes (a file that does not fit is skipped and the names
+  after it are still tried), reads at most ``MAX_IGNORE_CANDIDATES`` names from
+  the ignore file, and its copies and runs share one ``scan_timeout``; files
+  and names not reached are reported as not evaluated, which makes the scan
+  incomplete.
 * Inline ``gitleaks:allow`` comments drop a finding the same way, so ASH passes
   ``--ignore-gitleaks-allow``. ``options.honor_inline_ignores: true`` turns them
   back on; it is honored only when the operator set it, and from a config inside a
   git checkout or the scanned directory it is ignored with a warning.
-* A ``.gitleaksignore`` that is a symlink, not a regular file, or hard-linked
-  stops the scanner before gitleaks runs (``_read_tree_ignore_file``): gitleaks
-  opens the name, follows the link, and logs each line it cannot parse. ASH reads
-  the file once, without following a link, and parses what it read. gitleaks'
-  log is never quoted in an error, and the lines in it that quote the file are
-  cut (``_mask_quoted_ignore_entries``).
+* A ``.gitleaksignore`` that is a symlink to a file, not a regular file, or
+  hard-linked stops the scanner before gitleaks runs
+  (``_read_tree_ignore_file``): gitleaks opens the name, follows the link, and
+  logs each line it cannot parse. ASH reads the file once, without following a
+  link, and parses what it read. A link to a directory, or one that leads
+  nowhere, is read as no ignore file, since gitleaks reads no line through
+  either. gitleaks' log is never quoted in an error, and the lines in it that
+  quote the file are cut (``_mask_quoted_ignore_entries``). The file is read
+  again after gitleaks ran, and a change between the two reads fails the scan:
+  the re-scan would otherwise cover entries other than the ones gitleaks
+  applied.
 
 Paths
 -----
@@ -131,6 +144,7 @@ import posixpath
 import shutil
 import stat
 import time
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import (
     Annotated,
@@ -208,8 +222,9 @@ _monotonic = time.monotonic
 TREE_CONFIG_NAMES = (".gitleaks.toml", ".ash/.gitleaks.toml")
 
 #: Environment variables gitleaks reads a config from. When either is set, outside
-#: the scanner sandbox, ASH does not pass ``gitleaks --config`` and gitleaks
-#: resolves it.
+#: the scanner sandbox, ASH passes no ``gitleaks --config`` and gitleaks reads the
+#: variable; a non-absolute ``GITLEAKS_CONFIG`` is anchored to the directory ASH
+#: runs in and passed as ``gitleaks --config``, so the scanned tree cannot supply it.
 CONFIG_ENV_VARS = ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML")
 
 #: The ignore file gitleaks always reads at the root of its scan path.
@@ -234,9 +249,39 @@ _BINARY = getattr(os, "O_BINARY", 0)
 #: as incomplete (``run_ash_scan.unevaluated_rules``).
 MAX_RESCAN_FILES = 10_000
 
+#: Most bytes the ``.gitleaksignore`` re-scan copies in all. The copies go to
+#: the run's own directory, under TMPDIR by default, and a tree could otherwise
+#: have ASH duplicate gigabytes there by naming large files. A file that would
+#: take the total past this is not re-scanned and is reported as not evaluated,
+#: as names past ``MAX_RESCAN_FILES`` are; the names after it are still tried,
+#: so one large file does not leave the smaller ones that fit un-scanned. The cap
+#: has no option: raising it is a decision about the disk the copies use.
+MAX_RESCAN_BYTES = 1 << 30
+
 #: Most bytes of the tree's ``.gitleaksignore`` ASH reads. A larger file stops
 #: the scan: its entries could not all be re-scanned.
 MAX_IGNORE_FILE_BYTES = 32 * 1024 * 1024
+
+#: Longest candidate file name taken from a ``.gitleaksignore`` line, in characters:
+#: Linux's ``PATH_MAX`` (macOS's is 1024), or the extended-length limit on
+#: Windows. A longer prefix names no file, so it is never built.
+MAX_CANDIDATE_LENGTH = 32_767 if os.name == "nt" else 4_096
+
+#: Longest last component of a candidate, in UTF-16 code units. NTFS, exFAT,
+#: vfat and HFS+ bound a name at 255 units, and any host can scan a tree on one
+#: of them, so the unit does not depend on the platform ASH runs on. ext4, xfs
+#: and APFS bound a name at 255 bytes. A name's units never exceed its bytes (a
+#: name of 100 CJK characters is 100 units and 300 bytes), so a name that fits
+#: in bytes fits here, and a name over this bound fits no file system.
+MAX_NAME_LENGTH = 255
+
+#: Most candidate names, and most characters in all, taken from the tree's
+#: ``.gitleaksignore``. One line splits at every colon, so a few lines of colons
+#: could otherwise make gigabytes of strings before the re-scan's deadline is
+#: set. What is left unread is reported as names not evaluated, which fails the
+#: scan as incomplete (``run_ash_scan.unevaluated_rules``).
+MAX_IGNORE_CANDIDATES = 100_000
+MAX_IGNORE_CANDIDATE_CHARS = 64 * 1024 * 1024
 
 #: The characters Go's ``unicode.IsSpace`` reports as space, which
 #: ``strings.TrimSpace`` strips from both ends of each ``.gitleaksignore`` line:
@@ -283,7 +328,22 @@ def _write_private_copy(source: BinaryIO, destination: Path) -> None:
         shutil.copyfileobj(source, out)
 
 
+def _name_length(name: str) -> int:
+    """``name``'s length in UTF-16 code units, the unit ``MAX_NAME_LENGTH`` counts.
+
+    A character outside the Basic Multilingual Plane is two units. The name was
+    decoded with ``surrogateescape``, so an undecodable byte is one lone
+    surrogate, which is one unit.
+    """
+    return len(name.encode("utf-16-le", "surrogatepass")) // 2
+
+
 def gitleaksignore_files(data: bytes) -> List[str]:
+    """The candidate files of ``gitleaksignore_candidates``, without the count left unread."""
+    return gitleaksignore_candidates(data)[0]
+
+
+def gitleaksignore_candidates(data: bytes) -> Tuple[List[str], int]:
     """The file part of each fingerprint in ``data``, as gitleaks 8.30.1 reads it.
 
     ``Detector.AddGitleaksIgnore`` (``detect/detect.go`` at v8.30.1) reads the
@@ -293,14 +353,38 @@ def gitleaksignore_files(data: bytes) -> List[str]:
     ``#``, splits on ``:`` and replaces ``\\`` with ``/`` in the file part: the
     first of three parts, or the second of four (``commit:file:rule:line``). The
     rejoined line is matched exactly against each finding's
-    ``<file>:<rule>:<line>`` (``AddFinding``), so the file it can hide is
-    everything before the last two ``:``. A line with fewer than three parts can
-    hide nothing.
+    ``<file>:<rule>:<line>`` (``AddFinding``), so where the ``:`` between the
+    file and the rule falls is not in the line: a rule id can hold ``:`` (an
+    operator's config names rules freely), and then the file is not everything
+    before the last two ``:``. Every split that leaves a rule and a line is
+    returned as a candidate file; one that names no file in the tree is skipped
+    where the files are copied (``_copy_for_rescan``), and one that names a file
+    the line did not hide costs a copy whose findings the first run already
+    reported. A line with fewer than three parts can hide nothing.
 
     Bytes are decoded with ``surrogateescape``, so a name that is not UTF-8 maps
     back to the same bytes on disk.
+
+    Returns the candidates and the number of candidates left unread. The
+    candidates are bounded, because one line of ``a:`` repeated up to the 64 KiB
+    a line may hold splits at every colon and the prefixes are quadratic in its
+    length (about a gigabyte of strings for one such line, with hundreds allowed
+    in the file), all from the scanned tree's own text and before the re-scan's
+    deadline is set. A prefix no file can have is never made (longer than
+    ``MAX_CANDIDATE_LENGTH``, or ending in a component longer than
+    ``MAX_NAME_LENGTH``), a name is returned once however many lines repeat it,
+    and reading stops when ``MAX_IGNORE_CANDIDATES`` distinct names or
+    ``MAX_IGNORE_CANDIDATE_CHARS`` characters have been made. What is left,
+    counted by the colons of the lines not read, is the second value; the caller
+    reports it as names not evaluated, so the scan fails as incomplete. Once a
+    cap is reached, a colon met after it counts as unread whether or not the
+    name before it repeats one already returned: the cap is checked first, so
+    the work for each remaining line stays bounded.
     """
-    files = []
+    files: List[str] = []
+    seen: Set[str] = set()
+    unread = 0
+    characters = 0
     for raw in data.split(b"\n"):
         if len(raw) >= _MAX_SCAN_TOKEN:
             break
@@ -312,10 +396,40 @@ def gitleaksignore_files(data: bytes) -> List[str]:
             parts[0] = parts[0].replace("\\", "/")
         elif len(parts) == 4:
             parts[1] = parts[1].replace("\\", "/")
-        file_part = ":".join(parts).rsplit(":", 2)
-        if len(file_part) == 3 and file_part[0]:
-            files.append(file_part[0])
-    return files
+        joined = ":".join(parts)
+        # A candidate is the text before a colon, and the last colon leaves no
+        # rule and line behind it, so every colon but the last starts one.
+        colons = [index for index, char in enumerate(joined) if char == ":"][:-1]
+        for number, position in enumerate(colons):
+            if position == 0:
+                continue
+            if position > MAX_CANDIDATE_LENGTH:
+                # Every later prefix is longer, and none can be a file.
+                break
+            if (
+                len(files) >= MAX_IGNORE_CANDIDATES
+                or characters + position > MAX_IGNORE_CANDIDATE_CHARS
+            ):
+                unread += len(colons) - number
+                break
+            # The last component, measured before the prefix is built: more
+            # characters than NAME_MAX units is more units than that.
+            first_of_last = joined.rfind("/", 0, position) + 1
+            if position - first_of_last > MAX_NAME_LENGTH:
+                continue
+            file_part = joined[:position]
+            last = file_part[first_of_last:]
+            if _name_length(last) > MAX_NAME_LENGTH:
+                continue
+            # A name already taken is one copy and one re-scan however many
+            # lines repeat it, so it costs the cap nothing. Fingerprints of one
+            # file repeat its name once per finding.
+            if file_part in seen:
+                continue
+            seen.add(file_part)
+            files.append(file_part)
+            characters += position
+    return files, unread
 
 
 def _mask_quoted_ignore_entries(log_path: Path) -> None:
@@ -428,9 +542,20 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     # The target, argv and .gitleaksignore content of the run whose report
     # _read_results_file reads next, for the re-scan. Set by _execute_scan.
     _pending_run: Optional[Tuple[Path, List[str], bytes]] = PrivateAttr(default=None)
-    # Names the last re-scan did not reach (MAX_RESCAN_FILES), for the report
-    # _post_process_sarif finishes next.
+    # Files the last re-scan did not reach (MAX_RESCAN_FILES, MAX_RESCAN_BYTES),
+    # for the report _post_process_sarif finishes next. Reset per target in
+    # _execute_scan: a source run that failed after its re-scan left the count
+    # for the converted target's report.
     _rescan_skipped: int = PrivateAttr(default=0)
+    # Candidate names the last read of the tree's .gitleaksignore left unread
+    # (MAX_IGNORE_CANDIDATES), added by _add_back_gitleaksignore_drops from what
+    # _gitleaksignore_names returned. Names, not files: kept apart from
+    # _rescan_skipped, and reported apart, reset with it.
+    _rescan_unread: int = PrivateAttr(default=0)
+    # The stderr log of a re-scan run that failed this target, for
+    # _describe_scan_failure, which otherwise describes the first run's exit
+    # code and log. None until a re-scan fails; reset per target.
+    _rescan_failure_log: Optional[Path] = PrivateAttr(default=None)
     # Whether the tree-set honor_inline_ignores refusal was already logged.
     _ignores_refusal_logged: bool = PrivateAttr(default=False)
     # Whether the tree-set max_target_megabytes refusal was already logged.
@@ -598,6 +723,27 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 level=logging.WARNING,
             )
         elif set_vars:
+            # gitleaks resolves a relative GITLEAKS_CONFIG against its working
+            # directory, which is the scanned source directory here, so a
+            # relative value the operator set in ASH's own working directory
+            # would be read from the scanned tree: the repository would supply
+            # the config file. Anchor it where the operator typed it and pass
+            # it as --config, which gitleaks reads before the variable. The
+            # test is on the value AS GIVEN: a leading ``~`` is not absolute
+            # either (a shell expands it only in some positions, and CI
+            # ``env:`` blocks, ``.env`` files and ``--env-file`` never do), and
+            # gitleaks does not expand it, so ``~/rules.toml`` as given would
+            # name a ``~`` directory inside the scanned tree. Only a path that
+            # is absolute as typed, or GITLEAKS_CONFIG_TOML (the config's text,
+            # not a path), is left to gitleaks as before.
+            given = self._config_env_value()
+            if given and not os.path.isabs(given):
+                anchored = self._anchored_config_env(given)
+                ASH_LOGGER.debug(
+                    "GITLEAKS_CONFIG is not an absolute path; passing it to "
+                    "gitleaks resolved against the working directory ASH runs in"
+                )
+                return anchored
             ASH_LOGGER.debug(
                 f"{', '.join(set_vars)} set; leaving gitleaks config resolution to gitleaks"
             )
@@ -620,6 +766,34 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             DEFAULT_RULES_CONFIG,
             context=self.context,
         ).resolve()
+
+    @staticmethod
+    def _config_env_value() -> Optional[str]:
+        """``GITLEAKS_CONFIG`` as the operator set it, or None.
+
+        The one place this module reads the variable's value: the first run's
+        anchoring (``_resolve_config_file``) and the re-scan's environment
+        (``_rescan_env``) both go through it, so the builtin environment-read
+        audit (tests/unit/utils/test_uv_tool_runner.py) counts one read site
+        for this variable, as it did before the anchoring. The value is a path
+        for the gitleaks binary, which is not installed through uv, so it never
+        reaches a uv install input and is not added to ``_environment_values()``;
+        the debug line that mentions it names the variable, never the value.
+        """
+        return os.environ.get("GITLEAKS_CONFIG")
+
+    @staticmethod
+    def _anchored_config_env(given: str) -> Path:
+        """The absolute path a non-absolute ``GITLEAKS_CONFIG`` names, as ASH sees it.
+
+        ``~`` and ``~user`` are expanded first (the operator's home, never a
+        directory of that name in the scanned tree), then the result is
+        resolved against the working directory ASH runs in. Never against the
+        scanned source directory: that is where gitleaks would have read it,
+        and the point of anchoring is that the repository does not pick the
+        config.
+        """
+        return Path(os.path.abspath(os.path.expanduser(given)))
 
     def _empty_ignore_dir(self) -> Path:
         """A directory with no ``.gitleaksignore``, for ``--gitleaks-ignore-path``.
@@ -690,7 +864,16 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         # this, a source run that failed (1) failed a clean converted run, and one
         # that found leaks (2) made a converted run's failure (1) read as leaks.
         self.exit_code = 0
-        results_file = self.results_dir.joinpath(target_type, "gitleaks.sarif")
+        self._rescan_skipped = 0
+        self._rescan_unread = 0
+        self._rescan_failure_log = None
+        # Absolute: gitleaks runs with its working directory at the source (or
+        # the copies) directory, and a library caller's relative output
+        # directory would have it write the report there, where ASH does not
+        # read it.
+        results_file = (
+            Path(self.results_dir).absolute().joinpath(target_type, "gitleaks.sarif")
+        )
         results_file.parent.mkdir(exist_ok=True, parents=True)
         # A report left by an earlier run must not be read as this run's: a
         # gitleaks that fails writes no report, and the template reads whatever
@@ -723,28 +906,60 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         raw = super()._read_results_file(results_file)
         if raw is not None and pending is not None:
             target, final_args, ignore_data = pending
+            # The file as it is now, against the read before gitleaks ran:
+            # gitleaks read it by name in between, and the re-scan covers the
+            # entries ASH read. The two reads bracket gitleaks' own, so a change
+            # between them is caught here; nothing compared them before.
+            if self._read_tree_ignore_file(target) != ignore_data:
+                raise ScannerError(
+                    f"The scanned tree's {IGNORE_FILE_NAME} changed while gitleaks "
+                    "ran, so the files it names cannot be re-scanned as gitleaks "
+                    "applied them, and the findings it hid may be missing from "
+                    "this report. Run the scan again."
+                )
             self._add_back_gitleaksignore_drops(
                 raw, target, final_args, results_file, ignore_data
             )
+            # The re-scan is part of this run: the base's _post_scan recorded
+            # the end before it, and the invocation record is written after.
+            self.end_time = datetime.now(timezone.utc)
         return raw
 
     def _read_tree_ignore_file(self, target: Path) -> bytes:
         """The content of ``<target>/.gitleaksignore``, or ``b""`` without one.
 
+        A name that is a directory, a symlink to a directory, or a symlink that
+        leads nowhere is read as no ignore file: gitleaks reads a line through
+        none of them (its open of a directory reads nothing, and a dangling
+        link fails its stat), so there is nothing for the re-scan to cover and
+        no reason to stop.
+
         Raises:
-            ScannerError: it is a symlink, or not a regular file, or has a second
-                hard link, or is larger than ``MAX_IGNORE_FILE_BYTES``. gitleaks
-                opens the name itself, follows a symlink, blocks on a FIFO, and
-                logs every line it cannot parse, so a link to a file outside the
-                tree would put that file's lines into its log. gitleaks is not
-                run. Read with ``open_in_scanned_tree``, which
-                follows no link, and nothing read is quoted.
+            ScannerError: it is a symlink to a file, or not a regular file, or
+                has a second hard link, or is larger than
+                ``MAX_IGNORE_FILE_BYTES``. gitleaks opens the name itself,
+                follows a symlink, blocks on a FIFO, and logs every line it
+                cannot parse, so a link to a file outside the tree would put that
+                file's lines into its log. gitleaks is not run. Read with
+                ``open_in_scanned_tree``, which follows no link, and nothing read
+                is quoted.
         """
         path = Path(target) / IGNORE_FILE_NAME
         try:
-            if stat.S_ISDIR(os.lstat(path).st_mode):
+            named = os.lstat(path)
+            if stat.S_ISDIR(named.st_mode):
                 # gitleaks reads the name only when it is not a directory.
                 return b""
+            if stat.S_ISLNK(named.st_mode):
+                try:
+                    pointed = os.stat(path)
+                except FileNotFoundError:
+                    # Dangling: gitleaks' stat of the name fails, and it reads
+                    # nothing.
+                    return b""
+                if stat.S_ISDIR(pointed.st_mode):
+                    # A directory through a link: opened, read as nothing.
+                    return b""
         except FileNotFoundError:
             return b""
         except OSError:
@@ -806,19 +1021,35 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         The base class quotes the tool's stderr. gitleaks' can quote the scanned
         tree's ``.gitleaksignore``, and this message reaches ``ash.log``, the
         console and every results file. A failure before gitleaks started gives
-        no exit code, as the base class's does.
+        no exit code, as the base class's does, and so does a tool ASH could not
+        stop: it may still be running, and the code the timeout recorded is not
+        one gitleaks returned. A re-scan that failed names its own log beside
+        the first run's: ``self.exit_code`` is the first run's, which was
+        accepted, so that reading alone misdescribed the failure.
         """
         detail = f"{self.__class__.__name__} scan failed: {exc}"
         if not tool_started or results_file is None:
             # _execute_scan raised: gitleaks was not run, so there is no exit code.
             return f"{detail} (gitleaks was not started)"
+        log_path = Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
+        if self._rescan_failure_log is not None:
+            return (
+                f"{detail} (the first gitleaks run exited {self.exit_code}; the "
+                f"re-scan of the files the tree's {IGNORE_FILE_NAME} names failed). "
+                "gitleaks' logs are not quoted here; see "
+                f"{self._rescan_failure_log.as_posix()} and {log_path.as_posix()}"
+            )
+        if self.scan_could_not_stop is not None:
+            return (
+                f"{detail} (no exit code: ASH could not stop gitleaks). gitleaks' "
+                f"log is not quoted here; see {log_path.as_posix()}"
+            )
         verdict = (
             "an accepted exit code for this scanner"
             if self._exit_code_accepted()
             else "not an accepted exit code; success_exit_codes="
             f"{sorted(self.success_exit_codes)}"
         )
-        log_path = Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
         return (
             f"{detail} (exit code {self.exit_code}: {verdict}). gitleaks' log is "
             f"not quoted here; see {log_path.as_posix()}"
@@ -827,9 +1058,16 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     def _gitleaksignore_files(
         self, target: Path, data: Optional[bytes] = None
     ) -> List[str]:
-        """The files ``<target>/.gitleaksignore`` names, relative to the target.
+        """The files of ``_gitleaksignore_names``, without the count left unread."""
+        return self._gitleaksignore_names(target, data)[0]
 
-        Parsed as gitleaks parses it (``gitleaksignore_files``). A dir-scan
+    def _gitleaksignore_names(
+        self, target: Path, data: Optional[bytes] = None
+    ) -> Tuple[List[str], int]:
+        """The files ``<target>/.gitleaksignore`` names, relative to the target,
+        and the number of candidate names left unread.
+
+        Parsed as gitleaks parses it (``gitleaksignore_candidates``). A dir-scan
         fingerprint is ``<file>:<rule id>:<line>``; files that are not inside the
         target are left out, since gitleaks could not have matched them.
 
@@ -843,20 +1081,25 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         ``data`` is the file's content as ``_execute_scan`` read it before the
         first run; without it the file is read now, under the same rule
         (``_read_tree_ignore_file``).
+
+        The root is the resolved target (``_rescan_root``): the directory
+        gitleaks walked, which a lexical normalization of a target spelled with
+        ``..`` after a symlink is not.
         """
         if data is None:
             data = self._read_tree_ignore_file(target)
         if not data:
-            return []
-        target_abs = Path(os.path.normpath(Path(target).absolute()))
+            return [], 0
+        target_abs = self._rescan_root(target)
         names = set()
-        for name in gitleaksignore_files(data):
+        candidates, unread = gitleaksignore_candidates(data)
+        for name in candidates:
             # Joining keeps an absolute entry as it is.
             lexical = Path(os.path.normpath(target_abs / name))
             if lexical == target_abs or not lexical.is_relative_to(target_abs):
                 continue
             names.add(lexical.relative_to(target_abs).as_posix())
-        return sorted(names)
+        return sorted(names), unread
 
     def _add_back_gitleaksignore_drops(
         self,
@@ -885,7 +1128,15 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         and the copies, which hold the tree's secrets, are removed when the run
         ends.
         """
-        relatives = self._gitleaksignore_files(target, ignore_data)
+        relatives, unread = self._gitleaksignore_names(target, ignore_data)
+        if unread:
+            self._rescan_unread += unread
+            self._plugin_log(
+                f"{unread} name(s) in the scanned tree's {IGNORE_FILE_NAME} were "
+                f"not read: ASH reads at most {MAX_IGNORE_CANDIDATES} candidate "
+                "names per file. The scan is reported as incomplete.",
+                level=logging.WARNING,
+            )
         if not relatives:
             return
         runs = raw.get("runs") or []
@@ -920,19 +1171,22 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         rescan_dir.mkdir(parents=True)
         copies_dir = self._rescan_copies_dir()
         added = 0
-        # One deadline for every re-scan run, scan_timeout long.
+        # One deadline for every re-scan run, scan_timeout long, the copies
+        # included: copying is work the tree sizes, and it ran outside the
+        # deadline before.
         timeout = self._effective_scan_timeout()
         deadline = None if timeout is None else _monotonic() + timeout
         try:
-            batches, copied, skipped = self._copy_for_rescan(
-                target, relatives, copies_dir, rescan_dir, final_args
+            batches, copied, skipped, named = self._copy_for_rescan(
+                target, relatives, copies_dir, rescan_dir, final_args, deadline
             )
-            self._rescan_skipped = skipped
+            self._rescan_skipped += skipped
             if skipped:
                 self._plugin_log(
                     f"{skipped} file(s) the scanned tree's {IGNORE_FILE_NAME} names "
-                    f"were not re-scanned: ASH re-scans at most {MAX_RESCAN_FILES}. "
-                    "The scan is reported as incomplete.",
+                    f"were not re-scanned: ASH re-scans at most {MAX_RESCAN_FILES} "
+                    f"files and {MAX_RESCAN_BYTES} bytes. The scan is reported as "
+                    "incomplete.",
                     level=logging.WARNING,
                 )
             for cwd, scan_arg, report in batches:
@@ -940,11 +1194,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 if deadline is not None:
                     remaining = deadline - _monotonic()
                     if remaining <= 0:
-                        raise ScannerError(
-                            "gitleaks timed out re-scanning the files the scanned "
-                            f"tree's {IGNORE_FILE_NAME} names: scan_timeout "
-                            f"({timeout}s) covers every re-scan run"
-                        )
+                        raise self._rescan_timeout_error(timeout)
                 data = self._run_rescan(
                     final_args, cwd, scan_arg, report, rescan_dir, remaining
                 )
@@ -960,13 +1210,37 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             # secrets.
             shutil.rmtree(copies_dir, ignore_errors=True)
         self._plugin_log(
-            f"The scanned tree's {IGNORE_FILE_NAME} names {len(relatives)} file(s), "
+            f"The scanned tree's {IGNORE_FILE_NAME} names {named} file(s), "
             f"{copied} of them read by the directory scan. gitleaks applies it at "
             "the scan root whatever ASH passes, so ASH re-scanned those files and "
             f"reports the {added} finding(s) it dropped. Tune findings with ASH "
             "suppressions, which are reported and counted.",
             level=logging.INFO,
         )
+
+    @staticmethod
+    def _rescan_timeout_error(timeout: Optional[float]) -> ScannerError:
+        """The error for a re-scan that ran out of the shared deadline."""
+        return ScannerError(
+            "gitleaks timed out re-scanning the files the scanned "
+            f"tree's {IGNORE_FILE_NAME} names: scan_timeout "
+            f"({timeout}s) covers every re-scan run"
+        )
+
+    @staticmethod
+    def _rescan_root(target: Path) -> Path:
+        """The directory the re-scan reads the named files from: ``target``
+        resolved, the directory gitleaks walked.
+
+        A lexical normalization (``os.path.normpath`` of the absolute target)
+        is a different directory when the target is spelled with ``..`` after
+        a symlink, so the names were looked for under a root gitleaks never
+        read. The resolved form also compares with the operator's baseline
+        path, which ``_operator_option_path`` resolves, so a baseline inside a
+        source directory reached through a link is left out of the copies as
+        the docstring of ``_copy_for_rescan`` says.
+        """
+        return Path(os.path.realpath(target))
 
     def _copy_for_rescan(
         self,
@@ -975,11 +1249,20 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         copies_dir: Path,
         reports_dir: Path,
         final_args: List[str],
-    ) -> Tuple[List[Tuple[Path, str, Path]], int, int]:
+        deadline: Optional[float] = None,
+    ) -> Tuple[List[Tuple[Path, str, Path]], int, int, int]:
         """Copy the named files the directory scan reads; return the runs to make.
 
-        Returns the runs, the number of files copied, and the number of names
-        not checked because ``MAX_RESCAN_FILES`` files were copied first.
+        Returns the runs, the number of files copied, the number of files not
+        checked because ``MAX_RESCAN_FILES`` files, or ``MAX_RESCAN_BYTES``
+        bytes, were copied first, and the number of files the ignore file names
+        (the candidates that reach a file; a name made by a colon split that
+        reaches none is counted nowhere). ``deadline`` is the re-scan's shared deadline
+        on ``_monotonic``'s clock; a copy that would start past it raises the
+        re-scan's timeout error.
+
+        Raises:
+            ScannerError: the deadline passed, or a copy could not be written.
 
         Each run is ``(working directory, scan path, report path)``. The files go
         under ``copies_dir / RESCAN_TREE_DIR`` at their tree paths, scanned as
@@ -995,49 +1278,96 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
           regular file (``open_in_scanned_tree``): gitleaks follows no symlink,
           and skips a FIFO or device as empty. A hard-linked file is read, as the
           walk reads it;
-        * a file under ASH's output directory that the repository did not commit
+        * a file under one of ASH's output directories inside the target (this
+          run's, and the default ``.ash/ash_output`` an earlier run left:
+          ``_ash_output_dirs_inside``) that the repository did not commit
           (``_drop_results_under_output_dir``); a committed one is copied, since
           ASH keeps what it finds there (``_committed_file_test``);
         * the operator's baseline, which gitleaks does not scan;
         * an empty file, and one over ``max_target_megabytes``, which gitleaks
           skips.
         """
-        target_abs = Path(os.path.normpath(Path(target).absolute()))
-        output_inside = self._output_dir_inside(target)
+        target_abs = self._rescan_root(target)
+        outputs_inside = self._output_dirs_inside_target(target)
         committed = self._committed_file_test()
         skipped_names = set()
         for arg in final_args:
             if arg.startswith("--baseline-path="):
-                baseline = Path(os.path.normpath(Path(arg.split("=", 1)[1]).absolute()))
+                baseline = Path(os.path.realpath(arg.split("=", 1)[1]))
                 if baseline.is_relative_to(target_abs):
                     skipped_names.add(baseline.relative_to(target_abs).as_posix())
         # The limit the first run was given, not the option: it may have been
         # refused (_max_target_megabytes).
-        size_limit = None
+        size_limit_mb = None
         for arg in final_args:
             if arg.startswith("--max-target-megabytes="):
-                size_limit = int(arg.split("=", 1)[1]) * 1_000_000
+                size_limit_mb = int(arg.split("=", 1)[1])
 
         tree_dir = copies_dir / RESCAN_TREE_DIR
         self_dir = copies_dir / RESCAN_SELF_DIR
         in_tree = 0
-        itself = False
+        # The names the directory lists for the ignore file: one, unless the
+        # file is also linked under another name.
+        itself_names: List[str] = []
         not_checked = 0
+        past_the_limit = 0
+        copied_bytes = 0
+        listings: Dict[Path, Set[str]] = {}
+        spellings_seen: Set[str] = set()
+
+        def unreached(rest: List[str]) -> int:
+            """How many of the names in ``rest`` reach a file not yet seen.
+
+            A candidate that names no file (``app/x.py:my`` from the colon
+            splits of ``app/x.py:my:rule:4``) is not a file the re-scan missed,
+            so it is not counted.
+            """
+            reached: Set[str] = set()
+            for name in rest:
+                spelled = self._on_disk_spelling(target_abs, name, listings)
+                if (
+                    spelled is not None
+                    and spelled not in spellings_seen
+                    and spelled not in skipped_names
+                ):
+                    reached.add(spelled)
+            return len(reached)
+
         for index, relative in enumerate(relatives):
-            if in_tree + int(itself) >= MAX_RESCAN_FILES:
-                not_checked = len(relatives) - index
-                break
+            if deadline is not None and _monotonic() >= deadline:
+                raise self._rescan_timeout_error(self._effective_scan_timeout())
+            # Only a name the directories list exactly (_on_disk_spelling): the
+            # rejoined ignore line is matched exactly against the name the
+            # directory scan reports, so an entry in another case hid nothing.
+            # A name that reaches no file is skipped here, as the open below
+            # skipped it.
+            spelled = self._on_disk_spelling(target_abs, relative, listings)
+            if spelled is None or spelled in spellings_seen:
+                continue
+            spellings_seen.add(spelled)
+            relative = spelled
             if relative in skipped_names:
                 continue
-            if (
-                output_inside is not None
-                and PurePosixPath(relative).is_relative_to(output_inside.as_posix())
-                and not committed(Path(os.path.normpath(target_abs / relative)))
-            ):
+            if any(
+                PurePosixPath(relative).is_relative_to(output.as_posix())
+                for output in outputs_inside
+            ) and not committed(Path(os.path.normpath(target_abs / relative))):
                 continue
-            destination = (self_dir if relative == IGNORE_FILE_NAME else tree_dir) / (
-                relative
-            )
+            # The ignore file itself goes alone, under the name the directory
+            # lists, and is decided by identity (_is_the_ignore_file): a
+            # repository's `.GITLEAKSIGNORE` on a case-insensitive filesystem
+            # is the file gitleaks reads, and at the copy tree's root it would
+            # be read as the ignore file again.
+            is_ignore_file = self._is_the_ignore_file(target_abs, relative)
+            destination = (self_dir if is_ignore_file else tree_dir) / relative
+            # The limit is tested for a name that reaches a file the re-scan
+            # would copy, after the lookup: a made-up name sorted after the
+            # last real file is not a file left behind, and a tree that names
+            # exactly MAX_RESCAN_FILES real files was re-scanned in full.
+            if in_tree + len(itself_names) >= MAX_RESCAN_FILES:
+                past_the_limit = unreached(relatives[index + 1 :])
+                not_checked += 1 + past_the_limit
+                break
             try:
                 handle = open_in_scanned_tree(
                     target_abs / relative, target_abs, allow_hardlinks=True
@@ -1050,8 +1380,24 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 continue
             with handle:
                 size = os.fstat(handle.fileno()).st_size
-                if size == 0 or (size_limit is not None and size > size_limit):
+                # gitleaks' own test: a file is skipped when its size in whole
+                # megabytes (size / 1,000,000, integer division) is over the
+                # limit, so a file a few bytes past limit * 1,000,000 is still
+                # scanned, and a byte-exact test here left such a file out of
+                # the re-scan, its hidden findings with it.
+                if size == 0 or (
+                    size_limit_mb is not None and size // 1_000_000 > size_limit_mb
+                ):
                     continue
+                if copied_bytes + size > MAX_RESCAN_BYTES:
+                    # This file does not fit what is left of the budget: it is
+                    # reported as not evaluated, and the names after it are
+                    # still tried, since a smaller one may fit. Stopping here
+                    # left every later file un-scanned behind one large file
+                    # that sorted early.
+                    not_checked += 1
+                    continue
+                copied_bytes += size
                 try:
                     _write_private_copy(handle, destination)
                 except OSError as exc:
@@ -1063,17 +1409,98 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                         f"({exc.strerror or type(exc).__name__}); without the "
                         "re-scan the findings the file hides would go unreported"
                     ) from None
-            if relative == IGNORE_FILE_NAME:
-                itself = True
+            if is_ignore_file:
+                itself_names.append(relative)
             else:
                 in_tree += 1
+
+        # The copy filesystem's own matching is the last test: a name the tree's
+        # filesystem keeps apart from the ignore file can be the same file on
+        # the copies', and gitleaks would read the copy at the tree's root as
+        # the ignore file. Without the re-scan what the file hides would not be
+        # reported, so the scan fails instead.
+        if in_tree and (tree_dir / IGNORE_FILE_NAME).exists():
+            raise ScannerError(
+                f"A file the scanned tree's {IGNORE_FILE_NAME} names would be read "
+                f"as {IGNORE_FILE_NAME} when ASH copies it for the re-scan, because "
+                "the filesystem the copies are made on matches names differently "
+                "from the scanned tree's; without the re-scan the findings the "
+                "file hides would not be reported"
+            )
 
         batches = []
         if in_tree:
             batches.append((tree_dir, ".", reports_dir / "tree.sarif"))
-        if itself:
-            batches.append((self_dir, IGNORE_FILE_NAME, reports_dir / "self.sarif"))
-        return batches, in_tree + int(itself), not_checked
+        for number, name in enumerate(itself_names):
+            report = "self.sarif" if number == 0 else f"self-{number}.sarif"
+            batches.append((self_dir, name, reports_dir / report))
+        # The files the ignore file names: the ones the directories list, whether
+        # or not they were copied (spellings_seen), and those after the file the
+        # file limit stopped at.
+        named = len(spellings_seen) + past_the_limit
+        return batches, in_tree + len(itself_names), not_checked, named
+
+    @staticmethod
+    def _on_disk_spelling(
+        root: Path,
+        relative: str,
+        listings: Dict[Path, Set[str]],
+    ) -> Optional[str]:
+        """``relative`` when every directory under ``root`` lists it as spelled, or None.
+
+        gitleaks walks the directory and reports each file by the name the
+        directory lists. The rejoined ``.gitleaksignore`` line is matched
+        EXACTLY against ``<file>:<rule>:<line>`` with that name, so an entry
+        spelled in another letter case hid no finding, even where the
+        filesystem opens the listed file under that spelling (macOS and Windows
+        by default). Mapping such an entry to the listed name bought a copy and
+        a re-scan whose results were all de-duplicated, and the spelling it
+        copied under matched none of the first run's results and added every
+        finding a second time, or made two copies of one path, which failed the
+        scan. A name some directory does not list exactly is None.
+
+        ``listings`` caches each directory's entries across the entries of one
+        ignore file, read once per directory and held as a set of its names, so
+        the lookup is constant in the directory's size: the ignore file can hold
+        up to ``MAX_IGNORE_FILE_BYTES`` of entries, with the ones that name no
+        file or repeat one not counting toward ``MAX_RESCAN_FILES``.
+        """
+        current = root
+        for part in PurePosixPath(relative).parts:
+            names = listings.get(current)
+            if names is None:
+                try:
+                    with os.scandir(current) as entries:
+                        names = {entry.name for entry in entries}
+                except OSError:
+                    return None
+                listings[current] = names
+            if part not in names:
+                return None
+            current = current / part
+        return relative
+
+    @staticmethod
+    def _is_the_ignore_file(root: Path, relative: str) -> bool:
+        """Whether ``relative``, a name the directory lists, is the file gitleaks
+        reads as ``<root>/.gitleaksignore``.
+
+        Decided by identity and not by spelling: on a case-insensitive
+        filesystem (macOS and Windows by default) a repository that commits the
+        file as ``.GITLEAKSIGNORE`` has it read as the ignore file, and the
+        directory lists that spelling. Copied to the copy tree's root, which is
+        on a filesystem of its own that reads names the same way, it would be
+        read as the ignore file again and hide the same fingerprints in the
+        re-scan.
+        """
+        if relative == IGNORE_FILE_NAME:
+            return True
+        if "/" in relative:
+            return False
+        try:
+            return os.path.samefile(root / relative, root / IGNORE_FILE_NAME)
+        except OSError:
+            return False
 
     def _rescan_copies_dir(self) -> Path:
         """A new, empty directory for the re-scan's copies, outside the scanned tree.
@@ -1108,7 +1535,23 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         rescan_dir: Path,
         timeout: Optional[float],
     ) -> Dict[str, Any]:
-        """Run gitleaks with the first run's flags over ``scan_arg`` from ``cwd``."""
+        """Run gitleaks with the first run's flags over ``scan_arg`` from ``cwd``.
+
+        ``timeout`` is what is left of the shared deadline. A run that fails is
+        described by how it failed: a timeout (recorded against the whole
+        ``scan_timeout``, the limit the operator set, not the share this run
+        got), a start that failed, an exit code gitleaks does not use for a
+        finished run, or no report. Its log is named for ``_describe_scan_failure``.
+
+        An empty report, or one with no run, fails too, as the first run's does
+        (``_read_results_file``, ``scan``): gitleaks' writer always emits a
+        document with a run, so either is a write that did not finish, and
+        reading it as no dropped findings would silently keep what the ignore
+        file hid out of the report.
+
+        Raises:
+            ScannerError: the run did not finish, or its report cannot be graded.
+        """
         args = [
             f"--report-path={report.as_posix()}"
             if arg.startswith("--report-path=")
@@ -1125,35 +1568,72 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         )
         self.exit_code = exit_code
         code = response.get("returncode", 1) if isinstance(response, dict) else 1
-        if (
-            not isinstance(response, dict)
-            or response.get("timed_out")
-            or response.get("spawn_failed")
-            or code not in self.success_exit_codes
-            or not report.is_file()
-        ):
+        why: Optional[str] = None
+        if not isinstance(response, dict):
+            why = "no response from the run"
+        elif response.get("timed_out"):
+            # The base's _run_subprocess recorded this run's share of the
+            # deadline as the limit; the limit is scan_timeout.
+            self._record_timeout(response, self._effective_scan_timeout())
+            why = (
+                f"it timed out: scan_timeout ({self._effective_scan_timeout()}s) "
+                "covers every re-scan run"
+            )
+        elif response.get("spawn_failed"):
+            why = "gitleaks could not be started"
+        elif code not in self.success_exit_codes:
+            why = f"exit {code}"
+        elif not report.is_file():
+            why = "it wrote no report"
+        if why is not None:
+            self._rescan_failure_log = (
+                rescan_dir / f"{self.__class__.__name__}.stderr.log"
+            )
             raise ScannerError(
                 "gitleaks failed re-scanning the files the scanned tree's "
-                f"{IGNORE_FILE_NAME} names (exit {code}); without that run the "
-                "findings the file hides would go unreported"
+                f"{IGNORE_FILE_NAME} names ({why}); without that run the "
+                "findings the file hides would go unreported. gitleaks' log is "
+                f"not quoted here; see {self._rescan_failure_log.as_posix()}"
             )
-        return json.loads(report.read_text(encoding="utf-8") or "{}")
+        text = report.read_text(encoding="utf-8")
+        if not text.strip():
+            raise ScannerError(
+                "gitleaks wrote an empty report re-scanning the files the scanned "
+                f"tree's {IGNORE_FILE_NAME} names, so there is nothing to grade; "
+                "without that run the findings the file hides would go unreported"
+            )
+        data = json.loads(text)
+        if not isinstance(data, dict) or not data.get("runs"):
+            raise ScannerError(
+                "gitleaks' report of the re-scan of the files the scanned tree's "
+                f"{IGNORE_FILE_NAME} names holds no SARIF run, so there is nothing "
+                "to grade; without that run the findings the file hides would go "
+                "unreported"
+            )
+        return data
 
     def _rescan_env(self, final_args: List[str]) -> Optional[Dict[str, str]]:
-        """The re-scan's environment: a relative ``GITLEAKS_CONFIG`` made absolute.
+        """The re-scan's environment: a non-absolute ``GITLEAKS_CONFIG`` made absolute.
 
-        The first run resolves it from the source directory, its working
-        directory; the re-scan runs from the copies. Only when no ``--config`` is
-        passed, which is the only case gitleaks reads the variable in.
+        Only when no ``--config`` is passed, which is the only case gitleaks reads
+        the variable in. ``_resolve_config_file`` now anchors a non-absolute
+        ``GITLEAKS_CONFIG`` to the directory ASH runs in and passes it as
+        ``--config``, so this branch is not reached for it; it stays for a run
+        that reaches gitleaks with the variable alone, where the re-scan from the
+        copies must still read the same file as the first run. The anchor is
+        the same one (``_anchored_config_env``): the directory ASH runs in, with
+        ``~`` expanded, never the scanned source directory, which an earlier
+        shape used here and which would have let the scanned repository supply
+        the re-scan's config.
         """
         if any(arg.startswith("--config=") for arg in final_args):
             return None
-        value = os.environ.get("GITLEAKS_CONFIG")
-        if not value or Path(value).is_absolute():
+        value = self._config_env_value()
+        if not value or os.path.isabs(value):
             return None
         return {
             **snapshot_environ(),
-            "GITLEAKS_CONFIG": (self._source_dir() / value).absolute().as_posix(),
+            "GITLEAKS_CONFIG": self._anchored_config_env(value).as_posix(),
         }
 
     @staticmethod
@@ -1221,11 +1701,25 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
 
         A result in a file the repository committed under the output directory is
         kept (``_committed_file_test``): only what ASH wrote there is dropped.
+
+        Every ASH output directory inside the target counts
+        (``_output_dirs_inside_target``): this run's, and the default
+        ``.ash/ash_output`` an earlier run left in the tree, as every other
+        directory-walking scanner skips both.
+
+        A URI's backslashes are read as separators only where the platform
+        writes them (Windows, where gitleaks joins paths with ``\\``). On POSIX
+        a backslash is a character of a file's name, and reading it as a
+        separator let a file named like ``out\\x`` read as a path under the
+        output directory, and its findings were dropped.
         """
-        if self.context is None or self._output_dir_inside(target) is None:
+        if self.context is None:
             return
-        output_abs = Path(os.path.normpath(Path(self.context.output_dir).absolute()))
+        outputs_inside = self._output_dirs_inside_target(target)
+        if not outputs_inside:
+            return
         target_abs = Path(target).absolute()
+        output_roots = [Path(os.path.normpath(target_abs / o)) for o in outputs_inside]
         committed = self._committed_file_test()
 
         def under_output_dir(result: Any) -> bool:
@@ -1235,8 +1729,12 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 uri = artifact.uri if artifact else None
                 if not uri:
                     continue
-                path = Path(os.path.normpath(target_abs / uri.replace("\\", "/")))
-                if path.is_relative_to(output_abs) and not committed(path):
+                if os.sep == "\\":
+                    uri = uri.replace("\\", "/")
+                path = Path(os.path.normpath(target_abs / uri))
+                if any(path.is_relative_to(root) for root in output_roots) and (
+                    not committed(path)
+                ):
                     return True
             return False
 
@@ -1255,38 +1753,71 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 level=logging.DEBUG,
             )
 
+    def _output_dirs_inside_target(self, target: Path) -> List[Path]:
+        """ASH's output directories inside ``target``, relative to it.
+
+        This run's output directory when it sits inside the target
+        (``_output_dir_inside``), whole, and the directories
+        ``_ash_output_dirs_inside`` names: the default ``.ash/ash_output`` an
+        earlier run left in the tree, and for a directory holding committed
+        files ASH's own directories in it. The first keeps the drop of every
+        uncommitted file under this run's output, the files at its root
+        included, which the second lists only in part. Empty for the converted
+        target, which lives under the output directory.
+        """
+        found: List[Path] = []
+        own = self._output_dir_inside(target)
+        if own is not None:
+            found.append(own)
+        for relative in self._ash_output_dirs_inside(target):
+            if relative not in found:
+                found.append(relative)
+        return found
+
     def _report_rescan_skipped(self, sarif_report: SarifReport) -> None:
         """Record the names the re-scan did not reach as a run that is incomplete.
 
         An error-level ``toolExecutionNotifications`` entry on the invocation,
         which ``run_ash_scan.unevaluated_rules`` reads: the scan exits 1 as
         incomplete rather than reading as clean, since a finding the tree's
-        ``.gitleaksignore`` hides in those files is not reported. A count, not the
-        names, which are the tree's text.
+        ``.gitleaksignore`` hides in those files is not reported. Files not
+        re-scanned and candidate names not read are two counts and two entries,
+        since a name is not a file. A count, not the names, which are the tree's
+        text.
         """
         skipped, self._rescan_skipped = self._rescan_skipped, 0
-        if not skipped or not sarif_report.runs:
+        unread, self._rescan_unread = self._rescan_unread, 0
+        if not (skipped or unread) or not sarif_report.runs:
             return
-        notification = Notification(
-            level=Level.error,
-            message=Message(
-                root=Message1(
-                    text=(
-                        f"gitleaks: {skipped} file(s) the scanned tree's "
-                        f"{IGNORE_FILE_NAME} names were not re-scanned, past "
-                        f"ASH's limit of {MAX_RESCAN_FILES}, so a finding that file "
-                        "hides in them is not reported."
-                    )
-                )
-            ),
-        )
+        texts = []
+        if skipped:
+            texts.append(
+                f"gitleaks: {skipped} file(s) the scanned tree's "
+                f"{IGNORE_FILE_NAME} names were not re-scanned, past "
+                f"ASH's limits of {MAX_RESCAN_FILES} files and "
+                f"{MAX_RESCAN_BYTES} bytes, so a finding that file hides in "
+                "them is not reported."
+            )
+        if unread:
+            texts.append(
+                f"gitleaks: {unread} candidate name(s) in the scanned tree's "
+                f"{IGNORE_FILE_NAME} were not read, past ASH's limit of "
+                f"{MAX_IGNORE_CANDIDATES} names, so a finding the file they "
+                "name hides is not reported."
+            )
         run = sarif_report.runs[0]
         if not run.invocations:
             run.invocations = [Invocation(executionSuccessful=True)]
         invocation = run.invocations[0]
         invocation.toolExecutionNotifications = [
             *(invocation.toolExecutionNotifications or []),
-            notification,
+            *(
+                Notification(
+                    level=Level.error,
+                    message=Message(root=Message1(text=text)),
+                )
+                for text in texts
+            ),
         ]
 
     def _post_process_sarif(

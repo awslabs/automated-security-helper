@@ -44,17 +44,20 @@ try:
     import fcntl
 except ImportError:  # Windows, where no sandbox backend exists
     fcntl = None  # type: ignore[assignment]
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import (
     IO,
     Any,
+    Callable,
     Dict,
     FrozenSet,
+    Generator,
     Iterable,
     Iterator,
     List,
     Optional,
+    Set,
     Tuple,
     Union,
 )
@@ -98,6 +101,12 @@ class OutputLinkRefused(OSError, OutputDirLinkRefused):
             f"write through a symlink {where}",
         )
         self.found = found
+        # The base class's attribute, which its __init__ would have set: a reader
+        # of any OutputDirLinkRefused shows it.
+        self.remedy = (
+            "Remove the link, or use an output directory the scanned repository "
+            "does not write to."
+        )
         self.path = Path(path)
         self.link = Path(link)
         self.where = where
@@ -128,6 +137,10 @@ class OutputHardLinkRefused(OSError, OutputDirLinkRefused):
             "name refers to",
         )
         self.found = found
+        self.remedy = (
+            "Remove the file's other names, or use an output directory the scanned "
+            "repository does not write to."
+        )
         self.path = Path(path)
         self.links = links
 
@@ -255,13 +268,69 @@ def registered_roots() -> FrozenSet[Path]:
         return frozenset(_writable_roots)
 
 
+def _root_anchor(path: Path, roots: Iterable[Path]) -> Optional[Tuple[Path, Path]]:
+    """The outermost of ``roots`` that ``path`` is below, with its spelling in ``path``.
+
+    Returns ``(root, anchor)``: the root as registered, and the ancestor of
+    ``path`` that is that root. By spelling first (the root is one of ``path``'s
+    parents); else by identity: an ancestor of ``path`` that resolves to the
+    same directory as the root, as when the root is registered as ``/home/me/out``
+    and the write is spelled ``/local/home/me/out/x`` through a link above the
+    root. Only the ancestors are resolved, never the components below the root,
+    which the guard examines one by one without following a link.
+
+    The outermost root wins. With the output directory and a scanner's results
+    directory inside it both registered, choosing the deepest opened the results
+    directory by name, so a link planted at a component between the two was
+    followed; from the outermost root every component below it is opened without
+    following one.
+
+    The identity match is made outermost ancestor first, and only over the
+    ancestors ABOVE the outermost root matched by spelling. Two ancestors can
+    resolve to one root when a scanner plants a link below the root that points
+    back at it (``out/sub/back -> out``): the outer spelling is the anchor and
+    ``back`` is then a component the guard refuses, where taking the deeper one
+    opened the planted link by name. Below a root matched by spelling nothing is
+    resolved at all, which is also what spares most writes the resolution.
+    """
+    found: List[Tuple[Path, Path]] = []
+    unmatched: List[Path] = []
+    for root in roots:
+        if root in path.parents:
+            found.append((root, root))
+        else:
+            unmatched.append(root)
+    if unmatched:
+        above: List[Path] = list(path.parents)
+        if found:
+            outermost = min(found, key=lambda pair: len(pair[1].parts))[1]
+            above = [p for p in above if len(p.parts) < len(outermost.parts)]
+        # path.parents runs from the deepest ancestor up; reversed, the outermost
+        # spelling of each real directory is the one kept.
+        real_ancestors: Dict[str, Path] = {}
+        for ancestor in reversed(above):
+            real_ancestors.setdefault(os.path.realpath(ancestor), ancestor)
+        for root in unmatched:
+            anchor = real_ancestors.get(os.path.realpath(root))
+            if anchor is not None:
+                found.append((root, anchor))
+    if not found:
+        return None
+    return min(found, key=lambda pair: len(pair[1].parts))
+
+
 def _writable_root_for(path: Path) -> Optional[Path]:
-    """The deepest registered root ``path`` is below, or None."""
+    """The outermost registered root ``path`` is below, by spelling or identity, or None."""
+    anchored = _registered_anchor(path)
+    return anchored[0] if anchored is not None else None
+
+
+def _registered_anchor(path: Path) -> Optional[Tuple[Path, Path]]:
+    """``_root_anchor`` over the registered roots."""
     with _roots_lock:
         _apply_pending_releases()
         roots = list(_writable_roots)
-    inside = [r for r in roots if r in path.parents]
-    return max(inside, key=lambda r: len(r.parts)) if inside else None
+    return _root_anchor(path, roots)
 
 
 def _refuse_linked_root(root: Path) -> None:
@@ -270,82 +339,405 @@ def _refuse_linked_root(root: Path) -> None:
         raise OutputLinkRefused(root, root, where="at a directory it writes below")
 
 
-def _guard_root(path: Path, root: Optional[Union[str, Path]]) -> Optional[Path]:
-    """The root open_for_write checks ``path`` below: see its ``root`` argument."""
-    registered = _writable_root_for(path)
+def _guard_root(
+    path: Path, root: Optional[Union[str, Path]]
+) -> Optional[Tuple[Path, Path]]:
+    """The root open_for_write checks ``path`` below, and its spelling in ``path``.
+
+    See open_for_write's ``root`` argument. Returns ``(root, anchor)`` as
+    ``_root_anchor`` does, or None when nothing guards ``path``.
+    """
+    registered = _registered_anchor(path)
     if root is None:
         return registered
     named = Path(os.path.abspath(root))
-    if named not in path.parents:
+    anchored = _root_anchor(path, [named])
+    if anchored is None:
         raise ValueError(f"{path.as_posix()} is not below {named.as_posix()}")
     _refuse_linked_root(named)
-    if registered is not None and len(registered.parts) < len(named.parts):
+    if registered is not None and len(registered[1].parts) < len(anchored[1].parts):
         return registered
-    return named
+    return anchored
+
+
+def _sweep_warning(
+    text: str, value_free: str, values: Iterable[str], values_unread: bool
+) -> str:
+    """Log a sweep failure, redacted with the sweep's values; return the line logged.
+
+    ``text`` names the entry or root and the OS error; ``value_free`` says the
+    same with nothing a tool or an option chose. When the caller could not read
+    its redaction values (``values_unread``) nothing in ``text`` can be hidden, so
+    the value-free line is logged instead. The returned line is the one a caller
+    may put in an exception: it carries nothing the log does not.
+    """
+    if values_unread:
+        # The values to hide could not be read, so nothing here can be redacted:
+        # no entry name, root or OS error.
+        ASH_LOGGER.warning(value_free)
+        return value_free
+    # The entry's name and the root are paths a tool or an option chose, so
+    # either can hold an env-read value: redacted with the sweep's values, and
+    # the scope's, before it is logged.
+    from automated_security_helper.utils.sandbox.scope import scope_shown_text
+
+    shown = scope_shown_text(text, tuple(values))
+    ASH_LOGGER.warning(shown)
+    return shown
+
+
+#: What the walks report through their ``refuse`` callback for a directory they
+#: could not open or list, an entry they could not examine, and a directory they
+#: did not enter because of the depth limit.
+_REFUSE_LIST = "list"
+_REFUSE_EXAMINE = "examine"
+_REFUSE_DESCEND = "sweep below"
+
+
+def _below(relative: str, name: str) -> str:
+    """``name``'s path relative to the root, given its directory's."""
+    return name if relative == "." else f"{relative}/{name}"
+
+
+def _walk_descriptors(
+    root: Path, refuse: "Callable[[str, str, OSError], None]"
+) -> Generator[Tuple[str, int, Dict[str, os.stat_result], List[str]], None, None]:
+    """Walk ``root`` top-down through directory descriptors, never following a link.
+
+    For each directory reached this yields ``(relative, dir_fd, statuses,
+    dirnames)``: its path relative to ``root`` (``"."`` for the root itself), its
+    open descriptor, the lstat of every entry in it by name, and the names of its
+    subdirectories, which the caller may remove from the list to keep the walk
+    out of them. Entries are examined and subdirectories opened relative to the
+    descriptor, so a component replaced by a link while the walk runs is not
+    followed.
+
+    Nothing here raises for what the tree holds. A directory that cannot be
+    opened or listed (the root included), an entry whose lstat fails with
+    anything but ENOENT, and a directory with more directories below it at
+    _SWEEP_DEPTH_LIMIT (``_too_deep``) are each reported once through
+    ``refuse(what, relative, error)``, with ``what`` one of _REFUSE_LIST,
+    _REFUSE_EXAMINE and _REFUSE_DESCEND and ``relative`` the full path below
+    the root, and the walk goes on with the next entry or sibling. An entry or
+    directory that vanished between the listing and its examination is passed
+    over. A missing root yields nothing.
+
+    Written here rather than over os.fwalk because fwalk reports an unopenable
+    subdirectory to ``onerror`` by its bare name, with no parent to tell ``a/cache``
+    from ``b/cache``, raises for the root itself without calling ``onerror`` at all,
+    and ends the whole walk when ``onerror`` raises, siblings unvisited.
+    """
+    try:
+        fd = os.open(root, _DIR_WALK_FLAGS)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        refuse(_REFUSE_LIST, ".", error)
+        return
+    try:
+        yield from _walk_descriptor(root, fd, (), refuse)
+    finally:
+        os.close(fd)
+
+
+def _walk_descriptor(
+    root: Path,
+    fd: int,
+    parts: Tuple[str, ...],
+    refuse: "Callable[[str, str, OSError], None]",
+) -> Iterator[Tuple[str, int, Dict[str, os.stat_result], List[str]]]:
+    """One directory of ``_walk_descriptors``: its entries, then its subdirectories."""
+    relative = "/".join(parts) if parts else "."
+    try:
+        names = os.listdir(fd)
+    except OSError as error:
+        refuse(_REFUSE_LIST, relative, error)
+        return
+    statuses: Dict[str, os.stat_result] = {}
+    dirnames: List[str] = []
+    for name in names:
+        try:
+            status = os.lstat(name, dir_fd=fd)
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            # A directory the process can read but not search lists its entries
+            # and refuses their lstat (EACCES): a link there would otherwise be
+            # passed over, the hole the sweep and the pre-check exist to close.
+            refuse(_REFUSE_EXAMINE, _below(relative, name), error)
+            continue
+        statuses[name] = status
+        if stat.S_ISDIR(status.st_mode):
+            dirnames.append(name)
+    yield relative, fd, statuses, dirnames
+    if not dirnames:
+        return
+    try:
+        _too_deep(root, os.path.join(root, *parts), dirnames)
+    except OSError as error:
+        refuse(_REFUSE_DESCEND, relative, error)
+        return
+    for name in dirnames:
+        try:
+            child = os.open(name, _DIR_WALK_FLAGS, dir_fd=fd)
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            # EACCES for a mode the scanner set; ELOOP or ENOTDIR for a directory
+            # replaced by a link since its lstat, which O_NOFOLLOW refuses to
+            # follow and this walk does not remove.
+            refuse(_REFUSE_LIST, _below(relative, name), error)
+            continue
+        try:
+            yield from _walk_descriptor(root, child, parts + (name,), refuse)
+        finally:
+            os.close(child)
+
+
+def _relative_skips(root: Path, skip: Iterable[Union[str, Path]]) -> FrozenSet[str]:
+    """The paths in ``skip`` below ``root``, relative to it in the walks' form.
+
+    Compared by name and never resolved: the walk reaches a directory under the
+    name the backend made it with, and a link a scanner planted at that name is not
+    a directory, so the walk removes and counts it as it does any other link. A
+    path that is the root, above it, beside it or on another drive names nothing
+    here.
+    """
+    base = os.path.abspath(root)
+    below: Set[str] = set()
+    for path in skip:
+        candidate = os.path.abspath(path)
+        if candidate == base:
+            continue
+        try:
+            if os.path.commonpath([base, candidate]) != base:
+                continue
+        except ValueError:  # different drives, Windows
+            continue
+        below.add(os.path.relpath(candidate, base).replace(os.sep, "/"))
+    return frozenset(below)
 
 
 def _sweep_tree(
-    root: Path, values: Iterable[str] = (), values_unread: bool = False
+    root: Path,
+    values: Iterable[str] = (),
+    values_unread: bool = False,
+    refusals: Optional[List[OSError]] = None,
+    skip: Iterable[Union[str, Path]] = (),
 ) -> int:
-    """Remove non-regular, non-directory entries under ``root``.
+    """Remove non-regular, non-directory entries under ``root``; return how many.
 
-    os.fwalk descends through directory file descriptors and never follows a
-    symlink, so a directory replaced by a link while the walk runs is not entered.
-    Entries are removed relative to their directory's descriptor for the same
-    reason. Platforms without fwalk (Windows, where no sandbox backend exists)
-    fall back to os.walk.
+    The walk (``_walk_descriptors``) descends through directory file descriptors
+    and never follows a symlink, so a directory replaced by a link while it runs
+    is not entered, and entries are removed relative to their directory's
+    descriptor for the same reason. Platforms without directory descriptors
+    (Windows, where no sandbox backend exists) fall back to os.walk, with the
+    same decisions made by name.
+
+    What the walk cannot do is refused, never skipped: a directory it cannot open
+    or list (a mode the scanner set, a descriptor limit), an entry it cannot
+    examine (a directory readable but not searchable), an entry it cannot remove
+    (a directory the scanner made read-only around its link), a tree nested past
+    _SWEEP_DEPTH_LIMIT. Skipped, every link below the spot would survive for a
+    reader that opens paths by name to follow. Each refusal is logged as a removal
+    failure is (``_sweep_warning``: redacted with the sweep's values, value-free
+    when they could not be read) and the sweep GOES ON: the siblings of a refused
+    directory are still swept, and so is the rest of the tree, so a scanner cannot
+    shield one link with one unlistable directory. The refusals are collected as
+    OSErrors whose text is the logged line and nothing more, so the exception that
+    reaches the executor's failure handler (which can only redact with the plugin's
+    own values, the ones that could not be read) names no tool-chosen path when
+    the warning did not. With ``refusals`` given they are appended there for the
+    caller to raise once over every root (sweep_writable); without it, the first is
+    raised when this tree is done, with the others counted.
+
+    The one thing passed over by design is a directory named in ``skip``: ASH's
+    own private directories for the spawn (``SpawnPlan.private_dirs``, the cache
+    ``backends._private_caches`` makes under the results directory before the
+    scanner runs). The backend's own cleanup step removes each of them whole in the
+    same run (shutil.rmtree follows no link), and what they hold is ASH's, not
+    something the scanner left: uv fills its cache with links, which a sweep that
+    walked the directory counted and removed as a scanner's. The match is by the
+    name the backend made the directory under, relative to the root
+    (``_relative_skips``); a link a scanner planted at that name is removed and
+    counted like any other, and nothing beside or above the named directory is
+    passed over.
+
+    A missing root has nothing below it and sweeps as empty: a sandboxed scanner
+    that wrote nothing never created its results directory.
     """
+    values = tuple(values)
+    collected: List[OSError] = [] if refusals is None else refusals
+    skipped = _relative_skips(root, skip)
+
+    def refuse(what: str, relative: str, error: OSError) -> None:
+        shown = _sweep_warning(
+            f"Could not {what} {relative} under {root}: {error}",
+            f"Could not {what} an entry of a scanner's results directory; it is not "
+            "named because the plugin's redaction values could not be read",
+            values,
+            values_unread,
+        )
+        collected.append(OSError(_errno_of(error), shown))
+
+    def remove(name: str, dir_fd: Optional[int], path: Union[str, Path]) -> int:
+        # A removal that fails is a refusal like a directory that cannot be
+        # listed: the link stays where a reader that opens paths by name would
+        # follow it (a scanner can plant one and take the directory's write bit
+        # away), so it is logged, kept with the other refusals, and the sweep
+        # goes on to the next entry so nothing else is shielded by it.
+        try:
+            if dir_fd is None:
+                os.unlink(path)
+            else:
+                os.unlink(name, dir_fd=dir_fd)
+        except OSError as e:
+            shown = _sweep_warning(
+                f"Could not remove {name} under {root}: {e}",
+                "Could not remove an entry a scanner left in its results "
+                "directory; it is not named because the plugin's redaction "
+                "values could not be read",
+                values,
+                values_unread,
+            )
+            collected.append(OSError(_errno_of(e), shown))
+            return 0
+        return 1
+
     removed = 0
     if not hasattr(os, "fwalk"):
-        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-            for name in list(dirnames) + filenames:
-                path = os.path.join(dirpath, name)
-                if _is_special(os.lstat(path).st_mode):
-                    os.unlink(path)
-                    removed += 1
-        return removed
-    for _, dirnames, filenames, dir_fd in os.fwalk(root, follow_symlinks=False):
+        removed = _sweep_by_name(root, refuse, remove, skipped)
+    else:
+        # closing(): a consumer that leaves the loop early (an exception) closes
+        # the walk's open directory descriptors at once, not when the generator
+        # is finalized, which another interpreter can defer.
+        with closing(_walk_descriptors(root, refuse)) as walk:
+            for relative, dir_fd, statuses, dirnames in walk:
+                for name, status in statuses.items():
+                    if _is_special(status.st_mode):
+                        removed += remove(name, dir_fd, name)
+                if skipped:
+                    # The walk descends into what is left in this list once it
+                    # resumes; a named directory's entries are the backend's to
+                    # remove. A link at the name was removed and counted above.
+                    dirnames[:] = [
+                        name
+                        for name in dirnames
+                        if _below(relative, name) not in skipped
+                    ]
+    if refusals is None and collected:
+        raise _sweep_refused(collected) from None
+    return removed
+
+
+def _sweep_by_name(
+    root: Path,
+    refuse: "Callable[[str, str, OSError], None]",
+    remove: "Callable[[str, Optional[int], Union[str, Path]], int]",
+    skipped: FrozenSet[str] = frozenset(),
+) -> int:
+    """``_sweep_tree`` over os.walk, for a platform without directory descriptors.
+
+    The same refusals as the descriptor walk, reported through ``refuse`` with the
+    directory's path relative to ``root``: os.walk hands ``onerror`` the full path
+    of the directory it could not list, the root included, and goes on with the
+    siblings when ``onerror`` returns. ``skipped`` is the descriptor walk's: the
+    directories, relative to ``root``, that are not descended into.
+    """
+    removed = 0
+
+    def relative_to_root(path: Union[str, bytes, None]) -> str:
+        if path is None:
+            return "."
+        return os.path.relpath(os.fsdecode(path), root).replace(os.sep, "/")
+
+    def unlistable(error: OSError) -> None:
+        if error.errno == errno.ENOENT:
+            # Removed while the walk ran, or never created: nothing is below it.
+            return
+        refuse(_REFUSE_LIST, relative_to_root(error.filename), error)
+
+    for dirpath, dirnames, filenames in os.walk(
+        root, onerror=unlistable, followlinks=False
+    ):
+        relative = relative_to_root(dirpath)
         for name in list(dirnames) + filenames:
+            path = os.path.join(dirpath, name)
             try:
-                mode = os.lstat(name, dir_fd=dir_fd).st_mode
-            except OSError:
+                mode = os.lstat(path).st_mode
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                refuse(_REFUSE_EXAMINE, _below(relative, name), error)
                 continue
             if not _is_special(mode):
                 continue
-            try:
-                os.unlink(name, dir_fd=dir_fd)
-                removed += 1
-            except OSError as e:
-                if values_unread:
-                    # The values to hide could not be read, so nothing here
-                    # can be redacted: no entry name, root or OS error.
-                    ASH_LOGGER.warning(
-                        "Could not remove an entry a scanner left in its results "
-                        "directory; it is not named because the plugin's "
-                        "redaction values could not be read"
-                    )
-                    if name in dirnames:
-                        dirnames.remove(name)
-                    continue
-                # The entry's name and the root are paths a tool or an option
-                # chose, so either can hold an env-read value: redacted with
-                # the sweep's values, and the scope's, before it is logged.
-                from automated_security_helper.utils.sandbox.scope import (
-                    scope_shown_text,
-                )
-
-                ASH_LOGGER.warning(
-                    scope_shown_text(
-                        f"Could not remove {name} under {root}: {e}", tuple(values)
-                    )
-                )
+            removed += remove(name, None, path)
             if name in dirnames:
                 dirnames.remove(name)
+        if skipped:
+            dirnames[:] = [
+                name for name in dirnames if _below(relative, name) not in skipped
+            ]
+        try:
+            _too_deep(root, dirpath, dirnames)
+        except OSError as error:
+            refuse(_REFUSE_DESCEND, relative, error)
+            dirnames.clear()
     return removed
+
+
+def _errno_of(error: OSError) -> int:
+    """``error``'s errno, or EIO for an OSError raised without one."""
+    return error.errno if error.errno is not None else errno.EIO
+
+
+def _sweep_refused(refusals: List[OSError]) -> OSError:
+    """One OSError for a sweep's refusals, saying no more than their warnings did.
+
+    The first refusal's errno (so EACCES is a PermissionError, as before) and its
+    logged line, with the others counted: each was logged in full as it was met,
+    so the exception, which travels into ash.log, the scanner's row and its
+    results file, repeats nothing and names nothing the warnings kept back. The
+    caller raises it ``from None``: the OSErrors the walk met carry the raw paths.
+    """
+    first = refusals[0]
+    more = (
+        ""
+        if len(refusals) == 1
+        else f"; and {len(refusals) - 1} more, each logged as a warning"
+    )
+    return OSError(first.errno, f"{first.strerror}{more}")
 
 
 def _is_special(mode: int) -> bool:
     return not (stat.S_ISREG(mode) or stat.S_ISDIR(mode))
+
+
+#: How many directory levels below a root the walks descend. CPython's fwalk and
+#: walk recurse once per level, and the interpreter's recursion limit is about a
+#: thousand frames; a sweep that met a chain that deep raised RecursionError
+#: (3.10-3.12) or stopped at the descriptor limit (3.13+) and reported nothing.
+_SWEEP_DEPTH_LIMIT = 200
+
+
+def _too_deep(root: Path, dirpath: Union[str, bytes], dirnames: List[str]) -> None:
+    """Raise OSError when ``dirpath`` holds directories past the depth limit.
+
+    Called by the walks at each directory before they descend: a directory at the
+    limit that still has subdirectories ends the walk with ELOOP and a message,
+    so the caller fails the scanner rather than passing over what lies below.
+    """
+    if not dirnames:
+        return
+    depth = len(Path(os.fsdecode(dirpath)).relative_to(root).parts)
+    if depth >= _SWEEP_DEPTH_LIMIT:
+        raise OSError(
+            errno.ELOOP,
+            f"{os.fsdecode(dirpath)} under {root} is nested {depth} directories "
+            f"deep, past the {_SWEEP_DEPTH_LIMIT} the sweep descends, so what lies "
+            "below it could not be examined",
+        )
 
 
 def refuse_links_below(root: Union[str, Path]) -> None:
@@ -357,22 +749,52 @@ def refuse_links_below(root: Union[str, Path]) -> None:
     regular file with more than one name is refused too (OutputHardLinkRefused):
     the scanner can write the results directory, and a write to that file changes
     every name it has. The walk never follows a link. A missing ``root`` has nothing
-    below it.
+    below it; a root that is itself a link is refused as a link at it (the sweep
+    after the spawn would remove it without a word), and one that is not a
+    directory raises NotADirectoryError. The root is read with os.lstat, not
+    ``Path.is_dir``, which since Python 3.14 reads every OSError as False and would
+    pass a root the process cannot check over in silence. A directory below
+    ``root`` that cannot be opened or listed, and an entry that cannot be examined
+    (a directory readable but not searchable), are refused too, as the OSError
+    the walk met: skipped, a link there would be neither refused here nor removed
+    by the sweep.
     """
     root = Path(os.path.abspath(root))
-    if not hasattr(os, "fwalk") or not root.is_dir():
+    if not hasattr(os, "fwalk"):
         return
-    for dirpath, dirnames, filenames, dir_fd in os.fwalk(root, follow_symlinks=False):
-        for name in sorted(list(dirnames) + filenames):
-            try:
-                status = os.lstat(name, dir_fd=dir_fd)
-            except OSError:
-                continue
-            if stat.S_ISLNK(status.st_mode):
-                link = Path(dirpath) / name
-                raise OutputLinkRefused(link, link)
-            if stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
-                raise OutputHardLinkRefused(Path(dirpath) / name, status.st_nlink)
+    try:
+        status = os.lstat(root)
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(status.st_mode):
+        raise OutputLinkRefused(root, root, where="at a directory it writes below")
+    if not stat.S_ISDIR(status.st_mode):
+        raise NotADirectoryError(
+            errno.ENOTDIR,
+            f"{root} is not a directory, so what a scanner would write below it "
+            "cannot be checked",
+        )
+
+    def refuse(what: str, relative: str, error: OSError) -> None:
+        raise OSError(
+            _errno_of(error),
+            f"could not {what} {relative} under {root} ({error}), so a link below "
+            "it could not be refused",
+        ) from error
+
+    # closing(): the raises below leave the walk early, and its open directory
+    # descriptors are then closed here rather than when the generator is
+    # finalized, which another interpreter can defer.
+    with closing(_walk_descriptors(root, refuse)) as walk:
+        for relative, _dir_fd, statuses, _dirnames in walk:
+            where = root if relative == "." else root / relative
+            for name in sorted(statuses):
+                status = statuses[name]
+                if stat.S_ISLNK(status.st_mode):
+                    link = where / name
+                    raise OutputLinkRefused(link, link)
+                if stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
+                    raise OutputHardLinkRefused(where / name, status.st_nlink)
 
 
 def sweep_writable(
@@ -380,6 +802,7 @@ def sweep_writable(
     values: Iterable[str] = (),
     *,
     values_unread: bool = False,
+    skip: Iterable[Union[str, Path]] = (),
 ) -> int:
     """Remove symlinks and special files under ``roots``; return how many.
 
@@ -387,30 +810,91 @@ def sweep_writable(
     names the entry and the root, and either can hold one. ``values_unread``
     says the caller could not read them (the plugin's hook raised or gave no
     value set): ``values`` is then empty without meaning "none", and the
-    warning is value-free instead.
+    warning is value-free instead. ``skip`` names the directories the sweep
+    passes over, ASH's own private directories for the spawn
+    (``SpawnPlan.private_dirs``), which the backend removes whole in its own
+    cleanup step and whose contents are ASH's, not a scanner's; see
+    ``_sweep_tree`` for what is and is not passed over.
+
+    Every root is swept whatever happened at the others, and the whole of each
+    tree whatever a directory in it refused (``_sweep_tree``): a refusal is logged
+    where it is met and the sweep goes on, the count of removals is logged as
+    usual, and then one OSError is raised for all the refusals, its text the first
+    refusal's logged line (so it names no tool-chosen path the warning did not)
+    with the others counted, chained to nothing. The post-scan sweep fails the
+    scanner on it; the spawn cleanup records it at DEBUG and runs its release step
+    regardless (SpawnPlan.run_cleanup).
     """
     removed = 0
     values = tuple(values)
+    refusals: List[OSError] = []
     for root in roots:
         root = Path(root)
         try:
-            if root.is_symlink():
+            # os.lstat, not Path.is_symlink: since Python 3.14 is_symlink is
+            # os.path.islink, which reads every OSError as "not a link", so a
+            # root that cannot be checked would pass through here in silence.
+            mode = os.lstat(root).st_mode
+            if stat.S_ISLNK(mode):
                 root.unlink()
                 removed += 1
                 continue
-        except OSError:
+            if not stat.S_ISDIR(mode):
+                # A regular or special file given as a root (the policy builds
+                # only directories; a caller may not) has nothing below it, and
+                # opening it as a directory would read as a refusal. It is said,
+                # not refused: a sandboxed scanner cannot put a file at its own
+                # root (that needs write on the root's parent, which the policies
+                # grant only on the results directory itself), so this is an
+                # operator-side oddity that should not fail the scan.
+                _sweep_warning(
+                    f"The results directory root {root} is not a directory; "
+                    "nothing is swept below it",
+                    "A scanner's results directory root is not a directory and "
+                    "nothing is swept below it; it is not named because the "
+                    "plugin's redaction values could not be read",
+                    values,
+                    values_unread,
+                )
+                continue
+        except FileNotFoundError:
+            # A sandboxed scanner that wrote nothing created no results
+            # directory, the common case; or the root went since it was planned.
+            # Nothing is below it to remove, and the sweep creates nothing.
             continue
-        removed += _sweep_tree(root, values, values_unread)
+        except OSError as e:
+            # The root could not be checked (a parent the process cannot search,
+            # a link loop) or a link at the root could not be removed. Passing it
+            # over would leave whatever is there for a reader that opens paths by
+            # name to follow, so it is refused as an unlistable directory is; the
+            # other roots are still swept.
+            shown = _sweep_warning(
+                f"Could not check or remove the root {root}: {e}",
+                "Could not check or remove a scanner's results directory root; it "
+                "is not named because the plugin's redaction values could not be "
+                "read",
+                values,
+                values_unread,
+            )
+            refusals.append(OSError(_errno_of(e), shown))
+            continue
+        removed += _sweep_tree(root, values, values_unread, refusals, skip)
     if removed:
         ASH_LOGGER.warning(
             f"Scanner sandbox: removed {removed} symlink(s) or special file(s) a "
             "scanner left in its results directory"
         )
+    if refusals:
+        raise _sweep_refused(refusals) from None
     return removed
 
 
 _DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NONBLOCK = getattr(os, "O_NONBLOCK", 0)
+#: How the sweep and the pre-check open each directory they walk: a directory
+#: only, never through a link at the name, and without blocking on a FIFO put
+#: where a directory was.
+_DIR_WALK_FLAGS = os.O_RDONLY | _DIRECTORY | _NOFOLLOW | _NONBLOCK
 # No O_TRUNC: the file is truncated only after fstat shows it is a regular file
 # that no other name refers to (_open_regular).
 _FILE_FLAGS = os.O_WRONLY | os.O_CREAT | _NOFOLLOW | _NONBLOCK | _BINARY
@@ -432,7 +916,11 @@ def _is_link_status(status: os.stat_result) -> bool:
     )
 
 
-def _check_beneath_by_name(root: Path, relative: Tuple[str, ...], target: Path) -> None:
+def _check_beneath_by_name(
+    root: Path,
+    relative: Tuple[str, ...],
+    target: Path,
+) -> Optional[os.stat_result]:
     """Without directory descriptors: refuse a link on the way to ``target``.
 
     Each directory component below ``root`` is examined with lstat and created
@@ -440,7 +928,8 @@ def _check_beneath_by_name(root: Path, relative: Tuple[str, ...], target: Path) 
     OutputLinkRefused, and so does one at the file name. A regular file at the
     name that another name refers to raises OutputHardLinkRefused. This refuses a
     link that is already there, as one committed with the scanned tree is. A link
-    made between this check and the caller's open is not caught.
+    made between this check and the caller's open is not caught. Returns the
+    file's lstat, or None when nothing is at the name.
     """
     os.makedirs(root, exist_ok=True)
     current = root
@@ -449,8 +938,14 @@ def _check_beneath_by_name(root: Path, relative: Tuple[str, ...], target: Path) 
         try:
             status = _lstat(current)
         except FileNotFoundError:
-            os.mkdir(current)
-            continue
+            try:
+                os.mkdir(current)
+            except FileExistsError:
+                # Another writer put something there between the lstat and the
+                # mkdir: examined as any component is, a link there included.
+                status = _lstat(current)
+            else:
+                continue
         if _is_link_status(status):
             raise OutputLinkRefused(target, current)
         if not stat.S_ISDIR(status.st_mode):
@@ -458,11 +953,12 @@ def _check_beneath_by_name(root: Path, relative: Tuple[str, ...], target: Path) 
     try:
         status = _lstat(target)
     except FileNotFoundError:
-        return
+        return None
     if _is_link_status(status):
         raise OutputLinkRefused(target, target)
     if stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
         raise OutputHardLinkRefused(target, status.st_nlink)
+    return status
 
 
 def _is_link(name: str, dir_fd: int) -> bool:
@@ -472,20 +968,55 @@ def _is_link(name: str, dir_fd: int) -> bool:
         return False
 
 
-def _open_dir_beneath(root: Path, relative_parts: Tuple[str, ...], target: Path) -> int:
+def _anchor_is_root(fd: int, root: Path) -> bool:
+    """Whether the directory ``fd`` was opened at is ``root`` itself, now.
+
+    A guarded write or read opens its anchor by name, and that name may reach
+    the root through a link above it (the identity match in ``_root_anchor``); a
+    link re-pointed between the match and the open would put every check below
+    in another tree, which is the root-link hazard the module docstring names.
+    So the descriptor is compared with the root as it is at this moment: the
+    same device and inode, and the root not itself a link (a link put at the root
+    since its registration is read as one found there).
+    """
+    opened = os.fstat(fd)
+    try:
+        expected = os.lstat(root)
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(expected.st_mode):
+        return False
+    return (opened.st_dev, opened.st_ino) == (expected.st_dev, expected.st_ino)
+
+
+def _open_dir_beneath(
+    root: Path,
+    relative_parts: Tuple[str, ...],
+    target: Path,
+    identity_of: Optional[Path] = None,
+) -> int:
     """A descriptor for ``root/relative_parts``, never following a link below root.
 
     Each component is opened relative to the previous one with O_NOFOLLOW, and
     created when missing. A component that is a symlink, whoever put it there,
     raises OutputLinkRefused for ``target``; so does one replaced by a link between
-    the check and the open, which O_NOFOLLOW reports as ELOOP. A missing root is
-    created first; links at or above it are not examined.
+    the check and the open, which O_NOFOLLOW reports as ELOOP, or, with
+    O_DIRECTORY on Linux, as ENOTDIR: an ENOTDIR is read again with lstat, and a
+    link there is the same refusal. A component another writer creates between
+    the failed open and the mkdir is used as it is. A missing root is created
+    first; links above it are not examined, except that with ``identity_of`` (the
+    registered or named root ``root`` is a spelling of) the directory opened at
+    ``root`` must be that root itself (``_anchor_is_root``), or OutputLinkRefused
+    is raised for ``target`` and nothing below is opened.
     """
     try:
         fd = os.open(root, os.O_RDONLY | _DIRECTORY)
     except FileNotFoundError:
         os.makedirs(root, exist_ok=True)
         fd = os.open(root, os.O_RDONLY | _DIRECTORY)
+    if identity_of is not None and not _anchor_is_root(fd, identity_of):
+        os.close(fd)
+        raise OutputLinkRefused(target, root, where="at a directory it writes below")
     current = root
     try:
         for part in relative_parts:
@@ -497,10 +1028,15 @@ def _open_dir_beneath(root: Path, relative_parts: Tuple[str, ...], target: Path)
                 try:
                     child = os.open(part, flags, dir_fd=fd)
                 except FileNotFoundError:
-                    os.mkdir(part, 0o777, dir_fd=fd)
+                    try:
+                        os.mkdir(part, 0o777, dir_fd=fd)
+                    except FileExistsError:
+                        pass
                     child = os.open(part, flags, dir_fd=fd)
             except OSError as error:
-                if error.errno == errno.ELOOP:
+                if error.errno == errno.ELOOP or (
+                    error.errno == errno.ENOTDIR and _is_link(part, fd)
+                ):
                     raise OutputLinkRefused(target, current) from error
                 raise
             previous, fd = fd, child
@@ -533,13 +1069,16 @@ def unlink_beneath(root: Union[str, Path], relative_parts: Tuple[str, ...]) -> b
     *dirs, name = relative_parts
     if not hasattr(os, "fwalk"):
         # Windows, where no sandbox backend exists: the same refusals from
-        # lstat checks, between which a component can in principle change.
+        # lstat checks, between which a component can in principle change. A
+        # link is a symlink or a junction (is_link), as the rest of the module
+        # reads it: Path.is_symlink is False for a junction, which the walk then
+        # passed through.
         current = root
         for part in dirs:
             current = current / part
-            if not current.is_symlink() and not current.exists():
+            if not is_link(current) and not current.exists():
                 return True
-            if current.is_symlink() or not current.is_dir():
+            if is_link(current) or not current.is_dir():
                 return False
         target = current / name
         try:
@@ -594,16 +1133,20 @@ def unlink_beneath(root: Union[str, Path], relative_parts: Tuple[str, ...]) -> b
         os.close(fd)
 
 
-def _refuse_link_at(name: str, dir_fd: int, target: Path) -> None:
-    """Raise if ``name`` in ``dir_fd`` is a symlink, or a file another name refers to."""
+def _refuse_link_at(name: str, dir_fd: int, target: Path) -> Optional[os.stat_result]:
+    """Raise if ``name`` in ``dir_fd`` is a symlink, or a file another name refers to.
+
+    Returns the entry's lstat, or None when nothing is at the name.
+    """
     try:
         status = os.lstat(name, dir_fd=dir_fd)
     except FileNotFoundError:
-        return
+        return None
     if stat.S_ISLNK(status.st_mode):
         raise OutputLinkRefused(target, target)
     if stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
         raise OutputHardLinkRefused(target, status.st_nlink)
+    return status
 
 
 def _open_regular(
@@ -649,7 +1192,10 @@ def _open_regular(
 
 
 def replace_without_following(
-    path: Union[str, Path], content: str, encoding: str = "utf-8"
+    path: Union[str, Path],
+    content: str,
+    encoding: str = "utf-8",
+    newline: Optional[str] = None,
 ) -> None:
     """Write ``content`` to ``path`` as a new file renamed over it, never through a link.
 
@@ -661,6 +1207,10 @@ def replace_without_following(
     another name refers to is replaced as an entry, and that other name keeps its
     content. A link that appears at ``path`` between the check and the rename is
     replaced, not followed.
+
+    ``newline`` is open()'s: None translates ``\\n`` to the platform's line ending
+    on write, so a caller that wants the file's bytes the same on every platform
+    (a guide shipped with LF endings) passes ``"\\n"``, as it would to open().
     """
     path = Path(os.path.abspath(path))
     try:
@@ -669,14 +1219,12 @@ def replace_without_following(
         status = None
     if status is not None and _is_link_status(status):
         raise OutputLinkRefused(path, path, where="at a destination it writes")
-    # secrets, not uuid.uuid4: the snapshot tests pin uuid.uuid4 to a counter that
-    # report ids are built from, and a staging name only has to be unique.
-    staging = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(16)}.tmp")
+    staging = path.with_name(_staging_name(path.name, path.parent))
     fd = os.open(
         staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _BINARY, 0o666
     )
     try:
-        with os.fdopen(fd, "w", encoding=encoding) as handle:
+        with os.fdopen(fd, "w", encoding=encoding, newline=newline) as handle:
             handle.write(content)
         os.replace(staging, path)
     except BaseException:
@@ -686,6 +1234,64 @@ def replace_without_following(
 
 #: A staging file: created, never opened if anything is already at its name.
 _STAGING_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _BINARY
+#: The longest entry name the filesystems ASH writes to accept, in bytes (NAME_MAX
+#: on Linux and macOS; NTFS counts 255 characters, which is never fewer bytes).
+#: The ceiling, and the figure used where the directory's own limit cannot be read.
+_NAME_MAX = 255
+
+
+def _name_max(
+    directory: Optional[Union[str, Path]], dir_fd: Optional[int] = None
+) -> int:
+    """The longest entry name the directory's filesystem accepts, in bytes.
+
+    ``os.fpathconf(dir_fd, "PC_NAME_MAX")`` when the caller holds the directory
+    open (the guarded atomic writer, whose descriptor is the directory the
+    staging file goes into, created a moment ago if it was missing), else
+    ``os.pathconf(directory, ...)`` by name; either because a filesystem can
+    accept fewer than NAME_MAX bytes (eCryptfs accepts 143), and a target whose
+    name a plain open there accepts would otherwise fail with ENAMETOOLONG at the
+    staging open. _NAME_MAX when there is nothing to ask, no pathconf (Windows),
+    the call fails (a directory not there yet, asked by name) or the answer is
+    not a positive number; never more than _NAME_MAX.
+    """
+    try:
+        if dir_fd is not None and hasattr(os, "fpathconf"):
+            limit = os.fpathconf(dir_fd, "PC_NAME_MAX")
+        elif directory is not None and hasattr(os, "pathconf"):
+            limit = os.pathconf(directory, "PC_NAME_MAX")
+        else:
+            return _NAME_MAX
+    except (OSError, ValueError):
+        return _NAME_MAX
+    if not isinstance(limit, int) or limit <= 0:
+        return _NAME_MAX
+    return min(limit, _NAME_MAX)
+
+
+def _staging_name(
+    name: str,
+    directory: Optional[Union[str, Path]] = None,
+    dir_fd: Optional[int] = None,
+) -> str:
+    """The name of the staging file open_for_atomic_write writes ``name`` through.
+
+    A dot, the target's name, the pid and 32 hex digits of randomness, then
+    ``.tmp``. The target's name is shortened, from its end, until the whole fits
+    in the name limit of the directory's filesystem (``_name_max``, asked through
+    ``dir_fd`` when given, else by ``directory``'s name; _NAME_MAX bytes without
+    either): the suffix alone is about 46 bytes, so a target whose name a plain
+    open accepts could otherwise fail with ENAMETOOLONG at the staging open.
+    Uniqueness is the pid and the random digits, which are always kept. secrets,
+    not uuid.uuid4: the snapshot tests pin uuid.uuid4 to a counter that report
+    ids are built from, and a staging name only has to be unique.
+    """
+    limit = _name_max(directory, dir_fd)
+    suffix = f".{os.getpid()}.{secrets.token_hex(16)}.tmp"
+    stem = name
+    while stem and len(os.fsencode(f".{stem}{suffix}")) > limit:
+        stem = stem[:-1]
+    return f".{stem}{suffix}"
 
 
 @contextmanager
@@ -702,7 +1308,10 @@ def open_for_atomic_write(
 
     ``with open_for_atomic_write(path) as handle:`` yields a handle, text unless
     ``binary``, on a new file created exclusively in ``path``'s directory, with the
-    permissions a plain open gives (0o666 less the umask). When the block ends
+    permissions a plain open gives (0o666 less the umask). ``encoding``, ``errors``
+    and ``newline`` are open()'s, for text, as they are for open_for_write; the
+    staging handle is the one they shape, so the bytes renamed over ``path`` are
+    the bytes open() would have written there. When the block ends
     without an exception the file is renamed over ``path``, so a reader of ``path``
     opens the old complete file or the new complete one and never a partial write.
     When the block raises, the staging file is removed and ``path`` is left as it
@@ -712,12 +1321,23 @@ def open_for_atomic_write(
     Guarded as open_for_write is: below a registered root, or below ``root`` when
     the caller names one, each directory component is opened without following a
     link and created when missing; a link at any of them, or at the file name,
-    raises OutputLinkRefused, and a file at the name that another name refers to
-    raises OutputHardLinkRefused. The name is checked again just before the rename,
-    so a link made there while the block ran is refused and left in place rather
-    than replaced. The staging file is created and renamed relative to the
-    directory's descriptor. Outside every root the rename replaces whatever entry
-    is at the name, a link included, without following it.
+    raises OutputLinkRefused. A regular file at the name that another name refers
+    to (a hard link) raises OutputHardLinkRefused and is left as it was, as
+    open_for_write refuses it: the rename would not write through the other name,
+    but a hard link planted at a results path is a tamper signal, and the output
+    tree's contract is that no writer accepts one (refuse_links_below reads the
+    same way). The name is checked again just before the rename, so a link made there
+    while the block ran is refused and left in place rather than replaced. The
+    staging file is created and renamed relative to the directory's descriptor.
+    Outside every root the rename replaces whatever entry is at the name, a link
+    included, without following it.
+
+    A regular file already at the name keeps its read, write and execute bits:
+    the staging file is given them before the rename, where a fresh file would
+    otherwise have replaced a 0o600 file with a 0o644 one. Its setuid, setgid and
+    sticky bits are not carried over. Outside every root, where no hard-link
+    refusal runs, a file another name refers to is replaced and lends nothing:
+    the new file keeps its umask-derived mode.
 
     On a platform without directory descriptors (Windows) the components below a
     root are checked by name before the staging file is created and again before
@@ -733,19 +1353,36 @@ def open_for_atomic_write(
     )
     path = Path(os.path.abspath(path))
     guard = _guard_root(path, root)
-    relative = path.relative_to(guard).parts if guard is not None else ()
-    # secrets, not uuid.uuid4: the snapshot tests pin uuid.uuid4 to a counter that
-    # report ids are built from, and a staging name only has to be unique.
-    staging = f".{path.name}.{os.getpid()}.{secrets.token_hex(16)}.tmp"
+    anchor = guard[1] if guard is not None else None
+    relative = path.relative_to(anchor).parts if anchor is not None else ()
     dir_fd: Optional[int] = None
-    if guard is not None and _HAS_DIR_FD:
-        dir_fd = _open_dir_beneath(guard, relative[:-1], path)
-
-    def refuse_a_link_at_the_name() -> None:
+    if anchor is not None and _HAS_DIR_FD:
+        dir_fd = _open_dir_beneath(
+            anchor,
+            relative[:-1],
+            path,
+            identity_of=guard[0] if guard is not None else None,
+        )
+    # After the directory is open (and created, when it was missing): its own
+    # filesystem's name limit is asked through the descriptor, where asking the
+    # spelled path before it existed fell back to the ceiling.
+    try:
+        staging = _staging_name(path.name, path.parent, dir_fd=dir_fd)
+    except BaseException:
         if dir_fd is not None:
-            _refuse_link_at(path.name, dir_fd, path)
-        elif guard is not None:
-            _check_beneath_by_name(guard, relative, path)
+            os.close(dir_fd)
+        raise
+
+    def refuse_a_link_at_the_name() -> Optional[os.stat_result]:
+        if dir_fd is not None:
+            return _refuse_link_at(path.name, dir_fd, path)
+        if anchor is not None:
+            return _check_beneath_by_name(anchor, relative, path)
+        try:
+            status = _lstat(path)
+        except FileNotFoundError:
+            return None
+        return None if _is_link_status(status) else status
 
     def remove_staging() -> None:
         try:
@@ -757,13 +1394,27 @@ def open_for_atomic_write(
             pass
 
     try:
-        refuse_a_link_at_the_name()
+        existing = refuse_a_link_at_the_name()
         if dir_fd is not None:
             fd = os.open(staging, _STAGING_FLAGS, 0o666, dir_fd=dir_fd)
         else:
             fd = os.open(path.parent / staging, _STAGING_FLAGS, 0o666)
         try:
             try:
+                if (
+                    existing is not None
+                    and stat.S_ISREG(existing.st_mode)
+                    and existing.st_nlink == 1
+                    and hasattr(os, "fchmod")
+                ):
+                    # The read, write and execute bits of the file being
+                    # replaced, and only those: a setuid, setgid or sticky bit
+                    # on an entry a scanner put at the name is not carried onto
+                    # the results file. Below a root a file another name refers
+                    # to was refused above; outside every root it is replaced
+                    # and lends nothing: the new file keeps the umask-derived
+                    # mode it was created with.
+                    os.fchmod(fd, stat.S_IMODE(existing.st_mode) & 0o777)
                 handle = os.fdopen(fd, open_mode, **text)
             except BaseException:
                 os.close(fd)
@@ -832,10 +1483,11 @@ def open_for_write(
         {} if binary else {"encoding": encoding, "errors": errors, "newline": newline}
     )
     path = Path(os.path.abspath(path))
-    root = _guard_root(path, root)
-    if root is not None and not _HAS_DIR_FD:
-        _check_beneath_by_name(root, path.relative_to(root).parts, path)
-    if root is None or not _HAS_DIR_FD:
+    guard = _guard_root(path, root)
+    anchor = guard[1] if guard is not None else None
+    if anchor is not None and not _HAS_DIR_FD:
+        _check_beneath_by_name(anchor, path.relative_to(anchor).parts, path)
+    if anchor is None or not _HAS_DIR_FD:
         if make_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
         if mode == 0o666:
@@ -846,8 +1498,13 @@ def open_for_write(
         else:
             flags |= os.O_APPEND if append else os.O_TRUNC
         return os.fdopen(os.open(path, flags, mode), open_mode, **text)
-    relative = path.relative_to(root).parts
-    dir_fd = _open_dir_beneath(root, relative[:-1], path)
+    relative = path.relative_to(anchor).parts
+    dir_fd = _open_dir_beneath(
+        anchor,
+        relative[:-1],
+        path,
+        identity_of=guard[0] if guard is not None else None,
+    )
     try:
         name = relative[-1]
         if _is_link(name, dir_fd):
@@ -881,12 +1538,22 @@ def _guarded_read_fd(path: Path) -> int:
     not followed. O_NONBLOCK keeps a FIFO at the name from blocking the open;
     the regular-file check is the caller's, made on the opened descriptor.
     """
-    root = _writable_root_for(path) if hasattr(os, "fwalk") else None
-    if root is None or path == root:
+    anchored = _registered_anchor(path) if hasattr(os, "fwalk") else None
+    if anchored is None or path == anchored[1]:
         return os.open(path, _READ_FLAGS)
-    relative = path.relative_to(root).parts
-    dir_fd = os.open(root, os.O_RDONLY | _DIRECTORY)
+    root, anchor = anchored
+    relative = path.relative_to(anchor).parts
+    dir_fd = os.open(anchor, os.O_RDONLY | _DIRECTORY)
     try:
+        if not _anchor_is_root(dir_fd, root):
+            # The anchor was opened by name and reached another directory than
+            # the root (a link above it re-pointed, or a link put at the root):
+            # nothing below is read from there.
+            raise OSError(
+                errno.ELOOP,
+                f"{path} was not read: {anchor} does not lead to the directory "
+                f"{root} is registered as",
+            )
         for part in relative[:-1]:
             child = os.open(part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=dir_fd)
             os.close(dir_fd)

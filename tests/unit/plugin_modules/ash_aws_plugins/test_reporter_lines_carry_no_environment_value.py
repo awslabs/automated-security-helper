@@ -448,7 +448,8 @@ def test_cloudwatch_sts_check_failure(tmp_path, logged, monkeypatch):
 
 
 def test_cloudwatch_publish_failure(tmp_path, logged, monkeypatch):
-    """The failure is logged, kept in the errors, and returned as the report."""
+    """The failure is logged and kept in the errors, redacted; report() returns
+    None, so no report is written from the failure text."""
     from automated_security_helper.plugin_modules.ash_aws_plugins import (
         cloudwatch_logs_reporter as module,
     )
@@ -486,8 +487,10 @@ def test_cloudwatch_publish_failure(tmp_path, logged, monkeypatch):
         "Error when publishing results to CloudWatch Logs after retries",
         group,
     )
-    assert "does not exist" in returned, returned
-    assert "ENVCANARY-absent" not in returned, returned
+    # A failed publish produces no report: the error is in the log, redacted,
+    # and report() returns None (a text would be written as the report).
+    assert returned is None
+    _no_value_in([*logged, *reporter.errors], "does not exist", "ENVCANARY-absent")
 
 
 @pytest.mark.parametrize("code", ["AccessDeniedException", None])

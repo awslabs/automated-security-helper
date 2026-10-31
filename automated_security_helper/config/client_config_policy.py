@@ -31,8 +31,9 @@ the defaults, resolves. A ``patch`` op is refused whatever it writes.
 ``/sandbox`` and ``/ash_plugin_modules`` are not checked here. For a
 client-delivered file both are already restrict-only: ``sandbox_grants`` keeps
 its grants out and lets its mode only turn the sandbox on, and
-``plugin_module_trust`` keeps only installed modules outside the tree (and no
-package that sends findings or source off the host). Refusing them as well would
+``plugin_module_trust`` keeps only installed modules outside the scanned tree and
+outside every git checkout (a virtualenv inside a checkout counts as inside), and
+no package that sends findings or source off the host. Refusing them as well would
 refuse a file that tightens the sandbox.
 
 The rules are a ``ClientConfigRules``: the policy and the trusted config it came
@@ -64,6 +65,8 @@ Rejected alternatives
 
 from __future__ import annotations
 
+import copy
+import importlib
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -510,7 +513,8 @@ class ClientConfigRules(BaseModel):
     #: accepted, and its plugin sections add to the keys a glob is matched over.
     base: AshConfig
     #: Why the policy could not be established, or None. Held rather than raised,
-    #: so only a config with a client-delivered file is refused for it.
+    #: so only a config with a client-delivered file, or with overrides an MCP
+    #: client supplied, is refused for it.
     unreadable: Optional[str] = None
     #: The MCP session the rules were built for, or None. Its ``config/``
     #: directory, and no other session's, holds files the operator set aside for
@@ -603,16 +607,40 @@ def unreadable_rules(reason: str) -> ClientConfigRules:
     )
 
 
+def _refuse_unreadable(rules: ClientConfigRules, *, delivered: bool) -> None:
+    """Refuse a config because its ``rules`` could not be established.
+
+    ``delivered`` says a client-delivered file is what the rules were needed
+    for; otherwise it is overrides an MCP client supplied, and the text says so.
+    """
+    from automated_security_helper.core.exceptions import (
+        ASHConfigPolicyUnreadableError,
+    )
+
+    subject = (
+        "A config an MCP client delivered"
+        if delivered
+        else "A config with overrides an MCP client supplied"
+    )
+    raise ASHConfigPolicyUnreadableError(
+        f"{subject} cannot be checked: {rules.unreadable}"
+    )
+
+
 def rules_from(config: AshConfig) -> ClientConfigRules:
     """The rules a trusted ``config`` sets.
 
     When two of ``config``'s sections in one plugin section read as the same
     plugin, which values a delivered file would repeat is undecidable, and the
-    rules are ``unreadable``.
+    rules are ``unreadable``. The reason is returned to an MCP client, so a key
+    the trusted config read from the environment is not quoted in it.
     """
     from automated_security_helper.config.ash_config import reduced_plugin_name
+    from automated_security_helper.config.config_validator import redact_values
+    from automated_security_helper.utils.error_text import config_environment_values
 
     dump = config.model_dump(by_alias=True)
+    environment_values = config_environment_values(config)
     for section in ("scanners", "reporters", "converters"):
         by_plugin: Dict[str, List[str]] = {}
         for key in dump.get(section) or {}:
@@ -621,9 +649,12 @@ def rules_from(config: AshConfig) -> ClientConfigRules:
                 by_plugin.setdefault(reduced, []).append(key)
         clashes = [keys for keys in by_plugin.values() if len(keys) > 1]
         if clashes:
+            shown = ", ".join(
+                redact_values(repr(key), environment_values)
+                for key in sorted(clashes[0])
+            )
             return unreadable_rules(
-                f"The trusted config has {section} sections "
-                f"{', '.join(repr(key) for key in sorted(clashes[0]))}, which the "
+                f"The trusted config has {section} sections {shown}, which the "
                 f"plugin lookup reads as the same plugin. Keep one of them."
             )
     return ClientConfigRules(policy=policy_of(config), base=config)
@@ -740,6 +771,10 @@ def client_file_denials(
     (``client_scanner_exclusions.moved_exclusion_pointers``,
     ``runtime_patch.config_document_denials``). A caller whose files are not
     resolved that way leaves it off and refuses them as written.
+
+    Raises:
+        ASHConfigPolicyUnreadableError: A file is delivered and ``rules`` are
+            unreadable, so no policy exists to judge it against.
     """
     from automated_security_helper.cli.mcp.profile_registry import (
         session_config_was_patched,
@@ -765,6 +800,10 @@ def client_file_denials(
     for path, document in documents.items():
         if not (all_delivered or delivered(path)):
             continue
+        if rules.unreadable is not None:
+            # The placeholder policy and empty base of unreadable rules would
+            # judge this file against defaults the server does not hold.
+            _refuse_unreadable(rules, delivered=True)
         denials = [
             denial
             for denial in config_document_denials(
@@ -802,8 +841,19 @@ def _with_own_patch(document: Any, base: AshConfig) -> Any:
     So the restrict-only check sees a sandbox setting or plugin module a ``patch``
     op asks for, as well as one written out. Applied over ``base`` because an op
     may write into a list or section the document itself does not hold, and
-    ``base``'s own values ask for nothing beyond it. A patch that does not apply
-    there is left to resolution, which applies it over the real chain, and to the
+    ``base``'s own values ask for nothing beyond it. When the ops do not apply
+    there as a whole, each op is applied on its own and the ones that apply are
+    kept: an op that writes a sandbox grant or a plugin module still reaches the
+    walk when a sibling op fails, instead of the whole patch falling back to the
+    unpatched document. A ``test`` op that fails is skipped like any other op
+    that does not apply, and the walk goes on to the ops after it. The walk
+    starts from ``base`` and the file's own keys, while the load merges the
+    bases the file extends before it applies the patch, so a ``test`` that
+    passes in the load can fail here; ending the walk at it would leave a grant
+    written after it unjudged. Reading on can show a widening the load, which
+    aborts the patch at a failed test, never makes, and that over-report
+    refuses where the other answer would not. An op that applies in neither form
+    is left to resolution, which applies it over the real chain, and to the
     confinement that drops whatever it widens.
     """
     from automated_security_helper.config.config_sources import (
@@ -818,13 +868,23 @@ def _with_own_patch(document: Any, base: AshConfig) -> Any:
         return document
     own = {k: v for k, v in document.items() if k not in (PATCH_KEY, EXTENDS_KEY)}
     start = deep_merge(base.model_dump(mode="json", by_alias=True), own)
+    ops = document[PATCH_KEY]
+    where = Path("delivered config")
     try:
-        patched = _apply_patch(start, document[PATCH_KEY], Path("delivered config"))
+        # ``_apply_patch`` answers a ``_Patched``; the restrict-only walk reads
+        # the patched document it holds, as resolution does.
+        return _apply_patch(start, ops, where).document
     except ASHConfigSourceError:
+        pass
+    if not isinstance(ops, list):
         return document
-    # ``_apply_patch`` answers a ``_Patched``; the restrict-only walk reads the
-    # patched document it holds, as resolution does.
-    return patched.document
+    current: Any = start
+    for op in ops:
+        try:
+            current = _apply_patch(current, [op], where).document
+        except ASHConfigSourceError:
+            continue
+    return current
 
 
 def _writes_a_tightening(document: Any, denial: Any) -> bool:
@@ -864,8 +924,27 @@ def _writes_a_tightening(document: Any, denial: Any) -> bool:
     for (scanner, name), values in TIGHTENING_VALUES.items():
         if name == option and reduced_plugin_name(scanner) in names:
             present, value = _walk(document, segments)
-            return present and value in values
+            # Each listed value is compared as JSON: ``value in values`` is
+            # Python equality, under which ``1`` and ``1.0`` are ``True``.
+            return present and any(_equals_as_json(value, member) for member in values)
     return False
+
+
+def _equals_as_json(value: Any, expected: Any) -> bool:
+    """Whether ``value`` is the JSON value ``expected``, not merely equal in Python.
+
+    ``1 == True`` and ``0 == False`` in Python, so a comparison that decides what a
+    delivered file may write has to go through the JSON comparison the denial
+    check uses. A value that is not JSON data at all (a YAML date, a cycle) or
+    is nested past what the encoder will follow is not ``expected``; the
+    comparison does not raise.
+    """
+    from automated_security_helper.config.runtime_patch import _same_json_value
+
+    try:
+        return _same_json_value(value, expected)
+    except (TypeError, ValueError, RecursionError):
+        return False
 
 
 def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
@@ -878,6 +957,7 @@ def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
         plugin_key_lookup_names,
         reduced_plugin_name,
     )
+    from automated_security_helper.config.config_sources import _resolve_dict_key
     from automated_security_helper.config.runtime_patch import _path_segments, _walk
 
     if denial.from_patch:
@@ -891,11 +971,20 @@ def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
         if name != option or reduced_plugin_name(scanner) not in names:
             continue
         trusted = base.get_plugin_config("scanner", scanner)
-        options = (trusted or {}).get("options") or {}
-        if option in options:
+        # A plugin's section is plain data, so it can hold any value; one that
+        # is not a mapping, or whose options are not, has no value to compare.
+        options = trusted.get("options") if isinstance(trusted, dict) else None
+        if not isinstance(options, dict):
+            options = {}
+        # Under either spelling of the key, as every other option lookup here
+        # reads a plugin's section: a trusted value written ``ignore-file``
+        # is the trusted base's own value too.
+        if _resolve_dict_key(options, option) in options:
             return False
         present, value = _walk(document, segments)
-        return present and value == default
+        # As JSON values, not as Python ones: ``enable_preprocessors: 1`` is not
+        # the default ``true``.
+        return present and _equals_as_json(value, default)
     return False
 
 
@@ -906,7 +995,9 @@ def _scanner_gets_network(name: str, trusted: Any) -> bool:
     from its class among the scanner classes already imported (nothing is
     imported here, which would register plugins). A scanner whose class is not
     known, or whose class declares no ``SandboxRequirements``, counts as having
-    none.
+    none. Where several classes declare the name, the scanner gets a network
+    only if every one of them says so, so the answer does not depend on the
+    order the classes are found in.
     """
     from automated_security_helper.base.plugin_config import declared_plugin_name
     from automated_security_helper.base.scanner_plugin import ScannerPluginBase
@@ -915,6 +1006,7 @@ def _scanner_gets_network(name: str, trusted: Any) -> bool:
     if trusted.network_scanners is not None:
         return name in set(trusted.network_scanners)
     pending = list(ScannerPluginBase.__subclasses__())
+    answers: List[bool] = []
     while pending:
         cls = pending.pop()
         pending.extend(cls.__subclasses__())
@@ -935,8 +1027,23 @@ def _scanner_gets_network(name: str, trusted: Any) -> bool:
             # network_scanners names it. scanner_sandbox_scope makes the same test
             # of a scanner instance.
             continue
-        return bool(requirements.network and not requirements.network_requires_grant)
-    return False
+        answers.append(
+            bool(requirements.network and not requirements.network_requires_grant)
+        )
+    return bool(answers) and all(answers)
+
+
+def _environment_entry_label(entry: Any, position: int) -> str:
+    """How a denial names a delivered ``sandbox.environment`` *entry* (number
+    *position*, counting from one): its variable name when it starts with one, its
+    position otherwise, and its type when it is not text. Never the value: the
+    reason is returned to the client, and an entry that does not start with a name
+    may be a secret written without it."""
+    from automated_security_helper.utils.sandbox.policy import entry_variable_name
+
+    if not isinstance(entry, str):
+        return f"an entry of type {type(entry).__name__}"
+    return entry_variable_name(entry) or f"entry number {position}"
 
 
 def _widenings(
@@ -956,6 +1063,7 @@ def _widenings(
     for more used to be dropped by those limits with only a log line; it is now
     a denial, so the file is refused like any other that sets a denied field.
     """
+    from automated_security_helper.config.config_validator import redact_values
     from automated_security_helper.config.plugin_module_trust import (
         OFF_HOST_PLUGIN_SENDS,
         off_host_package,
@@ -963,6 +1071,7 @@ def _widenings(
         split_plugin_modules,
     )
     from automated_security_helper.config.runtime_patch import DocumentDenial, _walk
+    from automated_security_helper.utils.error_text import config_environment_values
 
     found: List[Any] = []
     trusted = base.sandbox
@@ -985,6 +1094,19 @@ def _widenings(
                         False,
                     )
                 )
+        elif listed and network is None and trusted.network_scanners is not None:
+            # Null hands every scanner the network its own declaration asks for,
+            # where the server's list names the ones that get one.
+            found.append(
+                DocumentDenial(
+                    "sandbox.network_scanners",
+                    "/sandbox/network_scanners",
+                    "gives every scanner the network its own declaration asks "
+                    "for, where the server's sandbox settings name the scanners "
+                    "that get one",
+                    False,
+                )
+            )
         listed, paths = _walk(section, ["extra_read_paths"])
         if listed and isinstance(paths, list):
             extra = [
@@ -1029,13 +1151,41 @@ def _widenings(
                         False,
                     )
                 )
+        listed, entries = _walk(section, ["environment"])
+        if listed and isinstance(entries, list):
+            # Named by variable, never by entry: a NAME=value entry holds a value,
+            # and this reason is returned to the client. Only a part that is a
+            # variable name is shown; an entry that does not start with one may be
+            # a value written without its name, so it is named by its position.
+            extra = list(
+                dict.fromkeys(
+                    _environment_entry_label(entry, position)
+                    for position, entry in enumerate(entries, start=1)
+                    if entry not in trusted.environment
+                )
+            )
+            if extra:
+                found.append(
+                    DocumentDenial(
+                        "sandbox.environment",
+                        "/sandbox/environment",
+                        f"passes {', '.join(extra)} to every scanner, which the "
+                        "server's sandbox settings do not",
+                        False,
+                    )
+                )
         listed, mode = _walk(section, ["mode"])
         if listed and trusted.mode != "off" and mode != trusted.mode:
+            # The server's mode can be a value its config read from the
+            # environment, and this reason is returned to the client.
+            server_mode = redact_values(
+                repr(trusted.mode), config_environment_values(base)
+            )
             found.append(
                 DocumentDenial(
                     "sandbox.mode",
                     "/sandbox/mode",
-                    f"replaces the server's sandbox mode {trusted.mode!r}",
+                    f"replaces the server's sandbox mode {server_mode}",
                     False,
                 )
             )
@@ -1043,6 +1193,8 @@ def _widenings(
     if modules and present:
         trusted_names = set(split_plugin_modules(base.ash_plugin_modules))
         refused: List[str] = []
+        # Once for the whole list, not once per name.
+        importlib.invalidate_caches()
         for name in split_plugin_modules(named):
             if name in trusted_names:
                 continue
@@ -1050,7 +1202,7 @@ def _widenings(
             if package is not None and package not in trusted_names:
                 refused.append(f"{name!r} ({OFF_HOST_PLUGIN_SENDS[package]})")
                 continue
-            reason = refusal_reason(name, scanned_root)
+            reason = refusal_reason(name, scanned_root, invalidate_caches=False)
             if reason is not None:
                 refused.append(f"{name!r} ({reason})")
         if refused:
@@ -1080,11 +1232,12 @@ def apply_client_config_rules(
 ) -> AshConfig:
     """``config``, checked for denied fields its client-delivered files set.
 
-    Refuses or drops them according to ``DENIED_FIELD_HANDLING``. ``rules`` None
-    takes the trusted base's. The suppressions and ignore paths the operator did
-    not supply are marked ``client_supplied``, and the scanner exclusions the
-    operator did not supply are moved out of the scanners' options to be applied
-    to their results instead (``config/client_scanner_exclusions.py``).
+    Refuses or drops them according to ``DENIED_FIELD_HANDLING``; a refusal names
+    the denied fields of every such file. ``rules`` None takes the trusted base's.
+    The suppressions and ignore paths the operator did not supply are marked
+    ``client_supplied``, and the scanner exclusions the operator did not supply
+    are moved out of the scanners' options to be applied to their results instead
+    (``config/client_scanner_exclusions.py``).
     ``scanned_root`` is the tree being scanned (the source directory when None).
     ``all_delivered`` counts every file of the chain as delivered, for a config
     path a client named (``resolve_config``'s ``untrusted_config``), wherever
@@ -1107,20 +1260,18 @@ def apply_client_config_rules(
         if all_delivered
         else by_every_name(config_is_client_supplied, names)
     )
-    if not client_overrides and not any(is_delivered(path) for path in documents):
+    file_delivered = any(is_delivered(path) for path in documents)
+    if not client_overrides and not file_delivered:
         return config
     if rules is None:
         rules = rules_from(
             _trusted_config(trusted_config_path, source_dir, permit_base)
         )
     if rules.unreadable is not None:
-        from automated_security_helper.core.exceptions import (
-            ASHConfigPolicyUnreadableError,
-        )
-
-        raise ASHConfigPolicyUnreadableError(
-            f"A config an MCP client delivered cannot be checked: {rules.unreadable}"
-        )
+        # Refused even with no delivered file: the marks and the scanner
+        # exclusion move that client overrides need are judged against the
+        # rules' trusted base, which unreadable rules do not have.
+        _refuse_unreadable(rules, delivered=file_delivered)
     # None when neither is given: client_file_denials then takes the working
     # directory, and judges with no tree when that is gone too.
     root = scanned_root or source_dir or None
@@ -1143,8 +1294,11 @@ def apply_client_config_rules(
             ASHConfigFieldDeniedError,
         )
 
-        path, denials = found[0]
-        raise ASHConfigFieldDeniedError(denied_fields_message(path, denials))
+        # Every delivered file of the chain that sets a denied field, so one
+        # refusal names them all.
+        raise ASHConfigFieldDeniedError(
+            " ".join(denied_fields_message(path, denials) for path, denials in found)
+        )
     if found:
         config = _drop_denied_fields(config, found, rules.base)
     config = _mark_client_supplied(config, documents, rules.base, is_delivered)
@@ -1206,9 +1360,15 @@ def _mark_client_supplied(
     Run on the merged result, so it does not matter how an entry got there: a
     plain list, a ``patch`` append, a ``global-settings`` spelling over a base.
     An entry is the operator's only when it equals one in a non-client file of the
-    chain or in the trusted ``base``; every other entry is marked
-    ``client_supplied``, so an entry whose source is unknown counts as the
-    client's.
+    chain, with that file's own ``patch`` ops applied, or in the trusted ``base``;
+    every other entry is marked ``client_supplied``, so an entry whose source is
+    unknown counts as the client's.
+
+    The patch is read on past an op that fails here. A config that resolved had
+    every op of every file's patch apply, since the load stops at the first op
+    that fails; the walk here starts without the bases the file extends, so a
+    ``test`` that passed there can fail here. Ending the walk at it would drop
+    the operator's entries after it, and they would be marked as the client's.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
     from automated_security_helper.config.runtime_patch import _walk
@@ -1222,7 +1382,9 @@ def _mark_client_supplied(
     models = {"suppressions": AshSuppression, "ignore_paths": IgnorePathWithReason}
     operators: Dict[str, List[Dict[str, Any]]] = {field: [] for field in models}
     sources: List[Any] = [
-        document for path, document in documents.items() if not delivered(path)
+        _with_own_patch(document, base)
+        for path, document in documents.items()
+        if not delivered(path)
     ]
     sources.append(base.model_dump(mode="json", by_alias=True))
     for source in sources:
@@ -1294,6 +1456,13 @@ def _drop_denied_fields(
                 "They were not applied; the server's values were used instead.",
             )
         )
+    # The rebuilt model is the same configuration with the denied fields
+    # restored, so it keeps everything its load recorded (AshConfig's private
+    # attributes: the values and keys its files read from the environment, the
+    # written-field record, the trust records), as apply_config_overrides keeps
+    # them for its rebuild. Without them a dropped config printed and recorded
+    # the environment values its file read.
+    dropped.__pydantic_private__ = copy.deepcopy(config.__pydantic_private__)
     dropped._resolution_warnings = warnings
     return dropped
 
@@ -1328,7 +1497,8 @@ def _trusted_config(
 ) -> AshConfig:
     """The operator config at ``trusted_config_path``, else the server's default config.
 
-    An operator config a client delivered is not one, and falls back to the default.
+    An operator config a client delivered is not one, and falls back to the
+    default, with a warning.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
     from automated_security_helper.config.config_sources import by_every_name
@@ -1347,6 +1517,12 @@ def _trusted_config(
         delivered = by_every_name(config_is_client_supplied, operator.names)
         if not any(delivered(path) for path in operator.chain):
             return operator.config
+        ASH_LOGGER.warning(
+            "The config named as the trusted base has a file under the MCP "
+            "workspace root, which an MCP client delivered, so the server's "
+            "default config is the trusted config instead. Keep the operator's "
+            "config outside the MCP workspace root."
+        )
     return trusted_default_config()
 
 
@@ -1358,7 +1534,11 @@ def trusted_default_config(
     ``get_default_config`` reads ``ASH_CONFIG``. A file under the MCP workspace
     root is a client's wherever it is named from (``config_is_client_supplied``),
     so when ``ASH_CONFIG`` or a base it extends is one, the built-in defaults are
-    the trusted config instead, and the policy is not read from it.
+    the trusted config instead, and the policy is not read from it. The file
+    ``ASH_CONFIG`` names is judged before it is loaded, so a client's file is
+    not parsed here; its bases are judged from the chain the load reports. A
+    named file whose load reports no chain was not judged, and the built-in
+    defaults are the trusted config for it too.
 
     ``repository`` is the settings the caller's own load of the same chain uses
     (``operator_only_options.repository_settings_for_root``). With them the file
@@ -1369,27 +1549,54 @@ def trusted_default_config(
     although the load itself ignores that value.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
-    from automated_security_helper.config.config_sources import by_every_name
     from automated_security_helper.config.default_config import (
-        default_config_document,
+        _ash_config_file,
         get_default_config,
     )
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
     from automated_security_helper.utils.log import ASH_LOGGER
 
-    document = default_config_document()
-    chain = list(document.chain) if document is not None else []
-    delivered = by_every_name(
-        config_is_client_supplied, document.names if document is not None else None
+    delivered = (
+        "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
+        "client delivered, so ASH's built-in defaults are the trusted config "
+        "instead. Keep the server's config outside the MCP workspace root."
     )
-    if any(delivered(path) for path in chain):
-        ASH_LOGGER.warning(
-            "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
-            "client delivered, so ASH's built-in defaults are the trusted config "
-            "instead. Keep the server's config outside the MCP workspace root."
-        )
+    unreported = (
+        "ASH_CONFIG names a file, but loading it reported no chain of files to "
+        "judge, so ASH's built-in defaults are the trusted config instead."
+    )
+
+    def built_in_defaults(reason: str) -> AshConfig:
+        ASH_LOGGER.warning(reason)
         return AshConfig()
+
+    # The file ASH_CONFIG names is judged before it is loaded: a client's file
+    # is never parsed here, so text in it that does not parse cannot make this
+    # config unloadable. A name ``_ash_config_file`` refuses is left to the
+    # load below, which refuses it the same way and tags the refusal.
+    try:
+        named_file = _ash_config_file()
+    except ASHConfigValidationError:
+        named_file = None
+    if named_file is not None and config_is_client_supplied(named_file):
+        return built_in_defaults(delivered)
+    # One read: the chain is judged from the files the load itself read
+    # (``views``, the carry get_default_config fills from the same read), not
+    # from a second resolution of ASH_CONFIG that a file changed in between
+    # could make disagree with the configuration returned.
+    views: List[Tuple[List[Path], List[Path], FrozenSet[Path]]] = []
     if repository is None:
-        return get_default_config()
-    return get_default_config(
-        repository.confine, repository_file=repository.is_repository_file
-    )
+        config = get_default_config(views=views)
+    else:
+        config = get_default_config(
+            repository.confine,
+            views=views,
+            repository_file=repository.is_repository_file,
+        )
+    # A file named and a load that reports no chain: nothing was judged.
+    if named_file is not None and not views:
+        return built_in_defaults(unreported)
+    for chain, named, _environment_paths in views:
+        if any(config_is_client_supplied(path) for path in (*chain, *named)):
+            return built_in_defaults(delivered)
+    return config

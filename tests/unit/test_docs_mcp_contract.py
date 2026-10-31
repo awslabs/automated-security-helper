@@ -1106,10 +1106,15 @@ def test_a_class_built_only_by_raising_again_is_not_a_complete_empty_list(
 PLANTED_EXECUTOR_SERVER = """
 import asyncio
 import functools
+from asyncio import to_thread
 
-from automated_security_helper.cli.tools import mcp_clear, mcp_clone
+from automated_security_helper.cli.tools import get_registry, mcp_clear, mcp_clone
 
 mcp = object()
+
+
+def _scoped(session):
+    return {"session_id": session}
 
 
 async def _run_on(function, kwargs):
@@ -1148,11 +1153,42 @@ async def clear():
 @mcp.tool()
 async def elsewhere():
     return _with_session(await _run_elsewhere(mcp_clear, session_id="s"), "s")
+
+
+@mcp.tool()
+async def clone_on_thread(url):
+    result = await asyncio.to_thread(mcp_clone, url)
+    return _with_session(result, "s")
+
+
+@mcp.tool()
+async def progress_on_thread(scan_id):
+    registry = get_registry()
+    return await to_thread(registry.progress, scan_id, **_scoped("s"))
+
+
+@mcp.tool()
+async def literal_on_thread():
+    return await asyncio.to_thread("not a callable")
 """
 
 PLANTED_EXECUTOR_TOOLS = """
 BUSY = "workspace_busy"
 TIMED_OUT = "clone_timed_out"
+
+
+class Registry:
+    def progress(self, scan_id, session_id=None):
+        try:
+            if session_id is None:
+                raise Busy("held")
+        except Busy as e:
+            return {"success": False, "error_type": e.error_type}
+        return {"success": True, "scan_id": scan_id, "status": "RUNNING"}
+
+
+def get_registry() -> Registry:
+    return Registry()
 
 
 class CloneRefused(RuntimeError):
@@ -1221,6 +1257,102 @@ def test_a_tool_that_runs_its_implementation_on_an_executor_returns_its_types(
     elsewhere = contracts["elsewhere"]
     assert elsewhere.error_types == ()
     assert any(getattr(v, "open_at", ()) for v in elsewhere.response.variants)
+
+
+@pytest.mark.unit
+def test_a_tool_that_runs_its_implementation_on_a_thread_returns_its_types(
+    planted_executor_contracts,
+):
+    """``await asyncio.to_thread(f, *args, **kw)`` is ``f(*args, **kw)``: the
+    types ``f`` returns are the tool's and its dict is read, whether ``f`` is a
+    package function called through ``asyncio.to_thread`` or a method on an
+    object the source names, called through ``to_thread`` imported by name with
+    a positional argument and a keyword spread. Before the reader followed it,
+    the call was an unread value, so a tool whose whole response came through it
+    listed no error type and no key."""
+    contracts = planted_executor_contracts
+    clone = contracts["clone_on_thread"]
+    assert clone.error_types == ("clone_refused", "clone_timed_out")
+    assert clone.error_types_unread == ()
+    assert [v for v in clone.response.variants if getattr(v, "open_at", ())] == []
+    assert {"success", "error_type", "session_id"} <= set(clone.response.keys())
+    progress = contracts["progress_on_thread"]
+    assert progress.error_types == ("workspace_busy",)
+    assert progress.error_types_unread == ()
+    assert {"success", "error_type", "scan_id", "status"} <= set(
+        progress.response.keys()
+    )
+
+
+@pytest.mark.unit
+def test_a_thread_run_of_a_non_callable_stays_unread(planted_executor_contracts):
+    """The planted-negative control for the runner: ``asyncio.to_thread`` of a
+    string literal names no function the reader can follow, so the tool's
+    response is the unread value it was before the reader followed the runner,
+    with no error type and nothing read into its keys."""
+    reader = _reader()
+    literal = planted_executor_contracts["literal_on_thread"]
+    assert literal.error_types == ()
+    assert [type(v) for v in literal.response.variants] == [reader.UnreadV]
+
+
+PLANTED_SELF_READING_TOOLS = """
+class Boom(RuntimeError):
+    error_type = "boom"
+
+    def __init__(self, detail):
+        super().__init__(detail)
+        self.detail = detail
+
+
+def helper(flag):
+    try:
+        raise Boom("first")
+    except Boom as e:
+        detail = e.detail if flag else "second"
+        raise Boom(detail)
+
+
+def run(flag):
+    try:
+        helper(flag)
+    except Boom as e:
+        return {"success": False, "error_type": e.error_type, "detail": e.detail}
+    return {"success": True}
+"""
+
+
+@pytest.mark.unit
+def test_a_construction_that_reads_a_caught_exception_of_its_own_class_ends(
+    tmp_path: Path,
+):
+    """``raise Boom(detail)`` under ``except Boom as e`` with ``detail`` read from
+    ``e``: reading the caught Boom reads its constructions, one of which reads a
+    caught Boom, which reads its constructions again. Each construction's argument
+    is read in a scope of its own, so the name guard never sees the repeat; the
+    class-level guard does, and the inner read is unread while the outer one
+    stands. Before the guard this read ended in a RecursionError, which made every
+    tool of a package with such a handler unreadable."""
+    package = _plant_server(
+        tmp_path,
+        """
+        from automated_security_helper.cli.tools import run
+
+        mcp = object()
+
+
+        @mcp.tool()
+        def planted(flag):
+            return run(flag)
+        """,
+    )
+    (package / "cli" / "tools.py").write_text(
+        textwrap.dedent(PLANTED_SELF_READING_TOOLS).lstrip("\n"), encoding="utf-8"
+    )
+    planted = _reader().tool_contracts(package)["planted"]
+    assert planted.error_types == ("boom",)
+    assert planted.error_types_unread == ()
+    assert {"success", "error_type", "detail"} <= set(planted.response.keys())
 
 
 @pytest.mark.unit
@@ -2822,3 +2954,35 @@ def test_example_keys_read_json_and_sketches():
         "severity_counts": {"critical": None},
         "scanners": {"<scanner_name>": {"<target_type>": {}}},
     }
+
+
+@pytest.mark.unit
+def test_no_explanation_entry_names_a_function_the_mcp_server_lacks():
+    """Each UNREAD_RESPONSE_EXPLAINED entry that points into the MCP server module
+    names a function that module defines. get_scan_results now returns the
+    filtered views directly, so the entries that named the removed
+    ``_with_coverage`` copy explain no site: the freshness check lists them as
+    entries that explained nothing, and reports them once their stale-after date
+    passes. The coverage keys are still spliced on in ``_coverage_fields`` in
+    result_filters.py, and those entries stay."""
+    server = REPO_ROOT / "automated_security_helper" / "cli" / "mcp_server.py"
+    tree = ast.parse(server.read_text(encoding="utf-8"))
+    defined = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert "get_scan_results" in defined
+    names = [
+        func.rsplit(".", 1)[-1]
+        for _tool, file, func, _fragment, _stale_after, _reason in (
+            dc.UNREAD_RESPONSE_EXPLAINED
+        )
+        if file.endswith("cli/mcp_server.py")
+    ]
+    assert "get_scan_results" in names
+    assert [name for name in names if name not in defined] == []
+    assert "_with_coverage" not in defined
+    assert not [
+        entry for entry in dc.UNREAD_RESPONSE_EXPLAINED if entry[2] == "_with_coverage"
+    ]

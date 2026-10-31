@@ -18,15 +18,23 @@ What happens now
 judge: each operator file's own relative values for the options below are made
 absolute against that file's directory before the files are merged, so a value in
 an ``extends`` base is taken from the base's directory, and one a ``patch``
-operation sets from the directory of the file that holds the operation. The file
+operation sets from the directory of the file that holds the operation; a
+``test`` operation's value compares equal to its path as written and as anchored
+(``_test_value``), so a guard on a same-directory path holds. The file
 ``ASH_CONFIG`` names is read the same way. ``--config-overrides``, and the CLI
 flags that become overrides, are taken from the working directory ASH runs in
 (``anchor_override_paths``), and so are ``TRIVY_IGNOREFILE`` and
 ``TRIVY_SECRET_CONFIG``, which trivy and trivy-repo read in place of their
 ``ignore_file`` and ``secret_config_file`` (``_trivy_scanner_base``), and
 ``TRIVY_CONFIG``, the trivy config file trivy-repo passes with ``--config``. A
-value that is already absolute, starts with ``~`` (the scanner expands it), holds
-``$`` (the sandbox expands it) or is a URL is left as written. The three
+value that is already absolute, starts with ``~`` (the scanner expands it) or is
+a URL is left as written, and so is a ``sandbox.extra_read_paths`` entry holding
+``$`` (the sandbox expands it). No scanner expands a ``$`` in its path options,
+so there it is a character of the file's name and the value is anchored like any
+other. opengrep's and semgrep's ``config`` is anchored when a file or directory
+is there, or when the value is spelled as a path (a rules-file suffix, or
+``./``/``../``): left as written, a missing file would be read from the tool's
+working directory, the scanned tree. The three
 environment variables are anchored by ``anchored_environment_path``: nothing
 expands them, so a relative value is joined as written, ``$`` and ``://``
 included, and its ``..`` is left for the lookup, which goes up from where a
@@ -88,6 +96,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -198,38 +207,95 @@ def _names_a_root(value: str) -> bool:
     return os.name == "nt" and value[:1] in ("/", "\\")
 
 
-def anchored_path(value: Any, base_dir: Path, *, only_if_there: bool = False) -> Any:
+#: A URL: a scheme (RFC 3986) at the start of the value, then ``://``. A value
+#: that holds ``://`` after a path separator or another character a scheme cannot
+#: hold, such as ``rules/a://b.yaml``, is a relative path.
+_URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://")
+
+#: Suffixes a rules file opengrep or semgrep reads carries; a registry entry
+#: (``p/ci``, ``r/python.lang.security``, ``auto``) carries none.
+_RULES_FILE_SUFFIXES: Tuple[str, ...] = (".yaml", ".yml", ".json")
+
+
+def _names_a_rules_file(value: str) -> bool:
+    """Whether a relative ``config`` value is spelled as a path, not a registry entry.
+
+    A value with a rules-file suffix, or one written from the current or parent
+    directory (``./rules``, ``../rules``), names a file or directory wherever it
+    is read from, so it is anchored even when nothing is there yet: left as
+    written, the tool would read it from its working directory, the scanned
+    tree, and run a same-named rules file the repository put there.
+    """
+    if value.lower().endswith(_RULES_FILE_SUFFIXES):
+        return True
+    return value.startswith(("./", ".\\", "../", "..\\"))
+
+
+def anchored_path(
+    value: Any,
+    base_dir: Path,
+    *,
+    only_if_there: bool = False,
+    expands_variables: bool = True,
+) -> Any:
     """``value`` made absolute against ``base_dir``, when it is a relative path.
 
-    Anything else (not a string, empty, absolute, starting with ``~``, holding
-    ``$`` or ``://``) is returned as it is. With ``only_if_there``, a relative
-    value that names nothing under ``base_dir`` is returned as it is too.
+    Anything else (not a string, empty, absolute, starting with ``~``, or a URL:
+    starting with a scheme and ``://``) is returned as it is. A ``://`` further
+    into the value is part of a relative name and is anchored. A value holding
+    ``$`` is returned as it is too when ``expands_variables`` is true, the
+    default: its reader expands the variable after this (the sandbox does for
+    ``extra_read_paths``), and anchoring the text first would put ``base_dir`` in
+    front of the expansion. A scanner's
+    tool reads its path options as written, so those are anchored with
+    ``expands_variables`` false and a ``$`` is a character of the file's name.
+    With ``only_if_there``, a relative value that names nothing under
+    ``base_dir`` is returned as it is too, unless it is spelled as a path
+    (``_names_a_rules_file``).
     """
     if not isinstance(value, str) or not value.strip():
         return value
-    if value.startswith("~") or "$" in value or "://" in value or "\x00" in value:
+    if value.startswith("~") or _URL_SCHEME.match(value) or "\x00" in value:
+        return value
+    if expands_variables and "$" in value:
         return value
     if _names_a_root(value):
         return value
     candidate = os.path.normpath(os.path.join(os.fspath(base_dir), value))
-    if only_if_there and not os.path.exists(candidate):
+    if (
+        only_if_there
+        and not os.path.exists(candidate)
+        and not _names_a_rules_file(value)
+    ):
         return value
     return candidate
 
 
 def _anchored_path_option(value: Any, base_dir: Path) -> Any:
-    """A ``SCANNER_PATH_OPTIONS`` value anchored: one path, or each path of a list."""
+    """A ``SCANNER_PATH_OPTIONS`` value anchored: one path, or each path of a list.
+
+    No scanner expands a variable in these options, so a ``$`` is part of the
+    name and the value is anchored like any other relative path.
+    """
     if isinstance(value, list):
-        return [anchored_path(entry, base_dir) for entry in value]
-    return anchored_path(value, base_dir)
+        return [
+            anchored_path(entry, base_dir, expands_variables=False) for entry in value
+        ]
+    return anchored_path(value, base_dir, expands_variables=False)
 
 
 def _anchored_file_entry(value: Any, base_dir: Path) -> Any:
-    """A ``file://<path>[::<function>]`` entry with a relative path made absolute."""
+    """A ``file://<path>[::<function>]`` entry with a relative path made absolute.
+
+    detect-secrets reads the path as written, so a ``$`` in it is a character
+    of the file's name and the path is anchored like a scanner's path option;
+    left as written, a relative path would be read from the tool's working
+    directory, the scanned tree.
+    """
     if not isinstance(value, str) or not value.startswith(_FILE_SCHEME):
         return value
     file_part, separator, function = value[len(_FILE_SCHEME) :].partition("::")
-    anchored = anchored_path(file_part, base_dir)
+    anchored = anchored_path(file_part, base_dir, expands_variables=False)
     if anchored == file_part:
         return value
     return f"{_FILE_SCHEME}{anchored}{separator}{function}"
@@ -259,7 +325,10 @@ def _anchor_options(key: str, options: Dict[str, Any], base_dir: Path) -> None:
             for name in names:
                 for spelling in _spellings(options, name):
                     options[spelling] = anchored_path(
-                        options[spelling], base_dir, only_if_there=True
+                        options[spelling],
+                        base_dir,
+                        only_if_there=True,
+                        expands_variables=False,
                     )
     if not _scanner_matches(key, "detect-secrets"):
         return
@@ -350,14 +419,101 @@ def anchor_patch_operations(ops: Any, base_dir: Union[str, Path]) -> Any:
         pointer = op.get("path") if isinstance(op, dict) else None
         if (
             not isinstance(pointer, str)
-            or not pointer.startswith("/")
+            # The root pointer is the empty string: an operation there replaces
+            # the whole document, and the loader accepts it, so its value is
+            # anchored as a whole document is.
+            or (pointer and not pointer.startswith("/"))
             or "value" not in op
         ):
             anchored_ops.append(op)
             continue
-        segments = [_unescape(segment) for segment in pointer[1:].split("/")]
-        anchored_ops.append(dict(op, value=_anchored_at(segments, op["value"], base)))
+        segments = (
+            []
+            if not pointer
+            else [_unescape(segment) for segment in pointer[1:].split("/")]
+        )
+        value = _anchored_at(segments, op["value"], base)
+        if op.get("op") == "test":
+            value = _test_value(op["value"], value)
+        anchored_ops.append(dict(op, value=value))
     return anchored_ops
+
+
+class _EitherSpelling(str):  # noqa: SLOT000 -- a str subtype takes no non-empty __slots__; ``written`` is per instance
+    """A ``test`` operation's value: the path as anchored, which also compares
+    equal to the path as written (``_test_value``).
+
+    ``jsonpatch`` compares the document's value against the operation's with
+    ``!=``; a comparison against a subclass of ``str`` is the subclass's, so the
+    test holds for either spelling. Printed, dumped or hashed it is the anchored
+    path. Rebuilt with both spellings by ``copy.deepcopy``, which the loader's
+    shadow apply makes of the operations.
+
+    Made by ``_either_spelling``, which sets ``written`` on a new one after
+    ``str`` has built it from the anchored path: the class takes no constructor
+    of its own, since the package admits no ``__new__`` outside the text
+    escapers' (``tests/unit/utils/test_shown_text_is_shown_once.py`` reads every
+    module for one).
+    """
+
+    written: str
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            str.__eq__(self, other) is True or str.__eq__(self.written, other) is True
+        )
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    __hash__ = str.__hash__
+
+    def __reduce__(self) -> Tuple[Any, Tuple[str, str]]:
+        return (_either_spelling, (str(self), self.written))
+
+
+def _either_spelling(anchored: str, written: str) -> _EitherSpelling:
+    """An ``_EitherSpelling`` of the anchored path that also equals ``written``."""
+    value = _EitherSpelling(anchored)
+    value.written = written
+    return value
+
+
+def _test_value(written: Any, anchored: Any) -> Any:
+    """A ``test`` operation's value, equal to its path as written and as anchored.
+
+    A test compares its value with what the document holds and sets nothing.
+    Every operator file and base is anchored before the merge, so a test of a
+    same-directory relative path (``test: bandit.yaml`` in a file whose base set
+    it) holds only against the anchored spelling; left as written, the test never
+    matched and the operator's chain failed to load. A base the load left as
+    written (a file inside the scanned tree) still holds the path as written. The
+    value compares equal to either spelling, so the test passes against whichever
+    one the document holds.
+
+    A list or mapping value (cfn-guard's ``rules_paths`` is one) is built the
+    same way leaf by leaf, so its test holds against a document whose entries
+    are anchored, as written, or a mix: ``list`` and ``dict`` compare their
+    members with ``==``, and each text leaf compares equal to either spelling.
+    A leaf that is not text is compared as written, and a pair whose shapes
+    differ (they do not, for the anchored copy of a value) keeps the value as
+    written.
+    """
+    if isinstance(written, str) and isinstance(anchored, str):
+        return written if written == anchored else _either_spelling(anchored, written)
+    if (
+        isinstance(written, list)
+        and isinstance(anchored, list)
+        and len(written) == len(anchored)
+    ):
+        return [_test_value(leaf, moved) for leaf, moved in zip(written, anchored)]
+    if (
+        isinstance(written, dict)
+        and isinstance(anchored, dict)
+        and written.keys() == anchored.keys()
+    ):
+        return {key: _test_value(written[key], anchored[key]) for key in written}
+    return written
 
 
 def anchor_override_paths(

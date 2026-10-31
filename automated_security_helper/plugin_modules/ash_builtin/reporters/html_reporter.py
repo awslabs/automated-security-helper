@@ -10,6 +10,9 @@ from typing import Dict, List, Literal, Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+from automated_security_helper.models.flat_vulnerability import (
+    recorded_artifact_path,
+)
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -23,12 +26,19 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
+    coverage_shortfall_text,
 )
 from automated_security_helper.core.unified_metrics import format_duration
+from automated_security_helper.utils.sarif_utils import (
+    is_result_suppressed,
+    suppressions_in_effect,
+)
 from automated_security_helper.utils.severity_ladder import SEVERITIES, result_severity
 from automated_security_helper.utils.terminal_text import (
     commands_broken,
+    controls_shown,
     is_shown_as_escape,
+    only_controls_shown,
     shown_not_obeyed,
     shown_on_one_line,
 )
@@ -36,6 +46,106 @@ from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 
 #: Most severe first, for the "Findings by Severity" list.
 _SEVERITY_ORDER = {name: index for index, name in enumerate(SEVERITIES)}
+
+
+def _has_controls(text: str, allowed: str = "") -> bool:
+    """Whether *text* holds a control or format character a viewer acts on.
+
+    The characters of *allowed* are admitted as layout, and a carriage return
+    before a line feed when the line feed is allowed.
+    """
+    for index, character in enumerate(text):
+        if character in allowed:
+            continue
+        if character == "\r" and "\n" in allowed and text.startswith("\n", index + 1):
+            continue
+        if is_shown_as_escape(character):
+            return True
+    return False
+
+
+def _is_plain(text: str, allowed: str = "") -> bool:
+    """Whether *text* holds nothing a viewer acts on.
+
+    No control or format character, and no CI command form. The characters of
+    *allowed* are admitted as layout, and a carriage return before a line feed
+    when the line feed is allowed. Multi-line text allows tab and line feed; a
+    location allows nothing.
+    """
+    return commands_broken(text) == text and not _has_controls(text, allowed)
+
+
+#: What a block of scan text may hold and still be printed as written.
+_TEXT_LAYOUT = "\t\n"
+
+
+def _shown_block(text: Any) -> tuple[str, str]:
+    """Multi-line scan text as the report prints it, and the note beside it.
+
+    Text with nothing in it a viewer acts on is printed as written, with no
+    note (``""``). Showing it anyway doubles a backslash that comes before text
+    reading as an escape (a code sample's ``\\x41``), so a reader sees a
+    character the source does not hold. Any other text is shown, not obeyed,
+    keeping its lines, and the note says so. A plain block, the common case,
+    is read once.
+
+    Each clause of the note is read from what showing the block changed, in
+    the order :func:`shown_not_obeyed` makes the changes: controls written as
+    escapes, a backslash run doubled, then command forms broken. A backslash
+    before text that reads as no escape is left as it is and is not mentioned.
+    """
+    value = "" if text is None else str(text)
+    if _is_plain(value, _TEXT_LAYOUT):
+        return value, ""
+    with_controls_written = only_controls_shown(value)
+    with_runs_doubled = controls_shown(value)
+    return str(shown_not_obeyed(value)), _shown_note(
+        controls=with_controls_written != value,
+        doubled=with_runs_doubled != with_controls_written,
+        commands=commands_broken(with_runs_doubled) != with_runs_doubled,
+    )
+
+
+def _shown_note(*, controls: bool, doubled: bool, commands: bool) -> str:
+    """The note that says a block was shown, not printed as written.
+
+    Showing a block writes its controls as escapes, breaks its CI command
+    forms, and doubles a backslash that comes before text reading as an escape,
+    so a copy of the block is not the source. The reader is told, and the note
+    names only what showing the block changed: text whose one change is a
+    broken command form is not said to hold control characters, and a
+    backslash that reads as no escape is not said to be doubled.
+    """
+    changes = []
+    if controls:
+        changes.append("control characters are written as escapes")
+    if commands:
+        changes.append("CI command forms are broken")
+    if doubled:
+        changes.append("a backslash before text that reads as an escape is doubled")
+    return (
+        '<p class="shown-note"><small>Shown, not as written: '
+        f"{'; '.join(changes)}.</small></p>"
+    )
+
+
+def _shown_location(location: str) -> str:
+    """A file location as one shown line, as written when it needs no change.
+
+    A name with no control and no command form is printed as written: showing
+    it would only double the backslash of text that reads as an escape (a
+    Windows path's ``\\x64``), and the copy would name no file.
+    """
+    return location if _is_plain(location) else str(shown_on_one_line(location))
+
+
+def _scanner_label(name: Any) -> str:
+    """A scanner's name as one shown line; never empty.
+
+    The scanner filter's "All scanners" entry has the empty value, so no
+    scanner may have it: an unnamed one is listed as ``unknown``.
+    """
+    return str(shown_on_one_line(name)) or "unknown"
 
 
 class HTMLReporterConfigOptions(ReporterOptionsBase):
@@ -107,16 +217,13 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             workspace = (
                 f'<div id="projects" class="workspace-section">{workspace}</div>'
             )
-        counts = "".join(
-            f'<span class="severity-{level}"><strong>{count}</strong> {level.title()}</span>'
-            for level, count in summary["counts"].items()
-        )
+        counts = self._format_severity_counts(summary["counts"])
         # A scanner's name can be a results file's text (``ash report`` renders
         # one a repository committed), so it is one shown line wherever it is
         # printed. The filter's values are the same shown names the cards'
         # data-scanner attributes hold, so the filter still matches.
         scanners = sorted(
-            {str(shown_on_one_line(finding.scanner)) for finding in emitter.flat_vulns}
+            {_scanner_label(finding.scanner) for finding in emitter.flat_vulns}
         )
         scanner_options = "".join(
             f'<option value="{html.escape(scanner, quote=True)}">{html.escape(scanner)}</option>'
@@ -145,11 +252,14 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             "next_step": summary["next_step"],
             "actionable": summary["actionable"],
             "below_threshold": summary["below_threshold"],
+            "policy_not_gating_tile": self._format_policy_not_gating_tile(
+                summary.get("policy_not_gating", 0)
+            ),
             "suppressed": summary["suppressed"],
             "completed": summary["completed"],
             "scanners": summary["scanners"],
             "skipped": summary["skipped"],
-            "unavailable": len(summary["unavailable"]),
+            "unavailable": summary["unavailable_count"],
             "severity_counts": counts,
             "coverage_notices": self._format_coverage_notices(summary),
             "workspace_nav": '<a href="#projects">Projects</a>' if workspace else "",
@@ -169,6 +279,35 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         return Template(
             assets.joinpath("ash-report.html").read_text(encoding="utf-8")
         ).substitute(data)
+
+    @staticmethod
+    def _format_policy_not_gating_tile(count: int) -> str:
+        """The masthead tile for findings the project's outcome left out.
+
+        Present only when there are such findings, so a report without any is
+        the page it always was.
+        """
+        if not count:
+            return ""
+        return (
+            f"<div><dl><dt>Not gating</dt><dd>{count}"
+            '<span class="metric-description">Workspace policy findings, '
+            "reported and left out of the outcome</span></dd></dl></div>"
+        )
+
+    @staticmethod
+    def _format_severity_counts(counts: Dict[str, int]) -> str:
+        """The severity chips of the masthead, one per bucket of *counts*.
+
+        The buckets are an open set (a row rated outside the five levels counts
+        under its own name), so each key is escaped where it becomes a class
+        name and where it is shown.
+        """
+        return "".join(
+            f'<span class="severity-{html.escape(level, quote=True)}">'
+            f"<strong>{count}</strong> {html.escape(level.title())}</span>"
+            for level, count in counts.items()
+        )
 
     @staticmethod
     def _format_timestamp(value: Any) -> str:
@@ -206,8 +345,8 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         notices = []
         if summary["shortfalls"]:
             rows = "".join(
-                f"<li><strong>{html.escape(str(shown_on_one_line(scanner)))}</strong>: evaluated {attempted - failed} "
-                f"of {attempted} target(s); {failed} could not be evaluated.</li>"
+                f"<li><strong>{html.escape(str(shown_on_one_line(scanner)))}</strong>: "
+                f"{html.escape(coverage_shortfall_text(attempted, failed))}.</li>"
                 for scanner, attempted, failed in summary["shortfalls"]
             )
             notices.append(
@@ -248,6 +387,21 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 '<div class="notice"><h3>Rules not evaluated</h3>'
                 f"<p>{rules}. These rules reached no verdict. Review the scanner logs before accepting this scan.</p></div>"
             )
+        if summary.get("could_not_stop"):
+            # The scanner's name and the reason (it names the process id) come
+            # from the run's own record: each is one shown line.
+            rows = "".join(
+                f"<li><strong>{html.escape(str(shown_on_one_line(name)))}</strong>: "
+                f"{html.escape(str(shown_on_one_line(reason)))}</li>"
+                for name, reason in summary["could_not_stop"]
+            )
+            notices.append(
+                '<div class="notice"><h3>Scanner tools not stopped</h3>'
+                "<p>These tools could not be stopped and may still be writing into the "
+                "output directory, so this report may not be final. The scan fails for them "
+                "whatever the severity gate says.</p>"
+                f"<ul>{rows}</ul></div>"
+            )
         if summary["stale"]:
             rows = "".join(
                 f"<li><strong>{html.escape(str(shown_on_one_line(record.name)))}</strong> "
@@ -283,22 +437,23 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             severity_class = severity.lower() if severity in order else "unknown"
             if finding.is_suppressed:
                 status, label = "suppressed", "Suppressed"
+            elif emitter.is_policy_not_gating(finding):
+                # Left out of the project's outcome by where it came from, at
+                # any severity: its own status, shown by the default view,
+                # never "Below threshold".
+                status, label = "policy-not-gating", "Not gating (workspace policy)"
             elif emitter.is_finding_actionable(finding):
                 status, label = "actionable", "Actionable"
             else:
                 status, label = "below-threshold", "Below threshold"
             location = finding.file_path or "N/A"
-            if finding.line_start is not None:
+            # A line number locates a file; with no file it would read "N/A:12".
+            if finding.file_path and finding.line_start is not None:
                 location += f":{finding.line_start}"
             # The location comes from a file name in the scanned repository and
-            # is offered for copying, so it is one shown line. A name with no
-            # control and no command form is copied as written: showing it
-            # would only double the backslash of text that reads as an escape
-            # (a Windows path's "\x64"), and the copy would name no file.
-            plain = commands_broken(location) == location and not any(
-                is_shown_as_escape(character) for character in location
-            )
-            copied = location if plain else str(shown_on_one_line(location))
+            # is offered for copying, so it is one shown line, as written when
+            # it needs no change.
+            copied = _shown_location(location)
             safe_location = html.escape(copied, quote=True)
             # Each context value can be the scan's text: the project from the
             # results, the CVE and CWE from a scanner's report, the package and
@@ -314,29 +469,36 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 )
                 if value is not None
             )
-            snippet = (
+            snippet = ""
+            if finding.code_snippet:
                 # Shown, not obeyed: the snippet keeps its lines, and its
-                # controls and CI command forms are written out.
-                f'<pre role="region" tabindex="0" aria-label="Code snippet for finding {index}"><code>{html.escape(str(shown_not_obeyed(finding.code_snippet)))}</code></pre>'
-                if finding.code_snippet
-                else ""
-            )
-            suppression = (
-                '<p class="suppression-reason"><strong>Suppression reason:</strong> '
+                # controls and CI command forms are written out. Source that
+                # holds none of them is printed as written.
+                shown_snippet, snippet_note = _shown_block(finding.code_snippet)
+                snippet = (
+                    f'<pre role="region" tabindex="0" aria-label="Code snippet for finding {index}"><code>{html.escape(shown_snippet)}</code></pre>'
+                    f"{snippet_note}"
+                )
+            reason = finding.suppression_justification or "No reason provided"
+            suppression = ""
+            if finding.is_suppressed:
                 # The reason can come from the scan: shown, keeping its lines.
-                f"{html.escape(str(shown_not_obeyed(finding.suppression_justification or 'No reason provided')))}</p>"
-                if finding.is_suppressed
-                else ""
-            )
+                shown_reason, reason_note = _shown_block(reason)
+                suppression = (
+                    '<p class="suppression-reason"><strong>Suppression reason:</strong> '
+                    f"{html.escape(shown_reason)}</p>{reason_note}"
+                )
+            shown_description, description_note = _shown_block(finding.description)
             # The scanner's name, as the filter's options show it.
-            scanner = str(shown_on_one_line(finding.scanner))
+            scanner = _scanner_label(finding.scanner)
             cards.append(
                 f'<article class="finding-card" aria-labelledby="finding-{index}" '
                 f'data-severity="{severity_class}" data-status="{status}" '
                 f'data-scanner="{html.escape(scanner, quote=True)}">'
                 '<div class="finding-card__inner">'
                 '<div class="finding-top">'
-                f'<span class="pill severity-{severity_class}">{html.escape(severity)}</span>'
+                # An additional report's severity is the results file's text.
+                f'<span class="pill severity-{severity_class}">{html.escape(str(shown_on_one_line(severity)))}</span>'
                 f'<span class="finding-status">{label}</span>'
                 f'<span class="finding-scanner">{html.escape(scanner)}</span></div>'
                 # The title (the rule ID) and the description come from the
@@ -348,7 +510,8 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 f'<button type="button" class="quiet-button copy-location js-only" '
                 f'aria-label="Copy location for finding {index}" data-copy-location="{safe_location}">Copy</button></span></p>'
                 f'<details><summary>Finding details</summary><div class="finding-body">'
-                f'<p class="finding-description">{html.escape(str(shown_not_obeyed(finding.description)))}</p>'
+                f'<p class="finding-description">{html.escape(shown_description)}</p>'
+                f"{description_note}"
                 f"{context}{suppression}{snippet}</div></details></div></article>"
             )
         return "\n".join(cards)
@@ -431,7 +594,11 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         """
 
         for hotspot in hotspots:
-            # A path from the scanned repository: shown on one line.
+            # A path from the scanned repository: shown on one line, with the
+            # backslash of text that reads as an escape doubled, so a name the
+            # record writes as an escape (a file name that is not UTF-8) cannot
+            # be taken for the escape itself. The finding card's code element
+            # and copy attribute keep the path as recorded, as data.
             location = html.escape(
                 str(shown_on_one_line(hotspot.get("location", "Unknown")))
             )
@@ -447,8 +614,15 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
     @staticmethod
     def _is_suppressed(result: Result) -> bool:
-        """Return True if the result carries a non-empty suppressions list."""
-        return bool(result.suppressions)
+        """Whether the result carries a suppression that is in effect.
+
+        Read through ``sarif_utils.is_result_suppressed``, the one answer every
+        consumer gives: a suppression ``rejected`` by the reviewer or still
+        ``underReview`` has not taken effect (SARIF 3.35.4), the gate still fails
+        the scan on the finding, and the report used to file it under Suppressed
+        on the presence of the entry alone.
+        """
+        return is_result_suppressed(result)
 
     def _group_results_by_severity(
         self, results: List[Result]
@@ -577,12 +751,15 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 severity = result_severity(finding)
                 severity_class = f"severity-{severity.lower()}"
                 location_str = self._location_str(finding)
-                reason = ""
-                if finding.suppressions:
-                    reasons = [
-                        s.justification for s in finding.suppressions if s.justification
-                    ]
-                    reason = "; ".join(reasons) if reasons else ""
+                # The reasons of the suppressions in effect: a rejected one did
+                # not hide the finding, so its justification is not why the row
+                # is here.
+                reasons = [
+                    s.justification
+                    for s in suppressions_in_effect(finding.suppressions)
+                    if getattr(s, "justification", None)
+                ]
+                reason = "; ".join(reasons) if reasons else ""
 
                 table += f"""
                 <tr>
@@ -605,6 +782,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             phys_loc = finding.locations[0].physicalLocation
             if phys_loc.root.artifactLocation and phys_loc.root.artifactLocation.uri:
                 location = phys_loc.root.artifactLocation.uri
+                # A workspace scan writes a rebased uri percent-encoded and
+                # records the path it names; show the path.
+                location = recorded_artifact_path(finding, location) or location
                 if phys_loc.root.region:
                     location += f":{phys_loc.root.region.startLine or 'N/A'}"
                 return location

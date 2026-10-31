@@ -52,7 +52,11 @@ from automated_security_helper.utils.sandbox.backends import SpawnPlan
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 from tests.utils.stand_ins import on_windows, write_stand_in
 
-pytestmark = pytest.mark.unit
+# Marked per class, not per module: the stand-in backend runs every planned command
+# unchanged, so the classes that reach the dependency check, the convert phase or
+# nbconvert start the stand-in uv, jupyter and jupyter-nbconvert as child processes
+# and are integration; only the tests of TestTheStandInsCanBeStartedOnWindows that
+# read the stand-ins' files without starting them are unit.
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
@@ -380,6 +384,7 @@ def _inside(path, roots) -> bool:
     )
 
 
+@pytest.mark.integration
 class TestNoInstallUnderASandbox:
     def test_the_dependency_check_does_not_install_nbconvert(
         self, tmp_path, tree, backend, monkeypatch
@@ -453,6 +458,7 @@ class TestNoInstallUnderASandbox:
         assert tools.installs(), f"calls: {tools.calls()}"
 
 
+@pytest.mark.integration
 class TestNbconvertRunsUnderTheSandbox:
     @pytest.mark.parametrize("use_uv_tool", [True, False], ids=["uv", "direct"])
     def test_the_conversion_is_planned_by_the_backend_with_a_scanner_policy(
@@ -533,6 +539,7 @@ class TestNbconvertRunsUnderTheSandbox:
         assert len(converted) == 1
 
 
+@pytest.mark.integration
 class TestAnUnconfinableNotebookIsRefused:
     def test_the_notebook_is_refused_and_nbconvert_does_not_run(
         self, tmp_path, tree, backend, monkeypatch
@@ -589,6 +596,7 @@ class TestAnUnconfinableNotebookIsRefused:
         assert [r.name for r in incomplete_converters(results)] == ["jupyter"]
 
 
+@pytest.mark.integration
 class TestAnUnconfinableNotebookFailsTheScan:
     """The refused notebook is lost coverage, which the completeness gate reports."""
 
@@ -626,6 +634,7 @@ class TestAnUnconfinableNotebookFailsTheScan:
         assert incomplete_converters(results) == []
 
 
+@pytest.mark.integration
 class TestASandboxedConversionRunsNbconvertItself:
     """Under a sandbox nbconvert's own entry point runs, not uv or the jupyter launcher.
 
@@ -681,6 +690,7 @@ class TestASandboxedConversionRunsNbconvertItself:
         assert [c[:3] for c in tools.conversions()] == [["uv", "tool", "run"]]
 
 
+@pytest.mark.integration
 class TestAFailedSandboxedConversionIsLostCoverage:
     """A notebook that was not converted under the sandbox makes the scan incomplete.
 
@@ -793,6 +803,7 @@ class TestAFailedSandboxedConversionIsLostCoverage:
         assert self._incomplete(results) == []
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("mode", ["off", "bwrap"])
 class TestAFailedConversionIsLostCoverageInEitherMode:
     """A notebook that is not converted makes the scan incomplete, sandbox or not.
@@ -886,24 +897,29 @@ class TestAFailedConversionIsLostCoverageInEitherMode:
         assert converter.failed_inputs == []
 
 
+@pytest.mark.integration
 class TestTheConverterConfinesItselfOutsideThePhase:
     """The converter's own guards, used where no convert phase sets a scope.
 
     A library caller can build a JupyterConverter and call it directly. Its
-    construction probe, its dependency check and its refusal to install must hold
-    without the phase's scopes, and each is tested on its own here: the install
-    guard with the probe scope removed, so the runner's in-scope refusal cannot
-    stand in for it.
+    construction (which records the nbconvert version probe and starts nothing),
+    its dependency check (which runs that probe, sandboxed) and its refusal to
+    install must hold without the phase's scopes, and each is tested on its own
+    here: the install guard with the probe scope removed, so the runner's in-scope
+    refusal cannot stand in for it.
     """
 
     def test_construction_and_the_dependency_check_are_planned(
         self, tmp_path, tree, backend, monkeypatch
     ):
-        """Every process each step runs was planned by the backend, counted.
+        """Construction starts nothing; what the dependency check runs was planned.
 
-        Construction and the dependency check are counted apart, so the check's own
-        scope is what plans its calls, and by count rather than by argv alone: a
-        second, unplanned run of a planned command shows up too.
+        Construction only records the version probe (the converter builds itself
+        inside ``deferred_tool_version_probes``), so a process started there is a
+        probe that escaped the deferral and ran outside any scope. The check runs
+        the recorded probe inside its own scope, so the check's scope is what
+        plans its calls, counted rather than matched by argv alone: a second,
+        unplanned run of a planned command shows up too.
         """
         from collections import Counter
 
@@ -927,10 +943,16 @@ class TestTheConverterConfinesItselfOutsideThePhase:
         converter.validate_plugin_dependencies()
         check_ran = ran_since(calls_after_construction)
 
-        assert construction_ran, "construction ran nothing to check"
+        assert construction_ran == Counter(), (
+            f"construction started a process: {sorted(construction_ran)}"
+        )
+        assert spawns_after_construction == 0, (
+            "construction asked the sandbox backend to plan "
+            f"{spawns_after_construction} process(es)"
+        )
         assert check_ran, f"the dependency check ran nothing; calls: {tools.calls()}"
-        assert construction_ran - planned_since(0) == Counter(), (
-            "construction ran a process the sandbox backend did not plan"
+        assert any("--version" in call for call in check_ran), (
+            f"the dependency check did not run the version probe: {sorted(check_ran)}"
         )
         assert check_ran - planned_since(spawns_after_construction) == Counter(), (
             "the dependency check ran a process the sandbox backend did not plan: "
@@ -974,6 +996,7 @@ class TestTheConverterConfinesItselfOutsideThePhase:
         )
 
 
+@pytest.mark.integration
 class TestNbconvertReadsOnlyItsStagedCopy:
     """nbconvert is handed a staged copy, so it may not read the scanned tree.
 
@@ -1073,6 +1096,8 @@ class TestTheStandInsCanBeStartedOnWindows:
 
     NAMES = ["uv", "jupyter", "jupyter-nbconvert"]
 
+    # Marked per test: three of these read the stand-ins' files and start nothing.
+    @pytest.mark.integration
     def test_a_script_logs_under_the_name_of_the_tool_it_stands_for(self, tmp_path):
         tools = _Tools(tmp_path, installed=True, windows=True)
 
@@ -1086,6 +1111,7 @@ class TestTheStandInsCanBeStartedOnWindows:
 
         assert [call[0] for call in tools.calls()] == self.NAMES
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("windows", [False, True], ids=["posix", "windows"])
     def test_removing_a_stand_in_removes_every_file_it_is_made_of(
         self, tmp_path, windows
@@ -1098,6 +1124,7 @@ class TestTheStandInsCanBeStartedOnWindows:
         assert "jupyter" not in left, left
         assert "jupyter-nbconvert" in left and "uv" in left, left
 
+    @pytest.mark.unit
     @pytest.mark.parametrize("windows", [False, True], ids=["posix", "windows"])
     def test_a_stand_in_is_rewritten_in_the_file_that_holds_its_program(
         self, tmp_path, windows
@@ -1112,6 +1139,7 @@ class TestTheStandInsCanBeStartedOnWindows:
         with pytest.raises(AssertionError, match="not in the uv stand-in"):
             tools.replace("uv", "text that is not there", "x")
 
+    @pytest.mark.unit
     def test_a_launcher_is_asked_for_a_version_with_no_character_cmd_reads(self):
         """cmd.exe reads ``< > | & ^ %`` in an argument, and the default range has two."""
         pinned = _tool_version(windows=True)
@@ -1120,6 +1148,7 @@ class TestTheStandInsCanBeStartedOnWindows:
         assert not set(pinned) & set('<>|&^%"')
         assert _tool_version(windows=False) is None
 
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         "given, expected",
         [

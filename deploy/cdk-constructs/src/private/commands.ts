@@ -96,7 +96,7 @@ export interface InstallOptions {
  * shard options, which v3.7.0 and v3.7.1 predate, so this has to move with the
  * release.
  */
-export const DEFAULT_ASH_REF = 'v3.7.0';
+export const DEFAULT_ASH_REF = 'v3.7.1';
 
 /** Default repository ASH is installed from. */
 export const DEFAULT_ASH_REPOSITORY =

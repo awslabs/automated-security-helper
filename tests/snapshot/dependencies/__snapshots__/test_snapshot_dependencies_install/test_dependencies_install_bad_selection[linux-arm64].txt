@@ -6,7 +6,7 @@ $ ash dependencies install --bin-path bin --tool grype --tool gryp
 ╰────────────────────────────────────────────╯
 Getting platform and architecture
 Installing dependencies for platform: linux, architecture: arm64
-[<LOG_TIME>] INFO     Loaded 2 converters, 16 scanners, and 15 reporters
+INFO     Loaded 2 converters, 16 scanners, and 15 reporters
 ╭─────────────────────────────────────── Nothing installed ────────────────────────────────────────╮
 │ Unknown tool(s): gryp                                                                            │
 │ Available: actionlint, archive, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, csv,     │

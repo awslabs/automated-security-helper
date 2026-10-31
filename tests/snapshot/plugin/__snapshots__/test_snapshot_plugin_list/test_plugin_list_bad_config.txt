@@ -1,6 +1,6 @@
 $ ash plugin list -c bad.yaml
-[<LOG_TIME>] INFO     Using config file specified at: bad.yaml
-             ERROR    Configuration validation failed: Invalid value at 'fail_on_findings': Input
-                      should be a valid boolean
+INFO     Using config file specified at: bad.yaml
+ERROR    Configuration validation failed: Invalid value at 'fail_on_findings': Input should be a
+         valid boolean
 Invalid configuration: Configuration validation failed for 'bad.yaml': Invalid value at 'fail_on_findings': Input should be a valid boolean. Run: ash config lint --config bad.yaml
 [exit code: 3]

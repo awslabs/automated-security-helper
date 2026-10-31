@@ -10,7 +10,7 @@
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
 │ detect-secre… │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ 250ms    │ 0          │ SKIPPED │ MEDIUM        │
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
-│ grype         │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ <1ms     │ 0          │ MISSING │ MEDIUM        │
+│ grype         │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ N/A      │ 0          │ MISSING │ MEDIUM        │
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
 │ npm-audit     │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ 1s       │ 0          │ ERROR   │ MEDIUM        │
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
@@ -18,7 +18,7 @@
 │               │            │          │      │        │     │      │          │            │         │ (config)      │
 │ semgrep       │ 2          │ 1        │ 0    │ 0      │ 0   │ 2    │ 48s      │ 1          │ FAILED  │ MEDIUM        │
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
-│ syft          │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ <1ms     │ 0          │ SKIPPED │ MEDIUM        │
+│ syft          │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ N/A      │ 0          │ SKIPPED │ MEDIUM        │
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
 └───────────────┴────────────┴──────────┴──────┴────────┴─────┴──────┴──────────┴────────────┴─────────┴───────────────┘
                                                     source-dir: '.'

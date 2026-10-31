@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Literal, TYPE_CHECKING
+import re
+from typing import Any, Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -11,15 +12,30 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.core.scanner_statistics_calculator import (
+    ScannerStatisticsCalculator,
+)
 from automated_security_helper.models.flat_vulnerability import (
     extract_workspace_project,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
+    workspace_policy_gates,
+    workspace_project_scanner_thresholds,
+    workspace_project_thresholds,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
     skipped_project_detail,
     skipped_projects,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.policy_origin import is_policy_origin
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sarif_utils import (
+    FINDING_KINDS,
+    result_message_text,
+    result_rule_id,
+    suppressions_in_effect,
+)
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     SEVERITY_THRESHOLDS,
@@ -32,15 +48,18 @@ import defusedxml
 import warnings
 
 
-# SARIF `kind` values that assert a finding exists. `fail` is handled earlier by
-# the level cascade; `open` and `review` reach the arm below.
-_FINDING_KINDS = frozenset({"fail", "open", "review"})
-
-# SARIF `kind` values that assert the opposite -- the rule ran and there is
-# nothing to report. cdk-nag uses `informational` for a COMPLIANT check
-# (cdk_nag_wrapper._level_and_kind), so rendering these as anything but a
-# passing test case would report a passed control as a problem.
-_NON_FINDING_KINDS = frozenset({"pass", "informational", "notApplicable"})
+# The SARIF `kind` values that assert a finding exists are `sarif_utils.FINDING_KINDS`,
+# shared with the other reporters (`fail`, `open` and `review`). The emit cascade
+# below gives all three the same arm: an actionable one is an <error>, typed by
+# its level, else `error` for `fail` and `note` for the other two.
+#
+# The other kinds (`pass`, `informational`) do not assert a finding. cdk-nag uses
+# `informational` for a COMPLIANT check (cdk_nag_wrapper._level_and_kind). They
+# are graded by level like any result, so that the report agrees with the exit
+# code: an actionable one with no `error` or `warning` level is a passing test
+# case, and one below the threshold is a skip. `notApplicable` is neither: the
+# rule was NOT evaluated, so it renders as skipped (see the emit cascade in
+# `report`).
 
 #: The ``type`` attribute on a skipped project's ``<skipped>`` element. Distinct
 #: from the existing ``suppression`` and ``threshold`` types, which are both about
@@ -52,6 +71,10 @@ SKIPPED_PROJECT_SKIP_TYPE = "project-skipped"
 #: no scanner ran: attributing the case to one would put a project nothing
 #: examined inside a tool's results.
 SKIPPED_PROJECT_CLASSNAME = "ash.workspace"
+
+
+#: The ``type`` of the skip a non-gating policy-origin finding is reported with.
+POLICY_NOT_GATING_SKIP_TYPE = "policy-not-gating"
 
 
 def _normalized_threshold(value: object) -> str | None:
@@ -73,9 +96,12 @@ def _configured_severity_threshold(model: "AshAggregatedResults") -> str:
 
     Read from ``global_settings.severity_threshold``, which is where the gate
     actually lives. This is the same field the exit code reads
-    (``run_ash_scan._compute_exit_code``) and the same one
-    ``ReportContentEmitter`` reads, so the report and the exit code cannot
-    describe different runs.
+    (``run_ash_scan._compute_exit_code``) for a finding whose scanner has no
+    threshold of its own and whose project recorded none, and the same one
+    ``ReportContentEmitter`` falls back to in that case, so the report and the
+    exit code cannot describe different runs. The per-project and per-scanner
+    gates are read ahead of it in ``report`` (``workspace_project_thresholds``,
+    ``_scanner_threshold``).
 
     Upper-cased because the ladder in ``utils.severity_ladder`` is
     case-SENSITIVE and ``_compute_exit_code`` upper-cases too. Without it a
@@ -118,6 +144,112 @@ def _configured_severity_threshold(model: "AshAggregatedResults") -> str:
         )
         return "ALL"
     return normalized
+
+
+def _scanner_threshold(
+    model: "AshAggregatedResults", scanner_name: str, cache: dict[str, Any]
+) -> str | None:
+    """The scanner's own ``options.severity_threshold``, normalized, or None.
+
+    Read through ``ScannerStatisticsCalculator.get_scanner_threshold_info``, the
+    resolver the exit code grades each result by and the summary table prints,
+    so the report cannot call a finding actionable that the exit code ignores
+    (or the reverse). The resolver names three sources: ``config`` (the
+    scanner's own ``options.severity_threshold``), ``global`` (the scan's
+    ``global_settings``) and ``unavailable`` (no recorded configuration, so
+    ASH's default). Only ``config`` counts here: the other two are the one
+    value ``_configured_severity_threshold`` already reads, and it validates
+    that value and warns where the resolver would pass an unrecognised one
+    through. Memoized per scanner because the resolver dumps the whole
+    scanners section on every call and a large SARIF carries one result per
+    finding.
+    """
+    if scanner_name not in cache:
+        threshold, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
+            model, scanner_name
+        )
+        cache[scanner_name] = (
+            _normalized_threshold(threshold) if source == "config" else None
+        )
+    return cache[scanner_name]
+
+
+#: XML 1.0 forbids these characters in text and attributes (section 2.2): C0
+#: controls other than tab, line feed and carriage return, the surrogate range
+#: and the two noncharacters. A scanner message, a suppression justification or a
+#: property value can carry one (a file name in a scanned repository may), and a
+#: document holding one is not well-formed, so no JUnit consumer reads it.
+_XML_FORBIDDEN_CLASS = (
+    "[\x00-\x08\x0b\x0c\x0e-\x1f"
+    + chr(0xD800)
+    + "-"
+    + chr(0xDFFF)
+    + chr(0xFFFE)
+    + chr(0xFFFF)
+    + "]"
+)
+
+#: The text of an escape ``_xml_text`` writes, in the lower-case hex it writes:
+#: ``xNN`` for a forbidden code below U+0100, ``uNNNN`` for a surrogate or one of
+#: the two noncharacters.
+_XML_ESCAPE_TEXT = r"x(?:0[0-8bcef]|1[0-9a-f])|u(?:d[89a-f][0-9a-f]{2}|fffe|ffff)"
+
+#: A forbidden character, or a run of backslashes that comes before text that
+#: reads as one of the escapes written for it (or before such a character), which
+#: has to be doubled so the written escape stays apart from a literal one.
+_XML_TEXT = re.compile(
+    rf"(?<!\\)(\\+)(?={_XML_ESCAPE_TEXT}|{_XML_FORBIDDEN_CLASS})|{_XML_FORBIDDEN_CLASS}"
+)
+
+
+def _xml_text(value: object) -> str:
+    """*value* as text XML 1.0 admits, each forbidden character written as its escape.
+
+    Written out (``\\x01``, ``\\ufffe``) rather than dropped, so a reader can
+    see what the text held; the layout characters XML allows (tab, newline,
+    carriage return) are kept as they are, because ``system-out`` is joined
+    with newlines. A backslash run before text that reads as one of those
+    escapes is doubled, as the other reports do, so a message that holds the
+    four characters ``\\x01`` is not taken for one that held U+0001.
+    """
+    text = "" if value is None else str(value)
+
+    def shown(match: re.Match[str]) -> str:
+        run = match.group(1)
+        if run:
+            return run * 2
+        point = ord(match.group(0))
+        return f"\\x{point:02x}" if point < 0x100 else f"\\u{point:04x}"
+
+    return _XML_TEXT.sub(shown, text)
+
+
+def _as_flag(value: object) -> bool | None:
+    """*value* as a true or false flag, or None when it states neither.
+
+    A boolean is itself; the strings ``true`` and ``false`` (any case) and the
+    integers 1 and 0 are read as those. Anything else is no flag: a string such
+    as ``"false"`` is truthy to Python, so negating it hid an actionable finding.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("true", "false"):
+            return lowered == "true"
+    return None
+
+
+#: The ``type`` of the ``<error>`` element for each SARIF level; ``none`` is the
+#: level of a finding that carries no severity, so it takes the lowest label.
+_ERROR_TYPE_BY_LEVEL = {
+    "error": "error",
+    "warning": "warning",
+    "note": "note",
+    "none": "note",
+}
 
 
 class JUnitXMLReporterConfigOptions(ReporterOptionsBase):
@@ -191,33 +323,152 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
 
         test_suite_dict = {}
 
-        # Read once: the threshold is a property of the scan, not of a finding.
+        # Read once: the global threshold is a property of the scan, not of a
+        # finding. A scanner's own threshold is resolved per scanner below and
+        # memoized here; a project's gate threshold is read off the workspace
+        # block per finding.
         configured_threshold = _configured_severity_threshold(model)
+        scanner_thresholds: dict[str, Any] = {}
+        project_thresholds = workspace_project_thresholds(model)
+        # The per-scanner gates each project's verdict recorded, and whether a
+        # policy scanner's findings decided it. Both read off the workspace
+        # block: the merged file carries no ash_config to read a scanner's own
+        # threshold from, and nothing else says a project's policy findings were
+        # excluded from its verdict.
+        project_scanner_thresholds = workspace_project_scanner_thresholds(model)
+        policy_gates = workspace_policy_gates(model)
 
         # Process SARIF report @ model.sarif
         if model.sarif is not None:
             all_results = model.sarif.get_all_results()
             for result in all_results:
-                # Create test case name from SARIF result details
+                # Create test case name from SARIF result details. Every value
+                # a scanner or the scanned repository wrote passes through
+                # _xml_text, because XML 1.0 forbids a control character in
+                # text and attributes and one makes the whole document
+                # unreadable to every JUnit consumer.
+                message_text = _xml_text(result_message_text(result, default=""))
+                named_rule = result_rule_id(result)
+                rule_id = _xml_text(named_rule) if named_rule else None
                 test_name = (
-                    f"{result.message.root.text} [{result.ruleId}]"
-                    if result.ruleId
-                    else result.message.root.text
+                    f"{message_text} [{rule_id}]"
+                    if rule_id and message_text
+                    else message_text or rule_id or ""
                 )
                 test_case = TestCase(
                     name=test_name,
-                    classname=result.ruleId,
+                    classname=rule_id,
                 )
+                # A result can carry no properties at all (an imported SARIF, a
+                # producer that writes none). Every read below goes through
+                # getattr so that result still gets its test case instead of
+                # losing the whole artefact to an AttributeError.
                 props = result.properties
 
-                # Add failure details for failed findings
-                if result.suppressions and len(result.suppressions) > 0:
+                # The scanner the finding came from, and the workspace project it
+                # was attributed to. Both are read before the gate, because the
+                # threshold a finding is judged by belongs to its scanner and to
+                # its project, not to the scan as a whole.
+                actual_scanner = "ash"
+                extra = getattr(props, "__pydantic_extra__", None) or {}
+                if "scanner_name" in extra:
+                    actual_scanner = extra["scanner_name"]
+                elif props is not None and getattr(props, "tags", None):
+                    for tag in props.tags:
+                        if tag.startswith("tool_name::"):
+                            actual_scanner = tag.split("::")[1]
+                            break
+                if (
+                    actual_scanner == "ash"
+                    and props is not None
+                    and hasattr(props, "scanner_details")
+                    and hasattr(props.scanner_details, "tool_name")
+                ):
+                    actual_scanner = props.scanner_details.tool_name
+                # An imported SARIF can name its scanner with anything (a list,
+                # a mapping). The name is a cache key and a suite name below, so
+                # a value that is not text falls back to the default suite
+                # instead of losing the whole artefact to a TypeError.
+                if not isinstance(actual_scanner, str) or not actual_scanner:
+                    actual_scanner = "ash"
+                # Read through the shared helper rather than inline, so this and
+                # the flattening path cannot disagree about where the attribution
+                # lives -- which is how a finding ends up under the wrong project
+                # in one report and the right one in another.
+                project = extract_workspace_project(result)
+
+                # A suppression hides the finding only when it is in effect:
+                # one whose state is rejected or underReview (SARIF 3.35.4) was
+                # never an approval, so the finding is graded below as the exit
+                # code, the per-scanner counts and the workspace verdict grade
+                # it. Only the suppressions in effect are rendered as the skip.
+                in_effect = suppressions_in_effect(result.suppressions)
+                if in_effect:
+                    # One <skipped> for the case, however many suppressions
+                    # accepted it: JUnit counts each child as a skip, so one
+                    # test was counted as two. The justifications are joined.
                     test_case.result = [
                         Skipped(
-                            message=suppression.justification,
+                            message=_xml_text(
+                                "; ".join(
+                                    suppression.justification
+                                    for suppression in in_effect
+                                    if suppression.justification
+                                )
+                            ),
                             type_="suppression",
                         )
-                        for suppression in result.suppressions
+                    ]
+                elif result.kind == "notApplicable":
+                    # SARIF 2.1.0 3.27.9: "the rule specified by ruleId was not
+                    # evaluated". cdk-nag writes this for a rule that raised
+                    # instead of reaching an answer, and the exit code fails the
+                    # scan for that rule through the run-level notification. A
+                    # bare test case says the rule passed, which it did not;
+                    # JUnit's own word for a test that did not run is skipped,
+                    # which no CI front end counts as a pass or a failure.
+                    #
+                    # Decided here, before any threshold grading, because the
+                    # result has no severity to grade: its level is `none` for a
+                    # cdk-nag rule, which under every gate but ALL would have
+                    # read "below configured severity threshold", and a
+                    # producer writing `warning` or `error` on such a result
+                    # would have had it reported as an error. Neither says what
+                    # happened, which is that the rule was never run.
+                    test_case.result = [
+                        Skipped(
+                            message="Rule was not evaluated for this target",
+                            type_="not-evaluated",
+                        )
+                    ]
+                elif (
+                    project
+                    and is_policy_origin(props)
+                    and policy_gates.get(project) is False
+                ):
+                    # A finding from a scanner only the workspace policy added, in
+                    # a project whose policy_scanners_gate is explicitly off. The
+                    # project's verdict reported it and excluded it from the
+                    # actionable count (execution.py's gating_results), and the
+                    # exit code followed that verdict; an <error> here would say
+                    # the finding failed the project when the scan said it did
+                    # not. Decided ahead of the threshold, because it is not a
+                    # question of severity: the operator added the scanner for
+                    # visibility, not as a gate. Skipped rather than a bare
+                    # passing case, so the finding is still visible in the report
+                    # with the reason it is not red. Only an explicit False takes
+                    # this arm: a project whose entry carries no gate (a file
+                    # written before the field existed, whose verdict applied the
+                    # gate) and a project the workspace block does not list fall
+                    # to the threshold grading below, the fail-closed side.
+                    test_case.result = [
+                        Skipped(
+                            message=(
+                                "Finding is from a workspace-policy scanner that "
+                                "does not gate this project"
+                            ),
+                            type_=POLICY_NOT_GATING_SKIP_TYPE,
+                        )
                     ]
                 else:
                     # Determine if finding is actionable based on severity threshold
@@ -245,7 +496,13 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     # writer -- so in a real scan this leaves is_actionable alone
                     # and the gate below decides.
                     if self.config.options.respect_severity_threshold and props:
-                        below_threshold = getattr(props, "below_threshold", None)
+                        # Read as a flag: the string "false" is truthy to Python,
+                        # and negating it marked an actionable finding as
+                        # below threshold. A value that states neither true nor
+                        # false decides nothing, and the gate runs.
+                        below_threshold = _as_flag(
+                            getattr(props, "below_threshold", None)
+                        )
                         if below_threshold is not None:
                             is_actionable = not below_threshold
 
@@ -271,9 +528,42 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         # since a finding-level statement is more specific than a
                         # scan-level default; it is simply no longer the only
                         # source.
+                        #
+                        # After it, the most specific recorded gate: the threshold
+                        # the project's verdict graded this finding's scanner by
+                        # (the scanner's own options.severity_threshold, as the
+                        # project's outcome recorded it), then the project's gate
+                        # (a merged workspace file carries no ash_config, and each
+                        # project's outcome was judged against its own recorded
+                        # gate threshold, so grading every project against ASH's
+                        # default here contradicted the per-project verdicts and
+                        # the exit code); then, for a single scan, the scanner's
+                        # own options.severity_threshold, which the exit code
+                        # grades each result by and this reporter used to ignore;
+                        # then the scan's global threshold. The recorded scanner
+                        # gate comes before the project gate because that is the
+                        # order the verdict resolved them in: a scanner the
+                        # project's config tightened or relaxed was judged by its
+                        # own setting, and reading the project gate first graded
+                        # its findings differently from the verdict.
                         threshold = (
                             _normalized_threshold(
                                 getattr(props, "severity_threshold", None)
+                            )
+                            or (
+                                project_scanner_thresholds.get(project, {}).get(
+                                    actual_scanner
+                                )
+                                if project is not None
+                                else None
+                            )
+                            or (
+                                project_thresholds.get(project)
+                                if project is not None
+                                else None
+                            )
+                            or _scanner_threshold(
+                                model, actual_scanner, scanner_thresholds
                             )
                             or configured_threshold
                         )
@@ -304,9 +594,11 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         # would not recognise, including the empty string, and
                         # _configured_severity_threshold substitutes ALL. Keeping
                         # a second guard here would mean neither was exercised.
-                        issue_severity = str(
-                            getattr(props, "issue_severity", "") or ""
-                        ).upper()
+                        issue_severity = (
+                            str(getattr(props, "issue_severity", "") or "")
+                            .strip()
+                            .upper()
+                        )
                         if issue_severity in SEVERITIES:
                             is_actionable = severity_fails_threshold(
                                 issue_severity, threshold
@@ -318,91 +610,73 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
 
                     # Only mark as error if it's actionable
                     if is_actionable:
-                        if result.level == "error" or result.kind == "fail":
+                        # The `type` follows the level, so a LOW (`note`)
+                        # finding is not ranked above a MEDIUM (`warning`) one.
+                        # It used to follow the kind first: the default kind
+                        # `fail` typed every finding "error".
+                        #
+                        # A kind that asserts a finding (`fail`, `open`,
+                        # `review`) always yields an <error>: the level's own
+                        # type when it names one, else `error` for `fail` and
+                        # `note` for the others. Before the `note` type existed
+                        # an actionable `open` or `review` finding at `note` or
+                        # `none` fell out with no result element, which renders
+                        # as a PASSING test case: the one direction a security
+                        # report must not fail in.
+                        #
+                        # `pass` and `informational` assert the opposite -- the
+                        # rule ran and found nothing; cdk-nag uses
+                        # `informational` with level `none` for a COMPLIANT
+                        # check (cdk_nag_wrapper._level_and_kind). They keep a
+                        # bare, passing test case unless the producer also
+                        # graded them `error` or `warning`. `notApplicable` (the
+                        # rule was not evaluated) never reaches this cascade:
+                        # it is decided ahead of the gate, above.
+                        #
+                        # `Error` rather than `Failure` because the module
+                        # imports only Error and Skipped; type_ carries the
+                        # distinction.
+                        level_type = _ERROR_TYPE_BY_LEVEL.get(str(result.level))
+                        error_type: str | None
+                        if result.kind in FINDING_KINDS:
+                            error_type = level_type or (
+                                "error" if result.kind == "fail" else "note"
+                            )
+                        elif result.level in ("error", "warning"):
+                            error_type = level_type
+                        else:
+                            error_type = None
+                        if error_type is not None:
                             test_case.result = [
-                                Error(message=result.message.root.text, type_="error")
+                                Error(message=message_text, type_=error_type)
                             ]
-                        elif result.level == "warning":
-                            test_case.result = [
-                                Error(message=result.message.root.text, type_="warning")
-                            ]
-                        elif result.kind in _FINDING_KINDS:
-                            # An actionable finding at `note` or `none` whose kind
-                            # still asserts a finding -- `open` or `review`. Before
-                            # this arm existed it fell out of the cascade with no
-                            # result element at all, which renders as a PASSING
-                            # test case: the reporter would decide a finding was
-                            # actionable and then publish it as a pass. That is the
-                            # one direction a security report must not fail in.
-                            #
-                            # Deliberately not extended to every kind. `pass`,
-                            # `informational` and `notApplicable` assert the
-                            # opposite -- the rule ran and found nothing -- and
-                            # cdk-nag uses `informational` with level `none` for a
-                            # COMPLIANT check (cdk_nag_wrapper._level_and_kind).
-                            # Erroring on those would report passed controls as
-                            # problems, which is how a threshold of ALL would turn
-                            # a clean compliance scan red.
-                            #
-                            # `Error` rather than `Failure` because the module
-                            # imports only Error and Skipped; type_ carries the
-                            # distinction, as it already does for `warning`.
-                            test_case.result = [
-                                Error(message=result.message.root.text, type_="note")
-                            ]
-                        # Any remaining kind is a non-finding (_NON_FINDING_KINDS)
-                        # and keeps its bare, passing test case.
                     else:
-                        # Mark as skipped if below threshold
+                        # Mark as skipped if below threshold. Whatever its kind:
+                        # the exit code reads the level against the threshold
+                        # and ignores the kind, so a `pass` or `informational`
+                        # result that is not actionable is a skip here too, and
+                        # the report agrees with the exit code.
                         test_case.result = [
                             Skipped(
                                 message="Finding is below configured severity threshold",
                                 type_="threshold",
                             )
                         ]
-                # elif result.kind not in ["notApplicable", "informational"]:
-                #     pass
 
                 # Add additional metadata in system-out
                 metadata = []
-                if hasattr(result, "properties") and result.properties is not None:
-                    for key, value in result.properties.model_dump(
-                        by_alias=True
-                    ).items():
+                if props is not None:
+                    for key, value in props.model_dump(by_alias=True).items():
                         metadata.append(f"{key}: {value}")
                 if metadata:
-                    test_case.system_out = "\n".join(metadata)
+                    test_case.system_out = _xml_text("\n".join(metadata))
 
-                # Create test suite for this finding type
-                actual_scanner = "ash"
-                if "scanner_name" in result.properties.__pydantic_extra__:
-                    actual_scanner = result.properties.__pydantic_extra__[
-                        "scanner_name"
-                    ]
-                elif result.properties and result.properties.tags:
-                    for tag in result.properties.tags:
-                        if tag.startswith("tool_name::"):
-                            actual_scanner = tag.split("::")[1]
-                            break
-                if (
-                    actual_scanner == "ash"
-                    and result.properties
-                    and hasattr(result.properties, "scanner_details")
-                ):
-                    if hasattr(result.properties.scanner_details, "tool_name"):
-                        actual_scanner = result.properties.scanner_details.tool_name
                 # In workspace mode the suite is named "<project>/<scanner>".
                 # Project leads so that one project's suites sort together in
                 # every CI front end that groups by suite name; the scanner is
                 # kept because discarding it -- the RFC's literal reading -- would
                 # lose a grouping single-directory mode has, for no gain.
-                #
-                # Read through the shared helper rather than inline, so this and
-                # the flattening path cannot disagree about where the attribution
-                # lives -- which is how a finding ends up under the wrong project
-                # in one report and the right one in another.
-                project = extract_workspace_project(result)
-                suite_name = (
+                suite_name = _xml_text(
                     f"{project}/{actual_scanner}" if project else actual_scanner
                 )
                 if suite_name not in test_suite_dict:
@@ -427,14 +701,14 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
         # rather than of anything enforced, and a merge that changed it would be
         # invisible here.
         for entry in skipped_projects(model):
-            suite = TestSuite(name=entry.project)
+            suite = TestSuite(name=_xml_text(entry.project))
             case = TestCase(
                 name=f"project skipped ({entry.reason.value})",
                 classname=SKIPPED_PROJECT_CLASSNAME,
             )
             case.result = [
                 Skipped(
-                    message=skipped_project_detail(entry),
+                    message=_xml_text(skipped_project_detail(entry)),
                     type_=SKIPPED_PROJECT_SKIP_TYPE,
                 )
             ]

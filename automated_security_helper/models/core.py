@@ -10,6 +10,7 @@ from typing import (
     Any,
     ClassVar,
     Dict,
+    FrozenSet,
     Iterable,
     List,
     Annotated,
@@ -47,6 +48,26 @@ if TYPE_CHECKING:
 #: TOLERATE_STORED_CONFIG. No value: the reader of a results file names where the
 #: entry is (models/asharp_model.py), since the value is the file's data.
 UNREADABLE_EXPIRATION_NOTE = "an expiration that is not a YYYY-MM-DD date"
+#: The note a results file's kept suppression gets when its ``symbol`` is the
+#: environment reference the config wrote (``${VAR}``), which the scan read and the
+#: record stores as written. The entry is kept, and never applied.
+UNREADABLE_SYMBOL_NOTE = "a symbol that is a reference to the environment"
+#: The note a results file's kept suppression gets when its ``rule_id`` is blank,
+#: which a scan of an earlier version accepted and recorded. The entry is kept, and
+#: never applied: a blank rule id once covered every rule in the entry's path.
+BLANK_RULE_ID_NOTE = "a rule_id that is blank"
+
+
+def _is_environment_reference(value: Any) -> bool:
+    """Whether ``value`` is the text of an environment reference as a config
+    writes it (``${VAR}``, with or without the ``!ENV`` tag), the form a results
+    file records for a value the scan read from the environment."""
+    # Lazy: config.ash_config imports this module.
+    from automated_security_helper.config.ash_config import ENV_REFERENCE_PATTERN
+
+    if not isinstance(value, str):
+        return False
+    return ENV_REFERENCE_PATTERN.match(value.removeprefix("!ENV ")) is not None
 
 
 class ToolExtraArg(BaseModel):
@@ -151,6 +172,16 @@ IGNORE_PATH_LISTS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
 )
 
 
+#: The lists of ``IGNORE_PATH_LISTS`` that ``--ignore-suppressions`` lifts, by
+#: their keys: the global ignore paths. A scanner's own option list (bandit
+#: ``excluded_paths``, checkov ``skip_path``, syft ``exclude``) reaches the tool as
+#: its argument whether or not the flag is set, so the flag leaves it alone. The
+#: scan-start expiry check read this from the first key being ``scanners``.
+IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS: FrozenSet[Tuple[str, ...]] = (
+    frozenset({("global_settings", "ignore_paths")})
+)
+
+
 def value_at(container: Any, keys: Tuple[str, ...]) -> Any:
     """The value at ``keys`` in a config mapping or a loaded config, or None."""
     value = container
@@ -224,8 +255,20 @@ class IgnorePathWithReason(RedactedSection):
 
     @field_validator("expiration", mode="before")
     @classmethod
-    def _expiration_is_text(cls, v: Any) -> Any:
-        """An unquoted date, refused with what to write (``refuse_an_expiration_that_is_not_text``)."""
+    def _expiration_is_text(cls, v: Any, info: ValidationInfo) -> Any:
+        """An unquoted date, refused with what to write (``refuse_an_expiration_that_is_not_text``).
+
+        Under the TOLERATE_STORED_CONFIG context a stored value that is not text
+        is kept as its text, which ``validate_expiration_date`` then records as an
+        unreadable date like a malformed string, instead of refusing the whole
+        results file.
+        """
+        if (
+            v is not None
+            and not isinstance(v, str)
+            and tolerated_notes(info) is not None
+        ):
+            return str(v)
         return refuse_an_expiration_that_is_not_text(v)
 
     @field_validator("expiration")
@@ -267,8 +310,13 @@ class IgnorePathWithReason(RedactedSection):
         ``active_ignore_paths`` and ``should_suppress_finding`` already leave
         such an entry out: an unreadable date gives no assurance the entry still
         applies. Returning False here made ``AshSuppression.matches`` apply it.
+
+        Only None is "no expiration". An empty string is kept from a results
+        file as an unreadable date (``validate_expiration_date`` records it so),
+        and reading it as no expiration applied the entry permanently while the
+        load warning said it did not apply.
         """
-        if not self.expiration:
+        if self.expiration is None:
             return False
         try:
             return expiration_has_passed(self.expiration)
@@ -493,6 +541,11 @@ def merged_honoring(records: Iterable[IgnoreFileExclusions]) -> Dict[str, Any]:
     disagree. A record that is itself merged counts as the scans it stands for
     (``IgnoreFileExclusions.scan_counts``), so merging merged records keeps their
     counts. ``ash merge`` and a workspace scan's merged results both use this.
+
+    A merged record whose scans all agreed carries no counts
+    (``_drop_counts_that_agree_with_honored``), so merging it with others counts
+    it as one scan, however many it covered. "honored by H of N" can then read H
+    or N smaller than the number of scans merged; ``honored`` itself stays right.
     """
     honoring = total = 0
     for record in records:
@@ -553,25 +606,36 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
     Shared by ``AshSuppression.id`` and the config linter, which reads raw YAML
     dicts, so the unused-suppressions report and the linter's fixer agree.
     """
+    # Every part is text. The linter reads raw YAML dicts, where a rule id or a
+    # package version can arrive as a number (``rule_id: 1234``,
+    # ``package_version: 2.0``), and joining a number raised TypeError out of
+    # ``ash config lint --fix-unused``. ``str()`` of a value is what the config's
+    # own text form would have been.
+
+    def _text(value: Any, absent: str) -> str:
+        if value is None or value == "":
+            return absent
+        return value if isinstance(value, str) else str(value)
+
     line_start = suppression.get("line_start")
     line_end = suppression.get("line_end")
     line_end_val = line_end if line_end is not None else line_start
     parts = [
-        suppression.get("path") or "",
-        suppression.get("rule_id") or "*",
+        _text(suppression.get("path"), ""),
+        _text(suppression.get("rule_id"), "*"),
         str(line_start) if line_start is not None else "*",
         str(line_end_val) if line_end_val is not None else "*",
     ]
     symbol = suppression.get("symbol")
     if symbol or any(suppression.get(f) for f in PACKAGE_SUPPRESSION_FIELDS):
         parts.append(
-            "@".join(suppression.get(f) or "*" for f in PACKAGE_SUPPRESSION_FIELDS)
+            "@".join(_text(suppression.get(f), "*") for f in PACKAGE_SUPPRESSION_FIELDS)
         )
     # A symbol is a sixth part, and its presence always brings the fifth, so an
     # id's part count says which fields it carries and a symbol can never be
     # read as a package.
     if symbol:
-        parts.append(symbol)
+        parts.append(_text(symbol, "*"))
     return "|".join(parts)
 
 
@@ -673,18 +737,58 @@ class AshSuppression(IgnorePathWithReason):
             )
         return v
 
+    @field_validator("rule_id")
+    @classmethod
+    def validate_rule_id_not_blank(cls, v, info: ValidationInfo):
+        """Reject a blank rule_id.
+
+        An omitted ``rule_id`` matches every rule in the suppression's path, as the
+        suppressions guide says. A blank one was accepted and read the same way
+        by ``matches`` (an empty string is false there), so a suppression whose
+        rule id was left empty by mistake silently covered every rule in its
+        path; a whitespace-only one matched nothing at all. Both are refused
+        with what to write, as the package fields are.
+
+        Under the TOLERATE_STORED_CONFIG context (utils/unknown_keys.py) a blank
+        rule id a results file recorded, written before this check, is kept and
+        noted rather than refused: refusing it made the whole results file
+        unreadable to ``ash report``, ``ash merge`` and ``--existing-results``.
+        ``matches`` never applies such an entry.
+        """
+        if v is not None and not v.strip():
+            notes = tolerated_notes(info)
+            if notes is not None:
+                notes.append(BLANK_RULE_ID_NOTE)
+                return v
+            raise ValueError(
+                "rule_id must be omitted rather than left blank: a suppression "
+                "with no rule_id covers every rule in its path"
+            )
+        return v
+
     @field_validator("symbol", mode="before")
     @classmethod
-    def validate_symbol(cls, v):
+    def validate_symbol(cls, v, info: ValidationInfo):
         """Reject a symbol that is not a dotted qualified name.
 
         A malformed name could never equal a parsed definition's name, so the
         entry would silently match nothing. Before the field's own ``str`` check,
         so a number gets this message too, not pydantic's string error. The rule
         alone, for text and for anything else: the value is not quoted.
+
+        Under the TOLERATE_STORED_CONFIG context (utils/unknown_keys.py) a
+        symbol a results file recorded as the environment reference its config
+        wrote (``${VAR}``) is kept and noted rather than refused: the scan read
+        the reference, the record stores it, and refusing it made the scan's
+        own results file unreadable. ``matches`` never applies such an entry.
         """
         if v is None:
             return v
+        if isinstance(v, str) and not is_valid_symbol(v):
+            notes = tolerated_notes(info)
+            if notes is not None and _is_environment_reference(v):
+                notes.append(UNREADABLE_SYMBOL_NOTE)
+                return v
         if not isinstance(v, str) or not is_valid_symbol(v):
             raise ValueError(SYMBOL_RULE)
         return v
@@ -740,12 +844,28 @@ class AshSuppression(IgnorePathWithReason):
         """
         if self.is_expired or self.has_unknown_keys:
             return False
+        # A symbol kept from a results file as the environment reference its
+        # config wrote (validate_symbol under the tolerance) names no definition,
+        # so the entry does not apply, as the load warning says.
+        if self.symbol is not None and not is_valid_symbol(self.symbol):
+            return False
+        # A blank rule id kept from a results file (validate_rule_id_not_blank
+        # under the tolerance) names no rule and is not "any rule" either: the
+        # entry does not apply, as the load warning says.
+        if self.rule_id is not None and not self.rule_id.strip():
+            return False
 
         if self.rule_id:
             if finding.rule_id is None:
                 return False
-            # Case-insensitive glob match for OS portability
-            if not fnmatch.fnmatch(finding.rule_id.lower(), self.rule_id.lower()):
+            # The finding's exact rule id first, then the case-insensitive glob.
+            # fnmatch reads '[' as a character class, so a suppression saved
+            # for a rule id that holds glob characters (cdk-nag's granular
+            # 'Rule[Resource::*]' ids, as the TUI saves them) never matched the
+            # finding it was saved for through the glob alone.
+            if finding.rule_id.lower() != self.rule_id.lower() and not fnmatch.fnmatch(
+                finding.rule_id.lower(), self.rule_id.lower()
+            ):
                 return False
 
         if not _path_pattern_matches(finding.file_path, self.path):

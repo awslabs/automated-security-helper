@@ -413,6 +413,20 @@ class TestDetectSecretsWrites:
         assert target.read_text() == ORIGINAL, (
             f"the {write} file was written through a link with --sandbox {mode}"
         )
+        if write == "worker request" and mode == "off":
+            # Without a sandbox nothing checks the results directory before the
+            # scan; the scanner removes its own exchange names first, beneath the
+            # directory without following a link (unlink_beneath), writes the
+            # request fresh, and its finally removes both names again. So the
+            # planted link is gone, not followed, and the scan is graded by what
+            # it found. Under a sandbox refuse_links_below refuses it before the
+            # scan starts (the other branch).
+            assert not planted.is_symlink() and not planted.exists(), (
+                "the planted link at the worker request name was not removed"
+            )
+            assert row.status != ScannerStatus.ERROR, row.errors
+            assert not any(REFUSAL in str(error) for error in row.errors), row.errors
+            return
         assert row.status == ScannerStatus.ERROR, (
             f"--sandbox {mode}: the row was graded {row.status.value}"
         )
@@ -432,6 +446,20 @@ class TestDetectSecretsWrites:
         assert target.read_bytes() == ORIGINAL.encode(), (
             f"the {write} file was written through a hard link with --sandbox {mode}"
         )
+        if write == "worker request" and mode == "off":
+            # As for the symlink above: without a sandbox the scanner's own
+            # cleanup unlinks the planted name before the request is written, so
+            # the file the other name refers to keeps its bytes and is the only
+            # name left, and the scan is graded by what it found.
+            assert not planted.exists(), (
+                "the planted hard link at the worker request name was not removed"
+            )
+            assert os.stat(target).st_nlink == 1
+            assert row.status != ScannerStatus.ERROR, row.errors
+            assert not any(HARD_LINK_REFUSAL in str(error) for error in row.errors), (
+                row.errors
+            )
+            return
         assert row.status == ScannerStatus.ERROR, (
             f"--sandbox {mode}: the row was graded {row.status.value}"
         )

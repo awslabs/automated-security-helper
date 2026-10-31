@@ -14,11 +14,12 @@
 │   - PASSED = No findings at or above threshold                                                                       │
 │   - FAILED = Findings at or above threshold                                                                          │
 │   - MISSING = Required dependencies not available                                                                    │
-│   - SKIPPED = Scanner explicitly disabled                                                                            │
+│   - SKIPPED = Scanner left out of the run, or it ran and found nothing it scans                                      │
 │   - ERROR = Scanner execution error                                                                                  │
 │ - *Threshold (Thresh)*: The minimum severity level that will cause a scanner to fail                                 │
 │   - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL                                                                     │
-│   - Source: (g)lobal = global_settings or the default, (c)onfig = the scanner's own options                          │
+│   - Source: (g)lobal = global_settings or the default, (c)onfig = the scanner's own options, (u)navailable = the     │
+│ results record no configuration, so the default applies                                                              │
 │   - ENV = (narrow terminal) read from an environment reference; the wide table and reports show the reference        │
 │ instead                                                                                                              │
 │   - REF = (narrow terminal) a reference ASH did not read in this run (read back from a results file, quoted, or a    │
@@ -43,7 +44,7 @@
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
 │ detect-secre… │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ 250ms    │ 0          │ SKIPPED │ MEDIUM        │
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
-│ grype         │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ <1ms     │ 0          │ MISSING │ MEDIUM        │
+│ grype         │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ N/A      │ 0          │ MISSING │ MEDIUM        │
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
 │ npm-audit     │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ 1s       │ 0          │ ERROR   │ MEDIUM        │
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
@@ -51,7 +52,7 @@
 │               │            │          │      │        │     │      │          │            │         │ (config)      │
 │ semgrep       │ 2          │ 1        │ 0    │ 0      │ 0   │ 2    │ 48s      │ 1          │ FAILED  │ MEDIUM        │
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
-│ syft          │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ <1ms     │ 0          │ SKIPPED │ MEDIUM        │
+│ syft          │ 0          │ 0        │ 0    │ 0      │ 0   │ 0    │ N/A      │ 0          │ SKIPPED │ MEDIUM        │
 │               │            │          │      │        │     │      │          │            │         │ (global)      │
 └───────────────┴────────────┴──────────┴──────┴────────┴─────┴──────┴──────────┴────────────┴─────────┴───────────────┘
                                                     source-dir: '.'

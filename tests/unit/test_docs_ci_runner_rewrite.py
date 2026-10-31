@@ -698,7 +698,9 @@ REAL_BLOCK_COUNTS = {
         [("ash", False)],
     ),
     "how-to/scale-large-repos.md": (
-        {"install": 1, "artifact-actions": 2, "serial-matrix": 1, "provenance": 2},
+        # Three artifact steps: the shard upload, the merge job's download and its
+        # upload of the merged output.
+        {"install": 1, "artifact-actions": 3, "serial-matrix": 1, "provenance": 2},
         [("shard", True), ("merge", False)],
     ),
     "how-to/ci/gitlab-ci.md #9": (
@@ -767,22 +769,33 @@ def test_act_runs_the_pages_artifact_steps_on_the_pinned_v4_actions():
     steps = [s for job in _load(result.text)["jobs"].values() for s in job["steps"]]
     upload = [s for s in steps if str(s.get("uses", "")).startswith("actions/upload-")]
     download = [s for s in steps if "download-artifact" in str(s.get("uses", ""))]
-    assert [s["uses"] for s in upload] == [UPLOAD_V4]
+    # Two uploads (each shard's, and the merge job's of the merged output) and the
+    # merge job's one download.
+    assert [s["uses"] for s in upload] == [UPLOAD_V4, UPLOAD_V4]
     assert [s["uses"] for s in download] == [DOWNLOAD_V4]
     assert "# v4.6.2" in result.text and "# v4.3.0" in result.text
-    # Each step keeps its inputs, which v4 reads as v7 and v8 do.
-    original = {
-        s["uses"].split("@")[0]: s
+    # Each step keeps its inputs, which v4 reads as v7 and v8 do; the uploads pair
+    # with the page's by artifact name.
+    original = [
+        s
         for job in _load(body)["jobs"].values()
         for s in job["steps"]
         if "-artifact@" in str(s.get("uses", ""))
+    ]
+    uploads_by_name = {
+        s["with"]["name"]: s for s in original if "upload-artifact@" in s["uses"]
     }
-    assert upload[0]["with"] == original["actions/upload-artifact"]["with"]
-    assert upload[0]["if"] == original["actions/upload-artifact"]["if"]
-    assert download[0]["with"] == original["actions/download-artifact"]["with"]
+    assert sorted(uploads_by_name) == ["ash-merged", "ash-shard-${{ matrix.shard }}"]
+    for step in upload:
+        assert step["with"] == uploads_by_name[step["with"]["name"]]["with"]
+        assert step["if"] == uploads_by_name[step["with"]["name"]]["if"]
+    (original_download,) = [s for s in original if "download-artifact@" in s["uses"]]
+    assert download[0]["with"] == original_download["with"]
+    # The two upload lines are the same release, so the rewrite records them as one
+    # change made twice.
     assert {
         (a.old.split("@")[0], a.count) for a in _applied(result, "artifact-actions")
-    } == {("actions/upload-artifact", 1), ("actions/download-artifact", 1)}
+    } == {("actions/upload-artifact", 2), ("actions/download-artifact", 1)}
 
 
 def test_act_runs_the_pages_matrix_one_entry_at_a_time():
@@ -830,10 +843,12 @@ def test_an_existing_max_parallel_is_set_to_one_and_only_on_a_matrix():
 
 
 @pytest.mark.parametrize(
-    "old,new,named",
+    "old,count,new,named",
     [
         (
+            # The shard job's upload and the merge job's: the first is the one quoted.
             "      - uses: actions/upload-artifact@043fb46d",
+            2,
             '      - uses: "actions/upload-artifact@043fb46d',
             "actions/upload-artifact",
         ),
@@ -842,21 +857,24 @@ def test_an_existing_max_parallel_is_set_to_one_and_only_on_a_matrix():
                 "    strategy:\n      fail-fast: false\n      matrix:\n"
                 "        shard: [0, 1, 2, 3]\n"
             ),
+            1,
             "    strategy: {matrix: {shard: [0, 1, 2, 3]}}\n",
             "the job shard has a matrix",
         ),
     ],
     ids=["a quoted uses", "a flow-style strategy"],
 )
-def test_an_artifact_step_or_matrix_the_rewrite_cannot_read_is_refused(old, new, named):
+def test_an_artifact_step_or_matrix_the_rewrite_cannot_read_is_refused(
+    old, count, new, named
+):
     body = _block(SCALE_PAGE, "github-actions").body
-    assert body.count(old) == 1
+    assert body.count(old) == count
     rewrite = _api("rewrite", "rewrite_pipeline")
     error = _api("rewrite", "RewriteError")
     with pytest.raises(error) as raised:
         rewrite(
             "github-actions",
-            body.replace(old, new),
+            body.replace(old, new, 1),
             _context("act", WHEEL),
             where="scale.md:1",
         )
@@ -2091,6 +2109,30 @@ def _scan_steps(text: str) -> list:
     return yaml.safe_load(text)["jobs"]["ash"]["steps"]
 
 
+def _on_v4_actions(steps: list) -> list:
+    """``steps`` with each artifact action's ``uses`` on the pin act runs it at."""
+    pins = {
+        "actions/upload-artifact": UPLOAD_V4,
+        "actions/download-artifact": DOWNLOAD_V4,
+    }
+    moved = []
+    for step in steps:
+        action = str(step.get("uses", "")).split("@")[0]
+        if action in pins:
+            step = {**step, "uses": pins[action]}
+        moved.append(step)
+    return moved
+
+
+def _artifact_steps(text: str) -> list:
+    return [
+        step
+        for job in yaml.safe_load(text)["jobs"].values()
+        for step in job["steps"]
+        if "-artifact@" in str(step.get("uses", ""))
+    ]
+
+
 def test_the_scan_workflow_prints_the_provenance_of_the_ash_it_runs():
     rewrite_called = _api("rewrite", "rewrite_called_workflow")
     begin = _api("provenance", "PROVENANCE_BEGIN")
@@ -2100,7 +2142,9 @@ def test_the_scan_workflow_prints_the_provenance_of_the_ash_it_runs():
         "run-ash-security-scan.yml", text, where="run-ash-security-scan.yml"
     )
     assert [(a.rule, a.count, a.job, a.matrix) for a in result.applied] == [
-        ("called-provenance", 1, "ash", False)
+        ("artifact-actions", 1, None, False),
+        ("artifact-actions", 1, None, False),
+        ("called-provenance", 1, "ash", False),
     ]
     original, steps = _scan_steps(text), _scan_steps(result.text)
     scans = [
@@ -2123,7 +2167,55 @@ def test_the_scan_workflow_prints_the_provenance_of_the_ash_it_runs():
         "the form the later steps use, which reuses the scan's environment"
     )
     assert step.get("if") == "${{ !cancelled() }}", "it runs when the scan failed too"
-    assert steps[: scans[0] + 1] + steps[scans[0] + 2 :] == original
+    assert steps[: scans[0] + 1] + steps[scans[0] + 2 :] == _on_v4_actions(original)
+
+
+def test_the_called_scan_workflow_runs_its_artifact_steps_on_the_pinned_v4_actions():
+    """The scan workflow's own upload and download steps pin the releases whose
+    requests act's artifact server refuses, as the pages' steps do, so the copy act
+    runs gets the same swap as a block; each step keeps its inputs and condition."""
+    rewrite_called = _api("rewrite", "rewrite_called_workflow")
+    text = SCAN_WORKFLOW.read_text(encoding="utf-8")
+    before = {s["uses"].split("@")[0]: s for s in _artifact_steps(text)}
+    assert set(before) == {"actions/upload-artifact", "actions/download-artifact"}
+    assert before["actions/upload-artifact"]["uses"] != UPLOAD_V4, (
+        "the workflow pins a release act cannot serve, which the swap stands in for"
+    )
+    assert before["actions/download-artifact"]["uses"] != DOWNLOAD_V4
+    result = rewrite_called(
+        "run-ash-security-scan.yml", text, where="run-ash-security-scan.yml"
+    )
+    assert result.original == text
+    after = _artifact_steps(result.text)
+    assert [s["uses"] for s in after] == [UPLOAD_V4, DOWNLOAD_V4]
+    assert "# v4.6.2" in result.text and "# v4.3.0" in result.text
+    for step in after:
+        given = before[step["uses"].split("@")[0]]
+        assert step["with"] == given["with"]
+        assert step.get("if") == given.get("if")
+    assert {
+        (a.old.split("@")[0], a.new.split(" #")[0], a.count)
+        for a in _applied(result, "artifact-actions")
+    } == {
+        ("actions/upload-artifact", UPLOAD_V4, 1),
+        ("actions/download-artifact", DOWNLOAD_V4, 1),
+    }
+    # Every other step is as given, and the print follows the scan as before.
+    rest = [
+        s
+        for s in _scan_steps(result.text)
+        if "-artifact@" not in str(s.get("uses", ""))
+    ]
+    print_steps = [
+        s
+        for s in rest
+        if s.get("name") == _api("rewrite", "CALLED_PROVENANCE_STEP_NAME")
+    ]
+    assert len(print_steps) == 1
+    rest.remove(print_steps[0])
+    assert rest == [
+        s for s in _scan_steps(text) if "-artifact@" not in str(s.get("uses", ""))
+    ]
 
 
 def test_only_the_first_uvx_step_of_the_scan_workflow_gets_the_print():
@@ -2836,7 +2928,11 @@ def test_the_real_scan_workflow_runs_its_steps_on_bash_and_is_kept():
     result = rewrite_called(
         "run-ash-security-scan.yml", text, where="run-ash-security-scan.yml"
     )
-    assert [a.rule for a in result.applied] == ["called-provenance"]
+    assert [a.rule for a in result.applied] == [
+        "artifact-actions",
+        "artifact-actions",
+        "called-provenance",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -3565,12 +3661,28 @@ def test_a_bump_of_the_scan_workflow_s_action_pins_is_kept(pin):
     bumped = re.sub(r"(uses: [\w./-]+@)[0-9a-f]{40}", lambda m: m[1] + pin, text)
     assert bumped.count(f"@{pin}") == len(pins), "every pin was bumped"
     result = rewrite_called("run-ash-security-scan.yml", bumped, where="bumped")
-    assert [a.rule for a in result.applied] == ["called-provenance"]
+    # The bumped artifact actions are swapped to the v4 pins as any ref is; the
+    # bump of every other pin is kept.
+    assert [a.rule for a in result.applied] == [
+        "artifact-actions",
+        "artifact-actions",
+        "called-provenance",
+    ]
     name, sha = pins[0]
     tagged = text.replace(f"{name}@{sha}", f"{name}@v1", 1)
     with pytest.raises(error) as raised:
         rewrite_called("run-ash-security-scan.yml", tagged, where="tagged")
     assert f"uses {name}@v1, an action other than" in str(raised.value)
+    # The two artifact actions are swapped to their pinned releases before the checks
+    # run, so the pin check reads the workflow as given: a tag or a branch on either is
+    # refused as on any other action, not passed because the swap pinned it.
+    upload = re.search(r"uses: (actions/upload-artifact)@([0-9a-f]{40})", text)
+    assert upload, "the scan workflow uploads an artifact"
+    for ref in ("v4", "main"):
+        moved = text.replace(f"{upload[1]}@{upload[2]}", f"{upload[1]}@{ref}", 1)
+        with pytest.raises(error) as raised:
+            rewrite_called("run-ash-security-scan.yml", moved, where="moved")
+        assert f"uses {upload[1]}@{ref}, an action other than" in str(raised.value), ref
 
 
 def _here_document_step(opening: str) -> str:

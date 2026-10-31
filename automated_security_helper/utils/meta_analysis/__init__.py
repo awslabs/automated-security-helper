@@ -36,3 +36,21 @@ EXPECTED_TRANSFORMATIONS = [
     "run.invocations",  # Invocation details may change
     "analysisTarget",  # Analysis target may be normalized
 ]
+
+
+def is_expected_transformation(path: str) -> bool:
+    """Whether *path* is one of :data:`EXPECTED_TRANSFORMATIONS` or lies under one.
+
+    A path lies under an entry when it continues the entry with a ``.`` child
+    or a ``[`` element index, so a list-valued entry such as ``properties.tags``
+    covers its elements ``properties.tags[0]`` and ``properties.tags[0].x`` as
+    well as its dotted children. Matching the entry only by exact path or by
+    ``entry.`` reported every tag of an expected-to-change list as a missing
+    field.
+    """
+    if not path:
+        return False
+    for entry in EXPECTED_TRANSFORMATIONS:
+        if path == entry or path.startswith((f"{entry}.", f"{entry}[")):
+            return True
+    return False

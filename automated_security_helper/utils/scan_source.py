@@ -41,10 +41,13 @@ different directories:
   wrapper started, or a hand-written ``docker run -v "$PWD:/src"``. These mount
   the directory at ``/src`` or set ``ASH_ACTUAL_SOURCE_DIR``, like the launcher,
   but pass no ``ASH_SCAN_SOURCE``, and git in the container cannot tell a nested
-  clone's mount from a repository's root.
+  clone's mount from a repository's root. A directory below ``/src`` is judged
+  as the mount is, so a CI job whose working directory is ``/src/app`` is taken
+  for one of these and records none.
 
-The ASH image run any other way (as a CI job image, for example) scans its own
-directory and records it as a scan on a host would.
+The ASH image run any other way (as a CI job image whose working directory is not
+at or below ``/src``, for example) scans its own directory and records it as a
+scan on a host would.
 """
 
 from __future__ import annotations
@@ -53,7 +56,7 @@ import errno
 import os
 import re
 import stat
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable, Mapping, Optional
 
 from automated_security_helper.utils.get_scan_set import (
@@ -63,6 +66,7 @@ from automated_security_helper.utils.get_scan_set import (
     git_untracked_paths_below,
     git_worktree_paths,
 )
+from automated_security_helper.utils.output_dir_links import same_by_identity
 from automated_security_helper.utils.scanned_tree import _is_link_stat
 
 #: Set by the container launcher (run_ash_container) to the label it worked out
@@ -80,8 +84,10 @@ _LAUNCHER_SOURCE_ENV = "ASH_ACTUAL_SOURCE_DIR"
 _CONTAINER_SOURCE_MOUNT = "/src"
 
 # One path segment: no separator, no ";" (which separates the parts of
-# ash/scope), no control character.
-_SEGMENT = re.compile(r"^[^/\\;\x00-\x1f\x7f]+$")
+# ash/scope), no control character: neither a C0 control or DEL nor a C1 control
+# (U+0080 to U+009F, NEL among them). Matched whole (``fullmatch``): a ``$``
+# anchor matches before a final newline, so a segment ending in one passed.
+_SEGMENT = re.compile(r"[^/\\;\x00-\x1f\x7f\x80-\x9f]+")
 
 FindRoot = Callable[[Path], Optional[Path]]
 IsNested = Callable[[Path], bool]
@@ -100,15 +106,41 @@ def scan_source_label(source_dir: Path | str, repository_root: Optional[Path]) -
     Returns:
         ``.`` for the repository root, ``services/api`` for a directory below it,
         and the resolved absolute path with ``/`` separators when there is no
-        root or the root does not contain the directory.
+        root or the root does not contain the directory. Whether the root
+        contains the directory is decided by the text first and then by
+        identity (``_relative_by_identity``): on a volume that compares names
+        without regard to case, a directory spelled in another case than git's
+        toplevel is inside it, and the text alone fell back to the absolute path.
     """
     resolved = Path(source_dir).resolve()
     if repository_root is not None:
-        try:
-            return resolved.relative_to(Path(repository_root).resolve()).as_posix()
-        except ValueError:
-            pass
+        relative = _relative_by_identity(resolved, Path(repository_root).resolve())
+        if relative is not None:
+            return relative
     return resolved.as_posix()
+
+
+def _relative_by_identity(path: Path, root: Path) -> Optional[str]:
+    """*path* below *root* with ``/`` separators, ``.`` for *root* itself, or None.
+
+    By text (``relative_to``) first; when the text says *path* is not below
+    *root*, each of *path* and its parents is compared with *root* by identity
+    (``same_by_identity``: device and inode), and the parts below the one that is
+    *root* are the answer. A path that does not exist has no identity, so a
+    nonexistent directory is decided by the text, as before. A mount that reports
+    inode 0 for every file gives no identity either: ``os.path.samefile`` read
+    every directory on it as *root*, and an outside directory was labeled as
+    inside the repository.
+    """
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        pass
+    for ancestor in (path, *path.parents):
+        if same_by_identity(ancestor, root):
+            rest = path.parts[len(ancestor.parts) :]
+            return PurePosixPath(*rest).as_posix() if rest else "."
+    return None
 
 
 def _is_utf8(label: str) -> bool:
@@ -135,7 +167,8 @@ def is_relative_scan_source(label: object) -> bool:
         return False
     segments = label.split("/")
     return all(
-        _SEGMENT.match(segment) and segment not in (".", "..") for segment in segments
+        _SEGMENT.fullmatch(segment) and segment not in (".", "..")
+        for segment in segments
     )
 
 
@@ -355,18 +388,26 @@ def _repository_holds(root: Path, hidden: Path, worktree: _WorktreeCheck) -> boo
     admin dirs, in a directory the repository ignores. When git cannot answer for
     the repository or for *root*, it holds *root*, and so it does when the
     repository's worktree admin dirs hold anything but regular files and
-    directories (``_admin_dirs_are_plain``), which git would wait on.
+    directories (``_admin_dirs_are_plain``), which git would wait on; that check
+    is made only when the worktree listing it guards is needed, which is when
+    *root*'s own common dir is the repository's or is unknown. The repository's
+    ``.git`` entry itself is checked the same way before git is started on it
+    (``_git_entry_is_plain``): git reads HEAD and config there first.
     """
-    common = git_common_dir(hidden)
-    if common is None or not _admin_dirs_are_plain(common):
+    if not _git_entry_is_plain(hidden / ".git"):
         return True
-    if worktree.of(hidden, common):
-        return False
-    # Not one of its worktrees, yet sharing its git dir (a .git file or symlink
-    # naming it or one of its admin dirs, in a directory it ignores): a scan of
-    # *root* reads the hidden repository's index.
+    common = git_common_dir(hidden)
+    if common is None:
+        return True
     own = worktree.own_common()
     if own is None or own == common:
+        if not _admin_dirs_are_plain(common):
+            return True
+        if worktree.of(hidden, common):
+            return False
+        # Not one of its worktrees, yet sharing its git dir (a .git file or
+        # symlink naming it or one of its admin dirs, in a directory it ignores):
+        # a scan of *root* reads the hidden repository's index.
         return True
     parts = root.relative_to(hidden).parts
     relative = "/".join(parts)
@@ -416,7 +457,11 @@ def repository_is_nested(root: Path) -> bool:
 
     An ancestor whose worktree admin dirs hold anything but regular files and
     directories (``_admin_dirs_are_plain``) counts as nesting too, which is
-    decided before git lists them.
+    decided before git lists them; so does one whose ``.git`` entry holds such a
+    thing where git reads it first, its HEAD, config or commondir
+    (``_git_entry_is_plain``), decided before git is started on it at all. git
+    was asked for the common dir first, and a FIFO HEAD in an ancestor's
+    ``.git`` held that call, and the scan, for git's 30-second timeout.
     """
     resolved = Path(root).resolve()
     ceilings = _ceiling_entries()
@@ -431,6 +476,8 @@ def repository_is_nested(root: Path) -> bool:
             return _hidden_repository_holds(resolved, ancestor, worktree)
         if not _marks_a_checkout(ancestor / ".git"):
             continue
+        if not _git_entry_is_plain(ancestor / ".git"):
+            return True
         common = git_common_dir(ancestor)
         if common is not None and common in verified:
             continue
@@ -443,43 +490,205 @@ def repository_is_nested(root: Path) -> bool:
     return False
 
 
+#: What git itself requires a gitfile to start with (setup.c,
+#: ``read_gitfile_gently``): the word, the colon and one space. The path is
+#: everything after it. ``_GITFILE_PREFIX`` above is the looser test for
+#: "marks a checkout"; this one decides which directory git opens.
+_GITFILE_RECORD_PREFIX = "gitdir: "
+
+
+def _git_entry_is_plain(entry: Path) -> bool:
+    """Whether git can start on the repository whose ``.git`` is *entry* without
+    waiting on what it reads first: the git dir's HEAD, config and commondir,
+    and the common dir's config.
+
+    *entry* is a ``.git`` directory, a gitfile naming the git dir, or a symlink
+    to either (``_marks_a_checkout`` counted it; a link to a gitfile is read as
+    the gitfile, as git reads it). Each of the three files must be
+    plain (``_plain_entry``) in the git dir the entry leads to, and so must
+    ``config`` in the common dir that git dir's ``commondir`` names
+    (``_common_dir_named``): git's repository-format check reads it next, and
+    for a linked worktree that is ``<common>/config``, which the admin dir does
+    not hold, so a FIFO there held ``git_common_dir`` for git's timeout while
+    the admin dir's own three files read plain.
+
+    A gitfile is parsed as git parses it: the exact prefix ``gitdir: ``, then
+    everything after it with only trailing carriage returns and newlines
+    dropped (as ``_registered_worktree`` reads a ``gitdir`` record). Stripping
+    the rest read ``gitdir: /x `` as ``/x`` while git opens ``/x `` (trailing
+    space), so the directory checked was not the one git would wait in. A
+    relative record is followed link by link (``_git_dir_named_by``), as git
+    opens it: ``link/../admin`` names the parent of the link's target, not the
+    parent of the link. A
+    record without the exact prefix is one git refuses ("invalid gitfile
+    format"), so git starts on nothing through it; it counts as not plain, the
+    side that errs toward nested, as ``_marks_a_checkout`` counts it. A gitfile
+    whose record cannot be read, or that names something that is not a
+    directory, counts as not plain too: the entry marked a checkout, and what
+    git would read there cannot be ruled out. Asked before ``git_common_dir``
+    runs on the directory, which read those files and waited on a FIFO there
+    for git's 30-second timeout.
+    """
+    try:
+        looked_up = os.lstat(entry)
+    except OSError:
+        return False
+    named_dir: Optional[Path]
+    if _is_link_stat(looked_up):
+        target = Path(os.path.realpath(entry))
+        try:
+            target_mode = os.lstat(target).st_mode
+        except OSError:
+            return False
+        if stat.S_ISREG(target_mode):
+            # A link to a gitfile: git follows the link and reads the file, and
+            # a relative record is joined under the directory of the name it
+            # was asked for (the link's), not the file's.
+            named_dir = _git_dir_named_by(target, entry.parent)
+            if named_dir is None:
+                return False
+            git_dir = named_dir
+        else:
+            git_dir = target
+    elif stat.S_ISREG(looked_up.st_mode):
+        named_dir = _git_dir_named_by(entry, entry.parent)
+        if named_dir is None:
+            return False
+        git_dir = named_dir
+    else:
+        git_dir = entry
+    try:
+        if not stat.S_ISDIR(os.lstat(git_dir).st_mode):
+            return False
+    except OSError:
+        return False
+    if not all(
+        _plain_entry(git_dir / name) for name in ("HEAD", "config", "commondir")
+    ):
+        return False
+    common = _common_dir_named(git_dir)
+    if common is None:
+        return False
+    return common == git_dir or _plain_entry(common / "config")
+
+
+def _git_dir_named_by(gitfile: Path, base: Path) -> Optional[Path]:
+    """The git dir the gitfile *gitfile* names, parsed as git parses it, or None.
+
+    The exact prefix ``gitdir: `` then everything after it with only trailing
+    carriage returns and newlines dropped, joined under *base* unless absolute
+    and followed link by link, as git opens it (``read_gitfile_gently`` resolves
+    the joined path): a ``..`` after a link steps to the parent of what the link
+    names, where collapsing the text would step to the parent of the link, and a
+    different directory would be checked from the one git waits in. None when the
+    record cannot be read, lacks the prefix, names nothing or cannot be followed
+    (a NUL in it): git starts on nothing through it, or what it would open cannot
+    be told (``_git_entry_is_plain`` counts that as not plain).
+    """
+    record = _read_gitdir_record(gitfile)
+    if record is None:
+        return None
+    text = record.rstrip("\r\n")
+    if not text.startswith(_GITFILE_RECORD_PREFIX):
+        return None
+    named = text[len(_GITFILE_RECORD_PREFIX) :]
+    if not named or "\x00" in named:
+        return None
+    try:
+        return Path(os.path.realpath(os.path.join(base, named)))
+    except (OSError, ValueError):
+        return None
+
+
+def _common_dir_named(git_dir: Path) -> Optional[Path]:
+    """The common dir of the repository whose git dir is *git_dir*, read as git
+    reads it (setup.c, ``get_common_dir_noenv``): *git_dir* itself when no
+    ``commondir`` file is there; otherwise the file's text with trailing carriage
+    returns and newlines dropped, joined under *git_dir* unless absolute and
+    followed link by link, as git opens it: a ``..`` after a link steps to the
+    parent of what the link names, where collapsing the text would step to the
+    parent of the link, and a different ``config`` would be checked from the one
+    git waits on. None when something is at the name that is not a record
+    ``_read_gitdir_record`` can read, or the record cannot be followed (a NUL in
+    it): what git would open there cannot be told.
+    """
+    path = git_dir / "commondir"
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return git_dir
+    except OSError:
+        return None
+    record = _read_gitdir_record(path)
+    if record is None:
+        return None
+    named = record.rstrip("\r\n")
+    if "\x00" in named:
+        return None
+    try:
+        return Path(os.path.realpath(os.path.join(git_dir, named)))
+    except (OSError, ValueError):
+        return None
+
+
 def _admin_dirs_are_plain(common: Path) -> bool:
     """Whether ``git worktree list`` can read what it reads under *common*
     without waiting.
 
     It reads every admin dir under ``worktrees/`` (its gitdir, its HEAD and the
-    rest), each worktree's HEAD target, and packed-refs when a ref is packed. It
-    follows a symlink and waits on a FIFO there: a FIFO as a peer's gitdir or
-    HEAD, as the branch a HEAD names, or as packed-refs held the listing, and so
-    the scan, for git's 30-second timeout (git 2.50). So each of those must be a
-    regular file, a directory or a socket (``_plain_mode``), checked down every
-    level of each admin dir. Other loose refs are not read, so they are not
-    checked. With no ``worktrees`` directory there are no admin dirs to read.
+    rest), each worktree's HEAD target, packed-refs when a ref is packed, and the
+    reftable stack when the repository keeps its refs there. It follows a symlink
+    and waits on a FIFO there: a FIFO as a peer's gitdir or HEAD, as the branch a
+    HEAD names, or as packed-refs held the listing, and so the scan, for git's
+    30-second timeout (git 2.50). So each of those must be a regular file, a
+    directory or a socket (``_plain_mode``), checked down every level of each
+    admin dir. Other loose refs are not read, so they are not checked. With no
+    ``worktrees`` directory there are no admin dirs to read, and a regular file
+    at that name is the same: git lists no linked worktree and waits on nothing,
+    where this once read the failed listing of it as not plain.
     """
     if not _plain_entry(common / "packed-refs"):
+        return False
+    if not _optional_tree_is_plain(common / "reftable"):
         return False
     if not _head_target_is_plain(common / "HEAD", common):
         return False
     worktrees = common / "worktrees"
     try:
-        if not _plain_mode(os.lstat(worktrees).st_mode):
-            return False
+        mode = os.lstat(worktrees).st_mode
     except FileNotFoundError:
         return True
     except OSError:
         return False
+    if not _plain_mode(mode):
+        return False
+    if not stat.S_ISDIR(mode):
+        return True
     try:
         with os.scandir(worktrees) as entries:
             admin_dirs = [Path(entry.path) for entry in entries]
+    except FileNotFoundError:
+        return True
     except OSError:
         return False
     for admin_dir in admin_dirs:
         if not (
             _tree_is_plain(admin_dir)
-            and _head_target_is_plain(admin_dir / "HEAD", common)
+            and _head_target_is_plain(admin_dir / "HEAD", common, admin=admin_dir)
         ):
             return False
     return True
+
+
+def _optional_tree_is_plain(top: Path) -> bool:
+    """``_tree_is_plain`` of *top*, True when there is nothing at *top*."""
+    try:
+        os.lstat(top)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except (OSError, ValueError):
+        return False
+    return _tree_is_plain(top)
 
 
 def _plain_mode(mode: int) -> bool:
@@ -507,8 +716,13 @@ def _plain_entry(path: Path) -> bool:
 def _tree_is_plain(top: Path) -> bool:
     """Whether *top* and everything below it is plain (``_plain_mode``).
 
-    Walked without following a symlink, and without recursion, so a deep tree
-    cannot exhaust the stack."""
+    Walked without following a symlink or, on Windows, a directory junction
+    (``_is_link_stat``; the mode alone read a junction as a directory and the
+    walk went through it), and without recursion, so a deep tree cannot exhaust
+    the stack. An entry that is gone between the listing and its stat (a lock
+    file git wrote and renamed meanwhile, a worktree pruned) is nothing git
+    would wait on, and is skipped; read as not plain, a concurrent git operation
+    in another worktree cost this one its scan source."""
     if not _plain_entry(top):
         return False
     pending = [top]
@@ -517,12 +731,17 @@ def _tree_is_plain(top: Path) -> bool:
         try:
             with os.scandir(directory) as entries:
                 for entry in entries:
-                    mode = entry.stat(follow_symlinks=False).st_mode
-                    if stat.S_ISDIR(mode):
-                        pending.append(Path(entry.path))
-                    elif not _plain_mode(mode):
+                    try:
+                        info = entry.stat(follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    if _is_link_stat(info):
                         return False
-        except NotADirectoryError:
+                    if stat.S_ISDIR(info.st_mode):
+                        pending.append(Path(entry.path))
+                    elif not _plain_mode(info.st_mode):
+                        return False
+        except (NotADirectoryError, FileNotFoundError):
             continue
         except OSError:
             return False
@@ -536,16 +755,37 @@ _SYMREF_DEPTH = 5
 #: carriage return and newline, and not a vertical tab or form feed.
 _GIT_SPACE = " \t\r\n"
 
+#: The ref namespaces git keeps per worktree, in a linked worktree's admin dir
+#: rather than under the common dir (refs.c, ``is_per_worktree_ref``).
+_PER_WORKTREE_REFS = ("worktree", "bisect", "rewritten")
 
-def _head_target_is_plain(head: Path, common: Path) -> bool:
+#: The most of a HEAD or ref file that is read to follow it. git reads the whole
+#: file; one past this size is counted as not plain rather than read.
+_REF_RECORD_LIMIT = 1 << 20
+
+
+def _head_target_is_plain(
+    head: Path, common: Path, *, admin: Optional[Path] = None
+) -> bool:
     """Whether the refs *head* names under *common*, one symbolic ref after
     another, are plain.
 
-    A linked worktree's per-worktree refs (refs/worktree/, refs/bisect/) are in
-    its admin dir, which ``_tree_is_plain`` checks whole. A HEAD that is not
-    there, holds a commit id, or names a ref with no loose file names nothing to
-    wait on. A name with an empty, ``.`` or ``..`` part, which git refuses, is
-    not followed out of the refs and counts as not plain.
+    *admin* is the admin dir of the linked worktree whose HEAD *head* is, when it
+    is one: a name in a per-worktree namespace (``_PER_WORKTREE_REFS``) is looked
+    up there, as git looks it up, and not under *common*, where it is not. The
+    common dir's own HEAD has no admin dir, and its per-worktree refs are its
+    own. A HEAD that is not there, holds a commit id, or names a ref with no
+    loose file names nothing to wait on. A name with an empty, ``.`` or ``..``
+    part, which git refuses, is not followed out of the refs and counts as not
+    plain.
+
+    A HEAD that is a symlink (``core.preferSymlinkRefs``) is read as git reads
+    it: the link's text, when it starts with ``refs/``, is the ref name, and the
+    link is not followed as a file. Any other symlink is one git opens through,
+    and counts as not plain. A HEAD or ref file larger than
+    ``_REF_RECORD_LIMIT`` counts as not plain too: git reads it whole, so the
+    name it holds after any amount of padding is followed, where a bounded read
+    once took it for a file naming nothing.
 
     Each file is read as git reads it (measured with git 2.50): whitespace at
     the end (``_GIT_SPACE``) is dropped, a symbolic ref is ``ref:``, then any
@@ -556,18 +796,38 @@ def _head_target_is_plain(head: Path, common: Path) -> bool:
     """
     path = head
     for _ in range(_SYMREF_DEPTH):
-        if not _plain_entry(path):
+        try:
+            looked_up = os.lstat(path)
+        except (FileNotFoundError, NotADirectoryError):
+            return True
+        except (OSError, ValueError):  # ValueError: a NUL in the path
             return False
-        record = _read_gitdir_record(path)
-        if record is None:
-            return True
-        text = record.rstrip(_GIT_SPACE).split("\0", 1)[0]
-        if not text.startswith("ref:"):
-            return True
-        parts = text[len("ref:") :].lstrip(_GIT_SPACE).split("/")
+        if stat.S_ISLNK(looked_up.st_mode):
+            try:
+                text = os.readlink(path)
+            except OSError:
+                return False
+            if not text.startswith("refs/"):
+                return False
+            parts = text.split("/")
+        else:
+            if not _plain_mode(looked_up.st_mode):
+                return False
+            if looked_up.st_size > _REF_RECORD_LIMIT:
+                return False
+            record = _read_gitdir_record(path, limit=_REF_RECORD_LIMIT)
+            if record is None:
+                return True
+            text = record.rstrip(_GIT_SPACE).split("\0", 1)[0]
+            if not text.startswith("ref:"):
+                return True
+            parts = text[len("ref:") :].lstrip(_GIT_SPACE).split("/")
         if parts[0] != "refs" or any(part in ("", ".", "..") for part in parts):
             return False
-        path = common.joinpath(*parts)
+        base = common
+        if admin is not None and len(parts) > 2 and parts[1] in _PER_WORKTREE_REFS:
+            base = admin
+        path = base.joinpath(*parts)
     return _plain_entry(path)
 
 
@@ -594,7 +854,11 @@ def _registered_worktree(root: Path, common: Path) -> bool:
     if not recorded:
         return False
     named = os.path.normpath(os.path.join(git_dir, recorded))
-    return named == os.path.join(root, ".git")
+    # Compared as the platform compares paths (``os.path.normcase``: without
+    # regard to case on Windows), as ``_WorktreeCheck.of`` compares the listed
+    # worktree paths; a text comparison refused a record spelled in another case
+    # than the resolved root there.
+    return os.path.normcase(named) == os.path.normcase(os.path.join(root, ".git"))
 
 
 #: PATH_MAX on Linux. A gitdir record holds one path and a newline.
@@ -611,11 +875,14 @@ _RECORD_OPEN_FLAGS = (
 )
 
 
-def _read_gitdir_record(path: Path) -> Optional[str]:
+def _read_gitdir_record(
+    path: Path, *, limit: int = _GITDIR_RECORD_LIMIT
+) -> Optional[str]:
     """The text of a worktree admin dir's ``gitdir`` file, or None.
 
-    Read only when the entry itself is a regular file of at most
-    ``_GITDIR_RECORD_LIMIT`` bytes. A FIFO there blocked the scan for good, and a
+    Read only when the entry itself is a regular file of at most *limit* bytes
+    (``_GITDIR_RECORD_LIMIT``, the size of one path, by default; a HEAD or ref
+    file is read up to ``_REF_RECORD_LIMIT``). A FIFO there blocked the scan for good, and a
     symlink was followed to whatever it named. The entry is checked before the
     open: where O_NOFOLLOW is 0 (Windows), the open follows a symlink and fstat
     then sees its target. Where the flags exist, the open does not follow a
@@ -643,8 +910,8 @@ def _read_gitdir_record(path: Path) -> Optional[str]:
             return None
         data = b""
         # One byte past the limit tells a file that fits from a longer one.
-        while len(data) <= _GITDIR_RECORD_LIMIT:
-            chunk = os.read(fd, _GITDIR_RECORD_LIMIT + 1 - len(data))
+        while len(data) <= limit:
+            chunk = os.read(fd, limit + 1 - len(data))
             if not chunk:
                 break
             data += chunk
@@ -652,7 +919,7 @@ def _read_gitdir_record(path: Path) -> Optional[str]:
         return None
     finally:
         os.close(fd)
-    if len(data) > _GITDIR_RECORD_LIMIT:
+    if len(data) > limit:
         return None
     # git writes the path as the bytes of its name, so the record is decoded as
     # Python decodes that name (os.fsdecode). On Windows, where that is strict
@@ -715,21 +982,27 @@ def _started_by_the_launcher(
 
     The image sets ASH_IN_CONTAINER whoever runs it, so that alone does not say
     the launcher did: the launcher always sets ASH_ACTUAL_SOURCE_DIR, and it and
-    the legacy wrappers mount the scanned directory at /src.
+    the legacy wrappers mount the scanned directory at /src. A directory below
+    /src counts as well: a workspace project, or a hand-written ``docker run`` of
+    the image scanning a subdirectory of the mount, is inside the same mount, and
+    git there sees only the mount, so its label would be the container's, not the
+    repository's.
     """
     if not _in_container(environ):
         return False
     if environ.get(_LAUNCHER_SOURCE_ENV):
         return True
-    return Path(source_dir).resolve().as_posix() == _CONTAINER_SOURCE_MOUNT
+    resolved = PurePosixPath(Path(source_dir).resolve().as_posix())
+    mount = PurePosixPath(_CONTAINER_SOURCE_MOUNT)
+    return resolved == mount or resolved.is_relative_to(mount)
 
 
 def _a_git_entry_may_exist(source_dir: Path | str, environ: Mapping[str, str]) -> bool:
     """Whether git could find a repository for *source_dir* at all.
 
     True with a ``.git`` entry (of any kind: directory, file, symlink) in the
-    directory or one of its parents, with GIT_DIR or GIT_WORK_TREE in *environ*,
-    which point git at a repository wherever it runs, or whenever the walk cannot
+    directory or one of its parents, with GIT_DIR in *environ*, which points git
+    at a repository wherever it runs, or whenever the walk cannot
     be sure: a directory that cannot be resolved, or a parent whose ``.git``
     entry cannot be checked, is no proof that there is none, and git is asked as
     before. Only a walk that saw every level and found nothing returns False, and
@@ -742,7 +1015,10 @@ def _a_git_entry_may_exist(source_dir: Path | str, environ: Mapping[str, str]) -
     entry ``_ceiling_entries`` cannot resolve is dropped, which hides fewer
     levels here too and errs toward starting git, never past it.
     """
-    if "GIT_DIR" in environ or "GIT_WORK_TREE" in environ:
+    # GIT_DIR points git at a repository wherever it runs (alone, or with the work
+    # tree it names). GIT_WORK_TREE alone does not: the root lookup drops it and
+    # git discovers from the directory, so the walk below is what decides.
+    if "GIT_DIR" in environ:
         return True
     try:
         current = Path(source_dir).resolve()
@@ -855,7 +1131,8 @@ def why_no_scan_source(source_dir: Path | str, environ: Mapping[str, str]) -> st
 #: and its receipt's ``archive_skipped`` name them.
 NO_SCAN_SOURCE_CASES = (
     "the legacy ./ash or Invoke-ASH wrapper, or another run of the ASH image with "
-    "the directory at /src or ASH_ACTUAL_SOURCE_DIR set and no ASH_SCAN_SOURCE, "
+    "the directory at or below /src or ASH_ACTUAL_SOURCE_DIR set and no "
+    "ASH_SCAN_SOURCE, "
     "started the scan; the directory is in a submodule, in a clone nested in "
     "another repository, or in a repository under an enclosing one; it is in a "
     "linked worktree, and the repository's git directory holds a FIFO or a "

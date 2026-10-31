@@ -23,8 +23,8 @@ Call `run_ash_scan` with the absolute path to the project. The call returns imme
 ```python
 run_ash_scan(
     source_dir="/absolute/path/to/project",
-    config_path=None,              # Optional path to .ash.yaml
-    clean_output=True
+    config_path=None,  # Optional path to .ash.yaml
+    clean_output=True,
 )
 ```
 
@@ -77,7 +77,7 @@ get_scan_results(
     output_dir="/absolute/path/to/project/.ash/ash_output",
     filter_level="summary",
     severities="critical,high",
-    actionable_only=True
+    actionable_only=True,
 )
 ```
 

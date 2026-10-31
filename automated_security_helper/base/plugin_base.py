@@ -6,6 +6,7 @@ from datetime import datetime
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 from typing import (
     Annotated,
@@ -56,6 +57,7 @@ from automated_security_helper.utils.redacted_model import (
     NO_RICH_REPR,
     carry_environment_values,
 )
+from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.terminal_text import as_written
 from automated_security_helper.utils.python_installer import (
     python_package_install_command as _python_package_install_command,
@@ -181,15 +183,16 @@ _INSTALL_COMMAND_BUILDERS: Dict[
         "-y",
         _versioned(dep, "-"),
     ],
-    # choco's version flag lands inside the same argv element as the package name.
-    # Preserved verbatim from the chain this replaced: it is wrong (argv elements do
-    # not word-split), but correcting it is a behaviour change for chocolatey users
-    # and belongs in its own commit, not in a commit about a missing member.
+    # choco's version pin is its own argv element. Argv elements do not
+    # word-split, so a pin rendered inside the package-name element
+    # ("tool --version=1.2") was looked up as a package of that name, the
+    # install failed, and the pin was never applied.
     PackageManager.CHOCO: lambda dep: [
         "choco",
         "install",
         "-y",
-        f"{dep.name}{f' --version={dep.version}' if dep.version != 'latest' else ''}",
+        dep.name,
+        *([f"--version={dep.version}"] if dep.version != "latest" else []),
     ],
 }
 
@@ -220,6 +223,18 @@ _UNRENDERED_PACKAGE_MANAGERS = (
     - frozenset(_INSTALL_COMMAND_BUILDERS)
     - _NO_INSTALL_COMMAND_PACKAGE_MANAGERS
 )
+
+
+#: The package managers whose dependencies are Python packages, for
+#: ``PluginBase.is_python_only``: ``pip install`` and ``uv tool install`` both
+#: install from a Python package index.
+_PYTHON_PACKAGE_MANAGERS = frozenset({PackageManager.PIP, PackageManager.UV})
+
+
+#: What a timeout message names in place of the limit's number: the token
+#: ``error_text.timeout_limit_token`` gives when an environment value typed the
+#: limit, used when the values hook could not be read.
+_LIMIT_TOKEN_WITHOUT_A_NUMBER = "the configured scan_timeout"
 
 
 #: The most of a run's stderr log _run_subprocess reads back into a post-run
@@ -371,9 +386,16 @@ def trimmed_at_read_edge(
             # O(tokens x text) passes: a match starting inside the window
             # was already excluded, so this fires at most once per
             # over-long code, and once at the loop's end.
+            # ANCHORED at the ESC (match, not search): the code this looks
+            # for starts there. An unanchored search tried the pattern at
+            # every position between the ESC and the end, and the
+            # replacement-run alternative scanned to the end from each of
+            # them: a long run of U+FFFD behind the last ESC that did not
+            # reach the end (a tail the sinks left after a bad decode)
+            # cost a quadratic walk inside a scan's failure handling.
             esc = text.rfind("\x1b", 0, end)
             if esc != -1:
-                cut = _TRAILING_JUNK.search(text, esc, end)
+                cut = _TRAILING_JUNK.match(text, esc, end)
                 if cut is None and text.startswith("\x1b\\", esc):
                     # The last ESC can be a string terminator's own: an OSC
                     # body holds no ESC, so a long ST-ended OSC ends
@@ -382,7 +404,7 @@ def trimmed_at_read_edge(
                     # opener; still at most two steps per over-long code.
                     opener = text.rfind("\x1b", 0, esc)
                     if opener != -1:
-                        cut = _TRAILING_JUNK.search(text, opener, end)
+                        cut = _TRAILING_JUNK.match(text, opener, end)
             if cut is None:
                 break
         end = cut.start()
@@ -668,9 +690,30 @@ def _log_identity(path: Path | None) -> Tuple[int, int, int, int] | None:
     return (status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns)
 
 
+#: Guards every instance's ``_processed_responses`` list. One module-level lock,
+#: not one per instance: a plugin instance is copied (``model_copy``,
+#: ``deepcopy``) and a lock cannot be. The three methods that use it hold it for
+#: one short list pass, so sharing it costs nothing measurable.
+_PROCESSED_MARKS_LOCK = threading.Lock()
+
 #: The response flags that say the tool did not finish its scan, so whatever
 #: scan() made of the run, the scan is graded ERROR (_record_kept_flag).
 _UNFINISHED_RUN_FLAGS = ("timed_out", "cancelled", "result_rejected", "signaled")
+
+#: How a run whose stop failed is keyed in ``scan_could_not_stop_runs``: the flag
+#: it ended with, then the wait that failed after the tool ran. A response that
+#: carries none of these recorded only the failed stop, and is keyed "unflagged".
+_COULD_NOT_STOP_RUN_KEYS = _UNFINISHED_RUN_FLAGS + ("post_run_error",)
+
+
+def _could_not_stop_run_key(response: Dict) -> str:
+    """Which run of one ``scan()`` a could-not-stop response belongs to: the first
+    of :data:`_COULD_NOT_STOP_RUN_KEYS` the response carries as True, else
+    ``unflagged``."""
+    for flag in _COULD_NOT_STOP_RUN_KEYS:
+        if response.get(flag) is True:
+            return flag
+    return "unflagged"
 
 
 def worse_exit_code(current: int | None, new: int) -> int:
@@ -691,6 +734,25 @@ def worse_exit_code(current: int | None, new: int) -> int:
     return max(current if current is not None else 0, new)
 
 
+def _folded_exit_code(plugin: Any, current: int | None, new: int) -> int:
+    """*current* and *new* folded by the plugin's own ranking, ``_worse_exit_code``.
+
+    The hook is read through ``getattr``, like the accumulator's other helpers:
+    a host that carries only the accumulator fields has none, and an override
+    that raises or answers something that is no exit code must not lose the
+    run's code. Both get :func:`worse_exit_code`, the default ranking.
+    """
+    rank = getattr(plugin, "_worse_exit_code", None)
+    if callable(rank):
+        try:
+            ranked = rank(current, new)
+        except Exception:  # noqa: BLE001 -- an overridable hook
+            ranked = None
+        if is_exit_code(ranked):
+            return ranked
+    return worse_exit_code(current, new)
+
+
 def _response_text(response: Dict, keys: Tuple[str, ...], default: str) -> str:
     """The first readable, non-empty value under ``keys``, as text, or ``default``.
 
@@ -708,9 +770,107 @@ def _response_text(response: Dict, keys: Tuple[str, ...], default: str) -> str:
     return default
 
 
+def _raised_key(recorder: str) -> str:
+    """What ``_record_response`` adds to ``invoked`` when ``recorder`` raised."""
+    return f"{recorder}:raised"
+
+
+def _error_text_read_once(error: BaseException, read: Any) -> str:
+    """``error`` as text for a record, redacted with a values read already taken.
+
+    ``read`` is a :func:`guarded_values_read` result: the handler's one read of
+    the values hook. Without values the text is not shown, and only the error's
+    class and the note say why."""
+    if read.values is not None:
+        return error_text(error, read.values)
+    return (
+        f"{type(error).__name__} (text not shown: the plugin's values hook "
+        f"{read.failure()})"
+    )
+
+
+def _uv_interpreter_inside(
+    environment: Optional[Dict[str, str]], cwd: Path, tree: Path
+) -> bool:
+    """Whether ``UV_PYTHON`` in ``environment`` names an interpreter inside ``tree``.
+
+    ``environment`` is what the child gets (this process's when None). A value
+    that is a path, absolute or relative to ``cwd`` (where the child starts), is
+    inside the scanned tree when it lies below it by its spelling: a ``.venv``
+    python is a link to the interpreter it was made from, so a path resolved
+    through links would read as outside and let the tree's environment in. A
+    version request or a name looked up on PATH names no path and is not inside.
+    """
+    chosen = (snapshot_environ() if environment is None else environment).get(
+        "UV_PYTHON"
+    )
+    if not isinstance(chosen, str) or not chosen:
+        return False
+    if not (os.path.isabs(chosen) or "/" in chosen or "\\" in chosen):
+        return False
+    candidate = os.path.abspath(
+        os.path.join(os.fspath(cwd), os.path.expanduser(chosen))
+    )
+    # By its own spelling, and with its directory resolved: the tree may be
+    # reached through a link above it by either name.
+    spelled = [
+        candidate,
+        os.path.join(
+            os.path.realpath(os.path.dirname(candidate)), os.path.basename(candidate)
+        ),
+    ]
+    roots = {os.path.abspath(os.fspath(tree)), os.path.realpath(os.fspath(tree))}
+    return any(
+        os.path.normcase(path).startswith(
+            os.path.normcase(root).rstrip(os.sep) + os.sep
+        )
+        for path in spelled
+        for root in roots
+    )
+
+
+def _log_name(plugin: Any) -> str:
+    """The name a plugin's own lines carry: its config's, else its class's.
+
+    ``config`` is optional and defaults to None, so a plugin built without one
+    has no name to read there. A function over the plugin, as
+    :func:`guarded_values_read` is, so the unbound ``PluginBase._plugin_log``
+    still runs on a stand-in."""
+    return getattr(plugin.config, "name", None) or plugin.__class__.__name__
+
+
 class CustomCommand(BaseModel):
+    """An install command a plugin declares, with its argv and a shell flag.
+
+    ``get_installation_commands`` returns a custom command as this object, so
+    the installer reads ``shell`` beside the argv. A reader that indexes,
+    slices, iterates or searches the entry reads its ``args``, as it read the
+    bare argv list the method used to return in its place; the flag rides
+    beside and is read by name.
+
+    ``shell=False`` (the default): ``args`` is the argv handed to the program
+    unchanged, no shell in between. ``shell=True``: the installer joins the
+    words with single spaces into ONE command line and hands that line to the
+    shell as written, so each word carries its own quoting, and shell syntax in
+    it (a ``$VARIABLE``, a redirection, a pipe) is expanded and interpreted by
+    the shell. Declare ``shell=True`` only when that expansion is the point; a
+    command that already names its program and arguments is an argv and stays
+    ``shell=False``.
+    """
+
     args: List[str]
-    shell: bool = False  # Set to True only when shell expansion is absolutely necessary
+    # True only when shell expansion is the point; see the class docstring for
+    # how the words are joined and handed to the shell.
+    shell: bool = False
+
+    def __getitem__(self, index):
+        return self.args[index]
+
+    def __len__(self) -> int:
+        return len(self.args)
+
+    def __iter__(self):
+        return iter(self.args)
 
 
 #: Whether the plugin being constructed was handed a configuration read from its
@@ -798,6 +958,10 @@ class PluginBase(UVToolMixin, BaseModel):
     # or None. See scan_post_run_error.
     _scan_post_run_error: str | None = PrivateAttr(default=None)
 
+    # Whether this plugin has already said it ignored a UV_PYTHON that names an
+    # interpreter inside the scanned tree (once per plugin, not per tool run).
+    _warned_in_tree_uv_python: bool = PrivateAttr(default=False)
+
     # The flag, and its reason, of this plugin's most recent run that did not
     # finish (a timeout, a cancel, a rejected result, a signal death), or None.
     # See scan_kept_flag.
@@ -805,10 +969,32 @@ class PluginBase(UVToolMixin, BaseModel):
     # The recorded reason this plugin's most recent run ended with a tool ASH
     # could not stop, or None. See scan_could_not_stop.
     _scan_could_not_stop: str | None = PrivateAttr(default=None)
+    # The latest such reason for each flag a run of this plugin's current scan()
+    # ended with. See scan_could_not_stop_runs.
+    _scan_could_not_stop_runs: Dict[str, str] = PrivateAttr(default_factory=dict)
+    # Every such reason, one (flag, reason) pair per failed run, in the order the
+    # runs ended. See scan_could_not_stop_history.
+    _scan_could_not_stop_history: List[Tuple[str, str]] = PrivateAttr(
+        default_factory=list
+    )
 
     # Why the last UVToolMixin._try_uv_tool_execution could not run the tool
     # through uv, or None. _run_subprocess reports it.
     _uv_run_failure: str | None = PrivateAttr(default=None)
+
+    #: The responses ``_process_command_response`` has folded and no recorder
+    #: has yet retired. Held as the objects themselves, never their ``id()``:
+    #: a mark keyed on an address outlived its dict on the paths that never
+    #: discarded it, and a later response allocated at that address would have
+    #: read as "already processed" and never reached exit_code and errors. A
+    #: held reference keeps the address taken for as long as the mark stands.
+    _processed_responses: list = PrivateAttr(default_factory=list)
+
+    # The lines ``_plugin_log`` itself put in ``errors``: ASH's own notes, kept
+    # apart from the lines a tool's stderr added (``_process_command_response``),
+    # so a reader that needs to know whether the tool said anything can tell the
+    # two apart. ``errors`` still holds both. See ``_tool_error_lines``.
+    _plugin_log_lines: List[str] = PrivateAttr(default_factory=list)
 
     # Whether this plugin's configuration was read from its context's resolved
     # configuration (a section ``AshConfig.get_plugin_config`` answered, as a
@@ -852,13 +1038,42 @@ class PluginBase(UVToolMixin, BaseModel):
         checked as a real boolean, and in force while the model's post-init
         hooks run, as in ``__init__``. With no declaration the provenance is
         the context's, the stricter judgment, whatever an enclosing
-        construction had set."""
+        construction had set.
+
+        It also skips the validator that gives the plugin's section its
+        context's environment values, so they are carried here, as
+        ``_give_its_section_the_environment_values`` does for a validated
+        plugin: a section handed in this way otherwise printed them in
+        clear."""
         declared = _declared_provenance(values)
         token = _CONFIG_FROM_CONTEXT.set(declared if declared is not None else True)
         try:
-            return super().model_construct(_fields_set, **values)
+            built = super().model_construct(_fields_set, **values)
         finally:
             _CONFIG_FROM_CONTEXT.reset(token)
+        carry_environment_values(
+            built.__dict__.get("config"), built._values_for_its_section()
+        )
+        return built
+
+    def model_copy(self, *, update: Any = None, deep: bool = False) -> "PluginBase":
+        """A copy whose replacement section carries the environment values.
+
+        ``model_copy`` runs neither the validators nor ``__setattr__``, the two
+        places a plugin's section is given its context's environment values,
+        so a ``config`` passed in ``update`` was put in the copy bare and
+        printed them in clear. The copy's section is carried to when ``update``
+        names a ``config`` (a section that was never in a plugin) or a
+        ``context`` (whose values the shared section may not yet hold), the two
+        keys ``__setattr__`` acts on. The carry adds the context's values beside
+        the ones the section already holds and never removes any, so a section
+        still shared with the original keeps what the original gave it."""
+        copied = super().model_copy(update=update, deep=deep)
+        if update and ("config" in update or "context" in update):
+            carry_environment_values(
+                copied.__dict__.get("config"), copied._values_for_its_section()
+            )
+        return copied
 
     # Installation-related properties
     dependencies: Annotated[
@@ -979,7 +1194,7 @@ class PluginBase(UVToolMixin, BaseModel):
             target_type: Target type (e.g. source, converted)
             append_to_stream: Append to stdout or stderr stream
         """
-        name = self.config.name or self.__class__.__name__
+        name = _log_name(self)
         tt = ""
         if target_type is not None:
             tt = f" @ [magenta]{escape_markup(target_type)}[/magenta]"
@@ -1001,14 +1216,58 @@ class PluginBase(UVToolMixin, BaseModel):
         # part the call site showed already (a ShownText) is read back first, or
         # it was shown a second time there.
         written = "\n".join(as_written(part) for part in msg)
-        if level == logging.ERROR or append_to_stream == "stderr":
-            self.errors.append(
-                f"({self.config.name or self.__class__.__name__}) " + written
-            )
+        # ERROR and above: a CRITICAL message is at least as much the plugin's
+        # error as an ERROR one.
+        if level >= logging.ERROR or append_to_stream == "stderr":
+            line = f"({name}) " + written
+            self.errors.append(line)
+            # Remembered as ASH's own, not the tool's: ``errors`` is one list
+            # for both, and a stand-in without the list (the unbound call in
+            # the tests) records as before.
+            ours = getattr(self, "_plugin_log_lines", None)
+            if isinstance(ours, list):
+                ours.append(line)
         elif append_to_stream == "stdout":
-            self.output.append(
-                f"({self.config.name or self.__class__.__name__}) " + written
-            )
+            self.output.append(f"({name}) " + written)
+
+    def _reset_errors(self) -> None:
+        """Start a run's error lines afresh.
+
+        ``errors`` is cleared together with the record of which of its lines
+        are ASH's own notes (``_plugin_log_lines``). The two belong together: a
+        reset of ``errors`` alone leaves the record holding notes of a run that
+        is over, which grows across targets and, when a later tool line reads
+        the same, drops that line from ``_tool_error_lines``. Anything that
+        starts a run's lines over, such as a ``scan()`` override, calls this
+        instead of assigning ``errors``.
+        """
+        self.errors = []
+        self._plugin_log_lines = []
+
+    def _tool_error_lines(self) -> List[str]:
+        """``errors`` without the lines ``_plugin_log`` added: what the tool's
+        stderr put there.
+
+        ``errors`` holds both, in the order they came, and stays that way for
+        every reader that wants the whole story. A reader that decides whether
+        the tool said anything (a failure message choosing between ``errors``
+        and the stderr log) asks this instead: ASH's own note ("timed out
+        after ...") is not the tool's stderr, and counted as it, it kept the
+        tool's real text in the log unread.
+
+        Each note removes one equal line, so a tool line that repeats a note
+        word for word is only dropped as many times as the note was written.
+        """
+        pending: Dict[str, int] = {}
+        for line in getattr(self, "_plugin_log_lines", None) or ():
+            pending[line] = pending.get(line, 0) + 1
+        kept: List[str] = []
+        for line in self.errors:
+            if pending.get(line):
+                pending[line] -= 1
+            else:
+                kept.append(line)
+        return kept
 
     def is_python_only(self) -> bool:
         """
@@ -1016,7 +1275,8 @@ class PluginBase(UVToolMixin, BaseModel):
 
         A plugin is considered Python-only if:
         1. It has no dependencies defined in self.dependencies, or
-        2. It only has pip dependencies (Python packages)
+        2. It only has pip or uv dependencies (Python packages, installed by
+           ``pip install`` and ``uv tool install``)
         3. It has no custom installation commands
 
         Returns:
@@ -1036,11 +1296,11 @@ class PluginBase(UVToolMixin, BaseModel):
             )
             return True
 
-        # Check if all dependencies are Python packages (pip)
+        # Check if all dependencies are Python packages (pip or uv)
         for platform in self.dependencies:
             for arch in self.dependencies[platform]:
                 for dep in self.dependencies[platform][arch]:
-                    if dep.package_manager != PackageManager.PIP:
+                    if dep.package_manager not in _PYTHON_PACKAGE_MANAGERS:
                         ASH_LOGGER.debug(
                             f"Plugin {self.__class__.__name__} has non-Python dependencies with {dep.package_manager}, this is not Python-only"
                         )
@@ -1058,6 +1318,54 @@ class PluginBase(UVToolMixin, BaseModel):
         ASH_LOGGER.trace(f"Using provided context for {self.__class__.__name__}")
         return self
 
+    def _tool_text_for_records(self, text: Any, stream: str) -> Any:
+        """The text of a tool's ``stream`` ("stdout" or "stderr") as the records keep it.
+
+        A hook for a plugin whose tool prints a finding's OWN secret in its
+        output: actionlint's JSON carries a credentials finding's hard-coded
+        password as its snippet, and a failed run's stdout reached the recorded
+        ``output`` lines, and from there the results file's raw_results, with
+        only the environment-value redaction applied. The default keeps the
+        text as it is; an override returns the text with such values removed
+        before the lines are split and recorded. Called with whatever the
+        response holds (None included), and must return the same kind.
+        """
+        return text
+
+    def _mark_processed(self, response: Any) -> None:
+        """Remember that *response* has been folded into exit_code and errors."""
+        with _PROCESSED_MARKS_LOCK:
+            if not any(seen is response for seen in self._processed_responses):
+                self._processed_responses.append(response)
+
+    def _was_processed(self, response: Any) -> bool:
+        """Whether *response* (this object, by identity) is marked processed."""
+        with _PROCESSED_MARKS_LOCK:
+            return any(seen is response for seen in self._processed_responses)
+
+    def _forget_processed(self, response: Any) -> None:
+        """Retire *response*'s mark; the recorders call this, so every path does.
+
+        The three mark methods share one lock. The retirement rebuilds the list
+        and writes it back, so a mark another thread added between the two
+        steps was dropped, and the response it named was folded into exit_code
+        and errors a second time (its stdout and stderr lines doubled).
+        """
+        with _PROCESSED_MARKS_LOCK:
+            self._processed_responses[:] = [
+                seen for seen in self._processed_responses if seen is not response
+            ]
+
+    def _worse_exit_code(self, current: int | None, new: int) -> int:
+        """The worse of two runs' exit codes, for the accumulated ``exit_code``.
+
+        A hook: the accumulator folds every run's code through it. The default
+        is :func:`worse_exit_code`, the larger code. A plugin that knows which
+        codes it accepts overrides it to rank by that, since the larger code
+        is not always the worse one (``ScannerPluginBase`` does).
+        """
+        return worse_exit_code(current, new)
+
     def _process_command_response(self, response: dict) -> None:
         """Accumulate stdout, stderr, and exit code from a subprocess response.
 
@@ -1072,13 +1380,49 @@ class PluginBase(UVToolMixin, BaseModel):
         state set around the call let two concurrent responses on one
         instance erase each other's inputs mid-call.
         """
+        # The helpers below are read through getattr, like the uv inputs hook:
+        # this method is bound onto hosts that carry only the accumulator fields
+        # (a mixin test drives the real accumulator through a stub plugin), and
+        # a host without them records as before. It sets no "processed" mark: the
+        # caller that hands it a response owns the mark (the uv mixin marks the
+        # response it processed), so an override of this seam that never calls
+        # super() is still counted.
         plugin_inputs: Tuple[str, ...] = ()
         if getattr(self, "use_uv_tool", False):
             inputs_getter = getattr(self, "_uv_run_inputs_for_records", None)
             if callable(inputs_getter):
                 plugin_inputs = tuple(inputs_getter() or ())
-        stdout_text = response.get("stdout")
-        stderr_text = response.get("stderr")
+        shape = getattr(self, "_tool_text_for_records", None)
+        if not callable(shape):
+
+            def shape(text: Any, _stream: str) -> Any:
+                return text
+
+        # The shaping hook is overridable like the values hook, and guarded the
+        # same way: a raise must not escape into the run's own outcome, and the
+        # unshaped text is not recorded in its place (the hook is what hides
+        # the plugin's own inputs from the lines), so that stream's lines are
+        # replaced by a value-free note.
+        shape_failed: List[str] = []
+
+        def shaped(text: Any, stream: str) -> Any:
+            try:
+                return shape(text, stream)
+            except Exception:  # noqa: BLE001
+                if text:
+                    shape_failed.append(stream)
+                return ""
+
+        stdout_text = shaped(response.get("stdout"), "stdout")
+        stderr_text = shaped(response.get("stderr"), "stderr")
+        if "stdout" in shape_failed:
+            self.output.append(
+                "(stdout not shown: the plugin's text-shaping hook raised)"
+            )
+        if "stderr" in shape_failed:
+            self.errors.append(
+                "(stderr not shown: the plugin's text-shaping hook raised)"
+            )
         # _values_to_redact is an overridable hook, called once for both
         # streams and guarded: without the values nothing can be redacted,
         # so a raising hook loses the lines (a value-free note takes their
@@ -1148,14 +1492,14 @@ class PluginBase(UVToolMixin, BaseModel):
                     )
 
                     shown = shown_uv_output(
-                        response["stderr"],
+                        stderr_text,
                         values,
                         plugin_inputs=plugin_inputs,
                         tool_name=self.command,
                         limit=None,
                     )
                 else:
-                    shown = shown_tool_stderr(response["stderr"], values)
+                    shown = shown_tool_stderr(stderr_text, values)
                 self.errors.extend(shown.splitlines())
 
         # Accumulate worst exit code across multiple subprocess calls.
@@ -1217,7 +1561,7 @@ class PluginBase(UVToolMixin, BaseModel):
             )
             if ending is not None:
                 self._scan_kept_flag = ("signaled", ending[1])
-        self.exit_code = worse_exit_code(self.exit_code, new_code)
+        self.exit_code = _folded_exit_code(self, self.exit_code, new_code)
 
     @property
     def scan_timed_out_after(self) -> float | None:
@@ -1287,6 +1631,9 @@ class PluginBase(UVToolMixin, BaseModel):
         )
 
     def _record_spawn_failure(self, response: Dict) -> None:
+        # Recording retires the processed mark (the handler calls this one
+        # directly, outside _record_response).
+        self._forget_processed(response)
         # State before the log, so the grade lands even when the log raises.
         if not isinstance(response, dict) or response.get("spawn_failed") is not True:
             return
@@ -1421,10 +1768,48 @@ class PluginBase(UVToolMixin, BaseModel):
         """
         return self._scan_could_not_stop
 
+    @property
+    def scan_could_not_stop_runs(self) -> Dict[str, str]:
+        """The reason recorded for each flag a run of this plugin's current
+        ``scan()`` ended with when ASH could not end its tool: the flag
+        (``timed_out``, ``cancelled``, ``result_rejected``, ``signaled``;
+        ``post_run_error`` for a wait that failed after the tool ran;
+        ``unflagged`` for a response that recorded only the failed end) mapped
+        to the LATEST reason recorded under it.
+
+        ``scan_could_not_stop`` keeps the most recent of these reasons alone, so
+        when one ``scan()`` launched its tool more than once it cannot say WHICH
+        run ASH could not end: a first launch that timed out and was killed,
+        then a second that was cancelled and could not be ended, left one
+        record, and the timeout headline read it as the timed-out tool still
+        running. A reader that attributes a failed stop to a run reads this
+        mapping instead (``"timed_out" in scan_could_not_stop_runs``). Two runs
+        that ended with the same flag share one entry, so the later run's
+        reason replaces the earlier one; a reader that has to name every run
+        reads ``scan_could_not_stop_history``. Cleared with
+        ``clear_scan_could_not_stop``. A copy: a reader cannot change it.
+        """
+        return dict(self._scan_could_not_stop_runs)
+
+    @property
+    def scan_could_not_stop_history(self) -> List[Tuple[str, str]]:
+        """Every failed end of this plugin's current ``scan()``, as (flag,
+        reason) pairs in the order the runs ended.
+
+        Unlike :attr:`scan_could_not_stop_runs` it keeps two runs that ended with
+        the same flag apart: a per-target scanner whose tool could not be ended on
+        two targets has both reasons here, including the process each one names.
+        Cleared with ``clear_scan_could_not_stop``. A copy.
+        """
+        return list(self._scan_could_not_stop_history)
+
     def clear_scan_could_not_stop(self) -> None:
-        """Forget a recorded could-not-stop ending. ``ScannerExecutor`` calls this
-        before each ``scan()``, as it does ``clear_scan_kept_flag``."""
+        """Forget a recorded could-not-stop ending, and the per-run records with
+        it. ``ScannerExecutor`` calls this before each ``scan()``, as it does
+        ``clear_scan_kept_flag``."""
         self._scan_could_not_stop = None
+        self._scan_could_not_stop_runs = {}
+        self._scan_could_not_stop_history = []
 
     def _could_not_stop_state(self, response: Dict) -> None:
         """Set the could-not-stop state from ``response``: state only, shared with
@@ -1452,9 +1837,13 @@ class PluginBase(UVToolMixin, BaseModel):
         # degrades to the value-free pid fallback, never to the raw text an
         # empty value set would print.
         values = guarded_values(self)
-        self._scan_could_not_stop = (
-            default if values is None else text_without_values(reason, values)
-        )
+        recorded = default if values is None else text_without_values(reason, values)
+        self._scan_could_not_stop = recorded
+        # Kept per run as well, under the flag this run ended with, so a reader
+        # can tell which run's stop failed when scan() launched more than once.
+        run_key = _could_not_stop_run_key(response)
+        self._scan_could_not_stop_runs[run_key] = recorded
+        self._scan_could_not_stop_history.append((run_key, recorded))
 
     def _record_could_not_stop(self, response: Dict) -> None:
         self._could_not_stop_state(response)
@@ -1471,10 +1860,16 @@ class PluginBase(UVToolMixin, BaseModel):
         Each is named in ``invoked`` before its call, so a recorder that raises
         counts as run and is never called again for this response: its report
         was given twice, and a recorder raising at every call escaped the
-        handler through its second call. Under ``guard``, for the handler, a
-        recorder that raises stays inside this call, with its error added to the
-        response's reason once.
+        handler through its second call. Outside ``guard`` a recorder that
+        raised is also named in ``invoked`` by ``_raised_key``, for the handler
+        that catches the raise to tell it from one that finished. Under
+        ``guard``, for the handler, a recorder that raises stays inside this
+        call, with its error added to the response's reason once.
+
+        Recording a response retires its processed mark: once recorded, the
+        response is done with, and the mark must not outlive it.
         """
+        self._forget_processed(response)
         for name, record in (
             ("timeout", lambda: self._record_timeout(response, timeout)),
             ("spawn_failure", lambda: self._record_spawn_failure(response)),
@@ -1486,7 +1881,15 @@ class PluginBase(UVToolMixin, BaseModel):
                 continue
             invoked.add(name)
             if not guard:
-                record()
+                try:
+                    record()
+                except BaseException:
+                    # Remembered beside the name for the handler that catches
+                    # this: a recorder that raised has had its one call, and
+                    # must not be given a second by a handler that wants the
+                    # ones the raise skipped (see _raised_key).
+                    invoked.add(_raised_key(name))
+                    raise
                 continue
             try:
                 record()
@@ -1526,11 +1929,21 @@ class PluginBase(UVToolMixin, BaseModel):
         """
         # A uv run's inputs join the trim: the sinks hide them whole, so a
         # cut just after a glued extra's value is the same edge piece a value
-        # split leaves. The accessor is the best-effort one and never raises.
+        # split leaves. Only for a plugin that runs through uv, as the report
+        # lines read them (_process_command_response): for any other the
+        # accessor still answers the command's own name, and the trim would
+        # drop a cut log's last characters for starting like it. The accessor
+        # is the best-effort one and never raises, but an override can answer
+        # None (no inputs) or raise, and this runs in a handler: the trim then
+        # has the values alone, as the mixin's own fallback does.
         inputs: Tuple[str, ...] = ()
-        inputs_for_records = getattr(self, "_uv_run_inputs_for_records", None)
-        if callable(inputs_for_records):
-            inputs = tuple(inputs_for_records())
+        if getattr(self, "use_uv_tool", False):
+            inputs_for_records = getattr(self, "_uv_run_inputs_for_records", None)
+            if callable(inputs_for_records):
+                try:
+                    inputs = tuple(inputs_for_records() or ())
+                except Exception:  # noqa: BLE001 -- an overridable accessor
+                    inputs = ()
         try:
             # The one bounded read (read_log_bounded): bound + 1 so a cut is
             # known, and a cut tail trimmed past anything it could have
@@ -1551,12 +1964,28 @@ class PluginBase(UVToolMixin, BaseModel):
         if text:
             post_run["stderr"] = text
 
-    def _timeout_limit_token(self, limit: float | None) -> str:
+    def _timeout_limit_token(
+        self, limit: float | None, values: Optional[Sequence[str]] = None
+    ) -> str:
         """The scan_timeout limit as a timeout message prints it:
         ``error_text.timeout_limit_token`` over this plugin's environment
         values. One token for every timeout message, the executor's included,
-        so the sites cannot drift."""
-        return timeout_limit_token(limit, self._values_to_redact())
+        so the sites cannot drift.
+
+        ``values`` is the caller's own guarded read of the values hook, for a
+        message that also redacts with them: the message then reads the hook
+        once, and the token and the redaction cannot disagree. Without it the
+        hook is read here, once, guarded: a hook that raised or gave no usable
+        answer leaves nothing to tell whether an environment value typed the
+        limit, so the token names the option and prints no number, the form it
+        takes when one did. A caller that redacts with the hook's values
+        itself and does not pass them reads the hook a second time, unguarded."""
+        if values is not None:
+            return timeout_limit_token(limit, values)
+        read = guarded_values_read(self)
+        if read.values is None:
+            return _LIMIT_TOKEN_WITHOUT_A_NUMBER
+        return timeout_limit_token(limit, read.values)
 
     def _record_timeout(self, response: Dict, timeout: float | None) -> None:
         """Name the scanner and the limit when its tool was killed at the timeout.
@@ -1676,11 +2105,71 @@ class PluginBase(UVToolMixin, BaseModel):
             # runs the tree's .venv python and builds its project unless told not
             # to; see utils/python_child.uv_child_overrides.
             from automated_security_helper.utils import python_child
-            from automated_security_helper.utils.process_env import snapshot_environ
 
-            uv_overrides = python_child.uv_child_overrides(command)
+            # The choice of interpreter is read from the environment the child
+            # gets (``env``, this process's when None): an interpreter the
+            # caller named there is theirs, and replacing it with ASH's would
+            # run the tool on another Python than the one the caller asked for.
+            # uv_child_overrides applies its own reading of UV_SYSTEM_PYTHON
+            # (a "0" or "false" is no choice), so that is not redone here.
+            #
+            # Except an interpreter inside the scanned tree: the tree's own
+            # .venv python is what these overrides exist to keep uv from
+            # finding, and an env a scanner assembled (its extra_env merged over
+            # this process's) is not known to be the operator's alone. Such a
+            # UV_PYTHON is dropped before the choice is read, so ASH's
+            # interpreter is set in its place.
+            if _uv_interpreter_inside(env, working_dir, Path(self.context.source_dir)):
+                # Said once per plugin, as a warning: the operator or the scan's
+                # config set a variable that is not honored, and one line per
+                # tool run would repeat it for every run. The value is not shown.
+                if not self._warned_in_tree_uv_python:
+                    self._warned_in_tree_uv_python = True
+                    self._plugin_log(
+                        "Ignoring a UV_PYTHON that names an interpreter inside the "
+                        "scanned tree; it is not passed to the tool.",
+                        level=logging.WARNING,
+                    )
+                env = {
+                    key: value
+                    for key, value in (
+                        snapshot_environ() if env is None else env
+                    ).items()
+                    if key != "UV_PYTHON"
+                }
+            uv_overrides = python_child.uv_child_overrides(command, env)
             if uv_overrides:
-                env = {**(snapshot_environ() if env is None else env), **uv_overrides}
+                child_env = snapshot_environ() if env is None else env
+                env = {**child_env, **uv_overrides}
+
+            # The ONE guarded read of the overridable values hook for this run
+            # (_values_to_redact's guarding rule). The runner prints the command
+            # line and the timeout limit with these, and the uv path reads them
+            # for its records. A hook that raised, or answered something that is
+            # no value set, gives nothing to redact with, and the runner read
+            # such an answer as "no values" and logged the command line in clear.
+            # The run is refused instead, as the uv path refuses it, and recorded
+            # as a tool that never started; the refusal names the hook.
+            values_read = guarded_values_read(self)
+            if values_read.values is None:
+                hook_failure = (
+                    f"the plugin's values hook {values_read.failure()}, so the "
+                    "run's records could not be redacted"
+                )
+                refused_run: Dict = {
+                    "stdout": "",
+                    "stderr": (
+                        f"{self.command or 'The tool'} was not run: {hook_failure}."
+                    ),
+                    "returncode": SPAWN_FAILURE_RETURNCODE,
+                    "spawn_failed": True,
+                    "error": hook_failure,
+                }
+                response = refused_run
+                self._process_command_response(refused_run)
+                self._record_response(refused_run, timeout, invoked)
+                return refused_run
+            run_values: Tuple[str, ...] = values_read.values
 
             # Attempt UV tool execution if enabled
             if self.use_uv_tool and self.command and len(command) > 0:
@@ -1702,10 +2191,19 @@ class PluginBase(UVToolMixin, BaseModel):
                         stderr_preference=stderr_preference,
                         env=env,
                         timeout=timeout,
-                        values=self._values_to_redact(),
+                        values=run_values,
                     )
                     if uv_result is not None:
                         response = uv_result
+                        # Processed exactly once. The uv path hands a run that
+                        # returned to _process_command_response itself, but a
+                        # failure after its child started, or a response whose
+                        # building raised, comes back unprocessed: the child's
+                        # exit code and stderr then never reached exit_code and
+                        # errors, so a scanner reading those judged such a run
+                        # accepted and reported none of the tool's text.
+                        if not self._was_processed(uv_result):
+                            self._process_command_response(uv_result)
                         self._record_response(uv_result, timeout, invoked)
                         return uv_result
                     # uv could not run it, and nothing runs in its place: the tool
@@ -1744,7 +2242,7 @@ class PluginBase(UVToolMixin, BaseModel):
                 timeout=timeout,
                 # The runner logs its own timeout line, and prints the limit
                 # with these: a limit read from the environment never reaches it.
-                values=self._values_to_redact(),
+                values=run_values,
             )
 
             self._process_command_response(response)
@@ -1753,29 +2251,78 @@ class PluginBase(UVToolMixin, BaseModel):
             return response
 
         except Exception as e:
-            # Show the full stack trace in debug, redacted: ``exc_info=True``
-            # would append the raw traceback, whose last line repeats the
-            # exception's message with any configured value in it.
-            environment_values = self._values_to_redact()
-            ASH_LOGGER.debug(
-                f"({self.config.name}) Full error details: "
-                f"{error_text(e, environment_values)}\n"
-                f"{traceback_text(e, values=environment_values)}"
-            )
+            # The ONE guarded read of the values hook for this handler
+            # (_values_to_redact's guarding rule). Read bare here, a hook that
+            # raised raised again out of the handler that was meant to record
+            # the run's failure, and one that answered no value set printed the
+            # error's text in clear; without the values the records below keep
+            # only the error's class and a note saying why.
+            read = guarded_values_read(self)
+            environment_values: Tuple[str, ...] = read.values or ()
+            withheld: str | None = None
+            if read.values is None:
+                withheld = (
+                    f"{type(e).__name__} (text not shown: the plugin's values "
+                    f"hook {read.failure()})"
+                )
+                ASH_LOGGER.debug(f"({_log_name(self)}) Full error details: {withheld}")
+            else:
+                # Show the full stack trace in debug, redacted: ``exc_info=True``
+                # would append the raw traceback, whose last line repeats the
+                # exception's message with any configured value in it.
+                ASH_LOGGER.debug(
+                    f"({_log_name(self)}) Full error details: "
+                    f"{error_text(e, environment_values)}\n"
+                    f"{traceback_text(e, values=environment_values)}"
+                )
             if response is None:
                 # Raised before any run returned, so the command never ran: recorded
                 # as a spawn failure the OS refused is, and ScannerExecutor reports
                 # ERROR from it. This answered exit code 1, which most scanners
                 # accept as "ran and found issues", so one that ignores the
                 # response was reported PASSED.
+                # Without the values the command line is not quoted (an
+                # argument can carry a value the config read from the
+                # environment): the stderr names the tool and the note.
                 spawn_failure: Dict = {
-                    "error": error_text(e, environment_values),
+                    "error": withheld or error_text(e, environment_values),
                     "returncode": SPAWN_FAILURE_RETURNCODE,
                     "spawn_failed": True,
-                    "stderr": spawn_failure_message(" ".join(map(str, command)), e),
+                    "stderr": (
+                        spawn_failure_message(" ".join(map(str, command)), e)
+                        if withheld is None
+                        else (
+                            f"Could not start {self.command or 'the tool'}: "
+                            f"{withheld}. The command never ran "
+                            f"(exit code {SPAWN_FAILURE_RETURNCODE})."
+                        )
+                    ),
                 }
-                self._process_command_response(spawn_failure)
-                self._record_spawn_failure(spawn_failure)
+                # ASH's own handling of this response can raise too (an
+                # override of the seams it calls), and this is the handler
+                # that records the failure: each step stays inside it, as the
+                # post-run arm's recorders do. A step that raised leaves its
+                # error on the response's reason, and the spawn failure's code
+                # and state land whatever it did.
+                try:
+                    self._process_command_response(spawn_failure)
+                except Exception as again:  # noqa: BLE001 -- see above
+                    self._forget_processed(spawn_failure)
+                    self.exit_code = _folded_exit_code(
+                        self, self.exit_code, SPAWN_FAILURE_RETURNCODE
+                    )
+                    spawn_failure["error"] = (
+                        f"{spawn_failure['error']}; "
+                        f"{_error_text_read_once(again, read)}"
+                    )
+                try:
+                    self._record_spawn_failure(spawn_failure)
+                except Exception as again:  # noqa: BLE001 -- see above
+                    self._spawn_failure_state(spawn_failure)
+                    spawn_failure["error"] = (
+                        f"{spawn_failure['error']}; "
+                        f"{_error_text_read_once(again, read)}"
+                    )
                 return spawn_failure
             # A run returned and ASH's own handling of its response raised. The
             # response already assembled is kept: its exit code (None for a tool
@@ -1786,23 +2333,44 @@ class PluginBase(UVToolMixin, BaseModel):
             # would let a scanner that ignores the response report PASSED.
             post_run: Dict = dict(response)
             earlier = response.get("error")
-            described = error_text(e, environment_values)
+            described = withheld or error_text(e, environment_values)
             # ``earlier`` is the response's own error text, so the joined text
             # is redacted whole: the run's error can carry a configured value
             # too, and this field is copied into the recorded post-run error,
-            # the executor's report and the results file.
+            # the executor's report and the results file. Without the values
+            # (``withheld``) nothing could redact it, and the runner keeps it
+            # raw, so it is left out and the note stands alone, as the other
+            # records of this handler do.
             post_run["error"] = text_without_values(
-                f"{earlier}; {described}" if earlier else described,
+                f"{earlier}; {described}"
+                if earlier and withheld is None
+                else described,
                 environment_values,
             )
             if not any(response.get(flag) is True for flag in RESPONSE_FLAGS):
                 post_run["post_run_error"] = True
                 post_run["spawn_failed"] = False
+                # The post-run recorder may have run already, as a no-op on the
+                # response as it was (a later recorder raised before the flag
+                # was added). It is called for the flagged copy, or its line
+                # and errors entry are never written. Not when it raised: that
+                # raise is the error this handler caught, and a second call
+                # would raise it again, with the recorder's side effects and
+                # its text on the response's reason twice.
+                if _raised_key("post_run_error") not in invoked:
+                    invoked.discard("post_run_error")
             # The tool's stderr: what the run returned, or under "write", where the
             # run returns none, its stderr log read back.
-            if not post_run.get("stderr") and (
-                stderr_log is not None
-                and _log_identity(stderr_log) not in (None, stderr_log_before)
+            # Not carried without the values: the log holds the tool's text in
+            # clear, and _carry_stderr_log takes this handler's one guarded
+            # read rather than reading the hook again.
+            if (
+                withheld is None
+                and not post_run.get("stderr")
+                and (
+                    stderr_log is not None
+                    and _log_identity(stderr_log) not in (None, stderr_log_before)
+                )
             ):
                 self._carry_stderr_log(post_run, stderr_log, environment_values)
             returncode = post_run.get("returncode")
@@ -1815,7 +2383,7 @@ class PluginBase(UVToolMixin, BaseModel):
                 # and False then recorded as an accepted-looking 0.
                 returncode = flagged_returncode(post_run)
             if is_exit_code(returncode):
-                self.exit_code = worse_exit_code(self.exit_code, returncode)
+                self.exit_code = _folded_exit_code(self, self.exit_code, returncode)
             # Recorded by the flag the response keeps, so the scan is graded by
             # it. Each recorder runs at most once for a response, the ones the
             # raise skipped run now, and under guard a recorder that raises again
@@ -1835,13 +2403,29 @@ class PluginBase(UVToolMixin, BaseModel):
                 self._post_run_error_state(post_run)
             if self._scan_kept_flag is None:
                 self._kept_flag_state(post_run)
-            if self._scan_could_not_stop is None:
+            # Unset for THIS run: a second launch whose stop failed has its own
+            # key, so an earlier run's record does not stand in for it.
+            if (
+                self._scan_could_not_stop is None
+                or _could_not_stop_run_key(post_run)
+                not in self._scan_could_not_stop_runs
+            ):
                 self._could_not_stop_state(post_run)
             return post_run
 
-    def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
-        """Generate installation commands for the specified platform/architecture as arrays of arguments"""
-        commands = []
+    def get_installation_commands(
+        self, platform: str, arch: str
+    ) -> List[List[str] | CustomCommand]:
+        """Generate installation commands for the specified platform/architecture.
+
+        Each declared dependency and uv tool install renders as an array of
+        arguments. A ``custom_install_commands`` entry is returned as the
+        :class:`CustomCommand` it was declared as, so its ``shell`` flag reaches
+        the installer (``cli.dependencies._well_formed_commands`` reads either
+        shape): returned as its bare ``args`` the flag was dropped, and a command
+        declared ``shell=True`` never ran through the shell.
+        """
+        commands: List[List[str] | CustomCommand] = []
 
         # Process standard dependencies
         if platform in self.dependencies and arch in self.dependencies[platform]:
@@ -1889,6 +2473,8 @@ class PluginBase(UVToolMixin, BaseModel):
             and arch in self.custom_install_commands[platform]
         ):
             for cmd in self.custom_install_commands[platform][arch]:
-                commands.append(cmd.args)
+                # The command itself, not its args: the installer runs a
+                # CustomCommand as declared, shell flag included.
+                commands.append(cmd)
 
         return commands

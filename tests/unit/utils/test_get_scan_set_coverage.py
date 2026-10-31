@@ -681,6 +681,8 @@ def test_get_changed_files_accepts_a_conventional_ref_and_parses_the_diff(tmp_pa
         "core.hooksPath=/dev/null",
         "-c",
         "core.quotepath=false",
+        "-c",
+        "diff.relative=false",
         "diff",
         "--name-only",
         "-z",

@@ -152,6 +152,9 @@ Then reference it in your AI tool's context or prompts.
 
 When ASH is updated, refresh the guide:
 ```bash
+# Create the directory if this is the first download
+mkdir -p ~/.kiro/steering
+
 # Re-download to the same location (overwrites existing)
 ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
 ```
@@ -224,6 +227,7 @@ command -v jq && echo "✓ jq available (recommended)" || echo "✗ jq not found
 - Provide progress indicators for large file operations
 
 **Example - Check before loading**:
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
 import time
 
@@ -288,7 +292,9 @@ else:
     "summary_stats": {
       "total": 156,
       "actionable": 61,
-      "suppressed": 95
+      "severity_counts": {
+        "suppressed": 95
+      }
     }
   }
 }
@@ -347,6 +353,7 @@ else:
 #### Strategy 1: Using jq (PREFERRED - Check Availability First)
 
 **Recommended: Use jq for all queries** (most Linux/macOS systems have it installed):
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 # Extract just summary stats
 jq '.metadata.summary_stats' ash_aggregated_results.json
@@ -356,6 +363,7 @@ jq '.scanner_results.bandit' ash_aggregated_results.json
 ```
 
 #### Strategy 2: Using Python (FALLBACK - If jq is NOT available)
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 # Extract summary stats
 python3 -c "import json; data=json.load(open('ash_aggregated_results.json')); print(json.dumps(data['metadata']['summary_stats'], indent=2))"
@@ -365,6 +373,7 @@ python3 -c "import json; print(json.load(open('ash_aggregated_results.json'))['m
 ```
 
 **Alternative: Use grep for simple extractions** (always available):
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 # Get actionable count (quick and dirty)
 grep -o '"actionable": [0-9]*' ash_aggregated_results.json | grep -o '[0-9]*'
@@ -376,6 +385,7 @@ grep -o '"critical": [0-9]*' ash_aggregated_results.json | head -1
 #### Strategy 3: Streaming JSON Parsers (For Large Files)
 
 **Python with ijson** (streaming parser, installed separately with `pip install ijson`):
+<!-- doctest: illustrative reason="needs ijson, a third-party package that ASH does not install" -->
 ```python
 import importlib
 
@@ -390,6 +400,7 @@ with open("ash_aggregated_results.json", "rb") as f:
 ```
 
 **Python standard library** (load specific sections):
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```python
 import json
 
@@ -402,12 +413,14 @@ summary = data["metadata"]["summary_stats"]
 del data  # Free memory
 
 print(f"Actionable: {summary['actionable']}")
-print(f"Critical: {summary['critical']}")
+# The per-severity counts are nested under severity_counts, not flat keys
+print(f"Critical: {summary['severity_counts']['critical']}")
 ```
 
 #### Strategy 4: Use Simpler Formats
 
 **For most use cases, use the flat JSON format instead**:
+<!-- doctest: illustrative reason="reads a report file that an earlier scan has to have written to the current directory" -->
 ```python
 # reports/ash.flat.json is much smaller and easier to parse
 import json
@@ -434,19 +447,24 @@ for finding in findings:
     "project_name": "my-service",
     "tool_version": "3.2.2",
     "summary_stats": {
+      "severity_counts": {
+        "suppressed": 95,
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 61,
+        "info": 0
+      },
+      "start": "2026-02-28T15:09:25+00:00",
+      "end": "2026-02-28T15:10:46+00:00",
+      "duration": 80.615062,
       "total": 156,
       "actionable": 61,
-      "suppressed": 95,
-      "critical": 0,
-      "high": 0,
-      "medium": 0,
-      "low": 61,
-      "info": 0,
       "passed": 9,
       "failed": 0,
       "missing": 1,
       "skipped": 0,
-      "duration": 80.615062
+      "error": 0
     }
   },
   "ash_config": { /* Configuration used for scan */ },
@@ -462,10 +480,11 @@ for finding in findings:
 #### metadata.summary_stats
 - `total`: Total findings detected
 - `actionable`: Findings that fail the scan: not suppressed, and at or above the severity threshold
-- `suppressed`: Findings marked as false positives/accepted risks
-- `critical`, `high`, `medium`, `low`, `info`: Counts by severity
+- `severity_counts.suppressed`: Findings marked as false positives/accepted risks
+- `severity_counts.critical`, `.high`, `.medium`, `.low`, `.info`: Counts by severity. The file has no flat `critical` or `suppressed` key at the `summary_stats` level; read them under `severity_counts`
 - `passed`: Scanners that completed successfully
-- `failed`: Scanners that encountered errors
+- `failed`: Scanners that found something at or above their threshold
+- `missing`, `skipped`, `error`: Scanners that did not run, were skipped, or started and failed
 - `duration`: Scan duration in seconds
 
 #### scanner_results
@@ -526,31 +545,37 @@ For one record per finding with flat field names, read `reports/ash.flat.json` i
 #### Recommended: Using jq (Check Availability First)
 
 **Get actionable findings count** (preferred method):
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 jq '.metadata.summary_stats.actionable' ash_aggregated_results.json
 ```
 
 **Get all critical/high findings** (suppressed ones included; the findings are in `sarif`):
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 jq '.sarif.runs[].results[] | select(.properties.issue_severity == "CRITICAL" or .properties.issue_severity == "HIGH") | {scanner: .properties.scanner_name, rule: .ruleId, severity: .properties.issue_severity, file: .locations[0].physicalLocation.artifactLocation.uri, line: .locations[0].physicalLocation.region.startLine, message: .message.text}' ash_aggregated_results.json
 ```
 
 **Get findings by scanner**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 jq '[.sarif.runs[].results[] | select(.properties.scanner_name == "bandit")]' ash_aggregated_results.json
 ```
 
 **Get a scanner's status and finding counts**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 jq '.scanner_results.bandit' ash_aggregated_results.json
 ```
 
 **Get non-suppressed findings**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 jq '.sarif.runs[].results[] | select((.suppressions // []) | length == 0)' ash_aggregated_results.json
 ```
 
 **Count findings by severity**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 jq '[.sarif.runs[].results[] | .properties.issue_severity] | group_by(.) | map({severity: .[0], count: length})' ash_aggregated_results.json
 ```
@@ -558,11 +583,13 @@ jq '[.sarif.runs[].results[] | .properties.issue_severity] | group_by(.) | map({
 #### Fallback: Using Python (If jq is unavailable)
 
 **Get actionable findings count**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 python3 -c "import json; print(json.load(open('ash_aggregated_results.json'))['metadata']['summary_stats']['actionable'])"
 ```
 
 **Get all critical/high findings**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```python
 import json
 
@@ -582,6 +609,7 @@ for run in data["sarif"]["runs"]:
 ```
 
 **Get findings by scanner**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```python
 import json
 
@@ -598,6 +626,7 @@ print(json.dumps(bandit_findings, indent=2))
 ```
 
 **Count findings by severity**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```python
 import json
 from collections import Counter
@@ -618,16 +647,19 @@ for severity, count in counts.items():
 #### Last Resort: Using grep/awk (If neither jq nor Python available)
 
 **Get actionable findings count** (basic but works):
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 grep -o '"actionable": [0-9]*' ash_aggregated_results.json | head -1 | grep -o '[0-9]*'
 ```
 
 **Check for critical findings**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 grep -c '"issue_severity": "CRITICAL"' ash_aggregated_results.json
 ```
 
 **List all severity levels found**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 grep -o '"issue_severity": "[A-Z]*"' ash_aggregated_results.json | sort -u
 ```
@@ -680,7 +712,10 @@ def get_actionable_count(results_file):
 ```
 
 **2. Use the flat JSON format when possible**:
+<!-- doctest: illustrative reason="reads a report file that an earlier scan has to have written to the current directory" -->
 ```python
+import json
+
 # Simpler, smaller, easier to parse
 with open("reports/ash.flat.json") as f:
     findings = json.load(f)
@@ -771,26 +806,31 @@ The CycloneDX SBOM (`reports/ash.cdx.json`) provides a complete Software Bill of
 #### Recommended: Using jq (Check Availability First)
 
 **List all components** (preferred method):
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```bash
 jq '.components[] | {name: .name, version: .version, type: .type}' ash.cdx.json
 ```
 
 **Find components with vulnerabilities**:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```bash
 jq '.vulnerabilities[] | .affects[].ref' ash.cdx.json | sort -u
 ```
 
 **Get high/critical vulnerabilities**:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```bash
 jq '.vulnerabilities[] | select(.ratings[].severity == "high" or .ratings[].severity == "critical")' ash.cdx.json
 ```
 
 **List all licenses**:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```bash
 jq '[.components[].licenses[]?.license.id] | unique' ash.cdx.json
 ```
 
 **Find dependency tree for a component**:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```bash
 jq --arg pkg "pkg:pypi/requests@2.31.0" '.dependencies[] | select(.ref == $pkg)' ash.cdx.json
 ```
@@ -798,6 +838,7 @@ jq --arg pkg "pkg:pypi/requests@2.31.0" '.dependencies[] | select(.ref == $pkg)'
 #### Fallback: Using Python (If jq is unavailable)
 
 **List all components**:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```python
 import json
 
@@ -809,6 +850,7 @@ for component in sbom.get("components", []):
 ```
 
 **Find components with vulnerabilities**:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```python
 import json
 
@@ -825,6 +867,7 @@ for ref in sorted(vulnerable_refs):
 ```
 
 **Get high/critical vulnerabilities**:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```python
 import json
 
@@ -843,6 +886,7 @@ for vuln in sbom.get("vulnerabilities", []):
 ```
 
 **List all licenses**:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```python
 import json
 
@@ -862,16 +906,19 @@ for license_id in sorted(licenses):
 #### Last Resort: Using grep (If neither jq nor Python available)
 
 **Count total components**:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```bash
 grep -c '"type": "library"' reports/ash.cdx.json
 ```
 
 **Find if specific package exists**:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```bash
 grep -i "requests" reports/ash.cdx.json
 ```
 
 **Count vulnerabilities**:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```bash
 grep -c '"id": "CVE-' reports/ash.cdx.json
 ```
@@ -1046,13 +1093,15 @@ suppressions:
    ```
 
 4. **Re-run Scan to Verify**:
+   <!-- doctest: illustrative reason="runs every enabled scanner, which needs each scanner's tool" -->
    ```bash
    ash --mode local
    ```
 
 5. **Confirm Suppression Applied**:
+   <!-- doctest: illustrative reason="reads the results of the full scan above" -->
    ```bash
-   jq '.metadata.summary_stats.suppressed' .ash/ash_output/ash_aggregated_results.json
+   jq '.metadata.summary_stats.severity_counts.suppressed' .ash/ash_output/ash_aggregated_results.json
    ```
 
 ## Common Pitfalls and Known Issues
@@ -1066,6 +1115,7 @@ suppressions:
 - Line numbers don't match (scanner may report different lines)
 
 **Solution**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 # Check exact path and rule_id from results
 jq '.sarif.runs[].results[] | select((.suppressions // []) | length == 0) | {file: .locations[0].physicalLocation.artifactLocation.uri, rule: .ruleId, line: .locations[0].physicalLocation.region.startLine}' ash_aggregated_results.json
@@ -1085,6 +1135,7 @@ jq '.sarif.runs[].results[] | select((.suppressions // []) | length == 0) | {fil
 **Issue**: Expected scanner results not in output
 
 **Check**:
+<!-- doctest: illustrative reason="reads a results file that an earlier scan has to have written to the current directory" -->
 ```bash
 # Verify scanner was enabled and executed
 jq '.metadata.validation_summary' ash_aggregated_results.json
@@ -1097,6 +1148,7 @@ jq '.scanner_results | to_entries[] | select(.value.status == "FAILED")' ash_agg
 **Issue**: Trying to extract dependencies from scan findings
 
 **Solution**: Use CycloneDX SBOM:
+<!-- doctest: illustrative reason="reads a software bill of materials that an earlier scan has to have written to the current directory" -->
 ```bash
 # Get all dependencies
 jq '.components[] | {name, version, type}' reports/ash.cdx.json
@@ -1109,6 +1161,7 @@ jq '.vulnerabilities[] | .affects[].ref' reports/ash.cdx.json
 
 ### Pattern 1: CI/CD Pipeline Gate
 
+<!-- doctest: illustrative reason="reads .ash/ash_output, which a scan has to have written first" -->
 ```python
 import json
 import sys
@@ -1118,15 +1171,17 @@ with open(".ash/ash_output/ash_aggregated_results.json") as f:
     results = json.load(f)
 
 stats = results["metadata"]["summary_stats"]
+# The per-severity counts are nested under severity_counts, not flat keys
+counts = stats["severity_counts"]
 
 # Fail on actionable critical/high findings
 # Note: Use actionable count to exclude suppressed findings (false positives)
-if stats["critical"] > 0:
-    print(f"FAILED: {stats['critical']} critical actionable findings")
+if counts["critical"] > 0:
+    print(f"FAILED: {counts['critical']} critical actionable findings")
     sys.exit(1)
 
-if stats["high"] > 5:
-    print(f"FAILED: {stats['high']} high actionable findings (threshold: 5)")
+if counts["high"] > 5:
+    print(f"FAILED: {counts['high']} high actionable findings (threshold: 5)")
     sys.exit(1)
 
 print(f"PASSED: {stats['actionable']} actionable findings (within threshold)")
@@ -1134,6 +1189,7 @@ sys.exit(0)
 ```
 
 **Using MCP Server:**
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
 import sys
 
@@ -1155,6 +1211,7 @@ if result["findings_count"] > 0:
 
 ### Pattern 2: Finding Analysis and Remediation
 
+<!-- doctest: illustrative reason="reads .ash/ash_output, which a scan has to have written first" -->
 ```python
 import json
 
@@ -1195,6 +1252,7 @@ for finding in actionable_findings:
 ```
 
 **Using MCP Server:**
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
 # Get actionable high/critical findings, one entry per finding
 results = await get_scan_results(
@@ -1217,6 +1275,7 @@ for finding in results["findings"]:
 
 ### Pattern 3: Dependency Vulnerability Report
 
+<!-- doctest: illustrative reason="reads .ash/ash_output, which a scan has to have written first" -->
 ```python
 import json
 
@@ -1266,6 +1325,7 @@ If using ASH via the Model Context Protocol (MCP) server, follow these guideline
 
 #### ❌ WRONG: Sleep and Wait (Connection Timeout)
 
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
 # This will cause connection timeout!
 result = run_ash_scan(source_dir="/path/to/project")
@@ -1280,6 +1340,7 @@ summary = get_scan_summary()  # ERROR: Connection closed
 
 #### ✅ CORRECT: Poll Progress (Keep Connection Alive)
 
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
 import time
 
@@ -1437,6 +1498,7 @@ results = await get_scan_results(output_dir=".ash/ash_output", filter_level="ful
 
 Filter by scanner, severity, or actionable status:
 
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
 # Only actionable findings: unsuppressed, at or above the severity threshold
 actionable = await get_scan_results(output_dir=".ash/ash_output", actionable_only=True)
@@ -1461,7 +1523,6 @@ high_priority_sast = await get_scan_results(
     scanners="bandit,semgrep",
     severities="critical,high",
     actionable_only=True,
-    severities="critical,high",
 )
 if results.get("success") is False:
     print(results["error"])
@@ -1658,6 +1719,7 @@ Call `suggest_suppression` with the finding's `id`, `results_path` set to the
 `expiration` defaults to 90 days from today. Leave out the `client_supplied` key it includes,
 and put the entry under `global_settings.suppressions` in the project's config:
 
+<!-- doctest: save-as=.ashrc.yaml -->
 ```yaml
 global_settings:
   suppressions:

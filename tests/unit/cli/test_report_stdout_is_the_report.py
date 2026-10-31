@@ -130,25 +130,34 @@ def _report(output_dir: Path, fmt: str, *extra: str):
 
 class TestStdoutIsTheReport:
     @pytest.mark.parametrize(
-        "fmt, reporter",
+        "fmt, reporter, content",
         [
-            ("sarif", "SarifReporter"),
-            ("markdown", "MarkdownReporter"),
-            ("csv", "CsvReporter"),
+            # A JSON format's report is read as JSON before it is written (a
+            # reporter returns its error text in place of a document it could
+            # not produce), so the tricky text rides inside a document there.
+            (
+                "sarif",
+                "SarifReporter",
+                json.dumps({"text": TRICKY}, ensure_ascii=False),
+            ),
+            ("markdown", "MarkdownReporter", TRICKY),
+            ("csv", "CsvReporter", TRICKY),
         ],
         ids=["json-route", "markdown-route", "plain-route"],
     )
     @pytest.mark.unit
-    def test_the_report_is_written_byte_for_byte(self, results_dir, fmt, reporter):
+    def test_the_report_is_written_byte_for_byte(
+        self, results_dir, fmt, reporter, content
+    ):
         target = (
             "automated_security_helper.plugin_modules.ash_builtin.reporters."
             f"{reporter}.report"
         )
-        with patch(target, return_value=TRICKY):
+        with patch(target, return_value=content):
             result = _report(results_dir, fmt)
 
         assert result.exit_code == 0, result.output
-        assert result.stdout == TRICKY
+        assert result.stdout == content
 
     @pytest.mark.unit
     def test_the_log_goes_to_stderr(self, results_dir):

@@ -12,6 +12,9 @@ being asked. These sandbox settings grant scanners access:
 * ``sandbox.read_path_scanners`` and ``sandbox.env_scanners`` let the scanners they
   name have the read paths and environment variables their own options ask for
   (see ``SandboxRequirements.read_paths_require_grant`` and ``env_requires_grant``).
+* ``sandbox.environment`` is the list of environment variables every sandboxed
+  scanner is passed; a ``NAME=value`` entry sets a variable (``LD_PRELOAD``) in all of
+  them, so it is a grant like the others.
 
 A config file can't make these grants if it is inside any git checkout, meaning a
 directory at or above it, by its own path or its resolved path, holds a git-shaped
@@ -102,7 +105,6 @@ from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
 )
 from automated_security_helper.config.untrusted_source import UntrustedSource
-from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import (
     ASH_LOGGER,
     NO_MARKUP,
@@ -151,6 +153,15 @@ def _chosen_by_environment(path: Path, chosen: Collection[Path]) -> bool:
         # strict: a link loop raises on every Python version, where
         # Path.resolve() raises on some and returns the name unresolved on others.
         return Path(os.path.realpath(path, strict=True)) in chosen
+    except (FileNotFoundError, NotADirectoryError):
+        # A name with nothing at the end of it (the config_overrides stand-in,
+        # a file that is gone) is not a link loop. It is the file the
+        # environment chose only when the place it leads to is one of them.
+        try:
+            return Path(os.path.realpath(path)) in chosen
+        except OSError:
+            # A relative name with no working directory to join it to.
+            return True
     except (OSError, RuntimeError):
         # A name that does not resolve (a link loop) may name a file the
         # environment chose, so it is shown as `<value>`.
@@ -169,6 +180,18 @@ def is_within(path: Path, root: Path) -> bool:
     return False
 
 
+def _examination_error(path: Path) -> Optional[OSError]:
+    """The error ``lstat`` of *path* raises, or None when it can be examined or
+    is provably absent (the same two answers ``_link_state`` reads as "no")."""
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as error:
+        return error
+    return None
+
+
 def _git_shaped(entry: Path) -> bool:
     """Whether ``entry`` marks a checkout.
 
@@ -181,7 +204,10 @@ def _git_shaped(entry: Path) -> bool:
     whose ``HEAD`` lookup cannot
     be answered (one the scanning user cannot search), because failing open
     there would hand the repository's own files the operator's trust -- with
-    a logged warning naming the entry.
+    a logged warning naming the entry. An entry that cannot be examined at
+    all (``lstat`` fails for a reason other than the entry being absent, as
+    when the directory holding it cannot be searched) gets the same answer
+    and the same warning.
 
     Each of those shapes counts only when ``_left_by_a_trusted_user`` says
     so: in a directory that other users can write (the system temp
@@ -208,7 +234,14 @@ def _git_shaped(entry: Path) -> bool:
     if _names_another_path(entry) or os.path.isfile(entry):
         pass
     elif not os.path.isdir(entry):
-        return False
+        # isfile and isdir answer False for an entry that cannot be examined
+        # (a parent the scanning user cannot search, a name too long to look
+        # up) as they do for one that is not there. Only an entry that is
+        # absent bounds nothing; one nobody could examine is the same
+        # unverifiable boundary as a .git directory nobody could search.
+        unverifiable = _examination_error(entry)
+        if unverifiable is None:
+            return False
     else:
         try:
             os.lstat(os.path.join(entry, "HEAD"))
@@ -244,6 +277,11 @@ def _left_by_a_trusted_user(entry: Path) -> bool:
     The directory is read with ``stat``, not ``lstat``, so one reached
     through a symlink is judged by the directory it is, not by the link.
     A directory that cannot be stat'ed keeps the shape rule.
+
+    On Windows ``stat`` reports every owner as uid 0, so any entry reads as
+    root's and counts. That is the confining side: a ``.git`` another user
+    left in a shared writable directory moves the boundary there, as it
+    would for the entry of the scanning user.
 
     The accepted cost: in a group-writable shared checkout whose ``.git``
     belongs to a teammate who is neither the scanning user nor the
@@ -522,13 +560,17 @@ class WalkJudgment:
     bound, an unreadable component, a name ``os.path.realpath`` raises on)
     rather than on anything found: the judgment is unchanged either way, but a
     sentence that explains it must then say the walk stopped instead of
-    claiming a location the walk never established. Not a bool on purpose: a
-    truth test would silently read every judgment as True, so a caller states
-    which field it reads.
+    claiming a location the walk never established. ``client_delivered`` is True
+    when the judgment is True only because an MCP client delivered the path
+    (``path_trust.scanned_tree_judgment``): it sits in no tree the walk found, so
+    a sentence must say a client delivered it, not that it is in the scanned
+    tree. Not a bool on purpose: a truth test would silently read every judgment
+    as True, so a caller states which field it reads.
     """
 
     verdict: bool
     decided: bool
+    client_delivered: bool = False
 
     def __bool__(self) -> bool:
         raise TypeError(
@@ -599,8 +641,12 @@ def checkout_judgment(path: Path) -> WalkJudgment:
     starts = [_as_named(path)]
     try:
         starts.append(Path(os.path.realpath(path)))
-    except OSError:
+    except OSError as error:
         decided = False
+        named = Path(path).absolute()
+        _warn_undecided_link_walk(
+            named, named, error.strerror or "it could not be resolved"
+        )
     starts.extend(link.parent for link in links)
     for start in starts:
         if any(_git_shaped(entry / ".git") for entry in (start, *start.parents)):
@@ -615,8 +661,13 @@ def as_named(path: Path) -> Path:
     sits. A ``..`` steps up from what the path before it resolves to: in
     ``link/..`` the kernel follows ``link`` first, which a plain textual fold of the
     path would not, and in ``src/../ops`` the result is no longer inside ``src``.
+    Where the platform removes each ``..`` before it looks at any link
+    (``_applies_parent_steps_lexically``) the path is folded textually instead,
+    as that platform opens it.
     """
     absolute = Path(path).absolute()
+    if _applies_parent_steps_lexically():
+        absolute = Path(os.path.normpath(absolute))
     named = Path(absolute.anchor)
     for part in absolute.parts[1:]:
         if part == "..":
@@ -753,6 +804,10 @@ def _walk_links(path: Path) -> Tuple[List[Path], bool]:
             )
             _warn_undecided_link_walk(absolute, candidate, reason)
             return links, False
+        if _applies_parent_steps_lexically():
+            # A target's own `..` is removed before any link in it is looked at,
+            # as the name's was above.
+            target = Path(os.path.normpath(target))
         if target.is_absolute():
             resolved = Path(target.anchor)
             rest = list(target.parts[1:]) + rest
@@ -766,9 +821,13 @@ def _as_named(path: Path) -> Path:
 
     Every other component stays as spelled, so a symlink is judged by where it
     sits. A ``..`` steps up from what the path before it resolves to: in
-    ``link/..`` the kernel follows ``link`` first.
+    ``link/..`` the kernel follows ``link`` first. Where the platform removes
+    each ``..`` before it looks at any link
+    (``_applies_parent_steps_lexically``) the path is folded textually instead.
     """
     absolute = Path(path).absolute()
+    if _applies_parent_steps_lexically():
+        absolute = Path(os.path.normpath(absolute))
     named = Path(absolute.anchor)
     for part in absolute.parts[1:]:
         if part == "..":
@@ -931,7 +990,16 @@ def scanned_checkouts(scan_root: Path) -> List[Path]:
     the superproject around it too. Empty for a scan root outside every checkout.
     """
     found: List[Path] = []
-    for start in (as_named(scan_root), Path(os.path.realpath(scan_root))):
+    # Every name the scan root has, as ``scanned_trees`` takes them: as given,
+    # resolved, and through ``$PWD``; without the shell's name, ``cd vendor &&
+    # ash scan`` found no superproject above the root the kernel names, and a
+    # path inside it that the other trust checks count as the scanned tree was
+    # honored as the operator's.
+    for start in (
+        as_named(scan_root),
+        Path(os.path.realpath(scan_root)),
+        *_logical_paths(scan_root),
+    ):
         outermost = None
         for candidate in (start, *start.parents):
             if _git_shaped(candidate / ".git"):
@@ -1026,7 +1094,7 @@ def scanned_trees(scan_root: Optional[Path]) -> List[Path]:
         return []
     trees = []
     for start in (
-        Path(os.path.abspath(scan_root)),
+        as_named(scan_root),
         Path(os.path.realpath(scan_root)),
         *_logical_paths(scan_root),
     ):
@@ -1114,11 +1182,15 @@ def tree_holding(
     say which tree to move the file out of. The file is judged by its own path
     and by each path in ``names`` it was reached by
     (``config_sources.ResolvedConfigDocument.names``), and each of those at
-    every symlink on the way (``utils/link_locations``).
+    every link on the way, found by this module's own walk (``_walk_links``),
+    which counts a Windows junction as the link it is and says so once when it
+    stops before the end; ``Path.is_symlink`` is False for a junction, and a
+    walk that stepped through one as a directory never saw the tree it sits in.
     """
     trees = list(trees)
     for name in (path, *(names or {}).get(path, ())):
-        places = [name, *(link.parent for link in link_locations(name))]
+        links, _decided = _walk_links(name)
+        places = [name, *(link.parent for link in links)]
         for tree in trees:
             if any(is_within(place, tree) for place in places):
                 return tree
@@ -1272,11 +1344,14 @@ def confinement_membership(
     )
     if client_supplied:
         return joined_membership(head, "so that content wrote it")
-    if outside and not undecided:
+    if undecided:
+        # The walk found no location, so no one is said to have written it.
+        return joined_membership(head, "so that repository may have written it")
+    if outside:
         return joined_membership(
             head, "so someone other than the operator may have written it"
         )
-    if undecided or mixed or checkout_membership or given_root:
+    if mixed or checkout_membership or given_root:
         return joined_membership(head, "so that repository wrote it")
     return joined_membership(head, "so the repository being scanned wrote it")
 
@@ -1368,7 +1443,12 @@ def confine_sandbox_grants(
     ignored = []
     if sandbox.network_scanners != trusted.network_scanners:
         ignored.append("sandbox.network_scanners")
-    for key in ("extra_read_paths", "read_path_scanners", "env_scanners"):
+    for key in (
+        "extra_read_paths",
+        "read_path_scanners",
+        "env_scanners",
+        "environment",
+    ):
         if list(getattr(sandbox, key)) != list(getattr(trusted, key)):
             ignored.append(f"sandbox.{key}")
     if trusted.mode != "off" and sandbox.mode != trusted.mode:
@@ -1387,6 +1467,7 @@ def confine_sandbox_grants(
     sandbox.extra_read_paths = list(trusted.extra_read_paths)
     sandbox.read_path_scanners = list(trusted.read_path_scanners)
     sandbox.env_scanners = list(trusted.env_scanners)
+    sandbox.environment = list(trusted.environment)
     sandbox.network_limit = list(limit) if limit is not None else None
     if ignored:
         if source is not None and not source.located:

@@ -9,6 +9,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    FrozenSet,
     Iterable,
     List,
     Optional,
@@ -82,11 +83,84 @@ def report_missing_setting(
     )
 
 
+def stripped_or_none(value: Optional[str]) -> Optional[str]:
+    """A value read from the environment without the whitespace around it, or None
+    when nothing is left.
+
+    For an AWS reporter option's default factory, which reads each variable it
+    names with ``os.environ.get`` itself (the reference documentation is built
+    from those reads). Pydantic runs no validator on a default, so a variable
+    set to a space would otherwise be the default: it hides the variable behind
+    it in the chain (``AWS_DEFAULT_REGION``), passes the missing-setting check
+    and reaches botocore as a region.
+    """
+    return (value or "").strip() or None
+
+
+def blank_is_unset(value: Any) -> Any:
+    """An empty or blank string is no value, whichever way it arrives; any other
+    value as given.
+
+    For an AWS reporter's option validator (``mode="before"``): the default
+    factories read the environment that way (``stripped_or_none``), and a config
+    file (``aws_profile: "${AWS_PROFILE}"`` with the variable empty) or
+    ``--config-overrides`` reaches the field through the validator instead.
+    Mapped to None, a blank profile is no profile (botocore reads "" as a
+    profile named "" and raises ProfileNotFound), and a blank region or name is
+    named as the missing setting rather than refused by the region pattern or
+    sent to AWS.
+    """
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def settings_missing(
+    reporter_key: str,
+    options: Any,
+    required: Sequence[Tuple[str, Sequence[str]]],
+) -> bool:
+    """Name each of the ``required`` options of ``options`` that is unset or
+    empty, with ``report_missing_setting``; True when one is.
+
+    ``required`` is ``(option, environment variables its default is read from)``
+    pairs. ``not`` rather than ``is None``: an empty name stays out of the AWS
+    call should one ever get through ``blank_is_unset``.
+    """
+    missing = False
+    for option, environment in required:
+        if not getattr(options, option):
+            report_missing_setting(reporter_key, option, environment)
+            missing = True
+    return missing
+
+
 #: The most retries an AWS reporter's options allow, and the longest delay in
 #: seconds between two attempts, so no config makes a reporter keep calling an
 #: API that refuses it for longer than that.
 MAX_RETRIES = 10
 MAX_RETRY_DELAY_SECONDS = 60
+
+#: Every region name AWS publishes, for the ``aws_region`` option of each AWS
+#: reporter: the two-letter areas plus mx and the eusc, us-isof and eu-isoe
+#: partitions, with an optional country segment (eusc-de-east-1). One pattern
+#: for the three reporters, so a region one accepts is never a configuration
+#: error (exit 3) for another. A value refused here is refused as a
+#: configuration error, so the pattern errs wide on NAMES. It is anchored at
+#: both ends: a pydantic ``pattern`` is a search, not a whole-value match, so an
+#: unanchored pattern admitted any value that merely holds a region name
+#: ("us-east-1.attacker.example", "us-east-1/x", a trailing newline), and the
+#: value ends up in an endpoint hostname. The engine of record is pydantic-core's
+#: (rust-regex): there a non-multiline "$" matches at the end of the value only,
+#: so the trailing newline is refused, and "$" is the one end anchor rust-regex
+#: and Python's ``re`` both read (rust-regex has "\z", ``re`` has "\Z", neither
+#: has the other's). Compiled with ``re``, "$" would also match before a final
+#: newline; no site does that today, and a site that did would need ``re.fullmatch``.
+AWS_REGION_PATTERN = (
+    r"^(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)"
+    r"(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)"
+    r"-\d{1,2}$"
+)
 
 
 def check_retry_delays(options: Any) -> Any:
@@ -305,6 +379,10 @@ def retry_with_backoff(
 #: failure of the SDK.
 UNEXPECTED_LISTING_ERROR = "unexpected error"
 
+#: The ``modelLifecycle.status`` values of a foundation model Bedrock serves:
+#: ACTIVE, and LEGACY for a model on its way out that still answers.
+SERVED_LIFECYCLES = frozenset({"ACTIVE", "LEGACY"})
+
 
 def _botocore_error_name(error: BaseException) -> Optional[str]:
     """The class name of a failure botocore raised on the client side (a missing
@@ -340,6 +418,30 @@ class AvailableModels(List[Dict[str, Any]]):
     #: caller that names the failure again logs it quietly, so one failure is one
     #: warning.
     reported: bool = False
+    #: How the inference profile listing failed while the foundation-model
+    #: listing succeeded: the error code, the botocore class name, or
+    #: ``UNEXPECTED_LISTING_ERROR``; None when it succeeded or when the whole
+    #: listing failed (then ``failed`` says so). The list then holds the
+    #: on-demand models, which the caller can use, and no model reachable only
+    #: through a profile, so a model missing from it may still exist.
+    profile_listing_failure: Optional[str] = None
+    #: ``failure_is_transient`` of the profile listing's error.
+    profile_listing_transient: bool = False
+    #: Whether the profile listing failed on the client side (a botocore error
+    #: with no service answer), as ``ModelCheck.listing_client_side`` reads it.
+    profile_listing_client_side: bool = False
+    #: Whether the profile listing's failure was logged when this list was
+    #: made (``get_available_models`` logs it once, at warning the first time a
+    #: walk sees it and at debug when the walk's wrapper hands it back). A
+    #: check that names the failure again for one candidate logs it at debug,
+    #: so one failed profile listing is one warning, not one per candidate.
+    profile_listing_reported: bool = False
+    #: The ``modelId`` of every foundation model the foundation-model listing
+    #: names as reachable through an inference profile. When the profile listing
+    #: failed, a model id with no area prefix is a candidate for a profile only
+    #: if it is one of these; any other such id can only be an on-demand model,
+    #: and the on-demand list already says whether it is there.
+    profile_routed_model_ids: FrozenSet[str] = frozenset()
 
     def __init__(
         self,
@@ -349,6 +451,11 @@ class AvailableModels(List[Dict[str, Any]]):
         reported: bool = False,
         transient: Optional[bool] = None,
         failure_label: Optional[str] = None,
+        profile_listing_failure: Optional[str] = None,
+        profile_listing_transient: bool = False,
+        profile_listing_client_side: bool = False,
+        profile_listing_reported: bool = False,
+        profile_routed_model_ids: Iterable[str] = (),
     ):
         super().__init__(models)
         self.failed = failed
@@ -360,6 +467,11 @@ class AvailableModels(List[Dict[str, Any]]):
             if transient is None
             else transient
         )
+        self.profile_listing_failure = profile_listing_failure
+        self.profile_listing_transient = profile_listing_transient
+        self.profile_listing_client_side = profile_listing_client_side
+        self.profile_listing_reported = profile_listing_reported
+        self.profile_routed_model_ids = frozenset(profile_routed_model_ids)
 
 
 def failure_is_transient(
@@ -529,6 +641,80 @@ class ListingsOnce:
         return listing
 
 
+def _inference_profile_summaries(
+    bedrock_client: Any, summaries: Optional[List[Dict[str, Any]]] = None
+) -> List[Dict[str, Any]]:
+    """Every inference profile summary the control plane lists, over every page.
+
+    ``ListInferenceProfiles`` pages its answer and hands back ``nextToken`` while
+    more remain; the first call carries no token, so a client double that takes
+    no arguments answers it as before. A page that hands back a token the walk
+    was already given stops it with an error, so a control plane that answers
+    the same page twice cannot make this loop without end, and the caller
+    records the listing as failed: the pages never read may hold profiles.
+
+    The summaries are appended to ``summaries`` as each page is read, so a
+    caller that hands in its own list keeps the pages read before a later page
+    raised (a throttle on page three loses page three, not pages one and two).
+
+    The call carries no ``typeEquals``. The API reference does not say which
+    profile types an unfiltered listing returns, so an application inference
+    profile ARN (a profile a user created) may not be listed, and a model
+    configured by that ARN is then reported as not found although Converse
+    takes it. That case is outside what this check can establish.
+    """
+    if summaries is None:
+        summaries = []
+    kwargs: Dict[str, Any] = {}
+    seen_tokens: Set[str] = set()
+    while True:
+        page = bedrock_client.list_inference_profiles(**kwargs)
+        token = page.get("nextToken")
+        if token and token in seen_tokens:
+            # Before the page is kept: it is the page already read, again.
+            raise RuntimeError(
+                "ListInferenceProfiles handed back a page token it had already "
+                "given; the listing was stopped"
+            )
+        summaries.extend(page.get("inferenceProfileSummaries", []) or [])
+        if not token:
+            return summaries
+        seen_tokens.add(token)
+        kwargs = {"nextToken": token}
+
+
+def _listing_failure_name(error: BaseException) -> str:
+    """How a failed listing is named: its service code, else the class name of a
+    botocore error, else ``UNEXPECTED_LISTING_ERROR``."""
+    kept_code = getattr(error, "failure_code", None)
+    kept_label = getattr(error, "failure_label", None)
+    if isinstance(error, KeptListingFailure):
+        return kept_code or kept_label or UNEXPECTED_LISTING_ERROR
+    return (
+        _service_error_code(error)
+        or _botocore_error_name(error)
+        or UNEXPECTED_LISTING_ERROR
+    )
+
+
+def _note_profile_failure_beside(
+    profile_failure: Optional[BaseException], values: Iterable[str]
+) -> None:
+    """When both listings failed, the foundation listing's failure is the
+    warning; the profile listing's, which would otherwise be dropped, is named
+    beside it at debug so ash.log says which calls failed."""
+    if profile_failure is None:
+        return
+    ASH_LOGGER.debug(
+        text_without_values(
+            "The inference profile listing had failed too "
+            f"({_listing_failure_name(profile_failure)}): "
+            f"{error_text(profile_failure, values)}",
+            values,
+        )
+    )
+
+
 def get_available_models(
     bedrock_client: Any, values: Iterable[str] = ()
 ) -> AvailableModels:
@@ -538,31 +724,69 @@ def get_available_models(
         List of available models with their details, including inference profile ARNs for models
         that only support inference profiles. A listing that failed answers an
         empty list whose ``failed`` flag is set.
+
+    The two listings are asked apart. A failed ``ListInferenceProfiles`` (a
+    principal allowed ``ListFoundationModels`` but not that call, a throttle on
+    that call alone) used to discard the foundation-model list with it, so every
+    on-demand model the caller could list and invoke read as "No available
+    models found in the current region". Now the on-demand models are answered
+    and the profile listing's failure is carried on ``profile_listing_failure``,
+    so a model missing from the list can be told as unchecked rather than as not
+    found. The profile listing is read over every page, and a model routed by
+    more than one profile (a geographic one and a global one, say) is listed
+    once per profile, each entry carrying its profile's ARN.
     """
     values = list(value_tuple(values))
+    profile_failure: Optional[BaseException] = None
+    profile_summaries: List[Dict[str, Any]] = []
     try:
         final_model_list = []
-        inference_profiles = bedrock_client.list_inference_profiles()
-        model_profile_map = {}
-        for profile in inference_profiles.get("inferenceProfileSummaries", []):
+        model_profile_map: Dict[str, List[Dict[str, Any]]] = {}
+        try:
+            _inference_profile_summaries(bedrock_client, profile_summaries)
+        except Exception as error:
+            # Kept for the answer below: the foundation-model listing is still
+            # asked (before, this failure failed the whole call and that listing
+            # was never asked), and only when it answers is this failure the
+            # listing's own news. When both fail, the foundation listing's
+            # failure is the one warned and this one is named beside it at
+            # debug, so one failed control plane is one warning. The pages read
+            # before the failure are kept: a model one of their profiles routes
+            # is listed, and only the profiles on the pages never read are not.
+            profile_failure = error
+        for profile in profile_summaries:
             for model in [
                 item
                 for item in profile.get("models", [])
                 if item.get("modelArn", None) is not None
             ]:
-                model_profile_map[model["modelArn"]] = profile
+                model_profile_map.setdefault(model["modelArn"], []).append(profile)
         ASH_LOGGER.debug("Fetching available foundation models...")
-        # Get foundation models
+        # Get foundation models. A LEGACY model is one Bedrock still serves
+        # while it is being retired; it answers Converse as an ACTIVE one does,
+        # so it is listed too, and an operator who configured it is not told it
+        # is unavailable.
         response = bedrock_client.list_foundation_models()
         active_models = [
             item
             for item in response.get("modelSummaries", [])
-            if item.get("modelLifecycle", {}).get("status", "NA") == "ACTIVE"
+            if item.get("modelLifecycle", {}).get("status", "NA") in SERVED_LIFECYCLES
             and "TEXT" in item.get("inputModalities", [])
             and "TEXT" in item.get("outputModalities", [])
         ]
-        ASH_LOGGER.debug(f"Found {len(active_models)} active foundation models")
+        ASH_LOGGER.debug(f"Found {len(active_models)} served foundation models")
+        profile_routed_model_ids: Set[str] = set()
         for model in active_models:
+            # A LEGACY model answers while it is being retired, but Bedrock may
+            # refuse it to an account that has not used it recently
+            # (https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle.html),
+            # so its entries say so: the dependency check does not count a
+            # Legacy fallback as available.
+            legacy = (
+                {"legacy": True}
+                if model.get("modelLifecycle", {}).get("status") == "LEGACY"
+                else {}
+            )
             if "ON_DEMAND" in model.get("inferenceTypesSupported", []):
                 final_model_list.append(
                     {
@@ -571,25 +795,83 @@ def get_available_models(
                         "modelArn": model.get("modelArn", "unknown"),
                         "providerName": model.get("providerName", "unknown"),
                         "inferenceType": "ON_DEMAND",
+                        **legacy,
                     }
                 )
             if "INFERENCE_PROFILE" in model.get("inferenceTypesSupported", []):
-                if model.get("modelArn", "unknown") not in model_profile_map:
-                    # Unable to find the inference profile ID!
-                    continue
-                final_model_list.append(
-                    {
-                        "modelId": model_profile_map[model.get("modelArn", "unknown")][
-                            "inferenceProfileId"
-                        ],
-                        "modelName": model.get("modelName", "unknown"),
-                        "modelArn": model.get("modelArn", "unknown"),
-                        "providerName": model.get("providerName", "unknown"),
-                        "inferenceType": "INFERENCE_PROFILE",
-                    }
-                )
+                profile_routed_model_ids.add(model.get("modelId", "unknown"))
+                # One entry per profile that routes the model: a model under a
+                # geographic profile and a global one is reachable by either
+                # ID, so neither is reported as not found.
+                for profile in model_profile_map.get(
+                    model.get("modelArn", "unknown"), []
+                ):
+                    final_model_list.append(
+                        {
+                            "modelId": profile["inferenceProfileId"],
+                            "modelName": model.get("modelName", "unknown"),
+                            "modelArn": model.get("modelArn", "unknown"),
+                            "inferenceProfileArn": profile.get("inferenceProfileArn"),
+                            "providerName": model.get("providerName", "unknown"),
+                            "inferenceType": "INFERENCE_PROFILE",
+                            **legacy,
+                        }
+                    )
 
-        return AvailableModels(final_model_list)
+        if profile_failure is None:
+            return AvailableModels(final_model_list)
+        failure = _listing_failure_name(profile_failure)
+        # Named with the foundation listing's own words, so a reader of ash.log
+        # finds one shape of line for a failed listing; the suffix says which
+        # call failed and what the list still holds.
+        if profile_summaries:
+            suffix = (
+                f"; the inference profile listing failed after {len(profile_summaries)} "
+                "profile(s) were read, so models reachable only through an "
+                "inference profile on the pages it never read are not listed"
+            )
+        else:
+            suffix = (
+                "; the inference profile listing failed, so models reachable only "
+                "through an inference profile are not listed"
+            )
+        if isinstance(profile_failure, KeptListingFailure):
+            # Reported when it first came: this call only reads it.
+            log = ASH_LOGGER.debug
+            transient = profile_failure.transient
+            client_side = profile_failure.failure_code is None and bool(
+                profile_failure.failure_label
+            )
+            described = f"the listing failed earlier in this walk ({failure}){suffix}"
+        elif isinstance(profile_failure, botocore.exceptions.ClientError):
+            log = ASH_LOGGER.warning
+            transient = failure_is_transient(failure, profile_failure)
+            client_side = False
+            message = profile_failure.response.get("Error", {}).get("Message")
+            described = (
+                f"Bedrock API error when getting available models "
+                f"({failure}): {message}{suffix}"
+            )
+        else:
+            log = ASH_LOGGER.warning
+            transient = failure_is_transient(None, profile_failure)
+            client_side = bool(_botocore_error_name(profile_failure))
+            described = (
+                "Unexpected error getting available models: "
+                f"{error_text(profile_failure, values)}{suffix}"
+            )
+        log(text_without_values(described, values))
+        return AvailableModels(
+            final_model_list,
+            profile_listing_failure=failure,
+            profile_listing_transient=transient,
+            profile_listing_client_side=client_side,
+            # Logged just above (at warning, or at debug for a failure the
+            # walk's wrapper already reported): a check that names it for one
+            # candidate logs it quietly.
+            profile_listing_reported=True,
+            profile_routed_model_ids=profile_routed_model_ids,
+        )
     except KeptListingFailure as kept:
         # The failure was reported when it first came; this call only reads it.
         return AvailableModels(
@@ -609,6 +891,7 @@ def get_available_models(
                 values,
             )
         )
+        _note_profile_failure_beside(profile_failure, values)
         return AvailableModels(
             failed=True,
             failure_code=error_code,
@@ -619,6 +902,7 @@ def get_available_models(
         ASH_LOGGER.warning(
             f"Unexpected error getting available models: {error_text(e, values)}"
         )
+        _note_profile_failure_beside(profile_failure, values)
         return AvailableModels(
             failed=True,
             reported=True,
@@ -627,16 +911,132 @@ def get_available_models(
         )
 
 
+#: The area prefix of the cross-region inference profiles the fallback chains
+#: are written with. A configured model under another area is looked up by its
+#: family as its ``us.`` spelling, and its candidates are answered under its
+#: own area; which spellings of a candidate the calling region lists is the
+#: walk's question (``candidate_spellings``), never this table's.
+_CHAIN_AREA = "us"
+
+#: The model every chain ends in, and the fallback for a model of no known
+#: family, under the configured model's area.
+_DEFAULT_FALLBACK = "amazon.nova-pro-v1:0"
+
+#: The cross-region inference profile area whose source regions a region's own
+#: name prefix places it in: a request from us-gov-west-1 may name ``us-gov.``
+#: profiles, one from eu-west-1 ``eu.`` profiles, one from ap-northeast-1
+#: ``apac.`` profiles, one from us-east-1 ``us.`` profiles. Longest prefix
+#: first (``us-gov-`` before ``us-``). A region of no row here (ca-, sa-, me-,
+#: af-, il-, mx-) has no geography spelling of its own in this table; its
+#: candidates are checked under their own and the ``us.`` spelling only. Which
+#: profiles a source region lists is what ListInferenceProfiles from that
+#: region answers, and the walk reads that listing; this table only names the
+#: spellings worth asking it about
+#: (https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html:
+#: "Don't rely on the geographic prefix in an inference profile ID alone").
+_REGION_AREAS = (
+    ("us-gov-", "us-gov"),
+    ("us-", "us"),
+    ("eu-", "eu"),
+    ("ap-", "apac"),
+)
+
+
+def region_area(region: Optional[str]) -> Optional[str]:
+    """The inference-profile area a region's own name prefix places it in
+    (``_REGION_AREAS``), or None for a region of no known geography or no
+    region at all. Read case-insensitively."""
+    if not region:
+        return None
+    lowered = region.lower()
+    for prefix, area in _REGION_AREAS:
+        if lowered.startswith(prefix):
+            return area
+    return None
+
+
+def candidate_spellings(model_id: str, region: Optional[str] = None) -> List[str]:
+    """The spellings of one chain candidate worth checking against the calling
+    region's listing, in the order to check them: the candidate as the chain
+    spells it (the configured model's own area), then the same model under the
+    region's own geography (``region_area``), then under ``us.``, the area the
+    chains are written in; each spelling once. A model id with no area (an
+    on-demand id) has one spelling.
+
+    Why more than one: a profile's geographic prefix says nothing about where
+    it can be called from (the Bedrock docs say so in as many words), so a
+    ``global.`` configured model in us-east-1 needs the ``us.`` spelling of
+    its candidates (us-east-1 lists those), a ``us-gov.`` one in GovCloud needs
+    the ``us-gov.`` spelling (GovCloud lists no ``us.`` profile), and an
+    ``eu.`` one called from us-east-1 needs ``us.`` too. The listing, read once
+    per walk, decides; a spelling it does not name costs one dictionary lookup.
+    """
+    area = _profile_area(model_id)
+    if area is None:
+        return [model_id]
+    rest = model_id[len(area) + 1 :]
+    spellings = [model_id]
+    for other in (region_area(region), _CHAIN_AREA):
+        if other is None or other == area.lower():
+            continue
+        spelling = f"{other}.{rest}"
+        if spelling not in spellings:
+            spellings.append(spelling)
+    return spellings
+
+
+def _profile_area(model_id: str) -> Optional[str]:
+    """The area prefix of a cross-region inference profile id
+    (``eu.anthropic.claude-...`` names ``eu``), or None for a model id with
+    none (``anthropic.claude-...``, ``amazon.titan-...``). A profile id is
+    ``<area>.<provider>.<model>`` and a model id ``<provider>.<model>``, and no
+    provider or model name holds a dot, so the id with two dots has an area."""
+    area, _, rest = model_id.partition(".")
+    if not area or "." not in rest:
+        return None
+    return area
+
+
 def get_fallback_model(current_model_id: str) -> Optional[str]:
     """
     Get a fallback model ID if the current model is unavailable.
+
+    The chains are written as the ``us.`` cross-region profiles. A model under
+    another area (``eu.anthropic.claude-...``, ``us-gov.anthropic...``,
+    ``global.anthropic...``) is looked up as its ``us.`` spelling, so its
+    family's chain is found whatever the area, and its fallback is answered
+    under its own area (``eu.anthropic.claude-...``): the operator's geography
+    is the first spelling to try. Whether the calling region lists that
+    spelling, its own geography's, or the ``us.`` one is the walk's question,
+    answered by the listing through ``candidate_spellings``; this function
+    only names the next candidate. The area is read case-insensitively and
+    the candidates carry the area's own spelling (``US.anthropic...`` gets
+    ``us.amazon.nova-...``, never ``US.amazon...``, which Converse does not
+    know).
 
     Args:
         current_model_id: The current model ID that failed
 
     Returns:
-        A fallback model ID or None if no suitable fallback is available
+        A fallback model ID: the next model of the current model's chain, the
+        chain's first model when the current one is not in it, or the default
+        model (``_DEFAULT_FALLBACK``) for a model of no known family and for a
+        chain's last member, under the current model's area. The walk ends a
+        chain on a repeat, never on None here.
     """
+    area = _profile_area(current_model_id)
+    area_lower = area.lower() if area is not None else None
+    lookup = current_model_id
+    if area is not None:
+        lookup = f"{_CHAIN_AREA}.{current_model_id[len(area) + 1 :]}"
+
+    def under_area(model: str) -> str:
+        if area_lower is None or area_lower == _CHAIN_AREA:
+            return model
+        if model.startswith(f"{_CHAIN_AREA}."):
+            return f"{area_lower}.{model[len(_CHAIN_AREA) + 1 :]}"
+        return model
+
     # Define fallback chains for different model families
     fallback_chains = {
         "anthropic.claude-": [
@@ -673,20 +1073,20 @@ def get_fallback_model(current_model_id: str) -> Optional[str]:
 
     # Find the appropriate fallback chain
     for prefix, models in fallback_chains.items():
-        if current_model_id.startswith(prefix):
+        if lookup.startswith(prefix):
             # Find the current model in the chain
             try:
-                current_index = models.index(current_model_id)
+                current_index = models.index(lookup)
                 # Return the next model in the chain if available
                 if current_index < len(models) - 1:
-                    return models[current_index + 1]
+                    return under_area(models[current_index + 1])
             except ValueError:
                 # If the current model isn't in our predefined list,
                 # return the first model in the chain
-                return models[0]
+                return under_area(models[0])
 
     # If no specific fallback chain is found, return a default model
-    return "us.amazon.nova-pro-v1:0"
+    return under_area(f"{_CHAIN_AREA}.{_DEFAULT_FALLBACK}")
 
 
 class _ModelCheckType(type):
@@ -704,11 +1104,17 @@ class _ModelCheckType(type):
         transient: bool = False,
         listing_failure: Optional[str] = None,
         listing_client_side: bool = False,
+        model_id: Optional[str] = None,
+        spelling_specific: bool = False,
+        legacy: bool = False,
     ) -> Any:
         check = super().__call__((is_valid, reason))
         check.transient = transient
         check.listing_failure = listing_failure
         check.listing_client_side = listing_client_side
+        check.model_id = model_id
+        check.spelling_specific = spelling_specific
+        check.legacy = legacy
         return check
 
 
@@ -738,11 +1144,32 @@ class ModelCheck(Tuple[bool, Optional[str]], metaclass=_ModelCheckType):  # noqa
     missing credential or region, a refused parameter, a failed connection):
     ``listing_failure`` then holds the error's class name. It is False for a
     service's own answer, a denied call included.
+
+    ``model_id`` is set on a True: the model id as the listing spells it, which
+    is the id to call Converse with. It differs from the id that was checked
+    when the check matched it case-insensitively; the check used to answer
+    True then and the caller kept calling with its own spelling, which the
+    service does not know. It is None on a False.
+
+    ``spelling_specific`` is set on a False that is about the spelling that was
+    checked and no other: the inference profile listing failed (it may have
+    been read in part), so a profile id the check did not find may still be
+    listed under another spelling of the same model. A caller that tries more
+    than one spelling goes on to the next one after it; every other False
+    holds for all of them.
+
+    ``legacy`` is set on a True for a model the foundation-model listing marks
+    LEGACY: Bedrock still serves it, but may refuse it to an account that has
+    not used it recently, so a caller that is choosing a model it has not
+    called does not count it as available.
     """
 
     transient: bool
     listing_failure: Optional[str]
     listing_client_side: bool
+    model_id: Optional[str]
+    spelling_specific: bool
+    legacy: bool
 
     if TYPE_CHECKING:
         # The call shape, for a type checker only. At run time the metaclass's
@@ -763,6 +1190,9 @@ class ModelCheck(Tuple[bool, Optional[str]], metaclass=_ModelCheckType):  # noqa
             transient: bool = False,
             listing_failure: Optional[str] = None,
             listing_client_side: bool = False,
+            model_id: Optional[str] = None,
+            spelling_specific: bool = False,
+            legacy: bool = False,
         ) -> Self: ...
 
 
@@ -788,6 +1218,91 @@ def check_listing_client_side(check: Any) -> bool:
     for a service's own answer, for any other answer, and for a pair a caller
     built."""
     return bool(getattr(check, "listing_client_side", False))
+
+
+def check_model_id(check: Any) -> Optional[str]:
+    """The model id a True ``validate_bedrock_model`` answer names, as the
+    listing spells it: the id to call Converse with. None for a False, and for
+    a pair a caller built."""
+    model_id = getattr(check, "model_id", None)
+    return model_id if isinstance(model_id, str) and model_id else None
+
+
+def check_is_spelling_specific(check: Any) -> bool:
+    """Whether a ``validate_bedrock_model`` answer is a False about the spelling
+    checked alone: the profile listing failed, so another spelling of the same
+    model may be listed on a page that was read. False for any other answer,
+    and for a pair a caller built."""
+    return bool(getattr(check, "spelling_specific", False))
+
+
+def check_is_legacy(check: Any) -> bool:
+    """Whether a True ``validate_bedrock_model`` answer names a model the
+    listing marks LEGACY. False for any other answer, and for a pair a caller
+    built."""
+    return bool(getattr(check, "legacy", False))
+
+
+def _may_be_routed_by_a_profile(model_id: str, available_models: Any) -> bool:
+    """Whether a profile could carry ``model_id``, so that a failed profile
+    listing leaves it unchecked. A cross-region profile id has an area prefix
+    (``eu.anthropic...``) and an ARN may name a profile. An id with neither is
+    reachable through a profile only when the foundation-model listing names
+    it as profile-routed; any other such id is an on-demand model, and the
+    on-demand list already said it is not there."""
+    if model_id.startswith("arn:") or _profile_area(model_id) is not None:
+        return True
+    return model_id in getattr(available_models, "profile_routed_model_ids", ())
+
+
+def _listed_as_legacy(available_models: Any, identifier: str) -> bool:
+    """Whether a listed entry that ``identifier`` names is marked LEGACY."""
+    lowered = identifier.lower()
+    return any(
+        model.get("legacy")
+        and (
+            str(model.get("modelId", "")).lower() == lowered
+            or identifier in (model.get("modelArn"), model.get("inferenceProfileArn"))
+        )
+        for model in available_models
+    )
+
+
+def _profile_listing_failed(
+    available_models: Any, shown: str, values: Sequence[str]
+) -> ModelCheck:
+    """The check's answer for a model the on-demand list does not name while
+    the inference profile listing failed: a listing failure about the check
+    (the model may be routed by a profile nobody could list), named by how that
+    listing failed, never "not found in available models".
+
+    Logged at debug when the listing already reported the failure
+    (``profile_listing_reported``), so a walk over a chain of profile models
+    logs one failed listing once, not once per candidate; at warning only for a
+    list that never reported it."""
+    failure = getattr(available_models, "profile_listing_failure", None)
+    reason = (
+        f"Model {shown} is not an on-demand model in this region and the "
+        f"inference profile listing failed: {failure}"
+    )
+    log = (
+        ASH_LOGGER.debug
+        if getattr(available_models, "profile_listing_reported", False)
+        else ASH_LOGGER.warning
+    )
+    log(text_without_values(reason, values))
+    return ModelCheck(
+        False,
+        text_without_values(reason, values),
+        transient=bool(getattr(available_models, "profile_listing_transient", False)),
+        listing_failure=failure,
+        listing_client_side=bool(
+            getattr(available_models, "profile_listing_client_side", False)
+        ),
+        # The listing may have been read in part: this spelling is not on the
+        # pages that were read, and another spelling of the model may be.
+        spelling_specific=True,
+    )
 
 
 def validate_bedrock_model(
@@ -860,6 +1375,10 @@ def validate_bedrock_model(
                     # service answered.
                     listing_client_side=not code and bool(failure_label),
                 )
+            if getattr(available_models, "profile_listing_failure", None):
+                # No on-demand model, and the profile listing failed: the
+                # region may still route the model through a profile.
+                return _profile_listing_failed(available_models, shown, values)
             # An empty list from a listing that succeeded is a region with no
             # models, which is about the model.
             ASH_LOGGER.warning("No available models found in the current region")
@@ -867,13 +1386,34 @@ def validate_bedrock_model(
 
         # Extract model IDs from the available models
         available_model_ids = [model.get("modelId") for model in available_models]
+        # Converse takes a model's ARN and an inference profile's ARN as a model
+        # identifier too, so an ARN the listing carries names a listed model: a
+        # foundation-model ARN names an ON_DEMAND entry, a profile ARN an
+        # INFERENCE_PROFILE entry. A profile entry carries its model's ARN as
+        # well, but Converse refuses that ARN for a model only a profile routes
+        # ("with on-demand throughput isn't supported"), so it is not an
+        # identifier the check may say yes to.
+        listed_arns = set()
+        for model in available_models:
+            if model.get("inferenceType") == "ON_DEMAND":
+                arn = model.get("modelArn")
+            else:
+                arn = model.get("inferenceProfileArn")
+            if arn and arn != "unknown":
+                listed_arns.add(arn)
 
         # Check if the requested model is in the available models
-        if model_id in available_model_ids:
+        if model_id in available_model_ids or model_id in listed_arns:
             ASH_LOGGER.debug(text_without_values(f"Model {shown} is available", values))
-            return ModelCheck(True)
+            return ModelCheck(
+                True,
+                model_id=model_id,
+                legacy=_listed_as_legacy(available_models, model_id),
+            )
 
-        # If model not found directly, try to find a matching model ID (case insensitive)
+        # If model not found directly, try to find a matching model ID (case
+        # insensitive). The answer names the listed spelling: Converse knows
+        # that one, not the spelling that was checked.
         for available_id in available_model_ids:
             if available_id and model_id and available_id.lower() == model_id.lower():
                 ASH_LOGGER.debug(
@@ -883,7 +1423,11 @@ def validate_bedrock_model(
                         values,
                     )
                 )
-                return ModelCheck(True)
+                return ModelCheck(
+                    True,
+                    model_id=available_id,
+                    legacy=_listed_as_legacy(available_models, available_id),
+                )
 
         # If still not found, check if it's an inference profile model
         for model in available_models:
@@ -897,7 +1441,22 @@ def validate_bedrock_model(
                         values,
                     )
                 )
-                return ModelCheck(True)
+                return ModelCheck(
+                    True,
+                    model_id=model_id,
+                    legacy=_listed_as_legacy(available_models, model_id),
+                )
+
+        if getattr(
+            available_models, "profile_listing_failure", None
+        ) and _may_be_routed_by_a_profile(model_id, available_models):
+            # The on-demand models were listed and this is not one of them; the
+            # profile listing failed, so whether a profile routes it is unknown.
+            # That is a listing failure about the check, not "not found". An id
+            # no profile could carry (an on-demand id the foundation listing
+            # does not name as profile-routed) is not in the list the listing
+            # made, and falls through to "not found".
+            return _profile_listing_failed(available_models, shown, values)
 
         # Model not found in available models
         ASH_LOGGER.warning(

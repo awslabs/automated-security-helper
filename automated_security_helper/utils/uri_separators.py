@@ -76,13 +76,19 @@ def root_text(root: object) -> str:
     """A scan root as text, with ``/`` for the separators of its own flavor.
 
     A path object is spelled with ``as_posix()``, which converts on Windows and
-    keeps a backslash in a POSIX name. A string is a Windows path when it is a
-    drive-letter or UNC path and is converted then; any other string is a POSIX
-    path and is returned as it is. Anything else is spelled by ``str()``.
+    keeps a backslash in a POSIX name. A string is a Windows path when
+    :func:`is_windows_root` reads it as one (a drive-letter or UNC path, the
+    UNC prefix in either spelling) and is converted then; any other string is a
+    POSIX path and is returned as it is. Anything else is spelled by ``str()``.
+
+    The two read the same shapes: a UNC root spelled ``//server/share\\ws`` was
+    a Windows root to :func:`is_windows_root`, so every URI under it had its
+    backslashes converted, while this function converted the drive form only
+    and left the root's own backslash in place, and nothing under it matched.
     """
     if isinstance(root, PurePath):
         return root.as_posix()
     text = str(root)
-    if WINDOWS_ABSOLUTE.match(text):
+    if is_windows_root(text):
         return text.replace("\\", "/")
     return text

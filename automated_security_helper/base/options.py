@@ -3,7 +3,7 @@ import threading
 from typing import Annotated, Any, ClassVar, FrozenSet, Literal, Set, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidatorFunctionWrapHandler
-from pydantic import ValidationInfo, WrapValidator, model_validator
+from pydantic import ValidationError, ValidationInfo, WrapValidator, model_validator
 from pydantic_core import PydanticUseDefault
 
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
@@ -26,10 +26,15 @@ def reset_refused_tool_version_warnings() -> None:
         _REFUSED_TOOL_VERSIONS.clear()
 
 
-#: A release tag: an optional ``v``, dot-separated numbers, and optional ``-`` or
-#: ``.`` separated alphanumeric parts (``v1.15.1``, ``1.2.0-rc1``). Nothing that can
-#: change the path of the URL the tag is put into.
-_RELEASE_TAG = re.compile(r"v?[0-9]+(\.[0-9]+)*([-.][0-9A-Za-z]+)*")
+#: A release tag: an optional ``v``, a number, then any run of ``-`` or ``.``
+#: separated alphanumeric parts (``v1.15.1``, ``1.2.0-rc1``). Nothing that can
+#: change the path of the URL the tag is put into. ONE repeated group: with a
+#: dot-number group followed by a separator-alphanumeric group, a ``.1`` part
+#: matched under either, and a long string that fails at its end (a value that is
+#: not a tag) backtracked through every split of the two, quadratic in its length,
+#: during config validation. Each part here starts at its separator and runs to the
+#: next, so a failing match is linear.
+_RELEASE_TAG = re.compile(r"v?[0-9]+(?:[-.][0-9A-Za-z]+)*")
 
 
 def release_tag(key: str) -> WrapValidator:
@@ -41,9 +46,13 @@ def release_tag(key: str) -> WrapValidator:
     """
 
     def _validate(value: Any, handler: ValidatorFunctionWrapHandler, _info: Any) -> Any:
-        value = handler(value)
-        if isinstance(value, str) and _RELEASE_TAG.fullmatch(value):
-            return value
+        try:
+            typed = handler(value)
+        except ValidationError:
+            # A value of the wrong type (a YAML number) is refused like any other.
+            typed = None
+        if isinstance(typed, str) and _RELEASE_TAG.fullmatch(typed):
+            return typed
         # The key and the rule, not the value: a value can be one read from the
         # environment, and the warning goes to the console and ash.log.
         _warn_once(
@@ -82,10 +91,11 @@ def tool_version_constraint(key: str) -> WrapValidator:
             validate_version_constraint,
         )
 
-        value = handler(value)
         try:
-            return validate_version_constraint(value)
+            return validate_version_constraint(handler(value))
         except ValueError:
+            # The handler's ValidationError is a ValueError too: a value of the
+            # wrong type (a YAML number) is refused like any other.
             # Not the check's message, which quotes the value; see release_tag.
             _warn_once(
                 key,
@@ -103,9 +113,10 @@ def report_file_name(key: str) -> WrapValidator:
     """Validator for an option that names a file in the reports directory, named ``key``.
 
     A reporter writes such a file directly inside the reports directory, so only a
-    single path component is accepted, from any source: a value with ``/``, ``\\``
-    or NUL, or one that is ``.`` or ``..``, is replaced by the option's default,
-    with one warning naming ``key``.
+    single path component is accepted, from any source: a value with ``/``, ``\\``,
+    ``:`` (an NTFS stream of another file) or NUL, or one that is ``.`` or ``..``,
+    is replaced by the option's default, with one warning naming ``key`` and
+    every refused character, so the operator can see which one the value held.
     """
 
     def _validate(value: Any, handler: ValidatorFunctionWrapHandler, _info: Any) -> Any:
@@ -113,17 +124,21 @@ def report_file_name(key: str) -> WrapValidator:
             is_report_file_name,
         )
 
-        value = handler(value)
-        if is_report_file_name(value):
-            return value
+        try:
+            typed = handler(value)
+        except ValidationError:
+            # A value of the wrong type is refused like any other; see release_tag.
+            typed = None
+        if is_report_file_name(typed):
+            return typed
         # The key and the rule, not the value; see release_tag.
         _warn_once(
             key,
             str(value),
             f"Ignoring {key}: the value is not a file name such as 'summary.md'. "
             "The file is written directly inside the reports directory, so the name "
-            "cannot contain '/', '\\' or NUL, or be '.' or '..'. Using the default "
-            "instead.",
+            "cannot contain '/', '\\', ':' or NUL, or be '.' or '..'. Using the "
+            "default instead.",
         )
         raise PydanticUseDefault from None
 

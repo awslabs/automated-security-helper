@@ -81,8 +81,10 @@ def test_sarif_fields_single_scanner(project_dir, text_snapshot):
 
     run = _run()
 
-    # With no aggregate every scanner field counts as missing from it.
-    assert run.exit_code == 1, run.output
+    # With no aggregate no field is checked against it: the command says so and
+    # fails on nothing else.
+    assert run.exit_code == 0, run.output
+    assert "no aggregate report" in run.output
     assert text_snapshot("txt")(name="console") == run.document
     for filename, ext in {**WRITTEN_DATA, HTML_REPORT: "html"}.items():
         assert text_snapshot(ext)(name=filename) == _written(project_dir, filename)

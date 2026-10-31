@@ -255,9 +255,14 @@ class TestFinalizeCannotReachOutsideTheSession:
         """The id is a single component and the path still must not be a link.
 
         Containment alone would accept this: the link sits inside ``incoming/``.
-        Following it would hash and then unlink whatever it points at, so the
-        candidate itself is required to be a real file -- the same call the zip
-        member handling makes for symlink entries.
+        Following it would stat and hash whatever it points at, so the candidate
+        itself is required to be a real file -- the same call the zip member
+        handling makes for symlink entries.
+
+        The unlink on the oversize and checksum branches removes the link, not
+        the file it points at, so the victim's survival alone proves nothing
+        about which branch ran. The assertions below pin the refusal to the path
+        guard's own text and check that the link itself is still in place.
         """
         outside = tmp_path / "outside-the-workspace"
         outside.mkdir()
@@ -266,9 +271,10 @@ class TestFinalizeCannotReachOutsideTheSession:
 
         incoming = tmp_path / _SESSION / "incoming"
         incoming.mkdir(parents=True)
-        (incoming / "sneaky.zip").symlink_to(victim)
+        link = incoming / "sneaky.zip"
+        link.symlink_to(victim)
 
-        with pytest.raises(ValueError, match="upload_id"):
+        with pytest.raises(ValueError) as excinfo:
             sd.set_source_zip_finalize(
                 upload_id="sneaky",
                 expected_sha256="0" * 64,
@@ -276,7 +282,19 @@ class TestFinalizeCannotReachOutsideTheSession:
                 session_id=_SESSION,
             )
 
+        message = str(excinfo.value)
+        assert "upload_id" in message
+        # The path guard's refusal names the incoming directory; the oversize and
+        # checksum branches, which run after a guard that let the link through,
+        # do not. Matching the guard's text keeps a reworded later message from
+        # satisfying this test.
+        assert "does not name a file inside the session's incoming directory" in message
+        assert "zip too large" not in message
+        # No delete branch ran: the link is still a link, and its target holds
+        # the bytes written above.
+        assert link.is_symlink()
         assert victim.exists()
+        assert victim.read_bytes() == b"not an uploaded archive"
 
 
 class TestFailedRedeliveryKeepsThePreviousTree:
@@ -390,3 +408,49 @@ class TestFailedRedeliveryKeepsThePreviousTree:
 
         leftovers = [p.name for p in (tmp_path / _SESSION).iterdir() if p.is_dir()]
         assert leftovers == ["incoming"], leftovers
+
+
+class TestASymlinkRefusalQuotesABoundedExcerpt:
+    """The refusal of a symlink entry quotes the first bytes of it, not all of it.
+
+    A link entry's content is whatever the archive says it is, up to the
+    uncompressed total the validation admits. The refusal read the whole entry
+    and embedded its ``repr`` in the message, which every per-character pass on
+    the error path (the control-character rendering, the redaction) then walked
+    on the event loop. Red at the base: the message carried the entire content.
+    """
+
+    def _refusal_for(self, link_target: bytes, tmp_path: Path) -> str:
+        hostile = _zip_with_symlink("evil", link_target)
+        sd.set_source_zip_chunk(
+            upload_id="link",
+            sequence=0,
+            data_b64=_b64(hostile),
+            last=True,
+            workspace_root=tmp_path,
+            session_id=_SESSION,
+        )
+        with pytest.raises(ValueError, match="symlinks are not allowed") as excinfo:
+            sd.set_source_zip_finalize(
+                upload_id="link",
+                expected_sha256=hashlib.sha256(hostile).hexdigest(),
+                workspace_root=tmp_path,
+                session_id=_SESSION,
+            )
+        return str(excinfo.value)
+
+    def test_a_long_link_target_is_cut_to_a_bounded_prefix(self, tmp_path):
+        # Stored uncompressed, so the archive stays within one upload chunk.
+        content = b"/" + b"a" * (512 * 1024)
+        message = self._refusal_for(content, tmp_path)
+
+        assert len(message) < 2 * sd._SYMLINK_TARGET_EXCERPT_BYTES, len(message)
+        assert "..." in message
+        assert "'evil'" in message
+
+    def test_a_short_link_target_is_quoted_whole(self, tmp_path):
+        """Control: a target within the bound is shown as it is, unmarked."""
+        message = self._refusal_for(b"/etc/passwd", tmp_path)
+
+        assert "'/etc/passwd'" in message
+        assert "..." not in message

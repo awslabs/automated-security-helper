@@ -41,11 +41,19 @@ image change.
 stdio carries no headers and serves a single client, so it resolves to
 ``DEFAULT_SESSION_ID``, the sentinel the profile registry already uses for
 callers that name no session. Only a caller known to be that local client gets
-it (:func:`serving_local_client`): a tool call with no HTTP request behind it is
-not enough on its own. A request that carries headers but names no session is
-never that client: it resolves to :data:`UNIDENTIFIED_SESSION_ID`. Naming the
-default session in the header is refused (:func:`is_reserved_session_id`), and
-leaving the header out must not reach it either.
+it (:func:`serving_local_client`): a Context the SDK built with no HTTP request
+behind it is not enough on its own. A request that carries headers but names no
+session is never that client: it resolves to :data:`UNIDENTIFIED_SESSION_ID`.
+Naming the default session in the header is refused
+(:func:`is_reserved_session_id`), and leaving the header out must not reach it
+either.
+
+The one caller the mark does not decide is an in-process caller's stand-in
+context (a plain object with a ``headers`` attribute, which no transport ever
+builds: the SDK builds a Context for every call it dispatches). A stand-in with
+no headers at all is that caller by construction and resolves to the default
+session without the mark; see :func:`resolve_session_id`. Gating it on the mark
+too would be a change of contract for every in-process caller, not a guard.
 
 Which session a network call belongs to is decided by the transport, never by
 the header alone: see :func:`resolve_caller_session_id` and
@@ -116,11 +124,14 @@ def serving_local_client() -> Iterator[None]:
     """Serve tool calls made inside this block as the local client's.
 
     ``run_mcp_server`` serves stdio inside it, and so should a process that
-    drives the server through the MCP SDK's in-memory client. A tool call with
-    no HTTP request behind it is stdio's ``DEFAULT_SESSION_ID``, with local
-    trust, only inside it; anywhere else it is :data:`UNIDENTIFIED_SESSION_ID`.
-    So a transport that ever hands a tool no request gets remote trust rather
-    than stdio's. Tasks the server starts inside the block inherit the mark.
+    drives the server through the MCP SDK's in-memory client. A Context the SDK
+    built with no HTTP request behind it is stdio's ``DEFAULT_SESSION_ID``, with
+    local trust, only inside it; anywhere else it is
+    :data:`UNIDENTIFIED_SESSION_ID`. So a transport that ever hands a tool no
+    request gets remote trust rather than stdio's. Tasks the server starts
+    inside the block inherit the mark. The mark does not decide an in-process
+    caller's stand-in context, which no transport builds: see the module
+    docstring and :func:`resolve_session_id`.
     """
 
     token = _LOCAL_CLIENT.set(True)
@@ -273,20 +284,26 @@ def is_reserved_session_id(value: str) -> bool:
     """True if ``value`` names a directory under the workspace root ASH owns.
 
     Those are stdio's workspace (``DEFAULT_SESSION_ID``), the unidentified
-    sentinel, the stdio servers' presence registry, and the running scans'
-    presence registry. Compared casefolded: on a case-insensitive filesystem (the
-    macOS and Windows defaults) ``__DEFAULT__`` opens the same directory as
-    ``__default__``. Trailing periods and spaces are dropped before the
-    comparison, because Windows drops them when it opens the name
-    (``__default__.`` is ``__default__``), and a generated 8.3 short name of a
-    reserved name (``__DEFAU~1``) is reserved too, since it opens the same
-    directory.
+    sentinel, the stdio servers' presence registry, the running scans' presence
+    registry, and the guard file each registry locks (``.lock``,
+    ``sessions.PRESENCE_LOCK_NAME``): under the scans' registry a session's
+    holder directory and that file would share one name, so a session called
+    ``.lock`` could register no scan and would never be swept. Compared
+    casefolded: on a case-insensitive filesystem (the macOS and Windows
+    defaults) ``__DEFAULT__`` opens the same directory as ``__default__``.
+    Trailing periods and spaces are dropped before the comparison, because
+    Windows drops them when it opens the name (``__default__.`` is
+    ``__default__``), and a generated 8.3 short name of a reserved name
+    (``__DEFAU~1``) is reserved too, since it opens the same directory. The
+    guard file's name is shorter than eight characters, so no short name
+    aliases it and none is reserved for it.
     """
 
     from automated_security_helper.cli.mcp.profile_registry import (
         DEFAULT_SESSION_ID,
     )
     from automated_security_helper.cli.mcp.sessions import (
+        PRESENCE_LOCK_NAME,
         SCAN_PRESENCE_DIR,
         STDIO_SERVERS_DIR,
     )
@@ -298,7 +315,7 @@ def is_reserved_session_id(value: str) -> bool:
         SCAN_PRESENCE_DIR,
     )
     folded = value.casefold().rstrip(". ")
-    if folded in {name.casefold() for name in reserved}:
+    if folded in {name.casefold() for name in (*reserved, PRESENCE_LOCK_NAME)}:
         return True
     return any(_short_name_pattern(name).fullmatch(folded) for name in reserved)
 
@@ -376,15 +393,21 @@ def _caller_behind(ctx: object) -> Optional["HttpCaller"]:
     """The :class:`HttpCaller` stamped on the request behind ``ctx``, or None.
 
     Read from the request's own scope, so it is a fact about one request and
-    nothing else: no resolution order, no task-local state. A ``ctx`` that
+    nothing else: no resolution order, no task-local state. Only a Context the
+    SDK built carries a request a transport produced (:func:`_as_sdk_context`,
+    the same test :func:`resolve_caller_session_id` applies), so the refusal
+    reads the stamp of exactly the request the resolution read. A ``ctx`` that
     carries no request -- a stand-in, a Context used outside a request -- has
     no stamp.
     """
 
     from automated_security_helper.cli.mcp.http_sessions import caller_of
 
+    sdk_context = _as_sdk_context(ctx)
+    if sdk_context is None:
+        return None
     try:
-        request = getattr(getattr(ctx, "request_context", None), "request", None)
+        request = sdk_context.request_context.request
     except ValueError:
         # A Context used outside a request has no transport behind it.
         return None
@@ -392,24 +415,38 @@ def _caller_behind(ctx: object) -> Optional["HttpCaller"]:
 
 
 def session_identity_refusal(
-    session_id: str, operation: str, ctx: object = None
+    session_id: str, operation: str, *, ctx: object
 ) -> Optional[Dict[str, Any]]:
     """The refusal a session-dependent tool returns for an unidentified caller.
 
     Returns None when ``session_id`` names a session, or is None: only the
     :data:`UNIDENTIFIED_SESSION_ID` sentinel is refused.
 
-    ``ctx`` is the refused call's context. Whether the protocol version is the
-    cause, and which server mode the advice holds on, are read from the stamp
-    on the request behind it, so the text depends only on the request being
-    refused, never on whichever resolution ran last in the same task. A
-    refusal built without ``ctx`` -- an id another tool resolved and passed
-    down -- claims no cause and gives the mode-less advice.
+    ``ctx`` is the refused call's context, and is required so that a caller
+    that has one cannot leave it out and get the mode-less advice for a request
+    whose mode is known. Whether the protocol version is the cause, and which
+    server mode the advice holds on, are read from the stamp on the request
+    behind it (:func:`_caller_behind`, which admits only a Context the SDK built,
+    as :func:`resolve_caller_session_id` does), so the text depends only on the
+    request being refused, never on whichever resolution ran last in the same
+    task. A refusal built with ``ctx=None`` -- an id another tool resolved and
+    passed down, with no request in reach -- claims no cause and gives the
+    mode-less advice.
+
+    The advice names what works on the server the request reached: a stateful
+    server issues sessions at ``initialize``; an sse server issues its session
+    with the event stream, and ``--trust-upstream-session-id`` is refused there
+    (``mcp_command``), so the stateless advice would send an sse caller to a
+    flag the server cannot take; a stateless server serves no session unless
+    the operator declared an upstream one.
     """
 
     if session_id != UNIDENTIFIED_SESSION_ID:
         return None
-    from automated_security_helper.cli.mcp.http_sessions import MODE_STATEFUL
+    from automated_security_helper.cli.mcp.http_sessions import (
+        MODE_SSE,
+        MODE_STATEFUL,
+    )
 
     caller = _caller_behind(ctx) if ctx is not None else None
     protocol_sentence = (
@@ -420,13 +457,33 @@ def session_identity_refusal(
         if caller is not None and caller.protocol_version_is_cause
         else ""
     )
-    if caller is not None and caller.server_mode == MODE_STATEFUL:
-        # The server already issues sessions, so operator advice to change the
-        # mode would be noise; what works here is in the caller's hands.
+    if caller is not None and caller.server_mode == MODE_SSE:
+        # The server issues the session with the event stream; what works here
+        # is in the caller's hands, and no operator flag applies to sse.
         error = (
             f"{operation} needs a session, and this call carries none the server "
-            f"issued. An Mcp-Session-Id header the server did not issue does not "
-            f"name one. {protocol_sentence}"
+            f"issued. An sse server issues its session with the event stream: "
+            f"send tool calls to the messages URL the stream's endpoint event "
+            f"gave, exactly as given, whose session_id names it. A session_id the "
+            f"server did not issue, or one given more than once in the URL, names "
+            f"no session, and an Mcp-Session-Id header is not read on sse."
+        )
+    elif caller is not None and caller.server_mode == MODE_STATEFUL:
+        # The server already issues sessions, so operator advice to change the
+        # mode would be noise; what works here is in the caller's hands. A
+        # session the TTL sweep removed is told apart from an id the server never
+        # issued: the client chose that profile and sent that upload, and both
+        # went with it.
+        named = (
+            "That session expired: the server removes the workspace of a session "
+            "nobody used for --session-workspace-ttl seconds, and its bound "
+            "profile and uploads are removed with it. "
+            if caller.session_expired
+            else "An Mcp-Session-Id header the server did not issue does not name one. "
+        )
+        error = (
+            f"{operation} needs a session, and this call carries none the server "
+            f"issued. {named}{protocol_sentence}"
             f"Open a session with initialize at a handshake protocol version and "
             f"send the Mcp-Session-Id it returns with that version."
         )

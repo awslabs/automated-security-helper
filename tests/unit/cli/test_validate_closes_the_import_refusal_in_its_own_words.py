@@ -32,7 +32,7 @@ IMPORT_CLOSING = (
 )
 NAMESPACE_CLOSING = (
     "Nothing was imported. Rename the package or name the packages inside it, "
-    "or remove the entry from the config file."
+    "or remove the entry from the config file or --config-overrides."
 )
 
 

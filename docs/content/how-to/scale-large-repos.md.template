@@ -244,6 +244,10 @@ jobs:
           path: |
             .ash/ash_output/reports
             .ash/ash_output/ash_aggregated_results.json
+          # Overwrite on re-runs only (run_attempt 2 and later), so the first
+          # attempt still fails loudly on a name taken twice, while "Re-run failed
+          # jobs" replaces its own earlier upload instead of failing on the name.
+          overwrite: ${{ github.run_attempt != '1' }}
   merge:
     needs: shard
     if: ${{ !cancelled() }}
@@ -293,6 +297,16 @@ jobs:
             2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
           exit "${status}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: ash-merged
+          # The merged reports and results file, beside the shards' artifacts.
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
+          # As for the shards: overwrite on re-runs only.
+          overwrite: ${{ github.run_attempt != '1' }}
       - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         if: ${{ !cancelled() }}
         with:
@@ -304,7 +318,10 @@ Each step that runs `uv` or `ash` stops workflow commands around it, as the step
 [Write the steps yourself](ci/github-actions.md#plain-steps) do.
 
 The shards run with `--no-fail-on-findings`, so a shard job fails only when one of its
-scanners did not run, and the merge job gives the verdict. The merge reads its gate settings
+scanners did not run, and the merge job decides the result. The merge job uploads the merged
+reports and results file as `ash-merged`, beside the shards' `ash-shard-0` to `ash-shard-3`,
+so the merged `ash_aggregated_results.json` and SARIF can be downloaded without rerunning the
+merge. The merge reads its gate settings
 from the configuration that the shards recorded, which on a pull request is the branch's own,
 so it passes `--fail-on-findings` and `--fail-on-incomplete-scanners`, and the shards pass
 `--no-allow-stale-content-db`. The thresholds and suppressions still come from the branch; to

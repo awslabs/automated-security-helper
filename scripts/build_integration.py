@@ -34,8 +34,11 @@ class BuildIntegrator:
         """
         print("Running pre-build version management checks...")
 
-        # Check that pyproject.toml exists and has version
-        current_version = get_version()
+        # Check that the project root's pyproject.toml has a version. The root is
+        # passed through: get_version() with no argument reads the checkout the
+        # version module was imported from, which under `--project-root` is not
+        # the tree being built.
+        current_version = get_version(self.project_root)
         if current_version == "unknown":
             print("Error: Could not determine version from pyproject.toml")
             return False
@@ -58,6 +61,25 @@ class BuildIntegrator:
             print(f"Generated {generated_count} documentation files from templates")
         except Exception as e:
             print(f"Error generating documentation from templates: {e}")
+            return False
+
+        # The manager keeps going past a template it could not render and lists
+        # it in ``failures``; a pre-build that printed the generated count over
+        # such a list reported success for a partial generation.
+        failures = self.template_manager.failures
+        if failures:
+            names = ", ".join(str(path) for path in failures)
+            print(f"Error: {len(failures)} template(s) were not generated: {names}")
+            return False
+
+        # generate_all_from_templates reports a template it could not render by
+        # leaving it out of the count, not by raising, so a count below the number
+        # of templates found is a failed build step and not a success.
+        if generated_count < len(templates):
+            print(
+                f"Error: only {generated_count} of {len(templates)} templates were "
+                f"generated; see the errors above"
+            )
             return False
 
         print("Pre-build checks completed successfully")
@@ -98,15 +120,15 @@ class BuildIntegrator:
                 print(f"Error: Required file missing: {file_path}")
                 return False
 
-        # Check that version management module can be imported
-        try:
-            from automated_security_helper.utils.version_management import get_version
-
-            version = get_version()
-            print(f"Version management module working, current version: {version}")
-        except Exception as e:
-            print(f"Error: Version management module import failed: {e}")
+        # The version management module is imported at the top of this file, so a
+        # failed import never reaches here; what can fail is the version read of
+        # the project root, which pre-build refuses too. "unknown" means the
+        # root's pyproject.toml carries no version this distribution owns.
+        version = get_version(self.project_root)
+        if version == "unknown":
+            print("Error: Could not determine version from pyproject.toml")
             return False
+        print(f"Version management module working, current version: {version}")
 
         print("Build environment validation passed")
         return True
@@ -125,7 +147,7 @@ class BuildIntegrator:
             output_path = self.project_root / "version_info.txt"
 
         try:
-            version = get_version()
+            version = get_version(self.project_root)
             build_info = f"""Automated Security Helper Build Information
 Version: {version}
 Build Date: {__import__("datetime").datetime.now().isoformat()}
@@ -163,6 +185,13 @@ def run_command(command: List[str], cwd: Optional[Path] = None) -> bool:
     except subprocess.CalledProcessError as e:
         print(f"Command failed: {' '.join(command)}")
         print(f"Error: {e.stderr}")
+        return False
+    except OSError as e:
+        # A binary that is not on PATH (FileNotFoundError) or cannot be executed
+        # (PermissionError) never produces a CalledProcessError; without this arm
+        # the exception escaped and the caller never got its False.
+        print(f"Command could not be started: {' '.join(command)}")
+        print(f"Error: {e}")
         return False
 
 

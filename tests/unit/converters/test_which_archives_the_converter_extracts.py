@@ -134,20 +134,20 @@ def test_the_run_records_only_the_archives_it_extracted_whole(
 def test_an_archive_with_a_member_no_scanner_reads_is_not_recorded_whole(
     test_plugin_context, monkeypatch
 ):
-    """The converter does not extract a member whose extension no scanner reads
-    (srv/app.mjs, a Dockerfile), so that archive was not extracted whole: it stays
-    in snyk-code's copy, which holds every member. Such a member is not refused. One
-    that an ignore path names is left out on purpose, so its archive still counts."""
+    """The converter does not extract a member no scanner reads (an image, a
+    font), so that archive was not extracted whole: it stays in snyk-code's copy,
+    which holds every member. Such a member is not refused. One that an ignore
+    path names is left out on purpose, so its archive still counts."""
     from automated_security_helper.models.core import IgnorePathWithReason
 
     source = Path(test_plugin_context.source_dir)
     source.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(source / "f.zip", "w") as archive:
-        archive.writestr("srv/app.mjs", "export const a = 1;\n")
-        archive.writestr("Dockerfile", "FROM scratch\n")
+        archive.writestr("assets/logo.png", b"\x89PNG\r\n\x1a\n")
+        archive.writestr("fonts/a.woff", b"wOFF")
         archive.writestr("ok.js", "ok = 1\n")
     with zipfile.ZipFile(source / "g.zip", "w") as archive:
-        archive.writestr("vendor/x.mjs", "export const x = 1;\n")
+        archive.writestr("vendor/x.png", b"\x89PNG\r\n\x1a\n")
         archive.writestr("ok.js", "ok = 1\n")
     names = ["f.zip", "g.zip"]
     monkeypatch.setattr(
@@ -155,7 +155,7 @@ def test_an_archive_with_a_member_no_scanner_reads_is_not_recorded_whole(
         lambda **kwargs: [str(source / name) for name in names],
     )
     test_plugin_context.config.global_settings.ignore_paths = [
-        IgnorePathWithReason(path="g.zip/vendor/x.mjs", reason="vendored"),
+        IgnorePathWithReason(path="g.zip/vendor/x.png", reason="vendored"),
     ]
     converter = archive_converter.ArchiveConverter(
         context=test_plugin_context, config=archive_converter.ArchiveConverterConfig()

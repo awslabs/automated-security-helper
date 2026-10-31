@@ -33,13 +33,13 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline import (
     BedrockModelClient,
 )
-from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_paths import (
+from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     FALLBACK_ONE,
+    FALLBACK_TWO,
     MODULE,
     PRIMARY_MODEL,
-    _client_error,
-    _default_session_client,
-    context,  # noqa: F401  (fixture)
+    client_error,
+    default_session_client,
     make_reporter,
     sarif_model,
 )
@@ -60,30 +60,69 @@ def _error(code, message="it failed", operation="ListInferenceProfiles"):
 
 
 class ControlPlane:
-    """A bedrock control-plane client: the inference-profile listing is
-    throttled while ``throttled`` is set (or for its first ``throttle_first``
-    calls), refuses with ``listing_error`` when that is set, and the model
-    listing names ``listed``. ``listings`` counts the profile listings and
-    ``model_listings`` the model listings: the control-plane calls a walk makes."""
+    """A bedrock control-plane client: both listings are throttled while
+    ``throttled`` is set (or for its first ``throttle_first`` profile listings),
+    refuse with ``listing_error`` when that is set, raise ``error`` when one is
+    given, and the model listing names ``listed`` otherwise. A control plane
+    that throttles or refuses one listing does so for the other, and
+    ``get_available_models`` asks the two apart (a failed profile listing alone
+    leaves the on-demand models listed), so a failure here is the whole
+    listing's. ``profile_error`` is the one exception: it refuses the profile
+    listing ALONE, with that code, while the model listing answers, which is
+    the shape a caller allowed ListFoundationModels but not
+    ListInferenceProfiles sees. ``listings`` counts the profile listings and
+    ``model_listings`` the model listings: the control-plane calls a walk
+    makes."""
 
-    def __init__(self, listed, throttled=False, listing_error=None, throttle_first=0):
+    def __init__(
+        self,
+        listed,
+        throttled=False,
+        listing_error=None,
+        throttle_first=0,
+        error=None,
+        profile_error=None,
+        profile_only=(),
+    ):
         self.listed = list(listed)
+        self.profile_only = list(profile_only)
         self.throttled = throttled
         self.listing_error = listing_error
         self.throttle_first = throttle_first
+        self.error = error
+        self.profile_error = profile_error
         self.listings = 0
         self.model_listings = 0
 
+    def _failure(self, operation):
+        """The failure both listings share, or None when they answer, built for
+        the *operation* that is failing (a new error per call, naming the call
+        that was made, as botocore's does); ``error`` is the one instance a
+        caller gave, raised as it is.
+
+        ``throttle_first`` counts profile listings, so a model listing made
+        before any (the dependency check's reachability probe) is not throttled
+        by it; one made alongside the k-th profile listing shares its fate."""
+        if self.throttled or 0 < self.listings <= self.throttle_first:
+            return _error("ThrottlingException", "Rate exceeded", operation)
+        if self.listing_error is not None:
+            return _error(self.listing_error, "the listing was refused", operation)
+        return self.error
+
     def list_inference_profiles(self):
         self.listings += 1
-        if self.throttled or self.listings <= self.throttle_first:
-            raise _error("ThrottlingException", "Rate exceeded")
-        if self.listing_error is not None:
-            raise _error(self.listing_error, "the listing was refused")
+        failure = self._failure("ListInferenceProfiles")
+        if failure is not None:
+            raise failure
+        if self.profile_error is not None:
+            raise _error(self.profile_error, "the listing was refused")
         return {"inferenceProfileSummaries": []}
 
     def list_foundation_models(self):
         self.model_listings += 1
+        failure = self._failure("ListFoundationModels")
+        if failure is not None:
+            raise failure
         return {
             "modelSummaries": [
                 {
@@ -97,6 +136,22 @@ class ControlPlane:
                     "inferenceTypesSupported": ["ON_DEMAND"],
                 }
                 for model in self.listed
+            ]
+            # A model only an inference profile routes: the foundation-model
+            # listing names it, and no profile listing is needed to know a
+            # profile could carry it.
+            + [
+                {
+                    "modelId": model,
+                    "modelName": "placeholder",
+                    "modelArn": f"placeholder-arn-{model}",
+                    "providerName": "placeholder",
+                    "modelLifecycle": {"status": "ACTIVE"},
+                    "inputModalities": ["TEXT"],
+                    "outputModalities": ["TEXT"],
+                    "inferenceTypesSupported": ["INFERENCE_PROFILE"],
+                }
+                for model in self.profile_only
             ]
         }
 
@@ -141,7 +196,7 @@ def _walk_setup(context, monkeypatch, control_plane, links):  # noqa: F811
     reporter = make_reporter(context, enable_caching=False)
     monkeypatch.setattr(f"{MODULE}.get_fallback_model", links.get)
     monkeypatch.setattr(f"{MODULE}.boto3.Session", Sessions(control_plane))
-    monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+    monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
     return reporter
 
 
@@ -328,8 +383,8 @@ def test_a_listing_that_raised_something_unexpected_is_not_transient_and_has_no_
     and the models are not called not checked."""
 
     class Broken(ControlPlane):
-        def list_inference_profiles(self):
-            raise RuntimeError("it failed")
+        def __init__(self, listed):
+            super().__init__(listed, error=RuntimeError("it failed"))
 
     models = aws_utils.get_available_models(Broken([FALLBACK_ONE]))
     check = validate_bedrock_model(Broken([FALLBACK_ONE]), FALLBACK_ONE)
@@ -347,8 +402,8 @@ def test_a_listing_that_lost_its_connection_is_transient_and_has_no_code(error):
     answers, so they carry no code and are still told apart from the rest."""
 
     class Dropped(ControlPlane):
-        def list_inference_profiles(self):
-            raise error
+        def __init__(self, listed):
+            super().__init__(listed, error=error)
 
     models = aws_utils.get_available_models(Dropped([FALLBACK_ONE]))
     check = validate_bedrock_model(Dropped([FALLBACK_ONE]), FALLBACK_ONE)
@@ -595,7 +650,7 @@ def test_a_model_whose_check_got_no_answer_is_named_as_not_checked(
         ControlPlane([FALLBACK_ONE], throttled=True),
         {PRIMARY_MODEL: FALLBACK_ONE},
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -614,7 +669,7 @@ def test_a_model_the_listing_does_not_name_is_named_as_unavailable(
         ControlPlane([PRIMARY_MODEL]),
         {PRIMARY_MODEL: FALLBACK_ONE},
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -648,7 +703,7 @@ def test_a_walk_names_a_refused_listing_by_its_code_not_as_unavailable(
     names the code, which sends the operator to access and not to availability."""
     control = ControlPlane([FALLBACK_ONE], listing_error=code)
     reporter = _walk_setup(context, monkeypatch, control, {PRIMARY_MODEL: FALLBACK_ONE})
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -662,6 +717,50 @@ def test_a_walk_names_a_refused_listing_by_its_code_not_as_unavailable(
     assert control.listings == 1, control.listings
 
 
+def test_a_walk_with_only_the_profile_listing_refused_still_calls_on_demand_models(
+    context,  # noqa: F811
+    monkeypatch,
+):
+    """ListInferenceProfiles is denied while ListFoundationModels answers: a
+    fallback the on-demand list names is checked and called, and a fallback
+    only a profile could route is "not checked, listing refused (code)", never
+    "unavailable", because nobody could list the profiles that would name it."""
+    control = ControlPlane(
+        [FALLBACK_TWO],
+        profile_error="AccessDeniedException",
+        profile_only=[FALLBACK_ONE],
+    )
+    reporter = _walk_setup(
+        context,
+        monkeypatch,
+        control,
+        {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO},
+    )
+    runtime = Runtime(
+        {
+            PRIMARY_MODEL: client_error("ResourceNotFoundException"),
+            FALLBACK_TWO: client_error("ValidationException"),
+        }
+    )
+
+    out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+    # The group names the call that was refused: it is the inference profile
+    # listing, not the foundation-model listing, that the principal may not make.
+    group = _listing_group(
+        "profile listing refused (AccessDeniedException)", FALLBACK_ONE
+    )
+    assert out.startswith(
+        f"*Error: No suitable fallback model found for {PRIMARY_MODEL} "
+        f"(called: {PRIMARY_MODEL}, {FALLBACK_TWO}; {group})"
+    ), out
+    assert "unavailable" not in out.split(". The configured model's error")[0], out
+    # The on-demand fallback was called; the profile-only one never was.
+    assert runtime.models == [PRIMARY_MODEL, FALLBACK_TWO], runtime.models
+    # One listing pair serves the whole walk, and the model listing answered.
+    assert (control.listings, control.model_listings) == (1, 1)
+
+
 def test_a_walk_names_every_candidate_a_refused_listing_left_unchecked(
     context,  # noqa: F811
     monkeypatch,
@@ -670,7 +769,7 @@ def test_a_walk_names_every_candidate_a_refused_listing_left_unchecked(
     code once and all four models after it."""
     control = ControlPlane(CHAIN, listing_error="AccessDeniedException")
     reporter = _walk_setup(context, monkeypatch, control, _chain_links())
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -679,7 +778,9 @@ def test_a_walk_names_every_candidate_a_refused_listing_left_unchecked(
         f"*Error: No suitable fallback model found for {PRIMARY_MODEL} "
         f"(called: {PRIMARY_MODEL}; {group})"
     ), out
-    assert (control.listings, control.model_listings) == (1, 0)
+    # Both listings are asked once: the profile listing's refusal alone no longer
+    # stands for the model listing's, so the model listing is asked (and refused).
+    assert (control.listings, control.model_listings) == (1, 1)
     assert runtime.models == [PRIMARY_MODEL], runtime.models
 
 
@@ -691,13 +792,13 @@ def test_a_walk_names_a_listing_that_failed_without_a_code(
     code to name. The group says the listing failed and how little is known."""
 
     class Broken(ControlPlane):
-        def list_inference_profiles(self):
-            raise RuntimeError("it failed")
+        def __init__(self, listed):
+            super().__init__(listed, error=RuntimeError("it failed"))
 
     reporter = _walk_setup(
         context, monkeypatch, Broken([FALLBACK_ONE]), {PRIMARY_MODEL: FALLBACK_ONE}
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -720,15 +821,10 @@ BOTOCORE_ERRORS = [
 
 
 class Failing(ControlPlane):
-    """A control plane whose first listing call raises ``error``."""
+    """A control plane whose listing calls raise ``error``."""
 
     def __init__(self, listed, error):
-        super().__init__(listed)
-        self.error = error
-
-    def list_inference_profiles(self):
-        self.listings += 1
-        raise self.error
+        super().__init__(listed, error=error)
 
 
 @pytest.mark.parametrize(
@@ -821,7 +917,7 @@ def test_a_walk_names_a_botocore_failure_by_its_class(
         Failing([FALLBACK_ONE], error),
         {PRIMARY_MODEL: FALLBACK_ONE},
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -885,7 +981,7 @@ def test_the_shim_names_a_primary_the_listing_does_not_name_as_unavailable(
     The one listing answers the primary's check and the fallback's."""
     control = ControlPlane([FALLBACK_ONE])
     reporter = _walk_setup(context, monkeypatch, control, {PRIMARY_MODEL: FALLBACK_ONE})
-    runtime = Runtime({FALLBACK_ONE: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({FALLBACK_ONE: client_error("ResourceNotFoundException")})
 
     out = reporter._call_bedrock(runtime, "findings", "system")
 
@@ -917,7 +1013,7 @@ def test_a_refused_listing_does_not_send_a_cyclic_chain_around_again(
         return links.get(model)
 
     monkeypatch.setattr(f"{MODULE}.get_fallback_model", _next_in_chain)
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -963,7 +1059,7 @@ def test_a_model_the_listing_names_is_called(context, monkeypatch):  # noqa: F81
         ControlPlane([FALLBACK_ONE]),
         {PRIMARY_MODEL: FALLBACK_ONE},
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -1018,7 +1114,7 @@ def test_a_listing_throttled_once_is_not_asked_again_by_the_wrapper():
     ]
 
     assert all(check_is_transient(check) for check in checks), checks
-    assert (control.listings, control.model_listings) == (1, 0)
+    assert (control.listings, control.model_listings) == (1, 1)
 
 
 def test_a_listing_throttled_for_good_is_kept_after_one_call():
@@ -1170,7 +1266,7 @@ def test_a_kept_failure_is_the_clients_error_with_its_response():
     assert control.listings == 1
 
 
-def test_a_kept_failure_without_a_service_answer_still_reads_as_a_client_error():
+def test_a_kept_failure_without_a_service_answer_still_reads_as_aclient_error():
     """A listing that failed without a service answer (a refused connection) has
     no response of its own. The kept failure is still a ``ClientError``, keeps
     the original, and is classified from it: a connection failure is transient
@@ -1178,12 +1274,15 @@ def test_a_kept_failure_without_a_service_answer_still_reads_as_a_client_error()
     not."""
 
     class Dropped(ControlPlane):
-        def list_inference_profiles(self):
-            raise botocore.exceptions.EndpointConnectionError(endpoint_url=_URL)
+        def __init__(self, listed):
+            super().__init__(
+                listed,
+                error=botocore.exceptions.EndpointConnectionError(endpoint_url=_URL),
+            )
 
     class Broken(ControlPlane):
-        def list_inference_profiles(self):
-            raise RuntimeError("it failed")
+        def __init__(self, listed):
+            super().__init__(listed, error=RuntimeError("it failed"))
 
     for control, transient in ((Dropped([]), True), (Broken([]), False)):
         wrapped = ListingsOnce(control)
@@ -1204,8 +1303,10 @@ def test_a_repeated_failure_keeps_the_kind_of_the_first_for_every_candidate():
     as not checked when the first was."""
 
     class Dropped(ControlPlane):
-        def list_inference_profiles(self):
-            raise botocore.exceptions.ReadTimeoutError(endpoint_url=_URL)
+        def __init__(self, listed):
+            super().__init__(
+                listed, error=botocore.exceptions.ReadTimeoutError(endpoint_url=_URL)
+            )
 
     wrapped = ListingsOnce(Dropped([FALLBACK_ONE]))
 
@@ -1552,7 +1653,7 @@ def test_a_throttled_control_plane_is_asked_once_per_walk_not_once_per_model(
     the chain again."""
     control = ControlPlane(CHAIN, throttled=True)
     reporter = _walk_setup(context, monkeypatch, control, _chain_links())
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
     expected = _exhausted_text(not_checked=", ".join(CHAIN))
 
     first = reporter._run_simple_report(runtime, sarif_model([]), [], [])
@@ -1574,7 +1675,7 @@ def test_a_listing_throttled_once_leaves_the_fallback_unchecked_not_gone(
     as not checked, one listing call was made, and the primary was called once."""
     control = ControlPlane([FALLBACK_ONE], throttle_first=1)
     reporter = _walk_setup(context, monkeypatch, control, {PRIMARY_MODEL: FALLBACK_ONE})
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -1592,7 +1693,7 @@ def test_the_listing_is_read_once_for_every_model_a_walk_checks(
     unavailable."""
     control = ControlPlane([PRIMARY_MODEL])
     reporter = _walk_setup(context, monkeypatch, control, _chain_links())
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -1616,7 +1717,7 @@ def test_a_candidate_the_one_listing_names_is_called(
         }
     }
     runtime = Runtime(
-        {PRIMARY_MODEL: _client_error("ResourceNotFoundException"), CHAIN[2]: third}
+        {PRIMARY_MODEL: client_error("ResourceNotFoundException"), CHAIN[2]: third}
     )
 
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
@@ -1680,7 +1781,7 @@ def _recording_reporter(
         f"{MODULE}.get_fallback_model", {PRIMARY_MODEL: FALLBACK_ONE}.get
     )
     monkeypatch.setattr(f"{MODULE}.boto3.Session", sessions)
-    monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+    monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
     return reporter, sessions
 
 
@@ -1729,7 +1830,7 @@ def test_the_walks_control_plane_client_is_built_with_the_retry_config(
         {"max_retries": max_retries},
         bedrock=ControlPlane([FALLBACK_ONE]),
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     reporter._run_simple_report(runtime, sarif_model([]), [], [])
 
@@ -1789,7 +1890,7 @@ def test_a_reporter_built_with_default_options_makes_three_control_plane_attempt
     reporter, sessions = _recording_reporter(
         context, monkeypatch, None, bedrock=ControlPlane([FALLBACK_ONE])
     )
-    runtime = Runtime({PRIMARY_MODEL: _client_error("ResourceNotFoundException")})
+    runtime = Runtime({PRIMARY_MODEL: client_error("ResourceNotFoundException")})
 
     reporter._run_simple_report(runtime, sarif_model([]), [], [])
 

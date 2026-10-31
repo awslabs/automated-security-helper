@@ -117,6 +117,7 @@ def test_a_nix_run_that_leaves_a_link_in_reports_is_refused(tmp_path):
 
     with (
         patch(f"{RUN_ASH_SCAN}.run_ash_nix", side_effect=inner_run_refused),
+        patch(f"{RUN_ASH_SCAN}.nix_preflight", lambda: None),
         pytest.raises(SystemExit) as refused,
     ):
         _run_nix_mode(opts, MagicMock())
@@ -226,6 +227,7 @@ def test_a_reports_directory_that_is_a_link_is_refused_before_the_inner_run(
 
     with (
         patch(f"{RUN_ASH_SCAN}.{runner_name}", runner),
+        patch(f"{RUN_ASH_SCAN}.nix_preflight", lambda: None),
         pytest.raises(SystemExit) as refused,
     ):
         run_mode(opts, MagicMock())

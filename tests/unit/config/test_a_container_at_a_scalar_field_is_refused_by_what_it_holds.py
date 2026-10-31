@@ -363,7 +363,10 @@ def test_the_first_reference_in_reading_order_is_the_one_returned(value):
 def test_a_reference_alone_and_a_value_with_none_are_answered():
     assert first_env_scalar(_SECOND) is _SECOND
     assert first_env_scalar(["plain", {"key": ("also", "plain")}]) is None
-    assert first_env_scalar({_FIRST: "a key is not a value"}) is None
+    # A key is read too, before its value: a reference written as a mapping
+    # key would otherwise reach pydantic unseen (tests/unit/utils/
+    # test_redacted_model_dict_keys.py pins the whole route).
+    assert first_env_scalar({_FIRST: "a key is a value too"}) is _FIRST
 
 
 @pytest.mark.parametrize("route", sorted(_ROUTES))

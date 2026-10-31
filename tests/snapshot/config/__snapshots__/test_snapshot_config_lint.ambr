@@ -154,7 +154,7 @@
         'category': 'legacy-name-conflict',
         'fix_description': '',
         'fixable': False,
-        'message': "'scanners.npm_audit' (the legacy form) and 'scanners.npm-audit' are both set; a scan reads 'npm-audit' and ignores 'npm_audit'. Remove or merge one of them by hand: `ash config lint --fix` does not rename it",
+        'message': "'scanners.npm_audit' (the legacy form) and 'scanners.npm-audit' are both set; a scan merges them key by key, and where both set a key 'npm-audit' wins, so a key only 'npm_audit' sets still applies. Remove or merge one of them by hand: `ash config lint --fix` does not rename it",
         'path': 'scanners.npm_audit',
         'severity': 'warning',
       }),

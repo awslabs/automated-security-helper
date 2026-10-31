@@ -453,10 +453,13 @@ def test_a_blind_refusal_built_from_the_literal_reading_carries_one_error(
     tmp_path, monkeypatch
 ):
     """A literal base under an unsearchable directory, beside a value the top
-    file reads from the environment: the blind refusal is then the literal
-    resolution's own error. That error has to be built after the handler too,
-    not only raised there: built inside it, the env-read resolution's error
-    rides its __context__, a second document-quoting error on the chain."""
+    file reads from the environment. The base is checked with
+    ``is_regular_file``, which answers a denied stat as "not a file" on every
+    Python version, so the base is refused by its own path refusal and no blind
+    refusal is built (before that check, a Python older than 3.14 raised the
+    denied stat into the chain's catch-all, and the blind refusal was the literal
+    resolution's own error). Either way the chain carries at most one
+    document-quoting error and never the value the top file read."""
     from automated_security_helper.config import config_sources
     from automated_security_helper.config.config_sources import (
         _QUOTES_THE_DOCUMENT_MARK,
@@ -495,16 +498,10 @@ def test_a_blind_refusal_built_from_the_literal_reading_carries_one_error(
         m for m in members if getattr(m, _QUOTES_THE_DOCUMENT_MARK, False) is True
     ]
     assert len(quoting) <= 1, [type(m).__name__ for m in members]
-    if sys.version_info < (3, 14):
-        # Control: before 3.14 the denied stat reaches the chain's catch-all,
-        # so the refusal is the literal resolution's own error and this cell
-        # measures the blind path: it ran once, for the document-quoting
-        # error. On 3.14 the base is refused by its own path refusal and no
-        # blind error is built.
-        assert blind_calls == [True], blind_calls
-        assert len(quoting) == 1, [type(m).__name__ for m in members]
-    else:
-        assert blind_calls == [], blind_calls
+    # The base is refused by its own path refusal on every Python version:
+    # the denied stat never reaches the chain's catch-all, so no blind error is
+    # built.
+    assert blind_calls == [], blind_calls
 
 
 @_NEEDS_PERMISSION_BITS

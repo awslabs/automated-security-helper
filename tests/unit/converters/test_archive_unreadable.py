@@ -38,6 +38,7 @@ from automated_security_helper.models.asharp_model import (
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverter,
 )
+from automated_security_helper.utils.scan_output_dirs import CONVERTED_SOURCES_FILE_NAME
 from tests.utils.archive_builders import tar_bytes
 
 pytestmark = pytest.mark.unit
@@ -232,10 +233,15 @@ def convert(context, monkeypatch, name: str, data: bytes):
 
 
 def files_under(converter) -> List[str]:
+    """Every file the converter extracted; its record of the sources is not one."""
     root = Path(converter.results_dir)
     if not root.exists():
         return []
-    return sorted(p.name for p in root.rglob("*") if p.is_file())
+    return sorted(
+        p.name
+        for p in root.rglob("*")
+        if p.is_file() and p != root / CONVERTED_SOURCES_FILE_NAME
+    )
 
 
 @pytest.mark.parametrize("name, data", UNREADABLE)
@@ -390,3 +396,38 @@ def test_a_tar_of_end_blocks_only_is_an_empty_archive(test_plugin_context, monke
     assert len(results) == 1
     assert converter.failed_inputs == []
     assert converter.refused_inputs == []
+
+
+def empty_tar_bytes() -> bytes:
+    """What ``tar -cf empty.tar -T /dev/null`` writes: end blocks only, a record long."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w"):
+        pass
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("name", "data"),
+    [
+        pytest.param("empty.tar", empty_tar_bytes(), id="tar"),
+        pytest.param("empty.tar.gz", gzip.compress(empty_tar_bytes()), id="tar-gz"),
+    ],
+)
+def test_a_real_empty_tar_is_an_empty_archive_recorded_whole(
+    name, data, test_plugin_context, monkeypatch
+):
+    """A valid archive with no members: tarfile.open opens it, so the converter
+    extracts it to nothing, records no failure and counts it as extracted whole;
+    reading its first block of zeros as "not a tar" made it fail the completeness
+    gate with a false reason."""
+    from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+        archives_extracted_whole,
+    )
+
+    converter, results = convert(test_plugin_context, monkeypatch, name, data)
+
+    assert len(results) == 1
+    assert files_under(converter) == []
+    assert converter.failed_inputs == []
+    assert converter.refused_inputs == []
+    assert archives_extracted_whole(test_plugin_context) == {name}

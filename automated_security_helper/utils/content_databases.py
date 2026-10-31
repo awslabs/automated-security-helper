@@ -434,15 +434,25 @@ def cache_key_suffix(entry: ContentDatabase, now: datetime) -> str:
 
 
 def save_allowed(entry: ContentDatabase, built: datetime, now: datetime) -> bool:
-    """Whether a database built at `built` may be saved into the CI cache at `now`."""
-    if not entry.cacheable:
+    """Whether a database built at `built` may be saved into the CI cache at `now`.
+
+    A build time further ahead of `now` than ``CLOCK_SKEW_ALLOWANCE`` is refused, as
+    ``is_stale`` refuses it: its age is not measured, and a cache entry saved on it
+    would be restored for as long as the clock stayed behind it, then read as stale
+    by every scan.
+    """
+    if not entry.cacheable or is_future_dated(built, now):
         return False
     return now - built <= entry.max_age - bucket_width(entry)
 
 
 def use_allowed(entry: ContentDatabase, built: datetime, now: datetime) -> bool:
-    """Whether a database built at `built`, restored from the CI cache, may be used at `now`."""
-    if not entry.cacheable:
+    """Whether a database built at `built`, restored from the CI cache, may be used at `now`.
+
+    A future-dated build time is refused here as ``is_stale`` refuses it at scan time,
+    so the CI check and the scan agree on the restored copy.
+    """
+    if not entry.cacheable or is_future_dated(built, now):
         return False
     return now - built <= entry.max_age
 
@@ -476,11 +486,15 @@ def is_stale(entry: ContentDatabase, built: datetime, now: datetime) -> bool:
 def parse_timestamp(value: str) -> datetime:
     """An RFC 3339 timestamp as grype prints it, which may carry nanoseconds.
 
-    Go's time.Time marshals up to nine fractional digits; Python's fromisoformat takes six,
-    so the rest is truncated rather than rejected.
+    Go's time.Time marshals up to nine fractional digits with trailing zeros dropped, so
+    the fraction can have any length from one to nine digits. Python 3.10's fromisoformat
+    takes exactly three or six, so the fraction is written as six: padded with zeros, or
+    truncated past the sixth digit.
     """
     text = value.strip().replace("Z", "+00:00")
-    text = re.sub(r"(\.\d{6})\d+", r"\1", text)
+    text = re.sub(
+        r"\.(\d+)", lambda match: "." + match.group(1)[:6].ljust(6, "0"), text, count=1
+    )
     parsed = datetime.fromisoformat(text)
     if parsed.tzinfo is None:
         raise ValueError(f"timestamp {value!r} carries no timezone")

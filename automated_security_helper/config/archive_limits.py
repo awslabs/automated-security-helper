@@ -14,7 +14,8 @@ uploaded), each limit is held to the trusted base's value: the defaults,
 ``--config-overrides`` replayed onto it. A value at or below the trusted one is
 kept, so such a file can still lower a limit. A higher one is replaced by the
 trusted value, with a warning naming each option and where its value came from:
-the file, when it set the option, or the default, when it left the option out.
+the file, when it set the option (a value equal to the default included), or the
+default, when it left the option out.
 
 A config file in the tree replaces ``ASH_CONFIG`` the way any selected config file
 does (config sources are selected, not merged), so a limit the file leaves out is
@@ -55,14 +56,42 @@ def _sets_a_limit(override: str) -> bool:
 
     True for an entry at one of the four options and for one at a section holding
     them (``converters.archive.options``, ``converters.archive``, ``converters``),
-    with either separator spelling, the way ``_apply_config_override`` reads keys.
+    spelled the way ``_apply_config_override`` reads keys: either separator at
+    every segment, and any spelling of the ``archive`` section that folds to the
+    declared converter (``Archive``, ``ARCHIVE``, ``arc_hive``), since the apply
+    folds such a segment onto the section the document holds
+    (``plugin_section_names.plugin_key_in``). An entry the apply lands on the
+    section is replayed, so the operator's raise is never capped back as the
+    in-tree file's value.
     """
+    from automated_security_helper.config.plugin_section_names import (
+        folded_section_name,
+    )
+
     key = override.partition("=")[0].removesuffix("+").strip()
     parts = [part.strip().replace("-", "_") for part in key.split(".")]
     depth = min(len(parts), len(_LIMITS_SECTION))
-    if parts[:depth] != list(_LIMITS_SECTION[:depth]):
-        return False
+    for index in range(depth):
+        wanted = _LIMITS_SECTION[index]
+        if index == 1:
+            if folded_section_name(parts[index]) != folded_section_name(wanted):
+                return False
+        elif parts[index] != wanted:
+            return False
     return len(parts) <= len(_LIMITS_SECTION) or parts[3] in EXTRACTION_LIMIT_OPTIONS
+
+
+def _wrote(config: "AshConfig", name: str) -> bool:
+    """Whether the config's file set the limit ``name`` itself.
+
+    Answered from the record of what the operator supplied
+    (``recorded_config._sets``), which a config rebuilt by an override carries: the
+    rebuild marks every field as set, so the model's own ``model_fields_set`` would
+    say the file wrote them all.
+    """
+    from automated_security_helper.config.recorded_config import _sets
+
+    return _sets(config, (*_LIMITS_SECTION, name))
 
 
 def confine_archive_limits(
@@ -108,9 +137,10 @@ def confine_archive_limits(
     trusted = trusted_config.converters.archive.options
     defaults = ArchiveConverterConfigOptions()
     # Split by where the capped value came from, so the warning names its source: a
-    # value equal to the default is the default, which the file took by leaving the
-    # option out (it replaces ASH_CONFIG as any selected config does); any other
-    # value was written by the file. An override cannot be either, because the
+    # value the file wrote is the file's, even when it equals the default; a default
+    # the file did not write is the one it took by leaving the option out (it
+    # replaces ASH_CONFIG as any selected config does). A value other than the
+    # default can only have been written. An override cannot be either, because the
     # overrides are replayed onto the trusted base as well.
     set_by_file: List[str] = []
     defaulted: List[str] = []
@@ -120,10 +150,10 @@ def confine_archive_limits(
         if value <= cap:
             continue
         entry = f"converters.archive.options.{name} ({value} above {cap})"
-        if value == getattr(defaults, name):
-            defaulted.append(entry)
-        else:
+        if value != getattr(defaults, name) or _wrote(config, name):
             set_by_file.append(entry)
+        else:
+            defaulted.append(entry)
         setattr(options, name, cap)
     files = ", ".join(describe_config_path(path) for path in in_tree)
     if set_by_file:

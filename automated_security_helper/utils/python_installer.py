@@ -33,7 +33,9 @@ changes. :func:`environment_rebuild_note` says so where the install runs.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib.machinery
+import os
+import shlex
 import sys
 from pathlib import Path
 from typing import List, Optional, Sequence
@@ -64,8 +66,25 @@ def is_uvx_environment() -> bool:
 
 
 def pip_is_importable() -> bool:
-    """Whether ``sys.executable -m pip`` can run in this environment."""
-    return importlib.util.find_spec("pip") is not None
+    """Whether ``sys.executable -m pip`` can run in this environment.
+
+    Looked for on the interpreter's own path entries: not the working directory
+    (``""`` or the directory itself, which ``sys.path`` holds when ASH runs as a
+    module from it), since the install runs ``-m pip`` under ``-P`` from an empty
+    directory, where a ``pip`` package in the launch directory is not found; and
+    not through ``sys.modules``, which answers for this process rather than for
+    the child.
+    """
+    try:
+        here: Optional[str] = os.path.realpath(os.getcwd())
+    except OSError:
+        here = None
+    entries = [
+        entry
+        for entry in sys.path
+        if entry and not (here is not None and os.path.realpath(entry) == here)
+    ]
+    return importlib.machinery.PathFinder.find_spec("pip", entries) is not None
 
 
 def python_package_install_command(requirements: Sequence[str]) -> List[str]:
@@ -76,7 +95,8 @@ def python_package_install_command(requirements: Sequence[str]) -> List[str]:
             found, naming what to install. Returning a pip command anyway would
             fail with "No module named pip", which is the defect this replaces.
     """
-    if not is_uv_tool_environment() and pip_is_importable():
+    uv_tool = is_uv_tool_environment()
+    if not uv_tool and pip_is_importable():
         return [sys.executable, "-m", "pip", "install", *requirements]
 
     from automated_security_helper.utils.uv_tool_runner import (
@@ -98,17 +118,37 @@ def python_package_install_command(requirements: Sequence[str]) -> List[str]:
             *requirements,
         ]
 
+    # The reason names what is true of this environment: a uv tool environment
+    # is installed into with uv whether or not pip is importable in it, so
+    # saying it "has no pip" and sending the operator to ensurepip changed
+    # nothing there.
+    if uv_tool:
+        reason = (
+            "it is an environment `uv tool install` manages, which is installed "
+            "into with uv, and no uv was found beside ASH's interpreter or on "
+            "PATH. Put uv on PATH, then run the command again."
+        )
+    else:
+        reason = (
+            "it has no pip, and no uv was found beside ASH's interpreter or on "
+            "PATH. Put uv on PATH, or add pip to that environment with "
+            f"`{sys.executable} -m ensurepip`, then run the command again."
+        )
     raise ToolNotProvisionableError(
         f"Cannot install {', '.join(requirements)} into the Python environment at "
-        f"{sys.prefix}: it has no pip, and no uv was found beside ASH's interpreter "
-        f"or on PATH. Put uv on PATH, or add pip to that environment with "
-        f"`{sys.executable} -m ensurepip`, then run the command again."
+        f"{sys.prefix}: {reason}"
     )
 
 
 def environment_rebuild_note(requirements: Sequence[str]) -> Optional[str]:
-    """What undoes an install into this environment, or None when nothing does."""
-    withs = " ".join(f"--with '{requirement}'" for requirement in requirements)
+    """What undoes an install into this environment, or None when nothing does.
+
+    Each requirement is quoted for a POSIX shell (``shlex.quote``): hand-written
+    single quotes broke the command for a requirement holding one.
+    """
+    withs = " ".join(
+        f"--with {shlex.quote(requirement)}" for requirement in requirements
+    )
     if is_uv_tool_environment():
         # --with is recorded in the tool's receipt, which is what uv rebuilds from.
         return (

@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import errno
+import json
 import logging
 import os
+import stat
 from pathlib import Path
 from typing import (
     Annotated,
@@ -64,6 +66,7 @@ from automated_security_helper.config.config_sources import (
     is_json_file,
     is_regular_file,
     is_toml_file,
+    parse_config_text,
     read_config_bytes,
     read_config_file,
     refuse_unless_a_file,
@@ -102,6 +105,12 @@ from automated_security_helper.utils.log import (
     escape_markup,
     get_logger,
     show_debug_locals,
+)
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+from automated_security_helper.utils.path_stat import (
+    UNREADABLE,
+    StatProblem,
+    stat_named_path,
 )
 
 # The exit code for a configuration a scan would refuse, the one `ash scan` exits
@@ -142,14 +151,128 @@ def _source_dir(source_dir: str | None) -> Path:
     Refused as `ash scan` refuses it, with exit 5 and the same text
     (utils/directory_refusals.py), when it names no directory a scan could read, so
     these commands never report "No config file found in" a directory that does
-    not exist, as if they had looked in one.
+    not exist, as if they had looked in one. A value that was given is checked as
+    given, an empty one included: ``--source-dir ""`` names no directory, as the
+    scan refuses it, and is not read as the current directory.
     """
-    scan_root = Path(source_dir) if source_dir else Path.cwd()
-    refusal = source_dir_refusal(scan_root)
+    if source_dir is None:
+        scan_root = _working_directory()
+        refusal = source_dir_refusal(scan_root)
+    else:
+        # The text as given: Path("") is the current directory, which the scan's
+        # own check of the empty string does not find.
+        scan_root = Path(source_dir)
+        refusal = source_dir_refusal(source_dir)
     if refusal is not None:
         echo(shown_on_one_line(refusal), err=True)
         raise typer.Exit(ASH_EXIT_USAGE_ERROR)
     return scan_root
+
+
+def _working_directory() -> Path:
+    """The current directory, or the exit-5 refusal `ash scan` gives a source
+    directory that does not exist.
+
+    ``Path.cwd()`` raises FileNotFoundError when the working directory was deleted
+    (or unmounted) under the shell, and that escaped as a traceback from every
+    command that defaults to the working directory, ahead of the refusal
+    :func:`_source_dir` exists to give.
+    """
+    try:
+        return Path.cwd()
+    except OSError:
+        echo(
+            "Source directory does not exist: the current directory was deleted or "
+            "unmounted. Change to a directory that exists, or pass --source-dir.",
+            err=True,
+        )
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+
+
+def _refuse_a_config_a_scan_refuses(
+    ash_config: AshConfig, frame: str, *, unfindable: bool = True
+) -> None:
+    """Exit 3 before writing a config whose ``ash_plugin_modules`` a scan refuses.
+
+    ``get``, ``validate`` and ``validate-plugin-dependencies`` refuse the same
+    entries with exit 3 (refuse_plugin_modules_a_scan_refuses), so a config the
+    editors wrote with one, and reported written, was one every reader then
+    refused. Checked with ASH_PLUGIN_MODULES, as those commands check it: a
+    scan of the same directory reads the variable. ``frame`` opens the message.
+
+    The check has two halves: a name outside ASH's plugin namespace, which no
+    install can admit, and a name inside it that no installed package provides
+    yet. With ``unfindable=False`` only the first refuses: the wizard writes a
+    module an operator may install next, as it always did, and ``get`` and
+    ``validate`` say so when they read the file before that install.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        environment_plugin_modules,
+    )
+    from automated_security_helper.plugins.loader import PluginModuleImportError
+
+    try:
+        refuse_plugin_modules_a_scan_refuses(ash_config, environment_plugin_modules())
+    except PluginModuleImportError as e:
+        if not unfindable:
+            return
+        _refuse_in_the_editors_words(e, frame)
+    except ASHConfigValidationError as e:
+        _refuse_in_the_editors_words(e, frame)
+
+
+def _typed_module_refusal(module: str) -> str | None:
+    """Why a scan refuses ``module`` as an ``ash_plugin_modules`` entry, or None.
+
+    The half of ``_refuse_a_config_a_scan_refuses`` that can never pass: a name
+    outside ASH's plugin namespace. A name inside it that no installed package
+    provides yet is admitted, as the wizard always admitted it (the operator may
+    install it next). The environment's entries are not judged here; they are
+    judged before the first prompt.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        replace_plugin_module_list,
+    )
+    from automated_security_helper.plugins.loader import (
+        PluginModuleError,
+        PluginModuleImportError,
+    )
+
+    probe = AshConfig()
+    replace_plugin_module_list(probe, [], [module])
+    try:
+        refuse_plugin_modules_a_scan_refuses(probe, [])
+    except PluginModuleImportError:
+        return None
+    except ASHConfigValidationError as error:
+        if isinstance(error, PluginModuleError):
+            return plugin_module_refusal_message(error)
+        return str(error)
+    return None
+
+
+def _refuse_in_the_editors_words(error: ASHConfigValidationError, frame: str) -> None:
+    """Print ``error`` under ``frame`` as ``get`` and ``validate`` print it, exit 3.
+
+    A plugin-module refusal is printed through plugin_module_refusal_message, as
+    the check commands print theirs: ``str(error)`` carries the scan's closing,
+    which names a run the editors do not make and option spellings they do not
+    take. When every refused entry came from ASH_PLUGIN_MODULES the file is not
+    what is wrong, so the line is headed as the check commands head theirs,
+    "Invalid configuration from ASH_PLUGIN_MODULES", in place of ``frame``,
+    instead of sending the operator to edit a file that holds no such entry.
+    Any other configuration refusal is printed as raised.
+    """
+    from automated_security_helper.plugins.loader import PluginModuleError
+
+    if isinstance(error, PluginModuleError):
+        message = plugin_module_refusal_message(error)
+        if _refused_only_from_environment(error):
+            frame = "Invalid configuration from ASH_PLUGIN_MODULES"
+    else:
+        message = str(error)
+    secho(shown_on_one_line(f"{frame}: {message}"), fg=typer.colors.RED)
+    raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
 
 
 def _config_path_or_discovered(config: str | None, source_dir: Path) -> Path | None:
@@ -219,6 +342,227 @@ def _refuse_unless_a_file(config_path: Path) -> None:
         raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
 
 
+def _config_name_exists(config_path: str | Path) -> bool:
+    """Whether the named config is there, or exit 3 when its stat cannot say.
+
+    Not ``Path.exists()``: before Python 3.14 it raises the stat's
+    PermissionError for a path under a directory that cannot be searched, so
+    the commands ended in a traceback and exit 1 where they document exit 3 for
+    a config that cannot be read. One stat, classified by its own error
+    (utils/path_stat.py): "not found" and a symbolic link loop answer False,
+    as ``exists`` answers them, and ``_refuse_missing_config`` then says which;
+    any other error is refused here, in the words the scan's own load uses.
+    """
+    result = stat_named_path(config_path)
+    if not isinstance(result, StatProblem):
+        return True
+    if result.kind != UNREADABLE:
+        return False
+    # One line: the path is the caller's text.
+    secho(
+        shown_on_one_line(
+            f"❌ Config file cannot be read ({result.code}): "
+            f"{Path(config_path).as_posix()}"
+        ),
+        fg=typer.colors.RED,
+    )
+    raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
+
+
+def _write_target(config_path: Path) -> Path:
+    """The file a write to ``config_path`` replaces: the one a link there points to.
+
+    A rename over the link's own name would turn the link into a regular file;
+    the plain write these commands made wrote through the link, so the file it
+    points to is the one replaced, and the link is kept.
+
+    A path that is not a link is written where it was given. ``realpath`` of a
+    relative path joins it to ``os.getcwd()``, and the plain write never read
+    the working directory's name: it resolved the path through the open, as the
+    staged write beside it does. A process whose ``os.getcwd`` does not answer
+    with the directory the files are in (one that reports a display name for it,
+    or whose working directory was renamed) then wrote beside a directory that
+    is not there. A relative link is resolved with ``realpath``, which does read
+    ``os.getcwd()``; that is the one case here that does.
+    """
+    target = Path(config_path)
+    if target.is_symlink():
+        return Path(os.path.realpath(target))
+    return target
+
+
+def _stat_to_keep(target: Path) -> os.stat_result | None:
+    """The file at ``target`` as it is before the write, or None when there is none.
+
+    A staged write makes a new inode, whose mode is 0o666 less the umask
+    (fs_guard.open_for_atomic_write) and whose owner is this process. The mode
+    the user set on the file is put back on the staging file before it is
+    renamed into place (``_carry_file_identity``), so a 0600 config does not
+    come back 0644, and so is the owner where this process may set it.
+    """
+    try:
+        return os.stat(target)
+    except (OSError, ValueError):
+        return None
+
+
+def _may_not_write(target: Path, before: os.stat_result | None) -> bool:
+    """Whether the file at ``target`` exists and this process may not write it.
+
+    A rename needs write permission on the directory, not on the file, so the
+    staged write replaced a file the user had made read-only (0444 in a
+    writable directory), where the plain write it replaced was refused with
+    EACCES. Such a file is written in place, so the refusal is the file's own.
+    """
+    return before is not None and not os.access(target, os.W_OK)
+
+
+def _owned_by_another_user(before: os.stat_result | None) -> bool:
+    """Whether the file exists and belongs to a user this process is not.
+
+    A rename makes a new file owned by this process, and handing the file back
+    to its owner needs the privilege to change an owner (root). Without it the
+    owner's chown is refused and swallowed (``_carry_file_identity``), so the
+    staged write left the file the editor's and its owner without write access
+    to their own config. Such a file is written in place, where the write is the
+    file's own permission's to allow or refuse and the owner is kept. Root is
+    not asked to: it can give the file back.
+    """
+    if before is None or not hasattr(os, "geteuid"):
+        return False
+    effective = os.geteuid()
+    return effective != 0 and before.st_uid != effective
+
+
+def _carry_file_identity(fd: int, before: os.stat_result | None) -> None:
+    """Give the staging file at ``fd`` the replaced file's owner and mode.
+
+    Called before any text is written to the staging file, so the text is never
+    in a file more open than the one it replaces.
+
+    The owner first: a chown clears set-id bits on some systems, and it is
+    attempted only where the staging file's owner differs (a process running as
+    root over a bind-mounted config, say, which otherwise handed the file back
+    owned by root); without the privilege it is refused and the mode is still
+    carried. Hard links, ACLs and extended attributes are not carried: the
+    rename makes a new file.
+    """
+    if before is None:
+        return
+    if hasattr(os, "fchown"):
+        try:
+            current = os.fstat(fd)
+            if (current.st_uid, current.st_gid) != (before.st_uid, before.st_gid):
+                os.fchown(fd, before.st_uid, before.st_gid)
+        except PermissionError:
+            pass
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, stat.S_IMODE(before.st_mode))
+
+
+def _staged_write_falls_back(error: OSError) -> bool:
+    """Whether a staged write that failed with ``error`` is made in place instead.
+
+    Staging beside the file and renaming over it needs a writable directory and
+    a name that can be replaced. A file the user may write in a directory they
+    may not (EACCES at the staging file), a single file bind-mounted into the
+    container (EBUSY from the rename onto a mount point), a rename across file
+    systems (EXDEV) and a file another process holds open on Windows
+    (PermissionError from the rename) are all places the plain in-place write
+    these commands made used to succeed, so it is made then. Any other error
+    (a full disk among them) is the write's own and is raised.
+
+    A refusal the guard made on purpose (a link below a guarded root, a file
+    another name refers to) is never one of them, whatever its errno: the
+    in-place write would make the very write the guard refused.
+
+    The in-place write is itself made through the guard (``_write_in_place``):
+    a file this process may not write, or one another user owns, never reaches
+    the staged write, so the guard has not looked at it when the write is made.
+    """
+    if isinstance(error, OutputDirLinkRefused):
+        return False
+    return isinstance(error, PermissionError) or error.errno in (
+        errno.EBUSY,
+        errno.EXDEV,
+    )
+
+
+def _write_in_place(target: Path, data: str | bytes) -> None:
+    """Write ``data`` over the file at ``target`` where it is, through the write guard.
+
+    ``fs_guard.open_for_write`` opens the file as ``Path.write_text`` does and
+    truncates it only after it has checked it. Below a guarded root it refuses a
+    link at any component (OutputLinkRefused) and a file another name refers to
+    (OutputHardLinkRefused) before anything is changed; anywhere else it is the
+    plain open. The in-place write used to be a bare ``write_text``, so a file
+    taken to this path because the staged write was skipped (an owner this
+    process is not, a file it may not write) was written where the guard would
+    have refused it.
+    """
+    # Not at the top: fs_guard imports the sandbox package (atomic_write.py).
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+    if isinstance(data, bytes):
+        with open_for_write(target, binary=True) as handle:
+            handle.write(data)
+    else:
+        with open_for_write(target, encoding="utf-8") as handle:
+            handle.write(data)
+
+
+def _write_config_text(config_path: Path, text: str) -> None:
+    """Replace the config file's text so a failed write leaves it as it was.
+
+    ``Path.write_text`` truncates the file before it writes, so a write that
+    failed partway (a full disk, a signal) left the user's config empty or
+    partial. The text is staged beside the file with the file's own permission
+    bits and owner and renamed over it (fs_guard.open_for_atomic_write, as
+    utils/atomic_write.py writes); where staging or the rename is refused for
+    the file's place (``_staged_write_falls_back``), or the file is one this
+    process may not write (``_may_not_write``) or one owned by another user it
+    cannot give back to (``_owned_by_another_user``), the in-place write is made.
+    """
+    # Not at the top: fs_guard imports the sandbox package (atomic_write.py).
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
+
+    target = _write_target(config_path)
+    before = _stat_to_keep(target)
+    try:
+        if _may_not_write(target, before) or _owned_by_another_user(before):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
+        with open_for_atomic_write(target, encoding="utf-8") as handle:
+            # Before the first byte: the staging file is created with the
+            # umask-derived mode, and a 0o600 config's text must not be written
+            # into a file another local user can open.
+            _carry_file_identity(handle.fileno(), before)
+            handle.write(text)
+    except OSError as error:
+        if not _staged_write_falls_back(error):
+            raise
+        _write_in_place(target, text)
+
+
+def _write_config_bytes(config_path: Path, data: bytes) -> None:
+    """``_write_config_text`` for bytes the caller has already encoded."""
+    # Not at the top: fs_guard imports the sandbox package (atomic_write.py).
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
+
+    target = _write_target(config_path)
+    before = _stat_to_keep(target)
+    try:
+        if _may_not_write(target, before) or _owned_by_another_user(before):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
+        with open_for_atomic_write(target, binary=True) as handle:
+            # Before the first byte, as in _write_config_text.
+            _carry_file_identity(handle.fileno(), before)
+            handle.write(data)
+    except OSError as error:
+        if not _staged_write_falls_back(error):
+            raise
+        _write_in_place(target, data)
+
+
 def _print_unchecked_plugin_options_note(check: ConfigCheck) -> None:
     """Say which plugin sections validate cannot check, as 'ash config lint' does.
 
@@ -275,6 +619,10 @@ def _print_invalid_config(
     # A parser's message spans lines of its own and keeps them; every other
     # message is one line, since it can name the caller's path.
     keep_layout = False
+    # The ASH_CONFIG file's own refusal, when the error is that file's: the
+    # named file's check is not run for it, since its errors would be printed
+    # in the refusal's place and the refusal that stopped the load never shown.
+    refused_env_file = getattr(error, "ash_config_file", None)
     if isinstance(error, PluginModuleError):
         # The raised refusal is the whole verdict, closed in these commands'
         # own words: str() carries the scan's closing, which names a run these
@@ -283,17 +631,30 @@ def _print_invalid_config(
         # validator's closing, whose namespace form offers only the config
         # file - wrong for an entry --config-overrides added, which these
         # commands take.
-        if config_file is not None:
+        if _refused_only_from_environment(error):
+            # Every refused entry came from ASH_PLUGIN_MODULES, so the config
+            # file is not what is wrong: naming it sent the operator to edit a
+            # file that holds no such entry.
+            header = "Invalid configuration from ASH_PLUGIN_MODULES:"
+        elif config_file is not None:
             header = f"Invalid configuration in {config_file}:"
         messages = [plugin_module_refusal_message(error)]
-    elif config_file is not None:
+    elif config_file is not None and (
+        refused_env_file is None or _same_file(Path(refused_env_file), config_file)
+    ):
+        # The named file is checked when the refusal is its own: the usual
+        # case, and the case where ASH_CONFIG names the very file --config (or
+        # discovery) named, as _refused_file_label reads it. Skipped for every
+        # ASH_CONFIG refusal, the common `ASH_CONFIG=.ash/.ash.yaml ash config
+        # get` printed only the refusal's one line and dropped the per-field
+        # messages the check gives.
         check = ConfigValidator.check_config_file(
             config_file,
             source_dir=source_dir,
             config_overrides=config_overrides,
             # A refusal get_default_config marked is the ASH_CONFIG file's own,
             # printed below: its check would load that file once more.
-            check_ash_config=getattr(error, "ash_config_file", None) is None,
+            check_ash_config=refused_env_file is None,
         )
         # The ASH_CONFIG file's refusal is not about config_file: printed
         # under its name, it would blame the wrong file. The refusal's own
@@ -320,6 +681,11 @@ def _print_invalid_config(
             messages = [str(error)]
             # The ASH_CONFIG file's parse refusal, printed as the scan prints it.
             keep_layout = bool(getattr(error, "parser_message", False))
+        if refused_env_file is not None and not isinstance(error, PluginModuleError):
+            header = (
+                "Invalid configuration in the file ASH_CONFIG names "
+                f"('{describe_config_path(Path(refused_env_file))}'):"
+            )
     # The header names the file on one line, whatever its path holds.
     if header is not None:
         secho(shown_on_one_line(header), fg=typer.colors.RED)
@@ -381,20 +747,47 @@ def _refused_file_label(label: str, config_file: Path, error: BaseException) -> 
     and an OSError names the path it could not read. ASH_CONFIG can name any
     path, a directory included.
     """
+    if _refused_only_from_environment(error):
+        return "The ASH_PLUGIN_MODULES setting"
     ash_config = os.environ.get("ASH_CONFIG") or ""
     refused = getattr(error, "ash_config_file", None)
     # A name that does not exist is refused as ASH_CONFIG's, not as config_file.
     if not ash_config or (refused is None and not os.path.exists(ash_config)):
         return label
     named = Path(ash_config)
-    if named.resolve() == Path(config_file).resolve():
+    if _same_file(named, Path(config_file)):
         return label
     if refused is None and isinstance(error, OSError) and error.filename:
-        if Path(os.fsdecode(error.filename)).resolve() == named.resolve():
+        if _same_file(Path(os.fsdecode(error.filename)), named):
             refused = named
     if refused is None:
         return label
     return f"The file ASH_CONFIG names ('{describe_config_path(named)}')"
+
+
+def _same_file(first: Path, second: Path) -> bool:
+    """Whether two paths resolve to one file; False when either cannot be resolved.
+
+    ``Path.resolve`` raises RuntimeError for a symbolic link loop on Python 3.10
+    to 3.12 (OSError on 3.13), and inside a refusal's label that crashed the
+    command with a traceback in place of the refusal.
+    """
+    try:
+        return first.resolve() == second.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _refused_only_from_environment(error: BaseException) -> bool:
+    """Whether ``error`` is a plugin-module refusal whose every refused entry
+    came from ASH_PLUGIN_MODULES, so no config file is what is wrong."""
+    from automated_security_helper.plugins.loader import PluginModuleError
+
+    if not isinstance(error, PluginModuleError):
+        return False
+    entries = getattr(error, "entries", ()) or ()
+    environment_only = getattr(error, "environment_only_entries", None) or frozenset()
+    return bool(entries) and set(entries) <= set(environment_only)
 
 
 def _new_source_refusal(search_dir: Path, target: Path) -> str | None:
@@ -410,15 +803,20 @@ def _new_source_refusal(search_dir: Path, target: Path) -> str | None:
     except ASHConfigValidationError as e:
         return f"the existing configuration here could not be read ({e})"
     wanted = (search_dir / target).absolute()
-    for source in [discovery.selected, *discovery.ignored]:
-        if source is not None and source.path.absolute() != wanted:
-            return (
-                f"ASH already reads its configuration from {source.label}, and "
-                f"configuration sources are never merged, so a new {target} here "
-                f"would leave one of the two files unread. Edit {source.label}, or "
-                "pass --config to write the new file somewhere else"
-            )
-    return None
+    # Only the selected source decides: it is the file ASH reads. When it is the
+    # target itself, writing the target changes nothing about what is read (the
+    # --force check decides whether to overwrite it); an ignored source beside it
+    # is already unread, and naming one as the file ASH reads was false and
+    # refused `init --force` on the file ASH does read.
+    selected = discovery.selected
+    if selected is None or selected.path.absolute() == wanted:
+        return None
+    return (
+        f"ASH already reads its configuration from {selected.label}, and "
+        f"configuration sources are never merged, so a new {target} here "
+        f"would leave one of the two files unread. Edit {selected.label}, or "
+        "pass --config to write the new file somewhere else"
+    )
 
 
 def _ensure_output_gitignore(config_path: Path) -> None:
@@ -436,10 +834,31 @@ def _ensure_output_gitignore(config_path: Path) -> None:
     else:
         return
     gitignore = ash_dir / ".gitignore"
-    if gitignore.exists():
+    # lexists: a dangling link at the name is not "no file", and exists() said
+    # so, after which the write went through the link to wherever it points.
+    if os.path.lexists(gitignore):
         return
-    ash_dir.mkdir(parents=True, exist_ok=True)
-    gitignore.write_text("# ASH default output directory (and variants)\nash_output*\n")
+    if ash_dir.exists() and not ash_dir.is_dir():
+        # A regular file (or a device) at .ash is not a directory to write
+        # into; mkdir raised FileExistsError through init and the wizard,
+        # which lost every answer given. The config itself is still written.
+        secho(
+            shown_on_one_line(
+                f"Not writing {gitignore}: {ash_dir} exists and is not a directory."
+            ),
+            fg=typer.colors.YELLOW,
+        )
+        return
+    try:
+        ash_dir.mkdir(parents=True, exist_ok=True)
+        gitignore.write_text(
+            "# ASH default output directory (and variants)\nash_output*\n"
+        )
+    except OSError as e:
+        secho(
+            shown_on_one_line(f"Not writing {gitignore}: {error_text(e)}"),
+            fg=typer.colors.YELLOW,
+        )
 
 
 # The config-file option every `ash config` subcommand that reads a config takes,
@@ -514,6 +933,10 @@ def _describe_load_error(error: Exception, config_path: Path) -> str:
     """
     if is_config_parse_error(error):
         return unparsed_config_reason(config_path, error)
+    if isinstance(error, RecursionError):
+        # The parser recursed past the interpreter's limit: a document nested
+        # too deeply to parse, refused as a file that does not parse is.
+        return f"{describe_config_path(config_path)} is nested too deeply to parse"
     validation_error = getattr(error, "validation_error", None)
     if isinstance(error, ValidationError):
         validation_error = error
@@ -581,8 +1004,14 @@ def _rewrite_refusal(config_path: Path) -> str | None:
     """
     if is_toml_file(config_path):
         return _TOML_REFUSAL
-    # Before the safe_load below, which cannot construct an !ENV tag.
-    if uses_env_references(config_path):
+    # Before the safe_load below, which cannot construct an !ENV tag. A document
+    # nested too deeply to parse raises RecursionError out of the parse here
+    # too; the load below reports it as a file that does not parse.
+    try:
+        reads_environment = uses_env_references(config_path)
+    except RecursionError:
+        return None
+    if reads_environment:
         return (
             "it reads values from the environment through environment references "
             "(${VAR} or !ENV), and rewriting it would replace each reference with "
@@ -591,10 +1020,25 @@ def _rewrite_refusal(config_path: Path) -> str | None:
     try:
         # As a scan reads it, so a FIFO at the name is refused, not waited on. A
         # file that does not load is refused when the command loads it.
-        raw = load_config_yaml(read_config_bytes(config_path).decode("utf-8"))
-    except (OSError, ValueError, yaml.YAMLError, ASHConfigValidationError):
+        data = read_config_bytes(config_path)
+        if is_json_file(config_path):
+            # Parsed as the scan parses a .json file (config_sources, with a
+            # byte order mark dropped). The YAML loader refused a JSON file it
+            # cannot read, one indented with tabs, so the refusal below was
+            # skipped and the command flattened the file's extends or patch.
+            raw = json.loads(data.decode("utf-8-sig"))
+        else:
+            raw = load_config_yaml(data.decode("utf-8"))
+    except (
+        OSError,
+        ValueError,
+        RecursionError,
+        yaml.YAMLError,
+        ASHConfigValidationError,
+    ):
         # UnicodeDecodeError and a constructor's ValueError (!!int) are
-        # ValueErrors. The load below reports the file it cannot read or parse.
+        # ValueErrors; a RecursionError is a document nested too deeply to
+        # parse. The load below reports the file it cannot read or parse.
         return None
     if isinstance(raw, dict) and (EXTENDS_KEY in raw or PATCH_KEY in raw):
         return (
@@ -643,7 +1087,7 @@ def init(
     )
     if config is None:
         config_path = Path(ASH_DEFAULT_CONFIG_FILE_NAME)
-        refusal = _new_source_refusal(Path.cwd(), config_path)
+        refusal = _new_source_refusal(_working_directory(), config_path)
         if refusal:
             secho(
                 shown_on_one_line(f"Not creating {config_path}: {refusal}."),
@@ -652,6 +1096,11 @@ def init(
             raise typer.Exit(1)
     else:
         config_path = Path(config)
+        if not config_path.is_absolute():
+            # A relative --config is resolved against the working directory
+            # below (config_path.absolute()); a deleted one ended in a
+            # traceback there instead of the exit-5 refusal.
+            _working_directory()
     if is_toml_file(config_path):
         # Before the --force check: `init --config pyproject.toml --force` would
         # otherwise replace the project's pyproject.toml with YAML.
@@ -662,7 +1111,21 @@ def init(
         raise typer.Exit(1)
     # Before the --force check too: --force opens the path for writing.
     _refuse_unless_a_file(config_path)
-    if config_path.absolute().exists() and not force:
+    config_exists = _config_name_exists(config_path.absolute())
+    if not config_exists and os.path.lexists(config_path):
+        # A link to nothing: the check above finds no file behind it, and "no
+        # config yet" would create the new file wherever the link points.
+        # Refused as the wizard refuses the same name. One line: the path is
+        # the caller's text.
+        secho(
+            shown_on_one_line(
+                f"Invalid configuration: {config_path} exists but is not a regular "
+                "file, so no config is written to it."
+            ),
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
+    if config_exists and not force:
         secho(
             shown_on_one_line(
                 f"Config file already exists at {config_path.absolute()}. "
@@ -671,8 +1134,6 @@ def init(
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
-    config_path.parent.mkdir(exist_ok=True, parents=True)
-    _ensure_output_gitignore(config_path)
     secho(shown_on_one_line(f"Saving ASH config to path: {config_path.absolute()}"))
     project_name = config_path.absolute().parent.name
     if project_name == ".ash":
@@ -680,10 +1141,20 @@ def init(
     ash_config = AshConfig(
         project_name=project_name,
     )
-    config_path.write_text(
-        render_config_file(config_path, ash_config, [SCHEMA_COMMENT]),
-        encoding="utf-8",
-    )
+    # An unwritable target (a parent that is a file, a read-only directory)
+    # ended in a traceback; update reports the same failure on one line.
+    try:
+        config_path.parent.mkdir(exist_ok=True, parents=True)
+        _ensure_output_gitignore(config_path)
+        _write_config_text(
+            config_path, render_config_file(config_path, ash_config, [SCHEMA_COMMENT])
+        )
+    except OSError as e:
+        secho(
+            shown_on_one_line(f"Error writing config file: {error_text(e)}"),
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
 
 
 @config_app.command()
@@ -729,7 +1200,7 @@ def get(
         use_color=color,
     )
     config_path = _named_config(ctx, config_path, config)
-    if config_path is not None and not Path(config_path).exists():
+    if config_path is not None and not _config_name_exists(config_path):
         _refuse_missing_config(config_path)
     # The file this command is about: the one named, or the one resolve_config
     # would discover. When there is one, it is loaded with fallback_to_default
@@ -794,6 +1265,10 @@ def get(
             lexer="yaml",
             theme="lightbulb",
             background_color=None,
+            # Wrapped, not cut: Syntax crops every line longer than the console
+            # to its width, so a long value (an ignore path, a module list) was
+            # silently truncated in the printed config.
+            word_wrap=True,
         )
     )
 
@@ -855,9 +1330,11 @@ def _refuse_a_reference_shaped_value(key_path: str, value: str) -> None:
         )
     try:
         parsed = _parse_config_value(value)
-    except RecursionError:
-        # A value nested too deep to parse: the apply refuses it with its own
-        # one-line message, so this check has nothing to add.
+    except (RecursionError, ValueError):
+        # A value nested too deep to parse, or one the parser's int() refuses (a
+        # JSON list holding an integer literal over the interpreter's digit
+        # limit): the apply refuses it with its own one-line message, so this
+        # check has nothing to add.
         return
     if _reference_shaped(parsed):
         raise ASHConfigValidationError(
@@ -886,6 +1363,12 @@ def _refuse_an_unknown_top_level_key(key_path: str) -> None:
     ]
     if first in known:
         return
+    # A first segment that is a key once its surrounding whitespace is dropped,
+    # or an empty one, is left to the apply: compared as typed, it was reported
+    # as "not a top-level configuration key" while that same key was listed as
+    # valid, hiding the problem the apply names.
+    if not first.strip() or first.strip() in known:
+        return
     raise ASHConfigValidationError(
         f"Invalid config override: '{key_path}'. '{first}' is not a top-level "
         f"configuration key: the keys are {', '.join(AshConfig.model_fields)}."
@@ -910,6 +1393,10 @@ def update(
             help="Configuration modifications specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW'). Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax.",
         ),
     ] = [],
+    source_dir: Annotated[
+        str | None,
+        typer.Option("--source-dir", help=_SOURCE_DIR_HELP, envvar="ASH_SOURCE_DIR"),
+    ] = None,
     verbose: Annotated[
         bool,
         typer.Option("--verbose/--no-verbose", "-v", help="Enable verbose logging"),
@@ -928,9 +1415,10 @@ def update(
     This command applies changes to an ASH configuration file using the same syntax as --config-overrides.
 
     Nothing is written, and the command exits 3, when the file is not a valid
-    configuration or a --set cannot be applied. A file that uses extends or
-    patch, or reads the environment (${VAR} or !ENV references), or a TOML
-    file, is refused with exit 1: rewriting it would lose what those express.
+    configuration, a --set cannot be applied, or the file changed while the
+    command read it. A file that uses extends or patch, or reads the environment
+    (${VAR} or !ENV references), or a TOML file, is refused with exit 1:
+    rewriting it would lose what those express.
     """
     logger = get_logger(
         level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),
@@ -939,10 +1427,22 @@ def update(
     )
     config_path = _named_config(ctx, config_path, config)
 
-    # Find the config file if not specified
+    # A --source-dir (or ASH_SOURCE_DIR) that names no directory a scan could
+    # read is refused as init, validate and lint refuse it, whether or not a
+    # config path is named: given beside a path it was not read at all, so a
+    # typo in it passed silently. With none given, the working directory is
+    # read only below, when the file has to be discovered.
+    scan_root = _source_dir(source_dir) if source_dir is not None else None
+
+    # Find the config file if not specified: the one a scan of --source-dir (or
+    # ASH_SOURCE_DIR, the scan option's variable) would read, as get, validate
+    # and lint find it. Discovered in the working directory alone, this command
+    # edited a different file than those commands showed and a scan read.
     if config_path is None:
+        if scan_root is None:
+            scan_root = _source_dir(None)
         try:
-            found = find_config_file()
+            found = find_config_file(scan_root)
         except ASHConfigValidationError as e:
             # Exit 3, as a scan of the directory does.
             secho(
@@ -963,12 +1463,27 @@ def update(
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
-    if not Path(config_path).exists():
+    if not _config_name_exists(config_path):
         _refuse_missing_config(config_path)
 
     # Load the existing config
     config_path = Path(config_path)
     _refuse_unless_a_file(config_path)
+    # The file's bytes as the refusal checks below are about to read them. The
+    # checks (TOML, environment references, extends) and the load each open the
+    # file, so a file changed between them could be judged on one text and
+    # rewritten from another, resolved environment values included; the bytes
+    # are read again before the rewrite and a changed file is refused.
+    try:
+        original_bytes = read_config_bytes(config_path)
+    except (OSError, ASHConfigValidationError) as e:
+        secho(
+            shown_on_one_line(
+                f"Not updating {config_path}: it cannot be read ({error_text(e)})."
+            ),
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
     refusal = _rewrite_refusal(config_path)
     if refusal:
         secho(
@@ -978,7 +1493,13 @@ def update(
         raise typer.Exit(1)
     try:
         config = AshConfig.from_file(config_path=config_path)
-    except (ValidationError, ASHConfigValidationError, yaml.YAMLError, ValueError) as e:
+    except (
+        ValidationError,
+        ASHConfigValidationError,
+        yaml.YAMLError,
+        ValueError,
+        RecursionError,
+    ) as e:
         # ValueError covers json.JSONDecodeError and UnicodeDecodeError.
         # The description alone: it says what is wrong with the file, so an
         # "it is not a valid configuration" frame reads double. Its own
@@ -1049,19 +1570,65 @@ def update(
         else:
             logger.info(f"Applied a modification to {key_path}")
 
+    # A config a scan refuses for its plugin modules is not written: get,
+    # validate and validate-plugin-dependencies refuse the same entries with
+    # exit 3, so a file written with one was reported updated and then refused
+    # by every reader. The wizard's policy (unfindable=False): a module inside
+    # ASH's plugin namespace that no installed package provides yet is written,
+    # since the operator may install it next and the check commands name it
+    # until then; refusing it here made a --set of an unrelated key fail on a
+    # file the wizard had just written.
+    _refuse_a_config_a_scan_refuses(
+        updated_config, f"Not updating {config_path}", unfindable=False
+    )
+
+    # The file as it is now, read once for the schema line and the keep_from
+    # data, and compared with the bytes the refusal checks read: a file changed
+    # since then is refused rather than rewritten from a text the checks never
+    # saw. Read as a scan reads it, so a FIFO swapped in at the name is refused
+    # rather than waited on. The keep_from data is parsed from these same bytes
+    # (parse_config_text, as read_config_file parses what it reads): a further
+    # open for it, after the comparison, read whatever was at the name by then.
+    try:
+        current_bytes = read_config_bytes(config_path)
+        if current_bytes != original_bytes:
+            raise ASHConfigValidationError(
+                "the file changed while this command was reading it; run the "
+                "command again"
+            )
+        # utf-8-sig: a file that starts with a byte order mark keeps its own
+        # schema line, where the mark made the line read as not a comment and
+        # the default schema line replaced it.
+        lines = current_bytes.decode("utf-8-sig").splitlines()
+        # Decoded as read_config_file decodes each format: JSON loses a leading
+        # byte order mark (json refuses one), YAML keeps it (the parser skips it).
+        keep_from = parse_config_text(
+            config_path,
+            current_bytes.decode("utf-8-sig" if is_json_file(config_path) else "utf-8"),
+        )
+    except (
+        OSError,
+        ValueError,
+        RecursionError,
+        yaml.YAMLError,
+        ASHConfigValidationError,
+    ) as e:
+        # ValueError covers UnicodeDecodeError and json's. The read for keep_from
+        # was bare before: a file removed, replaced or made unparseable after
+        # the load crashed the command with a traceback.
+        secho(
+            shown_on_one_line(f"Not updating {config_path}: {error_text(e)}"),
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
+
     # Preserve the schema reference if it exists in the original file
     comments = [SCHEMA_COMMENT]
-    # Read as a scan reads it, so a FIFO swapped in at the name is refused rather
-    # than waited on; the file loaded above, so a failure here only drops the line.
-    try:
-        lines = read_config_bytes(config_path).decode("utf-8").splitlines()
-    except (OSError, UnicodeDecodeError, ASHConfigValidationError):
-        lines = []
     first_line = lines[0].strip() if lines else ""
     if first_line.startswith("#") and "schema" in first_line.lower():
         comments = [first_line]
     updated_text = render_config_file(
-        config_path, updated_config, comments, keep_from=read_config_file(config_path)
+        config_path, updated_config, comments, keep_from=keep_from
     )
 
     # Show the updated config
@@ -1071,13 +1638,14 @@ def update(
             lexer="json" if is_json_file(config_path) else "yaml",
             theme="lightbulb",
             background_color=None,
+            word_wrap=True,
         )
     )
 
     # Write the updated config if not in dry run mode
     if not dry_run:
         try:
-            config_path.write_text(updated_text, encoding="utf-8")
+            _write_config_text(config_path, updated_text)
             secho(
                 shown_on_one_line(
                     f"Successfully updated config file: {config_path.absolute()}"
@@ -1139,7 +1707,7 @@ def validate_plugin_dependencies(
         use_color=color,
     )
     config_path = _named_config(ctx, config_path, config)
-    if config_path is not None and not Path(config_path).exists():
+    if config_path is not None and not _config_name_exists(config_path):
         _refuse_missing_config(config_path)
     label = (
         f"Config file '{Path(config_path).absolute().as_posix()}'"
@@ -1227,7 +1795,7 @@ def lint(
         typer.Option(
             "--output-dir",
             "-o",
-            help="Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output",
+            help="Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output under --source-dir when that is given, else to the one beside the config file (its project's .ash/ash_output, then ash_output)",
         ),
     ] = None,
     fix: Annotated[
@@ -1310,6 +1878,7 @@ def lint(
     """
     from automated_security_helper.config.config_linter import (
         ConfigLinter,
+        LintCategory,
         LintSeverity,
     )
 
@@ -1336,18 +1905,43 @@ def lint(
     if config_path is None:
         _report_no_config_found(scan_root)
         raise typer.Exit(1)
-    if not config_path.exists():
+    if not _config_name_exists(config_path):
         _refuse_missing_config(config_path)
 
-    # Both refusals name the caller's path: one line, whatever it holds.
-    if (fix or fix_unused) and is_toml_file(config_path):
-        secho(
-            shown_on_one_line(
-                "❌ --fix rewrites YAML and JSON config files, and --fix-unused "
-                f"YAML ones only; edit {describe_config_path(config_path)} by hand."
-            ),
-            fg=typer.colors.RED,
-        )
+    if output_dir_path is None and source_dir is not None and fix_unused:
+        # Where a scan of --source-dir writes the report: its output directory is
+        # under the scanned tree, not beside the config file, which --config can
+        # name anywhere. Only when the caller named the scanned tree: without
+        # --source-dir the working directory is not known to be the tree the
+        # config describes (a lint run from one project against another's file),
+        # so the linter's own search beside the file stays the default there,
+        # as it does when the scanned tree holds no report.
+        # Only for --fix-unused, the one option that reads the report, and only
+        # for a config that exists and is a regular file: the lookup reads the
+        # config (to name the report), and it ran before the documented exit-3
+        # checks for a config that is missing, a FIFO or unreadable.
+        scan_output_dir = scan_root / ConfigLinter.DEFAULT_OUTPUT_DIR
+        # Looked for under the name the config gives the report (its
+        # reporters.unused-suppressions.extension), as the linter's own lookup
+        # names it: checked under the default name alone, a configured
+        # extension with --config outside the scanned tree never set this.
+        if is_regular_file(config_path):
+            found, _written_at = ConfigLinter.find_unused_report(
+                Path(config_path), scan_output_dir
+            )
+            if found is not None and is_regular_file(found):
+                output_dir_path = scan_output_dir
+
+    # Both refusals name the caller's path: one line, whatever it holds. The
+    # --fix refusal for a TOML file waits for the lint: a TOML file with nothing
+    # to fix passes `lint --fix`, as the documented pre-commit invocation runs
+    # it, and is refused only when --fix would rewrite it (_fix_refusal below).
+    toml_refusal = (
+        "❌ --fix rewrites YAML and JSON config files, and --fix-unused "
+        f"YAML ones only; edit {describe_config_path(config_path)} by hand."
+    )
+    if fix_unused and is_toml_file(config_path):
+        secho(shown_on_one_line(toml_refusal), fg=typer.colors.RED)
         raise typer.Exit(1)
     if fix_unused and is_json_file(config_path):
         secho(
@@ -1399,33 +1993,139 @@ def lint(
     if lint_result.info_count:
         secho(f"  Info: {lint_result.info_count}", fg=typer.colors.CYAN)
 
-    fixable_count = len(lint_result.fixable_issues)
-    if fixable_count and not fix and not fix_unused:
-        secho(
-            f"\n💡 {fixable_count} issue(s) can be auto-fixed. Run with --fix to apply fixes.",
-            fg=typer.colors.YELLOW,
+    # What --fix would rewrite: the fixable issues other than unused suppressions,
+    # which --fix-unused handles.
+    fixable = [
+        i
+        for i in lint_result.fixable_issues
+        if i.category != LintCategory.SUPPRESSION_UNUSED
+    ]
+    # Why --fix would not rewrite this file, or None: a TOML file, or one that
+    # reads the environment (--fix writes the values the references resolve to).
+    # Read once, here: the hint below and the fix itself both need it.
+    # The lint un-marks the issues a fixer would refuse this file for
+    # (LintResult.fixes_refused), so for a TOML file or one that reads the
+    # environment `fixable` is empty; the refusal still has to fire when there
+    # was something to fix, or `--fix` would print "No fixable issues" and exit 0
+    # where it refuses to rewrite the file.
+    would_fix = fixable or [
+        i
+        for i in lint_result.fixes_refused
+        if i.category != LintCategory.SUPPRESSION_UNUSED
+    ]
+    fix_refusal: str | None = None
+    if would_fix and is_toml_file(config_path):
+        fix_refusal = toml_refusal
+    elif would_fix and lint_result.fix_refused_for_environment:
+        fix_refusal = (
+            f"❌ --fix rewrites the file from its parsed values, which would replace "
+            f"each of the environment references (${{VAR}} or !ENV) in "
+            f"{describe_config_path(config_path)} with its current value; make "
+            "these fixes by hand."
         )
 
+    fixable_count = len(lint_result.fixable_issues)
+    if fixable_count and not fix and not fix_unused:
+        if fix_refusal is None:
+            secho(
+                f"\n💡 {fixable_count} issue(s) can be auto-fixed. Run with --fix to apply fixes.",
+                fg=typer.colors.YELLOW,
+            )
+        else:
+            # Not "Run with --fix": --fix refuses this file, so the hint said
+            # to run a command that then refused.
+            secho(
+                f"\n💡 {fixable_count} issue(s) are marked [auto-fixable], but --fix "
+                "does not rewrite this file (a TOML file, or one that reads the "
+                "environment): make the fixes by hand.",
+                fg=typer.colors.YELLOW,
+            )
+
     # Apply fixes if requested. Declining a prompt stops the fixing and exits 0,
-    # unless the file is one a scan refuses.
+    # and a fix that refused to rewrite the file exits 1, unless the file is one
+    # a scan refuses: that exit 3 comes first, as the docstring's codes say, so
+    # a refused rewrite does not hide the scan's own refusal.
+    # A file the linter could not load at all (it does not parse, cannot be
+    # read, or is not a regular file) has nothing to fix: --fix finds no fixable
+    # issue in it, and --fix-unused would read it again and end in the parser's
+    # or the reader's traceback where the refusal below exits 3.
+    # The category beside `scan_ignores_file`: a path that is not a regular file
+    # is refused by the reader with that category and is not marked ignored,
+    # and the fixers would open it all the same.
+    loadable = not any(
+        issue.category == LintCategory.SYNTAX_ERROR for issue in lint_result.issues
+    )
     declined = False
+    fix_refused = False
+    applied = False
+    if fix and fix_refusal is not None and not lint_result.scan_ignores_file:
+        secho(shown_on_one_line(fix_refusal), fg=typer.colors.RED)
+        fix_refused = True
     try:
-        if fix:
-            _apply_fixes(config_path, lint_result, non_interactive, color)
-        if fix_unused:
-            _apply_unused_fixes(config_path, output_dir_path, non_interactive, color)
+        if lint_result.scan_ignores_file or not loadable:
+            if fix or fix_unused:
+                secho(
+                    "\nNot applying fixes: the file could not be loaded, so there "
+                    "is nothing to fix in it.",
+                    fg=typer.colors.YELLOW,
+                )
+        elif fix and not fix_refused:
+            applied = _apply_fixes(
+                config_path,
+                fixable,
+                non_interactive,
+                color,
+                output_dir=output_dir_path,
+                source_dir=scan_root,
+            )
+        # Not after a refused fix: the unused-suppression fixer rewrote the file
+        # the first fixer had just refused to touch, and the run exited with the
+        # refusal's code over a file it had changed all the same.
+        if (
+            fix_unused
+            and loadable
+            and not lint_result.scan_ignores_file
+            and not fix_refused
+        ):
+            applied = (
+                _apply_unused_fixes(
+                    config_path,
+                    output_dir_path,
+                    non_interactive,
+                    color,
+                    lint_result.resolved_data
+                    if isinstance(lint_result.resolved_data, dict)
+                    else None,
+                    report_path=lint_result.unused_report_path,
+                    report_checked=lint_result.unused_report_checked,
+                )
+                or applied
+            )
     except typer.Exit as stop:
-        if stop.exit_code != 0:
+        if stop.exit_code == 0:
+            declined = True
+        elif stop.exit_code == 1:
+            fix_refused = True
+        else:
             raise
-        declined = True
 
     # The exit code describes the file as it is now, so after a fix it comes
     # from linting the fixed file: removing an internal `build` section, for
-    # example, can make a config the scan refused valid again.
+    # example, can make a config the scan refused valid again. "Remaining after
+    # the fixes" is reported only when a fix was written: with none applied (a
+    # declined prompt, no unused report) the file is as it was, and the re-lint
+    # read fewer issues only because it does not look for unused suppressions.
     remaining = lint_result
-    if fix or fix_unused:
+    if applied:
+        # Without the unused-suppression check: the unused report in the output
+        # directory predates the fix and still lists the suppressions the fix
+        # just commented out, so re-reading it reports them as unused again;
+        # the next scan rewrites it. The re-lint reads the file as it is now.
         remaining = ConfigLinter.lint(
-            config_path=config_path, output_dir=output_dir_path, source_dir=scan_root
+            config_path=config_path,
+            output_dir=output_dir_path,
+            check_unused=False,
+            source_dir=scan_root,
         )
         if remaining.issues and remaining.issues != lint_result.issues:
             secho("\nRemaining after the fixes:", fg=typer.colors.YELLOW)
@@ -1446,47 +2146,40 @@ def lint(
             fg=typer.colors.RED,
         )
         raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
+    if fix_refused:
+        raise typer.Exit(1)
     if declined:
         raise typer.Exit(0)
-    if remaining.has_errors:
-        raise typer.Exit(1)
+    # A scan accepts the file, so the exit is 0, as the docstring says: whatever
+    # else is reported is a warning. An ERROR-severity issue a scan accepts
+    # exited 1 here, against the documented codes, and 0 when a --fix prompt
+    # had been declined for the same file.
 
 
 def _apply_fixes(
     config_path: Path,
-    lint_result,
+    fixable: List[Any],
     non_interactive: bool,
     color: bool,
-) -> None:
-    """Apply auto-fixes to the config file."""
-    from automated_security_helper.config.config_linter import (
-        ConfigLinter,
-        LintCategory,
-    )
+    output_dir: Path | None = None,
+    source_dir: Path | None = None,
+) -> bool:
+    """Apply auto-fixes (``fixable``, the issues other than unused suppressions)
+    to the config file. Returns whether the file was written. The caller has
+    refused a TOML file and one that reads the environment before this.
 
-    fixable = [
-        i
-        for i in lint_result.fixable_issues
-        if i.category != LintCategory.SUPPRESSION_UNUSED
-    ]
+    ``output_dir`` and ``source_dir`` are what the lint that produced
+    ``fixable`` ran with; the fix lints the file again with them, so its read
+    of the file is the same reading the operator confirmed.
+    """
+    from automated_security_helper.config.config_linter import ConfigLinter
 
     if not fixable:
         secho(
             "No fixable issues found (excluding unused suppressions).",
             fg=typer.colors.GREEN,
         )
-        return
-    # Here, not before linting: a file with !ENV references and nothing to fix
-    # passes `lint --fix`, as a pre-commit hook runs it.
-    if uses_env_references(config_path):
-        secho(
-            f"❌ --fix rewrites the file from its parsed values, which would replace "
-            f"each of the environment references (${{VAR}} or !ENV) in "
-            f"{describe_config_path(config_path)} with its current value; make "
-            "these fixes by hand.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(1)
+        return False
 
     secho(f"\n🔧 Fixing {len(fixable)} issue(s):", fg=typer.colors.BLUE)
     for issue in fixable:
@@ -1500,16 +2193,34 @@ def _apply_fixes(
             secho("Aborted.", fg=typer.colors.YELLOW)
             raise typer.Exit(0)
 
-    fixed_content, fixed_issues = ConfigLinter.fix(config_path, fixable)
+    fixed_content, fixed_issues = ConfigLinter.fix(
+        config_path, fixable, output_dir=output_dir, source_dir=source_dir
+    )
 
     if fixed_issues:
-        config_path.write_text(fixed_content, encoding="utf-8")
+        # One line and exit 1 for a target that cannot be written, as update
+        # reports it; the error escaped as a traceback.
+        try:
+            _write_config_text(config_path, fixed_content)
+        except OSError as e:
+            secho(
+                shown_on_one_line(f"Error writing config file: {error_text(e)}"),
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
         secho(
             f"\n✅ Fixed {len(fixed_issues)} issue(s) in {config_path}",
             fg=typer.colors.GREEN,
         )
-    else:
-        secho("No issues were fixed.", fg=typer.colors.YELLOW)
+        return True
+    secho("No issues were fixed.", fg=typer.colors.YELLOW)
+    return False
+
+
+def _entries_of(fixed_issues: List[Any]) -> List[tuple]:
+    """The entries a fix comments out, as (place, message) pairs, to compare
+    what was shown at a prompt with what is written after it."""
+    return sorted((str(issue.path), str(issue.message)) for issue in fixed_issues)
 
 
 def _apply_unused_fixes(
@@ -1517,21 +2228,65 @@ def _apply_unused_fixes(
     output_dir,
     non_interactive: bool,
     color: bool,
-) -> None:
-    """Comment out unused suppressions in the config file."""
-    from automated_security_helper.config.config_linter import ConfigLinter
+    report_config: Any = None,
+    report_path: Path | None = None,
+    report_checked: bool = False,
+) -> bool:
+    """Comment out unused suppressions in the config file. Returns whether the
+    file was written. A list the fixer cannot edit (a repeated key, a flow
+    sequence, an alias) is reported with its reason and exits 1.
+
+    ``report_config`` is the merged configuration lint named the report from
+    (``LintResult.resolved_data``): the age read and the fixer take the report
+    from it, so they read the report lint listed, not one a second resolution of
+    the chain (without the scanned tree) names.
+
+    ``report_path`` is the report file lint read (``LintResult.unused_report_path``).
+    The age read and the fixer take that file: a config whose chain does not
+    resolve (an ``extends`` that cannot be read) left ``report_config`` empty, and
+    each of them then named a report by its own resolution, which can be another
+    file than the one lint listed the entries from.
+
+    ``report_checked`` is whether lint looked for the report
+    (``LintResult.unused_report_checked``). Lint having looked and found none,
+    this says so and stops: a second lookup here could name a report lint did
+    not list, and the entries it commented out would be ones the operator was
+    never shown (with ``-y`` nothing is asked)."""
+    from automated_security_helper.config.config_linter import (
+        ConfigLinter,
+        UnusedSuppressionsNotEditable,
+    )
+
+    no_report = (
+        "⚠️  No unused suppressions report found. Run a scan first to generate the report."
+    )
+    if report_checked and report_path is None:
+        secho(no_report, fg=typer.colors.YELLOW)
+        return False
 
     # Check report age first
-    report_info = ConfigLinter.get_unused_report_age(config_path, output_dir)
+    report_info = ConfigLinter.get_unused_report_age(
+        config_path, output_dir, report_config, report_path=report_path
+    )
 
     if report_info is None:
-        secho(
-            "⚠️  No unused suppressions report found. Run a scan first to generate the report.",
-            fg=typer.colors.YELLOW,
-        )
-        return
+        secho(no_report, fg=typer.colors.YELLOW)
+        return False
 
     report_path, report_timestamp, age_seconds = report_info
+
+    # A report the fixer comments nothing out of (one that cannot be read, that
+    # evaluated no suppression, or that lists scanners which did not run) is not
+    # edited from, so no question about its age is asked and the run does not
+    # end in a green "nothing to comment out" under lint's own notes: the
+    # reason, as the fixer's own check gives it, is the line printed.
+    blocker = ConfigLinter.unused_report_blocker(report_path)
+    if blocker is not None:
+        secho(
+            shown_on_one_line(f"⚠️  Nothing is commented out: {blocker}"),
+            fg=typer.colors.YELLOW,
+        )
+        return False
 
     # Warn if report is too old
     if age_seconds > ConfigLinter.MAX_REPORT_AGE_SECONDS:
@@ -1557,14 +2312,29 @@ def _apply_unused_fixes(
                 secho("Aborted.", fg=typer.colors.YELLOW)
                 raise typer.Exit(0)
 
-    # Perform the fix
-    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(
-        config_path, output_dir
-    )
+    def compute_fix():
+        # Lint just listed the unused entries; saying "nothing to comment out"
+        # for a list the fixer cannot edit would contradict it. The file is
+        # unchanged when the fixer refuses.
+        try:
+            return ConfigLinter.fix_unused_suppressions(
+                config_path, output_dir, report_config, report_path=report_path
+            )
+        except UnusedSuppressionsNotEditable as exc:
+            secho(
+                f"\n❌ The unused suppressions could not be commented out: {exc}. "
+                f"{config_path} is unchanged.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
 
-    if not fixed_issues:
+    # Compute the fix, to show what it would comment out.
+    fixed_content, fixed_issues, _ = compute_fix()
+
+    if not fixed_issues or fixed_content is None:
+        # No content comes back only with no issues (the config did not read).
         secho("✅ No unused suppressions to comment out.", fg=typer.colors.GREEN)
-        return
+        return False
 
     secho(
         f"\n💬 Commenting out {len(fixed_issues)} unused suppression(s):",
@@ -1577,15 +2347,44 @@ def _apply_unused_fixes(
         if not confirm("\nComment out these unused suppressions?"):
             secho("Aborted.", fg=typer.colors.YELLOW)
             raise typer.Exit(0)
+        # Computed again from the file as it is now: the text computed before
+        # the prompt was written after it, over any edit made while the prompt
+        # waited (an edit that made the list uneditable is refused the same way).
+        approved = _entries_of(fixed_issues)
+        fixed_content, fixed_issues, _ = compute_fix()
+        if not fixed_issues or fixed_content is None:
+            secho("✅ No unused suppressions to comment out.", fg=typer.colors.GREEN)
+            return False
+        # The text is the new one, but what was approved is the list shown above.
+        # A file that changed while the prompt waited and now comments out other
+        # entries is not what the operator said yes to: nothing is written.
+        if _entries_of(fixed_issues) != approved:
+            secho(
+                "\n❌ The config or the unused suppressions report changed while "
+                "the prompt was open, and the unused suppressions to comment out "
+                f"are no longer the ones shown. {config_path} is unchanged; run "
+                "the command again.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
 
     # Bytes: fixed_content is the file's own text with its line endings (read as
     # bytes by fix_unused_suppressions), and text mode would turn the "\n" of a
-    # CRLF file into "\r\n" a second time on Windows.
-    config_path.write_bytes(fixed_content.encode("utf-8"))
+    # CRLF file into "\r\n" a second time on Windows. One line and exit 1 for a
+    # target that cannot be written; the error escaped as a traceback.
+    try:
+        _write_config_bytes(config_path, fixed_content.encode("utf-8"))
+    except OSError as e:
+        secho(
+            shown_on_one_line(f"Error writing config file: {error_text(e)}"),
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
     secho(
         f"\n✅ Commented out {len(fixed_issues)} unused suppression(s) in {config_path}",
         fg=typer.colors.GREEN,
     )
+    return True
 
 
 def _get_scanner_names() -> List[tuple]:
@@ -1657,6 +2456,10 @@ def wizard(
             envvar="ASH_CONFIG",
         ),
     ] = None,
+    source_dir: Annotated[
+        str | None,
+        typer.Option("--source-dir", help=_SOURCE_DIR_HELP, envvar="ASH_SOURCE_DIR"),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
     ] = False,
@@ -1667,10 +2470,10 @@ def wizard(
 ):
     """Interactive configuration wizard.
 
-    Reads the existing config (the one a scan of the current directory would
-    use, or --config), walks through scanner, reporter, offline-mode, and
-    community-plugin settings interactively, then writes the result back.
-    With no config yet, it creates .ashrc.yaml.
+    Reads the existing config (the one a scan of --source-dir, or the current
+    directory, would use, or --config), walks through scanner, reporter,
+    offline-mode, and community-plugin settings interactively, then writes the
+    result back. With no config yet, it creates .ashrc.yaml there.
     """
     get_logger(
         level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),
@@ -1678,11 +2481,26 @@ def wizard(
         use_color=color,
     )
     console = ash_console(theme=rich_theme())
+    # A deleted working directory is refused here, before the first prompt,
+    # when the paths below are relative to it (the search in ".", a relative
+    # --config): the write at the end resolved them with os.getcwd, so the
+    # wizard asked every question and then failed with "Error writing config
+    # file" where the exit-5 refusal belongs.
     if config is None:
+        relative_to_the_working_directory = source_dir is None
+    else:
+        relative_to_the_working_directory = not Path(config).is_absolute()
+    if relative_to_the_working_directory:
+        _working_directory()
+    if config is None:
+        # Relative to the working directory when no --source-dir (or
+        # ASH_SOURCE_DIR, the scan option's variable) names one, so the path is
+        # printed as the user would type it. Discovered in the working directory
+        # alone, the wizard edited a different file than get, validate and lint
+        # showed and a scan read.
+        search_dir = Path(".") if source_dir is None else _source_dir(source_dir)
         try:
-            # Relative to the working directory, so the path is printed as the
-            # user would type it.
-            found = find_config_file(Path("."))
+            found = find_config_file(search_dir)
         except ASHConfigValidationError as e:
             secho(
                 shown_on_one_line(
@@ -1692,16 +2510,19 @@ def wizard(
                 fg=typer.colors.RED,
             )
             raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
-        config_path = found if found is not None else Path(ASH_DEFAULT_CONFIG_FILE_NAME)
+        config_path = (
+            found if found is not None else search_dir / ASH_DEFAULT_CONFIG_FILE_NAME
+        )
     else:
         config_path = Path(config)
     _refuse_unless_a_file(config_path)
+    config_exists = _config_name_exists(config_path)
 
     # --- Load existing config or start from defaults ---
     # A new .toml file is refused too: the wizard would write YAML into it.
     refusal = (
         _rewrite_refusal(config_path)
-        if config_path.exists() or is_toml_file(config_path)
+        if config_exists or is_toml_file(config_path)
         else None
     )
     if refusal:
@@ -1723,7 +2544,7 @@ def wizard(
         )
         raise typer.Exit(3)
     existing_data: Any = None
-    if config_path.exists():
+    if config_exists:
         console.print(
             Panel(
                 # Shown: Text passes ESC and newline through, and the path is
@@ -1745,6 +2566,7 @@ def wizard(
             ASHConfigValidationError,
             yaml.YAMLError,
             ValueError,
+            RecursionError,
         ) as exc:
             # Starting from the defaults and writing them over this file would
             # throw away every setting in it.
@@ -1774,6 +2596,16 @@ def wizard(
             )
         )
         ash_config = AshConfig()
+
+    # Before the first prompt: with ASH_PLUGIN_MODULES naming a module a scan
+    # refuses, the file the wizard writes is one every reader refuses whatever
+    # the answers, and the check after the prompts (below) threw every answer
+    # away. Checked against a default config, so only the environment's entries
+    # are judged here: a module the FILE lists is still the operator's to drop
+    # at the prompts, and the check after them judges what is written.
+    _refuse_a_config_a_scan_refuses(
+        AshConfig(), f"Not writing {config_path}", unfindable=False
+    )
 
     from automated_security_helper.config.environment_record import (
         record_environment_references,
@@ -1870,6 +2702,15 @@ def wizard(
         )
         if not new_mod.strip():
             break
+        # Judged as it is typed: a module a scan refuses is asked about again,
+        # where the check after the prompts threw every answer away (exit 3).
+        refusal = _typed_module_refusal(new_mod.strip())
+        if refusal is not None:
+            secho(
+                shown_on_one_line(f"❌ {refusal}. The module is not added."),
+                fg=typer.colors.RED,
+            )
+            continue
         added_modules.append(new_mod.strip())
 
     # A dropped entry moves every entry after it, so the references move to
@@ -1889,19 +2730,38 @@ def wizard(
 
     replace_plugin_module_list(ash_config, kept_old_indices, added_modules)
 
-    # --- Write config ---
-    config_path.parent.mkdir(exist_ok=True, parents=True)
-    _ensure_output_gitignore(config_path)
+    # A typed module outside ASH's plugin namespace is refused here, before the
+    # write, as get and validate refuse it (exit 3); the wizard wrote it and
+    # reported success. A module inside the namespace that no installed package
+    # provides yet is written: the operator may install it next, and get and
+    # validate name it until then (unfindable=False).
+    _refuse_a_config_a_scan_refuses(
+        ash_config, f"Not writing {config_path}", unfindable=False
+    )
 
+    # --- Write config ---
     comments = [SCHEMA_COMMENT]
     if enable_offline:
         comments.append(
             "# Reminder: export ASH_OFFLINE=YES before running ASH for offline mode"
         )
-    config_path.write_text(
-        render_config_file(config_path, ash_config, comments, keep_from=existing_data),
-        encoding="utf-8",
-    )
+    # An unwritable target ended in a traceback after every prompt was answered;
+    # update reports the same failure on one line.
+    try:
+        config_path.parent.mkdir(exist_ok=True, parents=True)
+        _ensure_output_gitignore(config_path)
+        _write_config_text(
+            config_path,
+            render_config_file(
+                config_path, ash_config, comments, keep_from=existing_data
+            ),
+        )
+    except OSError as e:
+        secho(
+            shown_on_one_line(f"Error writing config file: {error_text(e)}"),
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
 
     console.print(
         Panel(
@@ -2046,7 +2906,7 @@ def validate(
                 fg=typer.colors.GREEN,
             )
             return
-        if not config_path.exists():
+        if not _config_name_exists(config_path):
             _refuse_missing_config(config_path)
 
         # The path is the caller's text, so the header is one line whatever it
@@ -2131,8 +2991,16 @@ def validate(
     except typer.Exit:
         raise
     except Exception as e:
-        logger.error(f"Error validating config: {e}")
-        secho(f"❌ Error validating config: {e}", fg=typer.colors.RED)
+        # Shown on one line, as every other message in this module is: the
+        # exception's text can quote the file or the caller's path. The
+        # traceback is kept for --debug (the exit code, 1, is the one typer
+        # gives an unhandled exception), where it was dropped.
+        logger.error(f"Error validating config: {error_text(e)}")
+        logger.debug("Traceback of the validation error:", exc_info=True)
+        secho(
+            shown_on_one_line(f"❌ Error validating config: {error_text(e)}"),
+            fg=typer.colors.RED,
+        )
         raise typer.Exit(1)
 
 

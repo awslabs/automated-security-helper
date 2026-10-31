@@ -90,16 +90,35 @@ def delivery(tmp_path, monkeypatch) -> Path:
     reset_default_registry_for_tests()
 
 
+#: The commit id the double's ``rev-parse`` answers: a ref-less clone is refused
+#: unless its HEAD names a commit, so the double names one.
+HEAD_COMMIT = "f" * 40
+
+
 def _git_that_fails_at(step: str):
-    """A ``_run_git`` double: every step works, except ``step``, which fails."""
+    """A ``_run_git`` double: every step works, except ``step``, which fails.
+
+    The delivery runs four git commands: ``clone``, then for a delivery with no
+    ref a ``rev-parse`` that must name a commit (an empty clone is refused), and
+    for one with a ref a ``fetch`` and a ``checkout``. The double answers each
+    by the command word in its argv.
+    """
 
     def run_git(cmd, *, env):
-        name = next(part for part in cmd if part in ("clone", "fetch", "checkout"))
+        name = next(
+            part for part in cmd if part in ("clone", "fetch", "checkout", "rev-parse")
+        )
         if name == "clone":
             target = Path(cmd[-1])
             target.mkdir(parents=True, exist_ok=True)
             (target / "cloned.txt").write_text("from git\n")
         if name != step:
+            # The step the double is told to fail is read before any answer:
+            # an earlier shape answered rev-parse with a commit first, so
+            # ``_git_that_fails_at("rev-parse")`` never failed and the
+            # ref-less clone's refusal was never driven as a failed delivery.
+            if name == "rev-parse":
+                return subprocess.CompletedProcess(cmd, 0, HEAD_COMMIT + "\n", "")
             return subprocess.CompletedProcess(cmd, 0, "", "")
         if name == "fetch":
             # A fetch that git fails is tolerated; one that git cannot be started
@@ -169,6 +188,29 @@ def test_a_git_redelivery_that_fails_leaves_the_scan_on_the_previous_tree(
     second = mcp_set_source_git(url=URL, ref="release", session_id=session_id)
 
     assert second["success"] is False, second
+    resolution = _resolve_omitted_source_dir(session_id)
+    assert resolution.error is None, resolution.error
+    assert resolution.source_dir == first["source_dir"]
+    assert (Path(resolution.source_dir) / "cloned.txt").read_text() == "from git\n"
+
+
+@pytest.mark.parametrize("session_id", SESSIONS)
+def test_a_ref_less_redelivery_whose_clone_has_no_commit_keeps_the_previous_tree(
+    monkeypatch, session_id
+) -> None:
+    """A clone with no ref whose HEAD names no commit is refused, and the refusal
+    is a failed delivery like the others: the previous tree and its record stay.
+    Red before the double read ``step`` before answering rev-parse: the second
+    delivery then succeeded with an empty tree."""
+    monkeypatch.setattr(sd, "_run_git", _git_that_fails_at("none"))
+    first = mcp_set_source_git(url=URL, session_id=session_id)
+    assert first["success"] is True, first
+
+    monkeypatch.setattr(sd, "_run_git", _git_that_fails_at("rev-parse"))
+    second = mcp_set_source_git(url=URL, session_id=session_id)
+
+    assert second["success"] is False, second
+    assert "no commit" in second["error"], second
     resolution = _resolve_omitted_source_dir(session_id)
     assert resolution.error is None, resolution.error
     assert resolution.source_dir == first["source_dir"]

@@ -223,11 +223,11 @@
     'client_messages': list([
       list([
         'error',
-        "refusing url with 'ext::' transport: it instructs git to execute an arbitrary command",
+        "refusing a clone url with the 'ext::' remote helper transport: git would run that helper rather than connect to a host",
       ]),
     ]),
     'result': dict({
-      'error': "refusing url with 'ext::' transport: it instructs git to execute an arbitrary command",
+      'error': "refusing a clone url with the 'ext::' remote helper transport: git would run that helper rather than connect to a host",
       'error_type': 'clone_url_not_permitted',
       'session_id': 'session-a',
       'success': False,
@@ -265,6 +265,35 @@
       '--',
       'https://example.com/org/repo.git',
       '<TMP>/workspaces/session-a/.source.incoming-<ID>',
+    ]),
+    list([
+      'git',
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'credential.helper=',
+      '-c',
+      'core.askPass=',
+      '-c',
+      'protocol.allow=never',
+      '-c',
+      'protocol.https.allow=always',
+      '-c',
+      'protocol.ssh.allow=always',
+      '-c',
+      'http.followRedirects=false',
+      '-c',
+      'gc.auto=0',
+      '-c',
+      'maintenance.auto=false',
+      '-C',
+      '<TMP>/workspaces/session-a/.source.incoming-<ID>',
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      'HEAD^{commit}',
     ]),
     list([
       'git',
@@ -432,7 +461,7 @@
               config:     ASH default config
               threshold:  MEDIUM
               scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
-              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
+              pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
               label:      web
@@ -441,7 +470,7 @@
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
               scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
-              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
+              pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone
               label:      gone
@@ -450,7 +479,7 @@
               config:     ASH default config
               threshold:  MEDIUM
               scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
-              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
+              pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
         Nothing has been scanned. This is a resolution and validation pass only.
       ''',
@@ -598,7 +627,7 @@
               config:     ASH default config
               threshold:  MEDIUM
               scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
-              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
+              pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           2. web
               label:      web
@@ -607,7 +636,7 @@
               config:     <TMP>/allowed/work/web/.ash/.ash.yaml
               threshold:  HIGH
               scanners:   actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
-              pins:       bandit >=1.7.0,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
+              pins:       bandit >=1.7.8,<2.0.0, cfn-lint >=1.43.3,<2.0.0, zizmor >=1.29.0,<2.0.0
         
           3. gone  [skipped: error]
               label:      gone
@@ -896,6 +925,8 @@
           'actionable_finding_count': 0,
           'ceiling_unreachable_findings': dict({
           }),
+          'converter_refusals': list([
+          ]),
           'display_label': 'api',
           'duration_seconds': 0.0,
           'error': None,
@@ -916,11 +947,14 @@
           'partial_coverage_scanners': list([
           ]),
           'policy_origin_finding_count': 0,
+          'policy_scanners_gate': None,
           'project': 'api',
           'relative_path': 'api',
           'sarif_run_index': None,
           'scan_id': '<PROJECT_SCAN_ID>',
           'scan_incomplete': False,
+          'scanner_thresholds': dict({
+          }),
           'scanners': dict({
           }),
           'severity_threshold': 'MEDIUM',
@@ -929,11 +963,19 @@
           'stale_content_databases': list([
           ]),
           'status': 'completed',
+          'unevaluated_rules': list([
+          ]),
+          'unstoppable_tools': dict({
+          }),
+          'withheld_scanner_thresholds': list([
+          ]),
         }),
         dict({
           'actionable_finding_count': 0,
           'ceiling_unreachable_findings': dict({
           }),
+          'converter_refusals': list([
+          ]),
           'display_label': 'web',
           'duration_seconds': 0.0,
           'error': None,
@@ -954,11 +996,14 @@
           'partial_coverage_scanners': list([
           ]),
           'policy_origin_finding_count': 0,
+          'policy_scanners_gate': None,
           'project': 'web',
           'relative_path': 'web',
           'sarif_run_index': None,
           'scan_id': '<PROJECT_SCAN_ID>',
           'scan_incomplete': False,
+          'scanner_thresholds': dict({
+          }),
           'scanners': dict({
           }),
           'severity_threshold': 'HIGH',
@@ -967,11 +1012,19 @@
           'stale_content_databases': list([
           ]),
           'status': 'completed',
+          'unevaluated_rules': list([
+          ]),
+          'unstoppable_tools': dict({
+          }),
+          'withheld_scanner_thresholds': list([
+          ]),
         }),
         dict({
           'actionable_finding_count': 0,
           'ceiling_unreachable_findings': dict({
           }),
+          'converter_refusals': list([
+          ]),
           'display_label': 'gone',
           'duration_seconds': 0.0,
           'error': None,
@@ -992,11 +1045,14 @@
           'partial_coverage_scanners': list([
           ]),
           'policy_origin_finding_count': 0,
+          'policy_scanners_gate': None,
           'project': 'gone',
           'relative_path': 'gone',
           'sarif_run_index': None,
           'scan_id': None,
           'scan_incomplete': False,
+          'scanner_thresholds': dict({
+          }),
           'scanners': dict({
           }),
           'severity_threshold': None,
@@ -1005,6 +1061,12 @@
           'stale_content_databases': list([
           ]),
           'status': 'completed',
+          'unevaluated_rules': list([
+          ]),
+          'unstoppable_tools': dict({
+          }),
+          'withheld_scanner_thresholds': list([
+          ]),
         }),
       ]),
       'results_path': '<TMP>/allowed/work/.ash/ash_output/ash_workspace_results.json',
@@ -1039,13 +1101,13 @@
       ]),
       list([
         'error',
-        "Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:\\x0a  - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)",
+        "Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:\\x0a  - '<TMP>/outside-project' resolves outside '<TMP>/allowed/escaping' (outside-root)",
       ]),
     ]),
     'result': dict({
       'context': dict({
       }),
-      'error': "Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:\\x0a  - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)",
+      'error': "Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:\\x0a  - '<TMP>/outside-project' resolves outside '<TMP>/allowed/escaping' (outside-root)",
       'error_category': 'unexpected_error',
       'error_type': 'WorkspaceDefinitionError',
       'exit_code': 4,

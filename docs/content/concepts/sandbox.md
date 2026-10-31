@@ -48,7 +48,7 @@ A scanner that has a network shares the host's network. There is no egress filte
 
 ## Grants, and who may make them {#grants}
 
-Four settings grant a sandboxed scanner more than the policy above: `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, and `sandbox.env_scanners`. [Give a scanner more access](../docs/scanner-sandbox.md#grants) says what each one grants.
+Five settings grant a sandboxed scanner more than the policy above: `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners`, and `sandbox.environment`. [Give a scanner more access](../docs/scanner-sandbox.md#grants) says what each one grants.
 
 Only the operator may grant. A grant counts when it comes from `--config-overrides`; from a config file outside every git checkout and outside the scanned directory, named with `--config` or `ASH_CONFIG`; in workspace mode, from the `--config` file given to the workspace scan, under the same rule with the workspace root as the scanned directory; or from the MCP server's own configuration, under the same rule. When such a file extends a base that cannot grant, only the grants it writes in its own `sandbox` section count, not what it inherits from any base or changes with `patch`. `--sandbox` sets the mode and grants nothing.
 

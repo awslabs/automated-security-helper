@@ -28,6 +28,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': True,
       'scan_id': '<SCAN_ID>',
@@ -74,6 +75,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': None,
       'skipped_scanners': list([
@@ -83,6 +85,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'completed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -105,6 +109,8 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
@@ -121,6 +127,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': False,
       'scan_id': '<SCAN_ID>',
@@ -142,6 +149,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 0,
+        'unknown': 0,
       }),
       'severity_threshold': None,
       'skipped_scanners': list([
@@ -151,6 +159,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 0,
@@ -276,6 +286,9 @@
       '_filter': 'summary',
       '_source_function': 'get_scan_summary',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
@@ -288,12 +301,17 @@
           'total': 3,
         }),
         'scan_stats': dict({
+          'error': 0,
           'failed': 2,
           'missing': 0,
           'passed': 0,
           'skipped': 0,
         }),
       }),
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
@@ -301,6 +319,7 @@
         'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
@@ -338,8 +357,12 @@
         'completed_scanners': 2,
         'total_scanners': 2,
       }),
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_summary',
   })
@@ -355,6 +378,8 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
@@ -371,6 +396,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': True,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': False,
       'scan_id': '<SCAN_ID>',
@@ -392,6 +418,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 0,
+        'unknown': 0,
       }),
       'severity_threshold': None,
       'skipped_scanners': list([
@@ -401,6 +428,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'failed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 0,
@@ -423,6 +452,8 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
@@ -439,6 +470,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': False,
       'scan_id': '<SCAN_ID>',
@@ -460,6 +492,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 0,
+        'unknown': 0,
       }),
       'severity_threshold': None,
       'skipped_scanners': list([
@@ -469,6 +502,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 0,
@@ -609,6 +644,8 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
@@ -625,6 +662,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': True,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': False,
       'scan_id': '<SCAN_ID>',
@@ -646,6 +684,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 0,
+        'unknown': 0,
       }),
       'severity_threshold': None,
       'skipped_scanners': list([
@@ -655,6 +694,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'failed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 0,
@@ -677,6 +718,8 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
@@ -693,6 +736,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': False,
       'scan_id': '<SCAN_ID>',
@@ -714,6 +758,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 0,
+        'unknown': 0,
       }),
       'severity_threshold': None,
       'skipped_scanners': list([
@@ -723,6 +768,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 0,
@@ -887,6 +934,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': True,
       'scan_id': '<SCAN_ID>',
@@ -944,6 +992,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': None,
       'skipped_scanners': list([
@@ -958,6 +1007,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'incomplete',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 3,
@@ -980,6 +1031,8 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
@@ -996,6 +1049,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': False,
       'scan_id': '<SCAN_ID>',
@@ -1017,6 +1071,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 0,
+        'unknown': 0,
       }),
       'severity_threshold': None,
       'skipped_scanners': list([
@@ -1026,6 +1081,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 0,
@@ -1157,6 +1214,9 @@
       '_filter': 'summary',
       '_source_function': 'get_scan_summary',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': False,
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
@@ -1169,12 +1229,23 @@
           'total': 3,
         }),
         'scan_stats': dict({
+          'error': 0,
           'failed': 2,
           'missing': 1,
           'passed': 0,
           'skipped': 0,
         }),
       }),
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+        dict({
+          'detail': 'MISSING',
+          'reason': 'missing_dependencies',
+          'scanner': 'semgrep',
+          'status': 'MISSING',
+        }),
+      ]),
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
@@ -1182,6 +1253,7 @@
         'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
@@ -1234,8 +1306,12 @@
         'completed_scanners': 2,
         'total_scanners': 3,
       }),
+      'stale_content_databases': list([
+      ]),
       'status': 'incomplete',
       'success': True,
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_summary',
   })
@@ -1375,8 +1451,18 @@
     'result': dict({
       '_filter': 'minimal',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
       'summary_stats': dict({
@@ -1397,6 +1483,8 @@
         'skipped': 0,
         'total': 3,
       }),
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_results',
   })
@@ -1412,8 +1500,18 @@
     'result': dict({
       '_filter': 'minimal',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
       'summary_stats': dict({
@@ -1435,6 +1533,8 @@
         'suppressed': 0,
         'total': 2,
       }),
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_results',
   })
@@ -1450,6 +1550,9 @@
     'result': dict({
       '_filter': 'summary',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
       'findings_summary': dict({
         'by_severity': dict({
           'actionable': 2,
@@ -1462,12 +1565,17 @@
           'total': 3,
         }),
         'scan_stats': dict({
+          'error': 0,
           'failed': 2,
           'missing': 0,
           'passed': 0,
           'skipped': 0,
         }),
       }),
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
@@ -1475,6 +1583,7 @@
         'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
@@ -1512,8 +1621,12 @@
         'completed_scanners': 2,
         'total_scanners': 2,
       }),
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_results',
   })
@@ -1529,24 +1642,32 @@
     'result': dict({
       '_filter': 'summary',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
       'findings_summary': dict({
         'by_severity': dict({
-          'actionable': 2,
-          'critical': 1,
+          'actionable': 1,
+          'critical': 0,
           'high': 1,
           'info': 0,
           'low': 0,
           'medium': 0,
           'suppressed': 1,
-          'total': 3,
+          'total': 1,
         }),
         'scan_stats': dict({
-          'failed': 2,
+          'error': 0,
+          'failed': 1,
           'missing': 0,
           'passed': 0,
           'skipped': 0,
         }),
       }),
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
@@ -1554,6 +1675,7 @@
         'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
@@ -1576,8 +1698,12 @@
         'completed_scanners': 1,
         'total_scanners': 1,
       }),
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_results',
   })
@@ -1593,24 +1719,32 @@
     'result': dict({
       '_filter': 'summary',
       'completion_time': '2026-01-02T03:04:05+00:00',
+      'could_not_stop': list([
+      ]),
+      'coverage_complete': True,
       'findings_summary': dict({
         'by_severity': dict({
-          'actionable': 2,
+          'actionable': None,
           'critical': 1,
           'high': 0,
           'info': 0,
           'low': 0,
           'medium': 0,
           'suppressed': 0,
-          'total': 3,
+          'total': 1,
         }),
         'scan_stats': dict({
+          'error': 0,
           'failed': 2,
           'missing': 0,
           'passed': 0,
           'skipped': 0,
         }),
       }),
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
       'is_complete': True,
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
@@ -1618,6 +1752,7 @@
         'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
+      'no_scanner_ran': False,
       'scan_id': 'scan-20260115120000',
       'scanner_summary': dict({
         'by_scanner': dict({
@@ -1632,7 +1767,7 @@
               'suppressed': 0,
             }),
             'duration': 0,
-            'findings_count': 2,
+            'findings_count': 0,
             'status': 'FAILED',
             'suppressed_findings': 1,
           }),
@@ -1655,8 +1790,12 @@
         'completed_scanners': 2,
         'total_scanners': 2,
       }),
+      'stale_content_databases': list([
+      ]),
       'status': 'completed',
       'success': True,
+      'unevaluated_rules': list([
+      ]),
     }),
     'tool': 'get_scan_results',
   })
@@ -2133,6 +2272,8 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
@@ -2149,6 +2290,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': False,
       'scan_id': '<SCAN_ID>',
@@ -2195,6 +2337,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2204,6 +2347,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'cancelled',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -2244,6 +2389,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': True,
       'scan_id': '<SCAN_ID>',
@@ -2290,6 +2436,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2299,6 +2446,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'completed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -2321,6 +2470,8 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': '2026-01-15T12:00:00',
@@ -2337,6 +2488,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': False,
       'scan_id': '<SCAN_ID>',
@@ -2383,6 +2535,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2392,6 +2545,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'failed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -2438,6 +2593,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': True,
       'scan_id': '<SCAN_ID>',
@@ -2495,6 +2651,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2509,6 +2666,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'incomplete',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 3,
@@ -2549,6 +2708,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': True,
       'scan_id': '<SCAN_ID>',
@@ -2595,6 +2755,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2604,6 +2765,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'completed',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -2626,6 +2789,8 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
@@ -2642,6 +2807,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': False,
       'scan_id': '<SCAN_ID>',
@@ -2663,6 +2829,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 0,
+        'unknown': 0,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2672,6 +2839,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'pending',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 0,
       'total_scanners': 0,
@@ -2694,6 +2863,8 @@
     'result': dict({
       'completed_scanners': 0,
       'config_path': None,
+      'could_not_stop': list([
+      ]),
       'coverage_complete': None,
       'directory_path': '<TMP>/allowed/project',
       'end_time': None,
@@ -2710,6 +2881,7 @@
       'operation': 'get_scan_progress',
       'output_directory': '<TMP>/allowed/project/.ash/ash_output',
       'output_holds_previous_results': False,
+      'output_superseded': False,
       'requested_severity_threshold': None,
       'results_available': False,
       'scan_id': '<SCAN_ID>',
@@ -2756,6 +2928,7 @@
         'low': 0,
         'medium': 0,
         'suppressed': 1,
+        'unknown': 1,
       }),
       'severity_threshold': 'MEDIUM',
       'skipped_scanners': list([
@@ -2765,6 +2938,8 @@
       'start_time': '2026-01-15T12:00:00',
       'status': 'running',
       'success': True,
+      'superseded_by': list([
+      ]),
       'timestamp': '2026-01-15T12:00:00',
       'total_findings': 3,
       'total_scanners': 2,
@@ -2941,7 +3116,6 @@
     ]),
     'result': dict({
       'context': dict({
-        'cwd': '<TMP>/cwd',
         'directory_path': '<TMP>/allowed/never-scanned/.ash/ash_output',
         'error_category': 'file_not_found',
       }),
@@ -3056,7 +3230,6 @@
     ]),
     'result': dict({
       'context': dict({
-        'cwd': '<TMP>/cwd',
         'directory_path': '<TMP>/allowed/never-scanned/.ash/ash_output',
         'error_category': 'file_not_found',
       }),
@@ -3080,7 +3253,7 @@
     'client_messages': list([
       list([
         'info',
-        'run_ash_scan tool called in cwd: <TMP>/cwd',
+        'run_ash_scan tool called',
       ]),
       list([
         'error',
@@ -3103,11 +3276,11 @@
     'client_messages': list([
       list([
         'error',
-        "The source tree delivered under this session id is no longer on disk at <TMP>/workspaces/session-c/source. Deliver it again with set_source_git or set_source_zip_chunk/set_source_zip_finalize. Refusing to scan: the recorded directory cannot be read, and scanning the server's working directory instead would report on a tree that is not yours.",
+        "The source tree delivered under this session id is no longer on disk at <TMP>/workspaces/session-c/source, or holds no file. Deliver it again with set_source_git or set_source_zip_chunk/set_source_zip_finalize. Refusing to scan: the recorded directory cannot be read, and scanning the server's working directory instead would report on a tree that is not yours.",
       ]),
     ]),
     'result': dict({
-      'error': "The source tree delivered under this session id is no longer on disk at <TMP>/workspaces/session-c/source. Deliver it again with set_source_git or set_source_zip_chunk/set_source_zip_finalize. Refusing to scan: the recorded directory cannot be read, and scanning the server's working directory instead would report on a tree that is not yours.",
+      'error': "The source tree delivered under this session id is no longer on disk at <TMP>/workspaces/session-c/source, or holds no file. Deliver it again with set_source_git or set_source_zip_chunk/set_source_zip_finalize. Refusing to scan: the recorded directory cannot be read, and scanning the server's working directory instead would report on a tree that is not yours.",
       'error_type': 'delivered_source_missing',
       'exit_code': 4,
       'exit_code_meaning': 'workspace definition or policy error',

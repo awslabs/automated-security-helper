@@ -3,7 +3,7 @@
  "Parameters": {
   "AshVersion": {
    "Type": "String",
-   "Default": "v3.7.0",
+   "Default": "v3.7.1",
    "Description": "ASH git ref (tag, branch, or full commit SHA) to build the image from, for example v3.7.0. Pinning a tag makes the build reproducible; the scheduled rebuild still repulls base-image and OS patches for that same ASH revision.",
    "MinLength": 1
   },

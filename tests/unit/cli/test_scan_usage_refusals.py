@@ -10,6 +10,10 @@
   same answer as a clean scan of the directory the operator meant.
 * A ``--base-ref`` starting with ``-`` went to ``git diff`` as an option, not a
   revision (see ``tests/unit/utils/test_base_ref.py``).
+* ``--ignore-suppressions`` with ``--use-existing`` ran and kept the stored
+  suppressions: the results the report is made from were written with ASH's
+  suppressions applied, and the scan phase the flag changes is the one
+  ``--use-existing`` skips. The combination is refused, naming both flags.
 
 A missing ``--source-dir`` is a mistyped argument, so it exits
 ``ASH_EXIT_USAGE_ERROR``, the code a refused shard selection
@@ -156,6 +160,47 @@ class TestUseExistingWithoutResults:
             )
         assert result.exit_code == 0, result.output
         assert mock_run.call_args.kwargs["existing_results"] == results.as_posix()
+
+
+class TestIgnoreSuppressionsWithUseExisting:
+    """The two flags together are a mistake in the command line, so the usage code.
+
+    The results are present, so the refusal is this one and not the missing-results
+    state refusal above (which exits 1 and names only ``--use-existing``).
+    """
+
+    def _invoke(self, runner, tmp_path, *flags):
+        source = tmp_path / "src"
+        source.mkdir()
+        output = tmp_path / "out"
+        output.mkdir()
+        (output / "ash_aggregated_results.json").write_text("{}", encoding="utf-8")
+        with patch(RUN_ASH_SCAN) as mock_run:
+            result = runner.invoke(
+                app,
+                [
+                    "scan",
+                    "--source-dir",
+                    str(source),
+                    "--output-dir",
+                    str(output),
+                    *flags,
+                ],
+            )
+        return result, mock_run
+
+    def test_the_combination_is_refused_naming_both_flags(self, runner, tmp_path):
+        result, mock_run = self._invoke(
+            runner, tmp_path, "--use-existing", "--ignore-suppressions"
+        )
+        _assert_refused(result, "--ignore-suppressions", "--use-existing")
+        mock_run.assert_not_called()
+
+    def test_ignore_suppressions_alone_still_reaches_the_scan(self, runner, tmp_path):
+        result, mock_run = self._invoke(runner, tmp_path, "--ignore-suppressions")
+        assert result.exit_code == 0, result.output
+        assert mock_run.call_args.kwargs["ignore_suppressions"] is True
+        assert mock_run.call_args.kwargs["existing_results"] is None
 
 
 class TestBaseRef:

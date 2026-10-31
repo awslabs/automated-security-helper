@@ -134,11 +134,25 @@ def test_a_record_keeps_its_runtime_and_the_daemon_environment(state, monkeypatc
     record = json.loads(path.read_text(encoding="utf-8"))
     assert record["runtime"] == "/opt/bin/docker"
     assert record["runner_argv"] == ["sudo", "-n"]
-    assert record["daemon_env"] == {
-        "DOCKER_HOST": _SECRET_A,
-        "DOCKER_CONTEXT": None,
-        "CONTAINER_HOST": None,
+    # Every setting a runtime client picks its daemon from, with the one that
+    # is set carried as set. The key set is spelled out here rather than read
+    # from _daemon_environment, which this record was written from: compared
+    # with itself, a key dropped from the product would drop from the
+    # expectation too and the test would still pass.
+    assert set(record["daemon_env"]) == {
+        "DOCKER_HOST",
+        "DOCKER_CONTEXT",
+        "DOCKER_CONFIG",
+        "docker_config_current_context",
+        "CONTAINER_HOST",
+        "CONTAINER_CONNECTION",
+        "podman_default_connection",
+        "CONTAINERD_ADDRESS",
+        "CONTAINERD_NAMESPACE",
     }
+    assert record["daemon_env"]["DOCKER_HOST"] == _SECRET_A
+    assert record["daemon_env"]["DOCKER_CONTEXT"] is None
+    assert record["daemon_env"]["CONTAINER_HOST"] is None
     assert isinstance(record["created"], float)
 
 
@@ -185,7 +199,9 @@ def test_a_runtime_that_has_no_such_container_still_drops_a_matching_record(
     stub = _runtime(tmp_path, says="Error: No such container: x", code=1)
     record = _plant(state, dead_pid, **_known(stub))
 
-    assert container_leftovers.sweep_leftover_containers([str(stub)]) != []
+    # The record is dropped on its own runtime's word, and nothing was removed
+    # to report: a container the runtime never had is not in the names returned.
+    assert container_leftovers.sweep_leftover_containers([str(stub)]) == []
     assert not record.exists()
 
 

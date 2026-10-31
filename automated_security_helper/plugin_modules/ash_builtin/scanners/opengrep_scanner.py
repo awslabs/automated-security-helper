@@ -5,16 +5,17 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 
 - the binary command (`opengrep`) and its custom URL-based install commands
 - version-gated `--metrics` (deprecated in opengrep 1.7.0+)
-- patterns mode (`--pattern`) which switches the scanner to JSON output
+- the refusal of patterns mode (`--pattern`), which opengrep runs only with a
+  language that no option of this scanner supplies
 """
 
 from __future__ import annotations
 
+import logging
 import platform
-import struct
 import sys
 from pathlib import Path
-from typing import Annotated, ClassVar, Dict, List, Literal, Optional, Tuple
+from typing import Annotated, ClassVar, Dict, List, Literal
 
 from pydantic import Field, PrivateAttr, model_validator
 
@@ -23,8 +24,10 @@ from automated_security_helper.base.options import ScannerOptionsBase, release_t
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import ScannerToolType
-from automated_security_helper.models.core import ToolArgs, ToolExtraArg
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
+    DEFAULT_EXCLUDES,
     GrepScannerBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -35,7 +38,11 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
+from automated_security_helper.utils.subprocess_utils import (
+    find_executable,
+    in_tree_refusal,
+    spawn_run,
+)
 from automated_security_helper.utils.process_env import snapshot_environ
 
 
@@ -52,7 +59,7 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Skip any file or directory whose path matches the pattern.",
         ),
-    ] = ["*-converted.py", "*_report_result.txt"]
+    ] = list(DEFAULT_EXCLUDES)
 
     exclude_rule: Annotated[
         List[str],
@@ -169,6 +176,58 @@ def _refuse_unverified_install_command(
     )
 
 
+def _release_number(version: str) -> str:
+    """``version`` without the one leading ``v`` a release tag may carry."""
+    return version.removeprefix("v")
+
+
+def _is_pinned_release(version: str) -> bool:
+    """Whether ``options.version`` names the pinned release, spelled with or
+    without the leading ``v``.
+
+    The validator (``base/options.release_tag``) accepts both spellings, and the
+    pinned table spells it with the ``v``, so ``1.30.2`` for a pinned ``v1.30.2``
+    used to take the custom-version branch: refused for want of a digest, or
+    fetched from a tag without the ``v``, which the release does not carry.
+    """
+    return _release_number(version) == _release_number(TOOL_VERSIONS["opengrep"])
+
+
+def _install_arch() -> str:
+    """The architecture key of ``custom_install_commands`` for this host.
+
+    From the machine name, as ``cli/dependencies.get_architecture`` reads it:
+    ``amd64`` for x86_64 and ``arm64`` for aarch64. The pointer size used to
+    decide it, which read every 64-bit host, an arm64 one included, as amd64.
+    """
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64"):
+        return "amd64"
+    if machine in ("aarch64", "arm64"):
+        return "arm64"
+    return machine
+
+
+def patterns_mode_refusal(patterns: List[str]) -> str:
+    """The message a configuration that sets ``options.patterns`` is refused with.
+
+    It names the option, the language option opengrep needs for a ``--pattern``
+    search and that this scanner has none, and the supported shape for several
+    patterns: a rule file named with ``options.config``, where each rule carries
+    its own language.
+    """
+    count = len(patterns)
+    return (
+        "opengrep patterns mode is refused: scanners.opengrep.options.patterns "
+        f"names {count} pattern{'' if count == 1 else 's'}, and opengrep runs a "
+        "--pattern search only with a language (its --lang option), which no "
+        "option of this scanner supplies. Write the patterns as rules in a rule "
+        "file, which carries several patterns each with its language, and name "
+        "the file with scanners.opengrep.options.config; or clear patterns to "
+        "scan with the configured rules."
+    )
+
+
 @ash_scanner_plugin
 class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     """OpengrepScanner implements code scanning using Opengrep."""
@@ -213,7 +272,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     # Whether --metrics applies depends on the installed opengrep's version, and
     # asking starts opengrep. The arguments are built at construction, which the scan
     # phase does for every registered scanner, selected or not, so the question
-    # waits for _resolve_arguments.
+    # waits for _resolve_scan_arguments.
     _constructing: bool = PrivateAttr(default=False)
     _metrics_decision_pending: bool = PrivateAttr(default=False)
     # The answer, once asked, so the arguments rebuilt with it do not ask again.
@@ -225,9 +284,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
         No path installs an unverified binary.
 
-        * The pinned version is installed from ``utils/tool_downloads.py``, verified
-          against its SHA256 before it is put on disk, exactly as grype, syft and
-          trivy are.
+        * The pinned version, spelled with or without its leading ``v``
+          (``_is_pinned_release``), is installed from ``utils/tool_downloads.py``,
+          verified against its SHA256 before it is put on disk, exactly as grype,
+          syft and trivy are.
         * A custom ``version`` is installed only on a platform for which the
           configuration supplies ``sha256``, and goes through the same verified
           download, failing closed on a mismatch.
@@ -241,7 +301,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         opengrep can scan with it, and only the install is refused.
         """
         version = self.config.options.version
-        if version == TOOL_VERSIONS["opengrep"]:
+        if _is_pinned_release(version):
             self.custom_install_commands.update(
                 pinned_tool_install_commands("opengrep")
             )
@@ -294,7 +354,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         """`--metrics` was removed in opengrep 1.7.0; only emit on older versions.
 
         During construction the answer is no, and the question is left for
-        ``_resolve_arguments``.
+        ``_resolve_scan_arguments``.
         """
         if self._constructing:
             self._metrics_decision_pending = True
@@ -303,21 +363,33 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             self._metrics_flag = self._should_use_metrics_flag()
         return self._metrics_flag
 
-    def _resolve_arguments(
-        self, target: str | Path, results_file: str | Path | None = None
-    ) -> List[str]:
+    def _resolve_scan_arguments(self, target: Path, results_file: Path) -> List[str]:
         """The arguments, with ``--metrics`` decided on the first call.
 
         Construction built them without ``--metrics``, which is right for the pinned
         version and any 1.7.0 or later. For an older opengrep they are built again,
         the same way, with it.
+
+        Decided here and not inside ``_resolve_arguments``: the base's
+        ``_resolve_scan_arguments`` adds this target's excludes to ``extra_args``
+        around that call and restores the list it saved afterwards, so a rebuild
+        inside it was thrown away (every later target lost ``--metrics``) and the
+        first target's command lost the output-directory excludes the rebuild
+        replaced.
+
+        The rebuild runs the offline-cache validation again, after
+        ``_execute_scan`` checked the reason construction recorded. A cache that
+        became unusable since then is recorded the same way, and the scan is
+        refused here rather than run with no cache ``--config`` and graded.
         """
         if self._metrics_decision_pending:
             self._metrics_decision_pending = False
             if self.emit_metrics_flag():
                 self.args.extra_args = []
                 self._process_config_options()
-        return super()._resolve_arguments(target=target, results_file=results_file)
+                if self.dependency_unavailable_reason:
+                    raise ScannerError(self.dependency_unavailable_reason)
+        return super()._resolve_scan_arguments(target, results_file)
 
     # ---------------------------------------------------------------
     # Dependency resolution
@@ -329,14 +401,25 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         Named for the ``GrepScannerBase`` hook rather than overriding
         ``validate_plugin_dependencies`` directly: the base method now consults the
         offline-cache verdict first, and an override here would skip it.
+
+        A copy found only inside the scanned tree is refused by the lookup
+        (``subprocess_utils.find_executable``); the reason is recorded for the
+        MISSING row, as ``ScannerPluginBase.validate_plugin_dependencies`` records
+        it, so the row says where the copy is and how to allow it rather than
+        "not installed".
         """
         found = find_executable(self.command)
         ASH_LOGGER.verbose(f"Found opengrep executable at: {found}")
+        if found is None:
+            refusal = in_tree_refusal(self.command)
+            if refusal is not None:
+                self.dependency_unavailable_reason = refusal
+                self._plugin_log(refusal, level=logging.WARNING)
         return found is not None
 
     def _has_install_commands(self) -> bool:
         system = platform.system().lower()
-        arch = "amd64" if struct.calcsize("P") * 8 == 64 else "arm64"
+        arch = _install_arch()
         if system in self.custom_install_commands:
             if arch in self.custom_install_commands[system]:
                 return len(self.custom_install_commands[system][arch]) > 0
@@ -384,41 +467,23 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         return True
 
     # ---------------------------------------------------------------
-    # Patterns mode — opengrep-only override
+    # Patterns mode — refused
     # ---------------------------------------------------------------
 
     def _process_config_options(self):
-        result = super()._process_config_options()
+        """The shared argument build, after refusing patterns mode.
 
-        # Patterns mode: JSON output and --pattern entries in place of the rule
-        # configs, SARIF output and metrics flag. Every other argument stays,
-        # --x-ignore-semgrepignore-files and the exclusions among them, so a
-        # .semgrepignore in the tree is not honored here either.
+        ``options.patterns`` used to switch the command to one ``--pattern`` per
+        entry with JSON output. opengrep runs a ``--pattern`` search only with a
+        language (``--lang``), which no option of this scanner carries, so every
+        such command was built, started and failed at the tool, and the report
+        showed a tool failure for a configuration opengrep can never run. The
+        refusal is raised here, while the scanner is built and before any argument
+        exists: the scan phase records a scanner whose constructor raised as that
+        scanner's ERROR with this text, so the report names the option and what to
+        write instead, and a run that did not select opengrep records it as not
+        selected, as for any other construction-time refusal.
+        """
         if self.config.options.patterns:
-            kept = [
-                arg
-                for arg in self.args.extra_args
-                if arg.key not in ("--config", "--sarif", "--metrics", "--json")
-            ]
-            self.args.extra_args = [ToolExtraArg(key="--json", value=""), *kept]
-            for pattern in self.config.options.patterns:
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--pattern", value=pattern)
-                )
-
-        return result
-
-    def _execute_scan(
-        self,
-        target: Path,
-        target_type: Literal["source", "converted"],
-        global_ignore_paths,
-    ) -> Tuple[List[str], Path, Optional[dict]]:
-        final_args, results_file, env = super()._execute_scan(
-            target, target_type, global_ignore_paths
-        )
-        if self.config.options.patterns:
-            results_file = results_file.parent / "opengrep_results.json"
-            # Re-resolve final_args so output_arg uses the json path.
-            final_args = self._resolve_scan_arguments(target, results_file)
-        return final_args, results_file, env
+            raise ScannerError(patterns_mode_refusal(self.config.options.patterns))
+        return super()._process_config_options()

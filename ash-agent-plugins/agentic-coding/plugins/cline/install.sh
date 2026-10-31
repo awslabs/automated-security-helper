@@ -20,7 +20,7 @@ fi
 ASH_MCP_ENTRY='{
   "command": "uvx",
   "args": [
-    "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
+    "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.1",
     "ash",
     "mcp"
   ],

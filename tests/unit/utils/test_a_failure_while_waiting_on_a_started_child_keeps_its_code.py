@@ -623,12 +623,17 @@ _POPEN_STOPPED = [
 
 @contextlib.contextmanager
 def _the_kernel_refuses_the_stop() -> Iterator[list]:
-    """Every signal ASH sends the tool's child through Popen raises EPERM, as for a
-    setuid program the tool started, and the child keeps running. Yields the
-    children started; each is killed for real afterwards."""
+    """Every signal ASH sends the tool's child raises EPERM, as for a setuid
+    program the tool started, and the child keeps running: the ones sent through
+    Popen (send_signal) and the ones sent to the child's own process group
+    (os.killpg, the plain runner's stop of a timed-out child, which leads a group
+    of its own so the kill reaches what it started). A probe of the group (signal
+    0) is answered for real, so the stop paths read the group as it is. Yields
+    the children started; each is killed for real afterwards."""
     children: list = []
     real_init = subprocess.Popen.__init__
     real_send_signal = subprocess.Popen.send_signal
+    real_killpg = os.killpg
 
     def recording(self, *args, **kwargs):
         real_init(self, *args, **kwargs)
@@ -640,10 +645,16 @@ def _the_kernel_refuses_the_stop() -> Iterator[list]:
             raise PermissionError(errno.EPERM, "Operation not permitted")
         return real_send_signal(self, sig)
 
+    def group_refused(pgid, signum):
+        if signum != 0 and any(child.pid == pgid for child in children):
+            raise PermissionError(errno.EPERM, "Operation not permitted")
+        return real_killpg(pgid, signum)
+
     try:
         with (
             patch.object(subprocess.Popen, "__init__", recording),
             patch.object(subprocess.Popen, "send_signal", refused),
+            patch.object(os, "killpg", group_refused),
         ):
             yield children
     finally:

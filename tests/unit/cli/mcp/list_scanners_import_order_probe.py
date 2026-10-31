@@ -153,13 +153,23 @@ class TestListScannersIsImportOrderIndependent:
 
 class TestLoadedScannerClasses:
     def test_finds_every_scanner_regardless_of_the_memo(self):
+        """The outcome, whatever the memo holds when this test runs.
+
+        A sibling test may already have loaded the vendored packages into this
+        worker, which makes the memo complete; this test does not control that
+        state, so a red here names what is missing and not why (the
+        memo-shortness mechanism is pinned, when observable, by
+        ``test_complete_when_the_memo_is_demonstrably_short``).
+        """
         _resolve_without_the_vendored_packages()
 
         resolved = _loaded_scanner_classes()
 
         names = {cls.__name__ for cls in resolved}
-        assert VENDORED_SCANNER_CLASSES <= names, (
-            f"resolved from the memo rather than the loaders; got {sorted(names)}"
+        missing = VENDORED_SCANNER_CLASSES - names
+        assert not missing, (
+            f"_loaded_scanner_classes() is missing {sorted(missing)}; "
+            f"got {sorted(names)}"
         )
         assert len(resolved) >= 13
 

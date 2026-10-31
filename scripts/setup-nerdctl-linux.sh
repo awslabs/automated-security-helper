@@ -67,46 +67,8 @@ esac
 TARBALL="nerdctl-full-${NERDCTL_VERSION}-linux-${ARCH}.tar.gz"
 URL="https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/${TARBALL}"
 
-# Docker's containerd is the same unit name this bundle installs, so leaving
-# Docker running means two things contending for one socket. nerdctl is the
-# runtime under test in this job; nothing here needs Docker.
-#
-# THIS IS ONE-WAY, AND THAT IS DELIBERATE
-#
-# Nothing below restarts Docker, and no trap restores it on failure. The intended
-# caller is an ephemeral GitHub-hosted runner that is destroyed at the end of the
-# job -- `sudo bash scripts/setup-nerdctl-linux.sh`, from the nerdctl leg of
-# .github/actions/validate-container/action.yml -- so there is nothing to restore
-# to. Restoring would also be wrong mid-script: the bundle's containerd unit
-# shadows the distro one from /usr/local/lib/systemd/system (see the note further
-# down), so a restarted Docker would be talking to a containerd it did not start.
-#
-# The consequence on a developer machine is that this script stops your Docker and
-# leaves it stopped, which is why the reversal is printed rather than left to be
-# discovered. Run this in a throwaway VM or container, not on a workstation.
-echo "=== Stopping Docker so it does not contend for containerd ==="
-echo "    (one-way: to undo, 'sudo systemctl start docker.socket docker.service'"
-echo "     after 'sudo systemctl stop buildkit' and a 'systemctl daemon-reload')"
-# The previous form was `systemctl stop docker.socket docker.service 2>/dev/null ||
-# true`, which discarded the message and the status together. A runner image with no
-# Docker is a fine place to install nerdctl, so absence must be tolerated -- but a
-# unit that is running and REFUSES to stop means something still holds the containerd
-# socket, and `ash build-image` would then fail a long way from that cause. So the two
-# cases are separated: absence is checked for, and a real failure to stop is left to
-# `set -e`.
-#
-# `is-active` rather than `list-unit-files`: it answers the question that matters
-# (is there something running to stop) in one call, reports a socket unit's
-# `listening` state as active, and needs no pipeline -- a `| grep -q` here would be
-# subject to `pipefail` and could kill the script over a missing unit.
-for unit in docker.socket docker.service; do
-    if systemctl is-active --quiet "${unit}"; then
-        echo "  ${unit}: active, stopping"
-        systemctl stop "${unit}"
-    else
-        echo "  ${unit}: not active, nothing to stop"
-    fi
-done
+# Docker is shut down further down, immediately before containerd is restarted,
+# and not here: see "WHY DOCKER IS SHUT DOWN LATE" below.
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "${WORKDIR}"' EXIT
@@ -135,12 +97,23 @@ tar -C /usr/local -xzf "${WORKDIR}/${TARBALL}"
 # symptom is a container with no network interface, roughly forty-five minutes later,
 # inside `ash scan --mode container`.
 #
-# Two changes, because dropping `|| true` alone is not enough. `cp -n` exits 0 when it
-# skips a file that already exists, so on a runner whose Docker install already
-# populated /opt/cni/bin the copy can succeed having copied nothing -- which is fine,
-# but means a zero status is not evidence the plugins are there. So the source
-# directory is required to exist and be non-empty first, and the result is asserted by
-# name afterwards.
+# Three changes, because dropping `|| true` alone is not enough.
+#
+# The source directory is required to exist AND to hold at least one entry before the
+# copy: an existing but empty directory leaves the glob unexpanded, and cp would then
+# die on its own bare "cannot stat" line instead of the diagnostic below.
+#
+# The copy overwrites (`-f`) rather than keeping what is there (`-n`). `-n` was wrong
+# twice. A plugin already sitting in /opt/cni/bin was kept, so the directory could hold
+# an older plugin than the rest of the bundle -- the version skew the bundle exists to
+# remove -- and the `bridge` assertion below cannot tell a kept file from a copied one.
+# And the exit status of `-n` on a skipped file depends on the coreutils release: 9.2
+# through 9.4 (Ubuntu 24.04 ships 9.4) exit non-zero, while 9.5 and later and releases
+# before 9.2 exit 0, so a re-run on a populated directory aborted here on some hosts and
+# not on others. `-f` has one meaning everywhere. `--preserve=mode` keeps the plugins
+# executable when the destination file already existed with a different mode.
+#
+# Finally the result is asserted by name afterwards.
 echo "=== Publishing CNI plugins to /opt/cni/bin ==="
 CNI_SRC="/usr/local/libexec/cni"
 if [ ! -d "${CNI_SRC}" ]; then
@@ -149,10 +122,20 @@ if [ ! -d "${CNI_SRC}" ]; then
     echo "them, update CNI_SRC here rather than letting the copy fail silently." >&2
     exit 1
 fi
+# nullglob turns an empty directory into an empty array instead of the literal
+# pattern, so the count below is the real number of entries.
+shopt -s nullglob
+cni_plugins=("${CNI_SRC}"/*)
+shopt -u nullglob
+if [ "${#cni_plugins[@]}" -eq 0 ]; then
+    echo "ERROR: ${CNI_SRC} exists but is empty after unpacking the nerdctl-full bundle." >&2
+    echo "The bundle is expected to ship the CNI plugins there; if v${NERDCTL_VERSION} moved" >&2
+    echo "them, update CNI_SRC here. Directory listing:" >&2
+    ls -la "${CNI_SRC}" >&2 || true
+    exit 1
+fi
 mkdir -p /opt/cni/bin
-# Unquoted glob on purpose -- it must expand. `set -u` does not apply to globs, and
-# the guard above plus the assertion below cover the empty-match case.
-cp -n "${CNI_SRC}"/* /opt/cni/bin/
+cp -f --preserve=mode "${cni_plugins[@]}" /opt/cni/bin/
 
 # `bridge` is the plugin nerdctl's default network actually loads, so its presence is
 # the specific fact worth asserting rather than a file count.
@@ -219,8 +202,19 @@ echo "  /opt/cni/bin/bridge: present"
 # reads is not the store `nerdctl pull` and `nerdctl tag` write to. nerdctl's
 # default is containerd's `namespaces.Default`, the string "default"
 # (`pkg/config/config.go`), and nothing in the bundle changes it.
+#
+# A file that is already there and was not written by this script is somebody's own
+# buildkitd configuration. It is copied aside (numbered, so a second run cannot
+# overwrite the first copy) before it is replaced, and the copy's name is printed. A
+# file this script wrote on an earlier run carries the marker line below and is simply
+# rewritten.
 echo "=== Configuring buildkitd to use containerd's image store ==="
 mkdir -p /etc/buildkit
+if [ -f /etc/buildkit/buildkitd.toml ] \
+    && ! grep -q '^# Written by scripts/setup-nerdctl-linux.sh' /etc/buildkit/buildkitd.toml; then
+    cp -p --backup=numbered /etc/buildkit/buildkitd.toml /etc/buildkit/buildkitd.toml.pre-setup-nerdctl
+    echo "  existing /etc/buildkit/buildkitd.toml kept as /etc/buildkit/buildkitd.toml.pre-setup-nerdctl"
+fi
 cat > /etc/buildkit/buildkitd.toml <<'EOF'
 # Written by scripts/setup-nerdctl-linux.sh. See that script for why every line
 # here is load-bearing. In short: a no-config buildkitd defaults to the OCI
@@ -237,6 +231,76 @@ cat > /etc/buildkit/buildkitd.toml <<'EOF'
 EOF
 cat /etc/buildkit/buildkitd.toml
 
+# WHY DOCKER IS SHUT DOWN LATE
+#
+# Docker's containerd is the same unit name this bundle installs, so leaving
+# Docker running means two things contending for one socket. nerdctl is the
+# runtime under test in this job; nothing here needs Docker. The contention
+# starts when the bundle's containerd is restarted below, so Docker is stopped
+# immediately before that and not at the top of the script: everything that can
+# fail for reasons unrelated to the host (the download, the checksum, unpacking, the
+# CNI plugins, the buildkitd config) has already completed, and a failure in any of
+# them leaves Docker running instead of a host with Docker stopped and nothing
+# installed.
+#
+# THIS IS ONE-WAY, AND THAT IS DELIBERATE
+#
+# Nothing below restarts Docker, and no trap restores it on failure. The intended
+# caller is an ephemeral GitHub-hosted runner that is destroyed at the end of the
+# job -- `sudo bash scripts/setup-nerdctl-linux.sh`, from the nerdctl leg of
+# .github/actions/validate-container/action.yml -- so there is nothing to restore
+# to. Restoring would also be wrong mid-script: the bundle's containerd unit
+# shadows the distro one from /usr/local/lib/systemd/system (see the note further
+# down), so a restarted Docker would be talking to a containerd it did not start.
+#
+# The consequence on a developer machine is that this script stops your Docker and
+# leaves it stopped, which is why the reversal is printed rather than left to be
+# discovered. The reversal has to take the bundle's units out of the way as well:
+# `daemon-reload` alone leaves /usr/local/lib/systemd/system ahead of the distro
+# directory, so a Docker started after it would still be using the bundle's
+# containerd, which is exactly the state this paragraph says is wrong. Run this in a
+# throwaway VM or container, not on a workstation.
+echo "=== Stopping Docker so it does not contend for containerd ==="
+echo "    (one-way: to undo, run 'sudo systemctl stop buildkit containerd', delete"
+echo "     /usr/local/lib/systemd/system/containerd.service and buildkit.service,"
+echo "     run 'sudo systemctl daemon-reload', then"
+echo "     'sudo systemctl start docker.socket docker.service')"
+# The previous form was `systemctl stop docker.socket docker.service 2>/dev/null ||
+# true`, which discarded the message and the status together. A runner image with no
+# Docker is a fine place to install nerdctl, so absence must be tolerated -- but a
+# unit that is running and REFUSES to stop means something still holds the containerd
+# socket, and `ash build-image` would then fail a long way from that cause. So the two
+# cases are separated: absence is checked for, and a real failure to stop is left to
+# `set -e`.
+#
+# `LoadState` rather than `is-active`. `is-active` reports only a unit that is running
+# right now: a Docker service that is `activating`, or waiting out a restart delay
+# after a crash (docker.service restarts itself), reads as not active and was left
+# alone, and it then came back and took the containerd socket after all. `systemctl
+# stop` on a loaded unit cancels a pending start or restart and is a no-op on a unit
+# that is already inactive, so every unit systemd knows about is stopped
+# unconditionally, and only `not-found` means there is nothing to do. `show` exits 0
+# for an unknown unit, needs no pipeline (a `| grep -q` would be subject to
+# `pipefail`), and a failure of `show` itself is left to `set -e`.
+for unit in docker.socket docker.service; do
+    load_state="$(systemctl show --property=LoadState --value "${unit}")"
+    if [ "${load_state}" = "not-found" ]; then
+        echo "  ${unit}: not installed, nothing to stop"
+    else
+        echo "  ${unit}: ${load_state}, stopping"
+        systemctl stop "${unit}"
+    fi
+done
+
+# Status and journal for a unit that failed to start or to become active. Used by
+# the restart and the wait below so that both failures print the same evidence; a
+# `systemctl restart` that fails under `set -e` would otherwise exit the script with
+# only systemd's one-line message and none of this.
+dump_unit_diagnostics() {
+    systemctl status "$1" --no-pager --lines=40 >&2 || true
+    journalctl -u "$1" --no-pager --lines=60 >&2 || true
+}
+
 # The bundle ships units at /usr/local/lib/systemd/system, which systemd loads
 # ahead of /lib/systemd/system, so `containerd` now resolves to the bundle's
 # copy running /usr/local/bin/containerd. restart rather than start, because the
@@ -248,10 +312,21 @@ cat /etc/buildkit/buildkitd.toml
 # no-op that exits 0. On a re-run, or on any host where something already started
 # buildkit, `start` would leave the old no-config daemon running and the worker
 # check below would report `oci` having written a perfectly good toml.
+#
+# Each restart is tested instead of left to `set -e`, because a unit that fails to
+# start is exactly the case the diagnostics exist for.
 echo "=== Reloading systemd and starting containerd and buildkit ==="
 systemctl daemon-reload
-systemctl restart containerd
-systemctl restart buildkit
+if ! systemctl restart containerd; then
+    echo "ERROR: systemctl restart containerd failed." >&2
+    dump_unit_diagnostics containerd
+    exit 1
+fi
+if ! systemctl restart buildkit; then
+    echo "ERROR: systemctl restart buildkit failed." >&2
+    dump_unit_diagnostics buildkit
+    exit 1
+fi
 
 # Docker was stopped above, so if either unit is dead there is no runtime left to
 # fall back on and the image build that follows blocks instead of failing.
@@ -264,12 +339,34 @@ for unit in containerd buildkit; do
     done
     if ! systemctl is-active --quiet "${unit}"; then
         echo "ERROR: ${unit} did not become active within 60s" >&2
-        systemctl status "${unit}" --no-pager --lines=40 >&2 || true
-        journalctl -u "${unit}" --no-pager --lines=60 >&2 || true
+        dump_unit_diagnostics "${unit}"
         exit 1
     fi
     echo "  ${unit}: active"
 done
+
+# The assumption in the note above -- that `containerd` resolves to the bundle's unit
+# once systemd has been reloaded -- is checked here rather than trusted. A unit of the
+# same name in /etc/systemd/system, or a drop-in that replaces ExecStart, wins over
+# /usr/local/lib/systemd/system, and the host would then run the distro's containerd
+# beside the bundle's buildkit and nerdctl: the version skew the bundle exists to
+# remove, with every unit reporting active. `ExecStart` as systemd resolved it names
+# the binary the unit runs.
+containerd_exec="$(systemctl show --property=ExecStart --value containerd)"
+case "${containerd_exec}" in
+    *"path=/usr/local/bin/containerd ;"*)
+        echo "  containerd unit runs /usr/local/bin/containerd (the bundle's)"
+        ;;
+    *)
+        echo "ERROR: the containerd unit does not run /usr/local/bin/containerd." >&2
+        echo "The bundle's unit at /usr/local/lib/systemd/system/containerd.service was" >&2
+        echo "shadowed by another definition, so the daemon is not the one built and" >&2
+        echo "tested with this buildkit and nerdctl. ExecStart as systemd resolved it:" >&2
+        echo "  ${containerd_exec:-<none reported>}" >&2
+        dump_unit_diagnostics containerd
+        exit 1
+        ;;
+esac
 
 echo "=== Verifying nerdctl installation ==="
 nerdctl --version
@@ -331,8 +428,16 @@ timeout 60 buildctl debug workers --verbose 2>&1 || true
 # grep over the JSON rather than parsing it: jq is not guaranteed on the runner,
 # and the label names are literal strings in buildkitd's output. The executor
 # label is `org.mobyproject.buildkit.worker.executor`.
-if ! grep -q '"org.mobyproject.buildkit.worker.executor":"containerd"' "${workers_json}"; then
-    echo "ERROR: buildkitd's default worker is not the containerd worker." >&2
+#
+# Two greps, because the output lists EVERY worker and the config above is
+# what makes the OCI worker absent. A no-config buildkitd registers both
+# workers with the OCI one as default, so a grep for the containerd executor
+# alone matched that list too and passed while the toml had not applied -- the
+# exact state this check exists to refuse. The containerd executor must be
+# present AND the OCI executor absent.
+if ! grep -q '"org.mobyproject.buildkit.worker.executor":"containerd"' "${workers_json}" \
+    || grep -q '"org.mobyproject.buildkit.worker.executor":"oci"' "${workers_json}"; then
+    echo "ERROR: buildkitd's default worker is not the containerd worker, or the OCI worker is still registered." >&2
     echo "" >&2
     echo "/etc/buildkit/buildkitd.toml was written above to disable the OCI worker," >&2
     echo "so reading anything other than executor=containerd here means it did not" >&2
@@ -361,8 +466,10 @@ echo "  buildkitd default worker: containerd (can read containerd's image store)
 # it only feeds the error message below -- but a diagnostic that silently prints
 # nothing is worse than no diagnostic, which is why the spelling is the documented
 # one rather than the one that reads better. `|| true` keeps it from ever being the
-# reason this script fails.
-nerdctl_ns="$(nerdctl namespace ls --quiet 2>/dev/null | tr '\n' ' ' || true)"
+# reason this script fails. Bounded like every other daemon probe in this script, so a
+# containerd that stops answering after the checks above cannot hang the step that
+# only exists to explain a failure.
+nerdctl_ns="$(timeout 30 nerdctl namespace ls --quiet 2>/dev/null | tr '\n' ' ' || true)"
 if grep -q '"org.mobyproject.buildkit.worker.containerd.namespace":"default"' "${workers_json}"; then
     echo "  buildkitd containerd namespace: default (matches the nerdctl CLI)"
 else

@@ -62,6 +62,7 @@ from automated_security_helper.utils.undecodable_text import (
     undecodable_of_text,
 )
 from automated_security_helper.utils.uri_separators import (
+    is_windows_root,
     root_text,
     sanitized_uri_text,
 )
@@ -71,8 +72,10 @@ import re
 from datetime import datetime
 from enum import Enum
 import json
-from pathlib import Path, PurePosixPath
-from typing import Dict, List, Literal, Optional, Union
+import posixpath
+from pathlib import Path, PurePath, PurePosixPath
+from typing import Any, Dict, List, Literal, Optional, Sequence, Union
+from urllib.parse import unquote
 
 from pydantic import AnyUrl, ConfigDict, Field, RootModel
 
@@ -2410,6 +2413,227 @@ _DRIVE_PREFIXED_ROOT = re.compile(r"^/[A-Za-z]:")
 _DRIVE_ROOT = re.compile(r"^[A-Za-z]:/")
 
 
+# A ``file:`` URI whose authority slot holds a drive letter: ``file://C:/x``
+# and ``file://c:\x`` (a Windows tool that puts the drive where a host goes).
+_DRIVE_IN_AUTHORITY = re.compile(r"^[A-Za-z]:(?:[\\/]|$)")
+
+
+def _file_uri_path_text(uri: str) -> str:
+    """The path a ``file:`` URI names, as text; any other URI unchanged.
+
+    Split by hand rather than with ``urllib.parse``: the scheme is matched
+    without regard to case; ``file:/abs``, ``file:///abs`` and
+    ``file://localhost/abs`` all name ``/abs``; a drive in the authority slot
+    (``file://C:/proj/x``) is the start of the path, where a URL parser read
+    ``C:`` as a host and lost the drive; any other host names a share, kept as
+    the UNC root ``//host/abs`` so a remote file never matches a local file of
+    the same path and a UNC ``source_dir`` still matches it. A ``;``, ``?`` or
+    ``#`` is a character of the file name, as a scanner wrote it (Java's
+    ``File.toURI`` writes ``a;b.py``; a ``C#`` directory is common), where a URL
+    parser cut the path there. The path is percent-decoded the way the file
+    system decodes a name (surrogateescape), so a name holding a space, a
+    non-ASCII character or a byte that is not UTF-8 reads back as the file's own.
+
+    This reader and the sanitize path's (``utils/sarif_utils._file_uri_to_path_text``)
+    agree on everything but a host: that one drops any authority and names
+    ``/abs`` (``TestBug47FileUriHostSegment`` pins it), because it normalizes a
+    location for display and suppression matching, where this one decides
+    whether a result names a listed LOCAL file, and a remote share's path must
+    not. Whether the sanitize path should keep the UNC root too is a product
+    decision, not taken here.
+    """
+    if uri[:5].lower() != "file:":
+        return uri
+    rest = uri[5:]
+    if rest.startswith("//"):
+        remainder = rest[2:]
+        if _DRIVE_IN_AUTHORITY.match(remainder):
+            authority, path = "", remainder
+        else:
+            authority, separator, tail = remainder.partition("/")
+            path = separator + tail
+        if authority and authority.lower() != "localhost":
+            path = "//" + authority + path
+    else:
+        path = rest
+    path = unquote(path, errors="surrogateescape")
+    # file:///C:/x -> /C:/x ; drop the slash that precedes a drive.
+    if _DRIVE_PREFIXED_ROOT.match(path):
+        path = path[1:]
+    return path
+
+
+def _relative_text(candidate: str, root: str, fold_case: bool) -> Optional[str]:
+    """*candidate* made relative to *root*, both ``/``-separated; None when it is
+    not under *root*. With *fold_case* the segments are compared without regard
+    to case and the candidate's own spelling of the tail is returned.
+
+    A *root* with no segments (``.`` or ``""``, the current directory given
+    relative) is under nothing lexically: every rooted candidate would pass an
+    empty prefix check and come back unchanged, which skipped the resolve
+    fallback this comparison is the first half of and dropped every absolute URI
+    under a ``.`` source directory. None, so the fallback runs."""
+    candidate_parts = PurePosixPath(candidate).parts
+    root_parts = PurePosixPath(root).parts
+    if not root_parts or len(candidate_parts) <= len(root_parts):
+        return None
+
+    def key(segment: str) -> str:
+        return segment.lower() if fold_case else segment
+
+    if [key(s) for s in candidate_parts[: len(root_parts)]] != [
+        key(s) for s in root_parts
+    ]:
+        return None
+    return PurePosixPath(*candidate_parts[len(root_parts) :]).as_posix()
+
+
+def _artifact_uri_by_index(run: "Run", index: Optional[int]) -> Optional[str]:
+    """The URI of ``run.artifacts[index]``'s own location, or None.
+
+    SARIF's default index is -1 (no artifact named); an index outside the
+    run's artifacts, an artifact with no location, or a location with no URI
+    all resolve to nothing. One hop only: an artifact whose location itself
+    names an index is not followed.
+    """
+    if not isinstance(index, int) or index < 0:
+        return None
+    artifacts = run.artifacts or []
+    if index >= len(artifacts):
+        return None
+    location = artifacts[index].location
+    if location is None:
+        return None
+    return location.uri
+
+
+def _resolved_root_text(source_dir: object) -> Optional[str]:
+    """*source_dir* resolved on this host, as ``/``-separated text; None for a
+    pure path of another flavor (it names no directory here) or a root that
+    cannot be resolved. Computed once per filter call, not once per result."""
+    if isinstance(source_dir, PurePath) and not isinstance(source_dir, Path):
+        return None
+    try:
+        return root_text(Path(str(source_dir)).resolve())
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def _first_segment(text: Optional[str], fold_case: bool) -> Optional[str]:
+    """The first path segment of *text* after its root: ``work`` in
+    ``/work/proj``, ``C:`` in ``C:/proj``, ``src`` in ``src/pkg``; None for no
+    text or a text with no segment (``/``, ``.``)."""
+    if not text:
+        return None
+    parts = [part for part in PurePosixPath(text).parts if part not in ("/", "//")]
+    if not parts:
+        return None
+    return parts[0].lower() if fold_case else parts[0]
+
+
+def _top_level_link_leads_under(
+    candidate: str, resolved_root: Optional[str], fold_case: bool
+) -> bool:
+    """Whether the first directory of a POSIX-rooted *candidate* is a symlink here
+    whose target starts under the resolved source directory's top segment.
+
+    Reads that one entry (``/tmp`` for ``/tmp/proj/a.py``) with one ``readlink``
+    and walks nothing else. A top-level link (``/tmp`` to ``/private/tmp``,
+    ``/home`` to ``/var/home``) is how the same directory gets two spellings, so
+    a candidate under one is resolved toward the place the link names even when
+    the source directory was given resolved. The link counts only when where it
+    points (made absolute against ``/`` and collapsed) begins at the same
+    top-level segment as *resolved_root*: the filter resolves toward places the
+    source directory already reaches, so a link into some other tree, an
+    automounter map included, is never followed on a scanner's say-so. False for
+    a candidate that is not rooted at ``/`` (a drive path, a relative one), for
+    an entry that is not a link, and for a name that cannot be read.
+    """
+    parts = PurePosixPath(candidate).parts
+    if len(parts) < 2 or parts[0] != "/":
+        return False
+    try:
+        target = Path("/", parts[1]).readlink().as_posix()
+    except (OSError, ValueError):
+        return False
+    # A relative target is relative to the directory holding the link, "/".
+    absolute_target = posixpath.normpath(posixpath.join("/", target))
+    leads_to = _first_segment(absolute_target, fold_case)
+    return leads_to is not None and leads_to == _first_segment(
+        resolved_root, fold_case
+    )
+
+
+def _resolved_relative_text(
+    candidate: str,
+    resolved_root: Optional[str],
+    fold_case: bool,
+    lexical_root: Optional[str] = None,
+) -> Optional[str]:
+    """*candidate* made relative to the resolved source directory, resolving the
+    candidate too when its own spelling does not match.
+
+    The lexical comparison takes ``source_dir`` as given, while a scanner's URI
+    is whatever spelling the scanner was handed: a relative ``source_dir``, or
+    one reached through a symlink (``/tmp`` against ``/private/tmp`` on macOS),
+    never matched and every absolute URI was dropped. The sanitize path
+    (``utils/sarif_utils._sanitize_uri``) resolves in its fallback; this is the
+    same fallback, reached only when the lexical form already failed, so the
+    common case pays nothing for it. *fold_case* carries the caller's Windows
+    reading through, so a drive-rooted URI against a relative or linked
+    ``source_dir`` on Windows is compared the way that file system compares.
+
+    A scanner's SARIF is the scanner's text, so no URI in it may make this
+    process reach a host. A UNC-rooted candidate (``//host/share/...``, what
+    ``file://host/...`` reads as) is compared lexically only: resolving it on
+    Windows opens a handle on that host's share. And ``Path.resolve`` walks
+    every component of a rooted candidate, which under an automounted
+    directory (``/net/<host>`` on macOS, an autofs map, a mapped network drive)
+    is a mount of that host; so a candidate is resolved only when it starts
+    under the same top-level segment as the source directory, as resolved or as
+    given (*lexical_root*), or under a top-level directory that is itself a
+    symlink pointing under the resolved source directory's top segment
+    (``_top_level_link_leads_under``): the filter resolves toward places the
+    source directory already reaches, and a URI anywhere else is compared as
+    spelled. The link case is the source directory given resolved
+    (``/private/tmp/x``, ``/var/home/u/x``) while the scanner wrote the link's
+    spelling (``/tmp/x``, ``/home/u/x``), where the first segments differ.
+
+    A candidate with a ``..`` component is never resolved either: the first
+    segment says where a path starts, not where it ends, and
+    ``/tmp/../../net/<host>/x.py`` starts at a link, steps up to ``/`` and
+    reaches the automounted directory this function exists to keep off. Such a
+    URI is compared as spelled, which only the lexical comparison above could
+    match.
+
+    None when the root could not be resolved, neither spelling matches, the
+    candidate is UNC-rooted, has a ``..`` component, or starts elsewhere and did
+    not match as spelled, or the candidate cannot be resolved.
+    """
+    if resolved_root is None:
+        return None
+    relative = _relative_text(candidate, resolved_root, fold_case)
+    if relative is not None:
+        return relative
+    if candidate.startswith("//"):
+        return None
+    if ".." in PurePosixPath(candidate).parts:
+        return None
+    first = _first_segment(candidate, fold_case)
+    if first is None:
+        return None
+    if first not in (
+        _first_segment(resolved_root, fold_case),
+        _first_segment(lexical_root, fold_case),
+    ) and not _top_level_link_leads_under(candidate, resolved_root, fold_case):
+        return None
+    try:
+        resolved_candidate = root_text(Path(candidate).resolve())
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return _relative_text(resolved_candidate, resolved_root, fold_case)
+
+
 class SarifReport(RecordModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -2481,7 +2705,10 @@ class SarifReport(RecordModel):
         Args:
             file_set: Set of relative file paths (as strings) to retain.
                      Results whose first location maps to a path not in this set
-                     are dropped. Results with no location are always retained.
+                     are dropped. Results with no location are always retained,
+                     and so is a location that names no path: one with no
+                     ``uri`` is read through ``run.artifacts`` when its
+                     ``index`` points there, and retained when nothing resolves.
             source_dir: The source directory used to normalize absolute URIs to
                      relative paths for comparison. A string is read by its
                      shape: one spelled ``//x/y`` is taken as a UNC root
@@ -2495,9 +2722,23 @@ class SarifReport(RecordModel):
         # A URI holds a file name that is not UTF-8 in its record form (each lone
         # surrogate as \udcNN, utils/undecodable_text.py), and a listed name may
         # hold the surrogate: both are compared in the record form. The URI is read
-        # back as the name first, so its escapes are not taken for separators.
-        recorded_set = {text_of_undecodable(str(name)) for name in file_set}
-        source_posix = PurePosixPath(root_text(source_dir))
+        # back as the name first, so its escapes are not taken for separators. A
+        # listed name given as a path object is spelled with "/" whatever its
+        # flavor: str() of a Windows path writes backslashes, which no URI holds.
+        recorded_set = {
+            text_of_undecodable(
+                name.as_posix() if isinstance(name, PurePath) else str(name)
+            )
+            for name in file_set
+        }
+        source_text = root_text(source_dir)
+        windows_source = is_windows_root(source_dir)
+        # Once, for the resolve fallback below: resolving per result repeated a
+        # file-system walk for every finding in the report.
+        resolved_root = _resolved_root_text(source_dir)
+        # A Windows file system compares a whole path without regard to case, the
+        # tail included: a listed ``src/app.py`` names the URI's ``Src/App.py``.
+        folded_set = {name.lower() for name in recorded_set}
         for run in self.runs:
             if not run.results:
                 continue
@@ -2513,35 +2754,51 @@ class SarifReport(RecordModel):
                 ):
                     filtered.append(result)
                     continue
-                uri = loc.physicalLocation.root.artifactLocation.uri or ""
+                artifact_location = loc.physicalLocation.root.artifactLocation
+                uri = artifact_location.uri
+                if uri is None:
+                    # SARIF 3.4.5: a location may name its artifact only by an
+                    # index into run.artifacts, whose own location carries the
+                    # URI. Read it there, so such a result is filtered like any
+                    # other instead of passing a changed-files filter unseen.
+                    uri = _artifact_uri_by_index(run, artifact_location.index)
+                if uri is None:
+                    # The location names its artifact by uriBaseId alone, or by
+                    # an index nothing resolves, which this filter cannot turn
+                    # into a path; a result with no usable location is retained,
+                    # as one with no location is. Comparing it as "" dropped it.
+                    filtered.append(result)
+                    continue
                 # SARIF artifact URIs are POSIX-style by spec, so all comparison
                 # happens in PurePosixPath space. Using pathlib.Path here makes the
                 # result host-dependent: on Windows, Path("/tmp/src/x.py").is_absolute()
                 # is False (no drive), so a Linux-produced SARIF processed on Windows
                 # would skip normalisation entirely and drop every result.
-                candidate_str = undecodable_of_text(uri)
-                if candidate_str.startswith("file://"):
-                    candidate_str = candidate_str[len("file://") :]
-                    # file:///C:/x -> /C:/x ; drop the slash that precedes a drive.
-                    if _DRIVE_PREFIXED_ROOT.match(candidate_str):
-                        candidate_str = candidate_str[1:]
+                candidate_str = _file_uri_path_text(undecodable_of_text(uri))
                 # A backslash is a separator only in a drive-letter or UNC path,
                 # or under a Windows source_dir; elsewhere it is part of a POSIX
                 # file name, which file_set holds as written
                 # (utils/uri_separators.py).
                 candidate_str = sanitized_uri_text(candidate_str, source_dir)
-                candidate = PurePosixPath(candidate_str)
-                is_rooted = candidate_str.startswith("/") or bool(
-                    _DRIVE_ROOT.match(candidate_str)
-                )
+                drive_rooted = bool(_DRIVE_ROOT.match(candidate_str))
+                is_rooted = candidate_str.startswith("/") or drive_rooted
+                # A Windows file system compares names without regard to case, so
+                # a URI whose drive letter or directory case differs from
+                # source_dir still names a file under it.
+                fold_case = windows_source or drive_rooted
+                rel_str: Optional[str] = None
                 if is_rooted:
-                    try:
-                        rel_str = candidate.relative_to(source_posix).as_posix()
-                    except ValueError:
-                        rel_str = candidate.as_posix()
-                else:
-                    rel_str = candidate.as_posix()
-                if text_of_undecodable(rel_str) in recorded_set:
+                    rel_str = _relative_text(candidate_str, source_text, fold_case)
+                    if rel_str is None:
+                        rel_str = _resolved_relative_text(
+                            candidate_str, resolved_root, fold_case, source_text
+                        )
+                if rel_str is None:
+                    rel_str = PurePosixPath(candidate_str).as_posix()
+                recorded_key = text_of_undecodable(rel_str)
+                if recorded_key in recorded_set or (
+                    fold_case and recorded_key.lower() in folded_set
+                ):
                     filtered.append(result)
             run.results = filtered
 
@@ -2576,61 +2833,132 @@ class SarifReport(RecordModel):
         include_driver: bool = True,
         include_rules: bool = True,
     ):
+        """Fold every run of *sarif_report* into this report's first run.
+
+        Every run, not only the first. A scanner's SARIF can carry one run per
+        target or per rule set, and the per-scanner counts read them all, so a
+        merge that folded ``runs[0]`` alone dropped the findings of every later
+        run from the summary, the reports and the exit code while the scanner's
+        own row still counted them. Each incoming run's tool joins this report's
+        ``extensions``, its taxonomies join (or are unioned into) the first run's
+        ``taxonomies``, and its results and invocations are appended to the first
+        run. A report whose own ``runs`` list is empty adopts the first incoming
+        run's tool and properties, then takes its results and invocations the
+        same way as every other run, so nothing is added twice.
+        """
         if sarif_report.runs is None or len(sarif_report.runs) == 0:
             return
+        if self.runs is None:
+            self.runs = []
 
-        report_run = sarif_report.runs[0]
+        for report_run in sarif_report.runs:
+            self._merge_run(
+                report_run, include_invocation, include_driver, include_rules
+            )
+
+        # Both report-level lists are Optional: a file that writes them as null
+        # validates to None, and the model's default only covers a file that
+        # omits them. Folded after the runs, and independent of them: the two
+        # lists are read from the incoming report alone, so nothing here can
+        # fail on what the run merge above did.
+        incoming_external = sarif_report.inlineExternalProperties or []
+        if incoming_external:
+            if self.inlineExternalProperties is None:
+                self.inlineExternalProperties = []
+            self.inlineExternalProperties.extend(
+                item.model_copy(deep=True) for item in incoming_external
+            )
+        incoming_tags = (
+            sarif_report.properties.tags
+            if sarif_report.properties is not None
+            else None
+        )
+        if incoming_tags:
+            if self.properties is None:
+                self.properties = PropertyBag()
+            if self.properties.tags is None:
+                self.properties.tags = []
+            # A set of distinct strings, as the schema describes the field: a tag
+            # both reports carry is listed once, and a later merge of the same
+            # report adds nothing.
+            known_tags = set(self.properties.tags)
+            for tag in incoming_tags:
+                if tag not in known_tags:
+                    self.properties.tags.append(tag)
+                    known_tags.add(tag)
+
+    def _merge_run(
+        self,
+        report_run: "Run",
+        include_invocation: bool,
+        include_driver: bool,
+        include_rules: bool,
+    ) -> None:
+        """Fold one run into this report's first run; see ``merge_sarif_report``."""
         report_tool = report_run.tool
-        report_invocations = report_run.invocations
+        # Copies, never the incoming objects: ash merge promises not to mutate
+        # its inputs, and a later merge appends to the aggregate's lists, so an
+        # aliased invocation or rule would change the report it came from.
+        # A run whose invocations are null merges as no invocations: the list
+        # below is extended with it, and extending with None raised TypeError.
+        report_invocations = [
+            invocation.model_copy(deep=True)
+            for invocation in (report_run.invocations or [])
+        ]
         report_results = []
         # A run may carry no results list at all (SARIF allows omitting it, and a
         # scanner that failed leaves it so), which merges as no results.
         for res in report_run.results or []:
-            clean_result = res.model_dump(
-                # Remove `ruleIndex`, since we're reordering rules. RuleId should
-                # correctly correlate results to associated rules in our set of scanners
-                # without it.
-                exclude=["ruleIndex"]
-            )
+            # Remove `ruleIndex`, since we're reordering rules. RuleId should
+            # correctly correlate results to associated rules in our set of scanners
+            # without it. A full dump, not one of the set fields only: pydantic marks
+            # a field set on construction or assignment, never on an append, so a
+            # dump of the set fields drops what code appended in place to a default
+            # list (a tag on a fresh PropertyBag, a related location).
+            clean_result = res.model_dump(exclude={"ruleIndex"})
+            # A full dump marks every field as set, so a result that stated no level
+            # came back with the default level set and resolve_missing_levels could
+            # no longer give it the level its rule's defaultConfiguration names. That
+            # one field keeps its unset state; nothing else reads the set-fields
+            # record of a result.
+            if "level" not in res.model_fields_set:
+                clean_result.pop("level", None)
+            _keep_the_rule_by_id(clean_result, res, report_tool)
+            if self.runs:
+                # Folded into a run that does not carry the incoming run's
+                # artifacts, logicalLocations or originalUriBaseIds, so an index
+                # or a base id into those tables must not travel with the copy.
+                # An adopted first run keeps its own tables, so its indices stay.
+                _detach_run_scoped_references(clean_result, report_run, self.runs[0])
             report_results.append(Result(**clean_result))
-        if self.runs is None:
-            self.runs = []
 
-        self_run = self.runs[0] if self.runs is not None else None
-        if self_run is None:
-            cleaned_run = json.loads(report_run.model_dump_json())
-            self_run = Run(**cleaned_run)
-        else:
+        if self.runs:
+            self_run = self.runs[0]
             if include_driver:
-                if (
-                    self_run.tool.extensions is None
-                    or len(self_run.tool.extensions) == 0
-                ):
-                    self_run.tool.extensions = [report_tool.driver]
-                else:
-                    # Check if report_tool.driver.name already exists in self_run.tool.extensions
-                    existing_extension = next(
-                        (
-                            ext
-                            for ext in self_run.tool.extensions
-                            if ext.name == report_tool.driver.name
-                            and ext.fullName == report_tool.driver.fullName
-                            and ext.organization == report_tool.driver.organization
-                        ),
-                        None,
-                    )
-                    if existing_extension is None:
-                        self_run.tool.extensions.append(report_tool.driver)
-                    else:
-                        if include_rules:
-                            # Add rules if the rule.id doesn't already exist in existing_extension.rules
-                            cur_rule_id_hash = {
-                                rule.id: rule
-                                for rule in (existing_extension.rules or [])
-                            }
-                            for rule in report_tool.driver.rules or []:
-                                if rule.id not in cur_rule_id_hash:
-                                    existing_extension.rules.append(rule)
+                _fold_tool_component(self_run, report_tool.driver, include_rules)
+                # A scanner's own SARIF can define rules in its tool.extensions
+                # (a rule pack or a plugin of the tool); results of that run then
+                # name rules the driver does not carry. Folding only the driver
+                # dropped those components and the metadata of every finding
+                # that referenced them.
+                for extension in report_tool.extensions or []:
+                    _fold_tool_component(self_run, extension, include_rules)
+            # A kept taxon reference names its taxonomy (CWE, say) by name or
+            # guid once its index is dropped, and the run it now sits in has to
+            # carry that taxonomy. Folded whatever the driver and rule flags say:
+            # the copied results keep their taxa either way.
+            for taxonomy in report_run.taxonomies or []:
+                _fold_taxonomy(self_run, taxonomy)
+        else:
+            # Adopt the incoming run's tool, properties and the rest, with its
+            # results and invocations left out: the common tail below adds them
+            # once, so an adopted run is not counted twice. A full dump, for the
+            # reason given above for results: an appended run tag must survive.
+            cleaned_run = json.loads(report_run.model_dump_json())
+            cleaned_run.pop("results", None)
+            cleaned_run.pop("invocations", None)
+            self_run = Run(**cleaned_run)
+            self.runs.append(self_run)
 
         if self_run.results is None:
             self_run.results = []
@@ -2644,13 +2972,598 @@ class SarifReport(RecordModel):
             # told explicitly not to (default is to include)
             if include_invocation:
                 self_run.invocations.extend(report_invocations)
-        self.runs = [self_run]
 
-        self.inlineExternalProperties.extend(sarif_report.inlineExternalProperties)
-        if sarif_report.properties.tags is not None:
-            if self.properties.tags is None:
-                self.properties.tags = []
-            self.properties.tags.extend(sarif_report.properties.tags)
+
+def _detach_run_scoped_references(
+    dumped: Dict, incoming: "Run", aggregate: "Run"
+) -> None:
+    """Make a result copied out of *incoming* stand without that run's tables.
+
+    SARIF scopes several kinds of reference to the run that holds the result:
+    ``artifactLocation.index`` (into ``run.artifacts``), ``logicalLocation.index``
+    and ``threadFlowLocation.index`` (into ``run.logicalLocations`` and
+    ``run.threadFlowLocations``), ``artifactLocation.uriBaseId`` (into
+    ``run.originalUriBaseIds``), a taxon reference's indices (into the tool's
+    extensions and their ``taxa``), and the indices of a web request, a web
+    response and an address (into ``run.webRequests``, ``run.webResponses`` and
+    ``run.addresses``). The merge folds results into the aggregate's first run,
+    which has its own tables, so every such reference in the copy pointed into
+    the wrong run: a result naming its file by index alone named whatever the
+    aggregate held at that position, and ``SRCROOT`` meant the aggregate's root,
+    not the scanned target's. ``ruleIndex`` was already dropped for the same
+    reason; the rest is handled here, on the dumped copy, before it is rebuilt
+    as a ``Result``. The copy is walked whole, so the references under a fix,
+    an attachment, a stack, a graph, a provenance record or a suppression are
+    detached as the ones under the primary locations are; property bags are
+    left alone. A graph traversal's ``runGraphIndex`` and a provenance
+    ``invocationIndex`` still count positions in the incoming run.
+
+    An artifact index is resolved first: a location with no ``uri`` takes the
+    ``uri`` (and ``uriBaseId``) of ``incoming.artifacts[index].location``, then
+    the index is dropped; a location that already names its file loses the index
+    only. A logical location or a thread-flow step that carries an index takes
+    the fields of the incoming run's cached row at that index that it does not
+    set itself (SARIF 3.33.3 and 3.38.2: the row is merged in and the entry's
+    own properties win), and then the index is dropped; before the row was read,
+    an entry written as an index alone was left empty, a step with no location
+    or a logical location with no name. A logical location's ``parentIndex``
+    points into the same table and is dropped with the index.
+    A ``uriBaseId`` is kept only when the aggregate defines the same base the
+    same way along its whole chain (each link's definition equal, down to a base
+    with no ``uriBaseId`` of its own); otherwise it is expanded into the ``uri``
+    from the incoming run's definitions, following the chain, so the two runs'
+    roots cannot be confused. Nothing is ever added to the aggregate's
+    ``originalUriBaseIds``: a copied definition re-rooted every OTHER run's
+    results that used the id without defining it (the aggregate's first run
+    starts with no table, so the first scanner to define ``SRCROOT`` set it for
+    all), and a copy of one link left the rest of its chain behind. A base id
+    the incoming run never defined is left as written: there is nothing to read
+    it against. A chain that ends at a base the incoming run does not define
+    keeps that last id on the location after the expansion, for the same reason.
+    """
+    incoming_bases = incoming.originalUriBaseIds or {}
+    artifacts = incoming.artifacts or []
+    logical_table = incoming.logicalLocations or []
+    thread_table = incoming.threadFlowLocations or []
+
+    aggregate_bases = aggregate.originalUriBaseIds or {}
+
+    def field_defaults(row: Any) -> Dict[str, object]:
+        """Each optional field's default on the row's model, by field name."""
+        defaults: Dict[str, object] = {}
+        for name, info in type(row).model_fields.items():
+            if not info.is_required():
+                defaults[name] = info.get_default(call_default_factory=True)
+        return defaults
+
+    def fill_from_table(entry: Dict, table: Sequence) -> None:
+        """Merge the incoming run's cached row at ``entry["index"]`` under the
+        entry's own fields. The dumped entry carries every field, an unset one
+        as its default: None for most, but a thread flow step's ``kinds`` and
+        ``taxa`` as ``[]``, its ``executionOrder`` as -1, its ``importance`` as
+        "important", an address's ``absoluteAddress`` as -1. A value equal to
+        the field's default is "not set" here and takes the row's; a row the
+        index does not reach (the scanner wrote a dangling index, or no table)
+        adds nothing."""
+        index = entry.get("index")
+        if not isinstance(index, int) or not 0 <= index < len(table):
+            return
+        row = table[index]
+        cached = row.model_dump(exclude_none=True, exclude={"index"})
+        defaults = field_defaults(row)
+        for key, value in cached.items():
+            current = entry.get(key)
+            if current is None or (key in defaults and current == defaults[key]):
+                entry[key] = value
+
+    def definition(bases: Dict, base_id: str) -> Optional[Dict]:
+        base = bases.get(base_id)
+        if base is None:
+            return None
+        return base.model_dump(exclude_none=True, exclude={"index"})
+
+    def base_definition(base_id: str) -> Optional[Dict]:
+        return definition(incoming_bases, base_id)
+
+    def same_chain(base_id: Optional[str]) -> bool:
+        """Whether the aggregate defines *base_id* and every base it chains to
+        exactly as the incoming run does. One equal link is not enough: two
+        ``SRCROOT``s spelled alike that sit on different ``REPOROOT``s name
+        different places."""
+        seen: set = set()
+        while base_id is not None and base_id not in seen:
+            seen.add(base_id)
+            incoming_definition = base_definition(base_id)
+            if incoming_definition is None:
+                # The incoming run does not define it: nothing to compare, and
+                # the id is left as written on the location below.
+                return True
+            if definition(aggregate_bases, base_id) != incoming_definition:
+                return False
+            base_id = incoming_bases[base_id].uriBaseId
+        return True
+
+    def expand(uri: Optional[str], base_id: str) -> tuple:
+        """*uri* prefixed by the incoming run's definition of *base_id*."""
+        text = uri or ""
+        seen: set = set()
+        while base_id is not None and base_id not in seen:
+            seen.add(base_id)
+            base = incoming_bases.get(base_id)
+            if base is None or not base.uri:
+                return text, base_id
+            prefix = base.uri if base.uri.endswith("/") else base.uri + "/"
+            text = prefix + text.lstrip("/") if text else base.uri
+            base_id = base.uriBaseId
+        return text, base_id
+
+    def detach_artifact_location(location: object) -> None:
+        if not isinstance(location, dict):
+            return
+        index = location.get("index")
+        if isinstance(index, int) and index >= 0:
+            if location.get("uri") is None and index < len(artifacts):
+                source = artifacts[index].location
+                if source is not None:
+                    location["uri"] = source.uri
+                    if location.get("uriBaseId") is None and source.uriBaseId:
+                        location["uriBaseId"] = source.uriBaseId
+            location.pop("index", None)
+        base_id = location.get("uriBaseId")
+        if base_id is None:
+            return
+        if base_definition(base_id) is None:
+            return
+        if same_chain(base_id):
+            return
+        expanded, remaining = expand(location.get("uri"), base_id)
+        if remaining == base_id:
+            # The definition names no uri to expand with; left as written.
+            return
+        location["uri"] = expanded
+        location.pop("uriBaseId", None)
+        if remaining is not None:
+            location["uriBaseId"] = remaining
+
+    def detach_logical_location(logical: object) -> None:
+        if not isinstance(logical, dict):
+            return
+        fill_from_table(logical, logical_table)
+        logical.pop("index", None)
+        logical.pop("parentIndex", None)
+
+    def referenced_extension(component_reference: object) -> Optional["ToolComponent"]:
+        """The component a taxon reference names among the tool's extensions,
+        for a reference no taxonomy answered to. A run that has taxonomies
+        counted the reference's ``index`` there, so an index that ran past them
+        must not be read again as a position in the extensions, which would
+        credit the taxon to whichever extension sits there: only a name or a
+        guid names an extension in such a run."""
+        if incoming.taxonomies and isinstance(component_reference, dict):
+            component_reference = {
+                key: value
+                for key, value in component_reference.items()
+                if key != "index"
+            }
+            if (
+                component_reference.get("name") is None
+                and component_reference.get("guid") is None
+            ):
+                return None
+        return _referenced_tool_component(component_reference, incoming.tool)
+
+    def detach_descriptor_reference(reference: object) -> None:
+        """A taxon reference: its ``index`` points into the ``taxa`` of the
+        component its ``toolComponent`` names, and that component reference's
+        own ``index`` into the run's ``taxonomies``. The component is looked up
+        in the incoming run's taxonomies first, since a result's taxa are
+        categories of a taxonomy (the index counts there only when the reference's
+        name or guid, if it gives one, is the taxonomy's); a reference that names
+        nothing there is read against the tool's extensions, as a scanner that
+        carries its taxa in an extension wrote it (by name or guid alone when
+        the run has taxonomies, see ``referenced_extension``). The id is read
+        from the incoming run when the reference carries none, then both
+        indices are dropped; the component's
+        name and guid stay, since they name the component by content, not by
+        position (the same shape ``_keep_the_rule_by_id`` gives a result's
+        ``rule``). A component reference that named its component by index
+        alone takes that component's name and guid from the incoming run before
+        the index goes: a reference with no component reads as the DRIVER's
+        (SARIF 3.52.7), and the taxon came from elsewhere."""
+        if not isinstance(reference, dict):
+            return
+        component_reference = reference.get("toolComponent")
+        component = _referenced_taxonomy(component_reference, incoming)
+        if component is None:
+            component = referenced_extension(component_reference)
+        if reference.get("id") is None and reference.get("guid") is None:
+            taxa = (getattr(component, "taxa", None) or []) if component else []
+            index = reference.get("index")
+            if isinstance(index, int) and 0 <= index < len(taxa) and taxa[index].id:
+                reference["id"] = taxa[index].id
+        # -1 is the schema's "no index" (the field is required on a reference
+        # without a guid), so the rebuilt reference still validates.
+        reference["index"] = -1
+        if isinstance(component_reference, dict):
+            component_reference.pop("index", None)
+            if (
+                component_reference.get("name") is None
+                and component_reference.get("guid") is None
+                and component is not None
+                and component is not incoming.tool.driver
+            ):
+                for key in ("name", "guid"):
+                    value = getattr(component, key, None)
+                    if value is not None:
+                        component_reference[key] = value
+            if (
+                component_reference.get("name") is None
+                and component_reference.get("guid") is None
+            ):
+                reference.pop("toolComponent", None)
+
+    def detach_indexed_row(entry: object, table: Sequence) -> None:
+        """A web request, a web response or an address written as an index into
+        the run's table takes its row and loses the index (an address's
+        ``parentIndex`` points into the same table)."""
+        if not isinstance(entry, dict):
+            return
+        fill_from_table(entry, table)
+        entry.pop("index", None)
+        entry.pop("parentIndex", None)
+
+    def walk(node: object) -> None:
+        """Detach every reference under *node*, by the key the schema gives it.
+        One walk over the whole dump, so a fix's artifact change, an attachment,
+        a stack frame, a graph node, a provenance conversion source and a
+        suppression's location are reached as the primary locations are; the
+        hand-written list of result fields this replaces missed them all."""
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        for key, value in list(node.items()):
+            if key == "properties":
+                # A property bag is the scanner's own text; a key in it that
+                # spells a SARIF field is not a reference into any table.
+                continue
+            if key in ("artifactLocation", "analysisTarget"):
+                detach_artifact_location(value)
+            elif key == "logicalLocations" and isinstance(value, list):
+                for logical in value:
+                    detach_logical_location(logical)
+            elif key == "threadFlows" and isinstance(value, list):
+                for thread in value:
+                    if isinstance(thread, dict):
+                        for step in thread.get("locations") or []:
+                            if isinstance(step, dict):
+                                # The cached row first: its location can name
+                                # its artifact by index, which the walk into
+                                # the step then resolves.
+                                fill_from_table(step, thread_table)
+                                step.pop("index", None)
+            elif key == "taxa" and isinstance(value, list):
+                for reference in value:
+                    detach_descriptor_reference(reference)
+                # A reference that names its taxon by id or guid still names it
+                # once the indices are dropped. One left with neither (an index
+                # into a table the run does not carry, or past its end) names
+                # nothing at all, so it is dropped rather than kept as an empty
+                # entry.
+                value[:] = [
+                    reference
+                    for reference in value
+                    if not isinstance(reference, dict)
+                    or reference.get("id") is not None
+                    or reference.get("guid") is not None
+                ]
+            elif key == "webRequest":
+                detach_indexed_row(value, incoming.webRequests or [])
+            elif key == "webResponse":
+                detach_indexed_row(value, incoming.webResponses or [])
+            elif key == "address":
+                detach_indexed_row(value, incoming.addresses or [])
+            walk(value)
+
+    walk(dumped)
+
+
+def _same_tool_component(
+    existing: Optional["ToolComponent"], incoming: Optional["ToolComponent"]
+) -> bool:
+    """Whether two tool components name the same tool: name, fullName and organization."""
+    return (
+        existing is not None
+        and incoming is not None
+        and existing.name == incoming.name
+        and existing.fullName == incoming.fullName
+        and existing.organization == incoming.organization
+    )
+
+
+def _fold_tool_component(
+    self_run: "Run", component: "ToolComponent", include_rules: bool
+) -> None:
+    """Add *component* to *self_run*'s tool, or union its rules into the one it names.
+
+    The run's own driver first: an incoming component that names it is the tool
+    the run was adopted from, so its rules are unioned into the driver and no
+    extension is added, and a tool merged twice into an empty aggregate is listed
+    once. Otherwise the component joins ``extensions`` as a copy, or its rules
+    join the extension of the same name, fullName and organization.
+    """
+    if _same_tool_component(self_run.tool.driver, component):
+        if include_rules:
+            _union_rules(self_run.tool.driver, component.rules)
+        return
+    if self_run.tool.extensions is None:
+        self_run.tool.extensions = []
+    existing_extension = next(
+        (
+            ext
+            for ext in self_run.tool.extensions
+            if _same_tool_component(ext, component)
+        ),
+        None,
+    )
+    if existing_extension is None:
+        self_run.tool.extensions.append(component.model_copy(deep=True))
+    elif include_rules:
+        _union_rules(existing_extension, component.rules)
+
+
+def _same_taxonomy(existing: "ToolComponent", incoming: "ToolComponent") -> bool:
+    """Whether two taxonomies are the same one: equal guids when both carry one,
+    otherwise the same name, fullName and organization."""
+    if existing.guid is not None and incoming.guid is not None:
+        return existing.guid == incoming.guid
+    return _same_tool_component(existing, incoming)
+
+
+def _fold_taxonomy(self_run: "Run", taxonomy: "ToolComponent") -> None:
+    """Add *taxonomy* to *self_run*'s ``taxonomies``, or union its taxa into the
+    one it names.
+
+    A taxon reference of a merged result names its taxonomy by ``name`` or
+    ``guid`` (its ``index`` into the incoming run's ``taxonomies`` is dropped),
+    so the run the result lands in has to hold that taxonomy with the taxon in
+    it. A copy, so the aggregate does not alias the report it was built from.
+    """
+    if self_run.taxonomies is None:
+        self_run.taxonomies = []
+    existing = next(
+        (item for item in self_run.taxonomies if _same_taxonomy(item, taxonomy)),
+        None,
+    )
+    if existing is None:
+        self_run.taxonomies.append(taxonomy.model_copy(deep=True))
+        return
+    incoming_taxa = taxonomy.taxa or []
+    if not incoming_taxa:
+        return
+    if existing.taxa is None:
+        existing.taxa = []
+    known_taxon_ids = {taxon.id for taxon in existing.taxa}
+    for taxon in incoming_taxa:
+        if taxon.id not in known_taxon_ids:
+            existing.taxa.append(taxon.model_copy(deep=True))
+            known_taxon_ids.add(taxon.id)
+
+
+def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") -> None:
+    """Make *dumped*, a result copied into the aggregate, name its rule by id.
+
+    The merged run reorders rules, so ``ruleIndex`` is dropped from the copy and
+    ``ruleId`` is what correlates a result to its rule afterwards. A result that
+    named its rule by index, or by a ``rule`` reference, and not by ``ruleId``
+    is given the id of the rule those name (``_rule_id_of_reference``). The
+    reference's own ``index`` and its ``toolComponent.index`` point into the
+    incoming run's arrays, which the merged run does not have, so they are
+    dropped from the copy.
+
+    A reference with no component reads as the driver's (SARIF 3.52.7). The
+    merge does not change that for the driver rules of an incoming tool: a
+    driver that is not the aggregate's own joins the aggregate as an extension,
+    so its rules read as the aggregate driver's by that rule although their
+    descriptors live in the extension, and ``ruleId`` is what finds them. The
+    merge names a component only when the scanner did: ``name`` and ``guid``
+    name it by content, and the component itself is folded into the
+    aggregate's extensions under that name, so they stay. A component reference
+    that named its component by index alone takes that component's name and
+    guid from the incoming run's tool before the index goes, since without them
+    the rule would read as the driver's. A reference left with neither id nor
+    guid is dropped whole, except one whose component reference kept the name
+    or guid of an extension the incoming run carries: it takes the id of the
+    rule its index names (the result's ``ruleId`` when the index names none),
+    so the rule stays attributed to that component instead of reading as the
+    driver's. A component the run does not carry, or one that is the driver,
+    gives the reference no id, and it is dropped.
+    """
+    reference = dumped.get("rule")
+    if dumped.get("ruleId") is None:
+        rule_id = _rule_id_of_reference(reference, result.ruleIndex, report_tool)
+        if rule_id:
+            dumped["ruleId"] = rule_id
+    if isinstance(reference, dict):
+        # Without the fields the reference never set: the result reaches this
+        # function as a full dump, which carries every field of the reference as
+        # None, and a None handed to the constructor marks the field set on the
+        # merged copy. Dropping them keeps the copy's set fields the reference's
+        # own, so a dump of the merged result shows what the scanner wrote, and
+        # the written SARIF (exclude_none, exclude_unset) is the same either way.
+        kept = {
+            key: value
+            for key, value in reference.items()
+            if key not in ("index", "toolComponent") and value is not None
+        }
+        component_reference = reference.get("toolComponent")
+        if isinstance(component_reference, dict):
+            component = {
+                key: value
+                for key, value in component_reference.items()
+                if key != "index" and value is not None
+            }
+            if component.get("name") is None and component.get("guid") is None:
+                named = _referenced_tool_component(component_reference, report_tool)
+                if named is not None and named is not report_tool.driver:
+                    for key in ("name", "guid"):
+                        value = getattr(named, key, None)
+                        if value is not None:
+                            component[key] = value
+            if component.get("name") is not None or component.get("guid") is not None:
+                kept["toolComponent"] = component
+        if (
+            kept.get("id") is None
+            and kept.get("guid") is None
+            and "toolComponent" in kept
+            and _referenced_tool_component(component_reference, report_tool)
+            is not None
+        ):
+            # A reference that named its rule by index alone, in an extension
+            # the incoming run carries. Dropped whole, the rule would read as
+            # the driver's in the merged run (the reason the component's name is
+            # kept above), so the reference keeps an id: the id of the rule its
+            # index names, which is the rule the reference means. The result's
+            # own ``ruleId`` is only the fallback for an index that names no
+            # rule: a scanner may write a ruleId of its own, or a hierarchical
+            # sub-rule id (``CA2101/1`` for the rule ``CA2101``), and copying it
+            # would name a rule the component does not have. A component the run
+            # does not carry is not given an id: the name would point at nothing
+            # in the merged run, and the reference is dropped as it always was.
+            indexed = _rule_id_of_reference(reference, result.ruleIndex, report_tool)
+            rule_id = indexed or dumped.get("ruleId")
+            if rule_id:
+                kept["id"] = rule_id
+        if kept.get("id") is None and kept.get("guid") is None:
+            dumped.pop("rule", None)
+        else:
+            dumped["rule"] = kept
+
+
+def _rule_id_of_reference(
+    reference: object, rule_index: Optional[int], report_tool: "Tool"
+) -> Optional[str]:
+    """The id of the rule a result names without a ``ruleId``, or None.
+
+    SARIF 2.1.0, 3.27.6 and 3.52: the reference's own ``id`` is the rule and
+    wins; otherwise ``ruleIndex`` (or the reference's ``index``) indexes the
+    ``rules`` of the component ``rule.toolComponent`` names, and the driver's
+    only when no component is named. Indexing the driver whatever the component
+    said gave a result the id, severity and help of another component's rule at
+    that position; a component this run does not have leaves the id unset
+    rather than guessed.
+    """
+    if isinstance(reference, dict) and reference.get("id"):
+        return str(reference["id"])
+    component_reference = (
+        reference.get("toolComponent") if isinstance(reference, dict) else None
+    )
+    component = _referenced_tool_component(component_reference, report_tool)
+    if component is None:
+        return None
+    index = rule_index if rule_index is not None and rule_index >= 0 else None
+    if index is None and isinstance(reference, dict):
+        candidate = reference.get("index")
+        if isinstance(candidate, int) and candidate >= 0:
+            index = candidate
+    if index is None:
+        return None
+    rules = component.rules or []
+    if index < len(rules) and rules[index].id:
+        return rules[index].id
+    return None
+
+
+def _referenced_tool_component(
+    component_reference: object, report_tool: "Tool"
+) -> Optional["ToolComponent"]:
+    """The component a ``toolComponentReference`` names in *report_tool*.
+
+    The driver when the reference is absent or names nothing; otherwise the
+    extension at its ``index``, or the one whose ``guid`` or ``name`` it gives;
+    None when it names an extension this run does not carry.
+    """
+    if component_reference is None:
+        return report_tool.driver
+    if not isinstance(component_reference, dict):
+        return None
+    index = component_reference.get("index", -1)
+    guid = component_reference.get("guid")
+    name = component_reference.get("name")
+    if not (isinstance(index, int) and index >= 0) and guid is None and name is None:
+        return report_tool.driver
+    extensions = report_tool.extensions or []
+    if isinstance(index, int) and index >= 0:
+        return extensions[index] if index < len(extensions) else None
+    for extension in extensions:
+        if guid is not None and extension.guid == guid:
+            return extension
+    for extension in extensions:
+        if name is not None and extension.name == name:
+            return extension
+    return None
+
+
+def _referenced_taxonomy(
+    component_reference: object, run: "Run"
+) -> Optional["ToolComponent"]:
+    """The taxonomy a ``toolComponentReference`` names in *run*'s ``taxonomies``.
+
+    A result's ``taxa`` are references into a taxonomy, not into the tool's
+    extensions or driver: the component reference's ``index`` counts positions
+    in ``run.taxonomies``. The taxonomy at that index when the reference gives
+    no ``guid`` or ``name``, or gives one that the taxonomy carries; otherwise
+    (the index is out of range, or the name or guid says the reference means
+    another component) the taxonomy whose ``guid`` or ``name`` the reference
+    gives. None when the reference names no taxonomy this run carries, or none
+    at all, which leaves the caller to read it against the tool's extensions.
+    """
+    if not isinstance(component_reference, dict):
+        return None
+    taxonomies = run.taxonomies or []
+    index = component_reference.get("index", -1)
+    guid = component_reference.get("guid")
+    name = component_reference.get("name")
+    if isinstance(index, int) and 0 <= index < len(taxonomies):
+        indexed = taxonomies[index]
+        if (
+            (guid is None and name is None)
+            or (guid is not None and indexed.guid == guid)
+            or (name is not None and indexed.name == name)
+        ):
+            return indexed
+    for taxonomy in taxonomies:
+        if guid is not None and taxonomy.guid == guid:
+            return taxonomy
+    for taxonomy in taxonomies:
+        if name is not None and taxonomy.name == name:
+            return taxonomy
+    return None
+
+
+def _union_rules(
+    component: "ToolComponent", incoming_rules: Optional[List["ReportingDescriptor"]]
+) -> None:
+    """Add to *component* copies of the rules whose id it does not carry yet.
+
+    The component's rules list may be None (cfn-lint writes none for a clean or
+    an all-failed target), so it is materialized before anything is appended.
+    Each appended id joins the known set at once, so a driver that lists one id
+    twice adds it once. Copies, not the incoming descriptors: the aggregate must
+    not alias the report it was built from.
+    """
+    incoming = incoming_rules or []
+    if not incoming:
+        return
+    if component.rules is None:
+        component.rules = []
+    known_rule_ids = {rule.id for rule in component.rules}
+    for rule in incoming:
+        if rule.id not in known_rule_ids:
+            component.rules.append(rule.model_copy(deep=True))
+            known_rule_ids.add(rule.id)
 
 
 Node.model_rebuild()

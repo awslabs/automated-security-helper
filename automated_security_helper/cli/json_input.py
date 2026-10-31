@@ -27,9 +27,12 @@ type before the command runs, so ``"strategy": "sideways"`` fails the same
 Choice check ``--strategy sideways`` does, and the error names the JSON key.
 The only checks added here are structural ones that argv makes impossible and
 JSON does not: an array or object where one value is expected, a bare value
-where a list is expected, and a JSON boolean for a parameter that is not a
+where a list is expected, a JSON boolean for a parameter that is not a
 boolean (``int(True)`` is 1, so ``"shard_index": true`` would otherwise be
-shard 1).
+shard 1), a JSON number for a boolean parameter (click reads a boolean from
+text, so ``"verbose": 2`` would otherwise be an internal error, not a refusal),
+and a JSON number with a fraction or an exponent for an integer parameter
+(``int(1.9)`` is 1, so ``"shard_index": 1.9`` would otherwise be shard 1).
 
 Security: the document is parsed with ``json`` and nothing else. No value is
 evaluated, and no environment-variable or ``~`` expansion is applied to it,
@@ -40,11 +43,14 @@ from __future__ import annotations
 
 import ast
 import json
+import math
 import re
 import warnings
+from copy import copy as shallow_copy
 from enum import Enum
 from pathlib import Path, PurePath
 from typing import Any
+from urllib.request import url2pathname
 
 import typer
 from typer.core import TyperCommand, TyperOption
@@ -61,11 +67,11 @@ from automated_security_helper.utils.terminal_text import (
 
 # Typer 0.27 vendors click as ``typer._click``, and Typer's commands and
 # contexts are instances of that copy, not of the ``click`` distribution.
-# ``UsageError``, ``ParameterSource`` and the base ``Parameter`` class are not
-# re-exported on Typer's public surface, so they are taken from
-# the vendored package directly. pyproject.toml pins ``typer<0.28``; a release
-# that moves these names fails tests/unit/cli/test_cli_json_input.py at import.
-from typer._click.core import Context, Parameter, ParameterSource
+# ``UsageError`` and the base ``Parameter`` class are not re-exported on
+# Typer's public surface, so they are taken from the vendored package directly.
+# pyproject.toml pins ``typer<0.28``; a release that moves these names fails
+# tests/unit/cli/test_cli_json_input.py at import.
+from typer._click.core import Context, Parameter
 from typer._click.exceptions import BadParameter, MissingParameter, UsageError
 from typer._click.types import (
     BoolParamType,
@@ -234,14 +240,19 @@ def build_skeleton(command: Any, ctx: Context) -> dict[str, Any]:
 
     Keys are parameter names. A parameter whose default is computed at run time
     (``source_dir`` defaults to the working directory inside the command) shows
-    ``null``, which ``--cli-json-input`` reads as "not provided".
+    ``null``, which ``--cli-json-input`` reads as "not provided". So does a
+    parameter that has an environment variable (``mode`` and ASH_MODE): the
+    document sits above the environment, so a skeleton that wrote such a
+    parameter's default as an explicit value overrode the variable with the
+    default on every run of the unedited skeleton. The variable keeps its say
+    until the key is filled in.
     """
     skeleton: dict[str, Any] = {}
     for param in json_input_parameters(command, ctx):
         default = param.default
         if callable(default):
             default = default()
-        if param.required:
+        if param.required or getattr(param, "envvar", None):
             default = None
         if param.name is not None:
             skeleton[param.name] = _to_json(default)
@@ -292,16 +303,80 @@ def _refused(message: str, ctx: Context) -> DocumentRefused:
     return DocumentRefused(shown_on_one_line(message), ctx=ctx)
 
 
+def _document_path(source: str) -> str:
+    """The file *source* names: a path as given, or the file a ``file://`` names.
+
+    Two spellings follow the prefix, each with one rule.
+
+    A URI, ``file:///...`` or ``file://localhost/...``, is read as RFC 8089 writes
+    it: its path is percent-decoded and made a local one with ``url2pathname``,
+    so a URI a tool wrote names the file it means, and on Windows
+    ``/C:/dir/params.json`` is a drive path.
+
+    Anything else after the prefix is a path exactly as written, as the AWS CLI
+    reads ``file://``: relative (``file://params.json``, ``file://./params.json``)
+    or absolute, a drive letter included (``file://C:\\dir\\params.json``, the
+    spelling a Windows path is pasted into). It is not percent-decoded, so a
+    ``%`` in a file's name stays a ``%``, and it is not parsed as a URI's host,
+    query or fragment: ``file://share.example/params.json`` names the relative
+    path ``share.example/params.json``, which is refused when it cannot be read,
+    and a ``#`` or a tab in a file's name stays in it.
+
+    ``url2pathname`` can raise on a URI it cannot make a local path from (an
+    OSError on Windows); the caller reads the path inside the handler that
+    refuses a file that cannot be read.
+    """
+    if not source.startswith(_FILE_URI_PREFIX):
+        return source
+    rest = source[len(_FILE_URI_PREFIX) :]
+    # A host name is compared without regard to case (RFC 8089), so
+    # ``file://LOCALHOST/...`` is the same URI as ``file://localhost/...``.
+    if rest[: len("localhost/")].lower() == "localhost/":
+        rest = rest[len("localhost") :]
+    if rest.startswith("/"):
+        return url2pathname(rest)
+    return rest
+
+
+def _read_stdin(ctx: Context) -> str:
+    """The document on stdin, read as UTF-8 whatever the locale, or a refusal.
+
+    Read from the bytes under the stream, so a document piped on Windows is
+    decoded as the file branch decodes a file, not with the process's code
+    page; a stream with no byte buffer under it (a test's) is read as text. A
+    byte order mark is dropped, as for a file. A read that fails, or bytes that
+    are not UTF-8, are the same refusal the file branch gives, not a traceback.
+    """
+    stream = typer.get_text_stream("stdin")
+    binary = getattr(stream, "buffer", None)
+    try:
+        if binary is not None:
+            return binary.read().decode("utf-8-sig")
+        return stream.read().removeprefix("\ufeff")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise _refused(
+            f"{CLI_JSON_INPUT_FLAG}: cannot read stdin: {error_text(exc)}", ctx
+        ) from exc
+
+
 def _read_document(source: str, ctx: Context) -> dict[str, Any]:
     if source == "-":
         label = "stdin"
-        text = typer.get_text_stream("stdin").read()
+        text = _read_stdin(ctx)
     else:
-        path = source.removeprefix(_FILE_URI_PREFIX)
+        path = source
         label = path
         try:
-            text = Path(path).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
+            # The path is made inside the handler: a file:// URI with a null byte
+            # in it (``%00``) or one the platform cannot turn into a path is the
+            # refusal below, not a traceback. A null byte in the name also makes
+            # read_text raise a ValueError, which is why that is caught too.
+            path = _document_path(source)
+            label = path
+            # utf-8-sig: a document a Windows editor or PowerShell 5 saved starts
+            # with a byte order mark, which json.loads refuses as text.
+            text = Path(path).read_text(encoding="utf-8-sig")
+        except (OSError, ValueError) as exc:
             # The message names the file, so an OSError's own copy of it is dropped.
             reason = (
                 os_error_without_named_file(exc, path)
@@ -318,6 +393,14 @@ def _read_document(source: str, ctx: Context) -> dict[str, Any]:
             object_pairs_hook=_reject_duplicate_keys,
             parse_constant=_reject_constant,
         )
+    except RecursionError:
+        # A document nested deeper than the parser can follow is refused like
+        # one that does not parse, not left as a traceback.
+        raise _refused(
+            f"{CLI_JSON_INPUT_FLAG}: {label} is not valid JSON: nested too deeply "
+            "to parse",
+            ctx,
+        ) from None
     except ValueError as exc:
         raise _refused(
             f"{CLI_JSON_INPUT_FLAG}: {label} is not valid JSON: {exc}", ctx
@@ -337,7 +420,20 @@ def _is_scalar(value: Any) -> bool:
 
 
 def _check_shape(param: Parameter, value: Any) -> str | None:
-    """Why ``value`` cannot be this parameter's value, or None if it can."""
+    """Why ``value`` cannot be this parameter's value, or None if it can.
+
+    The checks are the ones argv makes impossible and JSON does not. A JSON
+    number for a true/false parameter is refused: the click typer bundles reads
+    a boolean from a bool or from text (``"yes"``, ``"1"``), so every number, 0
+    and 1 included, reached its text conversion and raised AttributeError
+    (upstream click's ``BoolParamType`` takes 0 and 1 as the booleans; the
+    bundled copy does not). A JSON number with a fraction or an exponent for an
+    integer parameter is refused too, as ``--shard-index 3.5`` and
+    ``--shard-index 1e2`` are: click's integer type truncated ``3.5`` to 3
+    without a word, and argv takes only the digits of an integer. A number json
+    reads as infinite (``1e400``) is refused for a float parameter, which click
+    accepted as infinity; argv has no spelling for it.
+    """
     takes_list = param.multiple or param.nargs != 1
     items = value if isinstance(value, list) else [value]
     if takes_list and not isinstance(value, list):
@@ -349,6 +445,28 @@ def _check_shape(param: Parameter, value: Any) -> str | None:
             return "expected a string, number or boolean"
         if isinstance(item, bool) and not isinstance(param.type, BoolParamType):
             return "a JSON boolean is only accepted for a true/false parameter"
+        if isinstance(item, (int, float)) and not isinstance(item, bool):
+            # The boolean type reads text (``"yes"``, ``"1"``), so a number,
+            # 0 and 1 included, reached its text handling and raised an
+            # AttributeError, which is an internal error, not a refusal naming
+            # the key.
+            if isinstance(param.type, BoolParamType):
+                return (
+                    "expected a JSON boolean (true or false) for a true/false "
+                    "parameter, not a number"
+                )
+            # click's integer type is ``int(value)``, which truncates a float:
+            # 1.9 was accepted as 1. A whole float (2.0, 1e2) is refused as
+            # well, because ``--shard-index 2.0`` is: argv takes digits only.
+            if isinstance(param.type, IntParamType) and not isinstance(item, int):
+                return (
+                    "expected a JSON integer for this parameter, not a number "
+                    "with a fraction or an exponent"
+                )
+            # json reads 1e400 as infinity, which click's float type accepted
+            # as a value; argv has no spelling for it.
+            if isinstance(item, float) and math.isinf(item):
+                return "the number is too large for this parameter"
     return None
 
 
@@ -396,6 +514,13 @@ def _validated_values(
             except typer.BadParameter as exc:
                 # Its value as given, not yet shown: the refusal shows it once.
                 problem = _typed_text(exc)
+            except OverflowError:
+                # A JSON integer too large for a float parameter (10**400):
+                # click's float conversion raises past its own check. (1e400 for
+                # an integer parameter never reaches here: _check_shape refuses
+                # every float there, and 1e400 for a float parameter is refused
+                # there too, as infinite.)
+                problem = "the number is too large for this parameter"
         if problem is not None:
             raise _refused(
                 f"{CLI_JSON_INPUT_FLAG}: invalid value for key '{key}' in {label}: "
@@ -431,10 +556,25 @@ def _meta_options() -> list[Parameter]:
             rich_help_panel=_HELP_PANEL,
             help=(
                 f"Print a JSON template for {CLI_JSON_INPUT_FLAG}, listing every "
-                "parameter of this command with its default, and exit."
+                "parameter of this command with its default, or null where it is "
+                "required or an environment variable backs it, and exit."
             ),
         ),
     ]
+
+
+#: The ``ctx.meta`` key, made per context, under which a parse keeps its copies of
+#: the parameters whose environment variable the document set aside.
+_ENV_SET_ASIDE = "ash.cli_json_input.env_set_aside"
+
+
+def _without_environment(param: Parameter) -> Parameter:
+    """A copy of *param* that reads no environment variable."""
+    copy = shallow_copy(param)
+    copy.envvar = None
+    if isinstance(copy, TyperOption):
+        copy.allow_from_autoenv = False
+    return copy
 
 
 class CliJsonInputCommand(TyperCommand):
@@ -452,7 +592,15 @@ class CliJsonInputCommand(TyperCommand):
             # real parse below would raise for the same argv.
             opts, _, _ = self.make_parser(ctx).parse_args(args=list(args))
             source = opts.get(CLI_JSON_INPUT_FLAG.lstrip("-").replace("-", "_"))
-            if source is not None:
+            # --help and --generate-cli-skeleton are eager: click runs them
+            # before any other value is processed, and the command never runs.
+            # The document is read before that processing, so a document that
+            # does not parse blocked both; it is not read when either is asked.
+            # The pre-parse has already put a token that is another option's
+            # value where it belongs, so a value spelled "--help" is not help.
+            skeleton = GENERATE_CLI_SKELETON_FLAG.lstrip("-").replace("-", "_")
+            eager = bool(opts.get("help")) or bool(opts.get(skeleton))
+            if source is not None and not eager:
                 label = "stdin" if source == "-" else str(source)
                 document = _read_document(str(source), ctx)
                 supplied = _validated_values(document, self, ctx, label)
@@ -460,17 +608,40 @@ class CliJsonInputCommand(TyperCommand):
                 # line did not set, which is rule 1 of the precedence.
                 ctx.default_map = {**(ctx.default_map or {}), **supplied}
 
-        remaining = super().parse_args(ctx, args)
+        # click ranks an environment variable above default_map, and converts
+        # each parameter's value as it consumes it. Re-processing the document's
+        # parameters after the parse put the document above the environment only
+        # when the variable's value converted: one the type refused (an
+        # ASH_SHARD_INDEX of "nine") was a usage error before the re-processing
+        # ran, with the document's valid value never read. So for the parameters
+        # the document sets, the environment is not read at all (rule 2 over
+        # rule 3). The parse reads copies of those parameters that have no
+        # variable (get_params below): the parameter objects are the command's,
+        # shared by every invocation of it, so clearing the variable on them, even
+        # with a restore afterwards, hid it from a parse running at the same time.
+        # The copies belong to this parse's context alone. (The root group in
+        # main.py clears and restores variables on its own shared parameters in
+        # its own parse; this command does not touch the objects it shares.)
+        set_aside_key = f"{_ENV_SET_ASIDE}:{id(ctx)}"
+        if supplied:
+            ctx.meta[set_aside_key] = {
+                param.name: _without_environment(param)
+                for param in super().get_params(ctx)
+                if param.name in supplied
+            }
+        try:
+            return super().parse_args(ctx, args)
+        finally:
+            ctx.meta.pop(set_aside_key, None)
 
-        # click ranks an environment variable above default_map. Re-process
-        # those parameters from the document so that it ranks above the
-        # environment (rule 2 over rule 3).
-        for name, value in supplied.items():
-            if ctx.get_parameter_source(name) is ParameterSource.ENVIRONMENT:
-                param = next(p for p in self.get_params(ctx) if p.name == name)
-                ctx.params[name] = param.process_value(ctx, value)
-                ctx.set_parameter_source(name, ParameterSource.DEFAULT_MAP)
-        return remaining
+    def get_params(self, ctx: Context) -> list[Parameter]:
+        params = super().get_params(ctx)
+        set_aside = ctx.meta.get(f"{_ENV_SET_ASIDE}:{id(ctx)}")
+        if not set_aside:
+            return params
+        # The same copy each time this parse asks: click sorts the parameters
+        # it processes by comparing them with the ones its parser returned.
+        return [set_aside.get(param.name, param) for param in params]
 
 
 __all__ = [

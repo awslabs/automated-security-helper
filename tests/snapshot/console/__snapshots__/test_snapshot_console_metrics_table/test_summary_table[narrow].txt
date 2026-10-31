@@ -6,11 +6,11 @@
 │ cdk-nag       │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 7s     │ 0      │ PASSED  │ MED (g)  │
 │ checkov       │ 0 │ 0 │ 0 │ 0 │ 2 │ 1 │ 500ms  │ 0      │ PASSED  │ MED (g)  │
 │ detect-secre… │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 250ms  │ 0      │ SKIPPED │ MED (g)  │
-│ grype         │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ <1ms   │ 0      │ MISSING │ MED (g)  │
+│ grype         │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ N/A    │ 0      │ MISSING │ MED (g)  │
 │ npm-audit     │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ 1s     │ 0      │ ERROR   │ MED (g)  │
 │ opengrep      │ 0 │ 0 │ 1 │ 0 │ 0 │ 0 │ 1m 35s │ 0      │ PASSED  │ CRIT (c) │
 │ semgrep       │ 2 │ 1 │ 0 │ 0 │ 0 │ 2 │ 48s    │ 1      │ FAILED  │ MED (g)  │
-│ syft          │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ <1ms   │ 0      │ SKIPPED │ MED (g)  │
+│ syft          │ 0 │ 0 │ 0 │ 0 │ 0 │ 0 │ N/A    │ 0      │ SKIPPED │ MED (g)  │
 └───────────────┴───┴───┴───┴───┴───┴───┴────────┴────────┴─────────┴──────────┘
                                 source-dir: '.'
                          output-dir: '.ash/ash_output'

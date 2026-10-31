@@ -52,6 +52,9 @@ class TestDeliveredTreeIsUsed:
     def test_returns_the_delivered_tree(self, tmp_path):
         delivered = tmp_path / "session-a" / "source"
         delivered.mkdir(parents=True)
+        # A delivered tree holds what the client sent; an empty one is refused
+        # as a gone one is (test_mcp_server_omitted_source_dir_refuses_an_empty_tree).
+        (delivered / "app.py").write_text("x = 1\n", encoding="utf-8")
         sd._set_session_source_dir("session-a", delivered)
 
         resolution = _resolve_omitted_source_dir("session-a")
@@ -65,6 +68,7 @@ class TestDeliveredTreeIsUsed:
         second = tmp_path / "s2" / "source"
         for path in (first, second):
             path.mkdir(parents=True)
+            (path / "app.py").write_text("x = 1\n", encoding="utf-8")
         sd._set_session_source_dir("s1", first)
         sd._set_session_source_dir("s2", second)
 
@@ -85,6 +89,9 @@ class TestStdioFallbackSurvives:
         """Delivering over stdio is legal, and the tree wins over cwd."""
         delivered = tmp_path / "default" / "source"
         delivered.mkdir(parents=True)
+        # A delivered tree with nothing in it is refused like one that is gone
+        # (_holds_an_entry); this test is about which tree wins, so it holds one.
+        (delivered / "app.py").write_text("x = 1\n", encoding="utf-8")
         sd._set_session_source_dir(DEFAULT_SESSION_ID, delivered)
 
         resolution = _resolve_omitted_source_dir(DEFAULT_SESSION_ID)

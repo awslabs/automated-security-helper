@@ -41,9 +41,16 @@ def runner():
     return r
 
 
+# The runner starts uv through its own spawn seam, ``uv_tool_runner.spawn_run``
+# (a Popen under a start watch), not ``subprocess.run``: a stand-in on
+# ``subprocess.run`` intercepted nothing, the real uv ran, and the module's
+# started-tool guard failed the test at teardown.
+_SPAWN = "automated_security_helper.utils.uv_tool_runner.spawn_run"
+
+
 def _install(runner, **kwargs):
     with (
-        patch("subprocess.run") as mock_run,
+        patch(_SPAWN) as mock_run,
         patch(
             "automated_security_helper.utils.subprocess_utils.find_executable",
             return_value=None,
@@ -101,7 +108,7 @@ def test_run_tool_without_a_request_is_unchanged(runner, tmp_path):
 
 
 def test_version_probe_passes_python_and_keys_its_memo_on_it(runner):
-    with patch("subprocess.run") as mock_run:
+    with patch(_SPAWN) as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="3.2.0\n")
         assert (
             runner.get_tool_version(

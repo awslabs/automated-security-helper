@@ -18,7 +18,7 @@ Found 18 issue(s):
   ⚠️  Suppression sets 'symbol' but its path 'src/app.rb' only matches '.rb' files, which ASH has no symbol grammar for (supported: .cjs, .cts, .java, .js, .jsx, .mjs, .mts, .py, .pyi, .ts, .tsx), so it never matches at 'global_settings.suppressions[4]'
   ⚠️  Path 'vendor' points to a directory but matches no file in it. Use 'vendor/' to ignore every file inside the directory. at 'global_settings.ignore_paths[0].path'
   ⚠️  scanners.'cdk_nag' uses the legacy snake/kebab variant; canonical form is 'cdk-nag'. ASH reads it as 'cdk-nag', but only the canonical form is documented. at 'scanners.cdk_nag' [auto-fixable]
-  ⚠️  'scanners.npm_audit' (the legacy form) and 'scanners.npm-audit' are both set; a scan reads 'npm-audit' and ignores 'npm_audit'. Remove or merge one of them by hand: `ash config lint --fix` does not rename it
+  ⚠️  'scanners.npm_audit' (the legacy form) and 'scanners.npm-audit' are both set; a scan merges them key by key, and where both set a key 'npm-audit' wins, so a key only 'npm_audit' sets still applies. Remove or merge one of them by hand: `ash config lint --fix` does not rename it
   ℹ️  The options of scanners.trivy-repo are not checked here: no built-in plugin is configured under that name, and the plugins named in ash_plugin_modules are not loaded here, so what they declare is unknown. A scan checks the options of every section a loaded plugin reads when it loads the plugins, and refuses an unknown or invalid one with exit code 3.
 
   Errors: 4

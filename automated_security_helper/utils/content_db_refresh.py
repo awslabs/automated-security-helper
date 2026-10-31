@@ -38,9 +38,11 @@ reach them. They run from a working directory outside the scanned tree
 with an explicit config file (``-c`` for grype, ``--config`` for trivy) so neither
 tool looks for one in the working directory, the home directory or anywhere else:
 ``EMPTY_TOOL_CONFIG`` (``utils/content_db_shared.py``, which the staleness probes
-share), or for trivy the operator's ``trivy.yaml`` once the caller has checked it is
-the operator's and outside the scanned tree (``config_file``), so a database mirror
-it names applies to the update too. The cache directory is passed explicitly. The
+share), or the operator's own config file (trivy's ``trivy.yaml``, grype's
+``.grype.yaml``) once the caller has checked it is the operator's and outside the
+scanned tree (``config_file``), so a database mirror or CA it names applies to the
+update too; ``prepare_content_db`` refuses a config file inside the scanned tree
+itself, whatever a caller passes. The cache directory is passed explicitly. The
 environment is the operator's own (``snapshot_environ``), not anything a scanner
 derived from the scanned tree. They scan nothing but an empty directory ASH creates
 for the purpose.
@@ -74,17 +76,37 @@ reads the setting the way trivy 0.75.0 does, measured case by case in
 ``tests/unit/utils/test_content_db_refresh.py``; a form it does not recognize leaves
 the update in, and trivy's refusal then fails the scan with trivy's own message.
 
+grype has a setting of the same kind, ``GRYPE_DB_AUTO_UPDATE`` (``db.auto-update`` in
+its config), read as false by ``strconv.ParseBool`` to turn its own scan-time
+download off. In the operator's environment, a value that reads as false is honored
+the way trivy's skip settings are: ``grype db update`` does not run, nothing is
+fetched from the database registry, and one warning says so and that a database
+already in the cache stays in use. Whether that database is still fresh enough is
+left to the scan-time staleness check, as it is for trivy. Any other value of the
+variable (true, ``no``, a string ``strconv.ParseBool`` rejects) leaves the update in.
+The same setting in the operator's grype config file is not read as an opt-out: the
+update runs and the setting is said once per process (``_say_grype_auto_update_once``).
+An operator who wants ASH off the registry whatever the config says scans offline.
+The setting is read from the environment the refresh runs with, which is the
+process's own: ASH hands sandboxed grype ``GRYPE_PREPARED_ENV`` (the same value)
+through the child's environment only, never through ``os.environ``, so the refresh
+does not read its own setting back.
+
 Concurrency and repetition
 --------------------------
 Serialized by ``utils/file_lock.exclusive_lock`` on a lock file in the cache
 directory, or in the temporary directory named for the cache when the cache is not
 writable: the scanners of one scan run in threads, and other ASH processes may
 share the cache. The second caller to take the lock finds the database current,
-and the tool returns at once. ``scan_id`` also skips every call after the first
-that succeeded for the same tool, cache and scan. It is the scan's
-``PluginContext.scan_id``, a random id, rather than anything derived from the
-context object's address, which a long-running process such as the MCP server
-can hand to a later scan's context once the first is freed.
+and the tool returns at once. It waits for the lock longer than a healthy holder
+keeps it: every command the tool may run at its own ``UPDATE_TIMEOUT_SECONDS``,
+and never less than the lock's default (``_lock_wait_seconds``).
+
+``scan_id`` also skips every call after the first that succeeded for the same
+tool, cache and scan. It is the scan's ``PluginContext.scan_id``, a random id,
+rather than anything derived from the context object's address, which a
+long-running process such as the MCP server can hand to a later scan's context
+once the first is freed.
 
 Failure modes
 -------------
@@ -95,25 +117,34 @@ failed rather than run against a database that could not be brought up to date.
 
 from __future__ import annotations
 
+import contextlib
+import getpass
 import hashlib
 import ntpath
 import os
 import posixpath
 import re
 import shutil
+import stat
 import subprocess  # nosec B404 - TimeoutExpired only; spawns go through spawn_run
 import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, Union
 
 import yaml
 
-from automated_security_helper.config.path_trust import cwd_outside_scanned_tree
+from automated_security_helper.config.path_trust import (
+    cwd_outside_scanned_tree,
+    in_scanned_tree,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
-from automated_security_helper.utils.file_lock import exclusive_lock
+from automated_security_helper.utils.file_lock import (
+    LOCK_TIMEOUT_SECONDS,
+    exclusive_lock,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.scope import outside_scanner_sandbox
@@ -125,6 +156,16 @@ TOOLS = ("grype", "trivy")
 #: How long one refresh command may take. A first download of either database is
 #: a few hundred megabytes.
 UPDATE_TIMEOUT_SECONDS = 900
+
+#: The most commands one refresh of each tool runs under its lock: grype's database
+#: update; trivy's database, Java database and checks bundle. Each is bounded by
+#: ``UPDATE_TIMEOUT_SECONDS``, so a healthy holder keeps the lock for at most this
+#: many times that bound, whatever the caller that waits on it asked for.
+_MOST_COMMANDS = {"grype": 1, "trivy": 3}
+
+#: Added to the longest a healthy holder keeps the lock, for what it does outside
+#: the commands: its work directory, the process starts and the hand-off.
+_LOCK_MARGIN_SECONDS = 120.0
 
 #: Environment for grype inside the sandbox once its database has been prepared:
 #: no update of its own (the cache is read-only), no update check for grype itself,
@@ -146,13 +187,49 @@ TRIVY_UPDATE_OPT_OUTS: Mapping[str, Tuple[Tuple[str, ...], Tuple[str, str]]] = {
     "Java database": (("TRIVY_SKIP_JAVA_DB_UPDATE",), ("db", "java-skip-update")),
 }
 
+#: grype's own opt-out of its database update: ``GRYPE_DB_AUTO_UPDATE`` and its
+#: config key ``db.auto-update``, read in that order as viper reads them. Set to
+#: false, grype itself downloads nothing at scan time. Unlike trivy's, it does not
+#: block ``grype db update``. ASH honors it when the variable is set in the
+#: environment (no update, one warning) and, for the config key, only reports it
+#: (one notice per process) and updates.
+GRYPE_UPDATE_OPT_OUT: Tuple[Tuple[str, ...], Tuple[str, str]] = (
+    ("GRYPE_DB_AUTO_UPDATE",),
+    ("db", "auto-update"),
+)
+
 #: The strings Go's ``strconv.ParseBool`` reads as true, which is how trivy reads a
 #: boolean from the environment or a config string. Anything else, ``yes`` included,
 #: is false.
 _GO_TRUE = frozenset({"1", "t", "T", "TRUE", "true", "True"})
 
+#: The strings Go's ``strconv.ParseBool`` reads as false. grype's auto-update is on
+#: unless its setting reads as one of these; a string that is neither true nor false
+#: is an error grype reports itself, and no opt-out.
+_GO_FALSE = frozenset({"0", "f", "F", "FALSE", "false", "False"})
+
 _prepared_lock = threading.Lock()
-_prepared: Set[Tuple[str, str, bool, bool, str, str]] = set()
+#: The scans prepared so far, oldest first (a dict keeps insertion order). Bounded
+#: at ``_PREPARED_LIMIT`` entries: a long-running process (the MCP server) hands
+#: every scan a new id, and an unbounded set grew with each one. A key dropped by
+#: the bound costs one more refresh call for that scan, which the tool answers at
+#: once when the database is current.
+_prepared: Dict[Tuple[str, str, bool, bool, str, str], None] = {}
+_PREPARED_LIMIT = 1024
+#: The grype update settings already said once in this process (see
+#: ``_say_grype_auto_update_once``), under ``_prepared_lock``.
+_grype_notices: set[str] = set()
+
+#: The Go ``os.TempDir`` fallback on Unix when ``TMPDIR`` is unset.
+_GO_UNIX_TEMP_DIR = "/tmp"  # nosec B108 - Go's own constant, read, never written
+
+
+def _remember_prepared(key: Tuple[str, str, bool, bool, str, str]) -> None:
+    """Record ``key`` as prepared, dropping the oldest keys past the bound."""
+    with _prepared_lock:
+        _prepared[key] = None
+        while len(_prepared) > _PREPARED_LIMIT:
+            del _prepared[next(iter(_prepared))]
 
 
 def default_cache_dir(
@@ -168,23 +245,43 @@ def default_cache_dir(
 
     - grype: ``GRYPE_DB_CACHE_DIR``, else ``xdg.CacheHome/grype/db``
       (grype/db/v6/installation/curator.go, grype 0.120.1). github.com/adrg/xdg
-      v0.5.3 sets ``CacheHome`` to ``XDG_CACHE_HOME`` when that is an absolute
+      v0.5.3 sets ``CacheHome`` to ``XDG_CACHE_HOME`` when that, with a leading
+      ``~`` expanded to the home directory (pathutil.ExpandHome), is an absolute
       path, else to ``~/Library/Caches`` on macOS (paths_darwin.go), ``~/.cache``
       on other Unix (paths_unix.go) and ``%LOCALAPPDATA%\\cache`` on Windows
       (paths_windows.go).
     - trivy: ``TRIVY_CACHE_DIR``, else ``os.UserCacheDir()/trivy``
       (pkg/cache/dir.go, trivy 0.75.0), and ``os.TempDir()/trivy`` when Go cannot
       name a user cache directory. Go's ``os.UserCacheDir`` is ``XDG_CACHE_HOME``
-      (an error when relative) or ``~/.cache`` on Unix other than macOS,
-      ``~/Library/Caches`` on macOS, whatever ``XDG_CACHE_HOME`` says, and
-      ``%LocalAppData%`` on Windows.
+      (an error when relative, and no ``~`` expansion) or ``$HOME/.cache`` on Unix
+      other than macOS, ``$HOME/Library/Caches`` on macOS, whatever
+      ``XDG_CACHE_HOME`` says, and ``%LocalAppData%`` on Windows; an unset or
+      empty ``HOME`` is an error there (Go reads the variable, not the passwd
+      entry), so trivy then falls to the temporary directory. Go's ``os.TempDir``
+      is ``TMPDIR`` else ``/tmp`` on Unix, and on Windows ``TMP``, then ``TEMP``,
+      then ``USERPROFILE``, then the Windows directory (GetTempPath).
+
+    Known deviations from the tools, left as they are (write absolute paths in
+    these variables and none of them applies):
+
+    - A relative or ``~`` value of ``GRYPE_DB_CACHE_DIR`` or ``TRIVY_CACHE_DIR`` is
+      expanded with ``Path.expanduser``, which also reads ``~user``. The tools
+      expand a home directory with their own function (adrg/xdg ``ExpandHome`` for
+      grype, as the review of this module read it, not measured), so a value such
+      as ``~bob/cache`` or one holding ``$HOME`` can name another directory to the
+      tool than to ASH.
+    - trivy with ``HOME`` unset in the scanner's own process falls to the
+      temporary directory, as ``os.UserCacheDir`` reports an error there; this
+      function takes this process's home instead when the scan's environment names
+      none, because every sandbox backend gives the scanner that home.
 
     Args:
         tool: ``grype`` or ``trivy``.
         env: The environment the scan runs with; the process environment when
-            None. Only the variables above are read from it; the home directory
-            is this process's (``Path.home()``), which is also the ``HOME`` every
-            sandbox backend gives the scanner.
+            None. Only the variables above are read from it, ``HOME`` included
+            where the tool reads it (trivy); grype's home is this process's
+            (``Path.home()``), which is also the ``HOME`` every sandbox backend
+            gives the scanner.
         platform: A ``sys.platform`` value; this one when None.
 
     Returns:
@@ -216,8 +313,12 @@ def default_cache_dir(
         raw = variable("GRYPE_DB_CACHE_DIR")
         if raw:
             return absolute(raw)
-        if xdg and isabs(xdg):
-            cache_home = Path(xdg)
+        # adrg/xdg expands a leading ``~`` before it asks whether the path is
+        # absolute, so ``XDG_CACHE_HOME=~/caches`` names a directory under the
+        # home directory to grype, and here.
+        xdg_expanded = os.path.expanduser(xdg) if xdg.startswith("~") else xdg
+        if xdg_expanded and isabs(xdg_expanded):
+            cache_home = Path(xdg_expanded)
         elif windows:
             cache_home = Path(local_app_data or Path.home() / "AppData" / "Local")
             cache_home = cache_home / "cache"
@@ -230,20 +331,45 @@ def default_cache_dir(
         raw = variable("TRIVY_CACHE_DIR")
         if raw:
             return absolute(raw)
+        # The home directory is the scan's ``HOME`` when its environment sets
+        # one, else this process's: every sandbox backend gives the scanner
+        # the operator's home, and an environment built for the scan without
+        # the variable (a caller that names only the variables it changes)
+        # still means that home, not Go's temporary-directory fallback for a
+        # HOME that is unset in the scanner's own process.
+        home = Path(variable("HOME")) if variable("HOME") else Path.home()
         if windows:
             user_cache = Path(local_app_data) if local_app_data else None
         elif platform == "darwin":
-            user_cache = Path.home() / "Library" / "Caches"
+            user_cache = home / "Library" / "Caches"
         elif not xdg:
-            user_cache = Path.home() / ".cache"
+            user_cache = home / ".cache"
         else:
             user_cache = Path(xdg) if isabs(xdg) else None
         if user_cache is None:
-            # Go's os.TempDir: $TMPDIR on Unix, GetTempPath on Windows.
-            temp = "" if windows else variable("TMPDIR")
-            user_cache = Path(temp or tempfile.gettempdir())
+            user_cache = Path(_go_temp_dir(variable, windows))
         return user_cache / "trivy"
     raise ValueError(f"no content database refresh for {tool!r}")
+
+
+def _go_temp_dir(variable: Any, windows: bool) -> str:
+    """Go's ``os.TempDir`` over ``variable``: the directory trivy falls back to.
+
+    Unix: ``TMPDIR``, else ``/tmp``. Windows: GetTempPath's order, ``TMP``, then
+    ``TEMP``, then ``USERPROFILE``, then the Windows directory, which is read from
+    Python's own search when none of the three is set. Python's
+    ``tempfile.gettempdir`` is not used for the Unix side: its order (``TMPDIR``,
+    ``TEMP``, ``TMP``, then a writability probe of ``/tmp``, ``/var/tmp`` and
+    ``/usr/tmp``) names another directory than Go's when ``TMPDIR`` is unset and
+    ``TEMP`` or ``TMP`` is, or ``/tmp`` is not writable.
+    """
+    if not windows:
+        return variable("TMPDIR") or _GO_UNIX_TEMP_DIR
+    for name in ("TMP", "TEMP", "USERPROFILE"):
+        value = variable(name)
+        if value:
+            return value
+    return tempfile.gettempdir()
 
 
 def trivy_update_opt_outs(
@@ -269,11 +395,35 @@ def trivy_update_opt_outs(
     return found
 
 
-def _env_opt_out(env: Mapping[str, str], names: Tuple[str, ...]) -> Optional[str]:
+def grype_update_opt_outs(
+    env: Mapping[str, str], config_file: Optional[Union[str, Path]]
+) -> Dict[str, str]:
+    """Whether the operator's settings turn grype's OWN database update off, and how.
+
+    ``prepare_content_db`` leaves the update out for the environment variable and
+    only says the config key's setting once. Keyed as ``trivy_update_opt_outs`` is (``database`` only; grype has one
+    database), naming the setting. Read as viper reads it for grype:
+    ``GRYPE_DB_AUTO_UPDATE`` when set to a non-empty value, else ``db.auto-update``
+    in ``config_file``, the operator's grype config the update is given. The
+    setting opts out when it reads as false (``_GO_FALSE``); grype's default is on.
+    """
+    names, key = GRYPE_UPDATE_OPT_OUT
+    setting = _env_opt_out(env, names, opt_out=_GO_FALSE)
+    if setting is None and not any(env.get(name) for name in names):
+        config = _composed_yaml(Path(config_file)) if config_file is not None else None
+        setting = _config_opt_out(config, key, config_file, opt_out=_GO_FALSE)
+    return {"database": setting} if setting is not None else {}
+
+
+def _env_opt_out(
+    env: Mapping[str, str],
+    names: Tuple[str, ...],
+    opt_out: frozenset[str] = _GO_TRUE,
+) -> Optional[str]:
     for name in names:
         value = env.get(name)
         if value:
-            return f"{name}={value}" if value in _GO_TRUE else None
+            return f"{name}={value}" if value in opt_out else None
     return None
 
 
@@ -295,24 +445,31 @@ def _config_opt_out(
     root: Optional[yaml.Node],
     key: Tuple[str, str],
     config_file: Optional[Union[str, Path]],
+    opt_out: frozenset[str] = _GO_TRUE,
 ) -> Optional[str]:
-    """``key`` (``db``, ``skip-update``) in the composed config, as trivy reads it.
+    """``key`` (``db``, ``skip-update``) in the composed config, as the tool reads it.
 
-    Nested or dotted (``db.skip-update``), and case-insensitively, as trivy's config
-    library matches keys. True for a plain integer other than 0 and for a string
-    ``strconv.ParseBool`` accepts, quoted or not.
+    Dotted (``db.skip-update``) or nested, and case-insensitively, as both tools'
+    config library (viper) matches keys. The dotted spelling is read first: viper
+    searches a path's longest literal key prefix before it descends into nested
+    maps (searchIndexableWithPathPrefixes), so a top-level ``db.skip-update`` key
+    beats a nested ``db: skip-update:`` when a file holds both. The value is an
+    opt-out when it reads as one of ``opt_out``: true for trivy's skip settings,
+    false for grype's auto-update. A plain integer reads as true unless it is 0;
+    a string reads as what ``strconv.ParseBool`` makes of it, quoted or not, and
+    a string it rejects is neither, so it is no opt-out.
     """
-    value = _mapping_get(_mapping_get(root, key[0]), key[1])
+    value = _mapping_get(root, ".".join(key))
     if value is None:
-        value = _mapping_get(root, ".".join(key))
+        value = _mapping_get(_mapping_get(root, key[0]), key[1])
     if not isinstance(value, yaml.ScalarNode):
         return None
     text = value.value
     if value.style is None and re.fullmatch(r"[-+]?[0-9]+", text):
-        enabled = int(text) != 0
+        reads_as = "1" if int(text) != 0 else "0"
     else:
-        enabled = text in _GO_TRUE
-    return f"{'.'.join(key)}: {text} in {config_file}" if enabled else None
+        reads_as = text
+    return f"{'.'.join(key)}: {text} in {config_file}" if reads_as in opt_out else None
 
 
 def _mapping_get(node: Optional[yaml.Node], key: str) -> Optional[yaml.Node]:
@@ -328,16 +485,167 @@ def _mapping_get(node: Optional[yaml.Node], key: str) -> Optional[yaml.Node]:
 def update_lock_path(tool: str, cache_dir: Union[str, Path]) -> Path:
     """Where the refresh lock for ``cache_dir`` lives.
 
-    In the cache directory when it, or the directory it will be created in, is
-    writable; otherwise in the temporary directory, named for the cache, so the
-    callers on this host still take turns.
+    In the cache directory when it, or the nearest directory above it that exists
+    (the one it will be created under), is writable; otherwise in the temporary
+    directory, named for the cache, so the callers on this host still take turns.
+
+    The nearest existing ancestor rather than the parent alone: a first refresh of
+    a cache whose parent does not exist yet either (``~/.cache/grype/db`` on a host
+    with no ``~/.cache/grype``) would otherwise read the missing parent as not
+    writable and take the temporary-directory lock, and a caller arriving once the
+    refresh had created the cache would take the lock inside it, so the two ran at
+    once.
+
+    A lock file another account left in a shared cache (mode 0644) is no reason to
+    leave the cache: ``exclusive_lock`` opens a lock file it may not write for
+    reading alone and ``flock`` takes an exclusive lock on that descriptor
+    (``utils/file_lock._open_lock_file``), so the second account's update waits on
+    the first's. This function used to send such a caller to a per-account lock in
+    the temporary directory, and the two accounts then ran ``trivy image
+    --download-db-only`` or ``grype db update`` into the one cache at once. Only a
+    cache that cannot be written at all takes the temporary-directory lock, and
+    that name carries no account: a refresh from before this change and one from
+    after it, or two accounts that share the temporary directory, still meet at one
+    file, which ``exclusive_lock`` opens read-only when it is another's.
+
+    A lock file this account may neither write nor read (another account created
+    it under a restrictive umask, so it is mode 0600) is the one case the read-only
+    route cannot serve: both of ``exclusive_lock``'s opens are refused and the
+    PermissionError ends the scan. A caller whose cache lock is like that takes the
+    shared temporary-directory lock; when that file is unusable too, the temporary
+    lock named for this account, which this account made itself. Two accounts that
+    both end up there do not serialize against each other, which the unusable
+    file could not do for them either.
+
+    The same goes for a name that is not a regular file: a link, a FIFO, a socket
+    or a device another account left at the lock's name. ``exclusive_lock`` does
+    not follow a link and refuses anything but a regular file, whatever its mode,
+    so such a name is no lock; the caller takes the next one down.
+
+    The checks here read modes and file types, not what the filesystem will do with
+    the open. A shared temporary lock that passes them and is refused when taken
+    (a descriptor open for reading alone cannot take a lock on a network mount) is
+    not a reason to end the scan either: ``_refresh_lock`` takes the lock named
+    for this account in its place.
     """
     cache = Path(cache_dir)
-    probe = cache if cache.exists() else cache.parent
-    if os.access(probe, os.W_OK):
-        return cache / f".ash-{tool}-update.lock"
+    probe = cache
+    while not probe.exists() and probe.parent != probe:
+        probe = probe.parent
+    lock = cache / f".ash-{tool}-update.lock"
+    # The ancestor has to be a directory the cache can be created under:
+    # ``exclusive_lock`` creates the lock's missing parents, which fails under a
+    # regular file at the cache's path, so that case takes the temporary lock.
+    if probe.is_dir() and os.access(probe, os.W_OK) and _lock_is_openable(lock):
+        return lock
+    shared, account = _temporary_locks(tool, cache)
+    if _lock_is_openable(shared):
+        return shared
+    return account
+
+
+def _temporary_locks(tool: str, cache: Path) -> Tuple[Path, Path]:
+    """The two locks in the temporary directory for ``cache``: the shared one,
+    named for the cache alone, and the one named for this account as well."""
     digest = hashlib.sha256(os.fsencode(os.path.abspath(cache))).hexdigest()[:16]
-    return Path(tempfile.gettempdir()) / f"ash-{tool}-update-{digest}.lock"
+    account = str(os.getuid()) if hasattr(os, "getuid") else getpass.getuser()
+    temporary = Path(tempfile.gettempdir())
+    return (
+        temporary / f"ash-{tool}-update-{digest}.lock",
+        temporary / f"ash-{tool}-update-{digest}-{account}.lock",
+    )
+
+
+def _lock_is_openable(lock: Path) -> bool:
+    """Whether ``exclusive_lock`` can open ``lock``: it is missing, or it is a
+    regular file this account can read.
+
+    Its read-write open needs read and write permission and its read-only fallback
+    needs read permission, so a regular file this account can read is almost
+    always openable and one it cannot read never is (a write-only file fails both
+    opens). The name is looked at without following a link, because the open does
+    not follow one: a link (dangling or to a readable file) and a FIFO, socket or
+    device are refused whatever their mode, so none of them is openable.
+
+    "Almost": this reads the file's mode, not what the filesystem will do with an
+    open. A read-only descriptor on a network mount cannot take the lock (``EBADF``
+    from ``flock``), and an open can be refused for a reason the mode does not
+    show. ``_refresh_lock`` takes the lock named for this account when the shared
+    temporary one is refused after this said yes.
+    """
+    try:
+        mode = os.lstat(lock).st_mode
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return stat.S_ISREG(mode) and os.access(lock, os.R_OK)
+
+
+def _lock_wait_seconds(tool: str) -> float:
+    """How long a caller waits for another update's lock before giving it up.
+
+    The lock's own default, 30 minutes, is the floor: a holder that never releases
+    it (it died) must still end the wait. Above it, the longest a healthy holder of
+    this tool keeps the lock, every command it may run at its own bound plus a
+    margin. Under the default alone a trivy update that runs its database, Java
+    database and checks bundle commands one after the other can hold the lock for
+    45 minutes, and a second ASH process sharing the cache gave it up as dead while
+    it was still downloading. The caller's own settings do not size the wait: what
+    it asks to update says nothing of what the holder is running.
+    """
+    longest = _MOST_COMMANDS[tool] * UPDATE_TIMEOUT_SECONDS + _LOCK_MARGIN_SECONDS
+    return max(LOCK_TIMEOUT_SECONDS, longest)
+
+
+def _lock_refused(tool: str, lock: Path, exc: OSError) -> ScannerError:
+    """The ``ScannerError`` for a lock ``exclusive_lock`` could not take."""
+    return ScannerError(
+        f"the {tool} database update could not take its lock "
+        f"{lock.as_posix()} ({exc}). Make that file and its directory "
+        "usable by this account, or wait for the update that holds it, "
+        "and run ASH again."
+    )
+
+
+@contextlib.contextmanager
+def _refresh_lock(
+    tool: str, lock: Path, *, fallback: Optional[Path] = None
+) -> Iterator[None]:
+    """Hold ``exclusive_lock`` on ``lock`` for the block, and word its refusals.
+
+    What ``exclusive_lock`` raises while taking the lock (a lock file or directory
+    this account cannot open, a name that is not a regular file, a holder that has
+    kept it past the bound) becomes the ``ScannerError`` the scanners turn into a
+    failed scanner, instead of an ``OSError`` or ``TimeoutError`` that ends the
+    scan. Only the taking is worded here: whatever the block raises passes
+    through as it is. The wait for a holder is ``_lock_wait_seconds(tool)``.
+
+    ``fallback`` is the lock to take instead when ``lock`` is refused for a reason
+    other than a holder: the shared temporary lock, whose name any account can
+    have left, passes the mode check in ``_lock_is_openable`` and can still be
+    refused by the filesystem, and the lock named for this account, which this
+    account made itself, is then what the refresh takes, as it did before the
+    shared name existed. A holder that has kept ``lock`` past the bound is not a
+    refusal to route around: another update is running, and taking a second name
+    would let this refresh run beside it instead of after it.
+    """
+    wait = _lock_wait_seconds(tool)
+    with contextlib.ExitStack() as held:
+        try:
+            held.enter_context(exclusive_lock(lock, timeout=wait))
+        except OSError as exc:  # TimeoutError is one
+            if fallback is None or isinstance(exc, TimeoutError):
+                raise _lock_refused(tool, lock, exc) from exc
+            ASH_LOGGER.debug(
+                f"the {tool} database update could not take {lock.as_posix()} "
+                f"({exc}); taking {fallback.as_posix()}"
+            )
+            try:
+                held.enter_context(exclusive_lock(fallback, timeout=wait))
+            except OSError as second:
+                raise _lock_refused(tool, fallback, second) from second
+        yield
 
 
 def prepare_content_db(
@@ -373,31 +681,50 @@ def prepare_content_db(
             (``scan_id_for``). None refreshes on every call (the tool itself
             returns at once when current).
         executable: The tool to run; found on PATH when not given.
-        config_file: trivy only: the config file to pass instead of an empty one.
-            Only a file the caller has established is the operator's and outside
-            the scanned tree (``TrivyScannerBase._operator_path``); never one the
+        config_file: The operator's config file to pass instead of an empty one
+            (``--config`` for trivy, ``-c`` for grype), so a database mirror or
+            CA it names applies to the update as it does to the scan. Only a
+            file the caller has established is the operator's and outside the
+            scanned tree (``TrivyScannerBase._operator_path``); never one the
             scanned repository could have written.
         values: The caller's env-read values: a failed update's stderr excerpt
             is redacted with them BEFORE it is cut, so the cut cannot split a
             value and leave a fragment the downstream whole-spelling
             redaction misses.
 
-    A trivy update the operator's settings turn off is not run, with a warning; see
-    "The operator's opt-out" above.
+    An update the operator's trivy skip settings turn off is not run, with a
+    warning. So is grype's, when the environment sets ``GRYPE_DB_AUTO_UPDATE`` to a
+    value that reads as false. The same setting in grype's config file leaves the
+    update in and is said once; see "The operator's opt-out" above.
 
     Raises:
-        ScannerError: The tool is missing, failed, or timed out.
+        ScannerError: The tool is missing, failed, or timed out, ``config_file``
+            is inside the scanned tree, or the refresh lock could not be taken (a
+            lock file that is not a regular file, a directory this account cannot
+            use, another process holding it past the bound). The scanners turn this
+            error into a failed scanner; any other exception type would end the
+            scan instead.
+        ValueError: ``tool`` is not one this module refreshes (a programming error).
     """
     if tool not in TOOLS:
         raise ValueError(f"no content database refresh for {tool!r}")
-    if config_file is not None and tool != "trivy":
-        raise ValueError(f"no config file for the {tool} refresh")
     if offline:
         return
     cache = Path(os.path.abspath(Path(cache_dir).expanduser()))
     operator_config = (
         Path(os.path.abspath(config_file)) if config_file is not None else None
     )
+    if operator_config is not None and in_scanned_tree(operator_config, source_dir):
+        # Defense in depth behind the callers' own check: this update runs outside
+        # the sandbox and writes the shared cache, so a config the scanned
+        # repository could have written (a database mirror, a CA) never reaches
+        # it, whatever a caller passes.
+        raise ScannerError(
+            f"the {tool} config file given to the database refresh, "
+            f"{operator_config.as_posix()}, is inside the scanned tree "
+            f"{Path(source_dir).as_posix()}; the refresh takes only the operator's "
+            "own config, outside the tree it scans"
+        )
     key = (
         tool,
         cache.as_posix(),
@@ -417,27 +744,40 @@ def prepare_content_db(
             *(["Java database"] if java else []),
             *(["checks bundle"] if checks else []),
         ]
-    skipped = {
-        what: setting
-        for what, setting in (
-            trivy_update_opt_outs(env, operator_config) if tool == "trivy" else {}
-        ).items()
-        if what in wanted
-    }
+    skipped: Dict[str, str]
+    if tool == "grype":
+        # trivy's skip settings make `--download-db-only` fail, so they have to be
+        # honored. grype's `GRYPE_DB_AUTO_UPDATE` does not block `grype db update`,
+        # but an operator who sets it false in the environment asked for no
+        # database traffic, and ASH does not fetch over that word: the update is
+        # left out and the skip is warned about (below). The config key
+        # `db.auto-update` is read as before: the update runs and the setting is
+        # said once per process.
+        env_setting = _env_opt_out(env, GRYPE_UPDATE_OPT_OUT[0], opt_out=_GO_FALSE)
+        if env_setting is not None:
+            skipped = {"database": env_setting}
+        else:
+            skipped = {}
+            config_setting = grype_update_opt_outs(env, operator_config).get("database")
+            if config_setting is not None:
+                _say_grype_auto_update_once(config_setting, cache)
+    else:
+        opt_outs = trivy_update_opt_outs(env, operator_config)
+        skipped = {
+            what: setting for what, setting in opt_outs.items() if what in wanted
+        }
     for what, setting in skipped.items():
-        ASH_LOGGER.warning(
-            f"ASH did not update trivy's {what} in {cache.as_posix()} before the "
-            f"scan: the operator's {setting} turns trivy's own update off, and ASH "
-            "honors it. trivy reads what is already in the cache; the scan-time "
-            "staleness check still holds trivy's vulnerability database to its bound."
-        )
+        ASH_LOGGER.warning(_skipped_update_notice(tool, what, setting, cache))
     if any(what not in skipped for what in wanted):
         program = executable or find_executable(tool)
         if not program:
             raise ScannerError(
                 f"{tool} is not installed, so its database cannot be updated"
             )
-        with exclusive_lock(update_lock_path(tool, cache)), outside_scanner_sandbox():
+        lock = update_lock_path(tool, cache)
+        shared, account = _temporary_locks(tool, cache)
+        fallback = account if lock == shared else None
+        with _refresh_lock(tool, lock, fallback=fallback), outside_scanner_sandbox():
             workdir = Path(tempfile.mkdtemp(prefix=f"ash-{tool}-refresh-"))
             try:
                 # Placed by the same rule as checkov's scans, inside this block so
@@ -463,8 +803,44 @@ def prepare_content_db(
             finally:
                 shutil.rmtree(workdir, ignore_errors=True)
     if scan_id is not None:
-        with _prepared_lock:
-            _prepared.add(key)
+        _remember_prepared(key)
+
+
+def _skipped_update_notice(tool: str, what: str, setting: str, cache: Path) -> str:
+    """The warning for an update left out on the operator's ``setting``."""
+    if tool == "grype":
+        return (
+            f"ASH did not update grype's {what} in {cache.as_posix()} before the "
+            f"scan: the operator's {setting} turns grype's own update off, and ASH "
+            "honors it by fetching nothing from the database registry. A stale "
+            "database stays in use if the cache holds one; the scan-time staleness "
+            "check still holds grype's vulnerability database to its bound."
+        )
+    return (
+        f"ASH did not update {tool}'s {what} in {cache.as_posix()} before the "
+        f"scan: the operator's {setting} turns {tool}'s own update off, and ASH "
+        f"honors it. {tool} reads what is already in the cache; the scan-time "
+        f"staleness check still holds {tool}'s vulnerability database to its bound."
+    )
+
+
+def _say_grype_auto_update_once(setting: str, cache: Path) -> None:
+    """Say, once per process and setting, that grype's config file turns its own
+    update off, which ASH does not read as a request to leave its refresh out:
+    the scan runs against a read-only cache, so ASH updates the database for it.
+    An offline scan updates nothing."""
+    with _prepared_lock:
+        if setting in _grype_notices:
+            return
+        _grype_notices.add(setting)
+    ASH_LOGGER.warning(
+        f"The operator's {setting} turns grype's own database update off, which "
+        "ASH does not read as a request to leave its own refresh out: ASH still "
+        f"updates grype's database in {cache.as_posix()} before the scan, because "
+        "the scanner cannot update it itself. To keep ASH off the database "
+        "registry, set GRYPE_DB_AUTO_UPDATE=false in the environment or run the "
+        "scan offline."
+    )
 
 
 def _commands(
@@ -479,8 +855,10 @@ def _commands(
 ) -> List[Tuple[List[str], Dict[str, str], str]]:
     """The update commands, each with its environment and what it updates.
 
-    ``config_file`` is ``EMPTY_TOOL_CONFIG``, or for trivy the operator's file.
-    ``what`` is a key of ``TRIVY_UPDATE_OPT_OUTS`` for the commands that have one.
+    ``config_file`` is ``EMPTY_TOOL_CONFIG``, or the operator's own file for either
+    tool (``-c`` for grype, ``--config`` for trivy). ``what`` is a key of
+    ``TRIVY_UPDATE_OPT_OUTS`` for trivy's commands and ``database``, the key of
+    ``grype_update_opt_outs``, for grype's.
     """
     env = dict(env)
     config = config_file.as_posix()
@@ -506,8 +884,28 @@ def _commands(
     if checks:
         empty = workdir / "empty-target"
         empty.mkdir()
+        # The report of this scan of nothing goes to a file in the work directory,
+        # removed with it, in the default format: pinned on the command line, where
+        # it beats the operator's TRIVY_OUTPUT or TRIVY_FORMAT and the `output:` or
+        # `format:` of the trivy.yaml this command runs with. Left to those, the
+        # fetch wrote an empty report over the operator's own report file, or
+        # failed on a format that needs a template.
+        report = workdir / "checks-bundle-report"
         commands.append(
-            ([program, "config", *common, empty.as_posix()], env, "checks bundle")
+            (
+                [
+                    program,
+                    "config",
+                    *common,
+                    "--format",
+                    "table",
+                    "--output",
+                    report.as_posix(),
+                    empty.as_posix(),
+                ],
+                env,
+                "checks bundle",
+            )
         )
     return commands
 
@@ -524,6 +922,11 @@ def _run(
             argv,
             capture_output=True,
             text=True,
+            # Replacement, not the strict default: a byte the locale encoding
+            # does not read in the tool's output raised UnicodeDecodeError out
+            # of here, past the ScannerError every other failure becomes, even
+            # when the tool had succeeded.
+            errors="replace",
             env=env,
             cwd=cwd,
             timeout=UPDATE_TIMEOUT_SECONDS,
@@ -538,10 +941,13 @@ def _run(
     if proc.returncode != 0:
         from automated_security_helper.utils.error_text import shown_tool_stderr
 
-        # REDACTED BEFORE the excerpt is cut: a cut can split a quoted
+        # The stderr when it holds anything beyond whitespace, else the stdout:
+        # a stderr of a bare line break is no reason, and the reason is then on
+        # stdout. REDACTED BEFORE the excerpt is cut: a cut can split a quoted
         # env-read value, and the downstream whole-spelling redaction cannot
         # match the fragment.
-        detail = shown_tool_stderr((proc.stderr or proc.stdout or "").strip(), values)
+        printed = (proc.stderr or "").strip() or (proc.stdout or "").strip()
+        detail = shown_tool_stderr(printed, values)
         if len(detail) > 2000:
             detail = f"{detail[:1000]} ... {detail[-1000:]}"
         raise ScannerError(
@@ -579,3 +985,10 @@ def forget_prepared() -> None:
     """Forget which scans were prepared. For tests."""
     with _prepared_lock:
         _prepared.clear()
+        _grype_notices.clear()
+
+
+def prepared_count() -> int:
+    """How many scans are remembered as prepared. For tests."""
+    with _prepared_lock:
+        return len(_prepared)

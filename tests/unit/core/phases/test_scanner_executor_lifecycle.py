@@ -157,8 +157,10 @@ class TestNotify:
 class TestExecuteScannerRawResultShapes:
     """_execute_scanner normalizes each raw_results shape it can receive."""
 
-    def test_disabled_scanner_is_not_run_and_yields_failure_results(self, tmp_path):
-        """A disabled scanner is skipped and its container records the miss."""
+    def test_disabled_scanner_is_not_run_and_is_left_unscanned(self, tmp_path):
+        """A disabled scanner is skipped and its container records the miss as a
+        SKIPPED, excluded row with the reason, not as a failure: nobody asked it
+        to run, so there is no result to grade and nothing it failed at."""
         ctx = _make_context(tmp_path)
         scanner = _make_scanner(
             ctx, scripted_result=SarifReport(runs=[]), enabled=False
@@ -170,8 +172,10 @@ class TestExecuteScannerRawResultShapes:
 
         assert scanner.scan_calls == [], "a disabled scanner must not be invoked"
         assert len(results) == 1
-        assert results[0].raw_results["status"] == "failed"
-        assert results[0].raw_results["exception"] == "Scanner returned None"
+        assert results[0].status == ScannerStatus.SKIPPED, results[0].errors
+        assert results[0].excluded is True
+        assert "disabled in the configuration" in (results[0].skipped_reason or "")
+        assert results[0].raw_results is None
         assert any(
             "is not enabled" in str(c.args[0])
             for c in mock_logger.warning.call_args_list

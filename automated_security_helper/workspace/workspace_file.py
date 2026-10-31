@@ -79,12 +79,33 @@ Failure modes and known limitations
 -----------------------------------
 * JSON only, not JSONC. VS Code tolerates ``//`` comments and trailing commas in
   ``.code-workspace`` files; :mod:`json` does not, so a commented file is
-  rejected. The error message says so explicitly, because "Expecting value:
-  line 2 column 3" sends the reader looking for the wrong problem. Stripping
-  comments was considered and rejected: doing it correctly requires a real
-  tokeniser, since ``//`` inside a string literal is data, and a naive stripper
-  silently corrupts paths like ``https://...``. Rejecting with an actionable
-  message is the honest failure.
+  rejected. The error message says so on every parse failure, because
+  "Expecting value: line 2 column 3" sends the reader looking for the wrong
+  problem. It says what VS Code accepts and ASH does not, and claims nothing
+  about this file: a trailing comma alone leaves no comment marker to detect,
+  and a ``//`` inside a URL string is data, so a hint keyed on the text pointed
+  at the wrong problem both ways. Stripping comments was considered and rejected:
+  doing it correctly requires a real tokeniser, since ``//`` inside a string
+  literal is data, and a naive stripper silently corrupts paths like
+  ``https://...``. Rejecting with an actionable message is the honest failure.
+* A leading byte order mark is dropped (``utf-8-sig``), as ASH's own JSON config
+  reader drops it: Windows PowerShell 5 writes one, and the file was refused as
+  invalid JSON for it.
+* A parse failure that is not ``JSONDecodeError`` is refused the same way:
+  ``RecursionError`` for a document nested past the interpreter's limit, and the
+  ``ValueError`` Python 3.11 and later raise for an integer literal past the
+  digit limit. Both escaped as tracebacks, exit 1.
+* A workspace file that is a symlink is read where the operator named it: the
+  workspace root is the directory holding the link, made canonical, and not the
+  directory holding the link's target. Folder entries are relative to the file
+  the operator opened, as they are in VS Code, and a link into another tree
+  would otherwise move every project to that tree.
+* Existence is read with ``os.stat`` and the error kept: ``Path.exists()`` and
+  ``Path.is_file()`` raised a bare ``PermissionError`` for a file under an
+  unsearchable directory on Python 3.10-3.13 (exit 1) and read it as absent on
+  3.14, where the module promises exit 4 for every unusable input. Discovery
+  lists the directory the same way: an unlistable directory is a refusal, not
+  "no workspace file found".
 * Duplicate ``folders`` entries are not detected here. Two entries naming the
   same directory -- textually, or via a symlink -- are caught by the resolver's
   overlap detection, which compares canonicalised real paths and therefore
@@ -98,6 +119,8 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import json
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Tuple, Union
@@ -122,10 +145,12 @@ _PATH_KEY = "path"
 # Rejected from the raw text, before any pathlib call. See the module docstring.
 _NULL_CHARACTER = "\x00"
 
-# Substrings that mean "this is probably JSONC, not JSON". Used only to improve
-# the error message after json has already refused the content, never to decide
-# whether the content is valid.
-_COMMENT_MARKERS = ("//", "/*")
+# What every parse refusal adds. It names what VS Code accepts and ASH does not
+# and claims nothing about this file: see "JSON only, not JSONC" above.
+_STRICT_JSON_HINT = (
+    " VS Code accepts comments and trailing commas in this file; ASH reads "
+    "strict JSON, so remove any '//' or '/* */' comments and trailing commas."
+)
 
 
 @dataclass(frozen=True)
@@ -147,7 +172,9 @@ class WorkspaceDefinition:
     """A parsed workspace definition.
 
     Attributes:
-        path: Canonical absolute path of the ``.code-workspace`` file.
+        path: Absolute path of the ``.code-workspace`` file where the operator
+            named it, its directory made canonical: for a link, the link's own
+            location, not its target's.
         root: Canonical absolute directory holding it. This is the workspace
             root: folder entries resolve against it, containment is judged
             against it, and in container mode it is what gets mounted at
@@ -170,7 +197,9 @@ def _read_json(workspace_file: Path) -> Any:
     """Read and parse the workspace file, or raise with an actionable message."""
     undecoded = ""
     try:
-        raw = workspace_file.read_text(encoding="utf-8")
+        # utf-8-sig: a leading byte order mark is dropped, as the JSON config
+        # reader drops it (config_sources._read_config_file).
+        raw = workspace_file.read_text(encoding="utf-8-sig")
     except OSError as exc:
         raise _reject(
             f"workspace file '{workspace_file.as_posix()}' could not be read: {exc}"
@@ -188,16 +217,18 @@ def _read_json(workspace_file: Path) -> Any:
 
     try:
         return json.loads(raw)
-    except json.JSONDecodeError as exc:
-        hint = ""
-        if any(marker in raw for marker in _COMMENT_MARKERS):
-            hint = (
-                " It appears to contain comments; ASH reads strict JSON, so "
-                "remove any '//' or '/* */' comments and trailing commas."
-            )
+    except (ValueError, RecursionError) as exc:
+        # json.JSONDecodeError is a ValueError; so is the integer-digit-limit
+        # refusal of Python 3.11 and later. RecursionError is a document nested
+        # past the interpreter's limit. Every one is "this file is not usable".
+        reason = (
+            parse_error_kind(exc)
+            if isinstance(exc, json.JSONDecodeError)
+            else (f"({type(exc).__name__})")
+        )
         raise _reject(
-            f"workspace file '{workspace_file.as_posix()}' is not valid JSON: "
-            f"{exc}.{hint}"
+            f"workspace file '{workspace_file.as_posix()}' is not valid JSON "
+            f"{reason}.{_STRICT_JSON_HINT}"
         ) from exc
 
 
@@ -323,22 +354,59 @@ def load_workspace_file(workspace_file: PathLike) -> WorkspaceDefinition:
             here is exit code 4" in the module docstring for the full list.
     """
     candidate = Path(workspace_file)
+    _refuse_unless_a_regular_file(candidate)
 
-    if not candidate.exists():
-        raise _reject(f"workspace file '{candidate.as_posix()}' does not exist")
-    if not candidate.is_file():
-        raise _reject(f"workspace file '{candidate.as_posix()}' is not a file")
-
-    resolved = candidate.resolve()
-    _refuse_a_file_path_that_is_not_utf8(resolved)
-    document = _read_json(resolved)
-    folders = _parse_folders(document, resolved)
+    # The file where the operator named it, its directory canonical: a link's
+    # own location, so the workspace root is the directory holding the link and
+    # folder entries resolve against the tree the operator opened. resolve() of
+    # the file itself would move the root to the link target's directory.
+    located = _resolved_directory(candidate.parent) / candidate.name
+    _refuse_a_file_path_that_is_not_utf8(located)
+    document = _read_json(located)
+    folders = _parse_folders(document, located)
 
     return WorkspaceDefinition(
-        path=resolved,
-        root=resolved.parent,
+        path=located,
+        root=located.parent,
         folders=folders,
     )
+
+
+def _refuse_unless_a_regular_file(candidate: Path) -> None:
+    """Refuse *candidate* unless a regular file is at it, with the error kept.
+
+    ``os.stat``, not ``Path.exists()``/``is_file()``: those raised a bare
+    ``PermissionError`` for a file under an unsearchable directory on Python
+    3.10-3.13 (a traceback, exit 1) and read it as absent on 3.14, where every
+    unusable input here is exit 4.
+    """
+    label = f"workspace file '{candidate.as_posix()}'"
+    try:
+        mode = os.stat(candidate).st_mode
+    except FileNotFoundError as exc:
+        raise _reject(f"{label} does not exist") from exc
+    except OSError as exc:
+        raise _reject(
+            f"{label} could not be examined ({exc.strerror or type(exc).__name__})"
+        ) from exc
+    if not stat.S_ISREG(mode):
+        raise _reject(f"{label} is not a file")
+
+
+def _resolved_directory(directory: Path) -> Path:
+    """*directory* made canonical, or the refusal for one that cannot be.
+
+    ``Path.resolve`` raises ``RuntimeError`` for a symlink loop on CPython 3.10
+    to 3.12 and ``OSError`` for a few unreadable shapes.
+    """
+    try:
+        return directory.resolve()
+    except (RuntimeError, OSError) as exc:
+        raise _reject(
+            f"workspace directory '{directory.as_posix()}' cannot be resolved: a "
+            f"component on the way to it is a symlink loop or cannot be read "
+            f"({type(exc).__name__})"
+        ) from exc
 
 
 def discover_workspace_file(search_dir: PathLike) -> Path:
@@ -356,18 +424,27 @@ def discover_workspace_file(search_dir: PathLike) -> Path:
         The canonical absolute path of the one candidate found.
 
     Raises:
-        WorkspaceDefinitionError: When there is no candidate, or more than one.
-            Ambiguity is refused rather than resolved by sort order or mtime,
-            both of which would silently pick a different file as the directory
-            changes. The message lists every candidate so the operator can name
-            one explicitly.
+        WorkspaceDefinitionError: When there is no candidate, or more than one,
+            or the directory cannot be listed. Ambiguity is refused rather than
+            resolved by sort order or mtime, both of which would silently pick a
+            different file as the directory changes. The message lists every
+            candidate so the operator can name one explicitly.
     """
     directory = Path(search_dir)
+    # os.listdir with its error kept, not Path.glob, which swallows a
+    # PermissionError and reads an unlistable directory as holding nothing.
+    try:
+        names = os.listdir(directory)
+    except OSError as exc:
+        raise _reject(
+            f"'{directory.as_posix()}' could not be listed for a "
+            f"'*{WORKSPACE_FILE_SUFFIX}' file ({exc.strerror or type(exc).__name__})"
+        ) from exc
     candidates = sorted(
-        entry
-        for entry in directory.glob(f"*{WORKSPACE_FILE_SUFFIX}")
+        directory / name
+        for name in names
         # A directory can carry the suffix; it is not a definition.
-        if entry.is_file()
+        if name.endswith(WORKSPACE_FILE_SUFFIX) and _is_a_regular_file(directory / name)
     )
 
     if not candidates:
@@ -385,4 +462,18 @@ def discover_workspace_file(search_dir: PathLike) -> Path:
             [candidate.as_posix() for candidate in candidates],
         )
 
-    return candidates[0].resolve()
+    # The directory canonical, the file as named: a linked definition is read
+    # where it was found (see load_workspace_file).
+    return _resolved_directory(directory) / candidates[0].name
+
+
+def _is_a_regular_file(path: Path) -> bool:
+    """Whether a regular file is at *path*; one that cannot be examined is not.
+
+    For discovery's candidate filter, where a candidate that cannot be examined
+    is not a definition to pick. ``Path.is_file()`` raised instead on 3.10-3.13.
+    """
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except OSError:
+        return False

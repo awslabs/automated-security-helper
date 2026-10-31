@@ -1,6 +1,6 @@
 [project]
 name = "automated-security-helper"
-version = "3.7.0"
+version = "3.7.1"
 description = "Automated Security Helper for GitHub Actions"
 requires-python = ">=3.10,<3.15"
 readme = "README.md"
@@ -240,7 +240,7 @@ automated-security-helper = "automated_security_helper.cli.entrypoint:main"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "3.7.0"
+version = "3.7.1"
 # Every entry below names a file that pins an ASH git tag someone else installs
 # from. They are listed here because a pin nothing rewrites goes stale silently:
 # the release succeeds, the package version moves, and the stale pin keeps
@@ -280,7 +280,14 @@ version = "3.7.0"
 #
 # building-your-own-image.md joined when its install commands stopped naming
 # ASH's distribution bare, which PyPI resolves to an unrelated project, and
-# started naming the git tag instead.
+# started naming the git tag instead; it left with cli-reference.md and
+# mcp-performance-scalability.md when the docs restructure replaced those pages
+# (docs/redirects.yml). Its successor, how-to/run-in-a-container.md, is rendered
+# from a template by scripts/version_template_manager.py instead, and the two
+# other successors carry no install pin.
+# docs/content/index.md is here because it has no template since that
+# restructure: its front matter `ash_version` (read by docs/overrides/home.html)
+# and its install commands would otherwise keep the release they were written at.
 # suppressions.md is not listed: its install commands ask for the `symbols`
 # extra, which no tag up to v3.7.1 defines, so they name `main` until a release
 # has it.
@@ -313,6 +320,21 @@ version = "3.7.0"
 # the contract test discovers the pins itself, so a new template or example that
 # is missing from this list fails it.
 #
+# The three tests/unit/ entries are fixtures, not install instructions:
+# test_docs_checks_can_fail.py (a docs page the docs checks are given),
+# test_reusable_workflow_defaults.py (the reusable workflow's expected install
+# source) and test_no_bare_name_install_hints.py (the install forms the bare-name
+# hint checker must recognize) each spell an install command with the real
+# repository URL, so the install-ref walk in
+# tests/unit/test_agent_plugin_ash_version.py reads them as pins and compares
+# them with `version` above. The 3.7.1 bump left them at 3.7.0, and the walk was
+# red at the release commit; listed here, a bump moves them with everything
+# else. The regex entries keep the bump off the lines that name a version on
+# purpose: a docstring's historical release, and the docs-site versions a link
+# check is handed. The patterns end at `@`, never at the `v` after it: the walk's
+# loose pin reader takes a repository name, `@`, `v` and no version after them as
+# a malformed pin, in this list's own entries as in any other line of the tree.
+#
 # On pattern choice: commitizen matches each regex per line, then replaces the
 # bare current version within the matching lines. `ash_version` is used rather
 # than `version` because manifest.json also carries the plugin's own unrelated
@@ -334,10 +356,11 @@ version_files = [
     "ash-agent-plugins/agentic-coding/transpiler/_base/mcp.json:automated-security-helper@",
     "ash-agent-plugins/agentic-coding/transpiler/_base/commands/scan.md:automated-security-helper@",
     "ash-agent-plugins/agentic-coding/transpiler/_base/references/troubleshooting.md:automated-security-helper@",
-    "docs/content/docs/cli-reference.md:automated-security-helper@",
-    "docs/content/docs/mcp-performance-scalability.md:automated-security-helper@",
     "docs/content/docs/plugins/community/trivy-plugin.md:automated-security-helper.git@",
-    "docs/content/docs/building-your-own-image.md:automated-security-helper.git@",
+    "docs/content/index.md:ash_version:",
+    "docs/content/index.md:automated-security-helper.git@",
+    "docs/content/index.md:--branch v",
+    "docs/content/index.md:rev: v",
     "deploy/cdk/lib/ash-config.ts:DEFAULT_ASH_VERSION =",
     "deploy/cdk/templates/AshAgentCore.template.json:\"Default\": \"v[0-9]",
     "deploy/cdk/templates/AshCodeCommitGate.template.json:\"Default\": \"v[0-9]",
@@ -358,6 +381,11 @@ version_files = [
     "deploy/terraform/modules/fargate/examples/basic/main.tf:^\\s+ash_version\\s+=",
     "examples/AWSCodeBuild/buildspec.yml:RELEASE_TAG:",
     "examples/AWSCodeBuild/README.md:^\\| `RELEASE_TAG`",
+    "tests/unit/test_docs_checks_can_fail.py:automated-security-helper.git@",
+    "tests/unit/test_docs_checks_can_fail.py:rev: v",
+    "tests/unit/test_no_bare_name_install_hints.py",
+    "tests/unit/test_reusable_workflow_defaults.py:CHECKED_ASH_VERSION",
+    "tests/unit/test_reusable_workflow_defaults.py:automated-security-helper@",
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on
 # the old tag until the transpiler reruns, and `agentic-plugins check` byte-

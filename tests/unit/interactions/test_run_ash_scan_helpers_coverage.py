@@ -1180,8 +1180,10 @@ class TestARunWithoutAReportPhaseRecordsNoReports:
         written = json.loads(
             (output_dir / "ash_aggregated_results.json").read_text(encoding="utf-8")
         )
+        # The record also carries the token of the process that wrote it, which
+        # this test does not compare.
         assert [
-            checkpoint["metadata"]
+            {key: checkpoint["metadata"][key] for key in ("files", "formats")}
             for checkpoint in written["validation_checkpoints"]
             if checkpoint.get("type") == "reports_written"
         ] == [{"files": [], "formats": {}}]

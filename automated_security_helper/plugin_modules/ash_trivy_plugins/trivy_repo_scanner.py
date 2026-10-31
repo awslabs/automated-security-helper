@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-import os
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal, Optional, Set, Tuple
+from typing import Annotated, Any, ClassVar, List, Literal, Optional, Set
 from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -19,6 +19,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanne
     TrivyScannerBase,
     reset_trivy_default_misconfig_scanners as reset_trivy_default_misconfig_scanners,
     trivy_default_misconfig_scanners,
+    trivy_timeout,
 )
 from automated_security_helper.base.scanner_plugin import (
     redacted_command_record,
@@ -36,7 +37,6 @@ from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
-from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.process_env import snapshot_environ
 
 
@@ -163,7 +163,10 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
 
     The option-to-flag mapping, install commands and package identity are shared
     with the ``trivy`` scanner of this module through ``TrivyScannerBase``; this class
-    keeps its own config and its own ``scan()``, so what it reports is unchanged.
+    keeps its own config and its own ``scan()``. Its names and output files are
+    unchanged; its results carry trivy's own severity, and its command ASH's scan
+    timeout as trivy's deadline and ``--skip-dirs`` for ASH's output directories,
+    as the builtin scanner's do.
     """
 
     #: trivy is a native binary. See ScannerPluginBase.python_only.
@@ -191,30 +194,25 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         )
         super().model_post_init(context)
 
-    def validate_plugin_dependencies(self) -> bool:
-        """Validate scanner configuration.
-
-        Returns:
-            bool: True if validation passes
-        """
-        trivy_binary = find_executable("trivy")
-        if not trivy_binary or trivy_binary is None:
-            return False
-        return True
-
     def _process_config_options(self):
         self._append_trivy_options()
+        if self.config.options.ignore_unfixed:
+            # The default here, unlike the builtin trivy scanner's, so every default
+            # run says once what it withholds, as grype's config warning does. Once
+            # per scanner (_warned_inputs), however often the options are read, and
+            # as set: "the default" only when the option was not written.
+            written = "ignore_unfixed" in self.config.options.model_fields_set
+            warning = (
+                "scanners.trivy-repo.options.ignore_unfixed is true "
+                f"({'set in the configuration' if written else 'the default'}), "
+                "which restricts which vulnerabilities reach the report: those with "
+                "no fixed version are withheld, and the scan can pass with them "
+                "present. Set it to false to report them."
+            )
+            if warning not in self._warned_inputs:
+                self._warned_inputs.add(warning)
+                self._plugin_log(warning, level=logging.WARNING)
         return super()._process_config_options()
-
-    def _environment_values(self) -> Tuple[str, ...]:
-        """The configuration's environment values, plus the two variables this
-        scanner reads straight from the environment (never through the
-        configuration), so text that quotes one is redacted."""
-        read = (
-            os.environ.get("TRIVY_IGNOREFILE"),
-            os.environ.get("TRIVY_SECRET_CONFIG"),
-        )
-        return (*super()._environment_values(), *(value for value in read if value))
 
     def _default_misconfig_scanners(self, binary: str) -> Optional[List[str]]:
         """``TrivyScannerBase._default_misconfig_scanners``, looked up in this module.
@@ -248,11 +246,14 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 "trivy-repo runs with an empty modules directory instead.",
             )
             if module_dir is not None and not module_dir.is_dir():
+                # Key only, as the other input refusals (_existing_file): an
+                # option's value can come from the environment, and the path it
+                # resolved to spells that value.
                 raise ScannerError(
-                    f"scanners.trivy-repo.options.module_dir is "
-                    f"{str(options.module_dir)!r}, which is not a directory "
-                    f"(resolved to {module_dir.as_posix()}). Fix the path or unset "
-                    "the option."
+                    "scanners.trivy-repo.options.module_dir does not name a "
+                    "directory: the path it is set to does not exist or is not a "
+                    "directory. Fix the path or unset the option; trivy is not run "
+                    "without it."
                 )
         if module_dir is None:
             module_dir = empty_tool_directory("trivy-modules", context=self.context)
@@ -262,15 +263,16 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         ]
 
     def content_databases_in_use(self) -> list:
-        """trivy-db, unless the scan's ``--scanners`` leave out ``vuln``.
+        """trivy-db, unless the scan's effective scanners leave out ``vuln``.
 
-        The secret, misconfiguration and license scanners never open it. An empty
-        ``scanners`` list passes no ``--scanners``, so trivy runs its own default
-        (``vuln,secret``, pkg/flag/scan_flags.go) or what a trivy.yaml says, and the
-        database is held to its bounds then too.
+        The secret, misconfiguration and license scanners never open it. The set
+        is read as trivy reads it (``TrivyScannerBase._effective_scanners``: the
+        option, else ``TRIVY_SCANNERS``, else the config file's ``scan.scanners``,
+        else trivy's own ``vuln,secret`` default), the same reading the database
+        update is gated on: a run whose scanners never open the database skips the
+        update, and must not then be held to that database's age.
         """
-        scanners = self.config.options.scanners or []
-        if scanners and "vuln" not in scanners:
+        if "vuln" not in self._effective_scanners():
             return []
         return super().content_databases_in_use()
 
@@ -284,13 +286,17 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
+        global_ignore_paths: List[Any] | None = None,
         config: Any | None = None,
         *args,
         **kwargs,
     ) -> SarifReport | bool | None:
-        """Scan a target file/directory.
+        """Run ``trivy repository`` on the target and return its SARIF report.
 
-        This example scanner simply logs the target and returns a mock finding.
+        The parameters are in the base ``scan()``'s order (target, target type,
+        the global ignore paths, then the config), so a caller that passes them by
+        position as the base declares them is read right; the executor passes
+        them by keyword.
 
         Args:
             target: Target file or directory to scan
@@ -299,14 +305,18 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             config: Scanner configuration
 
         Returns:
-            dict: Scan results
+            The SarifReport trivy wrote; True for an empty target; False when trivy
+            cannot run; None when trivy wrote no readable SARIF.
         """
-        # Per target; see ScannerPluginBase.scan().
+        # Per target; see ScannerPluginBase.scan(). The tool lines too: a failed
+        # converted-target run otherwise records the source target's stderr as its
+        # own (exitCodeDescription).
         self.exit_code = 0
-        # Passed by keyword, as the executor passes it to every scanner.
-        global_ignore_paths = kwargs.get("global_ignore_paths") or []
+        self.output = []
+        self._reset_errors()
+        global_ignore_paths = list(global_ignore_paths or [])
         # Check if the target directory is empty or doesn't exist
-        if not target.exists() or not any(target.iterdir()):
+        if _target_is_empty(target):
             message = (
                 f"Target directory {target} is empty or doesn't exist. Skipping scan."
             )
@@ -316,6 +326,10 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 level=logging.INFO,
                 append_to_stream="stderr",
             )
+            # No tool runs for this target, so its record starts and ends now: a
+            # start time left from the previous target would give it that
+            # target's duration.
+            self.start_time = None
             self._post_scan(
                 target=target,
                 target_type=target_type,
@@ -341,10 +355,20 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             )
             return False
 
+        # No exit code until trivy returns one, as the template's scan() has it: a
+        # scan refused before the tool starts reports none, not the 0 set above.
+        self.exit_code = None
+
+        # Set by the except block below; declared here so a way out of the try body
+        # that neither returns nor raises cannot reach the final raise unbound.
+        failure: Optional[str] = None
         try:
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
+            # A report left by an earlier run must not be read as this run's: trivy
+            # writes none when it fails, and the read below takes whatever is here.
+            results_file.unlink(missing_ok=True)
 
             final_args = self._resolve_arguments(
                 target=target,
@@ -356,14 +380,42 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             insert_at = (
                 len(head) if final_args[: len(head)] == head else len(final_args)
             )
-            final_args[insert_at:insert_at] = [
+            # The --config token first: the secret config is read by the secret
+            # scanner alone, and whether that scanner runs is read through the
+            # config file the run passes (TrivyScannerBase._effective_scanners).
+            pinned = self._pinned_config_args()
+            # ASH's own output directories inside the target, as the builtin
+            # trivy scanner skips them: the converted copies the converted
+            # target scans already, and an earlier run's reports and results.
+            output_dir_args = self._output_dir_skip_args(target, target_type)
+            # The operator's own skip entries are sized first and kept out of the
+            # links' share of the argument budget
+            # (TrivyScannerBase._operator_skip_plan): ASH's tokens have a fallback
+            # when left out, the operator's have none.
+            operator_skips = self._operator_skip_plan([*pinned, *output_dir_args])
+            inserted = [
                 f"--ignorefile={self._ignore_file()}",
-                f"--secret-config={self._secret_config_file()}",
-                *self._pinned_config_args(),
+                f"--secret-config={self._secret_config_file(pinned)}",
+                *pinned,
+                # trivy's own deadline is five minutes and fails the scan when it
+                # passes; matched to ASH's scan_timeout, as the builtin trivy scanner
+                # does, so the bound the operator set is the one that applies.
+                f"--timeout={trivy_timeout(self._effective_scan_timeout())}",
                 # Each link leaving the target (trivy follows no link), and each
                 # path the global ignore paths ignore.
-                *self._link_skip_args(target, global_ignore_paths),
+                *self._link_skip_args(
+                    target, global_ignore_paths, reserved=operator_skips.reserved
+                ),
+                *output_dir_args,
             ]
+            # The operator's own skip lists, which ASH's skip flags would
+            # otherwise replace (TrivyScannerBase._operator_skip_args).
+            inserted.extend(
+                self._operator_skip_args(
+                    inserted, operator_skips, target_type=target_type
+                )
+            )
+            final_args[insert_at:insert_at] = inserted
             if self._offline():
                 final_args = self._offline_misconfig_args(final_args)
             subprocess_env = (
@@ -371,7 +423,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             )
             # The database update, its skip flags and --cache-backend=memory are
             # added by TrivyScannerBase._run_subprocess, for trivy and trivy-repo
-            # alike (utils/content_db_refresh.py).
+            # alike (utils/content_db_refresh.py), IN PLACE on final_args: the
+            # SARIF invocation is recorded after the run, below, so it carries the
+            # command that ran rather than the one assembled here.
 
             # The values hook is overridable and is read once, guarded, for the
             # log line and both SARIF records. When it raised or gave no usable
@@ -380,32 +434,45 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             read = guarded_values_read(self)
             redact_values = read.values
             if redact_values is None:
-                shown_command = str(self.command)
-                recorded_command_line = shown_command
-                recorded_arguments: List[str] = []
                 self._plugin_log(
-                    f"Running command: {shown_command} (the arguments are not "
+                    f"Running command: {self.command} (the arguments are not "
                     f"shown: the plugin's values hook {read.failure()})",
                     target_type=target_type,
                     level=logging.VERBOSE,
                 )
             else:
-                shown_command = text_without_values(" ".join(final_args), redact_values)
-                recorded_command_line, recorded_arguments = redacted_command_record(
-                    final_args, redact_values
-                )
                 self._plugin_log(
-                    f"Running command: {shown_command}",
+                    "Running command: "
+                    f"{text_without_values(' '.join(final_args), redact_values)}",
                     target_type=target_type,
                     level=logging.VERBOSE,
                 )
 
+            effective_timeout = self._effective_scan_timeout()
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 env=subprocess_env,
-                timeout=self._effective_scan_timeout(),
+                timeout=effective_timeout,
             )
+            # The run is over: its end time is recorded here, before the invocation
+            # below reads it, so the first target's record carries this run's end
+            # rather than None and the second's rather than the first's.
+            self._post_scan(target=target, target_type=target_type)
+            # The command as it ran, with the flags _run_subprocess added in place.
+            if redact_values is None:
+                shown_command = str(self.command)
+                recorded_command_line = shown_command
+                recorded_arguments: List[str] = []
+            else:
+                shown_command = text_without_values(" ".join(final_args), redact_values)
+                recorded_command_line, recorded_arguments = redacted_command_record(
+                    final_args, redact_values
+                )
+            # A run the subprocess layer flagged (timed out, could not start, its
+            # output not recorded, ended by a foreign signal) is refused before its
+            # file is read, whatever exit code it carries.
+            self._refuse_flagged_response(response, effective_timeout)
             self._record_target_exit_code(response)
             self._refuse_rejected_exit_code(results_file)
 
@@ -418,6 +485,10 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                         scanner_results
                     )
                     sarif_report = self._attach_package_identity(sarif_report, target)
+                    # trivy's own per-result severity, as the builtin trivy scanner
+                    # reports it: without it ASH buckets the CVE rule's last CVSS
+                    # score, which is another package's rating for the same CVE.
+                    sarif_report = self._attach_trivy_severity(sarif_report)
 
                     # Attach scanner details for proper identification
                     sarif_report = attach_scanner_details(
@@ -453,10 +524,6 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                                 ),
                             )
                         ]
-                    self._post_scan(
-                        target=target,
-                        target_type=target_type,
-                    )
                     return sarif_report
                 except Exception as e:
                     self._plugin_log(
@@ -464,10 +531,6 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                         target_type=target_type,
                         level=logging.ERROR,
                         append_to_stream="stderr",
-                    )
-                    self._post_scan(
-                        target=target,
-                        target_type=target_type,
                     )
                     return
             else:
@@ -477,11 +540,48 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                     level=logging.WARNING,
                     append_to_stream="stderr",
                 )
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
+                return None
 
         except Exception as e:
-            # Check if there are useful error details
-            raise ScannerError(f"Trivy scan failed: {str(e)}")
+            # The run is over for this target, however it ended: the executor
+            # records end_time, and one left from the previous target would give
+            # this one an end before its start.
+            self.end_time = datetime.now(timezone.utc)
+            # Redacted, as the syft scanner's catch-all is: the text can quote a
+            # path the configuration read from the environment (an OSError naming
+            # the TRIVY_SECRET_CONFIG or TRIVY_IGNOREFILE file). Through the same
+            # guarded read as the command record above, so a values hook that
+            # raises does not replace this error with its own; with no usable
+            # answer nothing can be redacted, and the error text is not shown.
+            read = guarded_values_read(self)
+            if read.values is None:
+                failure = (
+                    "Trivy scan failed (the error text is not shown: the plugin's "
+                    f"values hook {read.failure()})"
+                )
+            else:
+                failure = text_without_values(
+                    f"Trivy scan failed: {str(e)}", read.values
+                )
+        # Raised outside the except block, so the original exception, whose text
+        # is not redacted, is attached to the new one neither as __context__ nor
+        # as __cause__: `raise ... from None` would only hide it from the default
+        # traceback while leaving it readable on the object. Every other exit of
+        # the try body returns, so this line is reached from the except alone; a
+        # future exit that falls through gets the generic text, not an unbound name.
+        raise ScannerError(failure or "Trivy scan failed")
+
+
+def _target_is_empty(target: Path) -> bool:
+    """Whether ``target`` is missing, or a directory with nothing in it.
+
+    A target that is a file is not empty, and a directory that cannot be listed
+    is left to the tool: the probe used to raise ``NotADirectoryError`` or
+    ``PermissionError`` out of ``scan()`` before its error handling began.
+    """
+    try:
+        if not target.exists():
+            return True
+        return target.is_dir() and not any(target.iterdir())
+    except OSError:
+        return False

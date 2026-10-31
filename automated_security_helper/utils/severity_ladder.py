@@ -59,10 +59,16 @@ So the strictness order, strictest first, is
 ``ALL < LOW < MEDIUM < HIGH < CRITICAL``, and ``stricter_of`` returns whichever
 argument sits earlier in it.
 
-A falsy threshold (``None`` or ``""``) is looser still: nothing fails, not even
+A threshold that is ``None`` or ``""`` is looser still: nothing fails, not even
 a critical finding. That is deliberate and predates this module -- it is how an
-operator turns the gate off -- so it is preserved exactly. Note that this makes
-the falsy value *not* a synonym for ``CRITICAL``.
+operator turns the gate off -- so the comparison functions preserve it exactly.
+Only those two values turn the gate off: a value that is not text (``0``,
+``False``, an empty list) names no rung and gates like ``CRITICAL``, in the
+comparison functions as in the gate. Note that this makes the gate-off value
+*not* a synonym for ``CRITICAL``. The one
+place that never returns a gate-off value is :func:`resolve_scanner_threshold`: a
+scanner's or the global settings' ``severity_threshold`` left blank is an unset
+value there, not a request for no gate, and falls through to the next default.
 
 Why the workspace field is called ``max_severity_threshold``
 -----------------------------------------------------------
@@ -103,7 +109,34 @@ Failure modes and known limitations
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+import logging
+import re
+from typing import Any, Callable, Dict, Optional, Set, Tuple
+
+
+def _ash_logger() -> logging.Logger:
+    """ASH's logger, by name and at call time.
+
+    By name, not through utils.log: that module imports the console, the thread
+    wrapper and the process environment, and this module is imported by the
+    models they build on, so the import would be a cycle. At call time, not at
+    import: core.constants imports this module before utils.log has set ASHLogger
+    as the logger class, and a ``getLogger("ash")`` run then makes the "ash"
+    logger a plain ``logging.Logger`` for the whole process, which drops the
+    run-scoped handler walk ASHLogger adds. The first warning is logged long
+    after utils.log has run.
+    """
+    return logging.getLogger("ash")
+
+
+#: The off-table threshold values warned about so far, one warning per value per
+#: process: the gate runs once per finding, and a warning per finding would say
+#: the same thing hundreds of times.
+_WARNED_OFF_TABLE: Set[str] = set()
+
+#: The types of non-text scanner thresholds that were dropped, warned about once
+#: each per process: the resolver runs once per target.
+_WARNED_DROPPED_SCANNER: Set[str] = set()
 
 # The ladder, as data. Ordered strictest to loosest -- see the module docstring
 # for why that is the opposite of the severity ordering.
@@ -176,33 +209,194 @@ def effective_sarif_level(result: object) -> str:
     return normalized if normalized in _SARIF_LEVEL_TO_SEVERITY else MISSING_SARIF_LEVEL
 
 
+def _rule_default_level(rule: object) -> Optional[str]:
+    """The level a rule's ``defaultConfiguration`` states, or None when it states
+    none."""
+    configuration = getattr(rule, "defaultConfiguration", None)
+    if configuration is None or "level" not in getattr(
+        configuration, "model_fields_set", ()
+    ):
+        return None
+    return effective_sarif_level(configuration)
+
+
+def component_labels(component: object) -> frozenset[str]:
+    """The names a tool component answers to: its ``name`` and ``fullName``,
+    lower-cased, empty when it states neither. Compared with
+    :func:`result_scanner_labels` to find the component a result's scanner
+    wrote."""
+    labels = set()
+    for field in ("name", "fullName"):
+        value = getattr(component, field, None)
+        if isinstance(value, str) and value.strip():
+            labels.add(value.strip().lower())
+    return frozenset(labels)
+
+
+def result_scanner_labels(result: object) -> frozenset[str]:
+    """The names of the scanner that produced *result*, lower-cased:
+    ``properties.scanner_name`` (an attribute or a ``model_extra`` key) and
+    ``properties.scanner_details.tool_name`` (a mapping or an object). Empty when
+    the result names none, or when a read raises: this runs on every result,
+    stand-ins included."""
+    labels = set()
+    try:
+        props = getattr(result, "properties", None)
+        if props is None:
+            return frozenset()
+        extra = getattr(props, "model_extra", None)
+        extra = extra if isinstance(extra, dict) else {}
+        candidates = [getattr(props, "scanner_name", None), extra.get("scanner_name")]
+        details = getattr(props, "scanner_details", None)
+        if details is None:
+            details = extra.get("scanner_details")
+        if isinstance(details, dict):
+            candidates.append(details.get("tool_name"))
+        elif details is not None:
+            candidates.append(getattr(details, "tool_name", None))
+        for value in candidates:
+            if isinstance(value, str) and value.strip():
+                labels.add(value.strip().lower())
+    except Exception:  # noqa: BLE001 -- see the docstring
+        return frozenset()
+    return frozenset(labels)
+
+
+def _first_rule_with_id(rules: list[Any], identifier: object) -> object:
+    """The first rule in *rules* whose ``id`` is *identifier*, or None."""
+    for rule in rules:
+        if getattr(rule, "id", None) == identifier:
+            return rule
+    return None
+
+
+def _rule_of(
+    result: object,
+    components: list[Any],
+    by_id: Dict[Any, object],
+    component_names: Optional[list[Any]] = None,
+) -> object:
+    """The rule *result* names, read as SARIF 3.27.5 lets a result name one.
+
+    In order: the ``rule`` reference (its ``toolComponent.index`` picks an
+    extension, else the driver; its ``index`` picks the rule there; else its
+    ``id``), ``ruleIndex`` into the driver's rules, then ``ruleId``. An indexed
+    rule whose id disagrees with the id the result also states is passed over
+    for the id. A hierarchical id (``CA1001/sub``) falls back to each shorter
+    prefix at a ``/``, so the rule ``CA1001`` grades its sub-results.
+
+    A lookup by id is scoped before it is global. *components* is the driver's
+    rule list followed by the extensions'; *component_names* (optional) is the
+    parallel list of each component's :func:`component_labels`. An id is looked
+    for first in the component the reference names, then in the component whose
+    labels share a name with the result's scanner (:func:`result_scanner_labels`),
+    and only then across every component in order (*by_id*, first copy wins,
+    which is SARIF's reading of a bare ``ruleId``: the driver's rule). Two
+    scanners can share a rule id (grype and trivy both name a CVE), and the
+    merge that aggregates their runs keeps each scanner's rules in its own
+    extension while dropping the result's component reference; read across every
+    component first-wins, a level-less copy of the id in one scanner's extension
+    graded another scanner's result "warning" where its own rule said "error".
+    """
+    reference = getattr(result, "rule", None)
+    body = getattr(reference, "root", reference)
+    stated_id = getattr(result, "ruleId", None) or getattr(body, "id", None)
+    named_rules: Optional[list[Any]] = None
+    scanner = result_scanner_labels(result) if component_names else frozenset()
+
+    def in_scope(candidate: Any) -> object:
+        """The rule with id *candidate* in the component the reference names, else
+        in the component of the result's scanner; None when neither holds it."""
+        if named_rules is not None:
+            found = _first_rule_with_id(named_rules, candidate)
+            if found is not None:
+                return found
+        if scanner:
+            for rules, labels in zip(components, component_names or []):
+                if labels and not labels.isdisjoint(scanner):
+                    found = _first_rule_with_id(rules, candidate)
+                    if found is not None:
+                        return found
+        return None
+
+    def by_stated_id() -> object:
+        # The stated id, then each shorter prefix at a "/".
+        candidates = []
+        candidate = stated_id
+        while candidate:
+            candidates.append(candidate)
+            if "/" not in candidate:
+                break
+            candidate = candidate.rsplit("/", 1)[0]
+        # Every prefix is tried within the result's own scope before any is tried
+        # across every component. A prefix tried globally as soon as it missed in
+        # scope let another scanner's exact ``CA1001/sub`` win over the result's
+        # own component's ``CA1001``: the bleed between scanners the scope exists
+        # to prevent.
+        for candidate in candidates:
+            found = in_scope(candidate)
+            if found is not None:
+                return found
+        for candidate in candidates:
+            found = by_id.get(candidate)
+            if found is not None:
+                return found
+        return None
+
+    if body is not None:
+        component_ref = getattr(body, "toolComponent", None)
+        component_index = getattr(component_ref, "index", -1)
+        if component_index is None or component_index < 0:
+            rules = components[0]
+        elif component_index + 1 < len(components):
+            rules = components[component_index + 1]
+        else:
+            rules = []
+        named_rules = rules
+        index = getattr(body, "index", -1)
+        if index is not None and 0 <= index < len(rules):
+            rule = rules[index]
+            if not stated_id or getattr(rule, "id", None) == stated_id:
+                return rule
+        return by_stated_id()
+    rule_index = getattr(result, "ruleIndex", None)
+    if rule_index is not None and 0 <= rule_index < len(components[0]):
+        rule = components[0][rule_index]
+        if not stated_id or getattr(rule, "id", None) == stated_id:
+            return rule
+    return by_stated_id()
+
+
 def resolve_missing_levels(sarif_report: object) -> None:
     """Give every result of *sarif_report* that states no level an explicit one.
 
     SARIF 2.1.0 3.27.10: with ``kind`` other than "fail", a missing level "SHALL
     default to "none""; with "fail" (the default) it is the rule's
     ``defaultConfiguration.level`` when the rule gives one, else "warning". The
-    rule is looked up by ``ruleId`` (or ``rule.id``) in the run's driver and
-    extensions; invocation-level rule overrides are not consulted. Results that
+    rule is the one the result names (:func:`_rule_of`): through its ``rule``
+    reference, its ``ruleIndex`` or its ``ruleId``, in the run's driver and
+    extensions. Reading ``ruleId`` and ``rule.id`` alone gave a result that
+    names its rule by index the missing level, "warning", in place of the
+    rule's own. Invocation-level rule overrides are not consulted. Results that
     state a level keep it. Run where a scanner's report enters the results, so
     the level is explicit in memory, in ``ash.sarif`` and in the saved results.
     """
     for run in getattr(sarif_report, "runs", None) or []:
         tool = getattr(run, "tool", None)
-        components = [getattr(tool, "driver", None)] + list(
+        tool_components = [getattr(tool, "driver", None)] + list(
             getattr(tool, "extensions", None) or []
         )
-        rule_levels: Dict[Any, str] = {}
-        for component in components:
-            for rule in getattr(component, "rules", None) or []:
-                configuration = getattr(rule, "defaultConfiguration", None)
-                if configuration is None or "level" not in getattr(
-                    configuration, "model_fields_set", ()
-                ):
-                    continue
-                rule_levels.setdefault(
-                    getattr(rule, "id", None), effective_sarif_level(configuration)
-                )
+        components = [
+            list(getattr(component, "rules", None) or [])
+            for component in tool_components
+        ]
+        component_names = [component_labels(c) for c in tool_components]
+        # First copy wins across components: the global fallback of _rule_of,
+        # which looks in the named and the scanner's component before it.
+        by_id: Dict[Any, object] = {}
+        for rules in components:
+            for rule in rules:
+                by_id.setdefault(getattr(rule, "id", None), rule)
         for result in getattr(run, "results", None) or []:
             if "level" in getattr(result, "model_fields_set", ("level",)):
                 continue
@@ -211,11 +405,9 @@ def resolve_missing_levels(sarif_report: object) -> None:
             if kind != "fail":
                 result.level = "none"
                 continue
-            rule = getattr(result, "rule", None)
-            rule_id = getattr(result, "ruleId", None) or getattr(
-                getattr(rule, "root", rule), "id", None
-            )
-            result.level = rule_levels.get(rule_id, MISSING_SARIF_LEVEL)
+            rule = _rule_of(result, components, by_id, component_names)
+            level = _rule_default_level(rule) if rule is not None else None
+            result.level = level or MISSING_SARIF_LEVEL
 
 
 def result_severity(result: object) -> str:
@@ -267,6 +459,10 @@ def normalize_threshold(value: object) -> Optional[str]:
     ``plugin_modules.ash_builtin.reporters.junitxml_reporter._normalized_threshold``
     is this same predicate, written before this function existed; it is left in
     place here only because that file is outside this change's scope.
+
+    This is the text edge, not the gate: a value that is not text and falsy
+    (``0``, ``False``) names no threshold here and is None. Past the edge the
+    gate reads such a value as an unrecognised one (:func:`_gate_is_off`).
     """
     if not value:
         return None
@@ -274,7 +470,7 @@ def normalize_threshold(value: object) -> Optional[str]:
     return upper if upper in SEVERITY_THRESHOLDS else None
 
 
-def _strictness_key(threshold: Optional[str]) -> Tuple[int, str]:
+def _strictness_key(threshold: object) -> Tuple[int, str]:
     """Sort key for threshold strictness; a lower key is stricter.
 
     The three tiers keep the ordering total and independent of argument order:
@@ -283,9 +479,16 @@ def _strictness_key(threshold: Optional[str]) -> Tuple[int, str]:
     ``CRITICAL`` even though they gate identically, so that a real ``CRITICAL``
     always wins the comparison rather than the tie being decided by which
     argument came first.
+
+    The absence of a threshold is :func:`_gate_is_off`'s, the same test the gate
+    applies: ``0``, ``False`` and an empty list are not absent, they gate like
+    ``CRITICAL``. A value that is not text is keyed by its type's name, so the
+    key is always text and two keys can be compared.
     """
-    if not threshold:
+    if _gate_is_off(threshold):
         return (2, "")
+    if not isinstance(threshold, str):
+        return (1, f"<{type(threshold).__name__}>")
     if threshold in _THRESHOLD_MIN_RANK:
         return (0, f"{SEVERITY_THRESHOLDS.index(threshold):02d}")
     return (1, threshold)
@@ -297,14 +500,28 @@ def stricter_of(a: Optional[str], b: Optional[str]) -> Optional[str]:
     Total and commutative over every input, including ``None`` and ``""``.
     Returns ``None`` when neither side configures a threshold, which is why the
     return type is optional: the absence of a threshold is a value in the
-    domain, so it has to be a value in the range too.
+    domain, so it has to be a value in the range too. Absent is what
+    :func:`severity_fails_threshold` reads as absent (``None`` or empty text): a
+    value that is not text, falsy or not, is a threshold that gates like
+    ``CRITICAL``, so ``stricter_of(0, None)`` is ``0`` and not the gate turned
+    off. Two values that rank alike (two of one type that are not text) gate
+    alike, and the first is returned.
 
     Used to combine a workspace-level ceiling with a project-level setting: the
     project may tighten the gate but never loosen it.
     """
-    if not a and not b:
+    if _gate_is_off(a) and _gate_is_off(b):
         return None
     return a if _strictness_key(a) <= _strictness_key(b) else b
+
+
+def _gate_is_off(threshold: object) -> bool:
+    """Whether *threshold* turns the gate off: ``None``, or empty text.
+
+    Truthiness was the test, so ``0``, ``False`` and an empty list, which are
+    values an external section can hold, switched the gate off as if no threshold
+    were set, while the same values truthy gated like CRITICAL."""
+    return threshold is None or (isinstance(threshold, str) and not threshold)
 
 
 def severity_fails_threshold(severity: str, threshold: Optional[str]) -> bool:
@@ -318,10 +535,98 @@ def severity_fails_threshold(severity: str, threshold: Optional[str]) -> bool:
     Returns:
         True if the finding should fail the scan.
     """
-    if not threshold:
+    if _gate_is_off(threshold):
         return False
+    # A value that is not text (a number, a boolean, a list from an external
+    # section) names no rung and gates like any other unrecognised value, a
+    # falsy one (0, False, an empty list) included: only None and empty text turn
+    # the gate off. It is not looked up in the table: a list is unhashable, and
+    # the warning below describes it without reading it as text.
+    on_the_ladder = isinstance(threshold, str) and threshold in _THRESHOLD_MIN_RANK
+    if not on_the_ladder:
+        _warn_off_table_threshold(threshold)
     rank = _SEVERITY_RANK.get(severity.upper(), _UNKNOWN_SEVERITY_RANK)
-    return rank >= _THRESHOLD_MIN_RANK.get(threshold, _UNKNOWN_THRESHOLD_MIN_RANK)
+    minimum = (
+        _THRESHOLD_MIN_RANK[threshold] if on_the_ladder else _UNKNOWN_THRESHOLD_MIN_RANK
+    )
+    return rank >= minimum
+
+
+#: The shape of a threshold worth quoting in the log: a ladder-like word (letters,
+#: digits, ``_``, ``.``, ``-``), at most 32 characters. A misspelled or lower-case
+#: ladder word is this shape; a free-text value an external plugin or an
+#: environment reference passed through is not, and is described, not quoted.
+_QUOTABLE_THRESHOLD = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
+
+
+def _threshold_for_log(threshold: object) -> str:
+    """*threshold* as the off-table warning shows it: quoted when it is a
+    ladder-shaped word, else described by its length (or, for a value that is
+    not text, by its type).
+
+    The value is whatever an external plugin or caller passed straight through;
+    a configuration that pointed the threshold at an environment variable would
+    have put that variable's value in ash.log. The warning exists to name a typo
+    or a case slip, which a ladder-shaped word shows in full; anything else is
+    not the ladder's business to print.
+    """
+    if not isinstance(threshold, str):
+        return f"a value of type {type(threshold).__name__} (not shown: not text)"
+    if _QUOTABLE_THRESHOLD.match(threshold):
+        return repr(threshold)
+    return f"a {len(threshold)}-character value (not shown: not a ladder-shaped word)"
+
+
+def _warn_off_table_threshold(threshold: object) -> None:
+    """Log once per process that *threshold* is off the ladder and gates like CRITICAL.
+
+    Every configured route normalizes at its edge (``normalize_threshold``, the
+    Literal-typed config fields), so a value reaching here is a free-text one an
+    external plugin or caller passed straight through; silently gating it like
+    CRITICAL hid a loosened gate. The warning names the value
+    (:func:`_threshold_for_log`: quoted when ladder-shaped, described otherwise)
+    and the ladder, and says the matching is case-sensitive, which is the usual
+    cause.
+    """
+    # The dedupe key is the text itself, or the type's name for a value that is
+    # not text (a list cannot be a set member).
+    key = threshold if isinstance(threshold, str) else f"<{type(threshold).__name__}>"
+    if key in _WARNED_OFF_TABLE:
+        return
+    _WARNED_OFF_TABLE.add(key)
+    _ash_logger().warning(
+        f"Severity threshold {_threshold_for_log(threshold)} is not one of "
+        f"{', '.join(SEVERITY_THRESHOLDS)} (case-sensitive); it gates like "
+        "CRITICAL, so only critical findings fail against it"
+    )
+
+
+def _warn_dropped_scanner_threshold(
+    threshold: object, scanner_name: Optional[str] = None
+) -> None:
+    """Log once per scanner and type that a scanner's threshold is not text and
+    is ignored.
+
+    The scanner then grades against the global threshold. That was silent, so a
+    scanner whose section held ``severity_threshold: 5`` or a list was graded
+    against a threshold its owner never wrote and nothing said so. Like the
+    off-table warning, it names the type of the value and never the value. It
+    names the scanner when the caller knows it, and is once per scanner: two
+    scanners with a bad value each get their line, where one warning that named
+    neither left the owner of the second to find it by reading the config.
+    Without a name it is once per type, as before."""
+    key = f"<{type(threshold).__name__}>"
+    if scanner_name:
+        key = f"{scanner_name}: {key}"
+    if key in _WARNED_DROPPED_SCANNER:
+        return
+    _WARNED_DROPPED_SCANNER.add(key)
+    whose = f"Scanner {scanner_name}'s" if scanner_name else "Scanner"
+    _ash_logger().warning(
+        f"{whose} severity threshold {_threshold_for_log(threshold)} is ignored; "
+        "the global severity threshold applies to that scanner",
+        extra={"markup": False},
+    )
 
 
 def sarif_level_fails_threshold(level: Optional[str], threshold: Optional[str]) -> bool:
@@ -341,14 +646,68 @@ def sarif_level_fails_threshold(level: Optional[str], threshold: Optional[str]) 
     Returns:
         True if the finding should be treated as actionable.
     """
-    if not threshold:
+    if _gate_is_off(threshold):
         return False
     severity = _SARIF_LEVEL_TO_SEVERITY[effective_sarif_level({"level": level})]
     return severity_fails_threshold(severity, threshold)
 
 
+#: Resolves the threshold governing one scanner's findings from the scanner's
+#: name as ``properties.scanner_name`` records it, ``None`` for a result that
+#: names none. The answer is the threshold the gate compares against: the
+#: scanner's own ``options.severity_threshold`` when it has one, else the
+#: scan's (``global_settings.severity_threshold``, or the workspace project's);
+#: an answer of ``None`` or empty text turns the gate off for that scanner.
+ScannerThresholdResolver = Callable[[Optional[str]], Optional[str]]
+
+
+def result_scanner_name(result: object) -> Optional[str]:
+    """``properties.scanner_name`` of *result* (a ``Result`` or its JSON form), or None.
+
+    None for a result that names no scanner, or whose name is not a string: the
+    attribution ASH carries is this one property, and a resolver given None
+    answers with the scan-wide threshold, as ``_compute_exit_code`` judges a
+    finding it cannot attribute.
+    """
+    if isinstance(result, dict):
+        properties = result.get("properties")
+    else:
+        properties = getattr(result, "properties", None)
+    if isinstance(properties, dict):
+        name = properties.get("scanner_name")
+    else:
+        name = getattr(properties, "scanner_name", None)
+    return name if isinstance(name, str) and name else None
+
+
+def result_fails_scanner_threshold(
+    result: object, threshold_for: ScannerThresholdResolver
+) -> bool:
+    """Whether *result* fails the gate of the scanner that reported it.
+
+    The per-result question ``_compute_exit_code`` asks when it counts actionable
+    findings: the threshold is the one *threshold_for* resolves for the result's
+    scanner (:func:`result_scanner_name`), and the severity is
+    :func:`result_severity`'s one reading. Shared by the single scan's
+    ``--min-severity`` gate and the workspace project verdict so a finding the
+    scanner's own threshold made non-actionable is read alike on both sides: not
+    counted, and not the finding that keeps the count standing. The same findings
+    exited 0 in ``ash --source-dir P`` and 2 for P inside a workspace while the
+    workspace's gate judged severity alone.
+
+    Suppressions are the caller's to read (``sarif_utils.suppressions_in_effect``;
+    this module cannot import it): a suppressed result never reaches the gate.
+    """
+    return severity_fails_threshold(
+        result_severity(result), threshold_for(result_scanner_name(result))
+    )
+
+
 def resolve_scanner_threshold(
-    scanner_threshold: Optional[str], ash_config: object
+    scanner_threshold: Optional[str],
+    ash_config: object,
+    *,
+    scanner_name: Optional[str] = None,
 ) -> Tuple[str, str]:
     """The threshold a scanner is graded against, and where it came from.
 
@@ -367,15 +726,44 @@ def resolve_scanner_threshold(
     A global threshold that is not a string (None, or a test's mock config, neither
     of which a validated config holds) is read as no config at all: it cannot reach
     the ladder as an unrecognised value, and None, which turns the gate off, is
-    never returned.
+    never returned. A scanner threshold that is not a string (a number, a boolean
+    or a list in an external section) is read as unset in the same way: returned
+    as given, a falsy one (0, False, an empty list) would turn the gate off.
+
+    Both values are free text at this edge (an external plugin's section; a config
+    built without validation), so both are normalized once here
+    (:func:`normalize_threshold`): ``"high"`` grades as ``HIGH`` rather than as an
+    unrecognised value that fails only CRITICAL, and a blank value, which would
+    turn the gate off, is read as an unset one: a blank scanner value falls through
+    to the global threshold, a blank global value to ``ASH_DEFAULT_SEVERITY_LEVEL``.
+    A non-blank value off the ladder is returned as written, from either side: the
+    summary row shows it, and the ladder grades it at its unrecognised rank.
+
+    *scanner_name* is the scanner the threshold belongs to, when the caller knows
+    it. It is used for one thing: the warning for a scanner threshold that is not
+    text names the scanner and is logged once per scanner, not once per type.
     """
-    if scanner_threshold is not None:
-        return scanner_threshold, "config"
+    # Only text can be a threshold: a number, a boolean or a list from an external
+    # section is read as unset, like the global value below. Returned as given it
+    # could be falsy (0, False, []), which turns the gate off, or reach the ladder
+    # as a value it cannot rank.
+    if isinstance(scanner_threshold, str):
+        normalized = normalize_threshold(scanner_threshold)
+        if normalized is not None:
+            return normalized, "config"
+        if scanner_threshold.strip():
+            return scanner_threshold, "config"
+    elif scanner_threshold is not None:
+        _warn_dropped_scanner_threshold(scanner_threshold, scanner_name)
     global_settings = getattr(ash_config, "global_settings", None)
     if global_settings is not None and hasattr(global_settings, "severity_threshold"):
         configured = global_settings.severity_threshold
         if isinstance(configured, str):
-            return configured, "global"
+            normalized = normalize_threshold(configured)
+            if normalized is not None:
+                return normalized, "global"
+            if configured.strip():
+                return configured, "global"
     from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 
     return ASH_DEFAULT_SEVERITY_LEVEL, "global"

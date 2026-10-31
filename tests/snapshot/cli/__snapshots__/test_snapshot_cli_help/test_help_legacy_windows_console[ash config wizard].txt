@@ -3,18 +3,24 @@
 
  Interactive configuration wizard.
 
- Reads the existing config (the one a scan of the current directory would
- use, or --config), walks through scanner, reporter, offline-mode, and
- community-plugin settings interactively, then writes the result back.
- With no config yet, it creates .ashrc.yaml.
+ Reads the existing config (the one a scan of --source-dir, or the current
+ directory, would use, or --config), walks through scanner, reporter,
+ offline-mode, and community-plugin settings interactively, then writes the
+ result back. With no config yet, it creates .ashrc.yaml there.
 
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --config   -c                <str>  Path to read/write the configuration file. By default, the  │
-│                                     config a scan of the current directory would use, or a new  │
-│                                     .ashrc.yaml when there is none.                             │
-│                                     [env var: ASH_CONFIG]                                       │
-│ --verbose  -v                       Enable verbose logging                                      │
-│ --debug    -d                       Enable debug logging                                        │
-│ --color        --no-color           Enable/disable colorized output [default: color]            │
-│ --help                              Show this message and exit.                                 │
+│ --config      -c                <str>  Path to read/write the configuration file. By default,   │
+│                                        the config a scan of the current directory would use, or │
+│                                        a new .ashrc.yaml when there is none.                    │
+│                                        [env var: ASH_CONFIG]                                    │
+│ --source-dir                    <str>  The directory a scan would scan, as `ash scan            │
+│                                        --source-dir`: the config is discovered there unless     │
+│                                        --config names one, and a config inside it may only      │
+│                                        extend files inside it. Defaults to the current          │
+│                                        directory.                                               │
+│                                        [env var: ASH_SOURCE_DIR]                                │
+│ --verbose     -v                       Enable verbose logging                                   │
+│ --debug       -d                       Enable debug logging                                     │
+│ --color           --no-color           Enable/disable colorized output [default: color]         │
+│ --help                                 Show this message and exit.                              │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

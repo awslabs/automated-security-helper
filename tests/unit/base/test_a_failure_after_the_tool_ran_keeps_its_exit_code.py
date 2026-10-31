@@ -511,7 +511,9 @@ def test_the_uv_runner_after_a_clean_exit_keeps_the_code_when_its_conversion_rai
 
 
 class _UvResponseHandlingFails(_IgnoresTheResponse):
-    def _explain_offline_resolve_failure(self, response, results_dir):
+    # The seam the mixin does not guard on its own: a raise in the offline-resolve
+    # explainer is logged and swallowed there (uv_tool_mixin.py), so it grades nothing.
+    def _process_command_response(self, response):
         raise RuntimeError("reading the uv run's response failed")
 
 
@@ -1015,7 +1017,7 @@ def markup_console():
 
 
 class _UvResponseHandlingFailsWithMarkup(_IgnoresTheResponse):
-    def _explain_offline_resolve_failure(self, response, results_dir):
+    def _process_command_response(self, response):
         raise RuntimeError(_MARKUP_IN_THE_ERROR)
 
 
@@ -1217,11 +1219,26 @@ def _children_that_ignore_the_kill(
         first_read=first_read or (lambda: None),
         first_read_fails=first_read_fails,
     )
-    monkeypatch.setattr(
-        subprocess,
-        "Popen",
-        lambda *args, **kwargs: _ChildThatIgnoresTheKill(seen, *args, **kwargs),
-    )
+    real_popen = subprocess.Popen
+
+    def popen(*args: Any, **kwargs: Any) -> Any:
+        # On Windows the tree stop runs taskkill.exe through subprocess.run, which
+        # builds a Popen of its own. Handed the stand-in, that run times out, and
+        # the standard library's Windows timeout path then waits on it with no
+        # bound, which the stand-in reports as a wait of ASH's. taskkill is not
+        # the child under test, so it gets the real Popen: against the stand-in's
+        # pid it ends at once with "process not found".
+        import ntpath
+
+        command = args[0] if args else kwargs.get("args")
+        first = (
+            command[0] if isinstance(command, (list, tuple)) and command else command
+        )
+        if os.name == "nt" and ntpath.basename(str(first)).lower() == "taskkill.exe":
+            return real_popen(*args, **kwargs)
+        return _ChildThatIgnoresTheKill(seen, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
 
     def ignored(real: Any) -> Any:
         def call(pid: int, *rest: Any) -> Any:

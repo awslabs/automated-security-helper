@@ -198,11 +198,12 @@ def _row(
     def template_of(staged: str):
         """The template a staged cfn_nag input was copied from: the copy sits in
         ``<results dir>/<normalized template path>/.ash-cfn-nag-input/``, so its
-        directory's name ends with the template's normalized name."""
+        directory's name ends with the template's normalized name, after the
+        ``_s`` that stands for the separator before it."""
         results_dir = Path(staged).parent.parent.name
         for name in responses:
             normalized = get_normalized_filename(name)
-            if results_dir == normalized or results_dir.endswith(f"__{normalized}"):
+            if results_dir == normalized or results_dir.endswith(f"_s{normalized}"):
                 return name
         return None
 

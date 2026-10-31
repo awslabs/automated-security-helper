@@ -83,6 +83,7 @@ import re
 from pathlib import Path, PurePath
 from typing import (
     TYPE_CHECKING,
+    Annotated,
     Any,
     Collection,
     Dict,
@@ -94,6 +95,8 @@ from typing import (
     Set,
     Tuple,
 )
+
+from pydantic import TypeAdapter
 
 from automated_security_helper.config.config_sources import resolve_override_segment
 from automated_security_helper.config.confinement_remedy import (
@@ -133,6 +136,17 @@ OPERATOR_ONLY_SCANNER_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "detect-secrets": ("max_worker_output_mib",),
 }
 
+#: (reporter section name, option) -> the value the option has where no section
+#: sets it, for the options in OPERATOR_ONLY_OPTIONS. Listed here because the
+#: reporters' models are in a plugin package this module does not import; a unit
+#: test holds each value equal to the reporter's options model. A repository
+#: file that writes the value an unset option already has changes nothing, so
+#: the settle step does not report it as ignored.
+OPERATOR_ONLY_DEFAULTS: Dict[Tuple[str, str], Any] = {
+    ("aws-security-hub", "findings_scope"): None,
+    ("aws-security-hub", "archive_resolved_findings"): False,
+}
+
 _MISSING = object()
 
 
@@ -156,10 +170,14 @@ def _sections_in(
     )
 
     wanted = reduced_plugin_name(reporter)
+    # A key that is not a string (a YAML `1:` under reporters in a file the
+    # repository wrote) is no spelling of any reporter: skipped, where the name
+    # lookup would raise and abort a scan that should only skip the file.
     return [
         (key, section)
         for key, section in reporters.items()
-        if isinstance(section, dict)
+        if isinstance(key, str)
+        and isinstance(section, dict)
         and (key == reporter or wanted in plugin_key_lookup_names(key))
     ]
 
@@ -267,6 +285,66 @@ def _scanner_options(config: "AshConfig", scanner: str) -> Any:
     return None
 
 
+def _typed_as_the_model_reads(options: Any, option: str, value: Any) -> Any:
+    """*value* for *option* as the options model reads it (``"256"`` is 256).
+
+    The one coercion both callers use. The whole model is read first, over its
+    current values with this one replaced, so the option goes through the
+    validators the load ran: a before-validator on the field that turns
+    ``"256 MiB"`` into 256, an after-validator that clamps. Reading only the
+    field's annotation first took any value the bare type accepts and skipped
+    them. Only a read that leaves the option in ``model_fields_set`` counts: a
+    field with an alias on a model that does not populate by name is not set by
+    its name, and the model would answer its default without an error.
+
+    When the whole model does not take the value (another field the model
+    cannot rebuild from its dump, a model-level check, a reference the
+    environment wrote that the model's validators refuse at a typed field, or
+    the aliased field above) the option's own field is read alone (lax, as a
+    plugin's options are read at load; the field's annotation with its
+    constraints), as it was before the whole model was read first. A value
+    neither reading accepts raises the field reading's error. A name the model
+    declares no field for is returned as given.
+    """
+    field = type(options).model_fields.get(option)
+    if field is None:
+        return value
+    try:
+        current = options.model_dump()
+        current[option] = value
+        validated = type(options).model_validate(current)
+    except Exception:  # noqa: BLE001 -- the field alone is read below instead
+        pass
+    else:
+        if option in validated.model_fields_set:
+            return getattr(validated, option)
+    annotation: Any = field.annotation
+    if field.metadata:
+        annotation = Annotated[(annotation, *field.metadata)]
+    return TypeAdapter(annotation).validate_python(value)
+
+
+def _as_the_model_reads(options: Any, option: str, value: Any) -> Any:
+    """*value*, the raw text or number a file wrote for *option*, as the
+    scanner's options model reads it (``"256"`` is 256), so it is compared with
+    the typed value the trusted base holds. A value the model refuses is
+    returned as written: it is not the trusted base's."""
+    try:
+        return _typed_as_the_model_reads(options, option, value)
+    except (AttributeError, TypeError, ValueError):
+        return value
+
+
+def _differs(value: Any, operator: Any, default: Any = _MISSING) -> bool:
+    """Whether the scan uses a value other than *value*, which the repository's
+    files wrote. *operator* is the trusted base's value; where the base has
+    none (``_MISSING``) the option is unset, and unset is *default* when the
+    option has a known one."""
+    if operator is _MISSING:
+        return default is _MISSING or value != default
+    return value != operator
+
+
 def _scanner_sections_in(
     scanners: Dict[str, Any], scanner: str
 ) -> List[Tuple[str, Dict[str, Any]]]:
@@ -360,8 +438,11 @@ class RepositorySettings:
         self.repository_files: List[Path] = []
         #: The places (``found_place``) an option was left out of whose file is
         #: the repository's only because resolving its name stopped before the
-        #: walk finished, so a sentence naming them cannot claim a location.
+        #: walk finished, so a sentence naming them cannot claim a location. A
+        #: place a file with an established location also left out is not one.
         self.undecided_places: Set[str] = set()
+        #: The places a file with an established location left an option out of.
+        self._located_places: Set[str] = set()
         self.document: Any = None
 
     def _membership(self, real: Path, named: Path) -> Tuple[bool, bool]:
@@ -371,7 +452,10 @@ class RepositorySettings:
             return True, False
         confined = confined_files([real], self.trees, [named])
         if confined.members:
-            return True, bool(confined.undecided)
+            # A walk that stopped makes the file undecided only when the resolved
+            # path is not itself a member by where it is.
+            real_decided = real in confined.members and real not in confined.undecided
+            return True, bool(confined.undecided) and not real_decided
         # A file an MCP client delivered is the client's wherever it sits, in a
         # checkout or not: the same delivery judgment the rest of the chain's
         # membership uses (resolve_config._delivered_by_a_client).
@@ -394,10 +478,12 @@ class RepositorySettings:
             self.repository_files.append(real)
             first = len(self.found)
             data = self._without_operator_only(data)
+            places = {found_place(entry) for entry in self.found[first:]}
             if undecided:
-                self.undecided_places.update(
-                    found_place(entry) for entry in self.found[first:]
-                )
+                self.undecided_places.update(places - self._located_places)
+            else:
+                self._located_places.update(places)
+                self.undecided_places.difference_update(places)
         self.document = data
         return data
 
@@ -457,11 +543,15 @@ class RepositorySettings:
         places: List[str] = []
         for (scanner, _key, option), value in self.written("scanners").items():
             options = _scanner_options(trusted, scanner)
-            if options is not None and value != getattr(options, option):
+            if options is not None and _differs(
+                _as_the_model_reads(options, option, value),
+                getattr(options, option),
+            ):
                 places.append(f"scanners.{scanner}.options.{option}")
-        for (_reporter, key, option), value in self.written("reporters").items():
+        for (reporter, key, option), value in self.written("reporters").items():
             operator = _trusted_value(trusted, key, option)
-            if operator is _MISSING or value != operator:
+            default = OPERATOR_ONLY_DEFAULTS.get((reporter, option), _MISSING)
+            if _differs(value, operator, default):
                 places.append(f"reporters.{key}.options.{option}")
         return places
 
@@ -469,14 +559,26 @@ class RepositorySettings:
         """Whether a file of the chain other than the repository's sets the
         option: the merged document still holds it, under any of the plugin's
         section spellings."""
+        return self.elsewhere_value(kind, plugin, option) is not _MISSING
+
+    def elsewhere_value(self, kind: str, plugin: str, option: str) -> Any:
+        """The value a file of the chain other than the repository's set the
+        option to (the merged document's, under any of the plugin's section
+        spellings; the last section read wins), or ``_MISSING``. The settle
+        writes this value back: the configuration may hold another by the time
+        it runs (an override applied to the model before the confinement), and
+        skipping the option because a file outside the tree set it kept that
+        other value instead of the file's."""
         sections = self.document.get(kind) if isinstance(self.document, dict) else None
         if not isinstance(sections, dict):
-            return False
+            return _MISSING
         sections_of = _scanner_sections_in if kind == "scanners" else _sections_in
-        return any(
-            isinstance(section.get("options"), dict) and option in section["options"]
-            for _key, section in sections_of(sections, plugin)
-        )
+        value: Any = _MISSING
+        for _key, section in sections_of(sections, plugin):
+            options = section.get("options")
+            if isinstance(options, dict) and option in options:
+                value = options[option]
+        return value
 
 
 class _Settling(NamedTuple):
@@ -492,8 +594,15 @@ class _Settling(NamedTuple):
     option: str
     #: What the repository's files merged it to.
     value: Any
-    #: The trusted base's value, or _MISSING where it has none.
+    #: The trusted base's value, or _MISSING where it has none; the value a
+    #: file outside the tree wrote where ``from_elsewhere`` is set.
     operator: Any
+    #: What the option is where nothing sets it, or _MISSING where not known.
+    default: Any = _MISSING
+    #: Set when a file outside the tree wrote the option: ``operator`` is that
+    #: file's value, which the configuration takes as the operator's own, and
+    #: the option is neither settled to the trusted base nor reported.
+    from_elsewhere: bool = False
 
     @property
     def place(self) -> str:
@@ -502,7 +611,9 @@ class _Settling(NamedTuple):
     @property
     def ignored(self) -> bool:
         """Whether the value the scan uses is not the one the files wrote."""
-        return self.operator is _MISSING or self.value != self.operator
+        if self.from_elsewhere:
+            return False
+        return _differs(self.value, self.operator, self.default)
 
 
 def scan_repository_settings(
@@ -555,6 +666,17 @@ def _environment_values_of(
     return (*config_environment_values(config), *config_environment_values(trusted))
 
 
+#: One place of a joined list of place strings: its kind and ``.``, its key, and
+#: the ``.options.<option>`` that follows the key of an option's place.
+_PLACE_SHAPE = re.compile(
+    r"(?:^|(?<=, ))(?P<kind>(?:reporters|scanners)\.)"
+    r"(?P<key>.*?)"
+    r"(?P<option>\.options\.[^.,\s]+)?"
+    r"(?=, (?:reporters|scanners)\.|\Z)",
+    re.DOTALL,
+)
+
+
 def redacted_places(text: str, key_values: Collection[str]) -> str:
     """*text*, a joined list of place strings, with every env-read KEY in
     *key_values* hidden in both its separator spellings.
@@ -565,7 +687,13 @@ def redacted_places(text: str, key_values: Collection[str]) -> str:
     one-character minimum: a place string is built from mapping keys alone,
     so a read VALUE cannot appear in one, and redacting against values hid
     parts of fixed option names. Both spellings, since the found record folds
-    "-" and "_" and a place can print either."""
+    "-" and "_" and a place can print either.
+
+    Only the key of each place is searched (``reporters.<key>.options.<option>``
+    or ``reporters.<key>``): the kind, ``options`` and the option's name are
+    fixed words, so a short key read from the environment elsewhere in the
+    configuration does not hide them. Text that is not in that shape is
+    searched whole."""
     from automated_security_helper.config.config_validator import redact_values
 
     values = tuple(
@@ -580,7 +708,20 @@ def redacted_places(text: str, key_values: Collection[str]) -> str:
             )
         )
     )
-    return redact_values(text, values, min_length=1)
+
+    def hidden(piece: str) -> str:
+        return redact_values(piece, values, min_length=1) if piece else piece
+
+    parts: List[str] = []
+    position = 0
+    for place in _PLACE_SHAPE.finditer(text):
+        parts.append(hidden(text[position : place.start()]))
+        parts.append(place["kind"])
+        parts.append(hidden(place["key"]))
+        parts.append(place["option"] or "")
+        position = place.end()
+    parts.append(hidden(text[position:]))
+    return "".join(parts)
 
 
 def _scanner_options_to_settle(
@@ -591,7 +732,10 @@ def _scanner_options_to_settle(
 ) -> List[_Settling]:
     """The options in OPERATOR_ONLY_SCANNER_OPTIONS a file of the repository
     wrote that take the trusted base's value: neither an override, which is
-    the operator's, nor a file outside the tree sets them. Changes nothing."""
+    the operator's, nor a file outside the tree sets them. One a file outside
+    the tree set is listed too, ``from_elsewhere``, with that file's value, for
+    ``_confine_scanner_options`` to write back. Changes nothing: ``ash config
+    validate`` reads the list through ``ignored_operator_only_options``."""
     found: List[_Settling] = []
     sections = config.scanners.model_dump(by_alias=True)
     environment_values = _environment_values_of(config, trusted)
@@ -609,7 +753,22 @@ def _scanner_options_to_settle(
             environment_values=environment_values,
         ):
             continue
-        if repository.set_elsewhere("scanners", scanner, option):
+        elsewhere = repository.elsewhere_value("scanners", scanner, option)
+        if elsewhere is not _MISSING:
+            # A file outside the tree set it: that file's value holds, not
+            # whatever the configuration holds by now (an override applied to
+            # the model before the confinement).
+            found.append(
+                _Settling(
+                    "scanners",
+                    scanner,
+                    scanner,
+                    option,
+                    value,
+                    elsewhere,
+                    from_elsewhere=True,
+                )
+            )
             continue
         found.append(
             _Settling(
@@ -617,7 +776,7 @@ def _scanner_options_to_settle(
                 scanner,
                 scanner,
                 option,
-                value,
+                _as_the_model_reads(operator_options, option, value),
                 getattr(operator_options, option),
             )
         )
@@ -657,6 +816,7 @@ def _reporter_options_to_settle(
                     option,
                     value,
                     _trusted_value(trusted, key, option),
+                    OPERATOR_ONLY_DEFAULTS.get((reporter, option), _MISSING),
                 )
             )
     return found
@@ -709,8 +869,11 @@ def _confine_scanner_options(
         config, trusted, config_overrides, repository
     ):
         options = _scanner_options(config, settling.plugin)
-        if getattr(options, settling.option) != settling.operator:
-            setattr(options, settling.option, settling.operator)
+        _set_scanner_option(options, settling.option, settling.operator)
+        if settling.from_elsewhere:
+            # A file outside the tree set it: its value is written back, and
+            # the option is neither the trusted base's nor reported.
+            continue
         settled.add(("scanners", settling.plugin, settling.option))
         if settling.ignored:
             replaced.append(settling)
@@ -736,13 +899,40 @@ def _confine_scanner_options(
                 config_overrides,
                 kind="scanners",
                 environment_values=environment_values,
-            ) or repository.set_elsewhere("scanners", scanner, option):
+            ):
                 continue
-            operator_value = getattr(operator_options, option)
-            if getattr(options, option) != operator_value:
-                setattr(options, option, operator_value)
+            elsewhere = repository.elsewhere_value("scanners", scanner, option)
+            if elsewhere is not _MISSING:
+                # A file outside the tree set it: that file's value holds, not
+                # whatever the configuration holds by now.
+                _set_scanner_option(options, option, elsewhere)
+                continue
+            _set_scanner_option(options, option, getattr(operator_options, option))
             settled.add(("scanners", scanner, option))
     return replaced
+
+
+def _set_scanner_option(options: Any, option: str, value: Any) -> None:
+    """Set ``options.option`` to ``value`` as the options model reads it, when
+    it differs from what the model holds.
+
+    A value a file outside the tree wrote is the document's: an environment
+    reference (``!ENV``, ``${VAR}``) is a string there where the model holds a
+    number, so compared raw it always differed and was stored as a string. The
+    value is read through the options model, so what is stored is the model's
+    type and the comparison is like with like. The whole model is read over its
+    current values with this one replaced (:func:`_typed_as_the_model_reads`),
+    never ``{option: value}`` alone, which raised for any options model with
+    another required field, or a model validator reading several fields. The
+    model's validators run, so the write-back takes what the load took; when
+    the model does not take the value, the option's own field is read alone
+    (lax, as a plugin's options are read at load; the field's annotation with
+    its constraints). The trusted base's value is the model's already. A name
+    the model declares no field for is set as given.
+    """
+    typed = _typed_as_the_model_reads(options, option, value)
+    if getattr(options, option) != typed:
+        setattr(options, option, typed)
 
 
 def _trusted_value(trusted: "AshConfig", section_key: str, option: str) -> Any:
@@ -848,7 +1038,9 @@ def confine_operator_only_options(
             unchanged.
     """
     if repository is None:
-        repository = RepositorySettings(())
+        # Nothing was recorded, so no option is known to be the repository's
+        # and none is settled.
+        return set()
     membership = confinement_membership(
         checkout_membership=checkout_membership,
         client_supplied=client_supplied,
@@ -1032,33 +1224,73 @@ def _marker_value(
     place a read value lands: a YAML alias's place included, and a ``patch``
     value at the place the operation puts it (``copy`` and ``move`` are not
     allowed ops), so no read value reaches one of these places without one.
-    A literal a later file wrote over a read value is shown as the literal.
+    A literal a later file wrote over a read value is shown as the literal. A
+    mapping key the file read from the environment (a key reference, recorded
+    at the mapping's place) is shown as its reference too.
     """
     from automated_security_helper.config.environment_record import (
         environment_marker,
     )
 
-    if isinstance(value, str):
-        wanted = (kind, folded_section_name(key), "options", option)
+    wanted = (kind, folded_section_name(key), "options", option)
 
-        def at_place(reference: Any) -> bool:
-            path = tuple(reference.path)
-            return (
-                len(path) == 4
-                and path[0] == kind
-                and isinstance(path[1], str)
-                and folded_section_name(path[1]) == wanted[1]
-                and path[2:] == ("options", option)
-            )
+    def at_place(reference: Any, *, within: bool) -> bool:
+        # The option's own place, or (``within``) a place under it: an entry
+        # of a list or a mapping the option holds, which the loader records at
+        # the place the read value landed.
+        path = tuple(reference.path)
+        return (
+            (len(path) == 4 or (within and len(path) > 4))
+            and path[0] == kind
+            and isinstance(path[1], str)
+            and folded_section_name(path[1]) == wanted[1]
+            and path[2:4] == ("options", option)
+        )
 
+    def read_as(text: Any, *, within: bool, key: bool = False) -> Optional[str]:
+        # ``key``: the text is a mapping key, matched against the references
+        # the file read keys from (their path is the mapping's), never against
+        # the ones it read values from, and the other way round.
+        if not isinstance(text, str):
+            return None
         for reference in references:
             if (
-                not reference.key
-                and reference.resolved == value
-                and at_place(reference)
+                bool(reference.key) == key
+                and reference.resolved == text
+                and at_place(reference, within=within)
             ):
                 return environment_marker(reference.written)
-    return shown_on_one_line(json.dumps(value))
+        return None
+
+    if isinstance(value, str):
+        marker = read_as(value, within=False)
+        if marker is not None:
+            return marker
+        return shown_on_one_line(json.dumps(value))
+
+    # A list or mapping the file wrote holds its read values as leaves: each
+    # leaf a reference at or under this place resolved to is shown as the
+    # reference, never the value. A mapping key is shown the same way, and as
+    # text: ``json.dumps`` applies ``default=`` to values only, so a date or
+    # other non-JSON key a YAML file writes would raise out of the marking.
+    def shown_key(name: Any) -> str:
+        text = name if isinstance(name, str) else str(name)
+        marker = read_as(text, within=True, key=True)
+        return text if marker is None else marker
+
+    def shown_leaves(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {shown_key(name): shown_leaves(item) for name, item in node.items()}
+        if isinstance(node, (list, tuple)):
+            return [shown_leaves(item) for item in node]
+        if isinstance(node, str):
+            marker = read_as(node, within=True)
+            return node if marker is None else marker
+        return node
+
+    # A date, time, bytes or set a YAML or TOML file writes is not JSON: it is
+    # shown as text (``default=str``) instead of raising out of the marking.
+    return shown_on_one_line(json.dumps(shown_leaves(value), default=str))
 
 
 def mark_operator_only_options(
@@ -1104,13 +1336,31 @@ def mark_operator_only_options(
         if not isinstance(sections, dict):
             continue
         wrote = None if written is None else written.written(kind)
+        if wrote is not None and kind == "reporters":
+            # The record keys a reporter section by the spelling the file that
+            # wrote it used, and the dump by the spelling the merged chain kept,
+            # which another file may have written differently. Both are looked
+            # up by the folded spelling.
+            wrote = {
+                (plugin, folded_section_name(key), option): value
+                for (plugin, key, option), value in wrote.items()
+            }
+        # A scanners section is read as the model reads it: the declared
+        # section, or a spelling that folds to it (_scanner_sections_in); the
+        # reporter lookup would also mark an extra scanner section the plugin
+        # never reads and show its values as plain JSON.
+        sections_in = _scanner_sections_in if kind == "scanners" else _sections_in
         for plugin, names in listed.items():
-            for key, section in _sections_in(sections, plugin):
+            for key, section in sections_in(sections, plugin):
                 options = section.get("options")
                 if not isinstance(options, dict):
                     continue
                 for option in names:
-                    place = (plugin, plugin if kind == "scanners" else key, option)
+                    place = (
+                        plugin,
+                        plugin if kind == "scanners" else folded_section_name(key),
+                        option,
+                    )
                     if wrote is None:
                         if option not in options:
                             continue
@@ -1371,13 +1621,31 @@ def _section_within(section: Any, operator_section: Any) -> bool:
     The run uses the operator's section whole, so the warning fires only when
     the resolved section holds something that will not run: a key or value of
     the repository's. An operator section that holds MORE (the trusted base's
-    settings, which the config file never mentioned) ignores nothing."""
+    settings, which the config file never mentioned) ignores nothing.
+
+    A mapping that holds no value (the ``options`` table left empty after the
+    operator-only options were taken out of it) holds nothing that will not
+    run, so the operator's section need not have it."""
     if isinstance(section, dict) and isinstance(operator_section, dict):
         return all(
-            key in operator_section and _section_within(value, operator_section[key])
+            (
+                _section_within(value, operator_section[key])
+                if key in operator_section
+                else _holds_no_value(value)
+            )
             for key, value in section.items()
         )
+    if isinstance(section, dict) and operator_section is None:
+        return _holds_no_value(section)
     return section is None or section == operator_section
+
+
+def _holds_no_value(section: Any) -> bool:
+    """Whether *section* is a mapping with nothing in it, or only mappings that
+    have nothing in them."""
+    return isinstance(section, dict) and all(
+        _holds_no_value(value) for value in section.values()
+    )
 
 
 def reporter_section(config: Optional["AshConfig"], reporter_class: type) -> Any:

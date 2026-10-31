@@ -29,11 +29,20 @@ base's, and an overrides entry equal to one of the trusted base's entries. A
 value that only makes the gate stricter is kept too: ``content_db_staleness:
 fail``, and any entry with ``policy: fail``. Every other entry, a ``policy: warn``
 the operator did not set, is dropped, and the policy and the dropped entries' databases are
-named in one warning. Nothing is added: an entry the operator's file has and the
-repository's config does not is not copied in, as the policy the repository's
-config keeps is at least as strict. ``content_db_staleness_offline_image_default``
+named in one warning. An own ``policy: fail`` entry that has expired is dropped too when the
+operator holds that database to ``fail`` with an entry still in force: at run time an expired
+entry is ignored and the database returns to the scan-wide policy, laxer than the operator's,
+so the operator's entry is carried in its place. One kind of entry is added: the operator's ``policy: fail``
+entries for databases the repository's config has no entry for, since those
+narrow a scan-wide ``warn`` the config may have repeated, and without them the
+repository's config would hold those databases to a laxer policy than the
+operator's. A ``policy: warn`` entry of the operator's is not copied in: the
+policy the repository's config keeps is at least as strict for that database.
+``content_db_staleness_offline_image_default``
 is kept when it is false, or when the trusted base's is true; a true where the
-operator's is false is set back to false and named in the same warning.
+operator's is false is set back to false, and named in the same warning when a
+file wrote it (the field defaults to true, so a config that never mentions it is
+set back without being named).
 
 Under the MCP server the default ``denied_paths`` already refuse a client's file
 that sets any of these keys, and an MCP runtime patch cannot change them.
@@ -56,6 +65,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 
+from automated_security_helper.config.recorded_config import _sets
 from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
@@ -125,10 +135,24 @@ def confine_content_db_staleness(
     trusted_entries = [
         _dump(entry) for entry in trusted_config.content_db_staleness_overrides
     ]
+    # The databases the operator holds to ``fail`` with an entry still in force.
+    # A config's own entry for one of them that has expired holds the database
+    # to nothing: at run time an expired entry is ignored and the database
+    # returns to the scan-wide policy (``utils/content_db_staleness.py``), laxer
+    # than the operator's entry for it, and the run-time read stops at the first
+    # entry naming the database. Kept, it blocked the carry below; it is dropped
+    # first, and the operator's entry is carried in its place.
+    operator_fail_databases = {
+        entry.database
+        for entry in trusted_config.content_db_staleness_overrides
+        if entry.policy == STALENESS_FAIL and not entry.is_expired()
+    }
     kept = []
     dropped: List[str] = []
     for entry in config.content_db_staleness_overrides:
-        if entry.policy == STALENESS_FAIL or _dump(entry) in trusted_entries:
+        if entry.database in operator_fail_databases and entry.is_expired():
+            dropped.append(entry.database)
+        elif entry.policy == STALENESS_FAIL or _dump(entry) in trusted_entries:
             kept.append(entry)
         else:
             dropped.append(entry.database)
@@ -136,15 +160,33 @@ def confine_content_db_staleness(
         ignored.append(
             f"{STALENESS_OVERRIDES_CONFIG_FIELD} entries for {', '.join(dropped)}"
         )
-        config.content_db_staleness_overrides = kept
+    # The operator's per-database ``policy: fail`` entries narrow the scan-wide
+    # policy for the databases they name. A config that repeats the operator's
+    # ``content_db_staleness: warn`` (kept above as equal) but leaves those
+    # entries out would hold those databases to warn, laxer than the operator's
+    # setting for them, so each one the config has no entry for is carried over.
+    # An entry the config has for the same database is the config's own: a
+    # ``fail`` is already as strict, and a dropped ``warn`` makes way for the
+    # operator's entry here.
+    kept_databases = {entry.database for entry in kept}
+    carried = [
+        entry
+        for entry in trusted_config.content_db_staleness_overrides
+        if entry.policy == STALENESS_FAIL and entry.database not in kept_databases
+    ]
+    if dropped or carried:
+        config.content_db_staleness_overrides = [*kept, *carried]
 
     # true holds trivy-db to warn in an image built with OFFLINE=YES, so it relaxes
-    # the gate as warn does; false only makes it stricter.
+    # the gate as warn does; false only makes it stricter. The field defaults to
+    # true, so a true here is the file's own only when a file wrote it: a config
+    # that never mentions the field is set back to false without being blamed.
     if (
         config.content_db_staleness_offline_image_default
         and not trusted_config.content_db_staleness_offline_image_default
     ):
-        ignored.append(STALENESS_OFFLINE_IMAGE_CONFIG_FIELD)
+        if _sets(config, [STALENESS_OFFLINE_IMAGE_CONFIG_FIELD]):
+            ignored.append(STALENESS_OFFLINE_IMAGE_CONFIG_FIELD)
         config.content_db_staleness_offline_image_default = False
 
     if ignored:

@@ -71,7 +71,22 @@ declared 24h.
   database refresh is the separate step above. trivy does not ask about new
   versions either: online every scan gets ``--skip-version-check``
   (``ONLINE_FLAGS``), and offline ``TRIVY_SKIP_VERSION_CHECK`` in its environment
-  turns that check off (``utils/offline_tool_env.py``).
+  turns that check off (``utils/offline_tool_env.py``). The one exception is the
+  ``misconfig`` scanner, off by default here: its Terraform checks download the
+  module sources a ``.tf`` file names whatever flags are passed. Offline those
+  checks are left out (``TrivyScannerBase._offline_misconfig_args``); online, with
+  ``misconfig`` turned on, they run and can reach registry.terraform.io, git and
+  the archive URLs the scanned repository's modules name.
+
+* The operator's own ``TRIVY_*`` settings reach trivy (the sandbox passes every
+  ``TRIVY_`` variable through). Those that drop results from the report with
+  nothing in the run saying so (``TRIVY_SEVERITY``, ``TRIVY_IGNORE_UNFIXED`` and
+  the others in ``OUTPUT_RESTRICTING_TRIVY_ENV``) are named in a warning, as the
+  ``ignore_unfixed`` option is. ``TRIVY_SKIP_DIRS`` and ``TRIVY_SKIP_FILES``, and
+  ``scan.skip-dirs`` / ``scan.skip-files`` in an honored config file, are given
+  back to trivy as tokens of their own whenever ASH passes a skip flag itself:
+  trivy reads a list flag from one source only, so ASH's flag would otherwise
+  replace the operator's list rather than add to it.
 
 The database is only read by ``vuln``. With ``vuln`` turned off nothing is
 measured and the offline database check is skipped.
@@ -169,7 +184,6 @@ otherwise carry the worst code from one target into the next (``scan``).
 from __future__ import annotations
 
 import logging
-import math
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 
@@ -182,8 +196,13 @@ from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
-from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (  # noqa: F401 -- TRIVY_SEVERITIES, _SARIF_LEVEL, UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout are kept importable from here
+    _SARIF_LEVEL,
+    TRIVY_SEVERITIES,
+    UNBOUNDED_TRIVY_TIMEOUT,
     TrivyScannerBase,
+    skip_dirs_value,
+    trivy_timeout,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.config_trust import (
@@ -192,57 +211,10 @@ from automated_security_helper.utils.config_trust import (
     set_by_operator,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
-from automated_security_helper.schemas.sarif_schema_model import (
-    PropertyBag,
-    SarifReport,
-)
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
-#: trivy's severities that ASH reports as the same name. trivy's fifth, UNKNOWN,
-#: is left to ASH's generic SARIF mapping.
-TRIVY_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
-
-#: The SARIF level trivy gives a result of each severity (``toSarifErrorLevel``).
-_SARIF_LEVEL = {
-    "CRITICAL": "error",
-    "HIGH": "error",
-    "MEDIUM": "warning",
-    "LOW": "note",
-}
-
-#: Characters ``trivy --skip-dirs`` reads as glob syntax.
-_GLOB_SPECIAL = frozenset("*?[]{}\\")
-
-#: ``trivy --timeout`` when ASH's ``scan_timeout`` is null (unbounded). trivy has no
-#: value that means "no deadline": measured with 0.75.0, ``trivy --timeout=0s`` is a deadline
-#: that has already passed, and a scan that analyzes files one at a time (secret
-#: scanning, OS packages) exits 1 with "context deadline exceeded". This is the largest
-#: whole number of hours a Go duration holds, about 292 years; one hour more is refused
-#: as an invalid duration.
-UNBOUNDED_TRIVY_TIMEOUT = "2562047h"
-
-
-def trivy_timeout(seconds: Optional[float]) -> str:
-    """ASH's scan timeout in seconds, or None for unbounded, as trivy's ``--timeout``.
-
-    Rounded up to a whole second and never below one, so a bound is never ``0s``.
-    """
-    if seconds is None:
-        return UNBOUNDED_TRIVY_TIMEOUT
-    return f"{max(1, math.ceil(seconds))}s"
-
-
-def skip_dirs_value(path: str) -> str:
-    """*path* as a ``--skip-dirs`` value trivy matches literally.
-
-    trivy reads the value as a comma-separated list (CSV, so quotes group) of
-    globs. Measured on 0.69.3: an unescaped ``a,b`` or ``x[1]`` left that directory
-    scanned. Glob characters are backslash-escaped, then the value is CSV-quoted
-    when it holds a comma, a quote or edge whitespace.
-    """
-    escaped = "".join("\\" + ch if ch in _GLOB_SPECIAL else ch for ch in path)
-    if any(ch in escaped for ch in ',"') or escaped != escaped.strip():
-        escaped = '"' + escaped.replace('"', '""') + '"'
-    return escaped
+# UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout live in the shared base since trivy-repo
+# passes the same bound; both names stay importable from this module.
 
 
 class TrivyScannerConfigOptions(ScannerOptionsBase):
@@ -398,9 +370,6 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             options.model_dump() if options is not None else {}
         )
 
-    def _reads_vulnerability_db(self) -> bool:
-        return "vuln" in self._options().scanners
-
     def nothing_to_scan_reason(self) -> Optional[str]:
         """None: ASH cannot tell before trivy runs whether it reads any file.
 
@@ -448,33 +417,8 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         if self.config is not None:
             self.config.options = options.model_copy(update={"scanners": default})
 
-    def validate_plugin_dependencies(self) -> bool:
-        """The binary, and offline, a vulnerability database for it to read.
-
-        trivy refuses ``--skip-db-update`` when its cache holds no database ("cannot
-        be specified on the first run"), so an offline scan without one is reported
-        MISSING with the reason before trivy runs, rather than as a tool error.
-        """
-        if not super().validate_plugin_dependencies():
-            return False
-        if not (self._offline() and self._reads_vulnerability_db()):
-            return True
-        from automated_security_helper.utils.content_db_staleness import (
-            _built_from_trivy,
-        )
-
-        try:
-            _built_from_trivy(self.content_database_probe_context())
-        except Exception as exc:  # noqa: BLE001 - every failure means "no usable database"
-            self.dependency_unavailable_reason = (
-                "trivy is in offline mode and has no vulnerability database to read "
-                f"({exc}). Download one with network access (`trivy image "
-                "--download-db-only`, with TRIVY_CACHE_DIR set to the cache this scan "
-                "uses), or turn offline mode off."
-            )
-            self._plugin_log(self.dependency_unavailable_reason, level=logging.WARNING)
-            return False
-        return True
+    # validate_plugin_dependencies is TrivyScannerBase's: the binary, and offline a
+    # vulnerability database for the scan to read, shared with trivy-repo.
 
     def content_databases_in_use(self) -> List[Any]:
         """trivy's vulnerability database, when the ``vuln`` scanner ran."""
@@ -532,39 +476,18 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # an unbounded ASH timeout is UNBOUNDED_TRIVY_TIMEOUT, since trivy reads 0s
         # as a deadline already passed.
         extra.append(f"--timeout={trivy_timeout(self._effective_scan_timeout())}")
-        # ASH's own output under the target holds the converted copies of
-        # archives and notebooks, which the converted target scans already, and
-        # reports and scanner results. Named directory by directory
-        # (ScannerPluginBase._ash_output_dirs_inside), not as the output directory
-        # whole: a file the repository committed under it is scanned, and a
-        # --skip-dirs on the whole directory hid it from trivy.
-        skipped = self._ash_output_dirs_inside(target)
-        if not skipped:
-            # The helper answers [] when naming the directories raises (OSError,
-            # TypeError or ValueError), and that cannot be told from "none inside".
-            # This run's output directory inside the target with nothing named for
-            # it means the helper did not answer. The drop after the scan does not
-            # cover that case (it names the same directories and drops nothing when
-            # that raises), so skip the output directory whole, as before.
-            whole = self._output_dir_inside(target)
-            if whole is not None:
-                inside = Path(target).as_posix()
-                self._plugin_log(
-                    f"ASH named no output directory to skip inside {inside} although "
-                    f"its output directory {whole.as_posix()} is there, so trivy is "
-                    f"told to skip {whole.as_posix()} whole. A file the repository "
-                    "committed to it is not scanned by trivy in this run.",
-                    level=logging.WARNING,
-                    target_type=target_type,
-                )
-                skipped = [whole]
-        for relative in skipped:
-            extra.append(f"--skip-dirs={skip_dirs_value(relative.as_posix())}")
+        # ASH's own output directories inside the target, each as its own
+        # --skip-dirs: the converted copies of archives and notebooks (which the
+        # converted target scans already) and reports and scanner results. One
+        # helper builds the tokens for this scanner and trivy-repo
+        # (TrivyScannerBase._output_dir_skip_args), so the two cannot drift apart.
+        extra.extend(self._output_dir_skip_args(target, target_type))
         # trivy reads trivy.yaml and .trivyignore from its working directory, which
         # is the scanned repository. Either can drop findings with nothing in the
         # report saying so, so ASH passes its own unless the operator chose one
         # (TrivyScannerBase._trivy_config_file, as trivy-repo does).
-        extra.append(f"--config={self._trivy_config_file()}")
+        config_token = f"--config={self._trivy_config_file()}"
+        extra.append(config_token)
         # trivy loads the WASM modules in --module-dir (default ~/.trivy/modules,
         # or a trivy.yaml's module.dir). This scanner has no module_dir option, so
         # it always gets an empty directory, as trivy-repo does when its option is
@@ -572,13 +495,32 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         modules = empty_tool_directory("trivy-modules", context=self.context)
         extra.append(f"--module-dir={modules.as_posix()}")
         # .trivyignore and trivy-secret.yaml as trivy-repo passes them
-        # (TrivyScannerBase._trivy_input_file).
+        # (TrivyScannerBase._trivy_input_file). The secret config is read only by
+        # the secret scanner, so a missing operator file fails only a scan that
+        # runs it; the scanner set is read from the --config token just added.
         extra.append(f"--ignorefile={self._ignore_file()}")
-        extra.append(f"--secret-config={self._secret_config_file()}")
+        extra.append(f"--secret-config={self._secret_config_file([config_token])}")
         # Each link leaving the target, and each path the global ignore paths ignore.
-        extra.extend(self._link_skip_args(target, global_ignore_paths))
-        # Before the target, which _resolve_arguments places after the options.
-        target_index = final_args.index(Path(target).as_posix())
+        # The operator's own skip entries are sized first and kept out of this share
+        # of the argument budget (TrivyScannerBase._operator_skip_plan): ASH's
+        # tokens have a fallback when left out, the operator's have none.
+        operator_skips = self._operator_skip_plan(extra)
+        extra.extend(
+            self._link_skip_args(
+                target, global_ignore_paths, reserved=operator_skips.reserved
+            )
+        )
+        # The operator's own skip lists, which ASH's skip flags would otherwise
+        # replace (TrivyScannerBase._operator_skip_args).
+        extra.extend(
+            self._operator_skip_args(extra, operator_skips, target_type=target_type)
+        )
+        # Before the target, which _resolve_arguments places LAST (after the
+        # options): the last token equal to the target's spelling, not the first,
+        # so a relative target spelled like an earlier value ("sarif", "vuln",
+        # "trivy") does not move the insertion point into the options.
+        target_token = Path(target).as_posix()
+        target_index = len(final_args) - 1 - final_args[::-1].index(target_token)
         final_args[target_index:target_index] = extra
         if self._offline():
             # Only with misconfig, which the operator has to add: trivy's Terraform
@@ -605,52 +547,10 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Tie each dependency result to one package copy and set trivy's severity."""
-        sarif_report = self._attach_package_identity(sarif_report, target)
-        for run in sarif_report.runs or []:
-            rules = (
-                (run.tool.driver.rules or []) if run.tool and run.tool.driver else []
-            )
-            by_id = {rule.id: rule for rule in rules}
-            for result in run.results or []:
-                severity = self._trivy_severity(result, rules, by_id)
-                if severity is None:
-                    continue
-                if result.properties is None:
-                    result.properties = PropertyBag()
-                setattr(result.properties, "issue_severity", severity)  # noqa: B010
-        return sarif_report
+        """Tie each dependency result to one package copy and set trivy's severity.
 
-    @staticmethod
-    def _trivy_severity(
-        result: Any, rules: List[Any], by_id: Dict[str, Any]
-    ) -> Optional[str]:
-        """trivy's severity for *result*; see "Severity" above.
-
-        The ``Severity:`` line of its message when it has one, else its rule's tag.
+        The severity step is ``TrivyScannerBase._attach_trivy_severity``, shared
+        with trivy-repo; see "Severity" above for the rule.
         """
-        message = result.message.root.text if result.message else None
-        for line in (message or "").splitlines():
-            if line.startswith("Severity: "):
-                own = line[len("Severity: ") :].strip()
-                return own if own in TRIVY_SEVERITIES else None
-        rule = None
-        if result.ruleIndex is not None and 0 <= result.ruleIndex < len(rules):
-            rule = rules[result.ruleIndex]
-        if rule is None or (result.ruleId and rule.id != result.ruleId):
-            rule = by_id.get(result.ruleId)
-        if rule is None or rule.properties is None:
-            return None
-        tags = getattr(rule.properties, "tags", None) or []
-        found = [tag for tag in tags if tag in TRIVY_SEVERITIES]
-        # Exactly one, or no verdict: two severity tags would be a shape trivy
-        # does not write, and guessing between them could under-rate a finding.
-        if len(found) != 1:
-            return None
-        # The tag is the rating of the last result trivy wrote for the rule. A
-        # result whose own level differs is rated otherwise, and is left to the
-        # generic mapping rather than given another package's severity.
-        level = getattr(result.level, "value", result.level)
-        if level is not None and level != _SARIF_LEVEL[found[0]]:
-            return None
-        return found[0]
+        sarif_report = self._attach_package_identity(sarif_report, target)
+        return self._attach_trivy_severity(sarif_report)

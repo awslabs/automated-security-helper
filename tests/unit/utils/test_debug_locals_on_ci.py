@@ -133,6 +133,22 @@ def test_ci_off_is_not_a_ci_runner(tmp_path, capsys, locals_requested, value):
     assert CANARY in console, console
 
 
+@pytest.mark.parametrize("value", ["0", "NO", "false", "off", ""])
+def test_a_value_that_does_not_ask_for_locals_shows_none(
+    tmp_path, capsys, locals_requested, value
+):
+    """The variable names locals only as YES, 1 or TRUE: 0 and the rest are
+    no request, off a CI runner too, and there is nothing to warn about."""
+    from automated_security_helper.utils.log import show_debug_locals
+
+    locals_requested.setenv("ASH_DEBUG_SHOW_LOCALS", value)
+    assert show_debug_locals() is False
+    console, logged = _run(tmp_path, capsys, locals_requested)
+    assert CANARY not in console, console
+    assert CANARY not in logged, logged
+    assert "ignored" not in console, console
+
+
 RUNNER_MARKERS = [name for name in CI_MARKERS if name != "CI"]
 
 

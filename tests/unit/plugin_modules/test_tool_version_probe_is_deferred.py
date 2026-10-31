@@ -156,6 +156,11 @@ def recorders(monkeypatch):
         return f"{tool_name} 0.0.0"
 
     monkeypatch.setattr(uv_tool_runner.UVToolRunner, "get_tool_version", _probe)
+    # The mixin asks uv_availability() first; the tool guard answers it as a host
+    # without uv, which would end the probe before the recorder sees it.
+    monkeypatch.setattr(
+        uv_tool_runner.UVToolRunner, "uv_availability", lambda self: (True, None)
+    )
     monkeypatch.setattr(
         uv_tool_runner.UVToolRunner, "is_uv_available", lambda self: True
     )
@@ -217,7 +222,11 @@ def test_the_recorders_see_a_process_start_by_any_route(recorders, tmp_path):
         with pytest.raises(RuntimeError, match="allows no process"):
             attempt()
     assert [event for event, _ in spawned] == list(attempts)
-    assert spawned[0][1] == ["true"]
+    # On Windows, Popen joins the argument list into one command line before it
+    # raises the audit event, so the recorded arguments are the string "true";
+    # elsewhere they are the list. Each platform expects exactly its own form.
+    expected_args = "true" if os.name == "nt" else ["true"]
+    assert spawned[0][1] == expected_args
     started = threading.Timer(30, lambda: None)
     started.start()
     try:
@@ -413,7 +422,11 @@ def test_opengrep_asks_its_version_when_the_arguments_are_resolved(
     """``--metrics`` depends on the installed version, asked once, before the run.
 
     Construction asks nothing (test_constructing_a_plugin_starts_nothing); the
-    first argument resolution asks, and the second reuses the answer.
+    first argument resolution asks, and the second reuses the answer. The
+    resolution the scan runs is ``_resolve_scan_arguments`` (the base's per-target
+    entry, which opengrep overrides to decide ``--metrics`` before the target's
+    excludes are added); the inner ``_resolve_arguments`` is the base's and asks
+    nothing.
     """
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScanner,
@@ -432,12 +445,14 @@ def test_opengrep_asks_its_version_when_the_arguments_are_resolved(
     target.mkdir()
 
     runs = [
-        scanner._resolve_arguments(target=target, results_file=tmp_path / "r.sarif")
-        for _ in range(2)
+        scanner._resolve_scan_arguments(target, tmp_path / "r.sarif") for _ in range(2)
     ]
 
     assert asked == [True]
     assert [argv.count("--metrics") for argv in runs] == [expected, expected], runs
+    # Resolving the same target twice on one instance gives one command, not a
+    # command plus the per-target excludes appended a second time.
+    assert runs[0] == runs[1], runs
 
 
 @pytest.mark.unit
@@ -461,9 +476,7 @@ def test_an_old_opengrep_gets_the_same_arguments_plus_metrics(
             OpengrepScanner, "_get_opengrep_version", lambda self, v=version: v
         )
         scanner = OpengrepScanner(context=plugin_context)
-        argvs[version] = scanner._resolve_arguments(
-            target=target, results_file=tmp_path / "r.sarif"
-        )
+        argvs[version] = scanner._resolve_scan_arguments(target, tmp_path / "r.sarif")
 
     old = list(argvs[(1, 6, 0)])
     at = old.index("--metrics")

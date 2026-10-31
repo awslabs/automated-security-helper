@@ -20,12 +20,18 @@ here drive the threshold the way a scan does -- through
 property at all. Every assertion below fails on the code as it stood before the
 threshold source was fixed.
 
+Per-scanner threshold overrides
+-------------------------------
+``_compute_exit_code`` grades each result by the threshold governing its own
+scanner (``ScannerStatisticsCalculator.get_scanner_threshold_info``, memoized
+per scanner), so a scanner the operator tightened or relaxed through
+``options.severity_threshold`` was judged by its own setting in the exit code
+and the summary table, and by the global setting in this report. An earlier
+version of this docstring said the exit code did not consult them; it does, and
+``TestScannerThresholdIsRead`` pins the reporter to the same resolver.
+
 What these tests do not cover
 -----------------------------
-* Per-scanner threshold overrides. ``ScannerStatisticsCalculator`` resolves
-  those, but ``_compute_exit_code`` does not consult them, so honouring them
-  here would put the report and the exit code back into disagreement -- the
-  exact failure ``utils.severity_ladder`` exists to prevent.
 * ``<failure>``. The reporter imports only ``Error`` and ``Skipped``, so a
   qualifying finding is always ``<error>`` and never ``<failure>``. That is
   unchanged here and pinned only incidentally, by asserting on ``error``.
@@ -35,6 +41,9 @@ import xml.etree.ElementTree as ET  # nosec B405
 
 import pytest
 
+from automated_security_helper.core.scanner_statistics_calculator import (
+    ScannerStatisticsCalculator,
+)
 from tests.unit.plugin_modules.ash_builtin.reporters.test_junitxml_reporter import (
     ALL_SARIF_LEVELS,
     THRESHOLD_QUALIFYING_LEVELS,
@@ -44,6 +53,7 @@ from tests.unit.plugin_modules.ash_builtin.reporters.test_junitxml_reporter impo
     _make_run,
     _outcome,
 )
+from tests.utils.scanner_thresholds import without_scanner_thresholds
 
 pytestmark = pytest.mark.unit
 
@@ -70,7 +80,7 @@ def _render_from_config(tmp_path, level, threshold, issue_severity=None):
     if issue_severity is not None:
         result.properties.__pydantic_extra__["issue_severity"] = issue_severity
 
-    model = _make_model(runs=[_make_run(results=[result])])
+    model = without_scanner_thresholds(_make_model(runs=[_make_run(results=[result])]))
     model.ash_config.global_settings.severity_threshold = threshold
 
     output = _get_reporter(tmp_path).report(model)
@@ -81,7 +91,7 @@ def _render_kind(tmp_path, level, threshold, kind):
     """Report one finding at an explicit SARIF ``kind`` and return its testcase."""
     result = _make_result(level=level, scanner_name="cdk-nag")
     result.kind = kind
-    model = _make_model(runs=[_make_run(results=[result])])
+    model = without_scanner_thresholds(_make_model(runs=[_make_run(results=[result])]))
     model.ash_config.global_settings.severity_threshold = threshold
     output = _get_reporter(tmp_path).report(model)
     return ET.fromstring(output).find(".//testcase")  # nosec B314
@@ -325,12 +335,84 @@ class TestConfiguredSeverityThresholdHelper:
         result = _make_result(
             level="note", scanner_name="bandit", severity_threshold="INFO"
         )
-        model = _make_model(runs=[_make_run(results=[result])])
+        model = without_scanner_thresholds(
+            _make_model(runs=[_make_run(results=[result])])
+        )
         model.ash_config.global_settings.severity_threshold = "ALL"
         output = _get_reporter(tmp_path).report(model)
         testcase = ET.fromstring(output).find(".//testcase")  # nosec B314
         # Under ALL a `note` is actionable. Had "INFO" reached the ladder it would
         # have gated like CRITICAL and skipped this finding.
+        assert _outcome(testcase) == "actionable"
+
+
+class TestScannerThresholdIsRead:
+    """A scanner's own ``options.severity_threshold`` governs its findings.
+
+    The exit code resolves the threshold per result's scanner through
+    ``ScannerStatisticsCalculator.get_scanner_threshold_info``; the reporter
+    read ``global_settings.severity_threshold`` for every result, so a finding
+    the exit code ignored under a scanner's CRITICAL override was still an
+    ``<error>`` here (and the reverse under a scanner's LOW override).
+    """
+
+    @staticmethod
+    def _render(tmp_path, scanner_name, level, scanner_threshold):
+        result = _make_result(level=level, scanner_name=scanner_name)
+        model = without_scanner_thresholds(
+            _make_model(runs=[_make_run(results=[result])])
+        )
+        model.ash_config.global_settings.severity_threshold = "MEDIUM"
+        model.ash_config.scanners.bandit.options.severity_threshold = scanner_threshold
+        output = _get_reporter(tmp_path).report(model)
+        return ET.fromstring(output).find(".//testcase")  # nosec B314
+
+    def test_a_scanner_relaxed_to_critical_skips_its_warning_finding(self, tmp_path):
+        """At the base this was ``<error>``: MEDIUM graded a warning actionable."""
+        testcase = self._render(tmp_path, "bandit", "warning", "CRITICAL")
+        assert _outcome(testcase) == "below-threshold"
+
+    def test_a_scanner_tightened_to_low_reports_its_note_finding(self, tmp_path):
+        """At the base this was skipped: MEDIUM graded a note below threshold."""
+        testcase = self._render(tmp_path, "bandit", "note", "LOW")
+        assert _outcome(testcase) == "actionable"
+
+    def test_another_scanner_keeps_the_global_threshold(self, tmp_path):
+        """The control: bandit's override reaches bandit's findings only."""
+        testcase = self._render(tmp_path, "semgrep", "warning", "CRITICAL")
+        assert _outcome(testcase) == "actionable"
+
+    @staticmethod
+    def _render_cdk_nag(tmp_path, level, scanner_threshold):
+        """A finding of the hyphenated scanner ``cdk-nag``, whose configuration
+        section is the underscored ``cdk_nag``."""
+        result = _make_result(level=level, scanner_name="cdk-nag")
+        model = without_scanner_thresholds(
+            _make_model(runs=[_make_run(results=[result])])
+        )
+        model.ash_config.global_settings.severity_threshold = "MEDIUM"
+        model.ash_config.scanners.cdk_nag.options.severity_threshold = scanner_threshold
+        # The resolver the exit code uses finds the section under the hyphenated
+        # name; a reporter that looked the section up by the name as written
+        # would read the global threshold instead.
+        resolved = ScannerStatisticsCalculator.get_scanner_threshold_info(
+            model, "cdk-nag"
+        )
+        assert resolved == (scanner_threshold, "config"), resolved
+        output = _get_reporter(tmp_path).report(model)
+        return ET.fromstring(output).find(".//testcase")  # nosec B314
+
+    def test_a_hyphenated_scanner_name_finds_its_underscored_section(self, tmp_path):
+        """The mapping a separate lookup would get wrong: cdk-nag relaxed to
+        CRITICAL skips its warning finding, which the global MEDIUM would
+        have reported."""
+        testcase = self._render_cdk_nag(tmp_path, "warning", "CRITICAL")
+        assert _outcome(testcase) == "below-threshold"
+
+    def test_a_hyphenated_scanner_tightened_to_low_reports_its_note(self, tmp_path):
+        """The other direction, so the case above cannot pass by skipping every
+        cdk-nag finding."""
+        testcase = self._render_cdk_nag(tmp_path, "note", "LOW")
         assert _outcome(testcase) == "actionable"
 
 
@@ -362,7 +444,7 @@ class TestActionableSubErrorFindingsAreNotSilentlyPassed:
         assert error.get("type") == "note"
         assert testcase.find("failure") is None
 
-    @pytest.mark.parametrize("kind", ["pass", "informational", "notApplicable"])
+    @pytest.mark.parametrize("kind", ["pass", "informational"])
     @pytest.mark.parametrize("level", ["note", "none"])
     def test_a_non_finding_kind_stays_a_passing_testcase(self, tmp_path, level, kind):
         """The control that keeps the arm above from being over-broad."""
@@ -370,6 +452,92 @@ class TestActionableSubErrorFindingsAreNotSilentlyPassed:
         assert testcase.find("error") is None
         assert testcase.find("failure") is None
         assert testcase.find("skipped") is None
+
+    @pytest.mark.parametrize("threshold", ["ALL", "MEDIUM"])
+    @pytest.mark.parametrize("level", ["none", "note", "warning", "error"])
+    def test_a_not_applicable_result_is_skipped_not_passed(
+        self, tmp_path, level, threshold
+    ):
+        """SARIF ``notApplicable`` says the rule was NOT evaluated.
+
+        cdk-nag writes it, with level ``none``, for a rule that raised instead
+        of reaching an answer, and the exit code fails the scan for that rule
+        through the run-level notification. The reporter used to render the
+        result as a bare passing test case, so the JUnit artefact said the rule
+        passed while the process status said it was never evaluated. Skipped is
+        JUnit's own word for a test that did not run.
+
+        The reading does not depend on the gate or the level. A first fix put
+        the arm inside the actionable branch, so under the default MEDIUM gate
+        a cdk-nag ``none`` result read "below configured severity threshold"
+        and a ``warning`` or ``error`` one was reported as an error: a severity
+        for a rule that was never run.
+        """
+        testcase = _render_kind(
+            tmp_path, level=level, threshold=threshold, kind="notApplicable"
+        )
+        assert testcase.find("error") is None
+        assert testcase.find("failure") is None
+        skipped = testcase.find("skipped")
+        assert skipped is not None
+        assert skipped.get("type") == "not-evaluated"
+        assert skipped.get("message") == "Rule was not evaluated for this target"
+
+    @pytest.mark.parametrize("level", ["none", "warning", "error"])
+    def test_a_not_applicable_result_is_skipped_with_the_gate_off(
+        self, tmp_path, level
+    ):
+        """``respect_severity_threshold=False`` turns the severity gate off, and
+        a result that was never evaluated has no severity to gate. A check placed
+        inside the threshold-respecting path would, with the gate off, report a
+        ``notApplicable`` result at ``warning`` or ``error`` as an error."""
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.junitxml_reporter import (
+            JUnitXMLReporterConfig,
+            JUnitXMLReporterConfigOptions,
+        )
+
+        config = JUnitXMLReporterConfig(
+            options=JUnitXMLReporterConfigOptions(respect_severity_threshold=False)
+        )
+        result = _make_result(level=level, scanner_name="cdk-nag")
+        result.kind = "notApplicable"
+        model = without_scanner_thresholds(
+            _make_model(runs=[_make_run(results=[result])])
+        )
+        model.ash_config.global_settings.severity_threshold = "MEDIUM"
+
+        output = _get_reporter(tmp_path, config=config).report(model)
+
+        testcase = ET.fromstring(output).find(".//testcase")  # nosec B314
+        assert testcase.find("error") is None
+        assert testcase.find("failure") is None
+        skipped = testcase.find("skipped")
+        assert skipped is not None
+        assert skipped.get("type") == "not-evaluated"
+
+    def test_a_suppression_in_effect_wins_over_not_applicable(self, tmp_path):
+        """Two reasons to skip, one case: the suppression's, because the
+        operator accepted that finding."""
+        from automated_security_helper.schemas.sarif_schema_model import Suppression
+
+        result = _make_result(
+            level="none",
+            scanner_name="cdk-nag",
+            suppressions=[Suppression(kind="inSource", justification="accepted")],
+        )
+        result.kind = "notApplicable"
+        model = without_scanner_thresholds(
+            _make_model(runs=[_make_run(results=[result])])
+        )
+        model.ash_config.global_settings.severity_threshold = "MEDIUM"
+
+        output = _get_reporter(tmp_path).report(model)
+
+        testcase = ET.fromstring(output).find(".//testcase")  # nosec B314
+        skipped = testcase.find("skipped")
+        assert skipped is not None
+        assert skipped.get("type") == "suppression"
+        assert skipped.get("message") == "accepted"
 
     def test_cdk_nag_compliant_check_is_not_reported_as_a_problem(self, tmp_path):
         """cdk-nag's real compliant shape, named explicitly.

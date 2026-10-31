@@ -3,12 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Combine the coverage data of one set of unit-test artifacts and apply the threshold.
 
-The unit tier is not sharded, so a set is usually one artifact (``...-shard1of1``). The
-check below still guards a set that was sharded: no single shard of a split run can meet
-the 80% total-coverage gate. A run measures coverage, writes ``test-results/coverage.data``
-and uploads it with the rest of its test results. This script runs in the
-``unit-coverage`` job after they are downloaded, one subdirectory per artifact, and does
-what a single whole-suite "Run PyTest" step did in one process:
+The unit tier runs in four shards per OS and Python version, so a set is four artifacts
+(``...-shard1of4`` to ``...-shard4of4``); a set of one (``...-shard1of1``) is still a
+complete set, for a run of the tier that was not split. The check below is what makes the
+split safe: no single shard of a split run can meet the 80% total-coverage gate, so a
+missing shard is a failure, never a lower number. A run measures coverage, writes
+``test-results/coverage.data`` and uploads it with the rest of its test results. This
+script runs in the ``unit-coverage`` job after they are downloaded, one subdirectory per
+artifact, and does what a single whole-suite "Run PyTest" step did in one process:
 
 1. Check that every shard of the set is there. The shard names carry their own count
    (``...-shard3of8``), so a shard that crashed before uploading, or a matrix entry that
@@ -24,7 +26,10 @@ The set is named by the artifact name up to the shard suffix, which the run-unit
 action builds from the operating system, the architecture, the Python version and the
 tier marker. This script rebuilds that name from ``--os``, ``--python-version``,
 ``--marker`` and the runner's own ``RUNNER_ARCH``, so it must run on the same kind of
-runner as the runs it combines. Without ``--marker`` the name has no tier segment.
+runner as the runs it combines. ``--marker`` is required, with no default: without it the
+name would have no tier segment, so a combine that named no tier would look for the
+untiered artifact name no job uploads, or combine whatever set it found under it, and a
+gate run over an unmarked shard set could pass without having read the unit tier at all.
 That is also what makes path remapping unnecessary: coverage data records absolute source
 paths, and a runner of the same image has the same workspace path, so the combine finds
 every source file where the shard recorded it. A path that did not match would make
@@ -224,8 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python-version", help="the Python version of the shards")
     parser.add_argument(
         "--marker",
-        default=None,
-        help="the tier marker in the artifact names, e.g. unit (default: none)",
+        help="the tier marker in the artifact names, e.g. unit (required, no default)",
     )
     parser.add_argument(
         "--fail-under", type=float, help="minimum total coverage, percent"
@@ -248,13 +252,16 @@ def main(argv: list[str] | None = None) -> int:
         not args.results_dir
         or not args.os
         or not args.python_version
+        or not args.marker
         or args.fail_under is None
     ):
-        # Not parser.error(): argparse exits 2 there, which is coverage's own status for
-        # a run below the threshold.
+        # Not parser.error(), and not argparse's required=True: argparse exits 2 there,
+        # which is coverage's own status for a run below the threshold, and a required
+        # option would also refuse --self-test. --marker is required here for the reason
+        # the module docstring gives: without a tier the gate reads no tier.
         print(
-            "combine-unit-coverage: --results-dir, --os, --python-version and "
-            "--fail-under are required",
+            "combine-unit-coverage: --results-dir, --os, --python-version, --marker "
+            "and --fail-under are required",
             file=sys.stderr,
         )
         return 64

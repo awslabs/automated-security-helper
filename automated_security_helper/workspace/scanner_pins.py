@@ -40,7 +40,14 @@ Outside it, and therefore UNDECIDABLE: pre-releases (``1.0rc1``), post-releases
 explicit epochs (``1!1.0``), any operator not in the list, and any text that is
 not a specifier at all. ``===X`` is modelled only when ``X`` is itself a plain
 release version; PEP 440 defines it as arbitrary string equality, so
-``===some-build`` names a version this module cannot order.
+``===some-build`` names a version this module cannot order. As string equality
+it is satisfied by the one version spelled exactly ``X``: ``===1.0`` and
+``===1.0.0`` name two strings, so no version satisfies both, where ``==1.0``
+and ``==1.0.0`` are one padded version. The release tuple is compared without
+padding for it. A leading zero in a component (``===01.0``, ``===1.00``) is the
+one spelling difference a tuple does not hold: ``===1.0`` and ``===1.00`` would
+parse alike though no string is both, so such a text is UNDECIDABLE, and only a
+text that is its tuple's canonical spelling is modelled.
 
 UNDECIDABLE is refused by the caller, not assumed compatible. The asymmetry is
 the same one that runs through workspace mode: refusing a workspace that would
@@ -52,22 +59,22 @@ How emptiness is decided
 Both pins are converted to constraint lists and a witness is searched for: a
 version satisfying every constraint on both sides. The search is over candidates
 derived from the boundary versions mentioned by either pin -- each boundary
-itself, one step above and below it, and the same boundary with a deeper release
-segment appended. This is sufficient because every constraint's boundary lies in
-that set, so a non-empty feasible region must contain either a boundary or a
-point in an open interval between two consecutive ones, and an appended segment
-lands inside such an interval.
+itself, one step above and below it, the same boundary with a deeper release
+segment appended, and the boundary zero-padded to the longest boundary's length
+with one more segment ``1`` appended. This is sufficient because every
+constraint's boundary lies in that set, so a non-empty feasible region must
+contain either a boundary or a point in an open interval between two consecutive
+ones; the padded-and-appended candidate of the lower boundary lies in every such
+interval, whatever the two boundaries' depths (``>1, <1.0.1`` has the witness
+``1.0.0.1``; ``>1.0, <1.0.0.1`` has ``1.0.0.0.1``).
 
 Two candidates cover the unbounded ends: ``0`` for a region open below, and one
 past the largest major seen for a region open above.
 
 Failure modes and known limitations
 -----------------------------------
-* The witness search is not complete for boundaries nested more than two release
-  segments deep. Pins of the form ``>1.0, <1.0.0.1`` have a feasible region
-  (``1.0.0.0.1`` satisfies both) that the candidate set does not reach, and the
-  verdict comes back INCOMPATIBLE. That errs toward refusal, which is the safe
-  direction, and no real scanner pin has that shape.
+* The witness search is complete for the modelled subset, by the argument
+  above; a wrong answer here would be a defect, not a documented gap.
 * Ordering ignores everything but the release segment, which is exactly why
   anything carrying a pre/post/dev/local marker is rejected as UNDECIDABLE
   rather than compared on its release segment alone -- ``1.0rc1`` and ``1.0``
@@ -85,7 +92,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 #: A version reduced to its release segment, as a tuple of integers.
 ReleaseTuple = Tuple[int, ...]
@@ -119,9 +126,12 @@ class PinVerdict(str, Enum):
 
 
 class _Op(str, Enum):
-    """The modelled comparison kinds, after ``~=`` and ``===`` are expanded."""
+    """The modelled comparison kinds, after ``~=`` is expanded."""
 
     EQUAL = "=="
+    #: ``===``: the one version spelled exactly as written, release tuple
+    #: compared without padding (``1.0`` is not ``1.0.0`` here).
+    ARBITRARY_EQUAL = "==="
     NOT_EQUAL = "!="
     PREFIX_EQUAL = "==prefix"
     PREFIX_NOT_EQUAL = "!=prefix"
@@ -209,8 +219,14 @@ def _parse_specifier(specifier: str) -> Optional[List[_Constraint]]:
         ]
     if operator == "===":
         # Arbitrary equality. Modelled only because the version text happened to
-        # be an orderable release version; see the module docstring.
-        return [_Constraint(_Op.EQUAL, version)]
+        # be an orderable release version; see the module docstring. Not EQUAL:
+        # that pads, and "===1.0" with "===1.0.0" then read COMPATIBLE though
+        # no string is both. A text with a leading zero in a component parses to
+        # the tuple of its canonical spelling ("1.00" to (1, 0)), so "===1.0"
+        # and "===1.00" would read COMPATIBLE the same way: not modelled.
+        if ".".join(str(part) for part in version) != version_text:
+            return None
+        return [_Constraint(_Op.ARBITRARY_EQUAL, version)]
     if operator == "~=":
         return _expand_compatible_release(version)
     if operator == ">=":
@@ -258,6 +274,9 @@ def _satisfies(candidate: ReleaseTuple, constraint: _Constraint) -> bool:
         return _matches_prefix(candidate, constraint.version)
     if constraint.op is _Op.PREFIX_NOT_EQUAL:
         return not _matches_prefix(candidate, constraint.version)
+    if constraint.op is _Op.ARBITRARY_EQUAL:
+        # The spelling, not the padded version: (1, 0) is not (1, 0, 0).
+        return candidate == constraint.version
 
     order = _compare(candidate, constraint.version)
     if constraint.op is _Op.EQUAL:
@@ -277,9 +296,12 @@ def _candidates(constraints: List[_Constraint]) -> Set[ReleaseTuple]:
     """Build the witness search space from the boundaries the pins mention.
 
     For each boundary: the boundary itself, one step above and below it in its
-    last component, and the boundary with a deeper release segment appended --
-    the last of these is what reaches inside an open interval between two
-    consecutive boundaries. A prefix boundary also contributes the start of the
+    last component, the boundary with a deeper release segment appended, and the
+    boundary zero-padded to the longest boundary's length with a ``1`` appended
+    -- the last of these is what reaches inside an open interval between two
+    consecutive boundaries of any depths: ``>1`` with ``<1.0.1`` is satisfied by
+    ``1.0.0.1`` and by nothing shallower, so the shallower candidates alone read
+    the pair INCOMPATIBLE. A prefix boundary also contributes the start of the
     next prefix, which is where its range ends.
 
     ``0`` and one past the largest major cover regions open below and above.
@@ -288,10 +310,12 @@ def _candidates(constraints: List[_Constraint]) -> Set[ReleaseTuple]:
     candidates: Set[ReleaseTuple] = {(0,), (1,)}
 
     boundaries = [constraint.version for constraint in constraints]
+    longest = max((len(boundary) for boundary in boundaries), default=1)
     for boundary in boundaries:
         candidates.add(boundary)
         candidates.add(boundary + (1,))
         candidates.add(boundary + (0, 1))
+        candidates.add(_pad(boundary, longest) + (1,))
         candidates.add(boundary[:-1] + (boundary[-1] + 1,))
         if boundary[-1] > 0:
             candidates.add(boundary[:-1] + (boundary[-1] - 1,))
@@ -337,6 +361,43 @@ def compare_pins(first: str, second: str) -> PinVerdict:
         return PinVerdict.UNDECIDABLE
 
     combined = first_constraints + second_constraints
+    for candidate in _candidates(combined):
+        if all(_satisfies(candidate, constraint) for constraint in combined):
+            return PinVerdict.COMPATIBLE
+    return PinVerdict.INCOMPATIBLE
+
+
+def compare_pin_set(pins: Sequence[str]) -> PinVerdict:
+    """Decide whether one version satisfies every pin in *pins* at once.
+
+    Pairwise compatibility does not prove it. ``>=1,<3``, ``>=2,<4`` and
+    ``!=2.*`` are compatible two at a time (``1.x``, ``2.x`` and ``3.x`` are the
+    three pairs' witnesses) and no version satisfies all three, so a workspace
+    whose three projects carried them was accepted and then could not be
+    installed for all of them. The witness search is :func:`compare_pins`'s,
+    run over every pin's constraints together.
+
+    Textually identical pins are folded first, as :func:`compare_pins` folds
+    them, so a shared exotic default is COMPATIBLE rather than UNDECIDABLE. One
+    distinct pin, or none, is trivially COMPATIBLE.
+
+    Returns:
+        ``COMPATIBLE``, ``INCOMPATIBLE`` or ``UNDECIDABLE``, read as for
+        :func:`compare_pins`. The result does not depend on the pins' order.
+    """
+    distinct: Dict[Tuple[str, ...], str] = {}
+    for pin in pins:
+        distinct.setdefault(_normalise(pin), pin)
+    if len(distinct) <= 1:
+        return PinVerdict.COMPATIBLE
+
+    combined: List[_Constraint] = []
+    for pin in distinct.values():
+        constraints = _parse_pin(pin)
+        if constraints is None:
+            return PinVerdict.UNDECIDABLE
+        combined.extend(constraints)
+
     for candidate in _candidates(combined):
         if all(_satisfies(candidate, constraint) for constraint in combined):
             return PinVerdict.COMPATIBLE

@@ -703,6 +703,7 @@ workspace:
   projects:
   - actionable_finding_count: 1
     ceiling_unreachable_findings: {}
+    converter_refusals: []
     display_label: snapshot-api
     duration_seconds: 0.0
     error: null
@@ -720,10 +721,12 @@ workspace:
     output_path: projects/api
     partial_coverage_scanners: []
     policy_origin_finding_count: 0
+    policy_scanners_gate: false
     project: api
     relative_path: api
     sarif_run_index: 0
     scan_incomplete: true
+    scanner_thresholds: {}
     scanners:
       bandit: FAILED
       npm-audit: MISSING
@@ -732,8 +735,12 @@ workspace:
     skip_reason: null
     stale_content_databases: []
     status: completed
+    unevaluated_rules: []
+    unstoppable_tools: {}
+    withheld_scanner_thresholds: []
   - actionable_finding_count: 1
     ceiling_unreachable_findings: {}
+    converter_refusals: []
     display_label: snapshot-web
     duration_seconds: 0.0
     error: null
@@ -749,10 +756,12 @@ workspace:
     output_path: projects/web
     partial_coverage_scanners: []
     policy_origin_finding_count: 0
+    policy_scanners_gate: false
     project: web
     relative_path: web
     sarif_run_index: 1
     scan_incomplete: false
+    scanner_thresholds: {}
     scanners:
       checkov: FAILED
       semgrep: PASSED
@@ -761,8 +770,12 @@ workspace:
     skip_reason: null
     stale_content_databases: []
     status: completed
+    unevaluated_rules: []
+    unstoppable_tools: {}
+    withheld_scanner_thresholds: []
   - actionable_finding_count: 0
     ceiling_unreachable_findings: {}
+    converter_refusals: []
     display_label: docs
     duration_seconds: 0.0
     error: null
@@ -778,16 +791,21 @@ workspace:
     output_path: projects/docs
     partial_coverage_scanners: []
     policy_origin_finding_count: 0
+    policy_scanners_gate: null
     project: docs
     relative_path: docs
     sarif_run_index: null
     scan_incomplete: false
+    scanner_thresholds: {}
     scanners: {}
     severity_threshold: null
     skip_detail: '''docs'' does not exist as a directory at ''<REPO>/tests/test_data/snapshot_fixture/workspace/docs'''
     skip_reason: error
     stale_content_databases: []
     status: skipped
+    unevaluated_rules: []
+    unstoppable_tools: {}
+    withheld_scanner_thresholds: []
   refusal_detail: null
   skipped_projects:
   - detail: '''docs'' does not exist as a directory at ''<REPO>/tests/test_data/snapshot_fixture/workspace/docs'''

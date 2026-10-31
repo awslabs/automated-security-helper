@@ -123,7 +123,11 @@ def test_control_without_the_overrides_the_scanners_uv_uses_the_plant(
 ):
     marker = tmp_path / "MARKER"
     plant(repo, marker)
-    monkeypatch.setattr(python_child, "uv_child_overrides", lambda argv: {})
+    # The stub takes the real function's arguments: _run_subprocess hands it the
+    # command and the child's environment, and a one-argument stub raised a
+    # TypeError that the helper recorded as a failed run, so no uv ever started
+    # and the control measured nothing.
+    monkeypatch.setattr(python_child, "uv_child_overrides", lambda argv, env=None: {})
     _run(_scanner(repo, tmp_path), args)
     assert mark in marker.read_text(encoding="utf-8")
 

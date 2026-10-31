@@ -876,10 +876,10 @@ def _record_grype_parses(monkeypatch) -> list:
         seen.append(str(config_path))
         return real(config_path)
 
-    def recording_bound(environ, grype_config, values=()):
+    def recording_bound(environ, grype_config, values=(), *, shown=None):
         if grype_config is not None:
             seen.append(str(grype_config))
-        return real_bound(environ, grype_config, values)
+        return real_bound(environ, grype_config, values, shown=shown)
 
     monkeypatch.setattr(
         grype_scanner.GrypeScanner, "_output_restricting_keys", staticmethod(recording)

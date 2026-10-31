@@ -8,5 +8,5 @@ global_settings:
       reason: Still matches a finding
     # [ash-lint 2026-01-15] Commented out: unused suppression (not matched in last scan)
     # - path: src/old.py
-    # rule_id: B105
-    # reason: The file was deleted
+    #   rule_id: B105
+    #   reason: The file was deleted

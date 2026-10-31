@@ -117,7 +117,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: The shards partitioned different scanner sets: shard 0: bandit, semgrep; shard 1: bandit, grype, semgrep. Each partition is internally valid, so nothing else here can see this: one executor was missing a plugin module, or --python-only or a config override was applied to some jobs and not others. Merging would report a scan that never covered the scanners the smaller set omitted.
+      Refusing to merge: The shards partitioned different scanner sets: shard 0: bandit, semgrep; shard 1: bandit, grype, semgrep. Each partition is internally valid, so nothing else here can see this: one executor was missing a plugin module, or a config override was applied to some jobs and not others. Merging would report a scan that never covered the scanners the smaller set omitted.
   
     ''',
   })
@@ -147,7 +147,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: Missing shard results for indices [1] of 2. Those scanners did not run, or their results were never collected -- check whether the matching CI jobs succeeded and uploaded their artifacts. Refusing to merge a partial scan into a report that would read as complete.
+      Refusing to merge: Missing shard results for 1 of 2 indices (1). Those scanners did not run, or their results were never collected -- check whether the matching CI jobs succeeded and uploaded their artifacts. Refusing to merge a partial scan into a report that would read as complete.
   
     ''',
   })
@@ -177,7 +177,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: These scanners appear in shard results but no shard was assigned them: trivy (PASSED, seen in shard0/ash_aggregated_results.json). No shard ran them, so merging would report them as deliberately skipped rather than never attempted. The status of each is named above because the cause differs: the executors resolved different scanner sets (one missing a plugin module, or --python-only or a config override applied to some jobs and not others), or a scanner was excluded by every shard's partition. A scanner that failed to construct, or whose plugin module failed to import, is recorded ERROR or MISSING instead and is reported through --fail-on-incomplete-scanners rather than refused here.
+      Refusing to merge: These scanners appear in shard results but no shard was assigned them: trivy (PASSED, seen in shard0/ash_aggregated_results.json). No shard ran them, so merging would report them as deliberately skipped rather than never attempted. The status of each is named above because the cause differs: the executors resolved different scanner sets (one missing a plugin module, or a config override applied to some jobs and not others), or a scanner was excluded by every shard's partition. A scanner that failed to construct, or whose plugin module failed to import, is recorded ERROR or MISSING instead and is reported through --fail-on-incomplete-scanners rather than refused here; one the operator deselected is recorded SKIPPED as excluded and is not refused either.
   
     ''',
   })

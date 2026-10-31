@@ -33,7 +33,7 @@ import inspect
 import json
 import re
 from pathlib import Path, PurePath
-from typing import Any, Optional, TypeVar
+from typing import Any, List, Optional, TypeVar
 
 from pydantic import BaseModel, ValidationInfo, field_validator, model_validator
 from pydantic_core import PydanticSerializationError
@@ -191,8 +191,22 @@ def texts_of_undecodable(value: Any) -> Any:
             return value
         if isinstance(value, list):
             return items
-        return type(value)(items)
+        return _rebuilt(value, items)
     return value
+
+
+def _rebuilt(value: Any, items: List[Any]) -> Any:
+    """A container of ``value``'s type holding ``items``.
+
+    A tuple subclass with named fields (a NamedTuple, which the result models
+    keep in a few property bags) takes its items as positional arguments, one
+    per field, where every other container takes one iterable; ``type(value)
+    (items)`` handed a NamedTuple one list where it wanted its fields and raised
+    TypeError out of a dump.
+    """
+    if isinstance(value, tuple) and hasattr(type(value), "_fields"):
+        return type(value)(*items)
+    return type(value)(items)
 
 
 def _record_fields(model: BaseModel) -> None:
@@ -229,6 +243,20 @@ def _record_fields(model: BaseModel) -> None:
             new = texts_of_undecodable(value)
             if new is not value:
                 extra[key] = new
+        # The extra fields' NAMES too: a property bag's key is a name a tool or a
+        # repository chose, and a dump in JSON mode UTF-8-encodes the keys, so a
+        # lone surrogate in one stops the dump as one in a value would. Renamed in
+        # place, in the same order, only when a name changed. Two names with one
+        # record form collapse to one key (the later value stays), which leaves
+        # ``renamed`` shorter than ``extra``; zip stops at the shorter, so a
+        # collision whose first key was already the record form compared equal and
+        # the raw name stayed in the bag.
+        renamed = {texts_of_undecodable(key): value for key, value in extra.items()}
+        if len(renamed) != len(extra) or any(
+            new_key is not key for new_key, key in zip(renamed, extra)
+        ):
+            extra.clear()
+            extra.update(renamed)
 
 
 #: Field values :func:`_record_fields` skips: they hold no str of their own.
@@ -381,12 +409,12 @@ def _tree_holds_a_lone_surrogate(value: Any, seen: set[int]) -> bool:
         if id(value) in seen:
             return False
         seen.add(id(value))
+        # The extra fields' names are read as a dict's keys are: a dump encodes
+        # them, so one holding a lone surrogate fails the dump as a value would.
+        extra = value.__pydantic_extra__ or {}
         return any(
             _tree_holds_a_lone_surrogate(item, seen)
-            for item in [
-                *value.__dict__.values(),
-                *(value.__pydantic_extra__ or {}).values(),
-            ]
+            for item in [*value.__dict__.values(), *extra.keys(), *extra.values()]
         )
     if isinstance(value, dict):
         return any(

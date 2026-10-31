@@ -12,7 +12,7 @@ module "ash_image" {
 
   # Pin the revision. There is no default: the image this builds is the only
   # one any deployment target can consume, so the pin is a deliberate choice.
-  ash_version = "v3.7.0"
+  ash_version = "v3.7.1"
 
   # Daily rebuild. ASH bundles third-party scanners, so a stale image scans
   # with stale detections even when ASH itself has not changed.

@@ -119,6 +119,40 @@ runs:
         echo "hw.logicalcpu: $(sysctl -n hw.logicalcpu || true)"
         echo "processes owned by $(id -un): $(ps -U "$(id -un)" -o pid= | wc -l || true)"
 
+    # The e2e tier runs the product against real tools: `ash` as a child process over a
+    # target tree, and the docs pages' commands in a shell. Without the scanners installed,
+    # a page that scans with bandit exits 1 with bandit MISSING where it documents exit 2,
+    # and the links-leaving-the-tree scan records cfn-lint MISSING. This step installs them
+    # with the installer users run, before any test starts, the way the integration-test
+    # job in ash-unified-ci.yml does for its own suite. Pinned binaries land in ASH's bin
+    # directory and the uv tools in uv's tool bin directory;
+    # tests/integration/test_e2e_runner_has_its_tools.py asserts both lists, so keep the
+    # two in step.
+    #
+    # The second command completes the cfn-lint that `uv sync` already put in the
+    # environment. It arrives through moto without the `sarif` extra, `uv run` puts
+    # .venv/bin ahead of every other PATH entry so the scanner finds that copy before the
+    # uv tool installed above, and its pre-installed check wants the extra: offline, a
+    # copy without it is MISSING. The added packages survive `uv run`'s inexact sync.
+    #
+    # Windows gets bandit and checkov only. They are the two scanners the external-target
+    # and multi-project gates install on windows-latest, and semgrep publishes no Windows
+    # build (semgrep_scanner.py), so it cannot be in that list.
+    #
+    # The unit tier runs no real scanner. The integration tier is left as it is: its
+    # real-tool tests skip when the tool is absent, and the integration-test job in
+    # ash-unified-ci.yml is the one that installs them and requires them.
+    - name: Install the scanners the e2e tier runs for real
+      if: inputs.marker == 'e2e'
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = Windows ]; then
+          uv run ash dependencies install --tool bandit --tool checkov
+        else
+          uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
+        fi
+        uv pip install 'cfn-lint[sarif]>=1.43.3,<2.0.0'
+
     # ASH_REQUIRE_SYMBOLS_EXTRA and ASH_REQUIRE_CDK_EXTRA turn the skip-when-absent of the
     # tests that need each extra into a hard failure, so a leg that stops installing an extra
     # cannot pass by skipping them. A plain `uv sync` on a contributor's machine sets neither,
@@ -153,6 +187,23 @@ runs:
     # pytest_configure, and removed from the environment there, so a pytest a test starts
     # does not inherit it. xdist workers get the setting through workerinput instead.
     #
+    # ASH_TEST_TIER_FLOOR turns on the executed-test floor (tests/utils/sharding.py,
+    # fail_a_tier_run_that_executed_no_test): a tier leg that selected tests and executed
+    # none of them, because every one was skipped, exits 1 instead of reading green. It
+    # is the only trigger. A shard alone does not turn the floor on, and neither does
+    # GITHUB_ACTIONS, so that a pytest a test starts, a run under act, and a developer
+    # who reproduces a shard by hand all behave the same everywhere. The variable is
+    # read once and removed from the environment in pytest_configure, like
+    # ASH_TEST_SHARD.
+    #
+    # The value is 1 on the unit and integration legs, where the floor fails the leg. It
+    # is warn on the e2e legs: the floor prints its line with a warning prefix and the
+    # exit status is left alone. The e2e legs stay in warn mode until the hosted run
+    # shows every e2e leg executing a real test with the scanners installed, and then the
+    # expression below is replaced by 1. A leg whose every skip is a skipif condition
+    # that held is admitted in both modes: under 1 with a notice annotation, and in warn
+    # mode with a warning annotation, because an admitted leg executed no test either.
+    #
     # --junit-xml names test-results/pytest.junit.xml; the report step's glob matches it.
     #
     # PYTEST_DEBUG_TEMPROOT moves pytest's basetemp (tmp_path and friends) off the
@@ -173,19 +224,58 @@ runs:
         ASH_REQUIRE_CDK_EXTRA: "1"
         PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
         ASH_TEST_SHARD: ${{ inputs.shard }}
+        # 1 on the unit and integration legs, warn on the e2e legs until the hosted run
+        # shows each of them executing a real test; see the comment block above. The
+        # warn mode is temporary. The expression becomes 1 when a run shows neither
+        # a "tier run executed no test" warning nor a "tier run admitted on skipif
+        # skips" warning on any e2e leg: either title on the run page means that leg
+        # still executed no test.
+        ASH_TEST_TIER_FLOOR: ${{ inputs.marker == 'e2e' && 'warn' || '1' }}
         MARKER: ${{ inputs.marker }}
       run: |
-        # A tier run, and each shard of the integration tier, sees only part of the
-        # suite, so the snapshots that belong to the other tiers' and the other shards'
-        # tests are unused by construction. syrupy fails a session that has unused
-        # snapshots unless it is told to warn, and that failed legs with no failing test.
-        # The flag is passed here and not in pytest.ini's addopts, so a contributor's run
-        # of the whole suite keeps syrupy's unused-snapshot check.
-        args=(-m "$MARKER" --junit-xml=test-results/pytest.junit.xml --snapshot-warn-unused)
+        args=(-m "$MARKER" --junit-xml=test-results/pytest.junit.xml)
+        # Only a sharded leg is told to warn on unused snapshots. syrupy reports unused
+        # snapshots in two ways: when every collected test was selected it reports whole
+        # snapshot files nothing used, and when some were deselected (as `-m` deselects
+        # the other tiers' tests on every leg here) it reports only an entry whose own
+        # test ran and no longer asserts it, a real stale entry. A shard collects a
+        # subset of the modules, so a shard whose collected tests all carry the tier
+        # marker takes the first branch and reports the other shards' snapshot files,
+        # which are unused by construction; that failed legs with no failing test, and
+        # the flag turns it into a warning. A whole-tier run always deselects the other
+        # tiers, so it takes the second branch, where every report is a real stale entry
+        # and syrupy's failing default is kept. The flag is passed here and not in
+        # pytest.ini's addopts, so a contributor's run keeps the check too.
+        if [ -n "${ASH_TEST_SHARD:-}" ]; then
+          args+=(--snapshot-warn-unused)
+        fi
         if [ "$MARKER" = "unit" ]; then
           args+=(--cov=automated_security_helper --cov-config=.coveragerc --cov-report=)
         else
           args+=(--run-integration --run-slow --no-cov)
+        fi
+        if [ "$MARKER" = "e2e" ]; then
+          # The tests' can-run checks look for a scanner on PATH only, so a scanner that
+          # "Install the scanners the e2e tier runs for real" put in ASH's bin directory
+          # or uv's tool bin directory would be skipped as absent. Both directories are
+          # put on PATH for this step only, as the pre-tiers integration job did, not
+          # through GITHUB_PATH, which zizmor's github-env audit reports in a composite
+          # action. ASH's is ASH_BIN_PATH, else ~/.ash/bin (the product's constants module); uv's is
+          # what `uv tool dir --bin` prints. Neither comes from a workflow expression.
+          ash_bin="${ASH_BIN_PATH:-${HOME}/.ash/bin}"
+          tool_dirs=""
+          for tool_dir in "$ash_bin" "$(uv tool dir --bin)"; do
+            if [ "$RUNNER_OS" = Windows ]; then
+              tool_dir="$(cygpath -u "$tool_dir")"
+            fi
+            tool_dirs="${tool_dirs}${tool_dir}:"
+          done
+          export PATH="${tool_dirs}${PATH}"
+          # Without this the links test's cfn-guard check skips with "no database here",
+          # a false green of the kind the PATH export cures. The cfn-guard install puts the
+          # rules bundle next to ASH's bin directory (the product's rules-bundles helper), and tests
+          # run with a home of their own, so the default location is not found from there.
+          export ASH_CFN_GUARD_RULES_DIR="${ASH_CFN_GUARD_RULES_DIR:-$(dirname "$ash_bin")/share/cfn-guard-rules}"
         fi
         uv run pytest "${args[@]}"
 
@@ -270,9 +360,12 @@ runs:
       # step above being right. A typo there can only break an artifact name, never silently
       # deselect every leg.
       #
-      # Only for the unit tier: it is the only tier that measures coverage. The unsharded
-      # unit run on this one leg renders the table from its own data, and the unit-coverage
-      # job renders the combined one as well.
+      # Only for the unit tier: it is the only tier that measures coverage. Each of the four
+      # unit shards on this one combination renders a table from its own shard's data (a
+      # quarter of the suite each); the unit-coverage job renders the combined one over the
+      # four. On a pull request this combination does not run at all (the pull-request cover
+      # in ash-unified-ci.yml keeps no ubuntu-latest tier leg), so the combined table is the
+      # one a reader can count on, and only on a push to main or a merge-queue run.
       if: runner.os == 'Linux' && inputs.python-version == '3.12' && runner.arch == 'X64' && inputs.marker == 'unit'
       run: |
         {

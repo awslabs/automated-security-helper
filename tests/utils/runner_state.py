@@ -19,7 +19,9 @@ HOME, USERPROFILE and the other XDG directories stay the session's own, so the
 isolation that tests/conftest.py gives the rest of the test is not changed by it.
 
 The developer's values are the ones tests/conftest.py recorded before it moved them,
-as JSON in ``ASH_TEST_PRE_SESSION_HOME``; xdist workers inherit that variable.
+as JSON in ``ASH_TEST_DEVELOPER_HOME`` (``{"env": {name: value}, "home": path}``, with
+only the variables the developer had set in ``env``); xdist workers inherit that
+variable. :func:`developer_environment_record` reads its ``env`` part.
 """
 
 from __future__ import annotations
@@ -30,8 +32,9 @@ from pathlib import Path
 
 from tests.utils import real_home_guard
 
-#: The variable tests/conftest.py records the pre-session HOME and XDG values in.
-RECORD_ENV = "ASH_TEST_PRE_SESSION_HOME"
+#: The variable tests/conftest.py records the developer's HOME, XDG and uv values in
+#: (its ``_DEVELOPER_HOME_ENV``), as JSON: ``{"env": {name: value}, "home": path}``.
+RECORD_ENV = "ASH_TEST_DEVELOPER_HOME"
 
 #: The variables a rootless podman finds its image store (data) and its configuration
 #: under, each with where it is under the developer's home when the developer has not
@@ -40,6 +43,26 @@ _PODMAN_DIRECTORIES = {
     "XDG_DATA_HOME": (".local", "share"),
     "XDG_CONFIG_HOME": (".config",),
 }
+
+
+def developer_environment_record() -> dict[str, str]:
+    """The developer's values of the variables tests/conftest.py moved.
+
+    The ``env`` part of the JSON in :data:`RECORD_ENV`: a variable the developer had
+    not set is absent. Empty when the variable is unset, is not JSON, is not an object,
+    or has no ``env`` object, which is also what a process outside that conftest sees.
+    """
+    recorded = os.environ.get(RECORD_ENV)
+    if not recorded:
+        return {}
+    try:
+        record = json.loads(recorded)
+    except ValueError:
+        return {}
+    env = record.get("env") if isinstance(record, dict) else None
+    if not isinstance(env, dict):
+        return {}
+    return {str(name): str(value) for name, value in env.items()}
 
 
 def developer_runner_env(runner: str) -> dict[str, str]:
@@ -52,10 +75,9 @@ def developer_runner_env(runner: str) -> dict[str, str]:
     """
     if Path(runner).stem != "podman":
         return {}
-    recorded = os.environ.get(RECORD_ENV)
-    if not recorded:
+    record = developer_environment_record()
+    if not record:
         return {}
-    record = json.loads(recorded)
     home = record.get("HOME") or real_home_guard.passwd_home()
     if not home:
         return {}

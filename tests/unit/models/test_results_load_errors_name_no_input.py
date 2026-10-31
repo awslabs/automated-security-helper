@@ -23,6 +23,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import typer
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.resource_management import scan_tracking
@@ -124,7 +125,11 @@ def test_inspect_findings_names_the_field(output_dir, capsys):
         findings_command,
     )
 
-    findings_command(output_dir=output_dir, report_file=RESULTS)
+    # A results file that does not load ends the command with exit code 1; the
+    # error is printed before the exit.
+    with pytest.raises(typer.Exit) as exited:
+        findings_command(output_dir=output_dir, report_file=RESULTS)
+    assert exited.value.exit_code == 1
     printed = capsys.readouterr()
     text = f"{printed.out}\n{printed.err}"
     assert FIELD in text, text
@@ -147,7 +152,10 @@ def test_an_outer_scan_s_read_back_names_the_field(tmp_path, monkeypatch, mode):
     logger = MagicMock()
     runner = "run_ash_container" if mode == "container" else "run_ash_nix"
     wrapper = _run_container_mode if mode == "container" else _run_nix_mode
-    with patch.object(module, runner, side_effect=inner):
+    with (
+        patch.object(module, runner, side_effect=inner),
+        patch.object(module, "nix_preflight", lambda: None),
+    ):
         with pytest.raises(SystemExit) as exited:
             wrapper(opts, logger)
 

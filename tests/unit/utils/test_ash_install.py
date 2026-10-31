@@ -58,7 +58,20 @@ GIT_INSTALL = {
 WHEEL_NAME = "automated_security_helper-3.7.0-py3-none-any.whl"
 #: Every printed command installs with the interpreter that runs ASH and the uv
 #: it depends on, into that same interpreter's environment.
-UV_PIP = [sys.executable, "-m", "uv", "pip", "install", "--python", sys.executable]
+#: The hint's fixed head: the running interpreter, with -P where it accepts it
+#: (3.11 and later), `-m uv pip install --no-config`, and the interpreter again as
+#: the target environment.
+UV_PIP = [
+    sys.executable,
+    *(["-P"] if sys.version_info >= (3, 11) else []),
+    "-m",
+    "uv",
+    "pip",
+    "install",
+    "--no-config",
+    "--python",
+    sys.executable,
+]
 REINSTALL = [*UV_PIP, "--reinstall-package", "automated-security-helper"]
 REMOTE_WHEEL_INSTALL = {
     "url": "https://example.invalid/automated_security_helper-3.7.0-py3-none-any.whl",
@@ -570,14 +583,24 @@ class TestExtraRequirementsFromMetadata:
 
     def test_an_extra_name_is_matched_whole(self):
         """``extra == 'cdk'`` must not be read as part of ``extra == 'cdk2'``."""
-        with patch.object(
-            ash_install,
-            "requires",
-            return_value=[
-                "a>=1; extra == 'cdk2'",
-                'b>=1; extra == "cdk"',
-                "c>=1; extra=='cdk'",
-            ],
+        declared = [
+            "a>=1; extra == 'cdk2'",
+            'b>=1; extra == "cdk"',
+            "c>=1; extra=='cdk'",
+        ]
+        # The requirements are read through the located distribution's own
+        # object (_requirements_declared), not the by-name ``requires`` call,
+        # so the fake sits at that seam; a located name is given too, so the
+        # read runs the same where ASH is not installed as a distribution.
+        with (
+            patch.object(
+                ash_install,
+                "_distributions_declaring_this_module",
+                return_value=["automated-security-helper"],
+            ),
+            patch.object(
+                ash_install, "_requirements_declared", return_value=[declared]
+            ),
         ):
             assert ash_install.extra_requirements_from_metadata("cdk") == [
                 "b>=1",
@@ -704,8 +727,10 @@ def test_the_suppressions_page_lists_the_packages_of_the_extra():
     text = page.read_text(encoding="utf-8")
     section = text.split("### Installing the extra {#installing-the-extra}", 1)[1]
     section = section.split("\n## ", 1)[0].split("\n### ", 1)[0]
-    # The form the hint prints, with the interpreter as a placeholder.
-    prefix = "<python> -m uv pip install --python <python> "
+    # The form the hint prints, with the interpreter as a placeholder (and
+    # without the -P the hint adds on 3.11 and later, which the page does not
+    # tie to a version).
+    prefix = "<python> -m uv pip install --no-config --python <python> "
     pip_lines = [line for line in section.splitlines() if line.startswith(prefix)]
     assert len(pip_lines) == 1, pip_lines
     documented = {

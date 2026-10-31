@@ -101,6 +101,8 @@ _MAX_ZIP_BYTES: int = 100 * 1024 * 1024  # 100 MiB on-disk zip
 _MAX_EXTRACTED_BYTES: int = 500 * 1024 * 1024  # 500 MiB uncompressed
 _MAX_FILES: int = 50_000  # entry count
 _MAX_CHUNK_BYTES: int = 1 * 1024 * 1024  # 1 MiB per chunked b64 upload (decoded)
+#: How much of a refused symlink entry's content a refusal quotes as its target.
+_SYMLINK_TARGET_EXCERPT_BYTES: int = 256
 
 # A zip extraction and a git clone build here, and the result is renamed onto
 # "source" only once it has succeeded, so a refused or failed re-delivery cannot
@@ -203,6 +205,15 @@ def _no_scan_running(
     behind it. A session that ended while the change held the lock is removed
     once it is released.
 
+    The session's change excludes the scans of this process. A scan of the same
+    session in another server sharing the workspace root (a replica behind a
+    load balancer, or a sibling stdio server of the same user on the stdio
+    session, which every stdio server of that user shares) holds a locked
+    presence entry instead (``sessions.ScanPresence``), read once the change is
+    held (``sessions.a_scan_in_another_server_holds``): a tree replaced or
+    removed under it would make its result one of code it never examined, as
+    under a scan of this process. Refused the same way, naming the other server.
+
     ``removes_workspace`` is True for a change that deletes the session's whole
     directory (``clear_source``). Such a change also excludes writes
     (``MCPSession.try_begin_write``): it is refused while a chunk or a profile
@@ -222,6 +233,7 @@ def _no_scan_running(
     from automated_security_helper.cli.mcp.sessions import (
         CHANGE_REFUSED_BY_CHANGE,
         CHANGE_REFUSED_BY_WRITE,
+        a_scan_in_another_server_holds,
         finish_ended_session,
         get_default_registry,
     )
@@ -249,6 +261,13 @@ def _no_scan_running(
             "after it finishes"
         )
     try:
+        # Inside the try: a refusal here releases the change in the finally.
+        if a_scan_in_another_server_holds(session_id):
+            raise SourceDeliveryBusyError(
+                "a scan of this session is running in another server sharing "
+                "the workspace root; change the delivered source after it "
+                "finishes"
+            )
         yield
     finally:
         session.end_change()
@@ -483,7 +502,9 @@ def _remove_tree(path: Path) -> bool:
             else:
                 shutil.rmtree(root, onerror=clear_and_retry)
         passes += 1
-        if not os.path.lexists(root):
+        try:
+            os.lstat(root)
+        except OSError:
             return True
         if passes >= _REMOVE_TREE_MAX_PASSES:
             return False
@@ -598,7 +619,11 @@ def _swap_into_place(
     """
 
     replaced: Optional[Path] = None
-    if os.path.lexists(target):
+    try:
+        os.lstat(target)
+    except OSError:
+        pass
+    else:
         replaced = _move_aside(target, session_dir, "the previously delivered source")
     try:
         _rename_with_retries(staging, target)
@@ -711,11 +736,15 @@ def _put_a_lost_source_back(
         and path.is_dir()
         and not path.is_symlink()
     ]
-    if (
-        not hidden
-        or os.path.lexists(target)
-        or get_session_source_dir(session_id) != target
-    ):
+    if not hidden:
+        return leftovers
+    try:
+        os.lstat(target)
+    except OSError:
+        pass
+    else:
+        return leftovers
+    if get_session_source_dir(session_id) != target:
         return leftovers
     if len(hidden) > 1:
         _logger.warning(
@@ -783,7 +812,12 @@ def _sweep_delivery_scratch(session_dir: Path, session_id: str) -> None:
         else:
             with contextlib.suppress(OSError):
                 leftover.unlink()
-            gone = not os.path.lexists(leftover)
+            try:
+                os.lstat(leftover)
+            except OSError:
+                gone = True
+            else:
+                gone = False
         if not gone:
             stuck.append(leftover)
     if stuck:
@@ -874,11 +908,14 @@ def _refuse_ssh_key_id(ssh_key_id: Optional[str]) -> None:
     server process can reach, which is the opposite of what naming a key asks
     for, so the clone is refused before git runs.
 
+    An empty string is unset, as ``ref=""`` is on the tool side: a client that
+    sends the field with no value names no key.
+
     Raises:
-        ValueError: for every non-None ``ssh_key_id``.
+        ValueError: for every non-blank ``ssh_key_id``.
     """
 
-    if ssh_key_id is not None:
+    if ssh_key_id:
         raise ValueError(
             f"ssh_key_id {ssh_key_id!r} is not registered: this server registers no "
             f"ssh keys, so set_source_git cannot authenticate with one. Clone a "
@@ -959,6 +996,11 @@ _GIT_CONFIG = (
     "protocol.ssh.allow=always",
     "-c",
     "http.followRedirects=false",
+    # No core.symlinks setting: a delivered tree keeps its links, and a config
+    # reached through one is judged by every name it has when it is read
+    # (config_sources and validate_config_input), as tests/unit/cli/mcp/
+    # test_delivered_config_links.py pins. Checking links out as files would
+    # turn each into a plain file holding its target path.
     "-c",
     "gc.auto=0",
     "-c",
@@ -1172,6 +1214,15 @@ def _run_git(
         group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
     else:
         group = {"start_new_session": True}
+    # The group is recorded with the scanners' tools' groups for as long as it
+    # runs, so a server that stops while a clone, fetch or checkout runs ends
+    # it (subprocess_utils.kill_running_groups) instead of leaving it to run
+    # on, writing into a workspace the server has given up.
+    from automated_security_helper.utils.subprocess_utils import (
+        _register_group,
+        _unregister_group,
+    )
+
     process = subprocess.Popen(  # nosec B603 - list-form argv, git from _GIT_ARGV, url and ref validated before any call; see set_source_git
         cmd,
         stdin=subprocess.DEVNULL,
@@ -1182,7 +1233,21 @@ def _run_git(
         env=env,
         **group,
     )
+    _register_group(process)
     deadline = time.monotonic() + GIT_TIMEOUT_SECONDS
+    try:
+        return _await_git(cmd, process, deadline, grows_in)
+    finally:
+        _unregister_group(process)
+
+
+def _await_git(
+    cmd: List[str],
+    process: "subprocess.Popen[str]",
+    deadline: float,
+    grows_in: Optional[Path],
+) -> subprocess.CompletedProcess[str]:
+    """Wait for ``process``, a git command of a delivery, within its deadline."""
     try:
         while True:
             remaining = deadline - time.monotonic()
@@ -1277,7 +1342,27 @@ def _git_environment(home: Path) -> Dict[str, str]:
 # construction. This repository has already been bitten by this class of bug
 # once (see the GitPython argument-injection dependency patches), so the guards
 # below reject the option-like shape outright rather than trying to escape it.
-_DANGEROUS_URL_PREFIXES = ("ext::",)
+
+#: A url whose text before its first ``::`` is made of scheme characters (letters,
+#: digits, ``+``, ``-`` and ``.``) names a git remote helper, ``ext::`` among them.
+#: Tested as a plain string prefix; every such form is refused.
+_REMOTE_HELPER_PREFIX = re.compile(r"[A-Za-z0-9+.\-]+::")
+
+
+def _refuse_remote_helper_prefix(url: str) -> None:
+    """Refuse ``url`` when a scheme-shaped prefix precedes its first ``::``.
+
+    Raises:
+        ValueError: if ``url`` names a remote helper before ``::``.
+    """
+
+    helper = _REMOTE_HELPER_PREFIX.match(url)
+    if helper is not None:
+        raise ValueError(
+            f"refusing a clone url with the {helper.group()!r} remote helper "
+            f"transport: git would run that helper rather than connect to a host"
+        )
+
 
 #: ``error_type`` values set_source_git returns, besides the scan-target refusal
 #: of a local clone source (scan_target_not_permitted) and invalid_session_id.
@@ -1362,17 +1447,11 @@ def _validate_clone_url(url: str) -> str:
 
     Raises:
         ValueError: if ``url`` is option-like, holds a control character or a
-            lone surrogate, or uses a command-executing transport.
+            lone surrogate, or names a remote helper before ``::``.
     """
 
     _reject_option_like(url, "url")
-    lowered = url.lower()
-    for prefix in _DANGEROUS_URL_PREFIXES:
-        if lowered.startswith(prefix):
-            raise ValueError(
-                f"refusing url with {prefix!r} transport: it instructs git to "
-                f"execute an arbitrary command"
-            )
+    _refuse_remote_helper_prefix(url)
     return url
 
 
@@ -1429,6 +1508,8 @@ def remote_clone_endpoint(url: str) -> tuple[str, str, int]:
         raise ValueError(
             "refusing a clone url with whitespace, control characters or backslashes"
         )
+    # Before the scp-like reading below, which would take the helper name for a host.
+    _refuse_remote_helper_prefix(url)
     if local_clone_path(url) is not None:
         raise ValueError(
             "refusing a local clone source: set_source_git clones from a remote "
@@ -1480,33 +1561,54 @@ def remote_clone_endpoint(url: str) -> tuple[str, str, int]:
 ASH_MCP_GIT_ALLOWED_HOSTS_ENV = "ASH_MCP_GIT_ALLOWED_HOSTS"
 
 
+def _read_git_allowed_entry(
+    text: str,
+) -> Optional[tuple[Optional[str], str, Optional[int]]]:
+    """One allowlist entry as ``(scheme, host, port)``, or None when unreadable."""
+
+    scheme: Optional[str] = None
+    rest = text.strip().lower()
+    if "://" in rest:
+        scheme, rest = rest.split("://", 1)
+        if scheme not in _CLONE_SCHEMES:
+            return None
+    host, colon, port_text = rest.partition(":")
+    port: Optional[int] = None
+    if colon:
+        if not (port_text.isascii() and port_text.isdigit()):
+            return None
+        port = int(port_text)
+        if not 1 <= port <= 65535:
+            return None
+    host = host.rstrip(".")
+    if not _HOST_NAME.fullmatch(host):
+        return None
+    return scheme, host, port
+
+
 def _git_allowed_entries() -> list[tuple[Optional[str], str, Optional[int]]]:
     """The operator's entries as ``(scheme, host, port)``, None where unnamed.
 
     An entry this cannot read (another scheme, a port that is not a number from 1
-    to 65535, a host that is not a plain name) allows nothing.
+    to 65535, a host that is not a plain name) allows nothing, and is logged once
+    per read of the list by its position, so an operator whose entry is dropped
+    learns which one. The entry's text is not logged.
     """
 
     raw = os.environ.get(ASH_MCP_GIT_ALLOWED_HOSTS_ENV, "")
     entries: list[tuple[Optional[str], str, Optional[int]]] = []
-    for text in raw.replace(",", " ").split():
-        scheme: Optional[str] = None
-        rest = text.strip().lower()
-        if "://" in rest:
-            scheme, rest = rest.split("://", 1)
-            if scheme not in _CLONE_SCHEMES:
-                continue
-        host, colon, port_text = rest.partition(":")
-        port: Optional[int] = None
-        if colon:
-            if not (port_text.isascii() and port_text.isdigit()):
-                continue
-            port = int(port_text)
-            if not 1 <= port <= 65535:
-                continue
-        host = host.rstrip(".")
-        if _HOST_NAME.fullmatch(host):
-            entries.append((scheme, host, port))
+    for position, text in enumerate(raw.replace(",", " ").split(), start=1):
+        entry = _read_git_allowed_entry(text)
+        if entry is None:
+            _logger.warning(
+                "%s: entry %d cannot be read and allows nothing; an entry is "
+                "[scheme://]host[:port] with scheme https or ssh, a plain host "
+                "name and a port from 1 to 65535",
+                ASH_MCP_GIT_ALLOWED_HOSTS_ENV,
+                position,
+            )
+            continue
+        entries.append(entry)
     return entries
 
 
@@ -1731,7 +1833,12 @@ def _clone_into_session(
     # Read before the clone: only a session that has a source to free, or previous
     # source trees kept, is told that freeing them makes room (``_DISK_FULL_HINT``,
     # ``_DISK_FULL_KEPT_HINT``).
-    a_source_is_delivered = os.path.lexists(target)
+    try:
+        os.lstat(target)
+    except OSError:
+        a_source_is_delivered = False
+    else:
+        a_source_is_delivered = True
     kept_trees = _kept_previous_trees(session_dir)
     try:
         env = _git_environment(session_dir)
@@ -1973,6 +2080,32 @@ def _clone(
         message = f"git clone failed (exit {result.returncode}): {detail}"
         raise GitCommandError(message, GIT_CLONE_FAILED, disk_full=disk_full)
     if not ref:
+        # A clone of a repository whose HEAD names a branch that does not exist
+        # (an empty repository, or one whose default branch was deleted) exits 0
+        # with no commit and an empty working tree. Registered as the session's
+        # source, that tree scans clean for code the client never delivered, so
+        # the clone is refused unless its HEAD is a commit.
+        head = _run_git_step(
+            git_argv(
+                *_GIT_CONFIG,
+                "-C",
+                str(target),
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "HEAD^{commit}",
+                program=program,
+            ),
+            env=env,
+            what="git rev-parse HEAD",
+            error_type=GIT_CLONE_FAILED,
+        )
+        if head.returncode != 0:
+            raise GitCommandError(
+                "git clone produced no commit: the repository's default branch "
+                "has no commits or does not exist. Name a ref to deliver.",
+                GIT_CLONE_FAILED,
+            )
         return
 
     # A shallow clone is single-branch, so a ref off the default branch is not in
@@ -2098,6 +2231,78 @@ def _final_zip_path(session_dir: Path, upload_id: str) -> Path:
     return _upload_path(session_dir, upload_id, ".zip")
 
 
+#: How many uploads a session may hold in ``incoming/`` at once, and how many
+#: bytes they may hold together. Each upload is capped at ``_MAX_ZIP_BYTES`` on
+#: its own; without a bound across uploads a session could open any number of
+#: upload ids and hold that many archives on the server's disk until it ended
+#: or was swept.
+_MAX_UPLOADS_PER_SESSION: int = 4
+_MAX_INCOMING_BYTES: int = 2 * _MAX_ZIP_BYTES
+
+_UPLOAD_SUFFIXES = (".zip.part", ".zip")
+
+
+def _other_uploads(incoming: Path, upload_id: str) -> Tuple[int, int]:
+    """How many archives and partial archives other than ``upload_id``'s own sit
+    in ``incoming/``, and how many bytes they hold together.
+
+    An upload sent again under its id replaces its own file, so its own files
+    are left out. An upload whose chunks all arrived and whose finalize was never
+    sent holds its bytes until the next delivery, a clear or the end of the
+    session; this is what the per-session bounds below count. ``(0, 0)`` when the
+    directory cannot be read.
+    """
+    own = {f"{upload_id}{suffix}" for suffix in _UPLOAD_SUFFIXES}
+    held = 0
+    held_bytes = 0
+    try:
+        entries = list(os.scandir(incoming))
+    except OSError:
+        return 0, 0
+    for entry in entries:
+        if not entry.name.endswith(_UPLOAD_SUFFIXES) or entry.name in own:
+            continue
+        try:
+            st = entry.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            continue
+        held += 1
+        held_bytes += st.st_size
+    return held, held_bytes
+
+
+def _refuse_another_upload(incoming: Path, upload_id: str) -> None:
+    """Refuse the first chunk of an upload when the session holds the most it may."""
+    held, _held_bytes = _other_uploads(incoming, upload_id)
+    if held >= _MAX_UPLOADS_PER_SESSION:
+        raise ValueError(
+            f"too many uploads in progress for this session: {held} already held, "
+            f"the limit is {_MAX_UPLOADS_PER_SESSION}; finalize or clear them first"
+        )
+
+
+def _refuse_a_chunk_past_the_session_bound(
+    incoming: Path, upload_id: str, own_bytes: int
+) -> None:
+    """Refuse a chunk that would take the session's held bytes past the bound.
+
+    ``own_bytes`` is what this upload will hold once the chunk is appended: its
+    partial archive so far plus the chunk. Read on every chunk, not only the
+    first: a bound read only at an upload's first chunk let each of a session's
+    uploads start small and then grow to ``_MAX_ZIP_BYTES`` on its own, and the
+    session's uploads together held that many times the per-upload cap.
+    """
+    _held, held_bytes = _other_uploads(incoming, upload_id)
+    if held_bytes + own_bytes > _MAX_INCOMING_BYTES:
+        raise ValueError(
+            f"uploads in progress for this session hold {held_bytes} bytes and "
+            f"this chunk would make it {held_bytes + own_bytes}, the limit is "
+            f"{_MAX_INCOMING_BYTES}; finalize or clear them first"
+        )
+
+
 def _read_next_sequence(session_dir: Path, upload_id: str) -> int:
     meta = _meta_path(session_dir, upload_id)
     if not meta.exists():
@@ -2118,12 +2323,27 @@ def _write_next_sequence(session_dir: Path, upload_id: str, value: int) -> None:
 _UPLOAD_LOCK_STRIPES = 64
 _UPLOAD_LOCKS = tuple(threading.Lock() for _ in range(_UPLOAD_LOCK_STRIPES))
 
+#: Locks that serialize the chunk writers of one session against each other,
+#: taken before the upload's own lock. The per-session bounds are read from the
+#: directory and enforced under this lock: with only the per-upload lock, two
+#: first chunks of two uploads each counted the other as absent and both passed.
+#: The session's write hold (``sessions.writing_session_state``) does not
+#: serialize writes against each other, by design.
+_SESSION_UPLOAD_LOCKS = tuple(threading.Lock() for _ in range(_UPLOAD_LOCK_STRIPES))
+
 
 def _upload_lock(session_id: str, upload_id: str) -> threading.Lock:
     """The lock held while a chunk of this upload reads and moves its sequence."""
 
     digest = hashlib.sha256(f"{session_id}\0{upload_id}".encode()).digest()
     return _UPLOAD_LOCKS[digest[0] % _UPLOAD_LOCK_STRIPES]
+
+
+def _session_upload_lock(session_id: str) -> threading.Lock:
+    """The lock held while a chunk of any of this session's uploads is appended."""
+
+    digest = hashlib.sha256(session_id.encode()).digest()
+    return _SESSION_UPLOAD_LOCKS[digest[0] % _UPLOAD_LOCK_STRIPES]
 
 
 def set_source_zip_chunk(
@@ -2161,7 +2381,11 @@ def set_source_zip_chunk(
     """
     from automated_security_helper.cli.mcp.sessions import writing_session_state
 
-    with writing_session_state(session_id), _upload_lock(session_id, upload_id):
+    with (
+        writing_session_state(session_id),
+        _session_upload_lock(session_id),
+        _upload_lock(session_id, upload_id),
+    ):
         return _append_zip_chunk(
             upload_id,
             sequence,
@@ -2192,6 +2416,8 @@ def _append_zip_chunk(
         raise ValueError(
             f"out-of-order chunk: expected sequence {expected}, got {sequence}"
         )
+    if sequence == 0:
+        _refuse_another_upload(part.parent, upload_id)
 
     try:
         decoded = base64.b64decode(data_b64, validate=True)
@@ -2200,6 +2426,21 @@ def _append_zip_chunk(
 
     if len(decoded) > _MAX_CHUNK_BYTES:
         raise ValueError(f"chunk too large: {len(decoded)} > {_MAX_CHUNK_BYTES} bytes")
+
+    try:
+        so_far = part.stat().st_size
+    except OSError:
+        so_far = 0
+    try:
+        _refuse_a_chunk_past_the_session_bound(
+            part.parent, upload_id, so_far + len(decoded)
+        )
+    except ValueError:
+        # As for the per-upload cap below: what this upload holds is dropped
+        # with the refusal, and the upload is sent again from its first chunk.
+        part.unlink(missing_ok=True)
+        _meta_path(session_dir, upload_id).unlink(missing_ok=True)
+        raise
 
     # Append. Open in "ab" so successive chunks accumulate.
     with part.open("ab") as f:
@@ -2256,6 +2497,13 @@ def _validate_zip_member(name: str) -> None:
 
     if not name:
         raise ValueError("zip entry has empty name")
+    if "\\" in name:
+        # The zip format's separator is "/". An entry named with backslashes
+        # passed the checks below as a nested path, since they read a backslash
+        # as a separator, and was then extracted on POSIX as one flat file whose
+        # name holds the backslashes, which a scanner keyed on directories never
+        # sees. Refused rather than rewritten, as every other malformed entry.
+        raise ValueError(f"backslash in zip entry name: {name!r}")
     # Normalize separators for the pure-text checks below.
     normalized = name.replace("\\", "/")
     if os.path.isabs(normalized) or normalized.startswith("/"):
@@ -2357,6 +2605,26 @@ def _refusing_after_close(
         raise ValueError(str(refused)) from None
 
 
+@contextlib.contextmanager
+def _removing_a_refused_zip(remove_zip: Callable[[], None]) -> Iterator[None]:
+    """Call ``remove_zip`` when the validation or extraction inside refuses the zip.
+
+    Entered outside the handle and the ``zipfile.ZipFile`` that read the zip, so
+    both are closed before the removal: Windows does not delete a file that is
+    open. Best effort, as for the oversize and checksum refusals: a held file
+    must not replace the refusal the caller is owed, and a zip that stays is
+    refused again by the same call. Only a refusal (``ValueError``,
+    ``zipfile.BadZipFile``) removes it; a failure on disk (``OSError``) leaves it
+    for the next attempt.
+    """
+    try:
+        yield
+    except (ValueError, zipfile.BadZipFile):
+        with contextlib.suppress(OSError):
+            remove_zip()
+        raise
+
+
 def _remove_zip_still_at(
     final: Path, opened: os.stat_result, session_id: str, upload_id: str
 ) -> None:
@@ -2387,33 +2655,51 @@ def _finalize_zip_upload(
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
     session_dir = _created_session_dir(root, session_id)
     final = _final_zip_path(session_dir, upload_id)
-    if not final.exists():
+    # The one handle every read below uses: the size bound, the checksum and the
+    # extraction all see the file that was open here, whatever a chunk of the
+    # same upload (set_source_zip_chunk's last=True renames a new zip over the
+    # path) puts at the path meanwhile. ``opened`` identifies that file, so each
+    # removal (_remove_zip_still_at) deletes the path only while it still names
+    # it, and a newer zip is kept for its own finalize.
+    try:
+        handle = final.open("rb")
+    except FileNotFoundError:
         raise UploadNotFoundError(
             f"no finalized zip for upload_id={upload_id!r} "
             f"(did the last chunk arrive with last=True?)"
         ) from None
+    opened = os.fstat(handle.fileno())
+
+    def remove_zip() -> None:
+        _remove_zip_still_at(final, opened, session_id, upload_id)
 
     # Hard limit on the on-disk zip size.
-    actual_size = final.stat().st_size
+    actual_size = opened.st_size
     if actual_size > _MAX_ZIP_BYTES:
+        handle.close()
         # Removing the refused zip is scratch cleanup, best effort: an AV scanner
         # or indexer holding the file (routine on Windows) makes the unlink raise
         # PermissionError, and that must not replace the refusal the caller is
         # owed. A zip that stays is refused again by the same call.
         with contextlib.suppress(OSError):
-            final.unlink()
+            remove_zip()
         raise ValueError(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
 
-    # Verify checksum before opening the archive.
+    # Verify checksum before opening the archive, from the same handle.
     digest = hashlib.sha256()
-    with final.open("rb") as f:
-        for block in iter(lambda: f.read(1024 * 1024), b""):
+    try:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
+        handle.seek(0)
+    except BaseException:
+        handle.close()
+        raise
     actual_sha = digest.hexdigest()
     if actual_sha.lower() != expected_sha256.lower():
+        handle.close()
         # Best effort, as above: the mismatch is the answer, not a held file.
         with contextlib.suppress(OSError):
-            final.unlink()
+            remove_zip()
         raise ValueError(
             f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
         )
@@ -2443,15 +2729,29 @@ def _finalize_zip_upload(
     try:
         # Pre-extraction validation pass: walk the namelist and the zipinfo
         # list, rejecting absolute paths, traversal components, oversize totals,
-        # and symlinks that would resolve outside the session sandbox.
-        with zipfile.ZipFile(final) as zf:
+        # and symlinks that would resolve outside the session sandbox. An archive
+        # one of them refuses is removed with the refusal (_removing_a_refused_zip):
+        # it held its bytes in incoming/ until the session ended otherwise, and a
+        # client that sends the same finalize again is told the upload is gone.
+        # The archive is read from the handle the checksum read, so the bytes
+        # extracted are the bytes hashed; the handle closes before the removal.
+        with (
+            _removing_a_refused_zip(remove_zip),
+            handle,
+            zipfile.ZipFile(handle) as zf,
+        ):
             infos = zf.infolist()
             if len(infos) > _MAX_FILES:
                 raise ValueError(f"too many files in zip: {len(infos)} > {_MAX_FILES}")
 
             total_uncompressed = 0
             for info in infos:
-                _validate_zip_member(info.filename)
+                # The name as the archive spells it. On Windows the reader
+                # rewrites a backslash in ``filename`` to ``/`` (ZipInfo keeps
+                # the raw spelling in ``orig_filename``), so an archive judged
+                # by ``filename`` was refused on POSIX and admitted on Windows
+                # as a nested path; one spelling is judged on every platform.
+                _validate_zip_member(info.orig_filename)
                 total_uncompressed += info.file_size
                 if total_uncompressed > _MAX_EXTRACTED_BYTES:
                     raise ValueError(
@@ -2471,7 +2771,21 @@ def _finalize_zip_upload(
                     # Source tree shipping over MCP does not need symlinks.
                     # Refusing them outright eliminates the pre/post-write
                     # divergence, as an earlier review noted.
-                    link_target = zf.read(info).decode("utf-8", errors="replace")
+                    #
+                    # Only the first bytes of the entry are shown. A link entry's
+                    # content is whatever the archive says it is, up to the
+                    # uncompressed total this loop admits, and the refusal text
+                    # is carried through every per-character pass the error path
+                    # makes on the event loop; the whole of it in the message
+                    # was that many bytes read, held and re-processed for one
+                    # line nobody reads past its first few words.
+                    with zf.open(info) as member:
+                        head = member.read(_SYMLINK_TARGET_EXCERPT_BYTES + 1)
+                    link_target = head[:_SYMLINK_TARGET_EXCERPT_BYTES].decode(
+                        "utf-8", errors="replace"
+                    )
+                    if len(head) > _SYMLINK_TARGET_EXCERPT_BYTES:
+                        link_target += "..."
                     raise ValueError(
                         f"symlink {info.filename!r} -> {link_target!r}: "
                         f"symlinks are not allowed in MCP source delivery zips"
@@ -2501,8 +2815,9 @@ def _finalize_zip_upload(
     # The on-disk zip is no longer needed. Best effort: the delivery took effect
     # at _set_session_source_dir, and a failed unlink of a scratch file must not
     # report that delivery as failed, which invites a retry of a done delivery.
+    # Only the zip that was delivered: a newer one at the path is kept.
     with contextlib.suppress(OSError):
-        final.unlink()
+        remove_zip()
     return target
 
 
@@ -2526,6 +2841,12 @@ def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> N
             removes the directory they write into.
     """
 
+    # The binding select_profile made is kept. It names the profile materialized
+    # in this workspace's config/ directory, which goes with the workspace; the
+    # binding is the source of truth and the resolver writes the file again from
+    # it when the file is gone (profile_registry.resolve_session_config_path),
+    # refusing the scan when it cannot. The binding ends with the session
+    # (sessions.end_session), not with its files.
     if not remove_session_workspace(session_id, workspace_root=workspace_root):
         _logger.warning(
             "could not delete the whole workspace of session %s; the entries that "

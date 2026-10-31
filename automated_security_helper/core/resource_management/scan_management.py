@@ -10,6 +10,7 @@ cancelling scans, and cleaning up completed scans. It builds on the scan registr
 to provide a higher-level interface for scan management.
 """
 
+import asyncio
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -28,8 +29,152 @@ from automated_security_helper.utils.log import ASH_LOGGER
 # Configure module logger
 _logger = ASH_LOGGER
 
+#: How long cleanup waits for a cancelled scan's runner thread to stop and settle
+#: its output directory before giving the scan back to the caller as still
+#: stopping. The runner stops its scanner's child process and puts the previous
+#: results back, which takes seconds; the registry entry and the output
+#: directory are removed only once it is done.
+_RUNNER_SETTLE_TIMEOUT_SECONDS = 30.0
 
-def _scoped(session_id: Optional[str]) -> Dict[str, str]:
+#: How often the wait for a runner re-reads its ``runner_done`` flag.
+_RUNNER_POLL_SECONDS = 0.1
+
+
+async def _runner_settled(entry: Any, timeout: float) -> bool:
+    """Wait on the event loop until ``entry``'s runner has settled, or ``timeout`` passes.
+
+    True once ``runner_done`` is set, False at the bound. The wait used to be
+    ``asyncio.to_thread(entry.runner_done.wait, timeout)``: a worker of the
+    loop's default pool (``min(32, cpu + 4)`` of them, shared with every
+    progress read and tree removal) held for up to the whole bound per
+    cleanup, so a few cleanups of scans that were slow to settle queued every
+    ``get_scan_progress`` behind them, and a caller that cancelled its cleanup
+    left the worker waiting out the bound. Polling with ``asyncio.sleep``
+    holds no thread and ends at once when the awaiting task is cancelled.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not entry.runner_done.is_set():
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(_RUNNER_POLL_SECONDS, remaining))
+    return True
+
+
+class _OutputDirectoryInUse(Exception):
+    """The output directory must not be removed now; the message says why."""
+
+
+def _resolved_output_dir(
+    output_dir: Path, canonical_output_directory: Path
+) -> Optional[Path]:
+    """``output_dir`` resolved, when it still resolves into the registered output tree.
+
+    The output directory is stored as a string at registration and removed by
+    that path later; the registry fixed its resolved form at registration as
+    ``canonical_output_directory``. The recursive delete must land in that
+    tree. Resolving the stored path at cleanup time and requiring the result
+    to be at or under the registered output directory refuses every way a
+    link can redirect it: a ``.ash`` or ``ash_output`` that became a link
+    after the scan, a source directory that is itself a link retargeted since,
+    a ``projects`` directory of a workspace that became a link, and a link
+    anywhere above them. (A per-component lstat walk from the source directory
+    down checked none of the source's own ancestors, and checked only the last
+    component when the stored spelling did not sit under the stored source.)
+    A path that resolves inside the tree through a link is admitted here, and
+    the delete then removes the directory it resolves to, one the scan owned.
+    The caller still refuses an output directory that is itself a link, whatever
+    it points to, and leaves it in place.
+
+    The caller deletes the path this returns, never the stored spelling: the
+    kernel resolves a path again when the delete opens it, so a link on the
+    stored spelling retargeted between this check and the delete would land
+    the recursive delete in the new target. The resolved path holds no link
+    when it is read. The delete is still by path: a component of the resolved
+    path replaced by a link between the resolution and the moment the delete
+    opens it is not caught, a window this check narrows and does not close.
+
+    The comparison is against the OUTPUT tree, not the scanned directory. A
+    single MCP scan writes under its source (``<source>/.ash/ash_output``), but
+    a workspace scan registers each project with
+    ``<settings.output_dir>/projects/<key>`` (cli/mcp/workspace.py), which is
+    not under the project's own directory; compared against the scanned
+    directory, every workspace entry's cleanup refused the removal and blamed
+    a symbolic link that was not there.
+
+    None when the path cannot be resolved at all (a link loop, a NUL byte), or
+    resolves outside the registered tree: nothing is removed through a path
+    that cannot be read.
+    """
+    try:
+        resolved = output_dir.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    try:
+        resolved.relative_to(canonical_output_directory)
+    except ValueError:
+        return None
+    return resolved
+
+
+def _remove_output_tree(output_dir: Path) -> bool:
+    """Remove ``output_dir`` if it is a directory; True when it is absent afterwards.
+
+    Runs on a worker thread. An already-absent directory is "absent afterwards"
+    too: the question the result answers is whether the output is gone, not
+    who removed it.
+    """
+    if output_dir.exists() and output_dir.is_dir():
+        shutil.rmtree(output_dir)
+    return not output_dir.exists()
+
+
+def _already_ended_response(scan_id: str, status: str) -> Dict[str, Any]:
+    """The answer to a cancel of a scan that has already ended in ``status``.
+
+    One spelling for both places that give it: the check before the cancel, and
+    the registry declining the cancel because the scan ended in between.
+    """
+    return {
+        "success": False,
+        "scan_id": scan_id,
+        "message": f"Scan is already in {status} state and cannot be cancelled",
+        "status": status,
+        "suggestions": [
+            "No action needed as the scan is already completed/incomplete/failed/cancelled",
+            "Use get_scan_results to retrieve results if the scan is completed",
+            "Start a new scan if needed",
+        ],
+    }
+
+
+def _removed_meanwhile_response(scan_id: str, why: str) -> Dict[str, Any]:
+    """The not-found answer of a cleanup whose scan another cleanup removed.
+
+    The same response a cleanup of an unknown id gets (``scan_not_found``), so
+    a caller that branches on the category, ``cleanup_old_scans`` among them,
+    reads a scan that is gone as gone. ``why`` is the first suggestion.
+    """
+    from automated_security_helper.core.resource_management.error_handling import (
+        ErrorCategory,
+        create_error_response,
+    )
+
+    return create_error_response(
+        error=MCPResourceError(
+            f"Scan {scan_id} not found",
+            context={
+                "scan_id": scan_id,
+                "error_category": ErrorCategory.SCAN_NOT_FOUND.value,
+            },
+        ),
+        operation="cleanup_scan_resources",
+        suggestions=[why, "Nothing is left to clean up for this scan id"],
+    )
+
+
+def _scoped(session_id: Optional[str]) -> Dict[str, Any]:
     """The registry keyword that scopes a lookup to ``session_id``, if one is given.
 
     An unscoped call passes nothing, so it reaches the registry's unscoped
@@ -65,15 +210,21 @@ async def list_active_scans(session_id: Optional[str] = None) -> List[Dict[str, 
     return registry.list_scans(active_only=True, **_scoped(session_id))
 
 
-async def list_all_scans() -> List[Dict[str, Any]]:
+async def list_all_scans(session_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     List all scans, including completed ones.
+
+    Args:
+        session_id: When given, only that session's scans are listed. Unscoped,
+            this lists every session's scans with their ids, directories and
+            error messages, which the registry otherwise shows only to the
+            owning session.
 
     Returns:
         List of all scan information dictionaries
     """
     registry = get_scan_registry()
-    return registry.list_scans()
+    return registry.list_scans(**_scoped(session_id))
 
 
 async def cancel_scan(scan_id: str, session_id: Optional[str] = None) -> Dict[str, Any]:
@@ -133,17 +284,7 @@ async def cancel_scan(scan_id: str, session_id: Optional[str] = None) -> Dict[st
 
     # Check if scan is already completed
     if not entry.is_active():
-        return {
-            "success": False,
-            "scan_id": scan_id,
-            "message": f"Scan is already in {entry.status.value} state and cannot be cancelled",
-            "status": entry.status.value,
-            "suggestions": [
-                "No action needed as the scan is already completed/incomplete/failed/cancelled",
-                "Use get_scan_results to retrieve results if the scan is completed",
-                "Start a new scan if needed",
-            ],
-        }
+        return _already_ended_response(scan_id, entry.status.value)
 
     try:
         # Try to cancel the scan
@@ -157,19 +298,44 @@ async def cancel_scan(scan_id: str, session_id: Optional[str] = None) -> Dict[st
                 "status": "cancelled",
                 "timestamp": datetime.now().isoformat(),
             }
-        else:
-            return {
-                "success": False,
-                "scan_id": scan_id,
-                "message": "Failed to cancel scan",
-                "status": entry.status.value,
-                "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
-                "suggestions": [
-                    "The scan may have completed or failed during cancellation attempt",
-                    "Check scan status using get_scan_progress",
-                    "Try again if the scan is still active",
+
+        # The registry declined. The pre-check above ran without the registry
+        # lock, and the registry declines only a scan it cannot see or one no
+        # longer active, so the scan ended or was removed between the two.
+        # Ended is the already-ended answer; removed is the not-found answer
+        # the lookup above gives, which cleanup_old_scans branches on. Neither
+        # is an unexpected error, and the status shown is read now, not the
+        # pre-check's (which read "running" for a scan that was gone).
+        ended = registry.get_scan(scan_id, **_scoped(session_id))
+        if ended is None:
+            return create_error_response(
+                error=MCPResourceError(
+                    f"Scan {scan_id} not found",
+                    context={
+                        "scan_id": scan_id,
+                        "error_category": ErrorCategory.SCAN_NOT_FOUND.value,
+                    },
+                ),
+                operation="cancel_scan",
+                suggestions=[
+                    "The scan was removed during the cancellation attempt",
+                    "Check that the scan ID is correct",
+                    "Start a new scan if needed",
                 ],
-            }
+            )
+        if not ended.is_active():
+            return _already_ended_response(scan_id, ended.status.value)
+        return {
+            "success": False,
+            "scan_id": scan_id,
+            "message": "Failed to cancel scan",
+            "status": ended.status.value,
+            "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
+            "suggestions": [
+                "Check scan status using get_scan_progress",
+                "Try again if the scan is still active",
+            ],
+        }
     except MCPResourceError as e:
         # Handle specific MCPResourceError with enhanced context
         return create_error_response(
@@ -201,7 +367,7 @@ async def cancel_scan(scan_id: str, session_id: Optional[str] = None) -> Dict[st
 
 
 async def cleanup_scan_resources(
-    scan_id: str, remove_output: bool = False
+    scan_id: str, remove_output: bool = False, session_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Clean up resources associated with a scan.
@@ -209,11 +375,30 @@ async def cleanup_scan_resources(
     Args:
         scan_id: ID of the scan to clean up
         remove_output: If True, also remove output files
+        session_id: When given, another session's scan answers exactly like an
+            unknown id: same response, nothing cancelled, removed or deleted.
 
     Returns:
         Dictionary with cleanup result information, or the error response
         produced by ``create_error_response`` on failure. This does not raise;
-        callers should branch on ``success``.
+        callers should branch on ``success``. A scan whose runner is still
+        stopping after the cancel is reported with ``success`` False and
+        nothing removed; retry once it has settled.
+
+    ``removed_output`` answers whether the output directory is absent once the
+    call has run: True for one this call removed and for one that was already
+    gone, False for one that is still there. It used to be False for an
+    already-absent directory and True for one that vanished partway through
+    the walk, whether or not part of the tree remained.
+
+    When the output directory was asked to be removed and could not be, the
+    scan stays in the registry and ``success`` is False, so the directory is
+    still reachable through the entry for a retry. Removing the entry anyway,
+    as this used to, reported success and left the directory with nothing
+    pointing at it. The two deliberate refusals are different: an output tree
+    another scan of the directory still holds, or a link on the output path,
+    is left in place while the entry is removed, because no retry would change
+    either, and the warning says so.
     """
     from automated_security_helper.core.resource_management.error_handling import (
         validate_scan_id,
@@ -237,7 +422,7 @@ async def cleanup_scan_resources(
     registry = get_scan_registry()
 
     # Get scan information before cleanup
-    entry = registry.get_scan(scan_id)
+    entry = registry.get_scan(scan_id, **_scoped(session_id))
     if entry is None:
         error = MCPResourceError(
             f"Scan {scan_id} not found",
@@ -261,7 +446,7 @@ async def cleanup_scan_resources(
         if entry.is_active():
             # Try to cancel the scan first
             try:
-                cancel_result = await cancel_scan(scan_id)
+                cancel_result = await cancel_scan(scan_id, **_scoped(session_id))
                 if not cancel_result.get("success", False):
                     _logger.warning(
                         f"Failed to cancel scan {scan_id} during cleanup: {cancel_result.get('message', 'Unknown error')}"
@@ -271,40 +456,234 @@ async def cleanup_scan_resources(
                     f"Failed to cancel scan {scan_id} during cleanup: {str(e)}"
                 )
 
+        # A cancel closes the entry at once, while the in-process runner thread
+        # may run for seconds more: it stops its scanner's child process and
+        # puts the previous results back into the output directory. Removing
+        # that directory and the entry while it does so deletes a tree the
+        # runner still writes into, and lets a new scan of the directory in
+        # that the restore then overwrites. So the runner is waited for, and a
+        # scan whose runner has not settled in time is handed back as still
+        # stopping with nothing removed.
+        if entry.has_runner and not entry.runner_done.is_set():
+            settled = await _runner_settled(entry, _RUNNER_SETTLE_TIMEOUT_SECONDS)
+            if not settled:
+                return {
+                    "success": False,
+                    "scan_id": scan_id,
+                    "removed_output": False,
+                    "removed_from_registry": False,
+                    "message": (
+                        "Scan is still stopping: its runner has not finished "
+                        "settling the output directory"
+                    ),
+                    "status": entry.status.value,
+                    "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                    "suggestions": [
+                        (
+                            "Retry once the scan has stopped: it stops its scanner "
+                            "and puts the previous results back before its "
+                            "resources can be removed"
+                        ),
+                    ],
+                    "timestamp": datetime.now().isoformat(),
+                }
+
+        # The entry was read before the cancel and the wait, and both give up
+        # control: a concurrent cleanup of the same scan can have removed the
+        # entry meanwhile. Working on from the stale object, the output removal
+        # marked an entry the registry no longer held, so register_scan found
+        # no mark and admitted a new scan of the same tree while this call was
+        # deleting it. So the entry is read again here, and a scan that is gone
+        # is reported as not found: whoever removed it did this work.
+        entry = registry.get_scan(scan_id, **_scoped(session_id))
+        if entry is None:
+            return _removed_meanwhile_response(
+                scan_id,
+                "The scan was removed from the registry while it was stopping",
+            )
+
+        # The runner's finish is not the last writer's. A cancel that could not
+        # end one of the scanner tools leaves that tool writing into the output
+        # directory on its own clock (ScanRegistryEntry.could_not_stop), and
+        # cleanup_scan keeps the entry for as long as it runs. The removal did
+        # not ask: it deleted the tree under the writing tool, cleanup_scan then
+        # refused, and the caller read removed_output True beside
+        # removed_from_registry False with a generic message. Handed back as
+        # still stopping instead, with the tools named and nothing removed, as
+        # the docstring promises for a scan that has not settled.
+        if entry.a_surviving_tool_is_running():
+            # By basename: a tool is recorded as argv0 as spawned, which can be
+            # the server's full path, and this message reaches a remote MCP
+            # client (record_cancel_outcome names the tools the same way).
+            tools = ", ".join(entry.tool_display_names())
+            return {
+                "success": False,
+                "scan_id": scan_id,
+                "removed_output": False,
+                "removed_from_registry": False,
+                "message": (
+                    "Scan is still stopping: a scanner tool the cancel could not "
+                    f"end is still running ({tools})"
+                ),
+                "status": entry.status.value,
+                "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                "suggestions": [
+                    (
+                        "End the tool's process (the scan's entry names it in its "
+                        "warnings), then retry: the output directory may still be "
+                        "written to while it runs"
+                    ),
+                ],
+                "timestamp": datetime.now().isoformat(),
+            }
+
         # Remove output files if requested
         removed_output = False
         output_dir_error = None
+        # Whether a failed removal keeps the entry for a retry (True), or is a
+        # deliberate refusal that a retry would not change (False).
+        output_removal_failed = False
         if remove_output and entry.output_directory:
             try:
                 output_dir = Path(entry.output_directory)
-                # Deferred, and this site is the clearest case for deferring. Fixing the exists()
-                # and is_dir() calls flagged here would leave the shutil.rmtree() on the next
-                # line -- which blocks for as long as it takes to delete an entire scan output
-                # tree, far longer than two stats, and which ASYNC240 does not flag because it is
-                # not a pathlib method. Silencing the cheap half would make the rule green while
-                # the actual event-loop stall stayed exactly where it is. The whole block needs
-                # to move off the loop together.
-                if output_dir.exists() and output_dir.is_dir():  # noqa: ASYNC240
-                    shutil.rmtree(output_dir)
-                    removed_output = True
+
+                def remove() -> bool:
+                    # The path was recorded at registration; a link placed on
+                    # or above it since would redirect the delete outside the
+                    # output tree the scan registered. Checked here, on the
+                    # worker thread the registry runs this remover on, OFF the
+                    # registry's lock (remove_output_of_scan marks the entry
+                    # under its lock and runs the remover outside it) and right
+                    # before the delete, against the registered OUTPUT
+                    # directory: a workspace project's output sits under the
+                    # workspace's output_dir, not under the project's own
+                    # directory. Nothing serializes this check with the delete
+                    # but their order on this thread.
+                    resolved = _resolved_output_dir(
+                        output_dir, entry.canonical_output_directory
+                    )
+                    if resolved is None:
+                        raise _OutputDirectoryInUse(
+                            "the output path now resolves outside the output "
+                            "directory the scan registered (a component of it "
+                            "became a symbolic link)"
+                        )
+                    # A link as the last component is left in place, with
+                    # what it points to: rmtree refuses a link, so the delete
+                    # would fail on every retry and keep the entry for good.
+                    if output_dir.is_symlink():
+                        raise _OutputDirectoryInUse(
+                            "the output directory is itself a symbolic link, "
+                            "which is left in place with what it points to"
+                        )
+                    # The stats and the recursive delete, on the worker thread
+                    # this remover runs on, of the path that was just checked
+                    # and not of the stored spelling; True when the tree is
+                    # absent afterwards, an already-absent one included.
+                    return _remove_output_tree(resolved)
+
+                # Every scan of one source directory writes the same output
+                # tree under it, so this scan's output directory is also every
+                # other scan of the directory's. The registry decides, under
+                # its lock, whether another scan holds the tree (running or
+                # stopping, or registered later with its results in it), marks
+                # the entry as removing, and runs the delete off the lock; a
+                # scan registered while the tree comes down waits on that mark
+                # instead of writing into it, and every other registry caller
+                # is not held by the delete. Off the event loop: the delete
+                # blocks for as long as the tree takes to remove.
+                reason, removed_output = await asyncio.to_thread(
+                    registry.remove_output_of_scan, entry, remove
+                )
+                if reason is not None:
+                    raise _OutputDirectoryInUse(reason)
+                if not removed_output:
+                    # The remover ran and raised nothing, yet the path is still
+                    # there: it is not a directory (a file or a device at the
+                    # output name is not removed), or the tree was re-created
+                    # while it came down. Not a success, and nothing a second
+                    # try could not change, so the entry is kept for the retry
+                    # as for any other failed removal.
+                    output_removal_failed = True
+                    output_dir_error = (
+                        "Failed to remove output directory: the path is still "
+                        "present (not a directory, or re-created while it was "
+                        "being removed)"
+                    )
+                    _logger.error(
+                        f"Failed to remove output directory for scan {scan_id}: "
+                        "the path is still present"
+                    )
+            except _OutputDirectoryInUse as e:
+                output_dir_error = f"Output directory not removed: {e}"
+                _logger.warning(f"Output directory of scan {scan_id} not removed: {e}")
             except PermissionError as e:
+                output_removal_failed = True
                 output_dir_error = (
                     f"Permission denied: Cannot remove output directory: {str(e)}"
                 )
                 _logger.error(
                     f"Permission denied: Cannot remove output directory for scan {scan_id}: {str(e)}"
                 )
-            except FileNotFoundError:
-                # This is not an error, just means the directory was already removed
-                removed_output = True
+            except FileNotFoundError as e:
+                # Raised from inside the walk when an entry vanished under it.
+                # The directory itself may be gone (someone else removed it,
+                # which is not an error) or may still be there with part of
+                # the tree in it.
+                removed_output = not await asyncio.to_thread(output_dir.exists)
+                if not removed_output:
+                    output_removal_failed = True
+                    output_dir_error = (
+                        f"Failed to remove output directory: {str(e)}; part of the "
+                        "tree remains"
+                    )
+                    _logger.error(
+                        f"Failed to remove output directory for scan {scan_id}: "
+                        f"{str(e)}; part of the tree remains"
+                    )
             except Exception as e:
+                output_removal_failed = True
                 output_dir_error = f"Failed to remove output directory: {str(e)}"
                 _logger.error(
                     f"Failed to remove output directory for scan {scan_id}: {str(e)}"
                 )
 
+        if output_removal_failed:
+            # Kept in the registry: the entry is what still names the output
+            # directory, so a retry can reach it.
+            return {
+                "success": False,
+                "scan_id": scan_id,
+                "removed_output": False,
+                "removed_from_registry": False,
+                "message": (
+                    "Output directory could not be removed; the scan stays in the "
+                    "registry so the cleanup can be retried"
+                ),
+                "output_dir_error": output_dir_error,
+                "warnings": [
+                    (
+                        "Output directory could not be removed; the scan was kept "
+                        "in the registry"
+                    )
+                ],
+                "timestamp": datetime.now().isoformat(),
+            }
+
         # Remove scan from registry
-        removed_from_registry = registry.cleanup_scan(scan_id)
+        removed_from_registry = registry.cleanup_scan(scan_id, **_scoped(session_id))
+        # The registry declines for a scan it cannot find as well as for one it
+        # keeps. The awaits above (the runner, the delete) are where a second
+        # cleanup of the same scan runs; when it removed the entry first, this
+        # call is the not-found answer, which cleanup_old_scans counts as
+        # already removed, and not a failed cleanup with no category.
+        if (
+            not removed_from_registry
+            and registry.get_scan(scan_id, **_scoped(session_id)) is None
+        ):
+            return _removed_meanwhile_response(
+                scan_id, "The scan was removed from the registry by another cleanup"
+            )
 
         result = {
             "success": removed_from_registry,
@@ -317,11 +696,15 @@ async def cleanup_scan_resources(
             "timestamp": datetime.now().isoformat(),
         }
 
-        # Add output directory error if there was one
+        # Add output directory error if there was one. The warning says what
+        # happened to the entry, which depends on what the registry answered.
         if output_dir_error:
             result["output_dir_error"] = output_dir_error
             result["warnings"] = [
                 "Output directory could not be removed, but scan was removed from registry"
+                if removed_from_registry
+                else "Output directory could not be removed, and the scan was not "
+                "removed from the registry"
             ]
 
         return result
@@ -346,7 +729,9 @@ async def cleanup_scan_resources(
 
 
 async def cleanup_old_scans(
-    max_age_hours: int = 24, remove_output: bool = False
+    max_age_hours: int = 24,
+    remove_output: bool = False,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Clean up old completed scans.
@@ -354,14 +739,17 @@ async def cleanup_old_scans(
     Args:
         max_age_hours: Maximum age in hours for completed scans
         remove_output: If True, also remove output files
+        session_id: When given, only that session's scans are cleaned up.
 
     Returns:
-        Dictionary with cleanup result information
+        Dictionary with cleanup result information. A scan that was removed by
+        a concurrent cleanup between the listing and its own cleanup is listed
+        under ``already_removed`` and counts as neither cleaned up nor failed.
     """
     registry = get_scan_registry()
 
     # Get list of all scans before cleanup
-    all_scans = registry.list_scans()
+    all_scans = registry.list_scans(**_scoped(session_id))
 
     # Find old scans that should be cleaned up
     now = datetime.now()
@@ -381,15 +769,24 @@ async def cleanup_old_scans(
                         f"Invalid timestamp format for scan {scan['scan_id']}"
                     )
 
+    from automated_security_helper.core.resource_management.error_handling import (
+        ErrorCategory,
+    )
+
     # Clean up each old scan
     cleaned_up_scans = []
     failed_cleanups = []
+    already_removed = []
 
     for scan_id in scans_to_cleanup:
         try:
-            result = await cleanup_scan_resources(scan_id, remove_output)
+            result = await cleanup_scan_resources(
+                scan_id, remove_output, **_scoped(session_id)
+            )
             if result["success"]:
                 cleaned_up_scans.append(scan_id)
+            elif result.get("error_category") == ErrorCategory.SCAN_NOT_FOUND.value:
+                already_removed.append(scan_id)
             else:
                 failed_cleanups.append(scan_id)
         except Exception as e:
@@ -402,60 +799,75 @@ async def cleanup_old_scans(
         "failed_count": len(failed_cleanups),
         "cleaned_up_scans": cleaned_up_scans,
         "failed_cleanups": failed_cleanups,
+        "already_removed": already_removed,
         "message": f"Cleaned up {len(cleaned_up_scans)} old scans, {len(failed_cleanups)} failed",
     }
 
 
-async def get_scan_statistics() -> Dict[str, Any]:
+async def get_scan_statistics(session_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Get statistics about scans.
 
+    Args:
+        session_id: When given, count only that session's scans. Unscoped, the
+            counts are server-wide, the figure register_scan keeps from other
+            sessions.
+
     Returns:
-        Dictionary with scan statistics
+        Dictionary with scan statistics. The three counts come from one
+        registry read, so they agree with each other.
     """
     registry = get_scan_registry()
 
     return {
-        "total_scans": registry.get_scan_count(),
-        "active_scans": registry.get_active_scan_count(),
-        "status_counts": registry.get_scan_status_counts(),
+        **registry.get_scan_statistics(**_scoped(session_id)),
         "timestamp": datetime.now().isoformat(),
     }
 
 
-async def check_scan_exists(scan_id: str) -> bool:
+async def check_scan_exists(scan_id: str, session_id: Optional[str] = None) -> bool:
     """
     Check if a scan exists in the registry.
 
     Args:
         scan_id: ID of the scan to check
+        session_id: When given, another session's scan answers False, as every
+            session-scoped lookup answers for a scan it does not own.
 
     Returns:
         True if the scan exists, False otherwise
     """
     registry = get_scan_registry()
-    return registry.get_scan(scan_id) is not None
+    return registry.get_scan(scan_id, **_scoped(session_id)) is not None
 
 
-async def get_scan_by_directory(directory_path: str) -> Optional[Dict[str, Any]]:
+async def get_scan_by_directory(
+    directory_path: str, session_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     """
-    Get the active scan for a directory.
+    Get the scan that occupies a directory.
 
     Args:
         directory_path: Path to the directory
+        session_id: When given, another session's scan answers None; unscoped,
+            this returns any session's scan as a full dict, scan id and output
+            directory included.
 
     Returns:
         Scan information dictionary or None if not found
     """
     registry = get_scan_registry()
-    entry = registry.get_scan_by_directory(directory_path)
+    entry = registry.get_scan_by_directory(directory_path, **_scoped(session_id))
     if entry:
         return entry.to_dict()
     return None
 
 
 async def check_scan_progress(
-    scan_id: str, session_id: Optional[str] = None
+    scan_id: str,
+    session_id: Optional[str] = None,
+    *,
+    name_process_ids: bool = True,
 ) -> Dict[str, Any]:
     """
     Check the progress of a scan.
@@ -464,6 +876,10 @@ async def check_scan_progress(
         scan_id: ID of the scan to check
         session_id: When given, another session's scan is reported exactly as an
             unknown id is.
+        name_process_ids: False keeps server process ids out of the response's
+            warnings and could_not_stop reasons (``ScanRegistry.check_scan_progress``);
+            the caller passes the transport's word, a remote client reading
+            False.
 
     Returns:
         Dictionary with scan progress information, or, on any failure, the
@@ -493,7 +909,15 @@ async def check_scan_progress(
 
     try:
         registry = get_scan_registry()
-        return registry.check_scan_progress(scan_id, **_scoped(session_id))
+        # On a worker thread: the registry reads and parses the aggregated
+        # results file, which blocked the event loop for the duration while
+        # it ran here.
+        return await asyncio.to_thread(
+            registry.check_scan_progress,
+            scan_id,
+            name_process_ids=name_process_ids,
+            **_scoped(session_id),
+        )
     except MCPResourceError as e:
         # Add operation context to the error
         return create_error_response(error=e, operation="check_scan_progress")

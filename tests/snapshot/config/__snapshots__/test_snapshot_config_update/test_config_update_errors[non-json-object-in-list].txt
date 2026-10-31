@@ -1,3 +1,3 @@
 $ ash config update ash.yaml --set 'global_settings.ignore_paths+=[{path: '"'"'dist/**'"'"', reason: '"'"'x'"'"'}]'
-Not updating ash.yaml: Configuration is invalid after applying the requested overrides for 'global_settings.ignore_paths+': Invalid value at 'global_settings.ignore_paths[0]': Input should be a valid dictionary or instance of IgnorePathWithReason; Invalid value at 'global_settings.ignore_paths[1]': Input should be a valid dictionary or instance of IgnorePathWithReason
+Not updating ash.yaml: Configuration is invalid after applying the requested overrides for 'global_settings.ignore_paths+': Invalid value at 'global_settings.ignore_paths[0]': Input should be a valid dictionary or instance of IgnorePathWithReason
 [exit code: 3]

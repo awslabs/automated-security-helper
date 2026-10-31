@@ -157,6 +157,36 @@ def test_an_unloaded_community_scanner_names_its_module(tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.parametrize("typed", ["Snyk-Code", " snyk-code ", "SNYK-CODE"])
+def test_an_unloaded_community_scanner_in_another_spelling_names_its_module(
+    tmp_path, monkeypatch, typed
+):
+    """The hint is looked up by the spelling typed, and the lookup lowers and
+    strips it as the scan selects names, so a name in another case or with
+    blanks around it is no less a community scanner than `snyk-code` is."""
+    _patch_one_plugin(monkeypatch, tmp_path, [])
+
+    result = runner.invoke(
+        dependencies_app,
+        [
+            "--plugin-type",
+            "scanner",
+            "--bin-path",
+            str(tmp_path / "bin"),
+            "--tool",
+            typed,
+        ],
+    )
+
+    output = " ".join(_plain(result.output).split())
+    assert result.exit_code == EXIT_BAD_SELECTION
+    assert f"{typed.strip()} is a community plugin scanner" in output, output
+    assert (
+        "ash_plugin_modules+=[automated_security_helper.plugin_modules."
+        "ash_snyk_plugins]" in output
+    ), output
+
+
 def test_a_plain_typo_gets_no_community_hint(tmp_path, monkeypatch):
     _patch_one_plugin(monkeypatch, tmp_path, [])
 

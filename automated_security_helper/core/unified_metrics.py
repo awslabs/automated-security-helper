@@ -32,9 +32,10 @@ Example usage:
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
-from pydantic import Field, computed_field
+from pydantic import ConfigDict, Field, computed_field
 
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
@@ -64,6 +65,14 @@ class ScannerMetrics(ScannerSeverityCount):
     Inherits severity fields (suppressed, critical, high, medium, low, info) and
     the ``total`` / ``actionable_count()`` helpers from ``ScannerSeverityCount``.
     """
+
+    # Text fields are kept as given, not stripped as the severity-count model
+    # strips its own: the threshold shown has to be the threshold graded (a
+    # padded "HIGH " grades as an unrecognized level, critical only, and shown
+    # stripped it read as HIGH), and the scanner name is the key the rebuilt
+    # scanner_results row is written under, which has to match the scanner's
+    # reports and its existing row.
+    model_config = ConfigDict(str_strip_whitespace=False)
 
     scanner_name: str  # Name of the scanner (e.g., "bandit", "semgrep")
     actionable: int = 0  # Number of findings at or above the threshold severity
@@ -182,6 +191,46 @@ def counters_unusable(attempted: int | None, failed: int) -> bool:
     return (attempted is not None and attempted < 0) or failed < 0
 
 
+def own_target_reports(
+    asharp_model: AshAggregatedResults, scanner_name: str
+) -> Dict[Any, Dict[str, Any]]:
+    """The per-target reports filed under *scanner_name* that are this scanner's.
+
+    ``additional_reports`` is keyed by scanner name, and a results file merged from
+    another, or written by hand, can file a report under the wrong key. A mapping
+    that names another scanner is not read as this scanner's; one that names no
+    scanner is kept and read for the key it is filed under. The counters, the exit
+    code, the reasons and the unscanned inputs of a name-less report are what the
+    console summary prints (tests/unit/core/test_metrics_table_names_unscanned_inputs.py)
+    and what a partial audit's "N of M targets unevaluated" is read from
+    (tests/unit/interactions/test_partial_audit_counts_as_ran.py); a results file
+    written before the field existed carries no name at all. The calculator's
+    status reader is the one reader that refuses a name-less report, because a
+    STATUS filed under the wrong key would flip a row (``_own_reports``); dropping
+    the name-less case here as well left Security Hub's archive scope blind to a
+    failed target and the two readers above with nothing to print. Every reader of
+    the per-target reports in this module goes through here, so they agree on
+    which reports are the scanner's. The key and the recorded name are matched in
+    any case, as the calculator's ``_own_reports`` matches them: the name a row is
+    read under is the union's first spelling, and the reports can sit under
+    another.
+    """
+    reports = ScannerStatisticsCalculator.reports_for(asharp_model, scanner_name)
+    if not isinstance(reports, dict):
+        return {}
+    return {
+        key: report
+        for key, report in reports.items()
+        if isinstance(report, dict)
+        and (
+            report.get("scanner_name") is None
+            or ScannerStatisticsCalculator._same_scanner(
+                report.get("scanner_name"), scanner_name
+            )
+        )
+    }
+
+
 def target_counts(
     asharp_model: AshAggregatedResults, scanner_name: str
 ) -> tuple[int | None, int]:
@@ -214,16 +263,16 @@ def target_counts(
     attempt count, which is what a non-tracking scanner's stored report looks like when a writer
     emits the zero default. A zero attempt count with no failure count stays a usable claim:
     zero attempts leaves nothing unaccounted for.
+
+    Only this scanner's own reports are read (``own_target_reports``).
     """
-    reports = asharp_model.additional_reports.get(scanner_name)
-    if not isinstance(reports, dict):
+    reports = own_target_reports(asharp_model, scanner_name)
+    if not reports:
         return None, 0
 
     attempted: int | None = None
     failed = 0
     for target_report in reports.values():
-        if not isinstance(target_report, dict):
-            continue
         raw_attempted = target_report.get("targets_attempted")
         raw_failed = target_report.get("targets_failed")
         attempted_absent = raw_attempted is None
@@ -257,6 +306,11 @@ def target_counts(
                 continue
             return -1, -1
         if failed_count is None and attempted_count > 0:
+            return -1, -1
+        # More failures than attempts is a claim nobody can read either: 0
+        # attempted with 2 failed, or 3 attempted with 5 failed. Read as usable,
+        # it printed a negative evaluated count in the coverage line.
+        if failed_count is not None and failed_count > attempted_count:
             return -1, -1
         attempted = (attempted or 0) + attempted_count
         if failed_count is not None:
@@ -317,14 +371,10 @@ def recorded_reason(
     value = getattr(row, field, None)
     if isinstance(value, str) and value:
         return value
-    reports = (asharp_model.additional_reports or {}).get(scanner_name)
-    if not isinstance(reports, dict):
+    reports = own_target_reports(asharp_model, scanner_name)
+    if not reports:
         return None
-    recorded = [
-        reports[key].get(field)
-        for key in sorted(reports, key=_report_order)
-        if isinstance(reports[key], dict)
-    ]
+    recorded = [reports[key].get(field) for key in sorted(reports, key=_report_order)]
     recorded = [value for value in recorded if isinstance(value, str) and value]
     if field == "skipped_reason" and NO_PARSEABLE_CLOUDFORMATION_TEMPLATE in recorded:
         return NO_PARSEABLE_CLOUDFORMATION_TEMPLATE
@@ -382,13 +432,9 @@ def recorded_error(
     """
     from automated_security_helper.utils.error_text import text_without_values
 
-    reports = (asharp_model.additional_reports or {}).get(scanner_name)
-    if not isinstance(reports, dict):
-        return None
+    reports = own_target_reports(asharp_model, scanner_name)
     for key in sorted(reports, key=_report_order):
         report = reports[key]
-        if not isinstance(report, dict):
-            continue
         raw_results = report.get("raw_results")
         for errors in (
             report.get("errors"),
@@ -415,14 +461,11 @@ def dependencies_recorded_satisfied(
     so the rebuilt row and ash.flat.json do not tell the operator to install a tool
     nothing found missing.
     """
-    reports = (asharp_model.additional_reports or {}).get(scanner_name)
-    if not isinstance(reports, dict):
-        return False
+    reports = own_target_reports(asharp_model, scanner_name)
     recorded = [
         report.get("dependencies_satisfied")
         for report in reports.values()
-        if isinstance(report, dict)
-        and getattr(report.get("status"), "value", report.get("status")) == "MISSING"
+        if getattr(report.get("status"), "value", report.get("status")) == "MISSING"
         and isinstance(report.get("dependencies_satisfied"), bool)
     ]
     return bool(recorded) and all(recorded)
@@ -445,15 +488,11 @@ def tool_exit_code(asharp_model: AshAggregatedResults, scanner_name: str) -> int
     target; a scanner missing on one tree keeps the code its tool returned on the
     other. ``bool`` is rejected for the reason ``target_counts`` gives.
     """
-    reports = (asharp_model.additional_reports or {}).get(scanner_name)
-    if not isinstance(reports, dict):
-        return None
+    reports = own_target_reports(asharp_model, scanner_name)
     codes: list[int] = []
     error_codes: list[int] = []
     for report in reports.values():
-        if not isinstance(
-            report, dict
-        ) or ScannerStatisticsCalculator.target_report_is_missing(report):
+        if ScannerStatisticsCalculator.target_report_is_missing(report):
             continue
         code = report.get("exit_code")
         if not isinstance(code, int) or isinstance(code, bool):
@@ -488,6 +527,11 @@ def coverage_shortfalls(
     unknown size: its entry carries None for both counts. Dropping it would hide a scanner that
     made a coverage claim nobody can read. Both consumers take it: the renderer prints "coverage
     unknown" for it and the report summary reads only the names.
+
+    So is a scanner named by a report that was filed under another scanner's key and carries
+    a coverage claim (``_uncredited_coverage_claims``). The report is read as nobody's, so the
+    lost target or unscanned input it records reaches no row; the named scanner is listed
+    with unknown counts, and a warning names the key and the scanner.
     """
     shortfalls: list[tuple[str, int | None, int | None]] = []
     for scanner_name in sorted(asharp_model.additional_reports or {}):
@@ -498,7 +542,53 @@ def coverage_shortfalls(
         if attempted is None or failed <= 0:
             continue
         shortfalls.append((scanner_name, attempted, failed))
+    listed = {str(name).lower() for name, _attempted, _failed in shortfalls}
+    for recorded, filed_under in sorted(_uncredited_coverage_claims(asharp_model)):
+        ASH_LOGGER.warning(
+            f"A report filed under '{filed_under}' names scanner '{recorded}' and "
+            "carries a coverage claim (target counters or unscanned inputs). It is "
+            f"read as neither scanner's, so the coverage of '{recorded}' is unknown."
+        )
+        if recorded.lower() not in listed:
+            listed.add(recorded.lower())
+            shortfalls.append((recorded, None, None))
     return shortfalls
+
+
+def _uncredited_coverage_claims(
+    asharp_model: AshAggregatedResults,
+) -> set[tuple[str, str]]:
+    """``(recorded scanner name, key it is filed under)`` for each per-target report
+    that makes a coverage claim for one scanner while filed under another's key.
+
+    ``own_target_reports`` reads such a report as nobody's: not the key's scanner's
+    (the report names another) and not the named scanner's (that scanner's reports are
+    looked up under its own key). A lost target or an unscanned input it records is
+    therefore counted for neither, and the named scanner would read as having covered
+    everything. The report is still not credited to either; the caller marks the named
+    scanner's coverage unknown instead.
+    """
+    claims: set[tuple[str, str]] = set()
+    for key, reports in (asharp_model.additional_reports or {}).items():
+        if not isinstance(key, str) or not isinstance(reports, dict):
+            continue
+        for report in reports.values():
+            if not isinstance(report, dict):
+                continue
+            recorded = report.get("scanner_name")
+            if not isinstance(recorded, str) or not recorded:
+                continue
+            if ScannerStatisticsCalculator._same_scanner(recorded, key):
+                continue
+            # A claim is a counter that was written (the zero a non-tracking scanner's
+            # report carries for the failure count is none) or a non-empty list.
+            if (
+                report.get("targets_attempted") is not None
+                or report.get("targets_failed") not in (None, 0)
+                or report.get("inputs_not_scanned")
+            ):
+                claims.add((recorded, key))
+    return claims
 
 
 #: The name :func:`inputs_not_scanned` gives the inputs ASH itself left out of its scan
@@ -529,13 +619,13 @@ def inputs_not_scanned(
     for item in getattr(metadata, "inputs_not_scanned", None) or []:
         entries.append((SCAN_SET_OWNER, item.path, item.reason))
     for scanner_name in sorted(asharp_model.additional_reports or {}):
-        reports = asharp_model.additional_reports.get(scanner_name)
-        if not isinstance(reports, dict):
-            continue
-        for target_report in reports.values():
-            if not isinstance(target_report, dict):
+        for target_report in own_target_reports(asharp_model, scanner_name).values():
+            # Only a list is read: a results file put together by hand can hold
+            # a scalar here, and iterating it raised out of the console summary.
+            recorded = target_report.get("inputs_not_scanned")
+            if not isinstance(recorded, list):
                 continue
-            for item in target_report.get("inputs_not_scanned") or []:
+            for item in recorded:
                 if not isinstance(item, dict):
                     continue
                 path, reason = item.get("path"), item.get("reason")
@@ -582,6 +672,11 @@ def format_duration(duration_seconds: Optional[float]) -> str:
     """
     if duration_seconds is None:
         return "N/A"
+    # A duration read back from a results file can be NaN or infinite; neither
+    # is a duration, and int() of either raised out of every table that
+    # renders one.
+    if not math.isfinite(duration_seconds):
+        return "N/A"
 
     if duration_seconds < 0.001:  # Less than 1 millisecond
         return "<1ms"
@@ -591,8 +686,12 @@ def format_duration(duration_seconds: Optional[float]) -> str:
         # Keep decimal for seconds if present
         if duration_seconds == int(duration_seconds):
             return f"{int(duration_seconds)}s"
-        else:
-            return f"{duration_seconds:.1f}s"
+        # A value just under a minute rounds up to a whole minute at one decimal:
+        # 59.96 printed "60.0s" where the next branch prints a minute.
+        shown = f"{duration_seconds:.1f}"
+        if shown == "60.0":
+            return "1m 0s"
+        return f"{shown}s"
     else:
         # Convert to total minutes for test compatibility with large values
         total_minutes = int(duration_seconds) // 60
@@ -684,8 +783,42 @@ def get_unified_scanner_metrics(
             scan_result: ScannerTargetStatusInfo | None = (
                 asharp_model.scanner_results.get(scanner_name, None)
             )
-            status = (
+            recorded_status = (
                 scan_result.status if scan_result and scan_result.status else "PASSED"
+            )
+            # The recorded row is not authoritative about the finding count: a
+            # FAILED it carries from an earlier rebuild stayed on a scanner whose
+            # findings a later run dropped or suppressed, so the table and
+            # summary_stats said FAILED with 0 actionable while the exit code,
+            # from the finding counts, passed. With nothing actionable the gate
+            # passes, so FAILED here reads PASSED; what else the row says (a
+            # SKIPPED a shard recorded) is kept. Only when the counts were
+            # recorded, though: a dict-result report written before the
+            # executor assigned a findings list's counts carries its findings
+            # in raw_results and no severity_counts, so 0 actionable there says
+            # nothing, and the row's FAILED is the only evidence the gate failed.
+            # And only when the reports record the level they were graded
+            # against and this read-back grades at that same level: a results
+            # file written before that was recorded is re-graded here at
+            # whatever level the configuration record resolves to now, so a
+            # scan that failed at LOW read as 0 actionable at MEDIUM and its row
+            # flipped PASSED, and _populate_scanner_results_from_unified_metrics
+            # then wrote PASSED over the one record of the scan's own graded
+            # status. Recording a level was not enough: a literal threshold in
+            # the record is graded as written whatever the reports say, so a
+            # report recording LOW beside a record that now says MEDIUM flipped
+            # the same way (graded_level_agrees).
+            status = (
+                "PASSED"
+                if getattr(recorded_status, "value", recorded_status)
+                == ScannerStatus.FAILED.value
+                and not ScannerStatisticsCalculator.dict_counts_unrecorded(
+                    asharp_model, scanner_name
+                )
+                and ScannerStatisticsCalculator.graded_level_agrees(
+                    asharp_model, scanner_name
+                )
+                else recorded_status
             )
 
         # Read straight off the serialized per-target reports rather than through
@@ -936,15 +1069,26 @@ def _populate_summary_stats_from_unified_metrics(
     failed_count = sum(1 for m in unified_metrics if m.status == "FAILED")
     skipped_count = sum(1 for m in unified_metrics if m.status == "SKIPPED")
     missing_count = sum(1 for m in unified_metrics if m.status == "MISSING")
-    error_count = sum(1 for m in unified_metrics if m.status == "ERROR")
+    # Every other status is an error: a status that is not one of ASH's own is
+    # no result, and counted in no column the five no longer summed to the
+    # scanner count.
+    error_count = sum(
+        1
+        for m in unified_metrics
+        if m.status not in ("PASSED", "FAILED", "SKIPPED", "MISSING")
+    )
 
     # Preserve timing information if it exists
-    existing_start = aggregated_results.metadata.summary_stats.start
-    existing_end = aggregated_results.metadata.summary_stats.end
-    existing_duration = aggregated_results.metadata.summary_stats.duration
+    held = aggregated_results.metadata.summary_stats
+    existing_start = held.start
+    existing_end = held.end
+    existing_duration = held.duration
 
-    # Create new summary stats with unified metrics
-    aggregated_results.metadata.summary_stats = SummaryStats(
+    # Build the summary stats from the unified metrics, then give the object the
+    # metadata holds the fields that were set on it. Replacing the object left
+    # every reference taken before the pass (a reporter's, a caller's) reading
+    # the counts from before it.
+    rebuilt = SummaryStats(
         start=(
             existing_start.isoformat(timespec="seconds")
             if isinstance(existing_start, datetime)
@@ -970,12 +1114,41 @@ def _populate_summary_stats_from_unified_metrics(
         skipped=skipped_count,  # Add the missing skipped field
         error=error_count,
     )
+    _copy_set_fields(held, rebuilt)
+    # The same object, assigned back so the metadata counts the field as set. A
+    # metadata read from a file that lacks the key never set it, and a dump that
+    # leaves out unset fields (the CloudWatch Logs and S3 payloads) would leave
+    # out the whole block, whatever the object now carries.
+    aggregated_results.metadata.summary_stats = held
 
     ASH_LOGGER.debug(
         f"Updated summary_stats: {total_actionable} actionable findings across {len(unified_metrics)} scanners"
     )
 
     return aggregated_results
+
+
+def _copy_set_fields(target: Any, source: Any) -> None:
+    """Give *target* the fields that were set on *source*, and its extra fields.
+
+    Only what *source* set is copied, so a key *source* did not set is not added to
+    *target*, and the dumps that leave unset fields out (the CloudWatch Logs and S3
+    payloads) carry the same keys as before. The severity counts are copied the
+    same way, into the counts object *target* holds, and the field that holds them
+    is assigned back on *target* so it counts as set there too: a dump that leaves
+    out unset fields leaves out a parent whose own fields are unset, whatever its
+    child has set.
+    """
+    for name in source.model_fields_set:
+        value = getattr(source, name)
+        if isinstance(value, ScannerSeverityCount):
+            held = getattr(target, name)
+            _copy_set_fields(held, value)
+            setattr(target, name, held)
+        else:
+            setattr(target, name, value)
+    for name, value in (source.model_extra or {}).items():
+        setattr(target, name, value)
 
 
 #: Fields of the legacy two-target row (ScannerStatusInfo) that consolidation replaces
@@ -1005,6 +1178,17 @@ def _row_fields(row: object) -> Dict[str, Any]:
         for name, value in fields.items()
         if name not in _PER_TARGET_ROW_FIELDS
     }
+
+
+#: The rebuilt statuses under which the scanner's tool ran to a grade: a recorded
+#: exit code on such a row is the tool's, and is kept when the per-target reports
+#: carry none. A MISSING or SKIPPED tool never ran, so its row carries None; and
+#: an ERROR row is not kept either, because the rule is read off the row's own
+#: previous status (PASSED or FAILED), which an ERROR row no longer has: a code
+#: kept onto one survived the first rebuild and was dropped by the next, so a
+#: saved results file and the same file after ``ash report`` or ``ash merge``
+#: disagreed on it.
+_CODE_KEPT_STATUSES = frozenset({ScannerStatus.PASSED, ScannerStatus.FAILED})
 
 
 def _populate_scanner_results_from_unified_metrics(
@@ -1046,14 +1230,34 @@ def _populate_scanner_results_from_unified_metrics(
         elif metrics.status == "ERROR":
             status = ScannerStatus.ERROR
         else:
-            status = ScannerStatus.PASSED  # Default fallback
+            # Not a status of ASH's: no result that can be read, so the row
+            # says ERROR, never a PASSED nothing graded.
+            ASH_LOGGER.warning(
+                f"Scanner {scanner_name} has an unrecognized status "
+                f"{metrics.status!r}; its row is written as ERROR"
+            )
+            status = ScannerStatus.ERROR
 
         # Built from the scanner's existing row, with only the fields the metrics
         # compute replaced. Building it from the metrics alone dropped everything
         # else: an excluded scanner's ``excluded: true`` came back false, the same as
         # a scanner that ran and had nothing to scan, and exit_code and any extra
         # field were lost too.
-        fields = _row_fields(aggregated_results.scanner_results.get(scanner_name))
+        previous = aggregated_results.scanner_results.get(scanner_name)
+        fields = _row_fields(previous)
+        previous_status = (
+            previous.get("status")
+            if isinstance(previous, dict)
+            else getattr(previous, "status", None)
+        )
+        # Whether the row ITSELF said the tool ran (PASSED or FAILED), as opposed
+        # to the status the rebuild reaches now: a code on a MISSING or SKIPPED
+        # row is from a tool that did not run, and an ERROR row of an older file
+        # carries the model's default 0.
+        previous_ran = getattr(previous_status, "value", previous_status) in (
+            ScannerStatus.PASSED.value,
+            ScannerStatus.FAILED.value,
+        )
         fields.update(
             severity_counts=consolidated_severity_counts,
             finding_count=metrics.total,
@@ -1061,17 +1265,51 @@ def _populate_scanner_results_from_unified_metrics(
             suppressed_finding_count=metrics.suppressed,
             duration=total_duration,
             status=status,
-            dependencies_satisfied=not metrics.dependencies_missing,
-            excluded=metrics.excluded,
-            exit_code=metrics.exit_code,
             missing_reason=metrics.missing_reason,
-            skipped_reason=metrics.skipped_reason,
         )
-        # The scan phase's reason for a MISSING row comes with the row's other fields:
-        # the metrics know the status, not why. It stays only while the row is MISSING.
-        if status != ScannerStatus.MISSING or not isinstance(
-            fields.get("missing_reason"), str
+        # The exit code is written as the metrics have it, None included: the
+        # model's default is 0, which reads as a tool that ran and exited clean,
+        # so a tool that never ran (missing, excluded, refused before its start)
+        # has to carry an explicit None. One exception: the metrics read the
+        # code from the per-target reports, and a results file whose rows carry
+        # a code while its reports carry none (an older writer, a merged file)
+        # has the row as the code's only record. A row whose own status says the
+        # tool ran (PASSED or FAILED) keeps that code rather than having it
+        # erased by the rebuild, when the rebuilt status is PASSED or FAILED
+        # too. A code on a row that said MISSING, SKIPPED or ERROR is not the
+        # record of a run: kept, a stale code survived a rebuild to PASSED, and
+        # an older file's default 0 survived on an ERROR row. A rebuild to ERROR
+        # keeps none either: the rebuilt row says ERROR, so its own rebuild would
+        # drop the code, and one rule has to give one answer however many times
+        # the file is rebuilt.
+        # The skipped reason is written when the metrics have one and dropped
+        # when they have none (the metrics are the authority: a row's stale
+        # reason is not kept), without passing a None that would mark the field
+        # set on every row.
+        recorded_code = fields.get("exit_code")
+        if (
+            metrics.exit_code is None
+            and status in _CODE_KEPT_STATUSES
+            and previous_ran
+            and isinstance(recorded_code, int)
+            and not isinstance(recorded_code, bool)
         ):
+            fields["exit_code"] = recorded_code
+        else:
+            fields["exit_code"] = metrics.exit_code
+        if metrics.skipped_reason is None:
+            fields.pop("skipped_reason", None)
+        else:
+            fields["skipped_reason"] = metrics.skipped_reason
+        # The scan phase's reason for a MISSING row comes with the row's other fields:
+        # the metrics know the status, not why. It stays while the row is MISSING, and
+        # on a FAILED row whose dependencies were missing on one tree, the reason
+        # get_unified_scanner_metrics computes for it (contract clause 3i): dropped
+        # here, the rebuilt row said FAILED and nothing said which tree went unscanned.
+        if status not in (
+            ScannerStatus.MISSING,
+            ScannerStatus.FAILED,
+        ) or not isinstance(fields.get("missing_reason"), str):
             fields.pop("missing_reason", None)
         # The two flags say why the status is what it is, so they follow the
         # metrics when the metrics found the scanner missing or excluded. Every
@@ -1081,13 +1319,16 @@ def _populate_scanner_results_from_unified_metrics(
         # (scan() returned False) has no earlier row to carry the flag: left at its
         # default of True it read as having its dependencies, and one target that
         # evaluated nothing then graded it SKIPPED, which the completeness gate lets
-        # through. Set only in those cases, so a row that had no flag keeps its
-        # serialized shape (dumps that exclude unset fields, such as the S3 and
-        # CloudWatch payloads, leave the defaults out).
-        if metrics.dependencies_missing:
-            fields["dependencies_satisfied"] = False
-        if metrics.excluded:
-            fields["excluded"] = True
+        # through. Set in those cases, and on a row that already carries the field
+        # (so a stale value follows the metrics), so a row that had no flag keeps
+        # its serialized shape (dumps that exclude unset fields, such as the S3
+        # and CloudWatch payloads, leave the defaults out). Passed on every row,
+        # as the update above once did, both flags were set on every row and the
+        # shape preservation described here never happened.
+        if metrics.dependencies_missing or "dependencies_satisfied" in fields:
+            fields["dependencies_satisfied"] = not metrics.dependencies_missing
+        if metrics.excluded or "excluded" in fields:
+            fields["excluded"] = metrics.excluded
         consolidated_target_info = ScannerTargetStatusInfo(**fields)
 
         # Update scanner_results with consolidated information.

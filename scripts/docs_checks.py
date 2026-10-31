@@ -103,7 +103,16 @@ SHIPPED_DOCKERFILES = ("Dockerfile",)
 
 #: Pages for contributors. Variables only the test suite and CI read are documented
 #: here and nowhere else (a path ending in "/" is a directory).
-CONTRIBUTOR_PAGES = ("docs/content/contributing/", "CONTRIBUTING.md", "DEVELOPMENT.md")
+#: Pages written for contributors, where a variable only the test suite or CI
+#: reads may be documented. A trailing slash names a directory prefix; a document
+#: under tests/ (tests/NAMING_CONVENTIONS.md names the tier and shard variables)
+#: is contributor material by its location.
+CONTRIBUTOR_PAGES = (
+    "docs/content/contributing/",
+    "CONTRIBUTING.md",
+    "DEVELOPMENT.md",
+    "tests/",
+)
 
 #: Where the test suite and CI live in the code tree, for those test-only variables.
 TEST_SOURCES = "tests"
@@ -5814,7 +5823,8 @@ UNREAD_RESPONSE_EXPLAINED = (
         "get_config",
         "automated_security_helper/config/environment_record.py",
         "_Index._string",
-        "text = text.replace(reference.value, self.mark(reference.written))",
+        # The statement spans three lines; the reader records its first.
+        "text = text.replace(",
         "2026-12-31",
         "a string-shaping helper of the same dump.",
     ),
@@ -5915,6 +5925,26 @@ UNREAD_RESPONSE_EXPLAINED = (
         "results = _add_findings_list(results)",
         "2026-12-31",
         "the summary view is built from the reshaped results.",
+    ),
+    # The coverage keys (_COVERAGE_KEYS: coverage_complete and the gap lists)
+    # are copied from the loaded results document onto the filtered view by a
+    # comprehension keyed by the loop's name, which the reader cannot read;
+    # none of those names is an error_type.
+    (
+        "get_scan_results",
+        "automated_security_helper/core/resource_management/result_filters.py",
+        "_coverage_fields",
+        "return {key: results[key] for key in _COVERAGE_KEYS if key in results}",
+        "2026-12-31",
+        "the coverage keys copied from the loaded results file onto the view.",
+    ),
+    (
+        "get_scan_summary",
+        "automated_security_helper/core/resource_management/result_filters.py",
+        "_coverage_fields",
+        "return {key: results[key] for key in _COVERAGE_KEYS if key in results}",
+        "2026-12-31",
+        "the coverage keys copied from the loaded results file onto the view.",
     ),
     (
         "get_scan_progress",

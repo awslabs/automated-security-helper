@@ -104,6 +104,9 @@ class _FakeResponse:
     def __init__(self, payload: bytes):
         self._payload = payload
         self._read = False
+        # The body copy checks the copied bytes against Content-Length
+        # (_copy_whole_body), so the stand-in declares its own length.
+        self.headers = {"Content-Length": str(len(payload))}
 
     def read(self, *_args):
         if self._read:

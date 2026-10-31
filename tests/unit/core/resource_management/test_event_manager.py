@@ -843,7 +843,11 @@ class TestEventSubscriptionManager:
         assert results["total_subscriptions"] == 2
         assert results["successful_cleanups"] == 1
         assert results["failed_cleanups"] == 1
-        assert len(results["errors"]) == 0  # Errors are tracked separately
+        # The failed cleanup's error is in the results too, beside the count
+        # (and in get_cleanup_errors): a count with an empty list left the
+        # caller no way to tell what failed.
+        assert [e["subscription_id"] for e in results["errors"]] == ["sub_bad"]
+        assert "Cleanup failed" in results["errors"][0]["error"]
 
         # Verify good cleanup was called
         good_cleanup.assert_called_once()
@@ -1063,9 +1067,13 @@ class TestEventSubscriptionManager:
                 assert subscription_info["registered"] is True
                 raise RuntimeError("Test error")
 
-        # Cleanup should still be performed in finally block
+        # auto_cleanup_on_error=False means the subscription is left for the
+        # caller after an error: the final cleanup used to unregister it anyway,
+        # so the flag changed nothing.
+        cleanup_func.assert_not_called()
+        assert event_manager.get_subscription_info("sub_1") is not None
+        assert await event_manager.unregister_subscription("sub_1") is True
         cleanup_func.assert_called_once()
-        assert event_manager.get_subscription_info("sub_1") is None
 
     @pytest.mark.asyncio
     async def test_subscription_statistics_edge_cases(self, event_manager):

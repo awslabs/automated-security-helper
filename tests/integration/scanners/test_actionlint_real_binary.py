@@ -16,6 +16,7 @@ file must run in CI, not skip.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess  # nosec B404 - runs the real ash CLI under test
@@ -51,15 +52,20 @@ EXPECTED = [
 ]
 
 
+def _must_run() -> bool:
+    """Whether ASH_REQUIRE_ACTIONLINT says these tests must run, not skip."""
+    return os.environ.get("ASH_REQUIRE_ACTIONLINT", "").strip().upper() in (
+        "1",
+        "YES",
+        "TRUE",
+    )
+
+
 def _require_actionlint() -> str:
     found = find_executable("actionlint")
     if found:
         return found
-    if os.environ.get("ASH_REQUIRE_ACTIONLINT", "").strip().upper() in (
-        "1",
-        "YES",
-        "TRUE",
-    ):
+    if _must_run():
         pytest.fail(
             "ASH_REQUIRE_ACTIONLINT is set but actionlint is not installed. "
             "This test must run in CI, not skip."
@@ -69,9 +75,34 @@ def _require_actionlint() -> str:
 
 @pytest.fixture
 def repo(tmp_path) -> Path:
+    """A copy of the fixture tree, with no git root: what every test that does
+    not need actionlint to discover the project reads, git installed or not."""
     target = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, target)
     return target
+
+
+@pytest.fixture
+def git_repo(repo) -> Path:
+    """The copy as a git root. actionlint discovers a project only at an ancestor
+    that holds both .github/workflows and .git, and the fixture tree is committed
+    without one; without the root actionlint never finds the repository, so it
+    never reads the repository's own actionlint.yaml (the config cases would pass
+    whatever -config-file did) and never resolves a local ``uses: ./...``. Only
+    the tests that need the discovery take this fixture, so a runner without
+    git still runs the rest; where ASH_REQUIRE_ACTIONLINT says this file must
+    run, a missing git fails those tests rather than skipping them."""
+    if shutil.which("git") is None:
+        if _must_run():
+            pytest.fail(
+                "ASH_REQUIRE_ACTIONLINT is set but git is not installed. The tests "
+                "that need a git root must run in CI, not skip."
+            )
+        pytest.skip("git is not installed")
+    subprocess.run(  # nosec B603 B607 - initializes the copied fixture, fixed argv
+        ["git", "init", "-q", str(repo)], check=True, capture_output=True
+    )
+    return repo
 
 
 def _ash(
@@ -120,6 +151,78 @@ def test_the_real_binary_reports_the_fixture_findings(repo, tmp_path):
     } == {".github/workflows/vulnerable.yml"}
     assert scanner.exit_code == 1
     assert report.runs[0].tool.driver.version.startswith("1.")
+
+
+@pytest.mark.parametrize("shape", ["malformed", "linked-out"])
+def test_the_scanned_trees_actionlint_config_does_not_change_the_run(
+    git_repo, tmp_path, shape, caplog
+):
+    """ASH passes -config-file on every run, so the repository's own
+    .github/actionlint.yaml must not change the findings. A malformed one must
+    not turn the run into exit 3: actionlint parses it while it looks for the
+    project root (the fixture is a git root here), whatever the flag names, so
+    ASH lints such a tree from a copy outside it and says so. One that is a link
+    out of the tree must not have the outside file quoted into actionlint's
+    stderr. Measured with the real binary; the unit tests replace the
+    subprocess."""
+    _require_actionlint()
+    repo = git_repo
+    config = repo / ".github" / "actionlint.yaml"
+    if shape == "malformed":
+        config.write_text("paths: [\n")
+    else:
+        if sys.platform == "win32":
+            pytest.skip("symlinks")
+        outside = tmp_path / "outside.yaml"
+        outside.write_text("self-hosted-runner:\n  labels: [OUTSIDE-MARKER-LABEL]\n")
+        config.symlink_to(outside)
+    output = tmp_path / "out"
+    scanner = ActionlintScanner(
+        context=PluginContext(
+            source_dir=repo, output_dir=output, config=get_default_config()
+        ),
+        config=ActionlintScannerConfig(enabled=True),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        report = scanner.scan(target=repo, target_type="source")
+
+    rows = [
+        (
+            r.ruleId,
+            getattr(r.level, "value", r.level),
+            r.properties.issue_severity,
+            r.locations[0].physicalLocation.root.region.startLine,
+        )
+        for r in report.runs[0].results
+    ]
+    assert rows == EXPECTED
+    assert scanner.exit_code == 1
+    # Both shapes move the run to the copy, by different routes, and each says
+    # so: the malformed file is actionlint's own refusal (exit 3 on its first
+    # run, then the batch again from the copy); the link is never run against
+    # in the tree (judged by stat before actionlint starts).
+    if shape == "malformed":
+        assert (
+            "actionlint exited 3 with a repository actionlint config present"
+            in caplog.text
+        )
+    else:
+        assert ".github/actionlint.yaml at" in caplog.text
+        assert "is a link" in caplog.text
+    assert "linted from a copy outside the tree" in caplog.text
+    # Nothing of the outside file reaches the records. actionlint parses a valid
+    # linked config silently, so a quiet stderr alone would show nothing; the
+    # positive check is the staging note above, and these reads say the marker
+    # is in none of the places a read-through could have put it.
+    recorded = "\n".join(str(line) for line in scanner.errors)
+    assert "OUTSIDE-MARKER-LABEL" not in recorded
+    assert "OUTSIDE-MARKER-LABEL" not in report.model_dump_json()
+    stderr_log = Path(scanner.results_dir) / "source" / "ActionlintScanner.stderr.log"
+    if stderr_log.exists():
+        assert "OUTSIDE-MARKER-LABEL" not in stderr_log.read_text(
+            encoding="utf-8", errors="replace"
+        )
 
 
 def test_a_full_scan_with_actionlint_selected(repo, tmp_path):
@@ -332,12 +435,13 @@ def test_an_operator_path_in_the_tree_that_links_out_never_runs(repo, tmp_path):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
-def test_a_local_reference_out_of_the_tree_is_never_read(repo, tmp_path):
+def test_a_local_reference_out_of_the_tree_is_never_read(git_repo, tmp_path):
     """actionlint reads the action a ``uses: ./...`` names and lists its inputs in the
     finding. One linked out of the tree is not linted; one in the tree still is, which
-    shows the real binary does resolve local references in this layout."""
+    shows the real binary does resolve local references in this layout (a git root,
+    which is where actionlint finds the project the reference is relative to)."""
     _require_actionlint()
-    (repo / ".git").mkdir()
+    repo = git_repo
     outside = tmp_path / "outside" / "action"
     outside.mkdir(parents=True)
     metadata = (

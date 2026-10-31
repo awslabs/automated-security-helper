@@ -3,8 +3,8 @@
 A finding's rule id, file, message, suppression reason and code snippet come from
 the scanned repository or a scanner's output, and so does a scanner's name. None
 of it is markup or markdown here: each value reaches a widget through _shown,
-_text, _cell, _snippet or _metadata_table, as text with its terminal controls
-shown as escapes. Built into a markup string, "[@click=app.quit]" in a rule id was
+_shown_prose, _text, _cell, _snippet or _metadata_table, as text with its
+terminal controls shown as escapes. Built into a markup string, "[@click=app.quit]" in a rule id was
 an action a click ran (Textual's app actions include screenshot, which writes a
 file) and "[link=...]" a hyperlink; built into a Markdown document, a message's
 markdown link opened a browser and a "```" in a snippet ended its code fence.
@@ -12,7 +12,8 @@ tests/unit/cli/inspect/test_finding_text_is_not_markup.py fails when a module he
 hands text to a markup-reading API any other way.
 """
 
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, BinaryIO, Callable, Dict, List, Optional
 
 import typer
@@ -44,6 +45,7 @@ from textual.widgets import (
 from textual.widgets.data_table import ColumnKey
 
 from automated_security_helper.config.ash_config import add_suppression_to_config
+from automated_security_helper.core.exceptions import ASHConfigSourceError
 from automated_security_helper.utils.console import echo, secho
 from automated_security_helper.config.resolve_config import find_config_file
 from automated_security_helper.core.constants import (
@@ -56,9 +58,14 @@ from automated_security_helper.models.core import (
     expiration_date_problem,
     expiration_has_passed,
 )
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.path_matching import (
+    PathNotExpressible,
+    literal_path_pattern,
+)
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
@@ -69,6 +76,7 @@ from automated_security_helper.utils.terminal_text import (
     controls_shown,
     only_controls_shown,
 )
+from automated_security_helper.utils.undecodable_text import undecodable_of_text
 from automated_security_helper.utils.ui_theme import (
     COLORS,
     FOOTER_CREDIT,
@@ -86,10 +94,26 @@ SNIPPET_LINES = 200
 SNIPPET_LINE_CHARS = 500
 SNIPPET_TRUNCATED = "(truncated)"
 
+#: The most characters of a finding's message the detail view shows: as much text
+#: as a snippet at its cap holds. A message is prose, which the view wraps, so the
+#: cap is on the whole text and not on each line (``_shown_prose``).
+MESSAGE_CHARS = SNIPPET_LINES * SNIPPET_LINE_CHARS
+
 #: What the detail view's Code section says for a finding that names a file whose
 #: lines are not shown: the results hold no snippet, and the file is not one the
 #: TUI reads (see _source_excerpt).
 SOURCE_NOT_SHOWN = "(source not shown)"
+
+#: The key of a finding whose code the TUI read from a file (``_show_detail``):
+#: the path it read. The detail view says so above the lines, because they are
+#: the file as it is now, not as the scan read it, and the file is the one under
+#: the scanned directory the results' layout names (``scanned_directory``).
+SNIPPET_READ_FROM = "code_snippet_read_from"
+
+#: The key of a finding whose code snippet was read from a file: the characters
+#: of each snippet line the detail view shows, SNIPPET_LINE_CHARS of source after
+#: the line's number and marker (``_excerpt_line_chars``).
+SNIPPET_LINE_CHARS_KEY = "code_snippet_line_chars"
 
 #: The most bytes read from a finding's file to reach the lines around it. A
 #: finding deep in a large file shows nothing rather than keep the TUI reading.
@@ -98,9 +122,20 @@ SOURCE_READ_LIMIT = 64 * 1024 * 1024
 #: Lines shown on each side of a finding's line when they are read from its file.
 _CONTEXT_LINES = 5
 
-#: The bytes of each line kept while reading: enough for SNIPPET_LINE_CHARS + 1
-#: characters of UTF-8, so a line cut here still reads as longer than the cap.
-_LINE_HEAD_BYTES = (SNIPPET_LINE_CHARS + 1) * 4
+#: The bytes of each line kept while reading. A line longer than this is not shown
+#: at all (SOURCE_LINE_NOT_SHOWN): its head alone would reach the masker without
+#: the rest, so a value that started inside the shown part and ended past the head
+#: was not matched, and its start was shown. Nothing the masker could not check
+#: whole is shown. 64 KiB holds any line of code or prose (a paragraph of CJK text,
+#: a long log line) and leaves out only minified bundles and data blobs; the lines
+#: around a finding then take at most (2 * _CONTEXT_LINES + 1) times this. A head
+#: of (SNIPPET_LINE_CHARS + 1) * 4 bytes, enough for the shown part alone, hid
+#: every line over about 2,000 bytes, a Markdown paragraph among them.
+_LINE_HEAD_BYTES = 64 * 1024
+
+#: What an excerpt shows in place of a line longer than _LINE_HEAD_BYTES, or one
+#: the read limit ended inside. Not the head of the line: see _LINE_HEAD_BYTES.
+SOURCE_LINE_NOT_SHOWN = "(line too long to show)"
 
 #: The most bytes asked of the file at a time.
 _READ_CHUNK = 64 * 1024
@@ -122,11 +157,82 @@ def scanned_directory(report_file: Path) -> Optional[Path]:
 
 
 def _line_text(head: bytes) -> str:
-    """A line's kept bytes as text, without its line end, cut after
-    SNIPPET_LINE_CHARS + 1 characters."""
+    """A line's kept bytes as text, without its line end.
+
+    Not cut to the cap here: the lines are masked first (``mask_source``) and cut
+    to SNIPPET_LINE_CHARS + 1 characters after (``_cut_excerpt_lines``). Cut before
+    the masking, a secret value or shape that started inside the cap and ended past
+    it was no longer whole, so the masker did not match it and its head was shown.
+    The head is at most _LINE_HEAD_BYTES bytes, and a line that did not fit in it
+    is replaced by SOURCE_LINE_NOT_SHOWN (``_read_lines``) for the same reason.
+    """
     text = head.decode("utf-8", errors="replace")
-    text = text.removesuffix("\n").removesuffix("\r")
-    return text[: SNIPPET_LINE_CHARS + 1]
+    return text.removesuffix("\n").removesuffix("\r")
+
+
+#: The most characters of a source line kept in an excerpt, after its number and
+#: marker: one more than the cap, so _capped still reads it as cut.
+_EXCERPT_LINE_CHARS = SNIPPET_LINE_CHARS + 1
+
+
+def _cut_excerpt_lines(excerpt: str) -> str:
+    """*excerpt* (``_source_excerpt``'s text) with each line cut to its number,
+    its marker and _EXCERPT_LINE_CHARS characters of source.
+
+    After the masking, so a value the masker replaces is matched whole; see
+    ``_line_text``. A line the masker replaced is shorter than the cap already."""
+    cut = []
+    for line in excerpt.split("\n"):
+        marker, separator, text = line.partition(": ")
+        if separator and len(text) > _EXCERPT_LINE_CHARS:
+            line = f"{marker}{separator}{text[:_EXCERPT_LINE_CHARS]}"
+        cut.append(line)
+    return "\n".join(cut)
+
+
+def _excerpt_line_chars(excerpt: str) -> int:
+    """The characters of each line of *excerpt* the detail view shows: the line's
+    number and marker, then SNIPPET_LINE_CHARS of source.
+
+    The cap is on the source (``SNIPPET_LINE_CHARS``), and the number and marker
+    are the view's own layout, so they are added to it: counted inside the cap,
+    a source line of 491 to 500 characters lost its last characters to the
+    "→ 123: " before it and was shown "(truncated)". Every line of an excerpt has
+    a number of the same width (``_source_excerpt``), so the first line's prefix
+    measures them all.
+    """
+    prefix, separator, _text = excerpt.split("\n", 1)[0].partition(": ")
+    return SNIPPET_LINE_CHARS + len(prefix) + len(separator)
+
+
+#: The line ends a finding's line number counts: universal newlines, as the
+#: scanners number lines and as the masker counts them
+#: (utils/secret_masking.py's _LINE_BREAK). Counted by ``\n`` alone, a file with
+#: a lone carriage return numbered its lines differently from the finding that
+#: names one, so the arrow marked another line.
+_LINE_END = re.compile(rb"\r\n|\n|\r")
+
+
+def _line_ends(chunk: bytes) -> int:
+    """How many line ends *chunk* holds, a ``\\r\\n`` counted once."""
+    return chunk.count(b"\n") + chunk.count(b"\r") - chunk.count(b"\r\n")
+
+
+def _read_chunk(handle: BinaryIO, budget: int, after_cr: bool) -> tuple[bytes, int]:
+    """Up to _READ_CHUNK bytes of *handle*, within *budget*, and how many of them
+    were dropped: when the chunk before ended on ``\\r`` (*after_cr*) and this one
+    starts with ``\\n``, that byte is the second half of a ``\\r\\n`` whose first half
+    was already counted as a line end, so it is dropped and never counted again.
+    A ``\\r\\n`` split by a chunk is then one line end whatever the chunk holds.
+    Reading one more byte after a ``\\r`` instead still split ``\\r\\r\\n``, and the
+    lines after it were numbered one more than the finding numbers them.
+
+    An empty chunk with nothing dropped is the end of the file or of the budget.
+    """
+    chunk = handle.read(min(budget, _READ_CHUNK))
+    if after_cr and chunk.startswith(b"\n"):
+        return chunk[1:], 1
+    return chunk, 0
 
 
 def _offset_of_line(handle: BinaryIO, line: int, budget: int) -> Optional[int]:
@@ -136,32 +242,56 @@ def _offset_of_line(handle: BinaryIO, line: int, budget: int) -> Optional[int]:
     The line ends before it are counted in _READ_CHUNK reads, not read a line at a
     time: a file of 40 million short lines took 18.9 s to reach its end one
     readline at a time, on the UI thread, though the byte budget bounds the read.
+    The ends are counted (``_line_ends``) and only the chunk holding the wanted
+    line is scanned end by end.
     """
     to_skip = line - 1
     offset = 0
+    after_cr = False
     while to_skip > 0:
-        chunk = handle.read(min(budget - offset, _READ_CHUNK))
+        chunk, dropped = _read_chunk(handle, budget - offset, after_cr)
+        offset += dropped
         if not chunk:
+            if dropped:
+                after_cr = False
+                continue
             return None
-        ends = chunk.count(b"\n")
+        ends = _line_ends(chunk)
         if ends >= to_skip:
-            index = -1
-            for _ in range(to_skip):
-                index = chunk.index(b"\n", index + 1)
-            return offset + index + 1
+            for match in _LINE_END.finditer(chunk):
+                to_skip -= 1
+                if to_skip == 0:
+                    end = offset + match.end()
+                    if (
+                        match.end() == len(chunk)
+                        and chunk.endswith(b"\r")
+                        and end < budget
+                        and handle.read(1) == b"\n"
+                    ):
+                        # The wanted line ends on the chunk's last byte, a lone
+                        # carriage return so far: a newline right after it is
+                        # the same line end, and the next line starts past it.
+                        end += 1
+                    return end
         to_skip -= ends
         offset += len(chunk)
+        after_cr = chunk.endswith(b"\r")
     return offset
 
 
 def _read_lines(handle: BinaryIO, first: int, last: int) -> list[str]:
-    """Lines *first* to *last* (counted from 1) of *handle*, each cut by _line_text.
+    """Lines *first* to *last* (counted from 1) of *handle*, each whole (its line
+    end removed, _line_text) or replaced by SOURCE_LINE_NOT_SHOWN.
 
     At most SOURCE_READ_LIMIT bytes are read, the lines before *first* only counted
     (_offset_of_line), and only the head of each wanted line is kept, so a line
     that never ends (minified code, a sparse file) costs that many bytes of reading
-    and no more memory than its head. Fewer lines when the file, or the limit, ends
-    first. *handle* is a regular file, so it can seek back to where *first* starts.
+    and no more memory than its head. A line longer than its head
+    (_LINE_HEAD_BYTES), or one the limit ended inside, is replaced by
+    SOURCE_LINE_NOT_SHOWN: shown as its head alone, a value that started in the
+    shown part and ended past the head reached the masker cut, was not matched, and
+    its start was shown. Fewer lines when the file, or the limit, ends first.
+    *handle* is a regular file, so it can seek back to where *first* starts.
     """
     start = _offset_of_line(handle, first, SOURCE_READ_LIMIT)
     if start is None:
@@ -171,25 +301,86 @@ def _read_lines(handle: BinaryIO, first: int, last: int) -> list[str]:
     budget = SOURCE_READ_LIMIT - start
     number = first
     head = bytearray()
+    overflowed = False
+    after_cr = False
+
+    def keep(segment: bytes) -> None:
+        nonlocal overflowed
+        room = _LINE_HEAD_BYTES - len(head)
+        if len(segment) > room:
+            overflowed = True
+        head.extend(segment[:room])
+
     while number <= last and budget > 0:
-        piece = handle.readline(min(budget, _READ_CHUNK))
-        if not piece:
+        # Read in chunks and split at every line end (_LINE_END), not readline:
+        # readline ends a line at "\n" alone, so a lone "\r" stayed inside a
+        # line and the lines after it were numbered one less than the finding
+        # numbers them.
+        chunk, dropped = _read_chunk(handle, budget, after_cr)
+        budget -= len(chunk) + dropped
+        if not chunk:
+            if dropped:
+                after_cr = False
+                continue
             break
-        budget -= len(piece)
-        if len(head) < _LINE_HEAD_BYTES:
-            head += piece[: _LINE_HEAD_BYTES - len(head)]
-        if piece.endswith(b"\n"):
-            kept.append(_line_text(bytes(head)))
+        after_cr = chunk.endswith(b"\r")
+        position = 0
+        for match in _LINE_END.finditer(chunk):
+            keep(chunk[position : match.start()])
+            kept.append(
+                SOURCE_LINE_NOT_SHOWN if overflowed else _line_text(bytes(head))
+            )
             head.clear()
+            overflowed = False
             number += 1
+            position = match.end()
+            if number > last:
+                break
+        else:
+            keep(chunk[position:])
     if head and number <= last:
-        # The last line read: the file or the limit ended inside it.
-        kept.append(_line_text(bytes(head)))
+        # The last line read: the file or the limit ended inside it. Past the limit
+        # the line goes on unread, so it is not shown either; at the file's end it
+        # is whole.
+        if overflowed or (budget <= 0 and handle.read(1)):
+            kept.append(SOURCE_LINE_NOT_SHOWN)
+        else:
+            kept.append(_line_text(bytes(head)))
     return kept
 
 
-def _source_excerpt(finding: dict, scan_root: Optional[Path]) -> Optional[str]:
+def _source_path(file_value: object, scan_root: Path) -> Path:
+    """The file under *scan_root* a finding's recorded URI names.
+
+    The URI is the results' text: a name that is not UTF-8 is recorded in its
+    record form (utils/undecodable_text.py, ``\\udcNN`` for each byte), so the
+    name is read back before the file is opened, as every reader of a recorded
+    name does. Opened as the six characters of the record form, the file was
+    never found and the view said "(source not shown)" for a file that exists.
+    """
+    return scan_root / undecodable_of_text(str(file_value))
+
+
+def _excerpt_start(line_number: int, read_from: Optional[int]) -> int:
+    """The first line ``_source_excerpt`` reads: the window's, or the earlier line
+    the masker asked to read from (``earliest_reported_line``)."""
+    first = max(1, line_number - _CONTEXT_LINES)
+    return first if read_from is None else min(first, max(1, read_from))
+
+
+def _drop_lines_before(excerpt: str, count: int) -> str:
+    """*excerpt* without its first *count* lines (each ends with a newline)."""
+    return excerpt if count <= 0 else "\n".join(excerpt.split("\n")[count:])
+
+
+def _source_excerpt(
+    finding: dict, scan_root: Optional[Path], read_from: Optional[int] = None
+) -> Optional[str]:
     """The lines around a finding's line, read from its file, or None.
+
+    With *read_from*, an earlier line than the window starts at, the lines run
+    from there: the masker needs the BEGIN line of a key block to find the
+    block, and the caller cuts the lines before the window off after masking.
 
     The file and line are the results', so a scanner's and the scanned repository's
     to name. The file is read only when it is a regular file inside *scan_root*, as
@@ -198,7 +389,8 @@ def _source_excerpt(finding: dict, scan_root: Optional[Path]) -> Optional[str]:
     only while it stays inside the tree. A path outside the tree, "../" included,
     a device such as /dev/zero, a FIFO or a link out is not read. Neither is any
     file when there is no scan root, and reading stops at SOURCE_READ_LIMIT. Each
-    line is marked with its number, the finding's with an arrow.
+    line is marked with its number, right-aligned so every prefix is as wide as
+    the last line's, the finding's with an arrow.
     """
     file_value = finding.get("file")
     try:
@@ -207,10 +399,10 @@ def _source_excerpt(finding: dict, scan_root: Optional[Path]) -> Optional[str]:
         return None
     if scan_root is None or not file_value or line_number < 1:
         return None
-    first = max(1, line_number - _CONTEXT_LINES)
+    first = _excerpt_start(line_number, read_from)
     try:
         with open_in_scanned_tree(
-            scan_root / str(file_value), scan_root, follow_links_inside=True
+            _source_path(file_value, scan_root), scan_root, follow_links_inside=True
         ) as handle:
             lines = _read_lines(handle, first, line_number + _CONTEXT_LINES)
     except TreeInputRefused as refused:
@@ -222,10 +414,148 @@ def _source_excerpt(finding: dict, scan_root: Optional[Path]) -> Optional[str]:
         return None
     if not first <= line_number < first + len(lines):
         return None
+    width = len(str(first + len(lines) - 1))
     return "".join(
-        f"{'→ ' if number == line_number else '  '}{number}: {text}\n"
+        f"{'→ ' if number == line_number else '  '}{number:>{width}}: {text}\n"
         for number, text in enumerate(lines, start=first)
     )
+
+
+def _suppression_path(file_value: object) -> str:
+    """The suppression ``path`` that names the file of a finding, and no other.
+
+    The finding's file is the results' recorded URI, written as the scanner wrote
+    it: ``./src/x.py`` or ``src//x.py``. The scan matches a suppression against the
+    folded spelling (utils/sarif_utils.py's ``_matched_path_text``: ``.``
+    components and repeated separators folded, ``..`` kept), so the recorded
+    spelling is folded the same way here, or the saved entry never matched its
+    finding. A URI with a scheme and an authority is left as written, as the scan
+    leaves it.
+
+    Then written as a pattern that matches that one path
+    (``path_matching.literal_path_pattern``): ``[``, ``*`` and ``?`` in a file name
+    are glob syntax in a pattern, so ``x[1].py`` as a pattern matched ``x1.py``
+    and ``a*b.py`` matched every file between. A path holding a backslash has no
+    pattern of its own (``PathNotExpressible``, raised to the caller).
+    """
+    return literal_path_pattern(_folded_file(file_value))
+
+
+def _folded_file(file_value: object) -> str:
+    """A finding's recorded file in the spelling the scan matches a suppression
+    against: ``.`` components and repeated separators folded, ``..`` kept, a URI
+    with a scheme and an authority left as written (see ``_suppression_path``)."""
+    text = str(file_value)
+    if "://" not in text:
+        text = PurePosixPath(text).as_posix()
+    return text
+
+
+#: A character of a rule id that is glob syntax in a suppression's ``rule_id``, as
+#: a class matching only itself. fnmatch has no escape character; a class is how a
+#: pattern spells one of these literally.
+_GLOB_LITERAL = {"[": "[[]", "*": "[*]", "?": "[?]"}
+
+
+def _suppression_rule_id(rule_id: object) -> str:
+    """The suppression ``rule_id`` that names a finding's rule and no other.
+
+    The scan reads the field as a case-insensitive glob (models/core.py's
+    ``AshSuppression.matches``, ``fnmatch``), so a rule id written as it is did not
+    name itself when it held ``[``, ``*`` or ``?``: ``CKV[1]`` as a pattern matched
+    ``CKV1`` and not ``CKV[1]``, and ``rule*`` matched every rule beginning
+    ``rule``. Each such character is written as a class holding only itself.
+    """
+    return "".join(_GLOB_LITERAL.get(char, char) for char in str(rule_id))
+
+
+def _suppression_for(
+    finding: dict, reason: str, expiration: Optional[str] = None
+) -> AshSuppression:
+    """The entry the suppress dialog saves for *finding*: its rule as a pattern
+    naming that rule alone (``_suppression_rule_id``), its file as a pattern
+    naming that file alone (``_suppression_path``, which raises
+    PathNotExpressible for a file that has none), and the one line it reports as
+    both ends of the line range, or no range when it reports none.
+
+    The one place the entry's shape is written: the dialog saves what this
+    returns, ``_findings_suppressed_by`` marks what it covers, and
+    ``_suppression_scope_note`` describes it, so the three cannot drift apart.
+    """
+    line = finding.get("line")
+    line_number = int(line) if line else None
+    return AshSuppression(
+        rule_id=_suppression_rule_id(finding["rule_id"]),
+        path=_suppression_path(finding["file"]),
+        reason=reason,
+        expiration=expiration,
+        line_start=line_number,
+        line_end=line_number,
+    )
+
+
+def _as_scanned(finding: dict) -> Optional[FlatVulnerability]:
+    """*finding* as the record a suppression is matched against during a scan,
+    or None for a finding that names no file, which no saved entry covers.
+
+    The file is folded as the scan folds it before matching (``_folded_file``).
+    A line that is not a number is no line.
+    """
+    file_value = finding.get("file")
+    if not file_value:
+        return None
+    try:
+        line_number = int(finding.get("line"))
+    except (TypeError, ValueError):
+        line_number = None
+    rule_id = finding.get("rule_id")
+    return FlatVulnerability(
+        id="",
+        title="",
+        description="",
+        severity=str(finding.get("severity") or ""),
+        scanner=str(finding.get("scanner") or ""),
+        scanner_type="",
+        rule_id=None if rule_id is None else str(rule_id),
+        file_path=_folded_file(file_value),
+        line_start=line_number,
+        line_end=line_number,
+    )
+
+
+def _findings_suppressed_by(
+    findings: List[dict], suppression: AshSuppression
+) -> List[dict]:
+    """Every finding of *findings* the scan will suppress with *suppression*,
+    decided by the matcher the scan uses (``AshSuppression.matches``) over each
+    finding as the scan sees it (``_as_scanned``).
+
+    Matched by key equality on the rule id, the folded file and the line, the
+    marking disagreed with the scan: an entry saved for a finding with no line
+    covers its rule anywhere in the file, and the scan reads the rule id without
+    regard to case, so findings the entry covers stayed Active in the table, and
+    the summary's counts wrong, until a rescan.
+    """
+    covered = []
+    for candidate in findings:
+        scanned = _as_scanned(candidate)
+        if scanned is not None and suppression.matches(scanned):
+            covered.append(candidate)
+    return covered
+
+
+def _suppression_scope_note(finding: dict) -> str:
+    """What the saved suppression covers, for the dialog: the finding's rule at
+    its file, and the one line the finding reports, or the whole file when the
+    result reports no line (a region without a startLine, or no region), since an
+    entry with no line range applies to that rule anywhere in the file. The test
+    is the one ``_suppression_for`` saves by, so the note describes the entry."""
+    if not finding.get("line"):
+        return (
+            "This finding reports no line, so the suppression covers this rule "
+            "anywhere in this file. It will be excluded from actionable findings."
+        )
+    return "This rule and location will be excluded from actionable findings."
 
 
 def _text(value: object) -> str:
@@ -240,6 +570,25 @@ def _text(value: object) -> str:
 def _shown(value: object) -> Content:
     """*value* as Textual content: text, never markup, its controls shown."""
     return Content(_text(value))
+
+
+def _shown_prose(value: object) -> Content:
+    """*value* as Textual content for a prose field, a finding's message: its
+    controls shown as escapes, then cut to MESSAGE_CHARS characters, with a
+    SNIPPET_TRUNCATED line after the cut when anything was cut.
+
+    Prose wraps, so a line of it has no cap of its own: capped as a snippet is
+    (``_capped``), a message written as one paragraph lost everything past its
+    first SNIPPET_LINE_CHARS characters while a message of short lines kept
+    SNIPPET_LINES of them. And that cut came before the escaping, so a message
+    of control characters was drawn as four times the cap, the same shape
+    ``_snippet`` escapes first for. The escapes are written here before the cut,
+    so the cap bounds what is drawn.
+    """
+    text = controls_shown(str(value))
+    if len(text) > MESSAGE_CHARS:
+        text = f"{text[:MESSAGE_CHARS]}\n{SNIPPET_TRUNCATED}"
+    return Content(text)
 
 
 def _shown_one_line(value: object) -> Content:
@@ -275,29 +624,36 @@ def _named_finding(finding: dict, *, status: bool) -> Content:
     Each value goes through _one_line, so the one newline here is the layout's
     own. For the selected-finding strip and the suppress dialog, which show one
     line per field row whatever a value holds."""
-    first = _one_line(finding.get("rule_id", "N/A"))
+    first = _one_line(_display_value(finding.get("rule_id")))
     if status:
         state = "Suppressed" if finding.get("suppressed") else "Active"
         first += f"  ·  {_one_line(finding.get('scanner', 'N/A'))}  ·  {state}"
     return Content(
         f"{first}\n"
-        f"{_one_line(_display_location(finding.get('file')))}"
-        f"  ·  line {_one_line(_display_location(finding.get('line')))}"
+        f"{_one_line(_display_value(finding.get('file')))}"
+        f"  ·  line {_one_line(_display_value(finding.get('line')))}"
     )
 
 
-def _capped(code: str) -> str:
-    """*code* cut to SNIPPET_LINES lines of SNIPPET_LINE_CHARS characters, ending
-    with a SNIPPET_TRUNCATED line when anything was cut."""
-    lines = code.split("\n", SNIPPET_LINES)
+def _capped(code: str, line_chars: int = SNIPPET_LINE_CHARS) -> str:
+    """*code* cut to SNIPPET_LINES lines of *line_chars* characters, ending with a
+    SNIPPET_TRUNCATED line when anything was cut.
+
+    A line ends at ``\\n`` or ``\\r\\n``: counted toward the characters, the ``\\r``
+    of a CRLF snippet made a line of exactly the cap read as one over it, and the
+    snippet was marked truncated though no visible character was cut. A lone
+    ``\\r`` is no line end here, as it is none for the terminal: it stays in the
+    text, and ``_snippet`` shows it as its escape.
+    """
+    lines = code.replace("\r\n", "\n").split("\n", SNIPPET_LINES)
     # The piece after the last split: the rest of the code, or "" when the code
     # ends with the newline that ends line SNIPPET_LINES.
     rest = lines[SNIPPET_LINES:]
     lines = lines[:SNIPPET_LINES]
     cut = rest not in ([], [""])
     for index, line in enumerate(lines):
-        if len(line) > SNIPPET_LINE_CHARS:
-            lines[index] = line[:SNIPPET_LINE_CHARS]
+        if len(line) > line_chars:
+            lines[index] = line[:line_chars]
             cut = True
     if cut:
         lines.append(SNIPPET_TRUNCATED)
@@ -306,7 +662,9 @@ def _capped(code: str) -> str:
     return "\n".join(lines)
 
 
-def _snippet(code: str, lexer: Optional[str]) -> Text:
+def _snippet(
+    code: str, lexer: Optional[str], line_chars: int = SNIPPET_LINE_CHARS
+) -> Text:
     """A finding's code, highlighted as code: never markdown, so no fence to end.
 
     A snippet is a scanner's, and minified code reaches it whole, so it is cut to
@@ -315,9 +673,16 @@ def _snippet(code: str, lexer: Optional[str]) -> Text:
     wrapped all of it, and a 1 MB line took 36.5 s per resize with no input taken.
 
     Only its raw controls become escapes. Its backslashes stay as written, so a
-    "\\x00" spelled out in the source reads as the source has it.
+    "\\x00" spelled out in the source reads as the source has it. The escapes
+    are written before the cut, so the cap bounds what is drawn: cut first, a
+    line of 500 control characters was drawn as 2,000 characters of escapes, and
+    one of characters beyond U+FFFF as 5,000, which the cap was sized against.
+
+    *line_chars* is the cap on each line, SNIPPET_LINE_CHARS unless the snippet
+    was read from a file, where the view's own line numbers are added to it
+    (``_excerpt_line_chars``).
     """
-    shown = only_controls_shown(_capped(code))
+    shown = _capped(only_controls_shown(code), line_chars)
     syntax = Syntax(shown, lexer or "text", word_wrap=True, background_color="default")
     # As Syntax renders it: the lexer gets a final newline, and tabs are expanded.
     ends_on_a_newline = shown.endswith("\n")
@@ -426,7 +791,7 @@ class SuppressDialog(ModalScreen[Optional[str]]):
                 yield Static(
                     _cell(
                         f"Save to:\n{self.config_path}\n"
-                        "This rule and location will be excluded from actionable findings.",
+                        f"{_suppression_scope_note(self.finding)}",
                         wrap=True,
                     ),
                     id="suppression-destination",
@@ -478,20 +843,47 @@ class SuppressDialog(ModalScreen[Optional[str]]):
                     expiration_input.focus()
                     return
 
-            try:
-                suppression = AshSuppression(
-                    rule_id=self.finding.get("rule_id"),
-                    path=self.finding.get("file") or "*",
-                    reason=reason,
-                    expiration=expiration,
-                    line_start=int(self.finding["line"])
-                    if self.finding.get("line")
-                    else None,
-                    line_end=int(self.finding["line"])
-                    if self.finding.get("line")
-                    else None,
+            # A suppression is a rule at a path. A finding with no file was
+            # written with the path "*", and one with no rule id with no rule:
+            # an entry that never applied to the finding it was saved for and
+            # suppressed the rule in every file, or every rule at the path. The
+            # path is the file's own pattern (_suppression_path), so the entry
+            # matches that file as the scan spells it and no other.
+            if not self.finding.get("rule_id"):
+                problem = (
+                    "This finding reports no rule id, so no suppression names it: "
+                    "one saved without a rule would suppress every rule at this "
+                    "path. Suppress it in the scanner's own configuration instead."
                 )
+            elif not self.finding.get("file"):
+                problem = (
+                    "This finding reports no file, so no suppression names it: "
+                    "one saved without a path would suppress this rule in every "
+                    "file. Suppress it in the scanner's own configuration instead."
+                )
+            else:
+                problem = None
+                try:
+                    _suppression_path(self.finding["file"])
+                except PathNotExpressible as exc:
+                    problem = f"Could not save the suppression. {exc}"
+            if problem is not None:
+                error = self.query_one("#suppression-error", Static)
+                error.update(_shown(problem))
+                error.display = True
+                return
+
+            try:
+                # The rule as a pattern naming this rule alone, the file as the
+                # path checked above (_suppression_for).
+                suppression = _suppression_for(self.finding, reason, expiration)
                 saved = add_suppression_to_config(self.config_path, suppression)
+                # The reason the entry carries, so the detail view shows it for
+                # the finding it was saved for: read from the results, a finding
+                # suppressed in the dialog had none and the view said "Not
+                # specified". An identical entry already in the file carries the
+                # same reason (add_suppression_to_config's identity).
+                self.finding["suppression_reason"] = reason
                 self.dismiss(self.SAVED if saved else self.ALREADY_SUPPRESSED)
             except Exception as exc:
                 ASH_LOGGER.error(f"Failed to create or write suppression: {exc}")
@@ -514,12 +906,16 @@ class SuppressDialog(ModalScreen[Optional[str]]):
         self.dismiss(None)
 
 
-def _display_location(value) -> str:
-    """Render a finding's file or line, using the module's N/A for a missing one.
+def _display_value(value) -> str:
+    """Render a finding's rule id, file or line, using the module's N/A for a
+    missing one.
 
     Findings come from SARIF results, and a result is not required to have a
-    location: extract_findings then sets no "file" or "line" key, and a location
-    without a region leaves "line" unset.
+    rule id or a location: extract_findings then sets no "file" or "line" key, a
+    location without a region leaves "line" unset, and a result without a ruleId
+    gives "rule_id" the value None. A dict default does not replace a None that
+    is present, so the None was drawn as the word "None" in the table, the
+    selected-finding strip, the status bar and the detail view's title.
     """
     if value is None or value == "":
         return "N/A"
@@ -559,16 +955,16 @@ def _finding_cells(finding: dict, fields: list) -> List[Text]:
     is_suppressed = finding.get("suppressed", False)
     color = COLORS["muted"] if is_suppressed else severity_color(finding["severity"])
     title = Text(
-        _one_line(finding.get("rule_id", "N/A")),
+        _one_line(_display_value(finding.get("rule_id"))),
         style=COLORS["foreground"],
     )
     title.append(
-        "\n" + _one_line(finding.get("message", "")),
+        "\n" + _one_line(finding.get("message") or ""),
         style=COLORS["muted"],
     )
     title.no_wrap = True
     title.overflow = "ellipsis"
-    location = _one_line(_display_location(finding.get("file")))
+    location = _one_line(_display_value(finding.get("file")))
     if finding.get("line") is not None:
         location += "\nline " + _one_line(finding["line"])
     cells = {
@@ -597,8 +993,8 @@ def _metadata_table(finding: dict) -> Table:
     for key, value in (
         ("Severity", finding["severity"]),
         ("Scanner", finding["scanner"]),
-        ("File", _display_location(finding.get("file"))),
-        ("Line", _display_location(finding.get("line"))),
+        ("File", _display_value(finding.get("file"))),
+        ("Line", _display_value(finding.get("line"))),
     ):
         table.add_row(_cell(key), _cell(value, wrap=True))
     return table
@@ -648,13 +1044,20 @@ class FindingDetailScreen(Screen):
                 classes="detail-severity",
             )
             # One line: a rule id's own newline would draw a second title line.
-            yield Static(_shown_one_line(self.finding["rule_id"]), classes="title")
+            yield Static(
+                _shown_one_line(_display_value(self.finding.get("rule_id"))),
+                classes="title",
+            )
             yield Static("What to review", classes="heading")
-            yield Static(_shown(self.finding["message"]))
+            # Capped: a message is a scanner's text too, and a view draws every
+            # character of it on each resize (MESSAGE_CHARS).
+            yield Static(_shown_prose(self.finding.get("message") or ""))
             yield Static("Finding context", classes="heading")
             yield Static(_metadata_table(self.finding))
             if self.finding.get("suppressed"):
-                reason = self.finding.get("suppression_reason", "Not specified")
+                # `or`: a SARIF suppression's justification can be present and
+                # null, which the dict default does not replace.
+                reason = self.finding.get("suppression_reason") or "Not specified"
                 yield Static("Suppression", classes="heading")
                 yield Static(
                     _shown(
@@ -664,8 +1067,24 @@ class FindingDetailScreen(Screen):
                 )
             if self.finding.get("code_snippet"):
                 yield Static("Code", classes="heading")
+                read_from = self.finding.get(SNIPPET_READ_FROM)
+                if read_from:
+                    # The lines are the file's now, not the scan's: an edit since
+                    # the scan, or results made at another commit, moves them.
+                    yield Static(
+                        _shown(
+                            f"Read from {read_from} as it is now, which may differ "
+                            "from what the scan read."
+                        ),
+                        classes="notice",
+                    )
                 yield Static(
-                    _snippet(self.finding["code_snippet"], file_ext), classes="code"
+                    _snippet(
+                        self.finding["code_snippet"],
+                        file_ext,
+                        self.finding.get(SNIPPET_LINE_CHARS_KEY, SNIPPET_LINE_CHARS),
+                    ),
+                    classes="code",
                 )
             elif file_value:
                 yield Static("Code", classes="heading")
@@ -679,7 +1098,10 @@ class FindingsExplorerApp(App):
     """Interactive findings explorer application."""
 
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
+        # Its own action, not "quit": under the suppress dialog the q key is refused
+        # (check_action), and refusing the "quit" action there refused every key
+        # bound to it, Textual's own ctrl+q included.
+        Binding("q", "quit_from_table", "Quit"),
         Binding("f", "toggle_filters", "Filters"),
         Binding("j", "next_finding", "Next Finding", show=False),
         Binding("k", "previous_finding", "Previous Finding", show=False),
@@ -999,7 +1421,18 @@ class FindingsExplorerApp(App):
         table.focus()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        if self.screen_stack and isinstance(self.screen, FindingDetailScreen):
+        # The app's bindings stay live under a screen it pushed, so under the
+        # detail screen and the suppress dialog they are refused: a j or k
+        # that reached the hidden table moved its cursor, and the dialog's
+        # result then marked the row the cursor had moved to; an x opened a
+        # second dialog over the first. Under the dialog q is refused too: a
+        # key the operator typed with the Save button focused would otherwise
+        # quit the app with the reason they typed. The q key has its own action
+        # (quit_from_table) so that only it is refused: check_action sees actions,
+        # not keys, and refusing "quit" refused Textual's ctrl+q with it.
+        if self.screen_stack and isinstance(
+            self.screen, (FindingDetailScreen, SuppressDialog)
+        ):
             if action in {
                 "toggle_filters",
                 "toggle_search",
@@ -1011,6 +1444,8 @@ class FindingsExplorerApp(App):
                 "previous_finding",
                 "suppress_selected",
             }:
+                return False
+            if action == "quit_from_table" and isinstance(self.screen, SuppressDialog):
                 return False
         return True
 
@@ -1176,8 +1611,16 @@ class FindingsExplorerApp(App):
                 finding = self.filtered_findings[next_row]
                 status_bar = self.query_one("#status_bar", Static)
                 status_bar.update(
-                    _shown_one_line(f"Selected: {finding['rule_id']} · Enter: details")
+                    _shown_one_line(
+                        f"Selected: {_display_value(finding.get('rule_id'))}"
+                        " · Enter: details"
+                    )
                 )
+
+    def action_quit_from_table(self) -> None:
+        """Quit on the q key. The app's own action, refused under the suppress
+        dialog (check_action) while Textual's ctrl+q, bound to "quit", stays."""
+        self.exit()
 
     def action_toggle_suppressed(self) -> None:
         """Toggle showing/hiding suppressed findings."""
@@ -1203,17 +1646,40 @@ class FindingsExplorerApp(App):
                 finding = self.filtered_findings[finding_idx]
                 self.push_screen(
                     SuppressDialog(finding, self.config_path),
-                    self._on_suppress_result,
+                    lambda result: self._on_suppress_result(result, finding),
                 )
 
-    def _on_suppress_result(self, result: Optional[str]) -> None:
-        """Handle the result from the suppression dialog."""
+    def _on_suppress_result(
+        self, result: Optional[str], finding: Optional[dict] = None
+    ) -> None:
+        """Handle the result from the suppression dialog.
+
+        *finding* is the one the dialog was opened for, and the one marked
+        suppressed, with every other listed finding the saved entry covers too,
+        read by the scan's own matcher (``_findings_suppressed_by``). Marking the
+        row under the table's cursor instead marked whatever row the cursor had
+        moved to while the dialog was open; marking that row alone left the other
+        findings the entry covers Active, and the summary's counts wrong, until a
+        rescan.
+        """
         if result in (SuppressDialog.SAVED, SuppressDialog.ALREADY_SUPPRESSED):
             status_bar = self.query_one("#status_bar", Static)
-            table = self.query_one("#findings_table", DataTable)
-            idx = table.cursor_row
-            if idx is not None and idx < len(self.filtered_findings):
-                self.filtered_findings[idx]["suppressed"] = True
+            if finding is None:
+                table = self.query_one("#findings_table", DataTable)
+                idx = table.cursor_row
+                if idx is not None and idx < len(self.filtered_findings):
+                    finding = self.filtered_findings[idx]
+            if finding is not None:
+                # The entry as the dialog saved it; the reason is the one the
+                # dialog kept on the finding. The dialog saved it, so it has a
+                # rule, a file and a path pattern.
+                saved_entry = _suppression_for(
+                    finding, finding.get("suppression_reason") or "Not specified"
+                )
+                for covered in _findings_suppressed_by(self.findings, saved_entry):
+                    covered["suppressed"] = True
+                    if "suppression_reason" in finding:
+                        covered["suppression_reason"] = finding["suppression_reason"]
                 self._populate_table()
 
             # After the repopulate, which writes the view's counts to the
@@ -1244,7 +1710,10 @@ class FindingsExplorerApp(App):
                 finding = self.filtered_findings[prev_row]
                 status_bar = self.query_one("#status_bar", Static)
                 status_bar.update(
-                    _shown_one_line(f"Selected: {finding['rule_id']} · Enter: details")
+                    _shown_one_line(
+                        f"Selected: {_display_value(finding.get('rule_id'))}"
+                        " · Enter: details"
+                    )
                 )
 
     def action_view_selected(self) -> None:
@@ -1255,58 +1724,17 @@ class FindingsExplorerApp(App):
             if 0 <= finding_idx < len(self.filtered_findings):
                 self._show_detail(self.filtered_findings[finding_idx])
 
-    def _add_snippet_from_source(self, finding: dict) -> None:
-        """Give a finding with no snippet the lines around it, read from its file.
-
-        Five lines either side, numbered, with the finding's own line marked. They
-        are masked as the results' own snippets are (``mask_source``), since they
-        come from disk and not from the masked results.
-        """
-        if (
-            finding.get("code_snippet")
-            or not finding.get("file")
-            or not finding.get("line")
-        ):
-            return
-        try:
-            file_path = Path(finding["file"])
-            ASH_LOGGER.debug(
-                f"Looking for file: {file_path}, exists: {file_path.exists()}"
-            )
-            if not file_path.exists():
-                ASH_LOGGER.debug(f"File not found: {file_path}")
-                return
-            with open(file_path, mode="r", encoding="utf-8") as f:
-                lines = f.readlines()
-
-            # Get line number (adjust for 0-based indexing)
-            line_num = int(finding["line"]) - 1
-
-            # Get context (5 lines before and after)
-            start_line = max(0, line_num - 5)
-            end_line = min(len(lines), line_num + 6)
-
-            text = "".join(lines[start_line:end_line])
-            if self.mask_source is not None:
-                text = self.mask_source(finding["file"], start_line + 1, text)
-
-            # Extract the snippet with line numbers
-            snippet_lines = []
-            for offset, line in enumerate(text.splitlines(keepends=True)):
-                i = start_line + offset
-                prefix = "→ " if i == line_num else "  "
-                snippet_lines.append(f"{prefix}{i + 1}: {line}")
-
-            finding["code_snippet"] = "".join(snippet_lines)
-            ASH_LOGGER.debug(
-                f"Extracted code snippet of length: {len(finding['code_snippet'])}"
-            )
-        except Exception as e:
-            ASH_LOGGER.debug(f"Failed to extract code snippet: {e}")
-
     def on_data_table_row_selected(self, event) -> None:
-        """Handle row selection in the findings table."""
-        self._show_detail(self.filtered_findings[event.row_key.value])
+        """Handle row selection in the findings table.
+
+        The row key is checked as on_data_table_row_highlighted checks it: a key
+        that is no row of the current list (the table is repopulated while a
+        selection event is in flight) is no finding to show.
+        """
+        index = event.row_key.value
+        if not isinstance(index, int) or not 0 <= index < len(self.filtered_findings):
+            return
+        self._show_detail(self.filtered_findings[index])
 
     def _show_detail(self, finding: dict) -> None:
         """Open *finding*'s detail view, with the lines around it from its file when
@@ -1315,17 +1743,63 @@ class FindingsExplorerApp(App):
         The lines come from disk, not from the masked results, so they are masked
         as the results' own snippets are (``mask_source``) before they are shown;
         a line a secret finding reports is replaced whole, its display prefix
-        included."""
+        included. The finding records where the lines came from
+        (SNIPPET_READ_FROM) and the width of each shown line (SNIPPET_LINE_CHARS_KEY)
+        for the detail view.
+
+        The width is read from the excerpt as read, before the masking: measured
+        after it, a masked first line, which has no number or marker, read as a
+        prefix of its whole length, and every line of the excerpt was allowed
+        that many characters more than the cap. The path the view names is the
+        file as the results record it, under the scanned directory; the file is
+        opened by the name read back from its record form (``_source_path``)."""
         if not finding.get("code_snippet"):
-            excerpt = _source_excerpt(finding, self.scan_root)
+            try:
+                line_number = int(finding["line"])
+            except (KeyError, TypeError, ValueError):
+                line_number = None
+            window = (
+                max(1, line_number - _CONTEXT_LINES)
+                if line_number is not None
+                else None
+            )
+            # A key block is found from its BEGIN line. When a secret finding
+            # reports a line above the window, the lines are read from there, so
+            # a finding deep in a key body is masked as the block it is in, and
+            # the lines above the window are cut off after the masking.
+            earliest = getattr(self.mask_source, "earliest_reported_line", None)
+            read_from = (
+                earliest(finding.get("file"), window)
+                if callable(earliest) and window is not None
+                else None
+            )
+            if not isinstance(read_from, int):
+                read_from = None
+            excerpt = _source_excerpt(finding, self.scan_root, read_from)
             if excerpt is not None:
+                line_chars = _excerpt_line_chars(excerpt)
                 if self.mask_source is not None:
-                    try:
-                        first = max(1, int(finding["line"]) - _CONTEXT_LINES)
-                    except (KeyError, TypeError, ValueError):
-                        first = None
+                    first = (
+                        _excerpt_start(line_number, read_from)
+                        if line_number is not None
+                        else None
+                    )
                     excerpt = self.mask_source(finding.get("file"), first, excerpt)
-                finding["code_snippet"] = excerpt
+                    if first is not None and window is not None:
+                        excerpt = _drop_lines_before(excerpt, window - first)
+                # Cut after the masking, so a value that straddles the cap is
+                # masked whole (_line_text).
+                finding["code_snippet"] = _cut_excerpt_lines(excerpt)
+                finding[SNIPPET_LINE_CHARS_KEY] = line_chars
+                # The file as the results record it, under the scanned directory:
+                # the spelling the table and the results file show. The path the
+                # file was OPENED by holds the name read back from its record form
+                # (_source_path), and shown it drew that name's escape where the
+                # results spell the six characters of the record form.
+                if self.scan_root is not None:
+                    finding[SNIPPET_READ_FROM] = str(
+                        self.scan_root / str(finding.get("file"))
+                    )
         self.push_screen(FindingDetailScreen(finding))
 
     def on_select_changed(self, event) -> None:
@@ -1490,13 +1964,15 @@ class FindingsExplorerApp(App):
                 ),
                 reverse=self.sort_reverse,
             )
+        # `or ""` on both: a None rule id or message text (see _apply_search)
+        # cannot be ordered against a str, and the sort raised TypeError.
         elif self.current_sort == "message":
             self.filtered_findings.sort(
-                key=lambda f: f.get("message", ""), reverse=self.sort_reverse
+                key=lambda f: f.get("message") or "", reverse=self.sort_reverse
             )
         elif self.current_sort == "rule_id":
             self.filtered_findings.sort(
-                key=lambda f: f.get("rule_id", ""), reverse=self.sort_reverse
+                key=lambda f: f.get("rule_id") or "", reverse=self.sort_reverse
             )
 
     def _apply_search(self) -> None:
@@ -1504,16 +1980,22 @@ class FindingsExplorerApp(App):
         if not self.search_query:
             return
 
+        # Each field `or ""`: a result without a ruleId, or whose message has no
+        # text, gives the finding a None there (extract_findings), which the
+        # dict default does not replace, and .lower() on it ended the explorer.
+        # The line is searched as its digits or not at all: str(None) is "None",
+        # so a search for "n", "no" or "none" matched every finding without a line.
         search_term = self.search_query.lower()
         self.filtered_findings = [
             f
             for f in self.filtered_findings
             if (
-                search_term in f.get("message", "").lower()
-                or search_term in f.get("rule_id", "").lower()
+                search_term in (f.get("message") or "").lower()
+                or search_term in (f.get("rule_id") or "").lower()
                 or search_term in (f.get("file") or "").lower()
-                or search_term in f.get("scanner", "").lower()
-                or search_term in str(f.get("line", "")).lower()
+                or search_term in (f.get("scanner") or "").lower()
+                or search_term
+                in ("" if f.get("line") is None else str(f["line"])).lower()
             )
         ]
 
@@ -1586,7 +2068,26 @@ def _scanner_name(result: Result) -> str:
     properties = result.properties.model_dump(by_alias=True)
     details = properties.get("scanner_details")
     tool_name = details.get("tool_name") if isinstance(details, dict) else None
-    return properties.get("scanner_name") or tool_name or "unknown"
+    # A name is text. A scanner_name or tool_name of another shape (a list, a
+    # mapping, a number) is the results file's own and names no scanner; returned
+    # as it was, it was put in a set (unhashable) and sorted against the other
+    # names (TypeError), which ended the explorer at start or on a sort.
+    scanner_name = properties.get("scanner_name")
+    if not isinstance(scanner_name, str):
+        scanner_name = None
+    if not isinstance(tool_name, str):
+        tool_name = None
+    return scanner_name or tool_name or "unknown"
+
+
+def _applies(suppression: Any) -> bool:
+    """Whether a SARIF suppression suppresses its result: one whose ``state`` is
+    ``rejected`` or ``underReview`` does not (SARIF 2.1.0, 3.35.3), and one with
+    no state, or ``accepted``, does. ``bool(result.suppressions)`` counted every
+    entry, so a result whose suppressions were all rejected or under review was
+    shown suppressed and hidden from the default view."""
+    state = getattr(suppression, "state", None)
+    return getattr(state, "value", state) not in ("rejected", "underReview")
 
 
 def extract_findings(model: AshAggregatedResults) -> List[Dict[str, Any]]:
@@ -1607,8 +2108,12 @@ def extract_findings(model: AshAggregatedResults) -> List[Dict[str, Any]]:
                             result.ruleIndex if result.ruleIndex is not None else -1
                         ),
                         "rule_id": result.ruleId,
+                        # `or ""`: a message given by id alone has a root with a
+                        # None text, which the table drew as the word "None".
                         "message": (
-                            result.message.root.text if result.message.root else ""
+                            (result.message.root.text or "")
+                            if result.message.root
+                            else ""
                         ),
                         "level": result.level,
                         "kind": result.kind,
@@ -1619,23 +2124,22 @@ def extract_findings(model: AshAggregatedResults) -> List[Dict[str, Any]]:
                         # scanner_details' tool_name is the fallback
                         # (_scanner_name).
                         "scanner": _scanner_name(result),
-                        "suppressed": (
-                            bool(result.suppressions)
-                            if hasattr(result, "suppressions") and result.suppressions
-                            else False
-                        ),
                     }
 
-                    # Extract suppression reason if available
-                    if (
-                        finding["suppressed"]
-                        and hasattr(result, "suppressions")
-                        and result.suppressions
-                    ):
+                    # Suppressed by the entries that apply (_applies), whose first
+                    # justification is shown. `or "Not specified"`: a justification
+                    # can be present and null, and the detail view's dict default
+                    # does not replace a None that is there.
+                    applying = [
+                        suppression
+                        for suppression in (getattr(result, "suppressions", None) or [])
+                        if _applies(suppression)
+                    ]
+                    finding["suppressed"] = bool(applying)
+                    if applying:
                         finding["suppression_reason"] = (
-                            result.suppressions[0].justification
-                            if hasattr(result.suppressions[0], "justification")
-                            else "Not specified"
+                            getattr(applying[0], "justification", None)
+                            or "Not specified"
                         )
 
                     # Extract location info
@@ -1686,9 +2190,39 @@ def map_level_to_severity(level):
     return result_severity({"level": level}).lower()
 
 
-def _resolve_suppression_config_path(config: Path | None = None) -> Path:
-    """Return the config file that should receive new suppressions."""
-    return config or find_config_file() or Path.cwd() / ASH_DEFAULT_CONFIG_FILE_NAME
+def _resolve_suppression_config_path(
+    config: Path | None = None, search_dir: Path | None = None
+) -> Path:
+    """Return the config file that should receive new suppressions.
+
+    *config* when given; else the config a scan of *search_dir* reads
+    (``find_config_file``), else a new default file there. *search_dir* is the
+    scanned directory when the results' layout names one (``scanned_directory``),
+    and the current directory otherwise: found from the current directory, a
+    suppression saved while inspecting another project's results went to a config
+    the next scan of that project never read.
+
+    A discovery that fails (a config directory that cannot be read, a pyproject
+    that does not parse) is reported and the default path is used, so the
+    explorer still opens: raised, it was reported as "Error loading model or
+    report", a problem with the results the results did not have.
+    """
+    if config:
+        return config
+    if search_dir is None:
+        search_dir = Path.cwd()
+    try:
+        found = find_config_file(search_dir)
+    except (ASHConfigSourceError, OSError) as exc:
+        secho(
+            f"Could not find a config file for suppressions in {search_dir}: "
+            f"{error_text(exc)}. Suppressions saved here go to "
+            f"{search_dir / ASH_DEFAULT_CONFIG_FILE_NAME}.",
+            fg="yellow",
+            err=True,
+        )
+        found = None
+    return found or search_dir / ASH_DEFAULT_CONFIG_FILE_NAME
 
 
 def findings_command(
@@ -1707,9 +2241,11 @@ def findings_command(
             "-c",
             help=(
                 "Path to the configuration file where suppressions should be "
-                f"saved. By default, ASH searches for {ASH_CONFIG_SOURCES_DESCRIPTION}. "
-                f"With none found, suppressions go to a new {ASH_DEFAULT_CONFIG_FILE_NAME} "
-                "in the current directory."
+                f"saved. By default, ASH searches for {ASH_CONFIG_SOURCES_DESCRIPTION} "
+                "in the scanned directory (the one holding the results' "
+                ".ash/ash_output), or in the current directory when the results "
+                f"sit elsewhere. With none found, suppressions go to a new "
+                f"{ASH_DEFAULT_CONFIG_FILE_NAME} there."
             ),
             envvar="ASH_CONFIG",
         ),
@@ -1722,6 +2258,10 @@ def findings_command(
     the results file sits in <root>/.ash/ash_output, and only from a regular file
     inside <root> (a hard link inside the tree counts as a file in it, as it does
     for the scanners); otherwise the detail view says "(source not shown)".
+
+    Exits 1 when there are no results to show or they do not load: the command
+    produced no view, as a scan that produced no results exits 1, and a pipeline
+    reading 0 would take the missing report for an inspected one.
     """
     # Try to load the model from the output directory
     try:
@@ -1748,14 +2288,14 @@ def findings_command(
             echo(
                 "No model or report file available. Please run a scan first or provide a report file."
             )
-            return
+            raise typer.Exit(1)
 
         model = AshAggregatedResults.load_model(Path(report_file_actual))
         if model is None:
             echo(
                 "No model or report file available. Please run a scan first or provide a report file."
             )
-            return
+            raise typer.Exit(1)
 
         # Extract findings from the model
         findings = extract_findings(model)
@@ -1764,18 +2304,21 @@ def findings_command(
             echo("No findings to display.")
             return
 
-        config_path = _resolve_suppression_config_path(config)
+        scan_root = scanned_directory(report_file_actual)
+        config_path = _resolve_suppression_config_path(config, scan_root)
 
         # Launch the Textual app
         app = FindingsExplorerApp(
             findings,
             config_path=config_path,
             mask_source=source_snippet_masker(model),
-            scan_root=scanned_directory(report_file_actual),
+            scan_root=scan_root,
         )
         app.run()
+    except typer.Exit:
+        raise
     except Exception as e:
         # A record that does not load is described by field, not by its input
         # (utils/error_text.py).
         secho(f"Error loading model or report: {error_text(e)}", fg="red")
-        return
+        raise typer.Exit(1) from None

@@ -22,9 +22,11 @@
 │                                root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml',        │
 │                                '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml',         │
 │                                'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table  │
-│                                of pyproject.toml at the root; the first found is used. With     │
-│                                none found, suppressions go to a new .ashrc.yaml in the current  │
-│                                directory.                                                       │
+│                                of pyproject.toml at the root; the first found is used in the    │
+│                                scanned directory (the one holding the results'                  │
+│                                .ash/ash_output), or in the current directory when the results   │
+│                                sit elsewhere. With none found, suppressions go to a new         │
+│                                .ashrc.yaml there.                                               │
 │                                [env var: ASH_CONFIG]                                            │
 │ --help                         Show this message and exit.                                      │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

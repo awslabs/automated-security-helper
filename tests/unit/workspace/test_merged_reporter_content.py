@@ -850,7 +850,9 @@ class TestEveryReporterNamesASkippedProject:
 
         report = _report(HtmlReporter, skipped_workspace_model, context)
         assert f"<td>{SKIPPED_PROJECT}</td>" in report
-        assert "<td>SKIPPED (no-changes)</td>" in report
+        # The Result column carries the row's state as a class, so a skipped
+        # project is styled as skipped rather than as a failure.
+        assert '<td class="status-skipped">SKIPPED (no-changes)</td>' in report
 
 
 class TestASyntheticRowIsMarkedAndFilterable:

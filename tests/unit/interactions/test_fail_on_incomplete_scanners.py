@@ -1415,8 +1415,13 @@ class TestRunAshScanPlumbing:
         from automated_security_helper.interactions import run_ash_scan as mod
         from automated_security_helper.models.asharp_model import AshAggregatedResults
 
-        results = MagicMock(spec=AshAggregatedResults)
-        results.sarif = None
+        # A real, empty results model: run_ash_scan now reads the actionable
+        # count from the results before the exit code, whatever show_summary
+        # says (_gating_actionable_count -> the scanner metrics), and a spec'd
+        # Mock answers no unset pydantic field, so the first field it read
+        # (additional_reports) raised. The assertion is about the kwargs
+        # handed to _compute_exit_code and needs no Mock.
+        results = AshAggregatedResults()
         captured: dict = {}
 
         def spy(results_arg, opts_arg, *args, **kwargs):

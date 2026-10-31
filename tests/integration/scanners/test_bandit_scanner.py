@@ -1,5 +1,7 @@
 """Tests for Bandit scanner."""
 
+import logging
+
 import pytest
 from pathlib import Path
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
@@ -8,6 +10,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
     BanditScannerConfigOptions,
 )
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.integration
 
@@ -81,7 +84,9 @@ def test_process_config_options_with_config_files(
             )
         ),
     )
-    scanner._process_config_options()
+    # Construction has already processed the options (ScannerPluginBase). A
+    # second call rebuilds the option flags from the base arguments, so it
+    # would count one --ini too (the behavior tests pin that); none is needed.
 
     config_args_keys = [arg.key for arg in scanner.args.extra_args]
     if config_arg == "--ini":
@@ -181,22 +186,53 @@ def test_bandit_scanner_scan_nonexistent_path(test_bandit_scanner):
     )
 
 
-def test_bandit_scanner_additional_formats(test_plugin_context):
-    """Test BanditScanner with additional output formats."""
-    scanner = BanditScanner(
-        context=test_plugin_context,
-        config=BanditScannerConfig(
-            options=BanditScannerConfigOptions(
-                additional_formats=["sarif", "html"],
-            )
-        ),
-    )
-    scanner._process_config_options()
+def test_bandit_scanner_additional_formats(
+    test_plugin_context, test_source_dir, caplog
+):
+    """additional_formats adds no ``--format`` to the extra arguments, and the
+    operator is told the formats are not produced.
 
-    # Check that additional format arguments were added
+    bandit takes one ``--format`` (argparse ``store``, last one wins). A second
+    one after the base class's ``--format sarif`` made bandit write that format
+    into bandit.sarif, and the scan failed reading it as SARIF. The one format in
+    argv stays the base class's SARIF; without the warning ``html`` would just
+    never appear.
+
+    The command the scan assembles is read, not the extra arguments' keys: a
+    key carries its value in this scanner (``--exclude=...``), so a
+    ``--format=html`` key, the short ``-f html`` or a format the base class
+    added while assembling the command all passed a check on the key ``--format``.
+    """
+    with caplog.at_level(logging.WARNING, logger=ASH_LOGGER.name):
+        scanner = BanditScanner(
+            context=test_plugin_context,
+            config=BanditScannerConfig(
+                options=BanditScannerConfigOptions(
+                    additional_formats=["sarif", "html"],
+                )
+            ),
+        )
+        scanner._process_config_options()
+
     format_args = [arg.key for arg in scanner.args.extra_args]
-    format_values = [arg.value for arg in scanner.args.extra_args]
-
-    # Check that the --format argument is present with the additional formats
-    assert "--format" in format_args
-    assert "sarif" in format_values or "html" in format_values
+    assert not any(key.startswith(("--format", "-f")) for key in format_args)
+    argv, _, _ = scanner._execute_scan(test_source_dir, "source", [])
+    formats = []
+    for index, token in enumerate(str(arg) for arg in argv):
+        if token in ("--format", "-f"):
+            formats.append(str(argv[index + 1]))
+        elif token.startswith("--format="):
+            formats.append(token.split("=", 1)[1])
+        elif token.startswith("-f") and not token.startswith("--"):
+            formats.append(token[2:])
+    assert formats == ["sarif"], argv
+    assert scanner.args.format_arg == "--format"
+    assert scanner.args.format_arg_value == "sarif"
+    told = [
+        record.getMessage()
+        for record in caplog.records
+        if "additional_formats" in record.getMessage()
+    ]
+    assert any("html" in message and "not produced" in message for message in told), [
+        record.getMessage() for record in caplog.records
+    ]

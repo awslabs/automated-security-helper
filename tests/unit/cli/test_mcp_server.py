@@ -332,6 +332,14 @@ class TestRunAshScan:
         }
 
         with (
+            # The directory this test names does not exist on every runner
+            # (/tmp is no directory on Windows); the source directory check has
+            # its own tests, and this one is about the refusal mcp_scan_directory
+            # gives, so the check is stood down as the start tests above do.
+            patch(
+                "automated_security_helper.cli.mcp_server.source_directory_refusal",
+                return_value=None,
+            ),
             patch(
                 "automated_security_helper.cli.mcp_server.mcp_scan_directory",
                 new_callable=AsyncMock,
@@ -350,6 +358,13 @@ class TestRunAshScan:
         from automated_security_helper.cli.mcp_server import run_ash_scan
 
         with (
+            # As in test_scan_start_failure: /tmp is no directory on Windows,
+            # and the exception under test is mcp_scan_directory's, so the
+            # source directory check is stood down.
+            patch(
+                "automated_security_helper.cli.mcp_server.source_directory_refusal",
+                return_value=None,
+            ),
             patch(
                 "automated_security_helper.cli.mcp_server.mcp_scan_directory",
                 new_callable=AsyncMock,
@@ -550,6 +565,43 @@ class TestGetScanProgress:
         assert "Boom" in result["error"]
         assert result["error_type"] == "RuntimeError"
 
+    @pytest.mark.asyncio
+    async def test_progress_keeps_a_scanner_whose_map_is_not_a_mapping(
+        self, mock_ctx, mock_scan_registry_entry, tmp_path
+    ):
+        """A producer entry whose value is not a mapping is kept under its
+        scanner with an empty map, beside the entries that are. Before, dict()
+        of the odd value raised TypeError and the catch-all answered the whole
+        poll as failed."""
+        from automated_security_helper.cli.mcp_server import get_scan_progress
+
+        mock_progress = {
+            "status": "running",
+            "scanners": {"bandit": None, "semgrep": {"source": {"findings": 1}}},
+        }
+        mock_registry = MagicMock()
+        mock_scan_registry_entry.output_directory = str(tmp_path)
+        mock_registry.get_scan.return_value = mock_scan_registry_entry
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
+                new_callable=AsyncMock,
+                return_value=mock_progress,
+            ),
+            patch(
+                "automated_security_helper.cli.mcp_server.get_scan_registry",
+                return_value=mock_registry,
+            ),
+        ):
+            result = await get_scan_progress(ctx=mock_ctx, scan_id="test-scan-123")
+
+        assert "success" not in result, result
+        assert result["scanners"] == {
+            "bandit": {},
+            "semgrep": {"source": {"findings": 1}},
+        }, result
+
 
 # ---------------------------------------------------------------------------
 # get_scan_results tool
@@ -708,6 +760,63 @@ class TestGetScanResults:
 
         assert "bandit" in result["raw_results"]["scanner_results"]
         assert "semgrep" not in result["raw_results"]["scanner_results"]
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_scanner_name_is_the_clients_input_error(
+        self, mock_ctx, sample_full_results
+    ):
+        """A filter naming a scanner the results do not hold is the client's
+        input error (ResultFilterInputError, category invalid_parameter). It
+        used to fall through to the unexpected-error handler: logged as a server
+        fault, returned with no category a client could branch on."""
+        from automated_security_helper.cli.mcp_server import get_scan_results
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp_server.mcp_get_scan_results",
+                new_callable=AsyncMock,
+                return_value=sample_full_results,
+            ),
+            patch(
+                "automated_security_helper.cli.mcp_server.log_unexpected_error"
+            ) as unexpected,
+            patch("pathlib.Path.cwd", return_value=Path("/workspace")),
+        ):
+            result = await get_scan_results(
+                ctx=mock_ctx,
+                output_dir="/workspace/.ash/ash_output",
+                scanners="nope",
+            )
+
+        assert result["success"] is False
+        assert result["error_type"] == "ResultFilterInputError"
+        assert result["error_category"] == "invalid_parameter"
+        assert "Unknown scanner" in result["error"]
+        unexpected.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_severity_name_is_the_clients_input_error(
+        self, mock_ctx, sample_full_results
+    ):
+        from automated_security_helper.cli.mcp_server import get_scan_results
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp_server.mcp_get_scan_results",
+                new_callable=AsyncMock,
+                return_value=sample_full_results,
+            ),
+            patch("pathlib.Path.cwd", return_value=Path("/workspace")),
+        ):
+            result = await get_scan_results(
+                ctx=mock_ctx,
+                output_dir="/workspace/.ash/ash_output",
+                severities="urgent",
+            )
+
+        assert result["success"] is False
+        assert result["error_category"] == "invalid_parameter"
+        assert "Unknown severity" in result["error"]
 
     @pytest.mark.asyncio
     async def test_results_error_from_upstream(self, mock_ctx):
@@ -1117,15 +1226,19 @@ class TestPrompts:
         assert "run_ash_scan" in result
 
     def test_run_ash_security_scan_prompt_default(self):
-        """Prompt uses cwd when no source_dir is given."""
+        """With no source_dir the prompt names the session's source directory and
+        has the agent call run_ash_scan with no source_dir, never a directory of
+        the server's own: a prompt has no request context, so it cannot tell a
+        local client from a network one, and naming the working directory steered
+        a remote agent to pass the server's tree explicitly."""
         from automated_security_helper.cli.mcp_server import run_ash_security_scan
 
         with patch("pathlib.Path.cwd", return_value=Path("/default/dir")):
-            # The function calls Path.cwd().absolute() internally
-            with patch.object(Path, "absolute", return_value=Path("/default/dir")):
-                result = run_ash_security_scan(source_dir=None)
+            result = run_ash_security_scan(source_dir=None)
 
-        assert "/default/dir" in result or str(Path("/default/dir")) in result
+        assert "this session's source directory" in result, result
+        assert "called with no source_dir" in result, result
+        assert "/default/dir" not in result, result
 
     def test_analyze_security_findings_prompt(self):
         """Prompt includes directory and analysis instructions."""

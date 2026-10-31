@@ -20,7 +20,11 @@ refused rename raises, and without recovery the next call would lose an entry:
 A set_aside that fails moves what it had staged back before it raises, and
 a restore renames the held set to a ``.restoring`` directory once the top level
 is clear, so a second restore resumes the moves instead of clearing the top
-level again. The marker is written only once every entry is back.
+level again. The marker is written right after that rename, before the first
+move back, so a restore that stops on a refused move already says that what is
+at the top level was put back; a restore that stops before the rename (the top
+level could not be cleared, or the held set could not be renamed) leaves no
+marker, because nothing was put back yet.
 
 A set_aside can also stop on something other than a refused rename (an
 interrupt, any other error), and its process can be killed between two renames.
@@ -140,8 +144,11 @@ def test_a_restore_refused_halfway_then_retried_puts_every_entry_back(
     with pytest.raises(PermissionError):
         previous.restore()
     disarm()
-    assert not holds_restored_results(output), (
-        "a restore that stopped halfway says the results were put back"
+    # The marker is written before the first move: a restore that stopped on a
+    # refused rename left previous results at the top level, and a report must
+    # not present them as the new scan's from that moment on.
+    assert holds_restored_results(output), (
+        "a restore that stopped halfway put previous results back and does not say so"
     )
 
     previous.restore()
@@ -150,6 +157,86 @@ def test_a_restore_refused_halfway_then_retried_puts_every_entry_back(
     assert holds_restored_results(output)
     assert not (output / HELD_DIR_NAME).exists()
     assert not (output / (HELD_DIR_NAME + ".restoring")).exists()
+
+
+def _new_scan_wrote_results(output: Path) -> None:
+    """The new scan writes its own results, then ends without finishing."""
+    (output / "reports").mkdir()
+    (output / "reports" / "ash.sarif").write_text('{"new": 1}', encoding="utf-8")
+    (output / "ash_aggregated_results.json").write_text('{"new": 1}', encoding="utf-8")
+
+
+def test_a_restore_refused_at_the_held_sets_rename_leaves_no_marker(
+    tmp_path, monkeypatch
+):
+    """Control for the marker's place: the first rename of a restore is the held
+    set to RESTORING_DIR_NAME, and nothing was put back when it is refused, so no
+    marker is written, the held set is intact, and a retry restores everything."""
+    output = _with_previous(tmp_path)
+    previous = PreviousResults(output)
+    previous.set_aside()
+    _new_scan_wrote_results(output)
+    real = Path.rename
+
+    def refuse_the_first_rename(self, target):
+        monkeypatch.setattr(Path, "rename", real)
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "rename", refuse_the_first_rename)
+    with pytest.raises(PermissionError):
+        previous.restore()
+
+    assert not holds_restored_results(output), (
+        "a restore that never moved an entry back says the directory holds put-back results"
+    )
+    assert (output / HELD_DIR_NAME).is_dir()
+    assert not (output / (HELD_DIR_NAME + ".restoring")).exists()
+    # The top level was cleared before the rename; the held set is whole.
+    assert _contents(output) == _held()
+
+    previous.restore()
+    assert _contents(output) == PREVIOUS
+    assert holds_restored_results(output)
+
+
+def test_a_restore_refused_clearing_the_top_level_leaves_no_marker(
+    tmp_path, monkeypatch
+):
+    """Control for the marker's place: a top-level entry of the new scan that
+    cannot be removed stops the restore before anything moves, so no marker is
+    written, the held set is intact, and a retry restores everything."""
+    from automated_security_helper.core import previous_results
+
+    output = _with_previous(tmp_path)
+    previous = PreviousResults(output)
+    previous.set_aside()
+    _new_scan_wrote_results(output)
+    real_remove = previous_results._remove
+
+    def refuse_the_results_file(path: Path) -> None:
+        if path.name == "ash_aggregated_results.json":
+            raise PermissionError(13, "Permission denied", str(path))
+        real_remove(path)
+
+    monkeypatch.setattr(previous_results, "_remove", refuse_the_results_file)
+    with pytest.raises(PermissionError):
+        previous.restore()
+    monkeypatch.setattr(previous_results, "_remove", real_remove)
+
+    assert not holds_restored_results(output), (
+        "a restore that never moved an entry back says the directory holds put-back results"
+    )
+    assert (output / HELD_DIR_NAME).is_dir()
+    assert not (output / (HELD_DIR_NAME + ".restoring")).exists()
+    contents = _contents(output)
+    assert all(contents.get(rel) == text for rel, text in _held().items()), (
+        "the held set was touched before the top level was clear"
+    )
+    assert contents["ash_aggregated_results.json"] == '{"new": 1}'
+
+    previous.restore()
+    assert _contents(output) == PREVIOUS
+    assert holds_restored_results(output)
 
 
 def test_a_set_aside_refused_halfway_then_retried_keeps_every_entry(
@@ -310,12 +397,14 @@ def test_an_interrupt_after_the_rename_to_the_held_set_reports_nothing_lost(
     assert _contents(output) == PREVIOUS
 
 
-def test_a_refused_put_back_of_a_stage_still_drops_the_restored_marker(
+def test_a_refused_put_back_of_a_stage_keeps_the_restored_marker(
     tmp_path, refuse_second_rename
 ):
-    """A scan is starting even when what a killed set_aside staged cannot all be
-    moved back yet: the marker that says the directory holds put-back results
-    goes first, so the starting scan is not reported as holding them."""
+    """No scan starts when what a killed set_aside staged cannot all be moved
+    back: the set aside raises, the put-back results are at the top level, and
+    the marker that says the directory holds put-back results stays until a
+    set aside completes its moves. Removing it before the renames left them
+    there as if they were the next scan's."""
     arm, disarm = refuse_second_rename
     output = _with_previous(tmp_path)
     _killed_while_staging(output, "every-entry-staged")
@@ -326,9 +415,12 @@ def test_a_refused_put_back_of_a_stage_still_drops_the_restored_marker(
         PreviousResults(output).set_aside()
     disarm()
 
-    assert not holds_restored_results(output)
+    assert holds_restored_results(output)
     assert (output / STAGING).is_dir(), "what was not moved back was not kept staged"
     PreviousResults(output).set_aside()
+    assert not holds_restored_results(output), (
+        "the completed set aside keeps the marker"
+    )
     assert _contents(output) == _held()
 
 

@@ -258,11 +258,14 @@ def test_apply_suppressions_with_ignore_flag(mock_check):
 
     result = apply_suppressions_to_sarif(sarif, plugin_context)
 
-    # Even with ignore_suppressions=True, ignore_paths are still applied
-    # (ignore_suppressions only affects rule-based suppressions, not path ignoring).
-    # The path "to/test.py" matches the URI, so the finding is still filtered.
+    # An ignore path is a suppression, so --ignore-suppressions lifts it too
+    # (docs/content/concepts/suppressions.md: the flag turns the whole suppression
+    # step off, ignore paths included; the scan skips this function under the
+    # flag, and a direct call with the flag set reads the same way). The path
+    # "**/test.py" matches the URI, and the finding is kept.
     assert result is not None
-    assert len(result.runs[0].results) == 0
+    assert len(result.runs[0].results) == 1
+    assert not result.runs[0].results[0].suppressions
 
 
 @patch(

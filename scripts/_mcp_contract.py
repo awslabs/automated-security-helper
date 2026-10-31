@@ -122,6 +122,15 @@ MAX_EVALUATIONS = 20_000_000
 CALLABLE_RUNNERS = frozenset(
     {f"{SERVER_MODULE}._run_clone", f"{SERVER_MODULE}._run_delivery"}
 )
+#: Standard-library functions that run their first argument, a callable, with
+#: every argument that follows it and return what it returns: ``await
+#: asyncio.to_thread(f, a, k=v)`` is ``f(a, k=v)`` on a worker thread. The
+#: package hands a registry method's result through it (``await
+#: asyncio.to_thread(registry.check_scan_progress, scan_id, **scoped)``), so a
+#: reader that stopped at the call would list that tool's response as an unread
+#: value and miss every key the method's dict carries. Named by dotted path;
+#: both ``import asyncio`` and ``from asyncio import to_thread`` reach it.
+STDLIB_RUNNERS = frozenset({"asyncio.to_thread"})
 #: Builtin exceptions, which ``type(e).__name__`` can also name.
 BUILTIN_EXCEPTIONS = frozenset(
     name
@@ -836,6 +845,9 @@ class Evaluator:
         self._names_in_progress: set[tuple[int, str]] = set()
         self._calls_by_name: Optional[dict[str, list[tuple[_Module, ast.Call]]]] = None
         self._caught_memo: dict[int, Shape] = {}
+        #: Caught classes whose constructions are being read right now; a second
+        #: read of one, inside the first, is unread. See :meth:`_caught`.
+        self._caught_in_progress: set[int] = set()
         #: Parent of each node, per module tree, for :meth:`_construction_site`.
         self._parents: dict[int, dict[int, ast.AST]] = {}
         #: How often each name is used in the package, and the names an import
@@ -1715,6 +1727,8 @@ class Evaluator:
 
     def _eval_Call(self, node: ast.Call, scope: _Scope) -> Shape:
         func = node.func
+        if self._is_stdlib_runner(func, scope):
+            return self._run_on_thread(node, scope)
         if isinstance(func, ast.Name) and self.lookup(scope, func.id) is None:
             return self._builtin_call(func.id, node, scope)
         if isinstance(func, ast.Attribute):
@@ -1753,6 +1767,55 @@ class Evaluator:
             ast.Call(func=node.args[0], args=[], keywords=node.keywords), node
         )
         return self.call(target, forwarded, scope)
+
+    def _is_stdlib_runner(self, func: ast.AST, scope: _Scope) -> bool:
+        """Whether ``func`` names a :data:`STDLIB_RUNNERS` function.
+
+        ``asyncio.to_thread`` reads as a module attribute whose module the
+        package does not hold; ``to_thread`` after ``from asyncio import
+        to_thread`` is an import that resolves to no package object, so it is
+        read from the import tables the way :meth:`lookup` reads them.
+        """
+        if isinstance(func, ast.Attribute):
+            ref = self._ref_of(func, scope)
+            return (
+                ref is not None
+                and ref.kind == "module"
+                and ref.dotted in STDLIB_RUNNERS
+            )
+        if not isinstance(func, ast.Name):
+            return False
+        current: Optional[_Scope] = scope
+        while current is not None:
+            local = current.locals
+            if current.func is not None and local is not None:
+                if func.id in local.params or func.id in local.assigns:
+                    return False
+                if func.id in local.imports:
+                    dotted, attr = local.imports[func.id]
+                    return attr is not None and f"{dotted}.{attr}" in STDLIB_RUNNERS
+            current = current.parent
+        if func.id in scope.module.imports:
+            dotted, attr = scope.module.imports[func.id]
+            return attr is not None and f"{dotted}.{attr}" in STDLIB_RUNNERS
+        return False
+
+    def _run_on_thread(self, node: ast.Call, scope: _Scope) -> Shape:
+        """``asyncio.to_thread(f, *args, **kw)``: what ``f(*args, **kw)`` returns.
+
+        The call is read as if ``f`` had been called in place, so ``f`` may be a
+        package function, a method on an object the source names
+        (``registry.check_scan_progress``) or a nested function, and the
+        arguments after it bind as they would on a direct call. A call with no
+        callable, or one that spreads its callable, is unread.
+        """
+        if not node.args or isinstance(node.args[0], ast.Starred):
+            return unread(scope.site(node))
+        forwarded = ast.copy_location(
+            ast.Call(func=node.args[0], args=node.args[1:], keywords=node.keywords),
+            node,
+        )
+        return self._eval_Call(forwarded, scope)
 
     def _builtin_call(self, name: str, node: ast.Call, scope: _Scope) -> Shape:
         if name == "dict":
@@ -1833,13 +1896,34 @@ class Evaluator:
         call: ast.Call,
         family: Optional[list[ast.AST]],
     ) -> Shape:
-        """What a construction passes for ``__init__``'s ``param``."""
+        """What a construction passes for ``__init__``'s ``param``.
+
+        For a caught exception's construction that :meth:`_construction_argument`
+        does not place, a plain name is read where the construction sits: a
+        parameter of the raising function is then unread and a local assignment
+        is its value, never the module name either happens to shadow; a name
+        the function does not bind is still the module's. A name passed inside a
+        lambda's body, a comprehension or a class body is unread. Anything else
+        (a literal, an attribute, a call) is read as before, in ``scope``.
+        """
         if family is not None:
             found = self._construction_argument(
                 value, param, init, scope.module, call, family
             )
             if found is not None:
                 return found
+            if isinstance(value, ast.Name):
+                site = self._call_scope(scope.module, call)
+                if site is None:
+                    return unread(f"{scope.module.rel}:{getattr(call, 'lineno', 0)}")
+                local = site.locals
+                if (
+                    site.func is not None
+                    and local is not None
+                    and (value.id in local.params or value.id in local.assigns)
+                    and value.id not in local.caught
+                ):
+                    return self.evaluate(value, site)
         return self.evaluate(value, scope)
 
     def _construction_argument(
@@ -1981,7 +2065,12 @@ class Evaluator:
         alias, a reference passed on, a method of that name or a spread
         argument), so that the calls found are all the calls there are. A
         call that leaves the parameter out gives the parameter's default.
-        Each argument is read in its call's module scope, as a construction's are.
+        Each argument is read in the scope of the function the call sits in, the
+        module's for a call at module level or in a function's header
+        (:meth:`_call_scope`), so a name the calling function binds is read as
+        that function's and never as a module name it shadows. A call inside a
+        lambda's body, a comprehension or a class body leaves the parameter unread
+        unless what it passes is a literal, which needs no scope.
         """
         if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
             return None
@@ -1997,7 +2086,7 @@ class Evaluator:
         calls = [
             (m, c)
             for m, c in self._constructions(func.name)
-            if self._names_function(c.func, m, func)
+            if self._names_function(c, m, func)
         ]
         found: Optional[Shape] = None
         if func.name not in self._renamed_imports and uses.get(func.name, 0) == len(
@@ -2007,8 +2096,13 @@ class Evaluator:
         self._passed_memo[key] = found
         return found
 
-    def _names_function(self, expr: ast.expr, module: _Module, func: ast.AST) -> bool:
-        ref = self._ref_of(expr, _Scope(module=module))
+    def _names_function(self, call: ast.Call, module: _Module, func: ast.AST) -> bool:
+        """Whether ``call`` calls ``func``, resolved where the call sits, so a
+        parameter or local that shadows the function's name is not the function
+        (a call this reader cannot place then makes the name's use count exceed
+        its calls, and :meth:`_passed_through` gives up)."""
+        scope = self._call_scope(module, call) or _Scope(module=module)
+        ref = self._ref_of(call.func, scope)
         return ref is not None and ref.kind == "function" and ref.node is func
 
     def _call_arguments(
@@ -2035,17 +2129,75 @@ class Evaluator:
             ):
                 return None
             passed = next((k.value for k in call.keywords if k.arg == name), None)
-            where = call_module
             if passed is None and name in positional:
                 index = positional.index(name)
                 if index < len(call.args):
                     passed = call.args[index]
             if passed is None:
-                passed, where = default, module
-            if passed is None:
-                return None
-            parts.append(self.evaluate(passed, _Scope(module=where)))
+                if default is None:
+                    return None
+                # A default is bound where the function is defined.
+                parts.append(self.evaluate(default, _Scope(module=module)))
+                continue
+            scope = self._call_scope(call_module, call)
+            if scope is None:
+                # A literal needs no scope; anything that names something does.
+                if any(isinstance(n, ast.Name) for n in ast.walk(passed)):
+                    return None
+                scope = _Scope(module=call_module)
+            parts.append(self.evaluate(passed, scope))
         return union(*parts) if parts else None
+
+    def _call_scope(self, module: _Module, call: ast.Call) -> Optional[_Scope]:
+        """The scope an argument of ``call`` is read in, or None.
+
+        The module's for a call at module level. For a call inside a function's
+        body, that function's, with each function around it as a parent, so a
+        name the function binds (a parameter, an assignment, a loop target) is
+        read as the function's own and not as the module name it shadows; a
+        parameter, whose value this scope does not carry, is unread. A call in a
+        function's header (a default value, a decorator, an annotation) is read in
+        the scope around the function, where Python evaluates it, and so is a call
+        in a class's bases, keywords or decorators. A class body between a method
+        and the module is passed over, since its names are not in scope inside
+        the method. None for a call inside a lambda's body, a comprehension or a
+        class body itself, where a name can be bound by something this reader
+        does not follow.
+        """
+        parents = self._parent_map(module)
+        funcs: list[ast.AST] = []
+        child: ast.AST = call
+        node = parents.get(id(call))
+        while node is not None:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                in_header = (
+                    child is node.args
+                    or child is getattr(node, "returns", None)
+                    or any(child is d for d in getattr(node, "decorator_list", []))
+                )
+                if not in_header:
+                    if isinstance(node, ast.Lambda):
+                        return None
+                    funcs.append(node)
+            elif isinstance(node, ast.ClassDef):
+                in_header = any(
+                    child is n
+                    for n in [*node.bases, *node.keywords, *node.decorator_list]
+                )
+                if not in_header and not funcs:
+                    return None
+            elif isinstance(node, _OPAQUE_SCOPES):
+                return None
+            child, node = node, parents.get(id(node))
+        scope = _Scope(module=module)
+        for func in reversed(funcs):
+            scope = _Scope(
+                module=module,
+                func=func,
+                parent=scope,
+                locals=self._locals_for(func, module),
+            )
+        return scope
 
     def _reraises(
         self,
@@ -2119,6 +2271,14 @@ class Evaluator:
         ``except X`` catches them; each carries the class attributes it sets
         (``error_type = "..."``). Exceptions the package does not define are
         unread.
+
+        A construction's plain-name argument is read where the construction
+        sits (:meth:`_argument`), so a handler that assigns a local from the
+        caught exception and raises the class again with that local makes the
+        caught value need the construction and the construction need the caught
+        value. The second read of a class whose constructions are already being
+        read is unread; the first read then completes, and the memo it leaves
+        carries that unread part.
         """
         types = type_node.elts if isinstance(type_node, ast.Tuple) else [type_node]
         parts: list[Shape] = []
@@ -2128,30 +2288,43 @@ class Evaluator:
                 parts.append(unread(scope.site(type_expr)))
                 continue
             key = id(ref.node)
-            if key not in self._caught_memo:
-                kinds = [ref, *self._subclasses(ref)]
-                family = [kind.node for kind in kinds if kind.node is not None]
-                built = [
-                    (call, self._instance(kind, call, _Scope(module=module), family))
-                    for kind in kinds
-                    for module, call in self._constructions(kind.node.name)  # type: ignore[union-attr]
-                    if self._is_class(call.func, module, kind.node)  # type: ignore[arg-type]
-                ]
-                # A construction that only raises a caught exception again adds
-                # no value of its own. Without one that does, the exceptions
-                # come from somewhere this reader does not see (an alias of the
-                # class, ``cls(...)``, a partial), so nothing is known.
-                grounded = [
-                    c for c, _ in built if (id(c), key) not in self._reraise_calls
-                ]
-                self._caught_memo[key] = (
-                    union(*(shape for _, shape in built))
-                    if grounded
-                    else unread(
-                        f"{ref.module.rel}:{getattr(ref.node, 'lineno', 0)}"
-                        f" (never built, or only raised again from a caught one)"
-                    )
+            if key in self._caught_in_progress:
+                parts.append(
+                    unread(f"{scope.site(type_expr)} (caught type under resolution)")
                 )
+                continue
+            if key not in self._caught_memo:
+                self._caught_in_progress.add(key)
+                try:
+                    kinds = [ref, *self._subclasses(ref)]
+                    family = [kind.node for kind in kinds if kind.node is not None]
+                    built = [
+                        (
+                            call,
+                            self._instance(kind, call, _Scope(module=module), family),
+                        )
+                        for kind in kinds
+                        for module, call in self._constructions(kind.node.name)  # type: ignore[union-attr]
+                        if self._is_class(call.func, module, kind.node)  # type: ignore[arg-type]
+                    ]
+                    # A construction that only raises a caught exception again
+                    # adds no value of its own. Without one that does, the
+                    # exceptions come from somewhere this reader does not see (an
+                    # alias of the class, ``cls(...)``, a partial), so nothing is
+                    # known.
+                    grounded = [
+                        c for c, _ in built if (id(c), key) not in self._reraise_calls
+                    ]
+                    self._caught_memo[key] = (
+                        union(*(shape for _, shape in built))
+                        if grounded
+                        else unread(
+                            f"{ref.module.rel}:{getattr(ref.node, 'lineno', 0)}"
+                            f" (never built, or only raised again from a caught one)"
+                        )
+                    )
+                finally:
+                    self._caught_in_progress.discard(key)
             parts.append(self._caught_memo[key])
         return union(*parts)
 

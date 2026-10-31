@@ -70,6 +70,22 @@ case $max in
     exit 2
     ;;
 esac
+# All digits is not the same as in range for the attempt count either. `test`
+# reads its integer operands as 64-bit values and answers anything larger with
+# "integer expression expected" and status 2. The `[ "$max" -lt 1 ]` guard below
+# is an `if` condition, so that status reads as false and the guard passes; the
+# `while` condition then fails the same way and the loop body never runs. The
+# script printed "All N attempts failed" and exited 1 without having run the
+# command once -- the never-ran-but-reported hazard that guard exists to stop.
+#
+# Count the digits after stripping padding, on a copy, so the later messages
+# still show the value the caller set. Eighteen digits always fit in 63 bits.
+digits=$max
+while [ "${#digits}" -gt 1 ] && [ "${digits#0}" != "$digits" ]; do digits=${digits#0}; done
+if [ "${#digits}" -gt 18 ]; then
+  echo "with-retry: WITH_RETRY_MAX_ATTEMPTS must be at most 18 digits, got '$max'" >&2
+  exit 2
+fi
 case $delay in
   '' | *[!0-9]*)
     echo "with-retry: WITH_RETRY_DELAY must be a whole number of seconds, got '$delay'" >&2
@@ -153,6 +169,13 @@ fi
 # variable still passes one argument, so `$#` is 1 while `$*` is empty, and that
 # is the likelier of the two shapes. `case` for the same reason as above -- this
 # runs in the container build stage before most of the toolchain exists.
+#
+# The arguments are joined with single spaces into one command string, the way
+# `eval` joins its own, and that string is what `bash -c` parses. That is the
+# contract: callers pass one quoted command (the usage at the top of this file),
+# and any further arguments are more words of the same command line. An argument
+# that carries spaces or shell metacharacters is therefore not kept as one word;
+# quote it inside the command string.
 case "$*" in
   *[![:space:]]*) ;;
   *)
@@ -161,8 +184,43 @@ case "$*" in
     ;;
 esac
 
+# Exit statuses that are never retried, and are passed through as the script's
+# own status. A retry is for a failure the next attempt can cure: a reset
+# connection, a host that did not resolve. install-pinned-tool exits 3 on a
+# SHA256 mismatch against a pinned digest, and its docstring says that status
+# is "never retried" so a caller can tell it from a network failure; this loop
+# retried it five times anyway, on every pinned install in the Dockerfile,
+# and then reported exit 1. One mismatch on a pinned digest is disqualifying,
+# and a second fetch of the same bytes either reproduces it or quietly turns a
+# supply-chain control into a coin flip. Space-separated; the same `case` idiom
+# as the knobs above.
+#
+# 2 is in the default as well. install-pinned-tool exits 2 for a request that
+# can never succeed: an unknown tool or bundle, a platform with no asset, a
+# non-https URL, a half-applied version bump. Another attempt repeats the same
+# refusal, so retrying it five times only delays the build by the whole backoff
+# window and then reports a generic failure. A caller that wraps a command which
+# uses 2 for a transient failure sets WITH_RETRY_NO_RETRY_EXITS to its own list,
+# and a list set explicitly replaces this default rather than extending it.
+fatal=${WITH_RETRY_NO_RETRY_EXITS:-2 3}
+for code in $fatal; do
+  case $code in
+    '' | *[!0-9]*)
+      echo "with-retry: WITH_RETRY_NO_RETRY_EXITS must be space-separated exit statuses, got '$fatal'" >&2
+      exit 2
+      ;;
+  esac
+done
+
 while [ $attempt -le $max ]; do
   bash -o pipefail -c "$*" && exit 0
+  rc=$?
+  for code in $fatal; do
+    if [ "$rc" -eq "$code" ]; then
+      echo "with-retry: exit $rc is not retried (WITH_RETRY_NO_RETRY_EXITS='$fatal'); giving up after attempt $attempt/$max" >&2
+      exit "$rc"
+    fi
+  done
   # Announce and take the backoff only when an attempt actually follows it.
   # Unguarded, the final pass printed "Attempt 3/3 failed, retrying in 20s...",
   # slept the full 20 seconds, left the loop, and then printed "All 3 attempts
@@ -172,7 +230,16 @@ while [ $attempt -le $max ]; do
   # a silent 20-second pause, or a promised retry that never comes.
   if [ "$attempt" -lt "$max" ]; then
     echo "Attempt $attempt/$max failed, retrying in ${delay}s..." >&2
-    sleep $delay; delay=$((delay * 2))
+    sleep $delay
+    # The 86400 ceiling checked above covers the first interval only. Doubling it
+    # on every attempt walks past a day within a few attempts and, with a large
+    # attempt count, past 2^63, where `$(( ))` wraps silently to a negative
+    # number: GNU sleep rejects that, nothing checks its status, and the
+    # remaining attempts run back to back. Cap every interval at the same
+    # ceiling. The doubled value is at most twice the ceiling before it is
+    # capped, so the arithmetic cannot wrap.
+    delay=$((delay * 2))
+    if [ "$delay" -gt 86400 ]; then delay=86400; fi
   fi
   attempt=$((attempt + 1))
 done

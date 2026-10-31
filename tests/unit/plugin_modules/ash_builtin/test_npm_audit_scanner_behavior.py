@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -255,7 +256,8 @@ def test_has_install_commands_is_true_once_a_command_is_registered(
     import platform
 
     monkeypatch.setattr(platform, "system", lambda: "Linux")
-    # The arch key is derived from pointer size, so a 64-bit host reads "amd64".
+    # The arch key is the machine's family: an x86-64 host reads "amd64".
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     scanner.custom_install_commands["linux"]["amd64"] = [["echo", "install"]]
 
     assert scanner._has_install_commands() is True
@@ -274,11 +276,9 @@ def test_has_install_commands_is_false_when_the_arch_key_is_absent(
 ):
     """Windows has no arm64 entry, so an arm64 lookup falls through."""
     import platform
-    import struct
 
     monkeypatch.setattr(platform, "system", lambda: "Windows")
-    # Force the non-64-bit branch of the pointer-size check.
-    monkeypatch.setattr(struct, "calcsize", lambda fmt: 4)
+    monkeypatch.setattr(platform, "machine", lambda: "ARM64")
     scanner.custom_install_commands["windows"]["amd64"] = [["echo", "install"]]
 
     assert scanner._has_install_commands() is False, (
@@ -286,24 +286,57 @@ def test_has_install_commands_is_false_when_the_arch_key_is_absent(
     )
 
 
-def test_arch_key_is_derived_from_pointer_size_not_architecture(scanner, monkeypatch):
-    """The arch key comes from struct.calcsize('P'), not the real machine type.
+@pytest.mark.parametrize(
+    "machine,selected",
+    [
+        ("aarch64", "arm64"),
+        ("arm64", "arm64"),
+        # Windows on ARM spells it in capitals; the negative test above cannot
+        # tell "mapped to arm64" from "not recognized at all".
+        ("ARM64", "arm64"),
+        ("x86_64", "amd64"),
+        ("AMD64", "amd64"),
+    ],
+)
+def test_arch_key_is_derived_from_the_machine_type(
+    scanner, monkeypatch, machine, selected
+):
+    """The arch key comes from platform.machine(), not from pointer width.
 
-    A 64-bit host reads "amd64" whatever its CPU is, so 64-bit ARM is labeled
-    amd64 and a 32-bit x86 host would be labeled arm64. This has no effect today
-    because every install-command list is empty, but it means the arm64 entries
-    can never be selected on a 64-bit machine.
+    Pointer width read every 64-bit host as "amd64", 64-bit ARM included, so
+    an arm64 install-command list could never be selected where it applied.
+    The entry for the machine's own family is the one consulted.
     """
     import platform
-    import struct
 
     monkeypatch.setattr(platform, "system", lambda: "Linux")
-    monkeypatch.setattr(struct, "calcsize", lambda fmt: 8)
-    scanner.custom_install_commands["linux"]["arm64"] = [["echo", "arm-install"]]
-    scanner.custom_install_commands["linux"]["amd64"] = []
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    other = "amd64" if selected == "arm64" else "arm64"
+    scanner.custom_install_commands["linux"][selected] = [["echo", "install"]]
+    scanner.custom_install_commands["linux"][other] = []
+
+    assert scanner._has_install_commands() is True, (
+        f"the {selected} list is non-empty and {machine} is a {selected} machine"
+    )
+
+
+@pytest.mark.parametrize("machine", ["armv7l", "i686", ""])
+def test_a_machine_outside_both_families_selects_no_install_commands(
+    scanner, monkeypatch, machine
+):
+    """A 32-bit ARM or x86 host, or a platform that cannot name its machine
+    (platform.machine() returns ""), matches neither entry: both lists are
+    non-empty and the answer is still False. A substring match ("arm" in the
+    name) would have picked the arm64 list on a 32-bit ARM host."""
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    scanner.custom_install_commands["linux"]["amd64"] = [["echo", "install"]]
+    scanner.custom_install_commands["linux"]["arm64"] = [["echo", "install"]]
 
     assert scanner._has_install_commands() is False, (
-        "the arm64 list is non-empty but a 64-bit pointer size selects amd64"
+        f"{machine!r} is neither an amd64 nor an arm64 machine"
     )
 
 
@@ -427,7 +460,8 @@ def test_audit_runs_in_the_lock_files_own_directory(
     Each runs in a private copy of the lock file's directory, holding the manifest
     and the lockfile and no settings file of the repository's (see
     test_npm_audit_project_rc_ignored.py), read here when the tool is started,
-    since the copy is removed after.
+    since the copy is removed after. pnpm's copy also holds a workspace file of
+    its own, naming the package alone.
     """
     nested = node_project(
         directory=scanner.context.work_dir / "packages" / "api", lock_name=lock_name
@@ -455,6 +489,12 @@ def test_audit_runs_in_the_lock_files_own_directory(
 
     ((cwd, files),) = started
     assert cwd != nested
+    if lock_name == "pnpm-lock.yaml":
+        # pnpm's copy is its own workspace root (see
+        # test_package_manager_child_reads_and_settings.py): the one file here
+        # that the repository did not have.
+        workspace = files.pop("pnpm-workspace.yaml")
+        assert yaml.safe_load(workspace) == {"packages": ["."]}
     assert files == {
         "package.json": (nested / "package.json").read_text(),
         lock_name: (nested / lock_name).read_text(),
@@ -730,9 +770,10 @@ def test_numeric_metadata_is_summed_across_packages(
 ):
     """Counts add up across audits rather than being replaced.
 
-    The merge walks metadata keys: dict values are updated, numeric values are
-    added. ``dependencies.total`` is nested under a dict key, so it is updated;
-    this asserts the observable outcome of both arms.
+    The merge walks metadata keys by type: two dicts merge recursively and two
+    numbers add, so the per-severity counters nested under
+    ``metadata.vulnerabilities`` sum across lockfiles (a ``dict.update`` kept
+    only the last lockfile's).
     """
     node_project(directory=scanner.context.work_dir / "packages" / "api")
     node_project(directory=scanner.context.work_dir / "packages" / "web")
@@ -754,10 +795,9 @@ def test_numeric_metadata_is_summed_across_packages(
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     metrics = report.runs[0].properties.model_extra["metrics"]
-    # The second audit's vulnerability counts replaced the first's, since
-    # metadata.vulnerabilities is a dict and dicts are updated, not summed.
-    assert metrics["high"] == 2
-    assert metrics["total"] == 2
+    # One high in the first lockfile plus two in the second.
+    assert metrics["high"] == 3
+    assert metrics["total"] == 3
 
 
 def test_a_numeric_metadata_key_shared_by_both_audits_is_summed(
@@ -765,10 +805,10 @@ def test_a_numeric_metadata_key_shared_by_both_audits_is_summed(
 ):
     """A scalar metadata value present in both audits is added, not replaced.
 
-    The merge has three arms for a metadata key: dict values are updated,
-    int/float values are added, and unseen keys are inserted. npm's own metadata
-    contains only dicts, so the numeric arm is exercised here with a scalar of
-    the kind yarn and pnpm audit reports carry.
+    The merge walks a metadata key by type: two dicts merge recursively, two
+    numbers add, and an unseen key is inserted. npm's own metadata contains
+    only dicts, so the numeric arm is exercised here with a scalar of the kind
+    yarn and pnpm audit reports carry.
     """
     node_project(directory=scanner.context.work_dir / "packages" / "api")
     node_project(directory=scanner.context.work_dir / "packages" / "web")
@@ -996,20 +1036,31 @@ def test_severity_map_is_not_vacuous():
     assert SEVERITY_TO_LEVEL["not-a-severity"] == "warning"
 
 
-def test_a_vulnerability_with_no_nodes_produces_no_result(scanner):
-    """Results are emitted per install location, so no nodes means no result.
+def test_a_vulnerability_with_no_nodes_produces_one_result_by_name(scanner):
+    """A vulnerability npm lists with no node is still a finding.
 
-    Worth pinning because the rule is still created: a report can therefore
-    carry a rule with no matching finding.
+    npm counted the advisory in the report's metadata, so a rule with no
+    result silently dropped it. One result is made for the package by name,
+    at the hoisted location, with no installed version or path (the lockfile
+    gives none for a node npm did not name).
     """
     results = audit_json(nodes=())
 
     report = scanner._convert_npm_audit_to_sarif(results, scanner.context.source_dir)
 
-    assert report.runs[0].results == []
+    (result,) = report.runs[0].results
+    assert result.ruleId == "GHSA-aaaa-bbbb-cccc"
+    location = result.locations[0].physicalLocation.root.artifactLocation.uri
+    assert location == "node_modules/left-pad/package.json"
+    props = result.properties.model_extra
+    assert props["package_name"] == "left-pad"
+    assert "package_version" not in props and "package_path" not in props
+    assert "installed_version" not in props, (
+        "no node names an installed copy, so no version stands in for one"
+    )
     assert [rule.id for rule in report.runs[0].tool.driver.rules] == [
         "GHSA-aaaa-bbbb-cccc"
-    ], "the rule is registered even though no result references it"
+    ]
 
 
 def test_no_vulnerabilities_key_yields_an_empty_run(scanner):

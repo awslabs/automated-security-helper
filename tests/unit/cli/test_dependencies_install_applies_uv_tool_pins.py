@@ -112,9 +112,11 @@ def recorded_install(tmp_path, monkeypatch):
         "automated_security_helper.cli.dependencies.run_command",
         lambda cmd, shell=False: ran.append(cmd) or 0,
     )
+    # The install looks a tool up as a scan of the source tree does, scoped to
+    # the tree's root; the fake takes that root and says every tool is on PATH.
     monkeypatch.setattr(
-        "automated_security_helper.cli.dependencies.find_executable",
-        lambda cmd: f"/usr/bin/{cmd}",
+        "automated_security_helper.cli.dependencies.find_executable_for_scan",
+        lambda cmd, root: f"/usr/bin/{cmd}",
     )
 
     def invoke(extra_args: "list[str]"):

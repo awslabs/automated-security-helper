@@ -59,11 +59,15 @@ alongside a triple-loaded one; dealing guarantees sizes within one of each other
 and is predictable enough for an operator to check by eye.
 
 The residual risk is that two executors resolve *different scanner sets* -- one
-missing a plugin module, or with ``--python-only`` set on only some jobs. Then both
-partitions are internally valid and the union has a hole. Nothing at assignment
-time can detect that, so it is caught at merge time instead:
-:func:`verify_shard_coverage` refuses a set of shards that does not reconstruct
-exactly one whole scan.
+missing a plugin module, say. Then both partitions are internally valid and the
+union has a hole. Nothing at assignment time can detect that, so it is caught at
+merge time instead: :func:`verify_shard_coverage` refuses a set of shards that
+does not reconstruct exactly one whole scan. ``--python-only`` set on only some
+jobs is a different shape: every executor records its candidates before the
+selection filters apply, so the candidate sets agree and nothing here can see the
+flag; the merge's contribution check reads it from the shards' records and warns,
+naming the scanners the flagged shards left unrun and which shards ran with the
+flag (``cli.merge``).
 
 Catching it needs each shard to record the set it partitioned, and for a while
 this claim was false because nothing did. ``ShardAssignment`` held only the index,
@@ -93,10 +97,16 @@ count without knowing the scanner count.
 
 from __future__ import annotations
 
+import difflib
+import hashlib
 from collections.abc import Iterable, Sequence
+from itertools import islice
 
-from pydantic import ConfigDict, Field
+from typing import Any
 
+from pydantic import ConfigDict, Field, model_validator
+
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.undecodable_text import StrippedRecordModel
 
 from automated_security_helper.core.exceptions import (
@@ -107,6 +117,7 @@ from automated_security_helper.utils.terminal_text import (
     NAMED_HASH_COMMAND,
     controls_shown,
     hash_command_broken,
+    shown_on_one_line,
 )
 
 __all__ = [
@@ -119,6 +130,12 @@ __all__ = [
     "validate_shard_selection",
     "verify_shard_coverage",
 ]
+
+#: How many missing shard indices a coverage refusal names before "and N more".
+#: The count of missing indices is always exact; only the listing is bounded, so a
+#: shard_count read from a corrupt results file cannot make the refusal itself
+#: unbounded.
+MISSING_SHARD_INDICES_SHOWN = 20
 
 
 def shown_shard_text(value: object) -> str:
@@ -139,6 +156,24 @@ def shown_shard_text(value: object) -> str:
     """
     text = controls_shown(str(value), keep_layout=False)
     return NAMED_HASH_COMMAND.sub(hash_command_broken, text)
+
+
+#: How many ignored provenance keys the warning names before "and N more", and
+#: how much of one key or of the shard index it quotes. The count is exact; only
+#: the listing is bounded, so a results file with 100,000 unknown keys, or a list
+#: for the index, cannot make the warning line that size.
+_DROPPED_KEYS_SHOWN = 20
+_DROPPED_TEXT_SHOWN = 80
+
+
+def _cut_text(text: str, limit: int) -> str:
+    """*text* as it stands, or its first *limit* characters and "..."."""
+    return text if len(text) <= limit else f"{text[:limit]}..."
+
+
+#: The (shard index, digest of the ignored fields) pairs ShardAssignment has
+#: warned about in this process; see ShardAssignment._name_the_dropped_keys.
+_WARNED_PROVENANCE_KEYS: set[tuple[str, str]] = set()
 
 
 class ShardAssignment(StrippedRecordModel):
@@ -180,10 +215,100 @@ class ShardAssignment(StrippedRecordModel):
     in the provenance that said so.
     """
 
-    # Read from a results file, whose values an error does not quote.
+    # Read from a results file, whose values an error does not quote. Unknown
+    # keys are dropped, not refused: a results file written by a newer ASH can
+    # carry a provenance field this version does not know, and refusing it made
+    # ``ash merge`` report the shard as having no provenance at all, which
+    # named the wrong cause. Every field this version reads is still validated,
+    # and the dropped keys are named at WARNING (below): the rest of this module
+    # fails closed on a version mismatch, so a silent drop would be the one
+    # place a mismatch left no trace.
     model_config = ConfigDict(
-        str_strip_whitespace=True, extra="forbid", hide_input_in_errors=True
+        str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
     )
+
+    @classmethod
+    def _near_misses(cls, dropped: Sequence[str], data: dict[str, Any]) -> str:
+        """The sentence that says a dropped key looks like a misspelled field.
+
+        Dropping a key is right for a field a newer ASH added, and wrong for a
+        known field spelled differently: ``candidate_scaner`` is read as no
+        candidate set at all, which skips the one coverage check that needs it.
+        A hand-edited record is the only way to get there, and the line above
+        does not say what the dropped key cost, so a name close to a field this
+        version reads (and not already supplied under its own name) is called
+        out with the field it resembles.
+        """
+        wanted = [name for name in cls.model_fields if name not in data]
+        found = []
+        for key in dropped:
+            close = difflib.get_close_matches(key, wanted, n=1, cutoff=0.8)
+            if close:
+                found.append(f"{_cut_text(key, _DROPPED_TEXT_SHOWN)} (for {close[0]})")
+        if not found:
+            return ""
+        return (
+            " Read as absent, because the name does not match: "
+            + ", ".join(found)
+            + ". A shard with no candidate_scanners is not checked for coverage "
+            "of the set it was partitioned from."
+        )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _name_the_dropped_keys(cls, data: Any) -> Any:
+        """Log the keys of a provenance record this version ignores, by name.
+
+        Once per record per process: one merge reads the same shard's record
+        several times (collecting the assignments, ordering the shards, naming a
+        shard in a message), and a line repeated five or six times for one
+        shard reads as five or six shards.
+        """
+        if isinstance(data, dict):
+            known = set(cls.model_fields)
+            dropped = sorted(str(key) for key in data if key not in known)
+            if dropped:
+                shard = data.get("shard_index")
+                # A results file can carry any value here and any number of
+                # unknown keys: a list for the index, 100,000 keys. The line names
+                # a text or numeric index, cut, and the first few keys, cut, with
+                # the count of the rest; the memo holds a digest, not the keys.
+                shard_text = (
+                    _cut_text(str(shard), _DROPPED_TEXT_SHOWN)
+                    if isinstance(shard, (str, int)) and not isinstance(shard, bool)
+                    else None
+                )
+                memo_key = (
+                    shard_text if shard_text is not None else type(shard).__name__,
+                    hashlib.sha256(
+                        "\0".join(dropped).encode("utf-8", "surrogatepass")
+                    ).hexdigest(),
+                )
+                if memo_key in _WARNED_PROVENANCE_KEYS:
+                    return data
+                _WARNED_PROVENANCE_KEYS.add(memo_key)
+                # The values are put in raw and the whole message is shown once,
+                # by shown_on_one_line, which the log sink writes as it is. A value
+                # shown here and the message shown again at the sink doubled the
+                # backslash of every escape (``\\x1b`` for one ESC).
+                where = f"shard {shard_text}" if shard_text is not None else "a shard"
+                names = ", ".join(
+                    _cut_text(name, _DROPPED_TEXT_SHOWN)
+                    for name in dropped[:_DROPPED_KEYS_SHOWN]
+                )
+                if len(dropped) > _DROPPED_KEYS_SHOWN:
+                    names += f", and {len(dropped) - _DROPPED_KEYS_SHOWN} more"
+                ASH_LOGGER.warning(
+                    shown_on_one_line(
+                        f"The provenance of {where} carries {len(dropped)} field(s) "
+                        f"this ASH does not know and ignores: {names}. The results "
+                        "file was written by another ASH version; the fields this "
+                        "version knows are read as usual."
+                        + cls._near_misses(dropped, data)
+                    ),
+                    extra=NO_MARKUP,
+                )
+        return data
 
     shard_index: int = Field(
         ge=0, description="Zero-based index of this shard within the run."
@@ -314,8 +439,16 @@ def partition_scanners(
         when there are fewer scanners than shards.
 
     Raises:
-        ShardSelectionError: If the index and count are not a usable pair.
+        ShardSelectionError: If the index and count are not a usable pair, or if
+            neither is given. An unsharded scan has nothing to partition, so a
+            caller that reaches this with no selection has a defect, and it is
+            named here rather than surfacing as a TypeError from the arithmetic.
     """
+    if shard_index is None and shard_count is None:
+        raise ShardSelectionError(
+            "partition_scanners needs both --shard-index and --shard-count; an "
+            "unsharded scan has no partition to compute."
+        )
     validate_shard_selection(shard_index, shard_count)
     ordered = _normalized(scanner_names)
     return [
@@ -388,7 +521,7 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
             about the total count, if any index is missing or repeated, if two
             shards claim the same scanner, if the shards disagree about the
             candidate set, if the assignments do not union to it, or if a shard
-            selected a scanner assigned to another shard.
+            selected a scanner assigned to another shard or to no shard.
     """
     if not assignments:
         raise ShardCoverageError(
@@ -417,14 +550,28 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
             f"does not deduplicate."
         )
 
-    missing = sorted(set(range(expected_count)) - set(seen_indices))
-    if missing:
+    # Counted, never materialized. shard_count is read from a results file and has
+    # no upper bound, so set(range(expected_count)) could exhaust memory on a
+    # corrupt or hostile count, and a refusal that listed every missing index
+    # could run to megabytes. The count is exact; the listing stops at
+    # MISSING_SHARD_INDICES_SHOWN.
+    seen_set = set(seen_indices)
+    missing_count = expected_count - len({i for i in seen_set if i < expected_count})
+    if missing_count:
+        shown = list(
+            islice(
+                (i for i in range(expected_count) if i not in seen_set),
+                MISSING_SHARD_INDICES_SHOWN,
+            )
+        )
+        more = missing_count - len(shown)
+        listed = ", ".join(map(str, shown)) + (f" and {more} more" if more else "")
         raise ShardCoverageError(
-            f"Missing shard results for indices {missing} of {expected_count}. "
-            f"Those scanners did not run, or their results were never collected -- "
-            f"check whether the matching CI jobs succeeded and uploaded their "
-            f"artifacts. Refusing to merge a partial scan into a report that would "
-            f"read as complete."
+            f"Missing shard results for {missing_count} of {expected_count} "
+            f"indices ({listed}). Those scanners did not run, or their results "
+            f"were never collected -- check whether the matching CI jobs "
+            f"succeeded and uploaded their artifacts. Refusing to merge a partial "
+            f"scan into a report that would read as complete."
         )
 
     unexpected = sorted(i for i in set(seen_indices) if i >= expected_count)
@@ -459,9 +606,9 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
 def _verify_selection_within_assignment(
     assignments: Sequence[ShardAssignment],
 ) -> None:
-    """Check no shard intended to run a scanner another shard owns.
+    """Check no shard intended to run a scanner another shard owns, or no shard owns.
 
-    The only condition ``selected_scanners`` supports refusing on, and it is worth
+    Two conditions ``selected_scanners`` supports refusing on, and it is worth
     being precise about why the others are not here. A scanner assigned to some
     shard and selected by none ran nowhere, which sounds like the refusal to make;
     but that is also exactly what a config-disabled or platform-declined scanner
@@ -475,6 +622,13 @@ def _verify_selection_within_assignment(
     check above cannot see it: the overlap is between one shard's selection and
     another's assignment, and the assignments themselves are still disjoint.
 
+    The second is a shard reporting that it selected a scanner no shard owns. The
+    selection is taken from the assignment, so a scanner outside every assignment
+    was selected by a run whose exclusion did not take effect either; it ran on
+    every shard that selected it, outside the split, and the shard's provenance
+    does not describe its run. The refusal names that case in its own words, since
+    no other shard ran the scanner.
+
     A shard carrying no selection record is skipped rather than refused, unlike the
     candidate set. The distinction is which absence can hide something: a shard with
     no candidate set could be concealing the union hole, while a shard with no
@@ -485,7 +639,8 @@ def _verify_selection_within_assignment(
         assignments: One entry per shard result being merged.
 
     Raises:
-        ShardCoverageError: If any shard selected a scanner assigned to another.
+        ShardCoverageError: If any shard selected a scanner assigned to another
+            shard, or one assigned to no shard.
     """
     owner: dict[str, int] = {}
     for assignment in assignments:
@@ -498,21 +653,62 @@ def _verify_selection_within_assignment(
             continue
         for scanner in _normalized(assignment.selected_scanners):
             holder = owner.get(scanner)
-            if holder is not None and holder != assignment.shard_index:
+            if holder is None:
+                # Selected by this shard and assigned to none. The selection is
+                # taken from the assignment, so a scanner outside every assignment
+                # was selected by a run whose exclusion did not take effect either,
+                # and two shards selecting it would count its findings twice while
+                # the overlap check, which reads assignments only, sees nothing.
+                trespasses.append(
+                    f"{shown_shard_text(scanner)} (selected by shard "
+                    f"{assignment.shard_index}, assigned to no shard)"
+                )
+            elif holder != assignment.shard_index:
                 trespasses.append(
                     f"{shown_shard_text(scanner)} (selected by shard "
                     f"{assignment.shard_index}, assigned to shard {holder})"
                 )
 
     if trespasses:
-        raise ShardCoverageError(
-            "These shards intended to run a scanner assigned to another shard: "
-            f"{'; '.join(sorted(trespasses))}. A shard only runs what it was "
-            "assigned, so the exclusion that implements the split did not take "
-            "effect on that executor -- the scanner ran on both shards and its "
-            "findings would be counted once per shard. The assignments themselves "
-            "are disjoint, so no other check here can see this."
-        )
+        unowned = [
+            item for item in trespasses if item.endswith("assigned to no shard)")
+        ]
+        listed = "; ".join(sorted(trespasses))
+        if len(unowned) < len(trespasses):
+            # At least one scanner another shard owns: the two-shard wording,
+            # which tests/snapshot/errors pins, with a sentence for any scanner
+            # no shard owns beside it.
+            message = (
+                "These shards intended to run a scanner assigned to another shard: "
+                f"{listed}. A shard only runs what it was "
+                "assigned, so the exclusion that implements the split did not take "
+                "effect on that executor -- the scanner ran on both shards and its "
+                "findings would be counted once per shard. The assignments themselves "
+                "are disjoint, so no other check here can see this."
+            )
+            if unowned:
+                # The header above speaks of two shards; a scanner outside every
+                # assignment ran on whichever shards selected it.
+                message += (
+                    " A scanner assigned to no shard was selected by a run whose "
+                    "exclusion did not take effect either: it ran on every shard that "
+                    "selected it, outside the split, and its findings would be counted "
+                    "once per such shard."
+                )
+        else:
+            # Every selection names a scanner no shard owns: no other shard ran
+            # it, so the two-shard wording would describe a run that did not
+            # happen.
+            message = (
+                "These shards recorded selecting a scanner that is in no shard's "
+                f"assignment: {listed}. A shard only runs what it was assigned, so "
+                "its provenance does not describe its run: the exclusion that "
+                "implements the split did not take effect on that executor, the "
+                "scanner ran on every shard that selected it, outside the split, and "
+                "its findings would be counted once per such shard. The assignments "
+                "themselves are disjoint, so no other check here can see this."
+            )
+        raise ShardCoverageError(message)
 
 
 def _verify_candidate_agreement(
@@ -568,8 +764,8 @@ def _verify_candidate_agreement(
         raise ShardCoverageError(
             f"The shards partitioned different scanner sets: {detail}. Each "
             f"partition is internally valid, so nothing else here can see this: "
-            f"one executor was missing a plugin module, or --python-only or a "
-            f"config override was applied to some jobs and not others. Merging "
+            f"one executor was missing a plugin module, or a config override "
+            f"was applied to some jobs and not others. Merging "
             f"would report a scan that never covered the scanners the smaller set "
             f"omitted."
         )

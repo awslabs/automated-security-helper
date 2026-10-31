@@ -12,7 +12,8 @@ config was built from a file inside the scanned tree (``config/sandbox_grants.py
 decides that), or from a file an MCP client delivered (``untrusted_config``), those
 options come from the trusted base instead: the defaults, an operator config
 outside the tree, and ``--config-overrides``. Each section a reporter reads under
-any spelling ``AshConfig.get_plugin_config`` accepts is covered, and the values
+any spelling ``AshConfig.get_plugin_config`` accepts is covered, except a section
+named exactly as another loaded reporter, which is that reporter's own. The values
 that are not honored are named in one warning. Under the MCP server the default
 ``denied_paths`` refuse a client's file that sets one of them, and the overrides
 ``resolve_config`` is handed there are the client's, so none is replayed.
@@ -156,6 +157,7 @@ REPORTER_DESTINATION_OPTIONS: Dict[str, Tuple[str, ...]] = {
         "account_id",
         "archive_resolved_findings",
         "findings_scope",
+        *_RETRY_OPTIONS,
     ),
     "bedrock-summary-reporter": (
         "aws_region",
@@ -284,7 +286,10 @@ def confine_reporter_destinations(
             settings: the defaults, or the operator's config outside the tree.
         config_overrides: ``--config-overrides``. Those under ``reporters`` are
             replayed onto ``trusted_config``, the same way the sandbox overrides
-            are, so an override still sets these options.
+            are, so an override still sets these options. One that does not
+            apply to the trusted base is dropped with a warning, as for the
+            operator view (``resolve_config._with_reporter_overrides``); the
+            reporters then keep the base's settings for it.
         in_tree: The config files inside the tree, named in the warning.
         source: Why those files are not the operator's, and the fix, for the
             warning.
@@ -308,7 +313,7 @@ def confine_reporter_destinations(
             every base below it), which the warning names ``<value>``.
     """
     from automated_security_helper.config.resolve_config import (
-        apply_config_overrides,
+        _with_reporter_overrides,
     )
 
     # Read first, so a view of the wrong kind is refused before anything is recorded.
@@ -320,7 +325,16 @@ def confine_reporter_destinations(
         == "reporters"
     ]
     if reporter_overrides:
-        trusted_config = apply_config_overrides(trusted_config, reporter_overrides)
+        # The replay the operator view uses. An override the scan's own apply
+        # resolved under the repository's spelling of a section the trusted base
+        # spells another way is folded onto the trusted base's key first; without
+        # it the replay refuses the only spelling the scan's apply accepted, and
+        # the scan cannot run. An override that applied to the resolved config
+        # but not to the trusted base is dropped with a warning instead of
+        # refusing the whole load.
+        trusted_config = _with_reporter_overrides(
+            trusted_config, reporter_overrides, config
+        )
     config._untrusted_membership_source = source
     config._in_tree_config_files = tuple(in_tree)
     config._trusted_reporter_base = trusted_config
@@ -468,6 +482,7 @@ def confine_declared_reporter_destinations(
             command's own source for ``ash report``, otherwise
             ``IN_TREE_OR_DELIVERED``.
     """
+    from automated_security_helper.base.plugin_config import plugin_config_key
     from automated_security_helper.config.ash_config import AshConfig
 
     if not isinstance(config, AshConfig):
@@ -493,6 +508,7 @@ def confine_declared_reporter_destinations(
             else ()
         ),
         off_host=declared_off_host_reporters(reporter_classes),
+        reporters=[plugin_config_key(reporter) for reporter in reporter_classes],
     )
 
 
@@ -621,8 +637,12 @@ def _config_models(reporter_class: type) -> List[type[BaseModel]]:
 
 
 def _aliases(reporter_class: type, option: str) -> List[str]:
-    """The aliases of field ``option`` in any options model of ``reporter_class``'s config."""
-    from pydantic import AliasChoices
+    """The aliases of field ``option`` in any options model of ``reporter_class``'s config.
+
+    An ``AliasPath`` is listed by its first key: pydantic reads the field from the
+    value nested under that key, so a config that writes the key sets the option.
+    """
+    from pydantic import AliasChoices, AliasPath
 
     aliases: List[str] = []
     for config_model in _config_models(reporter_class):
@@ -639,6 +659,8 @@ def _aliases(reporter_class: type, option: str) -> List[str]:
             else:
                 candidates.append(field.validation_alias)
             for alias in candidates:
+                if isinstance(alias, AliasPath):
+                    alias = alias.path[0] if alias.path else None
                 if isinstance(alias, str) and alias != option and alias not in aliases:
                     aliases.append(alias)
     return aliases
@@ -654,16 +676,23 @@ def _confine(
     whole_sections: Sequence[str] = (),
     off_host: Collection[str] = (),
     environment_paths: Collection[Path] = (),
+    reporters: Collection[str] = (),
 ) -> None:
     """Set each reporter's ``destinations`` options, and the ``enabled`` of each
     reporter of ``enabled_defaults``, to the trusted base's, with one warning.
+
+    ``reporters`` names every reporter loaded, whether or not it is covered here,
+    so that a section named exactly as one is not confined as another's
+    (``_sections_of``).
 
     The whole section of each reporter of ``whole_sections`` is set to the trusted
     base's. For a config ``confine_off_host_reporters_to_overrides`` handled, the
     operator view recorded on it is confined the same way, and what it ignored is
     named once, beside what ``config`` did. ``off_host`` names the reporters of
     ``enabled_defaults`` that send findings off the host: for such a config, only
-    these are held to the opt-in (``_confine_enabled``)."""
+    these are held to the opt-in (``_confine_enabled``). For every config, they
+    are also the reporters that run only for the boolean true
+    (``off_host_reporter_refused``), so none is given a true that is not one."""
     targets = [config]
     view = _operator_view(config) if config._reporters_from_overrides else None
     if view is not None:
@@ -673,6 +702,15 @@ def _confine(
     # The spellings the files wrote are recorded on ``config`` alone. A copy of the
     # operator view has none of its own, so every target is quoted with these.
     tree_keys = config._in_tree_reporter_keys
+    # A section named exactly as one of these is that reporter's own, whatever
+    # another reporter's lookup could read.
+    loaded = {
+        *reporters,
+        *destinations,
+        *enabled_defaults,
+        *whole_sections,
+        *off_host,
+    }
     for target in targets:
         found = _confine_options(
             target,
@@ -681,6 +719,7 @@ def _confine(
             fill_missing=source.fills_missing_sections,
             drop_malformed=config._reporters_from_overrides,
             tree_keys=tree_keys,
+            loaded=loaded,
         )
         found.extend(
             _confine_enabled(
@@ -689,11 +728,19 @@ def _confine(
                 enabled_defaults,
                 off_host=off_host if config._reporters_from_overrides else (),
                 tree_keys=tree_keys,
+                fill_missing=source.fills_missing_sections,
+                requires_true=off_host,
+                loaded=loaded,
             )
         )
         found.extend(
             _confine_whole_sections(
-                target, trusted_config, whole_sections, replaced, tree_keys
+                target,
+                trusted_config,
+                whole_sections,
+                replaced,
+                tree_keys,
+                loaded=loaded,
             )
         )
         named = list(ignored)
@@ -742,8 +789,17 @@ def _operator_view(config: "AshConfig") -> Optional["AshConfig"]:
     )
 
 
-def _sections_of(config: "AshConfig", plugin: str) -> List[str]:
-    """The keys of ``config``'s reporter sections that ``plugin``'s lookup reads."""
+def _sections_of(
+    config: "AshConfig", plugin: str, loaded: Collection[str] = ()
+) -> List[str]:
+    """The keys of ``config``'s reporter sections that ``plugin``'s lookup reads.
+
+    A key named exactly as another reporter of *loaded* is that reporter's own
+    section, which its lookup reads by that name, so it is left out even when both
+    names reduce to the same string (``bedrock-summary`` and
+    ``bedrock-summary-reporter``). Confining it as ``plugin``'s would replace the
+    other reporter's options and ``enabled`` with ``plugin``'s.
+    """
     from automated_security_helper.config.ash_config import (
         plugin_key_lookup_names,
         reduced_plugin_name,
@@ -751,7 +807,12 @@ def _sections_of(config: "AshConfig", plugin: str) -> List[str]:
 
     reduced = reduced_plugin_name(plugin)
     extras = config.reporters.__pydantic_extra__ or {}
-    return [key for key in extras if reduced in plugin_key_lookup_names(key)]
+    return [
+        key
+        for key in extras
+        if reduced in plugin_key_lookup_names(key)
+        and (key == plugin or key not in loaded)
+    ]
 
 
 def _confine_options(
@@ -761,6 +822,7 @@ def _confine_options(
     fill_missing: bool = True,
     drop_malformed: bool = False,
     tree_keys: Optional[Sequence[str]] = None,
+    loaded: Collection[str] = (),
 ) -> List[str]:
     """Set each reporter's ``destinations`` options to the trusted base's.
 
@@ -773,7 +835,9 @@ def _confine_options(
     file that replaces the operator's config and leaves the section out would
     otherwise drop them. Returns the spellings the config set to a value the
     trusted base does not give them, as dotted keys, each under the section
-    spelling the files not the operator's wrote (``_quoted``).
+    spelling the files not the operator's wrote (``_quoted``). A spelling that
+    holds the value the trusted base gives under its other spelling of the name
+    is rewritten to the base's spelling and not returned.
 
     An ``options`` value that is not a mapping holds no option, so it reads as
     empty, and no error is raised for it. With ``drop_malformed`` it is replaced
@@ -786,7 +850,8 @@ def _confine_options(
     read this section.
 
     *tree_keys* are the section spellings the files wrote (``_quoted``); by
-    default the ones recorded on *config*.
+    default the ones recorded on *config*. *loaded* names the reporters whose own
+    sections are not another's (``_sections_of``).
     """
     extras = config.reporters.__pydantic_extra__
     ignored: List[str] = []
@@ -797,7 +862,7 @@ def _confine_options(
     for plugin, option_names in destinations.items():
         trusted_section = _as_dict(trusted_config.get_plugin_config("reporter", plugin))
         trusted_options = _options_of(trusted_section or {})
-        keys = _sections_of(config, plugin)
+        keys = _sections_of(config, plugin, loaded)
         if not keys:
             if not fill_missing:
                 continue
@@ -829,7 +894,7 @@ def _confine_options(
                 if {k: options[k] for k in written} == wanted:
                     continue
                 for spelling in written:
-                    if options[spelling] != wanted.get(spelling, _MISSING):
+                    if not _holds_base_value(options[spelling], spelling, wanted):
                         section_key = _quoted(key, plugin, tree_keys)
                         ignored.append(f"reporters.{section_key}.options.{spelling}")
                     options.pop(spelling)
@@ -847,6 +912,7 @@ def _confine_whole_sections(
     plugins: Sequence[str],
     replaced: Optional[List[str]] = None,
     tree_keys: Optional[Sequence[str]] = None,
+    loaded: Collection[str] = (),
 ) -> List[str]:
     """Give each reporter of ``plugins`` the trusted base's whole section.
 
@@ -860,7 +926,8 @@ def _confine_whole_sections(
     ``reporters.<section>``, under the spelling the files not the operator's wrote
     (``_quoted``). The names of the reporters it replaced a section of are added to
     ``replaced`` when given. *tree_keys* are the section spellings the files wrote;
-    by default the ones recorded on *config*.
+    by default the ones recorded on *config*. *loaded* names the reporters whose
+    own sections are not another's (``_sections_of``).
     """
     extras = config.reporters.__pydantic_extra__
     ignored: List[str] = []
@@ -870,7 +937,7 @@ def _confine_whole_sections(
         tree_keys = config._in_tree_reporter_keys
     for plugin in plugins:
         wanted = _as_dict(trusted_config.get_plugin_config("reporter", plugin)) or {}
-        for key in _sections_of(config, plugin):
+        for key in _sections_of(config, plugin, loaded):
             if _as_section(extras[key]) == wanted:
                 continue
             ignored.append(f"reporters.{_quoted(key, plugin, tree_keys)}")
@@ -890,12 +957,27 @@ def _spellings(options: Mapping[Any, Any], name: str) -> List[str]:
     ]
 
 
+def _holds_base_value(value: Any, spelling: str, wanted: Mapping[str, Any]) -> bool:
+    """Whether ``value``, written under ``spelling``, is what the trusted base gives.
+
+    *wanted* maps each spelling of the option that the trusted base writes to its
+    value. A config merge reads the ``-`` and ``_`` spellings of a name as one key,
+    so a value equal to the base's under its other spelling is the base's value.
+    """
+    if spelling in wanted:
+        return bool(value == wanted[spelling])
+    return bool(wanted) and all(value == base for base in wanted.values())
+
+
 def _confine_enabled(
     config: "AshConfig",
     trusted_config: "AshConfig",
     enabled_defaults: Mapping[str, bool],
     off_host: Collection[str] = (),
     tree_keys: Optional[Sequence[str]] = None,
+    fill_missing: bool = True,
+    requires_true: Collection[str] = (),
+    loaded: Collection[str] = (),
 ) -> List[str]:
     """Give each reporter of ``enabled_defaults`` the trusted base's ``enabled``.
 
@@ -906,9 +988,17 @@ def _confine_enabled(
     is given it, and the key of each whose ``enabled`` the reporter reads
     differently, or would refuse, is returned. A section that writes no
     ``enabled`` is set only where the reporter's default differs from the wanted
-    value, and a config with no section for the reporter gets one in that case.
+    value, and a config with no section for the reporter gets one in that case,
+    unless *fill_missing* is false (``UntrustedSource.fills_missing_sections``):
+    a recorded config that leaves a reporter out is not given a section.
     A key is returned under the section spelling the files not the operator's
     wrote (``_quoted``).
+
+    A reporter of *requires_true* runs only for the boolean true
+    (``off_host_reporter_refused``). Where the trusted base's ``enabled`` reads as
+    on without being true (``1``, ``"yes"``), the sections are given that value
+    itself and not a true: the reporter is refused with the base's own value, as
+    it is under the base alone, and the report step names the value's type.
 
     ``off_host`` (``ash report``, ``ash merge``) names the reporters of
     ``enabled_defaults`` that send findings off the host, for a command that takes
@@ -927,7 +1017,8 @@ def _confine_enabled(
     is not an opt-in.
 
     *tree_keys* are the section spellings the files wrote; by default the ones
-    recorded on *config*.
+    recorded on *config*. *loaded* names the reporters whose own sections are not
+    another's (``_sections_of``).
     """
     extras = config.reporters.__pydantic_extra__
     ignored: List[str] = []
@@ -937,10 +1028,14 @@ def _confine_enabled(
         tree_keys = config._in_tree_reporter_keys
     for plugin, default in enabled_defaults.items():
         trusted_section = _as_dict(trusted_config.get_plugin_config("reporter", plugin))
-        wanted = not _reads_as_off((trusted_section or {}).get("enabled", default))
-        keys = _sections_of(config, plugin)
-        if not keys and _reads_as_off(default) == wanted:
-            extras[plugin] = {"enabled": wanted}
+        base_enabled = (trusted_section or {}).get("enabled", default)
+        wanted = not _reads_as_off(base_enabled)
+        given: Any = wanted
+        if plugin in requires_true and wanted and base_enabled is not True:
+            given = base_enabled
+        keys = _sections_of(config, plugin, loaded)
+        if fill_missing and not keys and _reads_as_off(default) == wanted:
+            extras[plugin] = {"enabled": given}
         for key in keys:
             section = _as_section(extras[key])
             current = section.get("enabled", _MISSING)
@@ -960,10 +1055,10 @@ def _confine_enabled(
             if current is _MISSING:
                 if _reads_as_off(default) != wanted:
                     continue
-            elif current is wanted:
+            elif current is given:
                 continue
             elif _reads_as(current) != wanted:
                 ignored.append(f"reporters.{_quoted(key, plugin, tree_keys)}.enabled")
-            section["enabled"] = wanted
+            section["enabled"] = given
             extras[key] = section
     return ignored

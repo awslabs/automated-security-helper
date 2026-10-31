@@ -37,6 +37,7 @@ import os
 import sys
 import types
 import zipfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -1526,6 +1527,7 @@ jobs:
     uses: ./.github/workflows/run-ash-security-scan.yml
   sarif:
     needs: ash
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/upload-ash-sarif.yml
 """
 CALLED_BOTH = {
@@ -1552,6 +1554,19 @@ def test_a_reusable_call_expects_the_called_workflow_s_own_jobs():
         "ash": ("failure", 1, True),
         "upload-sarif": ("success", 1, False),
     }
+
+
+def test_a_dependent_of_the_gated_scan_is_left_out_without_an_if_that_admits_it():
+    """GitHub skips a job whose ``needs`` failed unless its ``if`` says otherwise, so
+    a SARIF job with a plain ``needs: ash`` never runs after the gated scan fails,
+    and act is not expected to report it."""
+    reports = _module("reports")
+    plain = REUSABLE_CALLER.replace("    if: ${{ !cancelled() }}\n", "")
+    plan = reports.act_job_plan(
+        reports.load_workflow(plain),
+        {name: reports.load_workflow(text) for name, text in CALLED_BOTH.items()},
+    )
+    assert sorted(plan) == ["ash"], plan
 
 
 def test_a_call_of_a_workflow_that_was_not_copied_is_an_error():
@@ -1651,6 +1666,59 @@ def test_junit_counts_read_every_report_under_a_directory(tmp_path):
     (tmp_path / "ash-findings" / "summary.json").write_text("{}")
     (tmp_path / "broken.xml").write_text("not xml")
     assert counts(tmp_path) == (5, 3)
+
+
+def test_junit_counts_read_the_reports_the_codebuild_agent_zips(tmp_path):
+    """The CodeBuild agent keeps each report group as ``reports-<name>.zip`` holding the
+    JUnit files (measured on the hosted codebuild-agent leg: ``reports-ash-findings.zip``
+    with one ``ash.junit.xml``); the zipped members count like plain files, a member
+    that is not JUnit XML counts nothing, and a file that is not a zip is skipped."""
+    counts = _api("reports", "junit_counts")
+    _junit_report(tmp_path / "plain" / "ash.junit.xml", 1, 1)
+    zipped = tmp_path / "zipped"
+    zipped.mkdir()
+    _junit_report(zipped / "ash.junit.xml", 3, 2)
+    (zipped / "notes.xml").write_text("not xml", "utf-8")
+    with zipfile.ZipFile(tmp_path / "reports-ash-findings.zip", "w") as archive:
+        archive.write(zipped / "ash.junit.xml", "ash.junit.xml")
+        archive.write(zipped / "notes.xml", "notes.xml")
+        archive.writestr("readme.txt", "<testcase name='not counted'/>")
+    (tmp_path / "zipped" / "ash.junit.xml").unlink()
+    (tmp_path / "zipped" / "notes.xml").unlink()
+    (tmp_path / "broken.zip").write_bytes(b"PK\x03\x04 not a zip")
+    # 1 failed + 1 passed in the plain report, 3 failed + 2 passed in the zipped one.
+    assert counts(tmp_path) == (7, 4)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(zlib.error("corrupt deflate data"), id="corrupt deflate data"),
+        pytest.param(EOFError("truncated member"), id="truncated member"),
+        pytest.param(RuntimeError("File 'x' is encrypted"), id="encrypted member"),
+        pytest.param(
+            NotImplementedError("compression method"), id="unsupported method"
+        ),
+    ],
+)
+def test_junit_counts_pass_over_a_zip_whose_members_cannot_be_read(
+    tmp_path, monkeypatch, error
+):
+    """Each error zipfile raises while reading a member leaves that archive counted
+    as nothing, the way a file that is not a zip is, and the plain reports still count;
+    none of them escapes to abort the leg's judge."""
+    counts = _api("reports", "junit_counts")
+    _junit_report(tmp_path / "plain" / "ash.junit.xml", 1, 1)
+    _junit_report(tmp_path / "zipped" / "ash.junit.xml", 3, 2)
+    with zipfile.ZipFile(tmp_path / "reports-ash-findings.zip", "w") as archive:
+        archive.write(tmp_path / "zipped" / "ash.junit.xml", "ash.junit.xml")
+    (tmp_path / "zipped" / "ash.junit.xml").unlink()
+
+    def failing_read(self, name, pwd=None):
+        raise error
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", failing_read)
+    assert counts(tmp_path) == (2, 1)
 
 
 def test_the_gate_job_reads_the_exit_code_the_scan_job_kept(tmp_path):

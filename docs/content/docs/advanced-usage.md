@@ -80,6 +80,7 @@ ash --mode precommit
 
 ### Nix Mode
 
+<!-- doctest: illustrative reason="needs Nix" -->
 ```bash
 ash --mode nix
 ```
@@ -593,7 +594,7 @@ logging.getLogger("ash").addHandler(handler)
 
 ## CI/CD Integration
 
-> **Tip**: The examples below use pinned versions (`@v3.7.0`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD.
+> **Tip**: The examples below use pinned versions (`@v3.7.1`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD.
 
 ### GitHub Actions
 
@@ -617,7 +618,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
@@ -639,7 +640,7 @@ jobs:
 ash-scan:
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
     - ash --mode local
   artifacts:
     paths:

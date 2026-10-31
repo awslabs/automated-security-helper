@@ -205,7 +205,7 @@ def test_verification_checks_the_extras_the_scan_needs(offline_host, plugin_cont
 
     dry_runs = [c for c in host.calls if c[1:3] == ["pip", "install"]]
     assert dry_runs, "the environment's extras were never checked"
-    assert dry_runs[0][-1] == "bandit[sarif,toml]>=1.7.0,<2.0.0"
+    assert dry_runs[0][-1] == "bandit[sarif,toml]>=1.7.8,<2.0.0"
     assert dry_runs[0][dry_runs[0].index("--python") + 1] == str(
         Path(host.tool_path).parent / "python"
     )
@@ -222,7 +222,7 @@ def test_offline_pre_installed_bandit_without_sarif_is_missing_with_a_named_reas
     reason = scanner.dependency_unavailable_reason
     assert reason is not None
     assert "missing extra: sarif" in reason
-    assert "uv tool install 'bandit[sarif,toml]>=1.7.0,<2.0.0'" in reason
+    assert "uv tool install 'bandit[sarif,toml]>=1.7.8,<2.0.0'" in reason
 
 
 def test_online_pre_installed_bandit_without_sarif_keeps_uv(
@@ -279,7 +279,7 @@ def test_unexplained_offline_resolve_failure_is_named_in_the_scan_error(
 
     message = str(excinfo.value)
     assert (
-        "Offline mode: uv could not resolve 'bandit[sarif,toml]>=1.7.0,<2.0.0'"
+        "Offline mode: uv could not resolve 'bandit[sarif,toml]>=1.7.8,<2.0.0'"
         in message
     )
     assert message.index("Offline mode:") < message.index("No solution found")

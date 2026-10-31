@@ -29,15 +29,21 @@ Name = Union[str, "os.PathLike[str]"]
 
 def _quoted_forms(name: Name) -> Set[str]:
     """The texts a message can quote *name* by: a str as it is, and a path as
-    given, absolute and resolved, since a loader may open it by any of them."""
+    given, absolute and resolved, since a loader may open it by any of them.
+
+    The absolute and the resolved form need the working directory, which can be
+    gone while a refusal is being printed; a form that cannot be made is left
+    out rather than raised from the printer.
+    """
     if isinstance(name, str):
         return {name}
     path = Path(name)
-    forms = {str(path), path.as_posix(), str(path.absolute())}
-    try:
-        forms.add(str(path.resolve()))
-    except (OSError, RuntimeError):
-        pass
+    forms = {str(path), path.as_posix()}
+    for spelled in (path.absolute, path.resolve):
+        try:
+            forms.add(str(spelled()))
+        except (OSError, RuntimeError):
+            pass
     return forms
 
 

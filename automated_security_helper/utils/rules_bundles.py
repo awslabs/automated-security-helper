@@ -88,17 +88,22 @@ or any directory above it.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import http.client
 import json
 import os
 import re
 import shutil
+import socket
+import ssl
 import tempfile
+import urllib.error
 import zipfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -121,6 +126,11 @@ _SAFE_MEMBER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # ~4MB, so these are two orders of magnitude of headroom and still bound a zip bomb.
 _MAX_MEMBER_BYTES = 16 * 1024 * 1024
 _MAX_TOTAL_BYTES = 128 * 1024 * 1024
+
+# What an install does under its lock besides the download: extract an archive
+# bounded by _MAX_TOTAL_BYTES and rename two directories. The lock wait another
+# installer grants it adds this to the download's own worst case.
+_INSTALL_LOCK_MARGIN_SECONDS = 120.0
 
 
 class RulesBundleUnavailable(Exception):
@@ -155,11 +165,25 @@ def rules_root() -> Path:
             ``current_bin_path`` has no directory (``ASH_BIN_PATH`` unset and no
             usable home for ``~/.ash/bin``), so there is nothing to put ``share``
             beside. The tool installs refuse for the same reason, with the same
-            text (``download_utils.NO_BIN_DIRECTORY``).
+            text (``download_utils.NO_BIN_DIRECTORY``). Or
+            ``$ASH_CFN_GUARD_RULES_DIR`` is set to a relative path: the install
+            runs in a child whose working directory is an empty temporary one,
+            cfn-guard reads the rules from the source directory, and the scan
+            checks them from ASH's own, so a relative path names a different
+            directory in each. A leading ``~`` is expanded first.
     """
     from_env = os.environ.get(RULES_DIR_ENV)
     if from_env:
-        return Path(from_env)
+        expanded = os.path.expanduser(from_env)
+        if not os.path.isabs(expanded):
+            raise RulesBundleUnavailable(
+                f"{RULES_DIR_ENV} must be an absolute path: a relative one is "
+                "read against the working directory of whichever process reads "
+                "it (the install child's temporary directory, the scanned "
+                "source directory, ASH's own), so the rules installed under it "
+                "are not the ones the scan reads."
+            )
+        return Path(expanded)
     from automated_security_helper.utils.download_utils import (
         NO_BIN_DIRECTORY,
         current_bin_path,
@@ -239,8 +263,20 @@ def _bundle_problem(
     The test both the installer and the scanner make, described in the module
     docstring. It reads the rule files only; the manifest plays no part.
     """
-    if not directory.is_dir():
-        if directory.exists() or directory.is_symlink():
+    try:
+        is_dir = directory.is_dir()
+        present = is_dir or directory.exists() or directory.is_symlink()
+    except OSError as exc:
+        # On Python 3.10-3.13 Path.is_dir and Path.exists re-raise PermissionError
+        # for a directory under an ancestor this process may not search. That is
+        # a reason the bundle cannot be used, reported as one, not an exception
+        # past the RulesBundleUnavailable contract of the dependency check.
+        return {}, (
+            f"{directory} could not be read ({exc}), so the {bundle.name} "
+            f"{bundle.version} rules there cannot be checked"
+        )
+    if not is_dir:
+        if present:
             return {}, (
                 f"{directory} is not a directory, so the {bundle.name} "
                 f"{bundle.version} rules are not installed there"
@@ -288,7 +324,9 @@ def extract_bundle(
 
     Raises:
         ToolDownloadIntegrityError: the archive is unreadable, holds no members,
-            holds two members with one name, or exceeds a size cap.
+            holds two members with one name (or two names that differ only in
+            case, which one filesystem keeps apart and another does not), a
+            member that cannot be read, or exceeds a size cap.
     """
     try:
         bundle_zip = zipfile.ZipFile(archive)
@@ -299,16 +337,18 @@ def extract_bundle(
         ) from exc
 
     written: Dict[str, str] = {}
+    written_folded: Dict[str, str] = {}
     total = 0
     with bundle_zip:
         for info in bundle_zip.infolist():
             name = _member_basename(info, bundle.member_dir, bundle.member_suffix)
             if name is None:
                 continue
-            if name in written:
+            if name.lower() in written_folded:
+                earlier = written_folded[name.lower()]
                 raise ToolDownloadIntegrityError(
-                    f"{archive.name} holds two members named {name}; refusing to guess "
-                    "which one is the rule file"
+                    f"{archive.name} holds two members named {earlier} and {name}; "
+                    "refusing to guess which one is the rule file"
                 )
             if info.file_size > _MAX_MEMBER_BYTES:
                 raise ToolDownloadIntegrityError(
@@ -318,25 +358,61 @@ def extract_bundle(
             target = staging.joinpath(name)
             size = 0
             digest = hashlib.sha256()
-            # O_EXCL: the staging directory is ours and fresh, so an existing name
-            # here means something raced us, and that is refused. O_BINARY because
-            # os.open on Windows otherwise opens in text mode and rewrites newlines,
-            # which would make every file disagree with the digest recorded below.
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
-            fd = os.open(target, flags, 0o644)
-            with bundle_zip.open(info) as source, os.fdopen(fd, "wb") as handle:
-                for chunk in iter(lambda: source.read(1024 * 256), b""):
-                    size += len(chunk)
-                    total += len(chunk)
-                    # Checked on the bytes read, not only on the declared size, which
-                    # an archive can understate.
-                    if size > _MAX_MEMBER_BYTES or total > _MAX_TOTAL_BYTES:
+            # The member is opened BEFORE the destination: a member that cannot be
+            # opened (a bad local header, an unsupported compression, an encrypted
+            # entry) used to leave the destination's descriptor open, and its
+            # error was not the integrity error the callers handle.
+            try:
+                source = bundle_zip.open(info)
+            except (
+                zipfile.BadZipFile,
+                RuntimeError,
+                NotImplementedError,
+                OSError,
+            ) as exc:
+                raise ToolDownloadIntegrityError(
+                    f"{archive.name}: {name} cannot be read from the archive ({exc}); "
+                    "refusing to install from it"
+                ) from exc
+            with source:
+                # O_EXCL: the staging directory is ours and fresh, so an existing name
+                # here means something raced us, and that is refused. O_BINARY because
+                # os.open on Windows otherwise opens in text mode and rewrites newlines,
+                # which would make every file disagree with the digest recorded below.
+                flags = (
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+                )
+                try:
+                    fd = os.open(target, flags, 0o644)
+                except FileExistsError as exc:
+                    raise ToolDownloadIntegrityError(
+                        f"{archive.name}: {name} was already written into the staging "
+                        "directory; refusing to guess which member is the rule file"
+                    ) from exc
+                with os.fdopen(fd, "wb") as handle:
+                    try:
+                        for chunk in iter(lambda: source.read(1024 * 256), b""):
+                            size += len(chunk)
+                            total += len(chunk)
+                            # Checked on the bytes read, not only on the declared
+                            # size, which an archive can understate.
+                            if size > _MAX_MEMBER_BYTES or total > _MAX_TOTAL_BYTES:
+                                raise ToolDownloadIntegrityError(
+                                    f"{archive.name} expands past ASH's size cap; "
+                                    "refusing it"
+                                )
+                            digest.update(chunk)
+                            handle.write(chunk)
+                    except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
+                        # A member whose data does not decompress or whose CRC does
+                        # not match is a damaged archive, the integrity error the
+                        # callers handle, not an untyped exception out of them.
                         raise ToolDownloadIntegrityError(
-                            f"{archive.name} expands past ASH's size cap; refusing it"
-                        )
-                    digest.update(chunk)
-                    handle.write(chunk)
+                            f"{archive.name}: {name} is damaged ({exc}); refusing to "
+                            "install from it"
+                        ) from exc
             written[name] = digest.hexdigest()
+            written_folded[name.lower()] = name
 
     if not written:
         raise ToolDownloadIntegrityError(
@@ -400,14 +476,30 @@ def install_rules_bundle(
     Raises:
         ToolNotProvisionableError: ``name`` is not a pinned bundle.
         ToolDownloadIntegrityError: the download does not match its pinned digest,
-            the files extracted from it do not match the pinned contents, or the
-            archive is unusable.
+            the server redirected it off https, the files extracted from it do not
+            match the pinned contents, or the archive is unusable.
         RulesBundleUnavailable: the bundle needs installing and the download
-            failed; the rules in place, if any, are left as they were. Also raised
-            before anything is created or downloaded when ``root`` is not given
-            and ``rules_root`` has no directory.
+            failed, or the rules root cannot be written; the rules in place, if
+            any, are left as they were. Also raised before anything is created or
+            downloaded when ``root`` is not given and ``rules_root`` has no
+            directory.
+
+    Two installs of one bundle at a time (two ``ash dependencies install``
+    processes, or two scans installing on demand) are serialized on a lock file
+    in the rules root; the second finds the bundle in place and skips. Replacing
+    a bundle still moves the old directory aside before the new one is renamed
+    in, so a scan reading at that instant can find no bundle under the final
+    name; a swap with no such instant needs a different layout (a versioned
+    directory behind a link) and is not attempted here.
     """
-    from automated_security_helper.utils.download_utils import download_file
+    from automated_security_helper.utils.download_utils import (
+        download_file,
+        download_wait_bound_seconds,
+    )
+    from automated_security_helper.utils.file_lock import (
+        LOCK_TIMEOUT_SECONDS,
+        exclusive_lock,
+    )
     from automated_security_helper.utils.tool_downloads import get_rules_bundle
 
     bundle = get_rules_bundle(name)
@@ -426,8 +518,92 @@ def install_rules_bundle(
         ASH_LOGGER.debug(f"Installing {bundle.name}: {found}")
         problem = found
 
-    root.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=".ash-rules-staging-", dir=root))
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # The documented refusal, not a raw PermissionError: the reason a
+        # reinstall was attempted rides with it, so an operator reading the
+        # error knows both what was wrong and why nothing could be done.
+        raise RulesBundleUnavailable(
+            f"{problem}, and the rules directory {root} could not be created "
+            f"({exc}). Make it writable, or set {RULES_DIR_ENV} to a directory "
+            "ASH can write."
+        ) from exc
+
+    # The wait for another installer's lock is sized from what that installer can
+    # be doing while healthy: a download that spends every attempt and every
+    # backoff of its retry policy, plus the extraction and the renames, and never
+    # less than the lock's default, the backstop for a holder that died. Under
+    # the default alone an operator who raised ASH_DOWNLOAD_MAX_ATTEMPTS could
+    # outlast it while still downloading, and the waiter gave a live installer up
+    # for dead. The two errors the lock raises (TimeoutError once the wait is
+    # spent; OSError when the lock file is not a regular file, or its directory
+    # cannot be made) are worded here as the documented refusal: raw, they left
+    # the scanner reporting a traceback instead of the reason it is MISSING.
+    lock_path = root.joinpath(".ash-rules-install.lock")
+    lock_wait = max(
+        LOCK_TIMEOUT_SECONDS,
+        download_wait_bound_seconds() + _INSTALL_LOCK_MARGIN_SECONDS,
+    )
+    with contextlib.ExitStack() as held:
+        try:
+            held.enter_context(exclusive_lock(lock_path, timeout=lock_wait))
+        except TimeoutError as exc:
+            if exc.errno is not None:
+                # The kernel's ETIMEDOUT (an open on a hung network mount),
+                # not file_lock's own wait: file_lock raises a TimeoutError
+                # with no errno once another holder has kept the lock past
+                # its bound, and only that one means another install.
+                raise RulesBundleUnavailable(
+                    f"{problem}, and the install lock {lock_path} could not be "
+                    f"opened ({exc}). Make the rules directory reachable and "
+                    f"writable, or set {RULES_DIR_ENV} to a directory ASH can write."
+                ) from exc
+            raise RulesBundleUnavailable(
+                f"{problem}, and another ASH process held the install lock "
+                f"{lock_path} for {lock_wait:g} seconds ({exc}). Wait for that "
+                "install to finish, then run the install again."
+            ) from exc
+        except OSError as exc:
+            # The lock is a file in the rules root. A root that exists but is
+            # not writable (the image's root-owned directory, run as another
+            # user) passes the mkdir above and fails here, so this is the same
+            # documented refusal, not a raw PermissionError out of the lock.
+            raise RulesBundleUnavailable(
+                f"{problem}, and the install lock {lock_path} could not be opened "
+                f"({exc}). Make the rules directory writable, or set "
+                f"{RULES_DIR_ENV} to a directory ASH can write."
+            ) from exc
+        if not force:
+            # Another install may have finished while this one waited for the
+            # lock: the check is made again under it, so two concurrent installs
+            # never race on the final rename and the first one's work is kept.
+            _, found = _bundle_problem(bundle, final)
+            if found is None:
+                ASH_LOGGER.info(
+                    f"{bundle.name} {bundle.version} rules already installed at "
+                    f"{final}, skipping download"
+                )
+                return final
+        return _install_locked(bundle, root, final, problem, download_file)
+
+
+def _install_locked(
+    bundle: "RulesBundle",
+    root: Path,
+    final: Path,
+    problem: str,
+    download_file: Callable[..., Any],
+) -> Path:
+    """The download, extraction and rename of ``install_rules_bundle``, under its lock."""
+    try:
+        staging = Path(tempfile.mkdtemp(prefix=".ash-rules-staging-", dir=root))
+    except OSError as exc:
+        raise RulesBundleUnavailable(
+            f"{problem}, and nothing can be written under the rules directory "
+            f"{root} ({exc}). Make it writable, or set {RULES_DIR_ENV} to a "
+            "directory ASH can write."
+        ) from exc
     try:
         with tempfile.TemporaryDirectory(prefix="ash-rules-download-") as download_dir:
             try:
@@ -436,15 +612,28 @@ def install_rules_bundle(
                     Path(download_dir),
                     rename_to=bundle.url.rsplit("/", 1)[-1],
                     expected_sha256=bundle.sha256,
+                    # A rules bundle is data, not a program to run.
+                    mode=0o644,
                 )
             except (OSError, http.client.HTTPException) as exc:
                 # URLError, HTTPError, timeouts and dropped connections, once
                 # download_file's retries are spent. A digest mismatch is a
-                # ToolDownloadIntegrityError and is not caught here.
+                # ToolDownloadIntegrityError and is not caught here. A local
+                # OSError (a full disk, a download directory that cannot be
+                # written) is not a network failure, and is worded as what it is.
+                if _is_network_failure(exc):
+                    remedy = (
+                        "Installing the pinned rules needs network access, or use "
+                        "the ASH container image, which ships them."
+                    )
+                else:
+                    remedy = (
+                        "The failure is local, not the network: check the free "
+                        "space and the permissions of the temporary directory."
+                    )
                 raise RulesBundleUnavailable(
                     f"{problem}, and the pinned archive {bundle.url} could not be "
-                    f"downloaded ({exc}). Installing the pinned rules needs network "
-                    "access, or use the ASH container image, which ships them."
+                    f"downloaded ({exc}). {remedy}"
                 ) from exc
             files = extract_bundle(archive, bundle, staging)
         actual = contents_digest(files)
@@ -466,18 +655,88 @@ def install_rules_bundle(
         os.chmod(staging, 0o755)  # nosec B103 - read-only rules directory
         for child in staging.iterdir():
             os.chmod(child, 0o644)
+        aside: Optional[Path] = None
         if final.exists() or final.is_symlink():
             # Moved aside, not deleted in place, so the final name is never a
             # half-removed directory. A symlink is unlinked rather than followed.
             aside = Path(tempfile.mkdtemp(prefix=".ash-rules-old-", dir=root))
-            os.replace(final, aside.joinpath("old"))
+            try:
+                os.replace(final, aside.joinpath("old"))
+            except OSError as exc:
+                # The old bundle stays where it was; the empty directory made
+                # for it is not left behind in the rules root. The documented
+                # refusal, as for every other local failure of the install: a
+                # rule file a scan holds open (Windows refuses the rename), or
+                # a root this user may not write into.
+                shutil.rmtree(aside, ignore_errors=True)
+                raise RulesBundleUnavailable(
+                    f"{problem}, and the rules in place at {final} could not be "
+                    f"moved aside ({exc}). Make sure no scan is reading them and "
+                    f"the rules directory is writable, or set {RULES_DIR_ENV} to "
+                    "a directory ASH can write."
+                ) from exc
+        try:
+            os.replace(staging, final)
+        except OSError as exc:
+            # The rules that were in place go back before the refusal, so a
+            # failed rename leaves the bundle as it was, as the docstring
+            # promises, not a rules root with no bundle under the final name.
+            # The aside is kept until the new bundle is in place for this.
+            restored = aside is None
+            if aside is not None:
+                try:
+                    os.replace(aside.joinpath("old"), final)
+                    restored = True
+                except OSError:
+                    restored = False
+            if aside is not None and restored:
+                shutil.rmtree(aside, ignore_errors=True)
+            where = (
+                ""
+                if aside is None
+                else (
+                    " The rules that were in place were moved back."
+                    if restored
+                    else " The rules that were in place could not be moved back; "
+                    f"they are at {aside.joinpath('old')}."
+                )
+            )
+            raise RulesBundleUnavailable(
+                f"{problem}, and the downloaded rules could not be moved into "
+                f"place at {final} ({exc}).{where} Make the rules directory "
+                f"writable, or set {RULES_DIR_ENV} to a directory ASH can write."
+            ) from exc
+        if aside is not None:
             shutil.rmtree(aside, ignore_errors=True)
-        os.replace(staging, final)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
     ASH_LOGGER.info(f"Installed {bundle.name} {bundle.version} rules to {final}")
     return final
+
+
+def _is_network_failure(error: BaseException) -> bool:
+    """Whether ``error`` from the download is the network's, not this host's.
+
+    urllib's URLError and HTTPError, an HTTP protocol error, a connection reset
+    or refused, a socket timeout, a TLS failure while the body is read (an
+    ``ssl.SSLEOFError`` from a proxy that drops the connection) and a name that
+    does not resolve are the network's. Any other OSError (a PermissionError or
+    a full disk writing the archive) is local, and telling the operator to find
+    network access for it sends them the wrong way.
+    """
+    return isinstance(
+        error,
+        (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            ConnectionError,
+            TimeoutError,
+            ssl.SSLError,
+            socket.gaierror,
+            socket.herror,
+        ),
+    )
 
 
 def create_rules_bundle_install_command(name: str) -> "CustomCommand":

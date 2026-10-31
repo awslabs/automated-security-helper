@@ -19,6 +19,7 @@ import stat
 import threading
 import time
 import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import (
@@ -123,10 +124,51 @@ MCP_SCAN_OUTPUT_REMEDY = (
 _scan_tasks: Dict["asyncio.Task[None]", str] = {}
 
 
-def _start_scan_task(scan_id: str, runner: Any) -> None:
-    task = asyncio.create_task(runner)
+def _start_scan_task(
+    scan_id: str,
+    runner: Any,
+    *,
+    if_never_run: Optional[Callable[[], None]] = None,
+) -> None:
+    """Start ``runner``, a scan's coroutine, as the scan's task.
+
+    ``if_never_run`` is what to do when the task ends without the runner having
+    run a line. A task cancelled before the loop first ran it (the server
+    stopping right after the start) runs no line of the coroutine, its
+    ``finally`` included, so what that ``finally`` would have released -- the
+    session claim, the count against the per-session limit, the PENDING entry
+    -- is released by this callback instead.
+
+    Whether the runner ran is this function's own reading: the runner is started
+    through a wrapper that marks the start as its first step, before the first
+    line of the runner, so the mark cannot be left out. Handed in as a marker
+    the caller also had to pass to the runner, a caller that passed it here
+    alone would have had the callback release, a second time, everything a
+    runner that did run released itself.
+    """
+    ran = False
+
+    async def _mark_then_run() -> None:
+        nonlocal ran
+        ran = True
+        await runner
+
+    task = asyncio.create_task(_mark_then_run())
     _scan_tasks[task] = scan_id
     task.add_done_callback(lambda done: _scan_tasks.pop(done, None))
+
+    def _release_if_the_runner_never_ran(done: "asyncio.Task[None]") -> None:
+        if ran:
+            return
+        # The runner was never awaited: closed here, so nothing warns of an
+        # un-awaited coroutine when it is collected.
+        close = getattr(runner, "close", None)
+        if close is not None:
+            close()
+        if if_never_run is not None:
+            if_never_run()
+
+    task.add_done_callback(_release_if_the_runner_never_ran)
     # The scan's log scope, which the task inherits from this context, is held
     # until the task is done, however it ends: a runner cancelled before the
     # loop first ran it never reaches its own cleanup, and an open scope the
@@ -321,6 +363,15 @@ OUTPUT_DIR_NOT_USABLE = "output_dir_not_usable"
 #: the finding's file alone: its path holds a backslash, a separator in a pattern
 #: (path_matching.literal_path_pattern).
 PATH_NOT_EXPRESSIBLE = "path_not_expressible"
+
+#: ``error_type`` of a suggest_suppression refused because the finding names no
+#: file or no rule: a suppression built from it would match nothing (an empty
+#: path), or every rule in the file (no rule id), never that finding alone.
+SUPPRESSION_NOT_SPECIFIC = "suppression_not_specific"
+
+#: ``error_type`` of a suggest_suppression refused for an ``expiration`` that is
+#: not a YYYY-MM-DD date (``models.core.EXPIRATION_RULE``).
+INVALID_EXPIRATION = "invalid_expiration"
 
 
 def output_directory_refusal(
@@ -920,6 +971,58 @@ def _config_load_failure(
     )
 
 
+def _bound_profile_unavailable(error: Exception, operation: str) -> Dict[str, Any]:
+    """The response of ``operation`` when the session's bound profile cannot be used.
+
+    The profile ``select_profile`` bound is no longer registered, or its file is
+    gone and cannot be written to the session's workspace again. That is the
+    session's state, not the file the call asked about, so it is answered as
+    ``run_ash_scan`` answers it (``bound_profile_unavailable``) and never as
+    that file's load failure.
+
+    The two causes are told apart by the error's ``workspace_unwritable``
+    (``BoundProfileUnavailableError``), as ``run_ash_scan`` tells them: False
+    when the profile is no longer registered, which is a config refusal, exit
+    code 3; True when the session's workspace cannot be written (the writer's
+    error, an OSError or the sandbox's RuntimeError, is the chained cause),
+    which is the server's failure and not the caller's config: exit code 1, the
+    category of the cause, and a warning in the server log for the operator,
+    who is the one that can act on a workspace permission. Answered as a config
+    refusal, an unwritable workspace read as the caller's own fault and left
+    nothing in the log. An error that is not a ``BoundProfileUnavailableError``
+    is the first kind.
+    """
+    if not getattr(error, "workspace_unwritable", False):
+        return with_exit_code(
+            {
+                "success": False,
+                "error": raw_controls_on_one_line(str(error)),
+                "error_type": "bound_profile_unavailable",
+                "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+                "operation": operation,
+            },
+            REFUSED_CONFIG_EXIT_CODE,
+        )
+    _logger.warning(
+        "The session's bound profile could not be written to its workspace, so "
+        f"{operation} was refused: {raw_controls_on_one_line(str(error))}"
+    )
+    return with_exit_code(
+        {
+            "success": False,
+            "error": raw_controls_on_one_line(str(error)),
+            "error_type": "bound_profile_unavailable",
+            "error_category": (
+                ErrorCategory.PERMISSION_DENIED.value
+                if isinstance(error.__cause__, PermissionError)
+                else ErrorCategory.UNEXPECTED_ERROR.value
+            ),
+            "operation": operation,
+        },
+        REFUSED_INTERNAL_EXIT_CODE,
+    )
+
+
 class _ConfigPreCheck(NamedTuple):
     """What one resolution of the scan's config gives the start path.
 
@@ -967,8 +1070,8 @@ def _config_pre_check(
     import yaml
 
     from automated_security_helper.cli.mcp.sandbox import (
+        client_named_config_is_untrusted,
         config_base_gate,
-        config_is_client_supplied,
     )
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
@@ -998,15 +1101,29 @@ def _config_pre_check(
         if config_path is None:
             return _ConfigPreCheck(None, None, ())
     path: Path = config_path
-    # The scan's own settings for this chain (see the docstring): a client-
-    # supplied file resolves with every chain file confined, any other with
+    # The scan's own settings for this chain (see the docstring): a named file
+    # the client chose resolves with every chain file confined, any other with
     # the files of the scanned tree and of any other checkout confined and the
-    # operator's writes owned.
-    settings = scan_repository_settings(
-        scanned_trees(source_dir),
-        every_file=client_named and config_is_client_supplied(path),
-    )
+    # operator's writes owned. The predicate is the scan's own
+    # (_run_scan's untrusted_config, through client_named_config_is_untrusted):
+    # a named path is the client's unless the operator set it aside, in a
+    # config root or as this session's profile file. Judging only whether a
+    # client delivered the file read a named file elsewhere with the
+    # operator's settings while the scan read it confined, and a refusal of
+    # that read was swallowed below as the scan's.
     try:
+        # Inside the try: the predicate reads the filesystem (a resolve, a
+        # samefile), so a link loop at the named path, or its directory gone
+        # since the request was made, raises an OSError here. Outside the try
+        # it left this function as an exception, through the thread the start
+        # path runs it in, and the start answered an internal error with a
+        # traceback instead of the read refusal below, which is what the same
+        # path gets when the file itself cannot be read.
+        settings = scan_repository_settings(
+            scanned_trees(source_dir),
+            every_file=client_named
+            and client_named_config_is_untrusted(path, session_id=session_id),
+        )
         resolved = resolve_config_document(
             path,
             confine_to=default_confinement_root(path, source_dir),
@@ -1394,7 +1511,8 @@ def _load_error_response(
     field it may not is refused for that first, as the scan would refuse it while
     resolving: the denial names what to remove. So is one this session's policy
     cannot be read for. A denial check that cannot finish on a file that does not
-    validate leaves the load error to report.
+    validate leaves the load error to report. Exit code 3 either way, as the
+    CLI exits for a config the scan cannot use.
     """
     if checked.document is not None:
         denial = _client_config_denial(
@@ -1409,13 +1527,16 @@ def _load_error_response(
             CONFIG_POLICY_UNREADABLE,
         ):
             return denial
-    return create_error_response(
-        error=checked.load_error,
-        operation="scan_directory",
-        suggestions=[
-            "Fix the error the message names; a syntax error names its line",
-            "Run 'ash config lint' on the file to check it",
-        ],
+    return with_exit_code(
+        create_error_response(
+            error=checked.load_error,
+            operation="scan_directory",
+            suggestions=[
+                "Fix the error the message names; a syntax error names its line",
+                "Run 'ash config lint' on the file to check it",
+            ],
+        ),
+        REFUSED_CONFIG_EXIT_CODE,
     )
 
 
@@ -1439,21 +1560,30 @@ def _session_client_rules(
 
 
 def _denied_response(exc: Exception, operation: str) -> Dict[str, Any]:
-    """The response for a client-delivered config that was refused."""
+    """The response for a client-delivered config that was refused.
+
+    Exit code 3, as for any config the scan cannot use: a field the session's
+    policy denies, or a policy that cannot be read for the file, refuses the
+    config as the CLI's exit does, and ``run_ash_scan`` and ``get_config`` pass
+    the response on promising that code.
+    """
     from automated_security_helper.core.exceptions import (
         ASHConfigPolicyUnreadableError,
     )
 
-    return {
-        "success": False,
-        "operation": operation,
-        "error": raw_controls_on_one_line(str(exc)),
-        "error_type": (
-            CONFIG_POLICY_UNREADABLE
-            if isinstance(exc, ASHConfigPolicyUnreadableError)
-            else CONFIG_FIELD_DENIED
-        ),
-    }
+    return with_exit_code(
+        {
+            "success": False,
+            "operation": operation,
+            "error": raw_controls_on_one_line(str(exc)),
+            "error_type": (
+                CONFIG_POLICY_UNREADABLE
+                if isinstance(exc, ASHConfigPolicyUnreadableError)
+                else CONFIG_FIELD_DENIED
+            ),
+        },
+        REFUSED_CONFIG_EXIT_CODE,
+    )
 
 
 def _client_config_denial(
@@ -1500,16 +1630,25 @@ def _client_config_denial(
         # The scan reads the same rules and refuses on the same failure
         # (``_run_scan_async``); refused here too, as a response the caller can
         # read rather than an exception out of the tool.
-        _logger.warning(f"Session config rules not read before the scan: {exc}")
-        return {
-            "success": False,
-            "operation": operation,
-            "error": (
-                "The config could not be checked against this session's "
-                f"runtime-override policy: {exc}"
-            ),
-            "error_type": CONFIG_POLICY_UNREADABLE,
-        }
+        # Described (error_text): a validation error's own text quotes the
+        # refused input, and the response goes to a remote client.
+        _logger.warning(
+            f"Session config rules not read before the scan: {error_text(exc)}"
+        )
+        # Exit code 3, as _denied_response gives the same error_type: the
+        # config is refused because its policy cannot be read.
+        return with_exit_code(
+            {
+                "success": False,
+                "operation": operation,
+                "error": raw_controls_on_one_line(
+                    "The config could not be checked against this session's "
+                    f"runtime-override policy: {error_text(exc)}"
+                ),
+                "error_type": CONFIG_POLICY_UNREADABLE,
+            },
+            REFUSED_CONFIG_EXIT_CODE,
+        )
     permit_base = config_base_gate(session_id)
     # A named path the client chose is the client's wherever it is, as the scan
     # reads it (resolve_config's untrusted_config).
@@ -1555,17 +1694,24 @@ def _client_config_denial(
         # Not left to the scan: the check is what decides whether the client's
         # file may be used, so one that cannot finish stops the scan here, as a
         # refusal the caller can read rather than an exception out of the tool.
-        _logger.warning(f"Config policy check failed before the scan: {exc}")
+        # Described (error_text), as create_error_response described it: the
+        # raw text of a validation error quotes the refused input, and both the
+        # log line and the response leave the server.
+        _logger.warning(
+            f"Config policy check failed before the scan: {error_text(exc)}"
+        )
         response = create_error_response(error=exc, operation=operation)
         response["error"] = raw_controls_on_one_line(
             "The config could not be checked against this session's "
-            f"runtime-override policy: {exc}"
+            f"runtime-override policy: {error_text(exc)}"
         )
         # A documented type, not the exception's class name: a client branches
         # on error_type (mcp_server.run_ash_scan answers scan_start_failure for
-        # a start that gives no scan id).
+        # a start that gives no scan id). Exit code 1, as for a start that fails
+        # on the server's side: the config was not found wanting, the check of
+        # it broke.
         response["error_type"] = "scan_start_failure"
-        return response
+        return with_exit_code(response, REFUSED_INTERNAL_EXIT_CODE)
     return None
 
 
@@ -1621,13 +1767,16 @@ async def mcp_scan_directory(
 
     # No session id is an in-process caller, not a network caller the server
     # could not identify (UNIDENTIFIED_SESSION_ID), so there is nothing to refuse.
+    # An id another tool resolved and passed down: no request is in reach here,
+    # so the refusal claims no cause and gives the mode-less advice.
     refusal = (
-        session_identity_refusal(session_id, "scan_directory")
+        session_identity_refusal(session_id, "scan_directory", ctx=None)
         if session_id is not None
         else None
     )
     if refusal is not None:
-        return refusal
+        # The request's own fault, as run_ash_scan codes the same refusal.
+        return with_exit_code(refusal, REFUSED_USAGE_EXIT_CODE)
 
     from automated_security_helper.cli.mcp.scan_target import (
         ASH_MCP_ALLOWED_ROOTS_ENV,
@@ -1799,16 +1948,21 @@ async def mcp_scan_directory(
         from automated_security_helper.cli.mcp.sandbox import check_config_input
 
         if not config_path.strip():
-            return create_error_response(
-                error=MCPResourceError(
-                    "The configuration file path is empty. Name a config file, or "
-                    "omit config_path to use the configuration found in the "
-                    "directory.",
-                    context={
-                        "error_category": ErrorCategory.INVALID_PARAMETER.value,
-                    },
+            # A parameter that names nothing is the request's own fault, as an
+            # unusable severity is: the CLI's usage-error code.
+            return with_exit_code(
+                create_error_response(
+                    error=MCPResourceError(
+                        "The configuration file path is empty. Name a config file, "
+                        "or omit config_path to use the configuration found in the "
+                        "directory.",
+                        context={
+                            "error_category": ErrorCategory.INVALID_PARAMETER.value,
+                        },
+                    ),
+                    operation="scan_directory",
                 ),
-                operation="scan_directory",
+                REFUSED_USAGE_EXIT_CODE,
             )
 
         # One read of the file and its chain answers both checks below: a base
@@ -1832,7 +1986,10 @@ async def mcp_scan_directory(
                     suggestions=[
                         "Check that the configuration file exists and is accessible",
                         "Verify that the path is correct",
-                        "Ensure the file has a valid extension (.yaml, .yml, or .json)",
+                        (
+                            "Ensure the file has a valid extension (.yaml, .yml, "
+                            ".json, or .toml)"
+                        ),
                     ],
                 ),
                 REFUSED_CONFIG_EXIT_CODE,
@@ -1912,13 +2069,21 @@ async def mcp_scan_directory(
             resolved_target, permit=config_base_gate(session_id)
         )
         if not_discovered is not None:
-            return create_error_response(
-                error=not_discovered,
-                operation="scan_directory",
-                suggestions=[
-                    "Fix the error the message names; a syntax error names its line",
-                    "Run 'ash config lint' on the file to check it",
-                ],
+            # A config the scan cannot use, as a named file that does not parse
+            # is: the same code (3) whichever way the file reached the scan.
+            return with_exit_code(
+                create_error_response(
+                    error=not_discovered,
+                    operation="scan_directory",
+                    suggestions=[
+                        (
+                            "Fix the error the message names; a syntax error names "
+                            "its line"
+                        ),
+                        "Run 'ash config lint' on the file to check it",
+                    ],
+                ),
+                REFUSED_CONFIG_EXIT_CODE,
             )
         if discovered is not None:
             from automated_security_helper.cli.mcp.sandbox import check_config_input
@@ -1962,15 +2127,20 @@ async def mcp_scan_directory(
 
         claimed_session = _get_session_registry().session_for(session_id)
         if not claimed_session.try_claim_scan():
-            return {
-                "success": False,
-                "operation": "scan_directory",
-                "error_type": SOURCE_DELIVERY_BUSY,
-                "error": (
-                    "the delivered source of this session is being changed; start "
-                    "the scan after the change finishes"
-                ),
-            }
+            # Neither the config, the request nor the target: the code for
+            # anything else, as the registry's refusal of a busy directory.
+            return with_exit_code(
+                {
+                    "success": False,
+                    "operation": "scan_directory",
+                    "error_type": SOURCE_DELIVERY_BUSY,
+                    "error": (
+                        "the delivered source of this session is being changed; "
+                        "start the scan after the change finishes"
+                    ),
+                },
+                REFUSED_INTERNAL_EXIT_CODE,
+            )
     # Counted against the operator's per-session limit from here until the scan
     # returns; the task uncounts it. A limited caller with no session counts on
     # the count all such callers share. See sessions.per_session_scan_limit.
@@ -1988,14 +2158,33 @@ async def mcp_scan_directory(
             # scan is counted anyway, so a limit set later sees it running.
             claimed_session.try_start_scan(None)
         elif not claimed_session.try_start_scan(limit):
-            claimed_session.release_scan()
+            # The claim goes back as the task's finally gives it back: with the
+            # end of a session that arrived while it was held completed, not
+            # left for the TTL sweep, off the event loop and without raising,
+            # so the refusal below is answered whatever the removal did. The
+            # limit is the server's, not the request's, the config's or the
+            # target's: the code for anything else, as the registry's
+            # concurrency refusal reports.
+            await _release_what_the_scan_held_off_the_loop(
+                None,
+                claimed_session,
+                session_id,
+                scan_id=None,
+                environment_values=environment_values,
+            )
             # try_start_scan turns a scan away only when a limit is reached.
-            return session_scan_limit_refusal("scan_directory", limit)
+            return with_exit_code(
+                session_scan_limit_refusal("scan_directory", limit),
+                REFUSED_INTERNAL_EXIT_CODE,
+            )
         counted = claimed_session
     elif limit is not None:
         shared = sessionless_scan_count()
         if not shared.try_start_scan(limit):
-            return session_scan_limit_refusal("scan_directory", limit, shared=True)
+            return with_exit_code(
+                session_scan_limit_refusal("scan_directory", limit, shared=True),
+                REFUSED_INTERNAL_EXIT_CODE,
+            )
         counted = shared
     try:
         # Create a unique scan ID
@@ -2027,27 +2216,68 @@ async def mcp_scan_directory(
         previous_results_moved = False
         try:
             # Register the scan in the registry, within the operator's
-            # concurrency limit; see _resource_limits.
+            # concurrency limit; see _resource_limits. Off the event loop, as
+            # the other registry work of this tool is: the registration waits
+            # for an output-tree removal still in progress for the same
+            # directory (ScanRegistry.register_scan), and that wait, run on the
+            # loop's thread, froze every other request for as long as the
+            # delete took.
             registry = get_scan_registry()
-            scan_id = registry.register_scan(
-                directory_path=str(directory_path_obj),
-                output_directory=str(output_dir),
-                # Not known yet: the scan runs at the stricter of the request
-                # and its config's threshold, and the runner records the one it
-                # used (_judged_threshold). The request is kept beside it.
-                severity_threshold=None,
-                requested_severity_threshold=severity_threshold,
-                config_path=config_path,
-                scan_id=scan_id,
-                # 0 or None is no limit.
-                max_active=limits.max_concurrent_scans or None,
-                session_id=_scan_owner(session_id),
-                # The registry redacts every error message it applies with
-                # these, so a failure arm that closes the entry with a bare
-                # exception's text is backstopped at the sink.
-                environment_values=environment_values,
+            registration = asyncio.ensure_future(
+                asyncio.to_thread(
+                    registry.register_scan,
+                    directory_path=str(directory_path_obj),
+                    output_directory=str(output_dir),
+                    # Not known yet: the scan runs at the stricter of the
+                    # request and its config's threshold, and the runner
+                    # records the one it used (_judged_threshold). The request
+                    # is kept beside it.
+                    severity_threshold=None,
+                    requested_severity_threshold=severity_threshold,
+                    config_path=config_path,
+                    scan_id=scan_id,
+                    # 0 or None is no limit.
+                    max_active=limits.max_concurrent_scans or None,
+                    session_id=_scan_owner(session_id),
+                    # The registry redacts every error message it applies with
+                    # these, so a failure arm that closes the entry with a bare
+                    # exception's text is backstopped at the sink.
+                    environment_values=environment_values,
+                )
             )
+            try:
+                # Shielded: a cancel here cannot interrupt the worker thread, which
+                # goes on to register the scan, so the registration is left to
+                # finish and is closed below instead of being abandoned half
+                # done.
+                scan_id = await asyncio.shield(registration)
+            except asyncio.CancelledError:
+                # `registered` is still False, so the arm below gives nothing
+                # back, and the entry the thread writes would stay PENDING,
+                # holding its directory and a max_concurrent_scans slot for the
+                # server's life. It is closed as a scan that did not start the
+                # moment the thread returns (at once when it already has). The
+                # session's claim and count are given back by the finally of
+                # this function, as for every other way out before the task.
+                registration.add_done_callback(
+                    lambda done: _close_a_registration_nobody_awaited(
+                        done, registry, scan_id, output_dir, environment_values
+                    )
+                )
+                raise
             registered = True
+            # The runner's claim on the entry, recorded here rather than by the
+            # runner's first step: between the set-aside below and that step a
+            # progress poll read a PENDING entry with no runner, which the
+            # registry closes from the results file (check_scan_progress), and
+            # the file was just set aside, so the scan was closed FAILED before
+            # it ran. Every way out of this tool that leaves no runner to settle
+            # the entry marks the runner done (the mkdir arm below and
+            # _give_back_a_scan_that_did_not_start), so the claim does not keep
+            # the directory held (occupies_its_directory).
+            claimed_entry = registry.get_scan(scan_id)
+            if claimed_entry is not None:
+                claimed_entry.has_runner = True
 
             # Created only now that the registry has given this scan the
             # directory, so a refused scan leaves nothing in the scanned
@@ -2069,6 +2299,11 @@ async def mcp_scan_directory(
                 registry.finish_scan(
                     scan_id, MCScanStatus.FAILED, error_message=unmakeable
                 )
+                # No runner will settle this entry: the claim made at
+                # registration is released, or the closed entry would hold
+                # its directory for the server's life.
+                if claimed_entry is not None:
+                    claimed_entry.runner_done.set()
                 unmakeable_response = create_error_response(
                     error=MCPResourceError(
                         unmakeable,
@@ -2105,7 +2340,38 @@ async def mcp_scan_directory(
                     )
                     _logger.warning(f"Scan {scan_id}: {warnings[-1]}")
 
-            # Start the scan process asynchronously
+            # Start the scan process asynchronously. A task cancelled before
+            # the loop first ran it runs no line of the runner, its finally
+            # included, so the task's done callback gives back what the runner
+            # would have (_start_scan_task reads whether the runner ran): the
+            # registered entry, closed as a scan that did not start, with the
+            # previous results set aside above put back; the count and the
+            # claim; and the end of a session that arrived while the claim was
+            # held.
+
+            def _give_back_what_the_runner_never_took() -> None:
+                _give_back_a_scan_that_did_not_start(
+                    registry,
+                    scan_id,
+                    output_dir,
+                    asyncio.CancelledError(
+                        "the scan's task was cancelled before it ran"
+                    ),
+                    previous_results_moved=previous_results_moved,
+                    environment_values=environment_values,
+                )
+                try:
+                    _release_what_the_scan_held(counted, claimed_session, session_id)
+                except Exception as release_error:  # noqa: BLE001 -- a done callback
+                    # Never out of a done callback, which asyncio would only
+                    # log; the claim and the count are released before the
+                    # session's end is completed, which is what can raise.
+                    _logger.error(
+                        f"Scan {scan_id}: could not complete the end of its session "
+                        f"after its task was cancelled before it ran: "
+                        f"{error_text(release_error, environment_values)}"
+                    )
+
             _start_scan_task(
                 scan_id,
                 _run_scan_async(
@@ -2120,6 +2386,7 @@ async def mcp_scan_directory(
                     scan_timeout_seconds=limits.scan_timeout_seconds or None,
                     environment_values=environment_values,
                 ),
+                if_never_run=_give_back_what_the_runner_never_took,
             )
             task_started = True
 
@@ -2223,12 +2490,102 @@ async def mcp_scan_directory(
         )
     finally:
         # The task releases the claim and the count once it has started; a scan
-        # that never started releases them here.
+        # that never started releases them here, and completes the end of a
+        # session that arrived while the claim was held, as the task would:
+        # off the event loop, and without raising, so what this tool was
+        # returning (a refusal, the exit-coded error reply) still reaches the
+        # client when the removal fails.
         if not task_started:
-            if counted is not None:
-                counted.scan_returned()
-            if claimed_session is not None:
-                claimed_session.release_scan()
+            await _release_what_the_scan_held_off_the_loop(
+                counted,
+                claimed_session,
+                session_id,
+                scan_id=scan_id,
+                environment_values=environment_values,
+            )
+
+
+async def _release_what_the_scan_held_off_the_loop(
+    scan_counted: Optional[Any],
+    scan_claim: Optional[Any],
+    session_id: Optional[str],
+    *,
+    scan_id: Optional[str],
+    environment_values: Tuple[str, ...],
+) -> None:
+    """Give back what a scan took of its session, off the event loop, never raising.
+
+    :func:`_release_what_the_scan_held` for the start paths of an async tool.
+    The removal of an ended session's workspace deletes a tree, so it runs on a
+    worker thread, as :func:`_run_scan_async`'s finally runs it, and shielded:
+    a tool call cancelled while it refuses a scan still completes the end it
+    deferred. The claim and the count are given back first, on this thread, so
+    a removal that fails leaves neither held; the failure is logged, redacted
+    with the config's environment values like every failure arm, and not
+    raised: at the per-session limit a raise would replace the structured
+    refusal, and in ``mcp_scan_directory``'s outer finally it would replace
+    whatever the tool was returning, so the client would get an exception for
+    a scan that was refused.
+    """
+    _give_back_the_scans_claim(scan_counted, scan_claim)
+    if not _holds_a_session(session_id):
+        return
+    import anyio
+
+    from automated_security_helper.cli.mcp.sessions import finish_ended_session
+
+    try:
+        with anyio.CancelScope(shield=True):
+            await anyio.to_thread.run_sync(finish_ended_session, session_id)
+    except Exception as release_error:  # noqa: BLE001 -- the tool's own reply wins
+        _logger.error(
+            f"Scan {scan_id or '(not started)'}: could not complete the end of "
+            "its session after the scan was not started: "
+            f"{error_text(release_error, environment_values)}"
+        )
+
+
+def _release_what_the_scan_held(
+    scan_counted: Optional[Any], scan_claim: Optional[Any], session_id: Optional[str]
+) -> None:
+    """Give back what a scan took of its session when it was started.
+
+    ``scan_counted`` is what counted the scan against the per-session limit
+    (its ``MCPSession``, or the shared ``sessions.ScanCount`` of a caller with
+    no session), uncounted here; ``scan_claim`` the ``MCPSession`` whose scan
+    claim ``mcp_scan_directory`` took, released here. Then a session that ended
+    while the scan held or claimed it has its workspace removed
+    (``sessions.finish_ended_session``): ``end_session`` is refused while a
+    claim is held and leaves the removal pending for whoever releases the
+    claim, so every path that releases one completes it, the runner's finally
+    and the start paths that give the claim back without a scan alike.
+
+    The removal runs here, on the calling thread, and raises what it raises:
+    this is the form for a done callback, which cannot await and guards the
+    call itself (``_give_back_what_the_runner_never_took``). An async start path
+    uses :func:`_release_what_the_scan_held_off_the_loop`.
+    """
+    _give_back_the_scans_claim(scan_counted, scan_claim)
+    if _holds_a_session(session_id):
+        from automated_security_helper.cli.mcp.sessions import finish_ended_session
+
+        finish_ended_session(session_id)
+
+
+def _give_back_the_scans_claim(
+    scan_counted: Optional[Any], scan_claim: Optional[Any]
+) -> None:
+    """Uncount a scan and release its claim; see :func:`_release_what_the_scan_held`."""
+    if scan_counted is not None:
+        scan_counted.scan_returned()
+    if scan_claim is not None:
+        scan_claim.release_scan()
+
+
+def _holds_a_session(session_id: Optional[str]) -> bool:
+    """Whether a scan with this id took a session claim: a caller the server
+    could identify (not None, not the unidentified sentinel)."""
+    return session_id is not None and session_id != UNIDENTIFIED_SESSION_ID
 
 
 def _give_back_a_scan_that_did_not_start(
@@ -2262,6 +2619,19 @@ def _give_back_a_scan_that_did_not_start(
             f"Scan {scan_id}: could not close the scan that did not start: "
             f"{error_text(finish_error, environment_values)}"
         )
+    # The tool claimed the runner's ownership of the entry at registration
+    # (mcp_scan_directory); no runner will mark it done, so this does, or the
+    # closed entry would hold its directory for the server's life
+    # (occupies_its_directory).
+    try:
+        entry = registry.get_scan(scan_id)
+        if entry is not None:
+            entry.runner_done.set()
+    except Exception as claim_error:  # noqa: BLE001
+        _logger.error(
+            f"Scan {scan_id}: could not release the runner's claim of the scan "
+            f"that did not start: {error_text(claim_error, environment_values)}"
+        )
     if not previous_results_moved:
         return
     from automated_security_helper.core.previous_results import (
@@ -2279,6 +2649,36 @@ def _give_back_a_scan_that_did_not_start(
             f"Scan {scan_id}: could not put the previous results back in "
             f"{output_dir}: {error_text(restore_error, environment_values)}"
         )
+
+
+def _close_a_registration_nobody_awaited(
+    registration: "asyncio.Future[str]",
+    registry: Any,
+    scan_id: str,
+    output_dir: Path,
+    environment_values: Tuple[str, ...] = (),
+) -> None:
+    """Close the entry of a registration whose start was cancelled while it ran.
+
+    ``mcp_scan_directory`` awaits ``registry.register_scan`` in a worker thread,
+    and a cancel cannot interrupt that thread: it goes on to write the PENDING entry
+    after the caller has gone. This done callback of the registration's future
+    closes that entry as a scan that did not start, through
+    ``_give_back_a_scan_that_did_not_start``, so it no longer occupies its
+    directory or a max_concurrent_scans slot. A registration that was refused or
+    cancelled wrote no entry, and its error is read here so it is not reported
+    as never retrieved. Never raises: asyncio would only log it.
+    """
+    if registration.cancelled() or registration.exception() is not None:
+        return
+    _give_back_a_scan_that_did_not_start(
+        registry,
+        scan_id,
+        output_dir,
+        asyncio.CancelledError("the scan's start was cancelled while it registered"),
+        previous_results_moved=False,
+        environment_values=environment_values,
+    )
 
 
 def _judged_threshold(results: Any) -> Optional[str]:
@@ -2354,7 +2754,11 @@ async def _run_scan_async(
     returns, before a session that ended meanwhile is removed; and
     ``scan_counted``: what counted this scan against the per-session limit (its
     ``MCPSession``, or for a caller with no session the shared
-    ``sessions.ScanCount``), uncounted at the same time.
+    ``sessions.ScanCount``), uncounted at the same time
+    (:func:`_release_what_the_scan_held`). A task cancelled before this
+    coroutine ran a line, whose finally below never runs, is told apart from
+    one that ran and released these itself by :func:`_start_scan_task`, which
+    marks the start before the runner's first line.
     """
     try:
         await _run_scan(
@@ -2368,18 +2772,22 @@ async def _run_scan_async(
             environment_values=environment_values,
         )
     finally:
-        if scan_counted is not None:
-            scan_counted.scan_returned()
-        if scan_claim is not None:
-            scan_claim.release_scan()
-        if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
+        _give_back_the_scans_claim(scan_counted, scan_claim)
+        if _holds_a_session(session_id):
             # A session that ended while this scan held or claimed it has its
-            # workspace removed now that the scan no longer reads it.
+            # workspace removed now that the scan no longer reads it. The
+            # removal deletes a tree, so it runs off the event loop every
+            # session's tool calls share, and shielded: this finally runs for
+            # a cancelled task too, and the removal has to complete anyway
+            # (http_sessions ends its own sessions the same way).
+            import anyio
+
             from automated_security_helper.cli.mcp.sessions import (
                 finish_ended_session,
             )
 
-            finish_ended_session(session_id)
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(finish_ended_session, session_id)
 
 
 async def _run_scan(
@@ -2497,6 +2905,11 @@ async def _run_scan(
     settled_close: Optional[
         Tuple[MCScanStatus, Optional[Dict[str, Any]], Optional[str]]
     ] = None
+    # Whether the caller is a remote one, decided before any closure below can
+    # run. The close helpers read it, and the refusal arms that run before the
+    # config work close an entry through them, so it cannot be assigned further
+    # down: a free variable read before its assignment raises.
+    remote_client = caller_is_remote(session_id)
 
     def _work_out_the_close(
         ended: Optional[BaseException], results: Any
@@ -2557,7 +2970,7 @@ async def _run_scan(
         refuses to close a scan as incomplete with no gap attached.
         """
         try:
-            return _work_out_the_close(ended, results)
+            status, coverage, threshold = _work_out_the_close(ended, results)
         except Exception as close_error:  # noqa: BLE001
             fallback: Tuple[MCScanStatus, Optional[Dict[str, Any]], Optional[str]]
             if isinstance(ended, ScanIncompleteExit):
@@ -2574,7 +2987,81 @@ async def _run_scan(
                 f"{fallback[0].value} without the full set: "
                 f"{error_text(close_error, environment_values)}"
             )
-            return fallback
+            status, coverage, threshold = fallback
+        # Inside the never-raises contract, as the work above is: a row that
+        # cannot be redacted must not turn the close into an exception, which
+        # would leave the entry running. It is stored without its reasons
+        # instead, since a reason is what names the process id.
+        try:
+            shown = _coverage_as_the_caller_may_see_it(coverage, remote_client)
+        except Exception as redact_error:  # noqa: BLE001
+            _logger.warning(
+                f"Scan {scan_id}: could not redact the coverage's reasons for "
+                "this caller, so they are not stored: "
+                f"{error_text(redact_error, environment_values)}"
+            )
+            shown = _coverage_without_reasons(coverage)
+        return status, shown, threshold
+
+    def _coverage_without_reasons(
+        coverage: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """``coverage`` with every could_not_stop row cut down to its scanner.
+
+        Never raises, whatever the rows are: a row that is not a mapping names
+        no scanner and is stored as ``unknown``, so the gap is still counted.
+        """
+        if not isinstance(coverage, dict):
+            return None
+        rows = coverage.get("could_not_stop")
+        if not isinstance(rows, (list, tuple)):
+            return coverage
+        return {
+            **coverage,
+            "could_not_stop": [
+                {
+                    "scanner": str(row.get("scanner", "unknown"))
+                    if isinstance(row, dict)
+                    else "unknown"
+                }
+                for row in rows
+            ],
+        }
+
+    def _coverage_as_the_caller_may_see_it(
+        coverage: Optional[Dict[str, Any]],
+        remote_client: bool,
+    ) -> Optional[Dict[str, Any]]:
+        """The coverage to store, its could_not_stop reasons shown as this caller may see them.
+
+        A reason names the process id of the tool ASH could not end
+        (``could_not_stop_default``). The cancel warning withholds that id from a
+        network transport and the workspace tool withholds it from a remote
+        caller (``_project_coverage``); the stored coverage is what a later
+        progress call returns, so it is stored the same way, decided by the
+        request-scoped predicate the response uses (``remote_client``, from
+        ``caller_is_remote``), never by the process-wide transport. Every close
+        of this scan passes through here, so the stored and the returned rows
+        agree. A progress call by a different caller than the one that scanned
+        reads this caller's choice; redacting at the read would cover that and
+        is not done here.
+        """
+        if not coverage or not remote_client:
+            return coverage
+        rows = coverage.get("could_not_stop")
+        if not rows:
+            return coverage
+        from automated_security_helper.utils.subprocess_utils import (
+            without_process_ids,
+        )
+
+        return {
+            **coverage,
+            "could_not_stop": [
+                {**row, "reason": without_process_ids(str(row.get("reason", "")))}
+                for row in rows
+            ],
+        }
 
     def _settle_previous_results(
         ended: Optional[BaseException], results: Any = None
@@ -2717,6 +3204,29 @@ async def _run_scan(
             if stop_the_scan:
                 entry.cancel_event.set()
 
+    def _refuse_before_running(exc: BaseException) -> None:
+        """Close the entry for a scan refused before its thread ran.
+
+        The runner's own try begins at the RUNNING mark below, so a refusal in
+        the set-up before it records the entry FAILED itself (left PENDING, it
+        would read as running) and settles the previous results as a scan
+        without results does: what clean_output set aside in
+        mcp_scan_directory is put back, and whether the directory holds them is
+        recorded on the entry. The thread never started, so this runner marks
+        its own end.
+
+        The reason is written as every other reason this runner records or logs
+        is (error_text with the scan's environment values): a refusal raised
+        here can quote a path or a value the session's configuration read, and
+        written raw it reached the entry's error_message, which
+        get_scan_progress hands to the client, and the log.
+        """
+        reason = error_text(exc, environment_values)
+        registry.finish_scan(scan_id, MCScanStatus.FAILED, reason)
+        _logger.error(f"Scan {scan_id} refused: {reason}")
+        _settle_previous_results(exc)
+        entry.runner_done.set()
+
     # Every config read inside the scan checks each `extends` base against this
     # session's grant. mcp_scan_directory checked the chain before starting; this
     # is what holds if a base changes between that check and the scan.
@@ -2730,24 +3240,46 @@ async def _run_scan(
     # itself a config the client supplied.
     # A config path the client named is the client's unless the operator set it
     # aside (client_named_config_is_untrusted), even when it is a file in another
-    # repository the server may scan.
-    untrusted_config = config_path is not None and client_named_config_is_untrusted(
-        config_path, session_id=session_id
-    )
-    trusted_config_path = (
-        resolve_session_trusted_config_path(session_id) if untrusted_config else None
-    )
-    # For a remote caller, every config file the operator did not set aside
-    # resolves no !ENV, the target's own .ash.yaml included; see "Environment
-    # variables" in config/config_sources.py.
-    remote_client = caller_is_remote(session_id)
+    # repository the server may scan. The predicate reads the filesystem (a
+    # resolve, a samefile), so a link loop or a directory gone since the start
+    # raises here, before the RUNNING mark: refused like the profile steps
+    # below, never raised out of this coroutine with the entry left PENDING.
+    try:
+        untrusted_config = config_path is not None and client_named_config_is_untrusted(
+            config_path, session_id=session_id
+        )
+    except Exception as exc:  # noqa: BLE001 -- an entry left PENDING reads as running
+        _refuse_before_running(exc)
+        return
+    # The session's bound profile is written again here when its file is gone;
+    # a profile that cannot be written again (unregistered, or an unwritable
+    # workspace), or one whose workspace another request holds (its removal by
+    # the sweep, a clear, the end of the session: the write hold's refusal),
+    # refuses the scan. Caught here, not left to propagate: the runner's own
+    # try begins further down, and an exception out of this coroutine would
+    # leave the entry PENDING, which reads as running. Every exception, not the
+    # registry's and the workspace hold's alone: the lookup stats the recorded
+    # files first, and a stat refused on the workspace's parent raises an OSError
+    # of its own, which left the entry PENDING with its runner claimed and never
+    # marked done, so the directory was held for the server's life.
+    try:
+        trusted_config_path = (
+            resolve_session_trusted_config_path(session_id)
+            if untrusted_config
+            else None
+        )
+    except Exception as exc:  # noqa: BLE001 -- an entry left PENDING reads as running
+        _refuse_before_running(exc)
+        return
+    # For a remote caller (remote_client, above), every config file the operator
+    # did not set aside resolves no !ENV, the target's own .ash.yaml included;
+    # see "Environment variables" in config/config_sources.py.
     # Every file of the chain a client delivered, the named upload or the
     # target's own .ash.yaml, is checked against this session's policy.
     try:
         client_config_policy = _session_client_rules(session_id)
     except Exception as exc:  # noqa: BLE001 -- an entry left PENDING reads as running
-        registry.finish_scan(scan_id, MCScanStatus.FAILED, str(exc))
-        _logger.error(f"Scan {scan_id} refused: {exc}")
+        _refuse_before_running(exc)
         return
     # The session's own profile as the scan's config: what the server passes
     # when the client names none. It is the same live file select_profile
@@ -2760,7 +3292,15 @@ async def _run_scan(
     # so it is decided on the worker thread of the snapshot step below and
     # never here on the event loop. Only whether the config could be the
     # profile is known here.
-    session_profile = resolve_session_config_path(session_id)
+    try:
+        session_profile = resolve_session_config_path(session_id)
+    except Exception as exc:  # noqa: BLE001 -- an entry left PENDING reads as running
+        # As above: a bound profile that cannot be read as registered, whose
+        # workspace another request holds, or whose recorded file cannot be
+        # stat'ed, refuses the scan, recorded on the entry rather than raised
+        # out of the runner.
+        _refuse_before_running(exc)
+        return
     config_may_be_the_profile = (
         config_path is not None and not untrusted_config and session_profile is not None
     )
@@ -2814,7 +3354,11 @@ async def _run_scan(
             get_default_registry as _get_session_registry,
         )
 
-        session_lock = _get_session_registry().session_for(session_id).lock
+        try:
+            session_lock = _get_session_registry().session_for(session_id).lock
+        except Exception as exc:  # noqa: BLE001 -- an entry left PENDING reads as running
+            _refuse_before_running(exc)
+            return
 
     # The client's threshold reaches the scan as a restriction: the orchestrator
     # runs it at the stricter of this and the threshold the config resolved to,
@@ -2915,6 +3459,57 @@ async def _run_scan(
             keep_previous_results=True,
         )
 
+    # The exception that ended the scan on its thread, for the record step.
+    ending: Dict[str, Optional[BaseException]] = {"exception": None}
+
+    def _record_the_tools_the_stop_could_not_end() -> None:
+        """Put the tools the stop could not end on the entry before the directory is let go.
+
+        A stop (cancel_scan, the scan timeout, a cancelled runner task) ends the
+        scan on its thread with a ScanCancelled, and the subprocess layer records
+        on the entry's cancel event, the root of the scan's cancel chain, every
+        tool it could not end (CancelEvent.note_could_not_stop). They are read
+        here, on the thread, after run_ash_scan ended and before runner_done is
+        set: the arm that catches the ScanCancelled runs on the runner's task,
+        which a cancelled task no longer has, and once runner_done is set the
+        registry may let the directory go (occupies_its_directory). The
+        registry attaches them only to an entry the server stopped; a scan that
+        ended on its own has no records. On a network transport the client's
+        warning names the tools only, and the process ids go to this log. Never
+        raises: it runs in the thread's finally, ahead of runner_done, and the
+        caller sets runner_done whatever happens here.
+        """
+        try:
+            # The event's records, then any the ScanCancelled that ended the
+            # scan carries and the event does not: a raise site may build the
+            # exception with its own pairs (scanner_executor's union of a
+            # pool's cancels, a stand-in in a test) without noting them on the
+            # event, and those pairs are the stop's outcome all the same.
+            records = tuple(entry.cancel_event.could_not_stop_records())
+            for record in getattr(ending["exception"], "could_not_stop", ()):
+                if record not in records:
+                    records = records + (record,)
+            if not records:
+                return
+            # Named by the caller the scan was started for, as a workspace scan
+            # names them (caller_is_remote), not by the transport alone: the
+            # transport misses a remote caller on a transport the operator did
+            # not mark as networked, and that caller would be handed the
+            # server's process ids by get_scan_progress.
+            if registry.record_cancel_outcome(
+                scan_id, records, name_process_ids=not remote_client
+            ):
+                named = ", ".join(f"{tool} (pid {pid})" for tool, pid in records)
+                _logger.warning(
+                    f"Scan {scan_id} was stopped, but {len(records)} scanner "
+                    f"tool(s) could not be stopped and may still be running: {named}"
+                )
+        except Exception as recording_error:  # noqa: BLE001 -- the thread's finally must go on
+            _logger.warning(
+                f"Scan {scan_id}: the tools the stop could not end were not "
+                f"recorded: {type(recording_error).__name__}"
+            )
+
     def _scan_under_session_lock() -> Any:
         """Acquire the session lock (if any) and run the scan synchronously.
 
@@ -2955,19 +3550,54 @@ async def _run_scan(
                     _start_the_clock()
                     results = _scan()
         except BaseException as ended:
+            # Kept for the record step in the finally: a ScanCancelled may
+            # carry pairs the cancel event never saw.
+            ending["exception"] = ended
             _settle_previous_results(ended)
             raise
         else:
             _settle_previous_results(None, results)
             return results
         finally:
-            entry.runner_done.set()
+            # Before runner_done: from then on the registry may let the
+            # directory go, and a tool still running would write into it. In
+            # its own try: a record step that raised would otherwise skip
+            # runner_done, and the entry would hold its directory for the
+            # server's life (occupies_its_directory), refusing every rescan.
+            try:
+                _record_the_tools_the_stop_could_not_end()
+            finally:
+                entry.runner_done.set()
             # After run_ash_scan ended on this thread, so the scan can no
             # longer load it.
             _discard_the_scans_profile_snapshot()
             # After the thread's last line: a task cancelled while this
             # thread ran has let go already, and the scope closes now.
             _release_the_threads_share()
+            # The session lock is released (the `with` above has exited). A
+            # session that ended while this thread held it had its end
+            # refused by the lock and left pending (sessions.end_session).
+            # The runner's task asks for it too, in its finally, but a task
+            # cancelled while this thread ran asked while the lock was still
+            # held, and nothing else asks again before the TTL sweep: so the
+            # thread asks once more, now that the lock is free. Harmless
+            # when the task has not released its claim yet: end_session is
+            # refused by the claim and the task's own call completes it.
+            if session_lock is not None:
+                from automated_security_helper.cli.mcp.sessions import (
+                    finish_ended_session,
+                )
+
+                try:
+                    finish_ended_session(session_id)
+                except Exception as end_error:  # noqa: BLE001 -- the scan is over
+                    # Never out of the thread: the scan ended as it ended, and
+                    # an exception here would reach the runner's failure arm
+                    # for a scan that has its results.
+                    _logger.error(
+                        f"Scan {scan_id}: could not complete the end of its "
+                        f"session: {error_text(end_error, environment_values)}"
+                    )
 
     try:
         # The run's log scope: joined from mcp_scan_directory, which opened it
@@ -3103,7 +3733,7 @@ async def _run_scan(
         )
         _logger.info(f"Scan {scan_id} completed successfully")
 
-    except ScanCancelled:
+    except ScanCancelled as cancelled:
         # cancel_scan set the entry's cancel event and the scan stopped at its next
         # check: before a phase or a scanner, or while waiting on a scanner's child
         # process, which was stopped. Nothing after that point ran, so no reports and
@@ -3111,6 +3741,19 @@ async def _run_scan(
         # closed entry alone, which keeps that status. Not re-raised: the scan
         # ended the way the client asked, and this task has nothing left to do.
         registry.finish_scan(scan_id, MCScanStatus.CANCELLED)
+        # A tool the stop could not end is still running, and may write into the
+        # output directory after the cancel. The exception carries which ones
+        # (core/cancellation.py), and the thread that ran the scan put them on
+        # the entry before it let the directory go
+        # (_record_the_tools_the_stop_could_not_end); a cancelled task never
+        # reaches this arm, so the thread is where the record is made. Only the
+        # registry can tell the client, through the entry's warnings, because
+        # the closed entry takes no other change.
+        if cancelled.could_not_stop:
+            _logger.warning(
+                f"Scan {scan_id} was cancelled, but {len(cancelled.could_not_stop)} "
+                "scanner tool(s) could not be stopped and may still be running"
+            )
         _logger.info(f"Scan {scan_id} stopped after it was cancelled")
 
     except ScanIncompleteExit as e:
@@ -3280,6 +3923,7 @@ async def mcp_get_scan_progress(
     Returns:
         Dictionary with scan progress information
     """
+    from automated_security_helper.cli.mcp.sandbox import caller_is_remote
     from automated_security_helper.core.resource_management.error_handling import (
         validate_scan_id,
     )
@@ -3312,9 +3956,14 @@ async def mcp_get_scan_progress(
                 if linked is not None:
                     return linked
 
-        # Check scan progress using the scan management function
+        # Check scan progress using the scan management function. The entry
+        # records the tools a cancel could not end with their process ids; the
+        # read keeps them out of what a remote caller is told, by the same
+        # request-scoped predicate the scan's own response uses.
         progress_info = await check_scan_progress(
-            scan_id, session_id=_scan_owner(session_id)
+            scan_id,
+            session_id=_scan_owner(session_id),
+            name_process_ids=not caller_is_remote(session_id),
         )
 
         # Add timestamp and operation to the response for consistency
@@ -3749,11 +4398,24 @@ _SEVERITY_RATIONALE: Dict[str, str] = {
 }
 
 
-def _load_flat_vulns_for_explain(results_path: Optional[str]) -> list:
-    """Load FlatVulnerability list from an ash_aggregated_results.json directory."""
+def _load_flat_vulns_for_explain(
+    results_path: Optional[str], *, results_dir: Optional[Path] = None
+) -> list:
+    """Load FlatVulnerability list from an ash_aggregated_results.json directory.
+
+    ``results_dir`` is the output directory the caller already derived from
+    ``results_path`` and checked (``mcp_explain_finding``: against the roots, the
+    restored marker and a link out of the directory); given, it is read as is,
+    so the directory read is the one checked, and ``is_dir`` is never asked a
+    second time for an answer that can differ from the first. Without it the
+    directory is derived here: ``results_path`` itself when it is a directory,
+    else its parent, and the working directory's ``.ash/ash_output`` for None.
+    """
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
-    if results_path is None:
+    if results_dir is not None:
+        output_dir = results_dir
+    elif results_path is None:
         output_dir = Path.cwd() / ".ash" / "ash_output"
     else:
         candidate = Path(results_path)
@@ -3762,7 +4424,9 @@ def _load_flat_vulns_for_explain(results_path: Optional[str]) -> list:
     agg_file = output_dir / "ash_aggregated_results.json"
     if not agg_file.exists():
         raise FileNotFoundError(f"Results file not found: {agg_file}")
-    model = AshAggregatedResults.from_json(agg_file.read_text())
+    # ASH writes its results files as UTF-8; the locale default is cp1252 on
+    # Windows, which cannot decode every byte they hold.
+    model = AshAggregatedResults.from_json(agg_file.read_text(encoding="utf-8"))
     return model.to_flat_vulnerabilities()
 
 
@@ -3795,9 +4459,11 @@ def mcp_explain_finding(
 
     # Same roots as the other results readers: this reads
     # ash_aggregated_results.json out of a caller-named output directory. The
-    # directory is derived from results_path exactly as
-    # _load_flat_vulns_for_explain derives it, so the path checked is the path
-    # read -- including the cwd default when results_path is omitted.
+    # directory is derived from results_path once, here, and handed to
+    # _load_flat_vulns_for_explain, so the directory checked below (roots,
+    # restored marker, a link out of it) is the directory read: a second
+    # derivation there asked is_dir again, and a path whose answer changed in
+    # between (a directory removed or made) read one the checks never saw.
     if results_path is None:
         _results_dir = Path.cwd() / ".ash" / "ash_output"
     else:
@@ -3826,7 +4492,9 @@ def mcp_explain_finding(
         return linked
 
     try:
-        flat_vulns = _load_flat_vulns_for_explain(results_path)
+        flat_vulns = _load_flat_vulns_for_explain(
+            results_path, results_dir=_results_dir
+        )
     except Exception as e:
         return {
             "success": False,
@@ -3961,13 +4629,29 @@ def _result_files_in(output_dir: Path) -> List[Path]:
     files = [output_dir / "ash_aggregated_results.json"]
     scanners_dir = output_dir / "scanners"
     if resolves_to_directory_inside(scanners_dir, output_dir):
-        for scanner_dir in sorted(scanners_dir.iterdir()):
+        for scanner_dir in _entries_of(scanners_dir):
             if not resolves_to_directory_inside(scanner_dir, output_dir):
                 continue
-            for target_dir in sorted(scanner_dir.iterdir()):
+            for target_dir in _entries_of(scanner_dir):
                 if resolves_to_directory_inside(target_dir, output_dir):
                     files.append(target_dir / "ASH.ScanResults.json")
     return files
+
+
+def _entries_of(directory: Path) -> List[Path]:
+    """``directory``'s entries, sorted; none when it cannot be listed.
+
+    A poll lists the directories of a scan that is running, or whose
+    clean_output is setting the previous results aside: one checked a moment
+    ago can be renamed aside or removed before it is listed, and the
+    ``FileNotFoundError`` (or ``NotADirectoryError``) that raised then turned
+    the poll into an unexpected-error reply. A directory that is gone holds no
+    results file to check, so it lists as empty, and the poll goes on.
+    """
+    try:
+        return sorted(directory.iterdir())
+    except OSError:
+        return []
 
 
 def _refuse_results_file(
@@ -4054,8 +4738,14 @@ def mcp_diff_scan_results(
         }
 
     try:
-        before_results = AshAggregatedResults.from_json(before_file.read_text())
-        after_results = AshAggregatedResults.from_json(after_file.read_text())
+        # ASH writes its results files as UTF-8; the locale default is cp1252 on
+        # Windows, which cannot decode every byte they hold.
+        before_results = AshAggregatedResults.from_json(
+            before_file.read_text(encoding="utf-8")
+        )
+        after_results = AshAggregatedResults.from_json(
+            after_file.read_text(encoding="utf-8")
+        )
     except Exception as e:
         return {
             "success": False,
@@ -4355,6 +5045,19 @@ def _config_as_written(
     return document
 
 
+def _document_kind(document: Any) -> str:
+    """How a refusal names a parsed document that is not a mapping, by kind."""
+    if isinstance(document, list):
+        return "a list"
+    if isinstance(document, bool):
+        return "a boolean"
+    if isinstance(document, (int, float)):
+        return "a number"
+    if isinstance(document, str):
+        return "a string"
+    return f"a {type(document).__name__}"
+
+
 def _mark_toml_references(value: Any) -> Any:
     """The TOML document with each string the loader resolves marked as such.
 
@@ -4393,7 +5096,17 @@ def mcp_get_config(
             ``sandbox`` section shown, and which chain files count as the
             scanned repository's own -- so the answer refuses exactly what
             a scan of that target refuses; without it, the session's
-            delivered source or the working directory stands in.
+            delivered source stands in, or the working directory for the
+            local client, whose own tree it is. A network session that
+            delivered nothing names no target a scan of it could take, so
+            a file of the client's (named outside every granted config
+            root) is judged for no scanned tree (the file confined by its
+            own root, no checkout's operator-only options read), which
+            leaves out more than a scan would, never less; a file the
+            operator granted keeps the working-directory judgment, under
+            which its ``ash_plugin_modules`` entries are kept and judged,
+            so a module every scan refuses refuses this answer too instead
+            of being dropped by the no-tree confinement.
             A given search_dir crosses the scan tool's own root gate, so a
             directory this session may not scan is refused as a scan of it
             is (``scan_target_not_permitted``, exit 4), before anything
@@ -4814,7 +5527,7 @@ def _answer_get_config(
                 if opened is not None
                 else read_config_bytes(Path(path), expect=checked)
             )
-            return _config_as_written(path, expect=checked, content=content) or {}
+            document = _config_as_written(path, expect=checked, content=content)
         except (
             ASHConfigValidationError,
             yaml.YAMLError,
@@ -4822,6 +5535,28 @@ def _answer_get_config(
             OSError,
         ) as exc:
             return _config_load_failure(exc, Path(path))
+        if document is None:
+            # An empty file: the configuration it writes is empty.
+            return {}
+        if not isinstance(document, dict):
+            # The tool answers a mapping of settings (its documented return,
+            # and what the wire carries): a file whose top level is a list or a
+            # scalar is a config the loader cannot use, refused as every other
+            # unusable config is (exit 3), not returned as the file's content.
+            # Described by kind, not quoted: the value is the file's own.
+            from automated_security_helper.config.config_sources import (
+                describe_config_path,
+            )
+
+            return _config_load_failure(
+                ASHConfigSourceError(
+                    f"{describe_config_path(Path(path))} holds "
+                    f"{_document_kind(document)} at its top level, not a mapping "
+                    "of settings"
+                ),
+                Path(path),
+            )
+        return document
 
     # resolve_config short-circuits to default when source_dir is None, so
     # supply one to force it to read the specified file. It is also where
@@ -4833,8 +5568,10 @@ def _answer_get_config(
     # resolved for the directory searched, which is what a scan of it would find.
     # A named file is resolved for the directory the caller's scan will target
     # when search_dir names one; with none, for the target run_ash_scan() takes
-    # when none is named, this session's delivered source or else the working
-    # directory. Never for the file's own directory: no scan targets the
+    # when none is named: this session's delivered source, or the working
+    # directory for the local client, or no tree at all for a network session
+    # that delivered nothing (run_ash_scan refuses the working directory for
+    # it). Never for the file's own directory: no scan targets the
     # directory of a bound profile or a config root, so treating the file as
     # inside its own scanned tree would hide grants a scan applies. A file the
     # client delivered is restrict-only wherever it is, with the bound profile
@@ -4843,6 +5580,13 @@ def _answer_get_config(
     # working directory deleted while the server runs): resolve_config then
     # judges the file by its own confinement root, which leaves out more,
     # never less, and the ASH_CONFIG pre-check below confines fail-closed.
+    #
+    # Whether the client named the file is read once, when the target needs it
+    # (a remote session that delivered nothing) and again below for the trusted
+    # base it is resolved against; the second use takes this reading, so the
+    # target and the base cannot be decided by two reads of a file that changed
+    # between them.
+    named_untrusted: Optional[bool] = None
     scanned_root: Optional[Path]
     if config_path is None:
         # Discovery above found `path` inside `search`, so `search` names a
@@ -4868,12 +5612,43 @@ def _answer_get_config(
             # directory or this session's delivered source sits.
             scanned_root = search
         else:
-            delivered = get_session_source_dir(session_id or DEFAULT_SESSION_ID)
-            scanned_root = (
-                delivered
-                if delivered is not None and delivered.is_dir()
-                else working_directory()
+            # None is the stdio session; an empty string is a session of its
+            # own (profile_registry's reading), so it never borrows the stdio
+            # session's delivered tree as the target this answer is judged for.
+            delivered = get_session_source_dir(
+                DEFAULT_SESSION_ID if session_id is None else session_id
             )
+            delivered_here = delivered is not None and delivered.is_dir()
+            if caller_is_remote(session_id) and not delivered_here:
+                named_untrusted = client_named_config_is_untrusted(
+                    path, session_id=session_id
+                )
+            if delivered_here:
+                scanned_root = delivered
+            elif named_untrusted:
+                # A network session that delivered nothing has no tree a scan
+                # of it may target: run_ash_scan refuses to fall back to the
+                # server's working directory for it (_resolve_omitted_source_dir),
+                # so a file of the CLIENT's (named outside every granted config
+                # root) is not judged for that directory either. It is judged
+                # for no scanned tree, the fail-closed path a deleted working
+                # directory already takes: the file is confined by its own
+                # root and the operator-only options of no checkout are read,
+                # which leaves out more, never less. A file the OPERATOR granted
+                # (inside ASH_MCP_ALLOWED_CONFIG_ROOTS) is not confined that way:
+                # under the no-tree load a trusted file in any checkout joins
+                # the confinement and its unimportable plugin modules are
+                # DROPPED, so the answer would show a configuration every scan
+                # of it refuses; it keeps the working-directory judgment, under
+                # which the file sits outside the tree, its entries are kept
+                # and judged, and the refusal below answers.
+                scanned_root = None
+            else:
+                # The local client's working directory is its own tree, the
+                # target run_ash_scan takes for it when none is named; a
+                # network session's granted file keeps the same judgment, as
+                # the arm above says.
+                scanned_root = working_directory()
 
     # resolve_config starts from the ASH_CONFIG base and raises when it is
     # refused. Checked first, so the refusal is not reported as the file asked
@@ -4896,11 +5671,47 @@ def _answer_get_config(
     except (ASHConfigValidationError, OSError) as exc:
         # OSError as above: refused as a config, never the file asked for.
         return _config_load_failure(exc, None)
-    untrusted_config = (
-        client_named_config_is_untrusted(path, session_id=session_id)
-        if config_path is not None
-        else config_is_client_supplied(path)
-    )
+    if config_path is None:
+        untrusted_config = config_is_client_supplied(path)
+    elif named_untrusted is not None:
+        untrusted_config = named_untrusted
+    else:
+        untrusted_config = client_named_config_is_untrusted(path, session_id=session_id)
+    # The trusted base a client-supplied config is resolved against: the
+    # session's bound profile, written again from the binding when its file is
+    # gone. Resolved before the load, so a binding that cannot be written again
+    # (its profile unregistered, its workspace unwritable) is answered as the
+    # session's refusal, the way run_ash_scan answers it, and never as the named
+    # file's load failure: that blamed the client's config for the server's own
+    # state. A BoundProfileUnavailableError is a ValueError too, so inside the
+    # load's try it was caught as one.
+    trusted_config_path: Optional[str] = None
+    if untrusted_config:
+        from automated_security_helper.cli.mcp.profile_registry import (
+            ProfileRegistryError,
+        )
+        from automated_security_helper.cli.mcp.sessions import (
+            SessionWorkspaceBusyError,
+        )
+
+        try:
+            trusted_config_path = resolve_session_trusted_config_path(session_id)
+        except ProfileRegistryError as exc:
+            return _bound_profile_unavailable(exc, "get_config")
+        except SessionWorkspaceBusyError as exc:
+            # The file is gone and another request holds the session's
+            # workspace (its removal), so it is not written again under that
+            # removal: the hold's own refusal, as select_profile answers it,
+            # with the exit code every refusal of this tool carries.
+            return with_exit_code(
+                {
+                    "success": False,
+                    "error": raw_controls_on_one_line(str(exc)),
+                    "error_type": exc.error_type,
+                    "operation": "get_config",
+                },
+                REFUSED_INTERNAL_EXIT_CODE,
+            )
     # The selected config's chain, handed out by the load itself (chain_out),
     # so this tool never reverse-engineers how the load's file lists were put
     # together: a subtraction over files_read dropped the first copy of a
@@ -4922,11 +5733,7 @@ def _answer_get_config(
             permit_base=config_base_gate(session_id),
             scanned_root=scanned_root,
             untrusted_config=untrusted_config,
-            trusted_config_path=(
-                resolve_session_trusted_config_path(session_id)
-                if untrusted_config
-                else None
-            ),
+            trusted_config_path=trusted_config_path,
             # The rules' trusted default config is the ASH_CONFIG file, read with
             # the settings the pre-check above used (a fresh instance: one
             # instance records one read), so a value the load leaves out never
@@ -5228,8 +6035,8 @@ def mcp_validate_config(
 
     from automated_security_helper.cli.mcp.sandbox import (
         caller_is_remote,
+        client_named_config_is_untrusted,
         config_base_gate,
-        config_is_client_supplied,
         validate_config_input,
     )
     from automated_security_helper.config.config_sources import (
@@ -5241,6 +6048,26 @@ def mcp_validate_config(
 
     permit_base = config_base_gate(session_id)
     remote_client = caller_is_remote(session_id)
+
+    if config_content is not None and config_path is not None:
+        # The two inputs are exclusive (the docstring): given both, validating
+        # the content and answering as if for the file reported one input's
+        # result under the other's name. Refused as the missing-input case is,
+        # before anything is read.
+        return {
+            "valid": False,
+            "errors": [
+                {
+                    "field": "",
+                    "message": (
+                        "Give either config_content or config_path, not both: the "
+                        "answer would be about one of them only."
+                    ),
+                    "type": "conflicting_input",
+                }
+            ],
+            "warnings": [],
+        }
 
     if config_content is not None:
         if caller_is_remote(session_id) and text_reads_the_environment(
@@ -5314,9 +6141,15 @@ def mcp_validate_config(
         check = ConfigValidator.check_config_file(
             path,
             permit_base=permit_base,
-            # A client-supplied path is judged as the scan judges it (the
-            # untrusted path); a server-side one keeps the operator's trust.
-            untrusted_config=config_is_client_supplied(path),
+            # A path the client named is judged as the scan judges it
+            # (resolve_config's untrusted_config, through the same predicate):
+            # the client's unless the operator set it aside, in a config root or
+            # as this session's own profile file. Judging only whether a client
+            # delivered the file passed a repository config elsewhere as the
+            # operator's, which the scan then refused, and the reverse.
+            untrusted_config=client_named_config_is_untrusted(
+                path, session_id=session_id
+            ),
             expect=checked,
             # The environment is the server's. A remote caller's config reads
             # nothing from it unless it is one of the operator's files
@@ -5652,15 +6485,44 @@ def mcp_suggest_suppression(
           - json: dict — same data as a dict
         On error: {"success": False, "error": <message>}. A finding whose file
         path holds a backslash has ``error_type`` PATH_NOT_EXPRESSIBLE: no
-        suppression path names that file alone.
+        suppression path names that file alone. A finding that reports no file
+        path, or no rule id, has ``error_type`` SUPPRESSION_NOT_SPECIFIC: a
+        suppression with an empty path matches nothing, and one with no rule
+        covers every rule in the file (or the lines), never that finding
+        alone, so none is suggested. An ``expiration`` that is not a YYYY-MM-DD
+        date has ``error_type`` INVALID_EXPIRATION, with the rule the config
+        model applies to the field.
     """
     from datetime import date, timedelta
+
+    from pydantic import ValidationError
+
     from automated_security_helper.models.asharp_model import AshAggregatedResults
-    from automated_security_helper.models.core import AshSuppression
+    from automated_security_helper.models.core import (
+        AshSuppression,
+        expiration_date_problem,
+    )
     from automated_security_helper.utils.path_matching import (
         PathNotExpressible,
         literal_path_pattern,
     )
+
+    # The client's date, checked before the results are read: the model refuses
+    # the same shape (validate_expiration_date), and a refusal out of it was a
+    # ValidationError raised from the tool, logged as an unexpected error and
+    # answered with a class name. An empty string is no date either; only None
+    # takes the default.
+    if expiration is not None:
+        problem = expiration_date_problem(expiration)
+        if problem is not None:
+            return {
+                "success": False,
+                "error_type": INVALID_EXPIRATION,
+                "error": raw_controls_on_one_line(
+                    f"No suppression suggested: the expiration is not a date the "
+                    f"config accepts. {problem}."
+                ),
+            }
 
     if results_path is None:
         results_file = (
@@ -5682,7 +6544,11 @@ def mcp_suggest_suppression(
         }
 
     try:
-        results = AshAggregatedResults.from_json(results_file.read_text())
+        # ASH writes its results files as UTF-8; the locale default is cp1252 on
+        # Windows, which cannot decode every byte they hold.
+        results = AshAggregatedResults.from_json(
+            results_file.read_text(encoding="utf-8")
+        )
     except Exception as e:
         return {
             "success": False,
@@ -5700,19 +6566,49 @@ def mcp_suggest_suppression(
             "error": raw_controls_on_one_line(f"Finding not found: {finding_id}"),
         }
 
-    expiration_date = expiration or (date.today() + timedelta(days=90)).strftime(
-        "%Y-%m-%d"
+    expiration_date = (
+        expiration
+        if expiration is not None
+        else (date.today() + timedelta(days=90)).strftime("%Y-%m-%d")
     )
     reason = (
         justification
         or "Suppressed via ASH MCP suggest_suppression tool — review before merging"
     )
 
+    # A suppression names the finding by its file and its rule. A finding with
+    # no file path would give one with an empty path, which matches nothing and
+    # was answered as a success; one with no rule id would give a suppression
+    # with no rule, which the matcher reads as every rule in that file (or in
+    # those lines), far more than the finding asked about. Neither names the
+    # finding alone, so neither is suggested.
+    if not finding.file_path:
+        return {
+            "success": False,
+            "error_type": SUPPRESSION_NOT_SPECIFIC,
+            "error": raw_controls_on_one_line(
+                f"No suppression suggested for finding {finding_id}: it reports "
+                "no file path, so a suppression built from it would match "
+                "nothing."
+            ),
+        }
+    if not finding.rule_id:
+        return {
+            "success": False,
+            "error_type": SUPPRESSION_NOT_SPECIFIC,
+            "error": raw_controls_on_one_line(
+                f"No suppression suggested for finding {finding_id}: it reports "
+                "no rule id, so a suppression built from it would cover every "
+                "rule in its file, not this finding alone. Write one by hand "
+                "with the rule, the path and the lines meant."
+            ),
+        }
+
     # The suppression's path is a pattern: written so that it matches the
     # finding's file and no other, where "[", "*" or "?" in the file's name read
     # as glob syntax. A backslash, a separator there, has no spelling at all.
     try:
-        path_pattern = literal_path_pattern(finding.file_path or "")
+        path_pattern = literal_path_pattern(finding.file_path)
     except PathNotExpressible as e:
         return {
             "success": False,
@@ -5722,14 +6618,30 @@ def mcp_suggest_suppression(
             ),
         }
 
-    suppression = AshSuppression(
-        path=path_pattern,
-        rule_id=finding.rule_id,
-        line_start=finding.line_start,
-        line_end=finding.line_end,
-        expiration=expiration_date,
-        reason=reason,
-    )
+    # A suppression with line_start and no line_end is open-ended (the matcher
+    # reads it as "from this line to the end of the file"), so a finding that
+    # reports one line gets a suppression that covers that one line.
+    line_end = finding.line_end if finding.line_end is not None else finding.line_start
+    try:
+        suppression = AshSuppression(
+            path=path_pattern,
+            rule_id=finding.rule_id,
+            line_start=finding.line_start,
+            line_end=line_end,
+            expiration=expiration_date,
+            reason=reason,
+        )
+    except ValidationError as e:
+        # The fields come from the finding and the client (the date is checked
+        # above; a line number or a reason the model refuses is still possible):
+        # answered as the tool's own refusal, described without the input, not
+        # raised out of the tool as an unexpected error.
+        return {
+            "success": False,
+            "error": raw_controls_on_one_line(
+                f"No suppression suggested for finding {finding_id}: {error_text(e)}"
+            ),
+        }
 
     suppression_dict = suppression.model_dump(exclude_none=True)
     suppression_yaml = _block_yaml_one_line_per_key(suppression_dict)
@@ -5809,6 +6721,7 @@ def mcp_select_profile(
     the hold ends. A ``set_source_git`` or ``set_source_zip_finalize`` in
     progress does not refuse it.
     """
+    from automated_security_helper.cli.mcp.profile_registry import binding_writes
     from automated_security_helper.cli.mcp.sessions import (
         SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
@@ -5816,7 +6729,12 @@ def mcp_select_profile(
     )
 
     try:
-        with writing_session_state(session_id):
+        # The write hold keeps the sweep off the workspace; the binding lock
+        # keeps another writer of this session's binding files (a rewrite of a
+        # gone file, profile_registry._rematerialize_binding) from landing an
+        # older profile's files after this one's. Taken inside the hold, as the
+        # rewrite takes it.
+        with writing_session_state(session_id), binding_writes(session_id):
             return _select_profile(
                 profile_name,
                 patch_ops=patch_ops,
@@ -6641,8 +7559,10 @@ def mcp_set_source_zip_finalize(
     Returns:
         ``{"success": True, "source_dir": str}`` on success;
         ``{"success": False, "error": str}`` on checksum mismatch,
-        oversize zip, oversize extraction, too-many-files, or any
-        path-traversal/symlink-out-of-tree entry, and with ``error_type``
+        oversize zip, oversize extraction, too-many-files, any
+        path-traversal/symlink-out-of-tree entry, or assembled bytes that are
+        not a zip archive (``zipfile.BadZipFile``: the checksum matched, so the
+        client sent what it meant to and packaged it wrong), and with ``error_type``
         ``session_workspace_unavailable`` when the session's workspace could not
         take the tree: a directory of it could not be created, the previous tree
         could not be renamed aside (nothing is deleted where it stands), the
@@ -6683,7 +7603,10 @@ def mcp_set_source_zip_finalize(
             "error": raw_controls_on_one_line(error_text(e)),
             "error_type": SESSION_WORKSPACE_UNAVAILABLE,
         }
-    except (UploadNotFoundError, ValueError) as e:
+    except (UploadNotFoundError, ValueError, zipfile.BadZipFile) as e:
+        # BadZipFile is the client's packaging error the delivery documents
+        # (set_source_zip_finalize), answered as the refusals are, not left to
+        # the generic handler as an unexpected error with a class name.
         return {"success": False, "error": raw_controls_on_one_line(error_text(e))}
     # No arm for any other OSError. The delivery maps the failures of the session's
     # workspace itself (a directory that cannot be created, a swap that cannot

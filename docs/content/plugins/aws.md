@@ -186,7 +186,10 @@ needs no IAM permission. The Security Hub reporter calls it in its pre-flight ch
 
 Uploads one object per scan to `<key_prefix>ash-report-<generated_at>.json` (in workspace
 mode `<key_prefix><project>/ash-report-<generated_at>.json`), or `.yaml` with
-`file_format: yaml`. The object holds the scan summary: the report metadata and summary
+`file_format: yaml`. `key_prefix` is used as written: the object name follows it directly,
+so `scans/repo/` places the object under `scans/repo/` and `scans/repo-` writes
+`scans/repo-ash-report-<generated_at>.json`. End the prefix with `/` to use it as a
+directory; ASH warns once per run about a prefix that does not. The object holds the scan summary: the report metadata and summary
 counts, each scanner's and converter's status and finding counts, and the resolved ASH
 configuration, which includes your suppressions and ignore paths. In the configuration and
 the metadata, a value or key a config file read from the environment is the reference the
@@ -217,7 +220,13 @@ assessment, recommendations, and a technical analysis, and writes them to
 `reports/ash.bedrock.summary.md`, `reports/bedrock-executive.md`, and
 `reports/bedrock-technical.md`. `output_file`, `output_executive_file`, and
 `output_technical_file` change those names, and must be plain file names in `reports/`:
-ASH does not write a file whose name leads anywhere else, and logs a warning. A test scan of a small project with one finding made six
+ASH does not write a file whose name leads anywhere else, and logs a warning. Two reports
+cannot share a file: when two of the three options name one file, the later option takes
+its default and ASH logs one warning, or refuses the configuration when that default is
+taken too. Names that differ only in letter case count as one file, since the file systems
+of macOS and Windows treat them so. Only reports that are written are compared, so a name
+for a section in `exclude_sections`, or any name with `output_markdown: false`, is left
+alone. A test scan of a small project with one finding made six
 Converse calls; more severity levels in the results mean more calls.
 
 The prompts contain the names of every scanner in the results, severity counts, and, for

@@ -4,8 +4,8 @@
     'exit_code': 2,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       
       === ASH Scan Completed in <DURATION>: Next Steps ===
@@ -44,18 +44,18 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Container execution failed with code 125
-                   ERROR    Container stderr:
-                            container exited with 125
+      ERROR    Container execution failed with code 125
+      ERROR    Container stderr:
+               container exited with 125
       
       
       Container Error Output:
       container exited with 125
       
-                   ERROR    The container exited with 125, which is not a status an ASH scan can return (0, 1, 2 are the verdicts it reaches from a results file). The scan did not run to completion, so any report in the output directory is incomplete and is not being read back.
+      ERROR    The container exited with 125, which is not a status an ASH scan can return (0, 1, 2 are the verdicts it reaches from a results file). The scan did not run to completion, so any report in the output directory is incomplete and is not being read back.
   
     ''',
   })
@@ -68,18 +68,18 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Container execution failed with code 137
-                   ERROR    Container stderr:
-                            container exited with 137
+      ERROR    Container execution failed with code 137
+      ERROR    Container stderr:
+               container exited with 137
       
       
       Container Error Output:
       container exited with 137
       
-                   ERROR    The container exited with 137, which is not a status an ASH scan can return (0, 1, 2 are the verdicts it reaches from a results file). The scan did not run to completion, so any report in the output directory is incomplete and is not being read back.
+      ERROR    The container exited with 137, which is not a status an ASH scan can return (0, 1, 2 are the verdicts it reaches from a results file). The scan did not run to completion, so any report in the output directory is incomplete and is not being read back.
   
     ''',
   })
@@ -92,18 +92,18 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Container execution failed with code 3
-                   ERROR    Container stderr:
-                            container exited with 3
+      ERROR    Container execution failed with code 3
+      ERROR    Container stderr:
+               container exited with 3
       
       
       Container Error Output:
       container exited with 3
       
-                   ERROR    The container exited with 3 (invalid config or refused input), which means nothing was scanned. Only 0, 1, 2 are verdicts ASH reaches from a results file, so there is nothing in the output directory to read back.
+      ERROR    The container exited with 3 (invalid config or refused input), which means nothing was scanned. Only 0, 1, 2 are verdicts ASH reaches from a results file, so there is nothing in the output directory to read back.
   
     ''',
   })
@@ -116,18 +116,18 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Container execution failed with code 4
-                   ERROR    Container stderr:
-                            container exited with 4
+      ERROR    Container execution failed with code 4
+      ERROR    Container stderr:
+               container exited with 4
       
       
       Container Error Output:
       container exited with 4
       
-                   ERROR    The container exited with 4 (workspace definition or policy error), which means nothing was scanned. Only 0, 1, 2 are verdicts ASH reaches from a results file, so there is nothing in the output directory to read back.
+      ERROR    The container exited with 4 (workspace definition or policy error), which means nothing was scanned. Only 0, 1, 2 are verdicts ASH reaches from a results file, so there is nothing in the output directory to read back.
   
     ''',
   })
@@ -140,18 +140,18 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Container execution failed with code 5
-                   ERROR    Container stderr:
-                            container exited with 5
+      ERROR    Container execution failed with code 5
+      ERROR    Container stderr:
+               container exited with 5
       
       
       Container Error Output:
       container exited with 5
       
-                   ERROR    The container exited with 5 (usage error), which means nothing was scanned. Only 0, 1, 2 are verdicts ASH reaches from a results file, so there is nothing in the output directory to read back.
+      ERROR    The container exited with 5 (usage error), which means nothing was scanned. Only 0, 1, 2 are verdicts ASH reaches from a results file, so there is nothing in the output directory to read back.
   
     ''',
   })
@@ -161,10 +161,10 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    The container run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. An ASH older than this one does not write that record: rebuild the image from this ASH (run without --no-build, with --force if the image is cached). Without --ash-revision-to-install, the build installs this ASH's own source tree.
+      ERROR    The container run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. An ASH older than this one does not write that record: rebuild the image from this ASH (run without --no-build, with --force if the image is cached). Without --ash-revision-to-install, the build installs this ASH's own source tree.
   
     ''',
   })
@@ -174,11 +174,10 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Container execution failed with code 2
-                   ERROR    The container run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. An ASH older than this one does not write that record: rebuild the image from this ASH (run without --no-build, with --force if the image is cached). Without --ash-revision-to-install, the build installs this ASH's own source tree.
+      ERROR    The container run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. An ASH older than this one does not write that record: rebuild the image from this ASH (run without --no-build, with --force if the image is cached). Without --ash-revision-to-install, the build installs this ASH's own source tree.
   
     ''',
   })
@@ -188,11 +187,11 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
       container wrote nothing
-                   ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json
+      ERROR    Results file not found at <TMP>/out/ash_aggregated_results.json
   
     ''',
   })
@@ -202,10 +201,10 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Failed to parse results file <TMP>/out/ash_aggregated_results.json: Invalid value at '(top level)': Invalid JSON: key must be a string at line 1 column 2
+      ERROR    Failed to parse results file <TMP>/out/ash_aggregated_results.json: Invalid value at '(top level)': Invalid JSON: key must be a string at line 1 column 2
   
     ''',
   })
@@ -215,10 +214,10 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Scan incomplete: cfn-nag (ERROR), npm-audit (MISSING)
+      ERROR    Scan incomplete: cfn-nag (ERROR), npm-audit (MISSING)
       
       === ASH Scan Completed in <DURATION>: Next Steps ===
       View detailed findings...
@@ -249,11 +248,10 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Container execution failed with code 1
-                   ERROR    Scan incomplete: cfn-nag (ERROR), npm-audit (MISSING)
+      ERROR    Scan incomplete: cfn-nag (ERROR), npm-audit (MISSING)
       
       === ASH Scan Completed in <DURATION>: Next Steps ===
       View detailed findings...
@@ -284,11 +282,10 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
-                   INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
+      INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+      INFO     ASH installation appears to be alongside the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Container execution failed with code 2
-                   ERROR    Scan incomplete: cfn-nag (ERROR), npm-audit (MISSING)
+      ERROR    Scan incomplete: cfn-nag (ERROR), npm-audit (MISSING)
       
       === ASH Scan Completed in <DURATION>: Next Steps ===
       View detailed findings...

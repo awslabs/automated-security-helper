@@ -121,6 +121,14 @@ from automated_security_helper.core.resource_management.error_handling import (
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
+from automated_security_helper.utils.link_chain import (
+    LINK_HOPS,
+    components_down_to,
+    first_unsafe_link,
+    is_a_drive_spelling,
+    link_chain_names_a_windows_share,
+    names_a_windows_share,
+)
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import set_environ
@@ -137,6 +145,11 @@ ASH_MCP_ALLOWED_ROOTS_ENV = "ASH_MCP_ALLOWED_ROOTS"
 #: location is read from and never scanned or written into, so conflating them
 #: would let an operator widen the scan surface by naming a config directory.
 ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV = "ASH_MCP_ALLOWED_CONFIG_ROOTS"
+
+#: The parent of every session workspace, read by ``source_delivery`` (its
+#: resolution order is documented there). Named here so a refusal can tell the
+#: caller which setting moves the workspace area.
+ASH_MCP_WORKSPACE_ROOT_ENV = "ASH_MCP_WORKSPACE_ROOT"
 
 #: Subdirectory of a session sandbox holding the delivered source tree. Matches
 #: what ``source_delivery`` writes; the two must agree or a delivered tree is
@@ -364,10 +377,15 @@ def config_is_client_supplied(config_path: str | Path) -> bool:
     shared = shared_workspace_root()
     if shared is None:
         return False
+    # os.path.realpath rather than Path.resolve, as in validate_config_input: on
+    # Python 3.12 and older, resolve raises RuntimeError for a link that leads
+    # back to itself, and a scanned tree can hold one (a self-referencing
+    # .semgrepignore made a scanner's construction raise here). realpath
+    # resolves as far as it can and raises nothing.
     for candidate in (
         Path(os.path.abspath(config_path)),
         *link_locations(config_path),
-        Path(config_path).resolve(),
+        Path(os.path.realpath(config_path)),
     ):
         parts = _parts_below(candidate, shared)
         if parts is not None and not _is_server_written_config(
@@ -500,7 +518,9 @@ def client_named_config_is_untrusted(
     config_roots = operator_config_roots()
     # Resolved as the gates resolve it, so an id that cannot name one directory
     # owns no config directory here either.
-    own = _sandbox_for_gate(session_id or DEFAULT_SESSION_ID).root
+    own = _sandbox_for_gate(
+        DEFAULT_SESSION_ID if session_id is None else session_id
+    ).root
 
     def chosen_by_operator(candidate: Path) -> bool:
         if own is not None:
@@ -511,11 +531,14 @@ def client_named_config_is_untrusted(
                 return True
         return any(_parts_below(candidate, root) is not None for root in config_roots)
 
+    # os.path.realpath, as config_is_client_supplied above: Path.resolve raises
+    # RuntimeError on Python 3.12 and older for a link that leads back to
+    # itself, and a named config is judged, not raised on.
     return not all(
         chosen_by_operator(candidate)
         for candidate in (
             Path(os.path.abspath(config_path)),
-            Path(config_path).resolve(),
+            Path(os.path.realpath(config_path)),
         )
     )
 
@@ -563,11 +586,16 @@ def _validated_session_component(session_id: str) -> str:
     directly.
     """
 
-    if not session_id:
-        raise ValueError("session_id must be a non-empty string")
-    if "/" in session_id or "\\" in session_id or session_id in ("..", "."):
-        raise ValueError(f"session_id contains path separators: {session_id!r}")
-    return session_id
+    # The one rule every builder of a session path applies
+    # (session_paths.validated_path_component): the registry, source delivery
+    # and the TTL sweep refuse an id by it, and a separator-only rule here
+    # granted a sandbox root for ids they refuse (a control character, a name
+    # over the length bound, the shape of a hidden delete name).
+    from automated_security_helper.cli.mcp.session_paths import (
+        validated_path_component,
+    )
+
+    return validated_path_component(session_id, "session_id")
 
 
 # ---------------------------------------------------------------------------
@@ -762,13 +790,26 @@ def _sandbox_for_gate(session_id: Optional[str]) -> SessionSandbox:
     nothing, so :func:`_sibling_refusal` refuses every path under the shared
     workspace area -- including the one the malformed id was shaped to reach.
     What the caller loses is exactly the session allowance it failed to name.
+
+    The degraded sandbox is a remote caller's: the operator's grant and nothing
+    else. ``session_sandbox(None)`` is the local caller's, with the permissive
+    denylist fallback and unconfined config reads, and a client that sent a
+    malformed id is not the process that launched the server.
     """
 
     try:
         return session_sandbox(session_id)
     except ValueError as exc:
         _logger.debug("MCP sandbox: no session allowance for %r (%s)", session_id, exc)
-        return session_sandbox(None)
+        granted_scan = operator_scan_roots()
+        return SessionSandbox(
+            session_id=None,
+            root=None,
+            scan_roots=tuple(granted_scan),
+            config_roots=tuple(operator_config_roots()) + tuple(granted_scan),
+            fall_back_to_denylist=False,
+            confine_config=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -789,22 +830,134 @@ def _refusal(
     sets on the ``mcp_tools`` side.
     """
 
-    shown = path.as_posix() if isinstance(path, PurePath) else path
     return MCPResourceError(
-        f"{what} is outside the permitted roots: {shown}. {remedy}",
-        context={
-            "cwd": str(Path.cwd()),
-            "directory_path": str(path),
-            "resolved_path": str(resolved),
-            "error_category": ErrorCategory.INVALID_PATH.value,
-        },
+        f"{what} is outside the permitted roots: {_shown_path(path)}. {remedy}",
+        context=_refusal_context(path, resolved),
+    )
+
+
+def _shown_path(path: object) -> object:
+    """The caller's own spelling of ``path``, as every refusal shows it."""
+    return path.as_posix() if isinstance(path, PurePath) else path
+
+
+def _refusal_context(path: object, resolved: Path) -> dict[str, str]:
+    """The context every refusal in this module carries; see ``_refusal``."""
+    return {
+        "cwd": str(Path.cwd()),
+        "directory_path": str(path),
+        "resolved_path": str(resolved),
+        "error_category": ErrorCategory.INVALID_PATH.value,
+    }
+
+
+def _running_on_windows() -> bool:
+    return os.name == "nt"
+
+
+#: The link-chain reading lives in ``utils/link_chain`` (one copy for this module
+#: and the config loader). The names are kept here for this module's tests; the
+#: hop bound is a module attribute so a test can shorten it, and is passed to the
+#: walk at call time.
+_LINK_HOPS = LINK_HOPS
+_names_a_windows_share = names_a_windows_share
+_is_a_drive_spelling = is_a_drive_spelling
+_link_chain_names_a_windows_share = link_chain_names_a_windows_share
+_components_down_to = components_down_to
+
+
+def _refusal_before_resolving(what: str, path: object) -> Optional[MCPResourceError]:
+    """On Windows, refuse a client-named path whose resolution would open a connection.
+
+    Resolving a UNC path, or a link whose target is one, makes Windows open a
+    connection to the host the path names, before any gate has judged it.
+    ``config_sources`` refuses a linked source unresolved for that reason
+    (``_permitted``); the gates here resolved the caller's path first, so a UNC
+    path, or a link to one, had the server reach the host it named and then be
+    refused. A UNC spelling is refused as given. A link is read, not resolved
+    (``_link_chain_names_a_windows_share``): one that leads to a share, or whose
+    target cannot be read, is refused unresolved; one that leads to a local name
+    goes on to the gates and is judged resolved, as on every other platform, so a
+    linked checkout, a junction in a repository and a link to nothing are judged
+    as the directory or file they name rather than refused for being links.
+    Nothing is refused on other platforms, where resolving opens nothing.
+
+    Every component of the path is read, not only its last: ``os.lstat`` on the
+    whole path follows a link in a PARENT component (only the final one is left
+    unfollowed), so ``C:\\granted\\lnk\\repo`` with ``lnk`` a link to a share
+    opened the share at the check meant to prevent it. The walk goes from the
+    anchor down; the first component that is a link is judged as the last one
+    was, and a local link is followed to judge the components under it. A
+    component the walk cannot examine at all (``os.lstat`` refuses it, or its
+    spelling cannot be given to the filesystem) is the third refusal: whether it
+    is a link cannot be told, and the doubt is refused rather than resolved. A
+    component that is not there ends the walk with nothing judged, and the gates
+    judge the path as they do on every other platform.
+    """
+    if not _running_on_windows():
+        return None
+    text = os.fspath(path) if isinstance(path, (str, os.PathLike)) else str(path)
+    if _names_a_windows_share(path):
+        return _refusal(
+            what,
+            path,
+            Path(text),
+            "It names a network share or a device path, which the MCP server does "
+            "not open. Name a directory on a local volume.",
+        )
+    # The walk (utils/link_chain) judges the lexically collapsed spelling, the
+    # one Win32 examines, component by component from the anchor down; a local
+    # link is followed, a missing component ends it with nothing judged, and the
+    # first link that leads to a share or whose target cannot be read is the
+    # answer; so is a component that cannot be examined at all (whether it is a
+    # link cannot be told, and the doubt is refused rather than resolved). The
+    # hop bound is read here at call time, so a test can shorten it.
+    unsafe = first_unsafe_link(text, hops=_LINK_HOPS)
+    if unsafe is None:
+        return None
+    if unsafe.unexaminable:
+        entry = (
+            "The path"
+            if unsafe.is_last
+            else f"Its component {_shown_path(unsafe.component)}"
+        )
+        return _refusal(
+            what,
+            path,
+            Path(text),
+            f"{entry} cannot be examined by the MCP server, so it is not resolved "
+            "on Windows: an entry that cannot be read may be a link, and "
+            "resolving one can open a connection to the host it names. Name a "
+            "directory on a local volume the MCP server can read.",
+        )
+    where = (
+        "It is a link"
+        if unsafe.is_last
+        else f"Its component {_shown_path(unsafe.component)} is a link"
+    )
+    if unsafe.reaches_a_share:
+        return _refusal(
+            what,
+            path,
+            Path(text),
+            f"{where} that leads to a network share or a device path, which "
+            "the MCP server does not open. Name a directory on a local volume.",
+        )
+    return _refusal(
+        what,
+        path,
+        Path(text),
+        f"{where} whose target the MCP server cannot read, so it is not "
+        "resolved on Windows: resolving one can open a connection to the host "
+        "its target names. Name the directory itself.",
     )
 
 
 def _sibling_refusal(
     sandbox: SessionSandbox, path: object, resolved: Path
 ) -> Optional[MCPResourceError]:
-    """Refuse a path inside the shared workspace root but not inside this sandbox.
+    """Refuse a path inside the shared workspace root but not inside this sandbox,
+    and a path the shared workspace root is inside, on disk yet or not.
 
     Checked before anything that could allow, and independent of both the
     operator grant and the transport. That independence is the point: the
@@ -825,6 +978,25 @@ def _sibling_refusal(
     shared = shared_workspace_root()
     if shared is None:
         return None
+    if _is_or_below(shared, resolved) and not _is_or_below(resolved, shared):
+        # The target is an ancestor of the shared root: its parent, the home
+        # directory, a granted tree above it. A scan of it walks every
+        # session's delivered source, which is the same disclosure as scanning
+        # a sibling directly, so it is refused on the same footing, before
+        # any grant is consulted. Judged by path, whether or not the root is on
+        # disk yet: a root created after the judgment changes nothing, and a
+        # root that cannot be read does not read as absent.
+        # The path shown is the caller's own, which names no other session.
+        # No grant admits this target, so the remedy names the setting that
+        # moves the workspace area rather than the one that grants roots.
+        return MCPResourceError(
+            f"Target {_shown_path(path)} contains the MCP session workspace "
+            "area, so a scan of it would read every session's delivered source. "
+            "Scan a tree this session delivered, or set "
+            f"{ASH_MCP_WORKSPACE_ROOT_ENV} to a workspace area the granted "
+            "directory does not contain.",
+            context=_refusal_context(path, resolved),
+        )
     inside_shared = _is_or_below(resolved, shared)
     if not inside_shared or sandbox.owns(resolved):
         return None
@@ -860,13 +1032,11 @@ def _server_config_dir_refusal(
         return None
     for name in (CONFIG_DIR_NAME, CLIENT_CONFIG_DIR_NAME):
         server_dir = sandbox.root / name
-        # By file identity too, as _parts_below matches ancestors, so a spelling
-        # that differs only in case on a case-insensitive volume is refused.
-        if (
-            resolved == server_dir
-            or resolved.is_relative_to(server_dir)
-            or _parts_below(resolved, server_dir) is not None
-        ):
+        # By file identity too (_is_or_below), so a spelling that differs only in
+        # case on a case-insensitive volume is refused: the directory itself as
+        # well as a path below it. _parts_below matches ancestors alone, so the
+        # directory's own respelling passed it, and then passed as a scan target.
+        if _is_or_below(resolved, server_dir):
             return _refusal(
                 "Scan target",
                 path,
@@ -882,6 +1052,7 @@ def _server_config_dir_refusal(
 def validate_scan_target_in_sandbox(
     directory_path: str | Path,
     session_id: Optional[str] = None,
+    resolved_out: Optional[List[Path]] = None,
 ) -> Optional[MCPResourceError]:
     """Check a scan target against this session's capability.
 
@@ -897,13 +1068,63 @@ def validate_scan_target_in_sandbox(
     Args:
         directory_path: Caller-supplied scan target, absolute or relative.
         session_id: The session this call acts for.
+        resolved_out: When given, a permitted target appends to it the resolved
+            path this check judged, so a caller that builds paths under the
+            target builds them from the path that was permitted and not from a
+            second resolution of the caller's text, which can lead elsewhere by
+            then. Nothing is appended for a refusal.
 
     Returns:
         None if permitted, otherwise an :class:`MCPResourceError`.
     """
 
-    resolved = Path(directory_path).resolve()
+    unresolved = _refusal_before_resolving("Scan target", directory_path)
+    if unresolved is not None:
+        return unresolved
+    # os.path.realpath rather than Path.resolve, as the config-input gate below:
+    # on Python 3.12 and older, resolve raises RuntimeError for a symbolic link
+    # that leads back to itself, which escaped this gate as an exception instead
+    # of a judgment. Resolved as far as it can be, the path is judged here.
+    resolved = Path(os.path.realpath(directory_path))
+    refusal = _scan_target_refusal(directory_path, resolved, session_id)
+    if refusal is None and resolved_out is not None:
+        resolved_out.append(resolved)
+    return refusal
+
+
+def _scan_target_refusal(
+    directory_path: str | Path, resolved: Path, session_id: Optional[str]
+) -> Optional[MCPResourceError]:
+    """The refusal of ``validate_scan_target_in_sandbox`` for ``resolved``, or None."""
+
     sandbox = _sandbox_for_gate(session_id)
+
+    remedy = (
+        f"Set {ASH_MCP_ALLOWED_ROOTS_ENV} to the directories the MCP server may "
+        f"scan, or deliver the tree with set_source_git or "
+        f"set_source_zip_finalize so it lands in this session's sandbox."
+    )
+    if _is_filesystem_root(resolved) and not sandbox.permits_scan(resolved):
+        # Reached most often by omitting the directory entirely: the tool falls
+        # back to the process working directory, and a server launched by an
+        # editor or agent frequently has "/" for a cwd. Telling that caller to
+        # configure an allowlist points at the wrong lever first. Judged before
+        # the gates below, so the root keeps this remedy whatever they would say
+        # of a directory that contains everything. A root the operator granted
+        # (a second volume's drive root on Windows, "/" where no shared
+        # workspace root sits under it) is not that caller: it passes to the
+        # gates below as any granted directory does, and is permitted by them
+        # when nothing else refuses it.
+        return _refusal(
+            "Scan target",
+            directory_path,
+            resolved,
+            (
+                "Pass the directory to scan explicitly; the default is the "
+                "server's working directory, which here is the filesystem root. "
+                f"{remedy}"
+            ),
+        )
 
     sibling = _sibling_refusal(sandbox, directory_path, resolved)
     if sibling is not None:
@@ -919,20 +1140,6 @@ def validate_scan_target_in_sandbox(
     if sandbox.fall_back_to_denylist:
         return _legacy_denylist_refusal(directory_path, resolved)
 
-    remedy = (
-        f"Set {ASH_MCP_ALLOWED_ROOTS_ENV} to the directories the MCP server may "
-        f"scan, or deliver the tree with set_source_git or "
-        f"set_source_zip_finalize so it lands in this session's sandbox."
-    )
-    if _is_filesystem_root(resolved):
-        # Reached most often by omitting the directory entirely: the tool falls
-        # back to the process working directory, and a server launched by an
-        # editor or agent frequently has "/" for a cwd. Telling that caller to
-        # configure an allowlist points at the wrong lever first.
-        remedy = (
-            "Pass the directory to scan explicitly; the default is the server's "
-            f"working directory, which here is the filesystem root. {remedy}"
-        )
     return _refusal("Scan target", directory_path, resolved, remedy)
 
 
@@ -975,6 +1182,9 @@ def validate_config_input(
     """
 
     if resolved is None:
+        unresolved = _refusal_before_resolving("Config input", config_path)
+        if unresolved is not None:
+            return unresolved
         # os.path.realpath rather than Path.resolve: on Python 3.12 and older,
         # resolve raises RuntimeError for a symbolic link that leads back to
         # itself, which would escape the tool as an exception. Resolved as far as
@@ -1367,7 +1577,9 @@ def _legacy_denylist_refusal(
     the documented container workspace root (/var/cache/ash-mcp), "/usr" would
     refuse tool installs, and "/home" would refuse the common case. A grant is
     the mechanism for narrowing beyond this; on a network transport the sandbox
-    is, and this function is not reached there.
+    is, and this function is not reached there. An ancestor of the workspace
+    root is refused earlier, by ``_sibling_refusal``, whether or not the root is
+    on disk yet.
     """
 
     from automated_security_helper.cli.mcp.scan_target import _denied_roots
@@ -1395,6 +1607,7 @@ def _legacy_denylist_refusal(
 __all__ = [
     "ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV",
     "ASH_MCP_ALLOWED_ROOTS_ENV",
+    "ASH_MCP_WORKSPACE_ROOT_ENV",
     "ASH_MCP_TRANSPORT_ENV",
     "DEFAULT_TRANSPORT",
     "CLIENT_CONFIG_DIR_NAME",

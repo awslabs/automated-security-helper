@@ -235,6 +235,53 @@ def test_a_workspace_suppression_reaches_only_the_project_it_names(tmp_path):
     assert projects["web"].policy_suppressions == []
 
 
+def test_a_package_path_is_pushed_down_into_the_project_that_holds_the_copy(tmp_path):
+    _project(tmp_path, "api")
+    _project(tmp_path, "web")
+    workspace = _workspace(tmp_path, ["api", "web"])
+    _policy_file(
+        tmp_path,
+        "workspace:\n"
+        "  suppressions:\n"
+        "    - path: '**/*.js'\n"
+        "      package_path: api/node_modules/left-pad\n"
+        "      reason: vendored copy\n",
+    )
+
+    plan = resolve_workspace(workspace)
+    projects = _by_key(plan)
+
+    (entry,) = projects["api"].policy_suppressions
+    assert entry.package_path == "node_modules/left-pad"
+    assert projects["web"].policy_suppressions == []
+
+
+def test_a_package_path_naming_no_project_refuses_the_workspace(tmp_path):
+    """Written relative to a project, the value names no project's copy once it
+    is read relative to the workspace, so the suppression applied nowhere with
+    only a log line to say so."""
+    _project(tmp_path, "api")
+    _project(tmp_path, "web")
+    workspace = _workspace(tmp_path, ["api", "web"])
+    _policy_file(
+        tmp_path,
+        "workspace:\n"
+        "  suppressions:\n"
+        "    - path: '**/*.js'\n"
+        "      package_path: vendored/zz-widget\n"
+        "      reason: vendored copy\n",
+    )
+
+    with pytest.raises(WorkspaceDefinitionError) as excinfo:
+        resolve_workspace(workspace)
+
+    message = str(excinfo.value)
+    assert "names no project's package copy" in message
+    # On the entry's own line: the refusal's header quotes 'node_modules/left-pad'
+    # as an example, so that value would pass without the entry's being quoted.
+    assert "suppression entry 1: its package_path 'vendored/zz-widget'" in message
+
+
 def test_an_unrewritable_policy_pattern_refuses_naming_project_and_pattern(tmp_path):
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api"])

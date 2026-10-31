@@ -905,7 +905,13 @@ def test_an_upload_without_the_section_keeps_the_servers_reporter_options(
 def test_a_delivered_tree_cannot_turn_on_a_reporter_the_server_turned_off(
     _server,
 ) -> None:
-    """Left out, the section would return the reporter to its default, which is on."""
+    """The server's ``enabled: false`` holds when the delivered tree leaves the section out.
+
+    Every off-host reporter is off by default (``REPORTER_ENABLED_DEFAULTS``), so
+    the operator's setting and the default agree here; what this pins is that a
+    delivered tree with no reporters section does not change the server's
+    answer, read as the scan reads it.
+    """
     operator = _server["tmp"] / "operator" / "ash.yaml"
     operator.write_text(
         "project_name: operator\nreporters:\n  s3:\n    enabled: false\n",
@@ -1072,6 +1078,7 @@ def test_the_check_reads_what_resolution_parsed_not_the_file_again(_server) -> N
     source = _upload({"ash.yaml": BEDROCK_REGION})
     upload = source / "ash.yaml"
     real = rc.resolve_config_document
+    swapped: List[Path] = []
 
     def read_then_swap(path: Any, *args: Any, **kwargs: Any) -> Any:
         document = real(path, *args, **kwargs)
@@ -1079,6 +1086,7 @@ def test_the_check_reads_what_resolution_parsed_not_the_file_again(_server) -> N
         # ASH_CONFIG too, and may read it first.
         if Path(path).resolve() == upload.resolve():
             upload.write_text("project_name: benign\n", encoding="utf-8")
+            swapped.append(Path(path))
         return document
 
     with patch.object(rc, "resolve_config_document", read_then_swap):
@@ -1088,6 +1096,10 @@ def test_the_check_reads_what_resolution_parsed_not_the_file_again(_server) -> N
                 source_dir=_server["target"],
                 untrusted_config=True,
             )
+    # The premise: the swap ran, once, after the upload was read. Without it the
+    # refusal above is the plain read's, and the test proves nothing about a
+    # file that changes under the check.
+    assert len(swapped) == 1, swapped
 
 
 def test_delivery_is_refused_while_a_scan_of_the_session_runs(_server) -> None:

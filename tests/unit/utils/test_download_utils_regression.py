@@ -84,12 +84,11 @@ class TestBug60RenameToNone:
         cmd = create_url_download_command(
             url="https://example.com/tool", rename_to=None, expected_sha256="a" * 64
         )
-        # The last arg should be the Python string "None" that the script
-        # checks with `if sys.argv[3] != 'None'`. The bug was that
-        # str(None) was used unconditionally. With the fix, we pass the
-        # actual string "None" only when rename_to IS None, so the
-        # inline script correctly interprets it.
-        assert cmd.args[-1] == "None"
+        # An absent rename travels as an empty argument, which the inline
+        # script reads with `sys.argv[4] or None`. The bug was that str(None)
+        # was used unconditionally; the first fix passed the string "None",
+        # which a binary to be named None could not be told from.
+        assert cmd.args[-1] == ""
 
     def test_rename_to_value_passes_through(self):
         from automated_security_helper.utils.download_utils import (

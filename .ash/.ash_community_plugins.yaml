@@ -63,7 +63,7 @@ global_settings:
         False positive. A changelog sentence about a Security Hub credentials check; it
         holds words, not a credential.
     - rule_id: SSN
-      path: docs/content/docs/plugins/builtin/converters.md
+      path: docs/content/reference/converters.md
       reason: >-
         False positive. The nine-digit numbers are the 256 MiB byte limits in the
         converter option examples and table, which the detector reads as a social
@@ -78,9 +78,6 @@ global_settings:
     # pattern instead of quoting a line, because a quoted line would make this file
     # trip the same rules. Sorted by rule, then path.
     - rule_id: API_KEY_OR_SECRET
-      path: tests/integration/codecommit_gate_regression/assert_case.py
-      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
-    - rule_id: API_KEY_OR_SECRET
       path: tests/snapshot/mcp/test_snapshot_mcp_session_tools.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
     - rule_id: API_KEY_OR_SECRET
@@ -93,16 +90,10 @@ global_settings:
       path: tests/unit/cli/mcp/test_a_scan_runner_failure_shows_no_value_the_config_read.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
     - rule_id: API_KEY_OR_SECRET
-      path: tests/unit/cli/mcp/test_delivered_config_env.py
-      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
-    - rule_id: API_KEY_OR_SECRET
       path: tests/unit/cli/mcp/test_ending_a_session_deletes_its_workspace_under_a_hidden_name.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/cli/mcp/test_source_delivery_deletes_read_only_scratch.py
-      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
-    - rule_id: API_KEY_OR_SECRET
-      path: tests/unit/config/test_config_alias_round_trip.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/config/test_config_messages_hide_values.py
@@ -115,12 +106,6 @@ global_settings:
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/plugins/test_the_registry_and_decorators_name_a_masked_module_by_its_mask.py
-      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
-    - rule_id: API_KEY_OR_SECRET
-      path: tests/unit/test_pinned_tool_github_lookup.py
-      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
-    - rule_id: API_KEY_OR_SECRET
-      path: tests/unit/utils/test_secret_masking.py
       reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
     - rule_id: B102
       path: tests/unit/characterization/test_harness_confinement.py
@@ -335,20 +320,6 @@ global_settings:
         mapped to the one option the scanned tree may not set for it. The keyword
         is part of a tool name; the value is an option name, not a credential.
         Pinned to the line so a real value added elsewhere in the file still reports.
-    - path: CHANGELOG.md
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The match is a sentence in an unreleased entry about the AWS
-        reporters being disabled by default, where the word credentials ends a clause
-        before a colon. It is prose describing which calls a dependency check makes,
-        not a value. The changelog is generated from commit messages and carries no
-        credentials.
-    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. This analysis document is about exactly this detector
-        misfiring: it quotes a typed attribute of a generated model as the example
-        that reads as a credential. Two lines of prose and a code span, no values.
     - path: tests/integration/codecommit_gate_regression/assert_case.py
       rule_id: API_KEY_OR_SECRET
       reason: >-
@@ -442,15 +413,6 @@ global_settings:
         False positive. The match is a buildspec command string that clones the ASH
         repository at a pinned version with git. It names the repository URL and
         version through environment variable references and carries no value.
-    # === ferret-scan SSN: a byte limit that has nine digits ===
-    - path: docs/content/docs/plugins/builtin/converters.md
-      rule_id: SSN
-      reason: >-
-        False positive. The three matches are the archive converter's byte limit
-        of 256 MiB, written out in bytes, in a YAML example, in its option table and
-        in a comment. A nine-digit number is the shape of a social security number;
-        this one is a power of two. Scoped to this page so an identifier-like number
-        added to another document is still reported.
     # === ferret-scan API_KEY_OR_SECRET: more identifier and fixture matches ===
     # Same detector, same cause as the block above: the unquoted-assignment check
     # reads a name that contains a secret keyword, or a long hex string, as a
@@ -500,90 +462,17 @@ global_settings:
       reason: >-
         False positive. Same shape as test_scan_directory_start_failures.py: a
         module constant named for a fake client session.
-    # === ferret-scan SSN: a byte limit written as a nine-digit number ===
-    - path: docs/content/docs/plugins/builtin/converters.md
-      rule_id: SSN
-      reason: >-
-        False positive. Three lines write 256 MiB out in full as a nine-digit
-        number: the archive converter's default per-member byte limit in the example
-        config and in the limits table, and a total-bytes limit in a second example.
-        Nine digits is the shape the SSN detector looks for; each is a size in
-        bytes, and the converter's source sets the per-member default as
-        256 * 1024 * 1024.
     # === ferret-scan API_KEY_OR_SECRET: files the 10-22 scan did not report ===
     # Same detector and the same causes as the two blocks above. The scan of the
-    # pull request's later head reports these thirteen files that the first
-    # scan did not (new files, a newer ferret-scan, or both). Each was read at the
-    # reported line. One entry per file, no globs, no line numbers.
-    - path: CHANGELOG.md
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The flagged line is release-note prose in an entry about a
-        scanner check that contacts AWS with the host's credentials. It names the
-        behavior; it holds no credential.
-    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. This design note documents the very detector false
-        positive the entries above suppress: two lines quote a typed model field
-        named for a session object that the detector reads as a credential. The
-        lines are documentation of the false positive, not secrets.
-    - path: deploy/cdk/templates/AshAgentCore.template.json
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. Three lines in the synthesized template: the logical id of
-        the Secrets Manager secret that holds the MCP auth header, and two Ref
-        expressions that point at it. A logical id holds no value; the secret's
-        content is created at deploy time. No line numbers because cdk synth
-        regenerates the file.
-    - path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The flagged line is the logical id of the Secrets Manager
-        secret for the MCP auth header, the same id as in the other templates. No
-        line number because cdk synth regenerates the file.
-    - path: deploy/cdk/templates/AshDistributedPipeline.template.json
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The flagged line is the logical id of the Secrets Manager
-        secret for the MCP auth header, the same id as in the other templates. No
-        line number because cdk synth regenerates the file.
-    - path: tests/integration/codecommit_gate_regression/assert_case.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The flagged line is a key in an expected scanner-results
-        table: the detect-secrets scanner's name with a status. The name carries
-        the word "secrets"; no value is a credential.
-    - path: tests/unit/config/test_config_alias_round_trip.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The flagged line is a fixture config section for the
-        detect-secrets scanner holding a severity threshold. The scanner's name is
-        what the detector matches.
+    # pull request's later head reports files that the first scan did not (new
+    # files, a newer ferret-scan, or both). Each was read at the reported line. One
+    # entry per file, no globs, no line numbers; a file an entry above already
+    # names is not repeated here.
     - path: tests/unit/cli/mcp/test_clone_limits_and_delivery_interlocks.py
       rule_id: API_KEY_OR_SECRET
       reason: >-
         False positive. A module constant named for a fake MCP session, the same
         shape as the entries for the other MCP tests above.
-    - path: tests/unit/cli/mcp/test_delivered_config_env.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. A module constant named for a fake client session, the
-        same shape as the entries for the other MCP tests above.
-    - path: tests/unit/test_pinned_tool_github_lookup.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The flagged constant is a placeholder token string that the
-        test sets in a fake environment and asserts never reaches the report or
-        the log. It authenticates nothing. The line already carries the
-        detect-secrets allowlist marker.
-    - path: tests/unit/utils/test_secret_masking.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. Five lines are fixtures for ASH's own secret masking: sample
-        scanner messages and a dummy key copied from AWS documentation's published
-        example value. The tests exist to prove such text is masked in the output.
-        Scoped to this file, as the SECRET-SECRET-KEYWORD entries above are.
     # === ferret-scan API_KEY_OR_SECRET: pinned release checksums ===
     # Separate from the block above and for a different reason. Those are identifiers
     # whose NAMES match a secret keyword; this one is a table of values that genuinely
@@ -626,23 +515,23 @@ global_settings:
         fails when the block moves and this range does not.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
-      line_start: 595
-      line_end: 595
+      line_start: 626
+      line_end: 626
       reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B404
-      line_start: 11
-      line_end: 11
+      line_start: 12
+      line_end: 12
       reason: Subprocess module required — ferret-scan is an external CLI tool invoked via subprocess with list args (no shell=True).
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B603
-      line_start: 826
-      line_end: 832
+      line_start: 1065
+      line_end: 1071
       reason: Subprocess calls use list args (no shell=True) with validated inputs. ferret-scan binary path comes from shutil.which().
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B607
-      line_start: 826
-      line_end: 832
+      line_start: 1065
+      line_end: 1071
       reason: Partial executable path resolved via shutil.which() in validate_plugin_dependencies(). Standard ASH scanner pattern.
     - path: scripts/generate_test_docx.py
       rule_id: B311
@@ -656,13 +545,13 @@ global_settings:
       reason: False positive — SETTING = "placeholder" uses a neutral variable name.
     - path: scripts/generate_test_docx.py
       rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      line_start: 227
-      line_end: 230
+      line_start: 346
+      line_end: 350
       reason: False positive — runtime-generated synthetic credit card numbers from seeded random for test data.
     - path: scripts/generate_test_docx.py
       rule_id: PASSPORT
-      line_start: 198
-      line_end: 199
+      line_start: 211
+      line_end: 212
       reason: Intentional test data — MRZ-format passport strings used to generate sample documents for ferret-scan integration testing.
     # === ferret-scan JWT_TOKEN: a shape the validator under test must accept ===
     - path: tests/unit/cli/mcp/test_session_id_single_component.py
@@ -1592,57 +1481,10 @@ global_settings:
         CVE-2026-114605 (GHSA-45c3-73f7-pv4m): dnspython 2.8.0 in uv.lock, the Python 3.10
         entry. The fixed release 2.9.0 requires Python 3.11; the Python 3.11 and later entry
         is at 2.9.0. Revisit when requires-python rises or a supporting release ships.
-    # === ferret-scan hits in documents, rendered templates and test files ===
-    # One entry per rule and file, never a directory. The reasons describe the
-    # pattern instead of quoting a line, because a quoted line would make this file
-    # trip the same rule.
-    - rule_id: API_KEY_OR_SECRET
-      path: automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md
-      reason: >-
-        False positive. These design notes quote, in prose, the type annotation that
-        causes this false positive in ferret-scan.
-    - rule_id: API_KEY_OR_SECRET
-      path: docs/content/docs/troubleshooting.md
-      reason: >-
-        False positive. A documentation example that sets an environment variable
-        named for a scanner's app credential to a placeholder phrase. No value is held.
-    - rule_id: API_KEY_OR_SECRET
-      path: deploy/cdk/templates/AshAgentCore.template.json
-      reason: >-
-        False positive. The flagged lines are CloudFormation logical ids and references
-        to them (a hash-suffixed id for the MCP auth header resource). The template holds
-        names, not values.
-    - rule_id: API_KEY_OR_SECRET
-      path: deploy/cdk/templates/AshCodeCommitGate.template.json
-      reason: >-
-        False positive. The flagged lines are CloudFormation logical ids and references
-        to them (a hash-suffixed id for the MCP auth header resource). The template holds
-        names, not values.
-    - rule_id: API_KEY_OR_SECRET
-      path: deploy/cdk/templates/AshDistributedPipeline.template.json
-      reason: >-
-        False positive. The flagged lines are CloudFormation logical ids and references
-        to them (a hash-suffixed id for the MCP auth header resource). The template holds
-        names, not values.
-    - rule_id: API_KEY_OR_SECRET
-      path: deploy/cdk/templates/AshFargate.template.json
-      reason: >-
-        False positive. The flagged lines are CloudFormation logical ids and references
-        to them (a hash-suffixed id for the MCP auth header resource, route table ids).
-        The template holds names, not values.
-    - rule_id: API_KEY_OR_SECRET
-      path: tests/integration/codecommit_gate_regression/assert_case.py
-      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
-    - rule_id: API_KEY_OR_SECRET
-      path: tests/unit/config/test_config_alias_round_trip.py
-      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
-    - rule_id: API_KEY_OR_SECRET
-      path: tests/unit/utils/test_secret_masking.py
-      reason: "False positive. Test names chosen after what they hold, with made-up values; the ferret-scan keyword heuristic reads the name."
     # === ferret-scan API_KEY_OR_SECRET, continued: names and generated templates ===
     #
-    # The same unquoted-assignment and name-matching dispositions as the block
-    # above. Per-file entries naming the flagged value, as the existing ferret
+    # The same unquoted-assignment and name-matching dispositions as the ferret-scan
+    # blocks above. Per-file entries naming the flagged value, as the existing ferret
     # entries do.
     - path: tests/unit/test_docs_ci_runner_judgments.py
       rule_id: API_KEY_OR_SECRET

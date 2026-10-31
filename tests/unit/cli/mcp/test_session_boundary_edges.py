@@ -194,7 +194,9 @@ def test_a_well_formed_session_id_nobody_issued_carries_no_identity() -> None:
 def test_a_websocket_scope_passes_through_unchanged(monkeypatch) -> None:
     swept: List[float] = []
     monkeypatch.setattr(
-        sessions, "sweep_stale_workspaces", lambda ttl, now=None: swept.append(ttl)
+        sessions,
+        "sweep_stale_workspaces",
+        lambda ttl, now=None, in_use=None: swept.append(ttl),
     )
     seen: Dict[str, Any] = {}
 

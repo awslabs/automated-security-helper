@@ -323,17 +323,17 @@ td:first-child { font-weight: 550; }
     <section class="overview" aria-labelledby="report-title">
       <h1 id="report-title">workspace</h1>
       <p class="report-context">Scanned 15 Jan 2026 at 12:00 UTC <span aria-hidden="true">·</span> ASH <ASH_VERSION></p>
-      <div class="outcome outcome--warning">
+      <div class="outcome outcome--danger">
         <div class="outcome__inner">
         <div class="outcome-mark" aria-hidden="true">!</div>
-        <div><h2>Scan incomplete</h2><p>3 actionable findings. Some inputs or scanners were not evaluated.</p><p class="next-step"><strong>Next:</strong> Review findings, resolve coverage gaps, and scan again.</p></div>
+        <div><h2>Scan incomplete</h2><p>2 actionable findings. Some inputs or scanners were not evaluated.</p><p class="next-step"><strong>Next:</strong> Review findings, resolve coverage gaps, and scan again.</p></div>
         </div>
       </div>
       <div class="metric-grid">
-        <div><dl><dt>Actionable findings</dt><dd class="metric-accent">3<span class="metric-description">At or above scanner thresholds</span></dd></dl></div>
-        <div><dl><dt>Below threshold</dt><dd>0<span class="metric-description">Active findings for context</span></dd></dl></div>
+        <div><dl><dt>Actionable findings</dt><dd class="metric-accent">2<span class="metric-description">At or above scanner thresholds</span></dd></dl></div>
+        <div><dl><dt>Below threshold</dt><dd>1<span class="metric-description">Active findings for context</span></dd></dl></div>
         <div><dl><dt>Suppressed</dt><dd>0<span class="metric-description">Excluded from actionable counts</span></dd></dl></div>
-        <div><dl><dt>Scanners completed</dt><dd>3<span> / 4</span><span class="metric-description">0 disabled · 1 unavailable</span></dd></dl></div>
+        <div><dl><dt>Scanners completed</dt><dd>3<span> / 4</span><span class="metric-description">0 skipped · 1 unavailable</span></dd></dl></div>
       </div>
       <div class="severity-strip" aria-label="Active findings by severity"><span class="severity-critical"><strong>0</strong> Critical</span><span class="severity-high"><strong>2</strong> High</span><span class="severity-medium"><strong>1</strong> Medium</span><span class="severity-low"><strong>0</strong> Low</span><span class="severity-info"><strong>0</strong> Info</span></div>
       <div class="notice"><h3>Scanners needing attention</h3><p>npm-audit. Check their dependencies and execution logs, then scan again.</p></div>
@@ -344,21 +344,21 @@ td:first-child { font-weight: 550; }
       <a href="#projects">Projects</a>
       <a href="#scan-metadata">Scan metadata</a>
     </nav>
-    <div id="projects" class="workspace-section"><div class="section" id="workspace-projects"><h2>Projects</h2><p>Each project is scanned independently and judged against its own threshold, so a workspace fails when any project does.</p><div class="table-scroll" role="region" aria-label="Project results" tabindex="0"><table><thead><tr><th>Project</th><th>Status</th><th>Findings</th><th>Actionable</th><th>Threshold</th><th>Result</th></tr></thead><tbody><tr class="failed"><td>snapshot-api (api)</td><td>COMPLETED</td><td>1</td><td>1</td><td>MEDIUM</td><td>FAILED (incomplete)</td></tr><tr class="failed"><td>snapshot-web (web)</td><td>COMPLETED</td><td>2</td><td>1</td><td>HIGH</td><td>FAILED</td></tr><tr class="passed"><td>docs</td><td>SKIPPED</td><td>0</td><td>0</td><td>n/a</td><td>SKIPPED (error)</td></tr></tbody></table></div></div></div>
+    <div id="projects" class="workspace-section"><div class="section" id="workspace-projects"><h2>Projects</h2><p>Each project is scanned independently and judged against its own threshold, so a workspace fails when any project does.</p><div class="table-scroll" role="region" aria-label="Project results" tabindex="0"><table><thead><tr><th>Project</th><th>Status</th><th>Findings</th><th>Actionable</th><th>Threshold</th><th>Result</th></tr></thead><tbody><tr class="failed"><td>snapshot-api (api)</td><td>COMPLETED</td><td>1</td><td>1</td><td>MEDIUM</td><td class="status-failed">FAILED (incomplete)</td></tr><tr class="failed"><td>snapshot-web (web)</td><td>COMPLETED</td><td>2</td><td>1</td><td>HIGH</td><td class="status-failed">FAILED</td></tr><tr class="failed"><td>docs</td><td>SKIPPED</td><td>n/a</td><td>n/a</td><td>n/a</td><td class="status-failed">SKIPPED (error)</td></tr></tbody></table></div><ul class="project-notes"><li><strong>snapshot-api (api)</strong>: did not complete: npm-audit</li><li><strong>docs</strong>: &#x27;docs&#x27; does not exist as a directory at &#x27;<REPO>/tests/test_data/snapshot_fixture/workspace/docs&#x27;</li></ul></div></div>
     <section id="findings" aria-labelledby="findings-title" class="report-section">
       <div class="section-heading"><h2 id="findings-title">Findings</h2><p>Sorted by severity</p></div>
       <div class="finding-controls js-only">
         <div class="search-control"><label for="finding-search">Search findings</label><input id="finding-search" type="search" placeholder="Rule, file, message, or scanner…" autocomplete="off"></div>
-        <div><label for="finding-scope">Show</label><select id="finding-scope"><option value="actionable">Actionable</option><option value="active">All active</option><option value="suppressed">Suppressed</option><option value="all">All findings</option></select></div>
+        <div><label for="finding-scope">Show</label><select id="finding-scope"><option value="actionable">Actionable</option><option value="policy-not-gating">Not gating</option><option value="active">All active</option><option value="suppressed">Suppressed</option><option value="all">All findings</option></select></div>
         <div><label for="finding-severity">Severity</label><select id="finding-severity"><option value="all">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option><option value="unknown">Unknown</option></select></div>
-        <div><label for="finding-scanner">Scanner</label><select id="finding-scanner"><option value="all">All scanners</option><option value="bandit">bandit</option><option value="checkov">checkov</option><option value="semgrep">semgrep</option></select></div>
+        <div><label for="finding-scanner">Scanner</label><select id="finding-scanner"><option value="">All scanners</option><option value="bandit">bandit</option><option value="checkov">checkov</option><option value="semgrep">semgrep</option></select></div>
         <button type="button" id="reset-filters" class="quiet-button">Reset</button>
       </div>
       <p id="finding-count" class="result-count" role="status" aria-live="polite">3 findings in this report</p>
       <div id="empty-findings" class="empty-state" hidden><h3>No findings match this view</h3><p>Try another severity or scanner, or reset the filters.</p><button type="button" class="primary-button" id="empty-reset">Show all findings</button></div>
       <div class="findings-list"><article class="finding-card" aria-labelledby="finding-1" data-severity="high" data-status="actionable" data-scanner="bandit"><div class="finding-card__inner"><div class="finding-top"><span class="pill severity-high">HIGH</span><span class="finding-status">Actionable</span><span class="finding-scanner">bandit</span></div><h3 id="finding-1">B602</h3><p class="finding-meta"><code>B602</code><span><code>app.py:7</code> <button type="button" class="quiet-button copy-location js-only" aria-label="Copy location for finding 1" data-copy-location="app.py:7">Copy</button></span></p><details><summary>Finding details</summary><div class="finding-body"><p class="finding-description">subprocess call with shell=True identified, security issue.</p><p><strong>Project:</strong> api</p></div></details></div></article>
 <article class="finding-card" aria-labelledby="finding-2" data-severity="high" data-status="actionable" data-scanner="checkov"><div class="finding-card__inner"><div class="finding-top"><span class="pill severity-high">HIGH</span><span class="finding-status">Actionable</span><span class="finding-scanner">checkov</span></div><h3 id="finding-2">CKV_AWS_20</h3><p class="finding-meta"><code>CKV_AWS_20</code><span><code>main.tf:1</code> <button type="button" class="quiet-button copy-location js-only" aria-label="Copy location for finding 2" data-copy-location="main.tf:1">Copy</button></span></p><details><summary>Finding details</summary><div class="finding-body"><p class="finding-description">S3 Bucket has an ACL defined which allows public READ access.</p><p><strong>Project:</strong> web</p></div></details></div></article>
-<article class="finding-card" aria-labelledby="finding-3" data-severity="medium" data-status="actionable" data-scanner="semgrep"><div class="finding-card__inner"><div class="finding-top"><span class="pill severity-medium">MEDIUM</span><span class="finding-status">Actionable</span><span class="finding-scanner">semgrep</span></div><h3 id="finding-3">terraform.aws.best-practice.s3-bucket-name-hardcoded</h3><p class="finding-meta"><code>terraform.aws.best-practice.s3-bucket-name-hardcoded</code><span><code>main.tf:2</code> <button type="button" class="quiet-button copy-location js-only" aria-label="Copy location for finding 3" data-copy-location="main.tf:2">Copy</button></span></p><details><summary>Finding details</summary><div class="finding-body"><p class="finding-description">Bucket name is hardcoded; derive it from a variable.</p><p><strong>Project:</strong> web</p></div></details></div></article></div>
+<article class="finding-card" aria-labelledby="finding-3" data-severity="medium" data-status="below-threshold" data-scanner="semgrep"><div class="finding-card__inner"><div class="finding-top"><span class="pill severity-medium">MEDIUM</span><span class="finding-status">Below threshold</span><span class="finding-scanner">semgrep</span></div><h3 id="finding-3">terraform.aws.best-practice.s3-bucket-name-hardcoded</h3><p class="finding-meta"><code>terraform.aws.best-practice.s3-bucket-name-hardcoded</code><span><code>main.tf:2</code> <button type="button" class="quiet-button copy-location js-only" aria-label="Copy location for finding 3" data-copy-location="main.tf:2">Copy</button></span></p><details><summary>Finding details</summary><div class="finding-body"><p class="finding-description">Bucket name is hardcoded; derive it from a variable.</p><p><strong>Project:</strong> web</p></div></details></div></article></div>
       <noscript><p class="notice">All findings are visible. Enable JavaScript to search and filter this report.</p></noscript>
     </section>
     <section id="scanner-results" aria-labelledby="scanner-title" class="report-section">
@@ -387,7 +387,7 @@ td:first-child { font-weight: 550; }
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td>&lt;1ms</td>
+                <td>N/A</td>
                 <td class="status-failed">1</td>
                 <td class="status-failed">FAILED</td>
                 <td>MEDIUM (unavailable)</td>
@@ -401,7 +401,7 @@ td:first-child { font-weight: 550; }
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td>&lt;1ms</td>
+                <td>N/A</td>
                 <td class="status-failed">1</td>
                 <td class="status-failed">FAILED</td>
                 <td>MEDIUM (unavailable)</td>
@@ -415,7 +415,7 @@ td:first-child { font-weight: 550; }
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td>&lt;1ms</td>
+                <td>N/A</td>
                 <td class="status-passed">0</td>
                 <td class="status-missing">MISSING</td>
                 <td>MEDIUM (unavailable)</td>
@@ -429,13 +429,13 @@ td:first-child { font-weight: 550; }
                 <td>1</td>
                 <td>0</td>
                 <td>0</td>
-                <td>&lt;1ms</td>
+                <td>N/A</td>
                 <td class="status-failed">1</td>
                 <td class="status-failed">FAILED</td>
                 <td>MEDIUM (unavailable)</td>
             </tr>
             </table></div>
-      <details class="reference"><summary>How to read scanner results</summary><p><strong>Actionable</strong> means a finding meets or exceeds its scanner's configured threshold. Suppressed findings do not contribute to this count.</p><p><strong>PASSED</strong> has no actionable findings. <strong>FAILED</strong> exceeds the threshold. <strong>MISSING</strong> needs dependencies. <strong>SKIPPED</strong> is disabled. <strong>ERROR</strong> could not complete. Coverage notices above explain partial results.</p><p>Threshold sources: <code>global</code> settings, scanner <code>config</code>, or the <code>scanner</code> default.</p></details>
+      <details class="reference"><summary>How to read scanner results</summary><p><strong>Actionable</strong> means a finding meets or exceeds its scanner's configured threshold. Suppressed findings do not contribute to this count.</p><p><strong>PASSED</strong> has no actionable findings. <strong>FAILED</strong> exceeds the threshold. <strong>MISSING</strong> needs dependencies. <strong>SKIPPED</strong> did not run (disabled, or nothing to scan). <strong>ERROR</strong> could not complete. Coverage notices above explain partial results.</p><p>Threshold sources: <code>global</code> settings, scanner <code>config</code>, or the <code>scanner</code> default.</p></details>
       <div class="hotspots"><h3>Top 2 hotspots</h3><p>Files with the most actionable findings.</p><div class="table-scroll" role="region" aria-label="Top hotspots" tabindex="0">
         <table>
             <tr>
@@ -444,13 +444,13 @@ td:first-child { font-weight: 550; }
             </tr>
 
             <tr>
-                <td>2</td>
-                <td>main.tf</td>
+                <td>1</td>
+                <td>app.py</td>
             </tr>
 
             <tr>
                 <td>1</td>
-                <td>app.py</td>
+                <td>main.tf</td>
             </tr>
             </table></div></div>
     </section>
@@ -524,11 +524,13 @@ td:first-child { font-weight: 550; }
     themeButton.textContent = theme === "dark" ? "Light theme" : "Dark theme";
     themeButton.setAttribute("aria-label", `Switch to ${theme === "dark" ? "light" : "dark"} theme`);
   };
+  const preferredTheme = () =>
+    window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   try {
-    setTheme(localStorage.getItem("ash-report-theme") ||
-      (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
+    const stored = localStorage.getItem("ash-report-theme");
+    setTheme(stored === "light" || stored === "dark" ? stored : preferredTheme());
   } catch (_) {
-    setTheme(window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    setTheme(preferredTheme());
   }
   themeButton.addEventListener("click", () => {
     const theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -544,17 +546,29 @@ td:first-child { font-weight: 550; }
   const empty = document.getElementById("empty-findings");
   document.querySelector(".finding-controls").hidden = cards.length === 0;
   count.hidden = cards.length === 0;
-  const searchable = new Map(cards.map((card) => [card, card.textContent.toLocaleLowerCase()]));
+  // Search the finding's own text: the title, scanner, rule, location and body,
+  // not the buttons and labels around them ("Copy", "Finding details").
+  const searchText = (card) => {
+    const clone = card.cloneNode(true);
+    clone.querySelectorAll("button, summary, strong, .pill, .finding-status").forEach((node) => node.remove());
+    return [...clone.querySelectorAll("h3, .finding-scanner, .finding-meta code, .finding-body > *")]
+      .map((node) => node.textContent).join("\n").toLocaleLowerCase();
+  };
+  const searchable = new Map(cards.map((card) => [card, searchText(card)]));
   const filter = () => {
     const query = search.value.trim().toLocaleLowerCase();
     let shown = 0;
     for (const card of cards) {
       const status = card.dataset.status;
+      // A finding the project's outcome left out (a workspace policy scanner
+      // whose policy does not gate) is shown by the default view, whatever its
+      // severity: it is reported, not set aside as below the threshold.
       const matchesScope = scope.value === "all" || status === scope.value ||
+        (scope.value === "actionable" && status === "policy-not-gating") ||
         (scope.value === "active" && status !== "suppressed");
       const matches = matchesScope &&
         (severity.value === "all" || card.dataset.severity === severity.value) &&
-        (scanner.value === "all" || card.dataset.scanner === scanner.value) &&
+        (scanner.value === "" || card.dataset.scanner === scanner.value) &&
         (!query || searchable.get(card).includes(query));
       card.hidden = !matches;
       if (matches) shown += 1;
@@ -566,7 +580,7 @@ td:first-child { font-weight: 550; }
     search.value = "";
     scope.value = showAll ? "all" : "actionable";
     severity.value = "all";
-    scanner.value = "all";
+    scanner.value = "";
     filter();
     search.focus();
   };

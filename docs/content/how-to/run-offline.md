@@ -20,7 +20,8 @@ ash scan --offline --scanners detect-secrets
 
 This scan runs offline as usual; in a repository with a hardcoded password it exits 2.
 The log also shows a warning for each scanner whose offline cache is not set up, such as
-`Grype offline mode: GRYPE_DB_CACHE_DIR not set`.
+`Grype offline mode: the database directory <path> does not exist`, naming the cache
+grype would read (`GRYPE_DB_CACHE_DIR`, else grype's default cache directory).
 
 The other ways to turn it on:
 
@@ -38,7 +39,7 @@ There is no config key for offline mode. `build.build_mode` exists in the config
 | Scanner | Offline behavior |
 |---|---|
 | grype | Reads its cached database with updates and grype's own age check off. ASH fails the scan when the database is past its age bound ([Refresh cadence](#refresh)). |
-| trivy, trivy-repo | Read the cached trivy database with its updates off. ASH fails the scan when the database is past its age bound, except in the offline image, where it warns ([Refresh cadence](#refresh)). With no database, `trivy` is MISSING. Every trivy scan gets `trivy --offline-scan` and `trivy --skip-version-check`, so trivy contacts no package registry and does not check for a newer release. |
+| trivy, trivy-repo | Read the cached trivy database with its updates off. ASH fails the scan when the database is past its age bound, except in the offline image, where it warns ([Refresh cadence](#refresh)). With no database, `trivy` is MISSING. Every trivy scan gets `trivy --offline-scan`, so trivy contacts no package registry. trivy does not check for a newer release either: an online scan gets `--skip-version-check`, and an offline one gets `TRIVY_SKIP_VERSION_CHECK=true` in trivy's environment instead, since a trivy too old to know the flag refuses the command over it. |
 | semgrep, opengrep | Run the rulesets in `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` plus ASH's bundled rules, instead of the configured registry rulesets. MISSING when the directory is unset or empty. ASH fails the scan when the rulesets are past their age bound. |
 | detect-secrets | Runs as usual. If its settings turn on detect-secrets' verification filter, it still sends each candidate secret to the service that issued it, to check whether it is live; under the sandbox, leave detect-secrets out of `sandbox.network_scanners` to stop that. |
 | checkov | Uses the policies in the installed package and skips platform downloads. |

@@ -2,6 +2,7 @@
 
 import contextlib
 import contextvars
+import math
 import ntpath
 import os
 import random
@@ -40,6 +41,7 @@ from automated_security_helper.utils.error_text import ESCAPE_CODES as _ESCAPE_C
 from automated_security_helper.utils.redacted_model import value_tuple
 
 from automated_security_helper.utils.subprocess_utils import (
+    _STARTED_CHILD_ATTRIBUTE,
     _timeout_token,
     signal_death,
     spawn_run,
@@ -132,6 +134,22 @@ def is_checking_only() -> bool:
     return _CHECKING_ONLY.get()
 
 
+def _offline_for(offline: Optional[bool]) -> bool:
+    """The offline mode a uv call runs under: ASH's own, or the caller's on top.
+
+    A scanner's own ``options.offline: true`` puts that scanner offline while
+    the rest of the run stays online (``ScannerPluginBase._scanner_offline``);
+    its uv calls pass that as ``offline``. ASH's mode (``ASH_OFFLINE``) can be
+    added to, never switched off: a caller passing False under ``ASH_OFFLINE``
+    stays offline, as ``_scanner_offline`` documents ("cannot be switched off
+    for one of them"). None, the default, is ASH's mode alone, which was the
+    only mode uv saw before the parameter existed.
+    """
+    from automated_security_helper.core.constants import is_offline_mode
+
+    return bool(offline) or is_offline_mode()
+
+
 @dataclass
 class UVToolRetryConfig:
     """Configuration for UV tool operation retry logic."""
@@ -162,13 +180,62 @@ class UVToolRetryConfig:
         ``exponential_base`` floors at 1.0 rather than above it: 1.0 is a
         deliberate fixed-interval retry, which is a legitimate choice. Below 1.0
         the backoff would *shrink* between attempts, which never is.
+
+        Normalizing means never raising: a knob that is None, a non-numeric
+        string, NaN or infinite takes the field's default (``int()`` and
+        ``float()`` used to raise TypeError or ValueError out of here, against
+        this docstring's own promise), and every delay is bounded from above
+        too (``_MAX_RETRY_DELAY_SECONDS``, ``_MAX_EXPONENTIAL_BASE``), because a
+        delay ``time.sleep`` cannot take, or a power that overflows a float, is
+        as unsleepable as a negative one.
         """
-        self.max_retries = max(0, int(self.max_retries))
-        self.base_delay = max(0.0, float(self.base_delay))
+        self.max_retries = _bounded_int(self.max_retries, 3, 0, _MAX_RETRIES)
+        self.base_delay = _bounded_float(
+            self.base_delay, 1.0, 0.0, _MAX_RETRY_DELAY_SECONDS
+        )
         # Ordered after base_delay so the cap can never sit below the floor.
-        self.max_delay = max(self.base_delay, float(self.max_delay))
-        self.exponential_base = max(1.0, float(self.exponential_base))
-        self.network_check_timeout = max(0.0, float(self.network_check_timeout))
+        self.max_delay = _bounded_float(
+            self.max_delay, 60.0, self.base_delay, _MAX_RETRY_DELAY_SECONDS
+        )
+        self.exponential_base = _bounded_float(
+            self.exponential_base, 2.0, 1.0, _MAX_EXPONENTIAL_BASE
+        )
+        self.jitter = bool(self.jitter)
+        self.network_check_timeout = _bounded_float(
+            self.network_check_timeout, 5.0, 0.0, _MAX_RETRY_DELAY_SECONDS
+        )
+
+
+#: The longest a retry waits between install attempts, whatever the knobs say:
+#: an hour, far past any useful backoff and far below what time.sleep refuses.
+_MAX_RETRY_DELAY_SECONDS = 3600.0
+#: The largest exponential base: a power of it over the retry count stays a
+#: finite float, and above this the first retry already hits the delay cap.
+_MAX_EXPONENTIAL_BASE = 1e6
+#: The most retries a config can ask for.
+_MAX_RETRIES = 1000
+
+
+def _bounded_float(value: Any, default: float, floor: float, ceiling: float) -> float:
+    """``value`` as a finite float within ``[floor, ceiling]``; ``default`` for a
+    value that is not a number, NaN or infinite. Never raises."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = default
+    if math.isnan(number) or math.isinf(number):
+        number = default
+    return min(max(number, floor), ceiling)
+
+
+def _bounded_int(value: Any, default: int, floor: int, ceiling: int) -> int:
+    """``value`` as an int within ``[floor, ceiling]``; ``default`` for a value
+    that is not a number, NaN or infinite. Never raises."""
+    try:
+        number = int(float(value)) if isinstance(value, str) else int(value)
+    except (TypeError, ValueError, OverflowError):
+        number = default
+    return min(max(number, floor), ceiling)
 
 
 def _refused_by_sandbox(error: BaseException) -> bool:
@@ -191,11 +258,52 @@ def _install_retry_delay(config: UVToolRetryConfig, attempt: int) -> float:
     that normalization closed. This clamp sits closest to ``time.sleep``, which is
     the only place the value actually has to be safe. Both guards are covered by
     tests that distinguish them -- see ``TestRetryDelayIsAlwaysSleepable``.
+
+    The power is computed under the same rule: a base assigned after
+    construction can overflow a float for a late attempt (``OverflowError`` out
+    of the retry loop, as a failed install), so an overflowing or infinite
+    growth reads as the cap, and the result is always a finite number no larger
+    than ``_MAX_RETRY_DELAY_SECONDS``. Unless ``base_delay`` is zero: zero
+    times an infinite growth is NaN, which read as the cap too, so a config
+    asking for no wait between attempts slept ``max_delay`` from the attempt
+    the power overflowed. A zero base stays zero.
     """
-    delay = config.base_delay * (config.exponential_base**attempt)
+    try:
+        growth = config.exponential_base**attempt
+    except OverflowError:
+        growth = math.inf
+    delay = config.base_delay * growth
+    if math.isnan(delay) or math.isinf(delay):
+        delay = 0.0 if config.base_delay <= 0 else config.max_delay
     if config.jitter:
         delay += random.uniform(0, 1)  # nosec B311 — retry jitter, not security
-    return max(0.0, min(delay, config.max_delay))
+    bounded = max(0.0, min(delay, config.max_delay, _MAX_RETRY_DELAY_SECONDS))
+    return bounded if math.isfinite(bounded) else 0.0
+
+
+def _sleep_between_attempts(seconds: float) -> None:
+    """Wait ``seconds`` before the next install attempt, stopping at a cancel.
+
+    A plain ``time.sleep`` could not be interrupted: a scan cancelled between two
+    attempts went on waiting out the backoff before the cancel reached it. The
+    wait polls the scan's cancel at the same interval the probe locks use.
+
+    The chunks are counted from ``seconds``, never from a clock read back after
+    each sleep: a wait that re-read the clock spun for the whole delay when the
+    sleep returned early (a stubbed or coarse ``time.sleep``), handing it one
+    chunk per spin. So ``time.sleep`` is handed exactly ``ceil(seconds / poll)``
+    chunks that add up to ``seconds``, whatever the sleep does with them.
+    """
+    from automated_security_helper.core.cancellation import raise_if_cancelled
+
+    total = max(0.0, seconds) if math.isfinite(seconds) else 0.0
+    poll = _UV_PROBE_CANCEL_POLL_SECONDS
+    for index in range(math.ceil(total / poll)):
+        raise_if_cancelled()
+        # Clamped at zero: a count one too high (the division and the
+        # multiplication rounding apart) must not hand the sleep a negative.
+        time.sleep(max(0.0, min(total - index * poll, poll)))
+    raise_if_cancelled()
 
 
 def _exit_description(result: Any) -> str:
@@ -489,7 +597,12 @@ def shown_uv_output(
     is the answer and no file name is printed) -- while with an explicit
     iterable only the inputs
     that hold one of the values are hidden, so a builtin constraint, the
-    very thing a resolver conflict is about, stays diagnosable. The contract
+    very thing a resolver conflict is about, stays diagnosable. A hidden
+    input is matched as written AND as the value layer has just respelled it
+    (its values replaced by that layer's placeholder): the layer ran first,
+    so the input's own spelling is already gone from the text, and matching
+    only that spelling left the rest of the input -- a repository path, an
+    index URL -- in clear around the hidden value. The contract
     behind that: ``values`` is the run's COMPLETE env-read set (the same set
     redact_values is given), so a plugin that reads the environment itself
     must add the value through _environment_values(), or an input built from
@@ -647,6 +760,24 @@ def shown_uv_output(
         # (set order is not).
         key=lambda token: (-len(token), token),
     )
+    # The value layer ran first, so a token that holds a value no longer reads
+    # as written in ``shown``: the value inside it reads as the value layer's
+    # placeholder, and a replace of the token's own spelling finds nothing,
+    # leaving the REST of the input (a repository path, an index URL) in clear
+    # around a hidden value. Each such token is therefore also matched in that
+    # respelled form -- the token with its values hidden the way the layer hid
+    # them in the text (the same function, the same spellings). A token the
+    # layer eats whole (the input IS the value, or values glued together)
+    # respells to the bare placeholder and is left out: replacing that would
+    # re-label every hidden value in the text as an argument.
+    respelled: Dict[str, str] = {}
+    if value_spellings:
+        from automated_security_helper.config.config_validator import REDACTED
+
+        for token in plugin_built:
+            hidden_form = text_without_values(token, value_spellings)
+            if hidden_form != token and hidden_form.replace(REDACTED, ""):
+                respelled[token] = hidden_form
     # Each placeholder is written as one private-use character that neither
     # the text nor a token holds, and spelled out after the last replacement.
     # A later token can then never be found inside an earlier placeholder's
@@ -654,11 +785,18 @@ def shown_uv_output(
     # "<argument 1 not shown>" and renumbered it. With every character of the
     # block taken (a text built to use them up) the placeholders are written
     # out as the tokens are replaced.
-    marks = _free_marks(len(plugin_built), set(shown).union(*plugin_built))
+    marks = _free_marks(
+        len(plugin_built), set(shown).union(*plugin_built, *respelled.values())
+    )
     for position, token in enumerate(plugin_built, start=1):
         placeholder = (
             marks[position - 1] if marks else f"<argument {position} not shown>"
         )
+        if token in respelled:
+            # A token that holds a value is replaced wherever it appears (the
+            # arm below), so its respelled form is too: the form holds the
+            # value layer's placeholder, a spelling no name boundary applies to.
+            shown = shown.replace(respelled[token], placeholder)
         if token in name_tokens and not _holds_value(token, value_spellings):
             # A name is made of word characters, so a raw substring replace
             # mangles every word that contains it ("toml" inside
@@ -687,11 +825,39 @@ def shown_uv_output(
         )
     if limit is not None and len(shown) > limit:
         dropped = len(shown) - limit
-        shown = f"(first {dropped} characters not shown) " + shown[-limit:]
+        # Sliced from the front, not with a negative index: ``shown[-0:]`` is
+        # the whole text, so ``limit=0`` kept everything behind a marker that
+        # claimed every character was dropped.
+        shown = f"(first {dropped} characters not shown) " + shown[len(shown) - limit :]
     return shown
 
 
-def checked_requirement(spec: str, naming: str = "a tool requirement") -> str:
+def _canonical(name: str) -> str:
+    """``name`` as PEP 503 compares package names (case and separator folded)."""
+    from packaging.utils import canonicalize_name
+
+    return canonicalize_name(name)
+
+
+def _requirement_name(spec: str) -> Optional[str]:
+    """The package ``spec`` names, read off the requirement; None when it is not one.
+
+    A caller's ``package_name`` may be a bare name or carry its constraint and
+    extras ("nbconvert>=7.16.0,<8.0.0"): the package the spec is held to is the
+    name inside it, never the string whole. None leaves ``checked_requirement``
+    to refuse the spec in its own words.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+
+    try:
+        return Requirement(spec).name
+    except InvalidRequirement:
+        return None
+
+
+def checked_requirement(
+    spec: str, naming: str = "a tool requirement", *, package: Optional[str] = None
+) -> str:
     """``spec`` if it names a package from an index; UVToolRunnerError otherwise.
 
     Every requirement uv installs or runs here is assembled from a package name, the
@@ -700,12 +866,19 @@ def checked_requirement(spec: str, naming: str = "a tool requirement") -> str:
     the check at the point of use, so a plugin that builds its constraint some
     other way still cannot hand uv a path, a URL or an environment marker.
 
+    ``package`` is the name the caller assembled ``spec`` around, when it knows
+    it. The parsed requirement must then still name that package: a constraint
+    glued onto the name without an operator ("bandit" + "2") parses as a valid
+    requirement for another package, ``bandit2``, and the specifier check alone
+    lets it through to the index.
+
     ``naming`` is the caller's fixed, value-free words for WHICH requirement
     was refused ("the tool spec", "--with dependency 2", "the --from spec for
     bandit"): a refusal that names nothing leaves the operator with three
     candidate entries and no way to tell which to fix.
     """
     from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
 
     from automated_security_helper.utils.pre_installed_tool import (
         validate_version_constraint,
@@ -715,6 +888,10 @@ def checked_requirement(spec: str, naming: str = "a tool requirement") -> str:
         requirement = Requirement(spec)
         if requirement.url or requirement.marker:
             raise ValueError("a direct reference or marker")
+        if package is not None and canonicalize_name(
+            requirement.name
+        ) != canonicalize_name(package):
+            raise ValueError("a requirement for another package")
         validate_version_constraint(str(requirement.specifier))
     except (InvalidRequirement, ValueError):
         # The message carries no part of the spec: a plugin-built constraint
@@ -722,11 +899,23 @@ def checked_requirement(spec: str, naming: str = "a tool requirement") -> str:
         # text reaches logs, and neither this function nor the runner holds
         # the values to redact it with. ``naming`` is the caller's own fixed
         # words, never the spec; callers that know the tool name it there.
-        raise UVToolRunnerError(
-            f"Refusing to pass {naming} to uv: it must be a package "
-            "name with optional extras and a PEP 440 version specifier"
-        ) from None
+        raise UVToolRunnerError(requirement_refusal(naming)) from None
     return spec
+
+
+def requirement_refusal(naming: str) -> str:
+    """The text of checked_requirement's refusal of *naming*.
+
+    One builder for the raise and for the log lines of the callers that catch
+    it: those lines say the refusal in these words rather than quoting the
+    caught error, because an error's text is shown once, by whoever prints it
+    on, and a log line that quoted it showed it a second time. Fixed words:
+    nothing of the spec is in them.
+    """
+    return (
+        f"Refusing to pass {naming} to uv: it must be a package name with "
+        "optional extras and a PEP 440 version specifier"
+    )
 
 
 def _type_keeping_the_flag(
@@ -1099,6 +1288,35 @@ class UVToolRunner:
                     errors="replace",
                 )
             except FileNotFoundError:
+                from automated_security_helper.utils.subprocess_utils import (
+                    in_tree_refusal,
+                )
+
+                refusal = in_tree_refusal(executable)
+                if refusal is not None:
+                    # The spawn layer refused this uv for lying inside the
+                    # scanned tree (subprocess_utils._resolve_for_spawn raises
+                    # the FileNotFoundError subprocess raises for a missing
+                    # program). That is this scan's refusal of this copy, not
+                    # uv's absence: remembered as absence it answered False for
+                    # the rest of the process, scans of other trees included.
+                    # Answered for this call only; another scope probes again.
+                    return _failed(
+                        f"the probe's spawn was refused: {refusal}",
+                        "the next call probes again",
+                    )
+                if scope_key is not None:
+                    # Raised from inside a sandbox scope, where the wrapper's
+                    # view of the filesystem decides what can be found: a uv
+                    # the backend does not mount is absent THERE, not on the
+                    # host, and remembering that as uv's absence answered False
+                    # for the rest of the process to every caller outside the
+                    # scope. Answered for this call only.
+                    return _failed(
+                        "the probe's program was not found from inside the "
+                        "sandbox scope",
+                        "the next call probes again",
+                    )
                 # "Not available" is the whole truth here: nothing to name.
                 self._uv_available_cache = False
                 return _answered(False)
@@ -1233,6 +1451,15 @@ class UVToolRunner:
 
         except subprocess.CalledProcessError as e:
             raise UVToolRunnerError(f"Failed to list UV tools: {e}")
+        except (subprocess.SubprocessError, OSError) as e:
+            # A listing that timed out or whose spawn failed is this method's
+            # failure like a non-zero exit, not an exception for its callers:
+            # is_tool_installed answers False on UVToolRunnerError, and the
+            # callers of install_tool_with_version and
+            # get_tool_installation_info expect a value, not a raise.
+            raise UVToolRunnerError(
+                f"Failed to list UV tools: {type(e).__name__}: {e}"
+            ) from e
 
     def is_tool_installed(self, tool_name: str) -> bool:
         """Check if a specific tool is installed via UV."""
@@ -1250,8 +1477,24 @@ class UVToolRunner:
         refresh: bool = False,
         values: Optional[Iterable[str]] = None,
         python_request: Optional[str] = None,
+        offline: Optional[bool] = None,
+        package: Optional[str] = None,
+        probe_outcome: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """Get version of a UV tool.
+
+        ``package`` is the name the caller assembled ``package_name`` around,
+        when it knows it (``checked_requirement``'s own meaning): a constraint
+        glued onto the name ("bandit" + "2") then refuses here instead of
+        probing, and installing, ``bandit2`` from the index.
+
+        ``probe_outcome``, when a dict is given, is filled with how the answer
+        was reached, for a caller that must tell a tool that failed from a
+        probe that never ran: ``ran`` (the probe spawned and exited),
+        ``returncode`` (its exit, when it ran), ``from_memo`` (answered from the
+        memo, no probe) and ``error`` (why no probe ran, or what the spawn
+        raised). ``validate_cached_tool`` reads it: a timeout, a sandbox
+        refusal or a refused spec is not a broken tool.
 
         Memoized and serialized per ``(tool_name, package_name)``: concurrent
         callers asking about the same tool produce exactly ONE
@@ -1268,7 +1511,7 @@ class UVToolRunner:
 
         ``package_name`` is the ``--from`` specification. Passing the SAME spec
         the scan will use matters: ``uv tool run bandit`` and
-        ``uv tool run --from 'bandit[sarif,toml]>=1.7.0,<2.0.0' bandit`` resolve
+        ``uv tool run --from 'bandit[sarif,toml]>=1.7.8,<2.0.0' bandit`` resolve
         to different environments, and stevedore's digest is over
         ``sys.executable`` and ``sys.prefix``, so they warm different cache
         files. A probe that warms the wrong file leaves the scan's file cold for
@@ -1304,20 +1547,36 @@ class UVToolRunner:
         pick (see ``UVToolMixin._get_tool_python_request``). It is part of the
         memo key because it selects a different environment.
         """
+        outcome: Dict[str, Any] = {
+            "ran": False,
+            "returncode": None,
+            "from_memo": False,
+            "error": None,
+        }
+        if probe_outcome is not None:
+            probe_outcome.update(outcome)
+            outcome = probe_outcome
+
         if not self.is_uv_available():
+            outcome["error"] = self.unavailable_reason()
             return None
         if package_name:
             try:
-                checked_requirement(package_name, "the package spec")
+                checked_requirement(package_name, "the package spec", package=package)
             except UVToolRunnerError as error:
                 from automated_security_helper.utils.log import ASH_LOGGER
 
-                # The refusal's text carries no part of the spec (its message
-                # is fixed), so a plugin-built constraint holding a value the
-                # config read from the environment is never logged here. The
-                # tool's name comes from this call's own argument, plugin
-                # code, never the spec.
-                ASH_LOGGER.warning(f"{tool_name}: {error}")
+                # The refusal is logged in this call's own fixed words, not by
+                # quoting the error: its text is shown once by the caller that
+                # records it (``outcome``), and a log line quoting it showed it
+                # twice. Nothing here carries a part of the spec, so a
+                # plugin-built constraint holding a value the config read from
+                # the environment is never logged. The tool's name comes from
+                # this call's own argument, plugin code, never the spec.
+                ASH_LOGGER.warning(
+                    f"{tool_name}: {requirement_refusal('the package spec')}"
+                )
+                outcome["error"] = str(error)
                 return None
 
         cache_key = f"{tool_name}::{package_name or ''}"
@@ -1329,11 +1588,11 @@ class UVToolRunner:
         # keyed by (executable, offline) under the tool::spec key, so a uv
         # resolved or assigned after the probe is asked itself instead of
         # answered from the other uv's memory, while invalidation by tool
-        # name still drops every environment's answer at once.
-        from automated_security_helper.core.constants import is_offline_mode
-
+        # name still drops every environment's answer at once. ``offline`` is
+        # the caller's mode when given (a scanner's own options.offline), else
+        # ASH's; see run_tool.
         executable = self.uv_executable
-        offline = bool(is_offline_mode() or is_checking_only())
+        offline = bool(_offline_for(offline) or is_checking_only())
         environment_key = (executable, offline)
 
         # A hit copies the remembered answer under the lock and redacts it
@@ -1352,14 +1611,19 @@ class UVToolRunner:
             if not found:
                 # Bind to a local and keep it alive until after the acquire
                 # below; the registry holds locks weakly. See
-                # _get_or_create_probe_lock.
-                probe_lock = _get_or_create_probe_lock(f"version::{cache_key}")
+                # _get_or_create_probe_lock. Keyed by the TOOL, not by the
+                # tool::spec key: two spec keys of one tool can resolve to one
+                # environment (``bandit`` and ``--from bandit bandit`` both run
+                # the installed bandit), and probing them concurrently reopened
+                # the first-import race the lock exists to close.
+                probe_lock = _get_or_create_probe_lock(f"version::{tool_name}")
         if found:
+            outcome["from_memo"] = True
             return _version_shown(
                 hit, values, tool_name=tool_name, package_name=package_name
             )
 
-        # Held across the subprocess so a second thread on this key waits for
+        # Held across the subprocess so a second thread on this tool waits for
         # the first probe rather than starting its own. The coarse cache lock is
         # deliberately NOT held here, so probes for *different* tools still run
         # in parallel. Held through the polling helper, so a waiter whose scan
@@ -1377,6 +1641,7 @@ class UVToolRunner:
                 # answer from before the drop.
                 generation = _uv_tool_version_generations.setdefault(cache_key, 0)
             if found:
+                outcome["from_memo"] = True
                 return _version_shown(
                     hit, values, tool_name=tool_name, package_name=package_name
                 )
@@ -1427,6 +1692,8 @@ class UVToolRunner:
                     encoding="utf-8",
                     errors="replace",
                 )
+                outcome["ran"] = True
+                outcome["returncode"] = result.returncode
 
                 if result.returncode == 0 and result.stdout.strip():
                     # Unstripped: the strip runs in _version_shown, after the
@@ -1438,6 +1705,7 @@ class UVToolRunner:
 
             except Exception as error:  # nosec B110 - version check failure is non-critical
                 raw = None
+                outcome["error"] = f"{type(error).__name__}: {error}"
                 # A probe the active sandbox scope refused never ran, so it says
                 # nothing about the tool: not remembered for later callers.
                 refused = _refused_by_sandbox(error)
@@ -1445,7 +1713,12 @@ class UVToolRunner:
                 refused = False
 
             # A check-only probe ran offline; a scan's would not. Not remembered.
-            if not refused and not is_checking_only():
+            # Nor is a probe that FAILED inside a sandbox scope: the scope's
+            # wrapper decides what the probe can see and run, so its failure is
+            # that scope's and not an answer for every later caller process-wide
+            # (a probe that answered a version is a version wherever it ran).
+            failed_in_scope = raw is None and _probe_scope_key() is not None
+            if not refused and not failed_in_scope and not is_checking_only():
                 with _uv_tool_runner_cache_lock:
                     # Only while no invalidation landed since the pre-probe
                     # read. The answer is still returned to this caller --
@@ -1493,11 +1766,22 @@ class UVToolRunner:
         progress_callback: Optional[Callable] = None,
         values: Optional[Iterable[str]] = None,
         python_request: Optional[str] = None,
+        reinstall: bool = False,
+        offline: Optional[bool] = None,
     ) -> bool:
         """Install a UV tool with optional version constraint, extras, and retry logic.
 
         Args:
             tool_name: Name of the tool to install
+            reinstall: Install even when uv already lists the tool, with
+                ``uv tool install --reinstall``, so the environment is rebuilt
+                against this call's spec, extras and ``--with`` entries. The
+                default answers True without running anything for a tool uv
+                lists; the mixin's "installed but not functional, proceeding
+                with reinstallation" path used to call this and get exactly
+                that: a True and no install.
+            offline: Whether this install runs offline (nothing is installed
+                then). None follows ASH's own mode; see ``run_tool``.
             version_constraint: Optional version constraint (e.g., ">=1.7.0,<2.0.0")
             values: The caller's environment-read values, for redacting uv's
                 stderr before the debug log. The raised texts never need them:
@@ -1532,14 +1816,23 @@ class UVToolRunner:
                 existed.
 
         Returns:
-            True if installation succeeded, False otherwise
+            True if installation succeeded, or the tool was already listed and
+            no reinstall was asked for. False when NOTHING was installed and
+            that is the answer: uv absent, offline, a dependency question
+            (``checking_only``), a sandboxed scan, or a refused spec.
+
+        Raises:
+            UVToolRunnerError: every attempt exited non-zero, an attempt timed
+                out, or uv could not be started. A failed install is a raise,
+                never a False; the False arm says nothing was tried.
         """
 
         if not self.is_uv_available():
             return False
 
-        # Check if tool is already installed - skip installation if it exists
-        if self.is_tool_installed(tool_name):
+        # Check if tool is already installed - skip installation if it exists,
+        # unless the caller asked for a reinstall of a listed tool.
+        if not reinstall and self.is_tool_installed(tool_name):
             # Tool already exists, no need to reinstall
             return True
 
@@ -1551,10 +1844,19 @@ class UVToolRunner:
             # than run outside the sandbox the operator asked for.
             from automated_security_helper.utils.log import ASH_LOGGER
 
-            ASH_LOGGER.error(
-                f"{tool_name} is not installed, and a sandboxed scan does not install "
-                "tools. Run `ash dependencies install` first."
-            )
+            if reinstall:
+                # The tool is listed; its probe failed, and a sandboxed scan
+                # does not rebuild it either. "Is not installed" misread that.
+                ASH_LOGGER.error(
+                    f"{tool_name} is installed but its version probe failed, and a "
+                    "sandboxed scan does not reinstall tools. Run "
+                    "`ash dependencies install` first."
+                )
+            else:
+                ASH_LOGGER.error(
+                    f"{tool_name} is not installed, and a sandboxed scan does not "
+                    "install tools. Run `ash dependencies install` first."
+                )
             return False
 
         # Check if tool executable exists but is broken (e.g., broken symlink)
@@ -1576,12 +1878,22 @@ class UVToolRunner:
         # line's token filter reads, distinct from a checked empty tuple.
         values = None if values is None else value_tuple(values)
 
+        # Check for offline mode: the caller's own when given, else ASH's.
+        offline_mode = _offline_for(offline)
+        if offline_mode:
+            # In offline mode, skip installation attempts and rely on pre-installed tools
+            return False
+        if is_checking_only():
+            # A dependency question, not a scan: nothing is installed.
+            return False
+
         # find_executable answers only an executable file, found by a search or
         # re-tested when a remembered path is given again, so a link whose target is
         # gone is never the answer (test_a_dangling_link_is_never_the_tool_found).
         # This branch therefore runs only when the file is removed between that
         # lookup and the next line; it does not find a dangling link that is
-        # already there.
+        # already there. AFTER the offline and check-only returns: both are
+        # documented to change nothing, and this removal ran before them.
         tool_path = find_executable(tool_name)
         if tool_path and not os.path.exists(tool_path):
             # Broken symlink detected - remove it so UV can recreate
@@ -1595,16 +1907,6 @@ class UVToolRunner:
                     f"Failed to remove broken symlink for {tool_name}: {e}"
                 )
 
-        # Check for offline mode
-        from automated_security_helper.core.constants import is_offline_mode
-
-        if is_offline_mode():
-            # In offline mode, skip installation attempts and rely on pre-installed tools
-            return False
-        if is_checking_only():
-            # A dependency question, not a scan: nothing is installed.
-            return False
-
         # The spec uv installs and the record set that hides it come from
         # ONE builder: the string appended to the argv below is the same
         # object the stderr debug line and the mixin's installation record
@@ -1613,24 +1915,34 @@ class UVToolRunner:
             tool_name, version_constraint, package_extras, with_dependencies
         )
         tool_spec = install_inputs.spec
+        # Which requirement is being checked, for the refusal's log line: the
+        # name is bound before each check so the handler names the one that
+        # was refused without quoting the error (as get_tool_version's does).
+        naming = "the tool spec"
         try:
-            checked_requirement(tool_spec, "the tool spec")
+            checked_requirement(tool_spec, naming, package=tool_name)
             for position, dep in enumerate(with_dependencies or [], start=1):
-                checked_requirement(dep, f"--with dependency {position}")
-        except UVToolRunnerError as error:
-            # As get_tool_version's refusal: the error's text is fixed and
-            # carries no part of the spec, and the tool's name comes from
-            # this call's own argument.
-            ASH_LOGGER.warning(f"{tool_name}: {error}")
+                naming = f"--with dependency {position}"
+                checked_requirement(dep, naming)
+        except UVToolRunnerError:
+            # As get_tool_version's refusal: fixed words that carry no part of
+            # the spec, and the tool's name comes from this call's own argument.
+            ASH_LOGGER.warning(f"{tool_name}: {requirement_refusal(naming)}")
             return False
 
         # Build command with offline support
         cmd = [self.uv_executable, "tool", "install"]
 
-        # Add offline flag if UV_OFFLINE environment variable is set
-        offline = os.environ.get("UV_OFFLINE") == "1"
-        if offline:
+        # UV_OFFLINE set by hand in the environment while _offline_for read
+        # online (the offline mode itself returned above): uv's own flag is
+        # passed along. Named apart from the ``offline`` parameter, which the
+        # return above has already consumed.
+        env_offline = os.environ.get("UV_OFFLINE") == "1"
+        if env_offline:
             cmd.append("--offline")
+
+        if reinstall:
+            cmd.append("--reinstall")
 
         if python_request:
             cmd.extend(["--python", python_request])
@@ -1650,7 +1962,10 @@ class UVToolRunner:
         # never the assembled argv. Each fact is read from the input that set
         # it, not back out of the argument list.
         described = [f"uv tool install {tool_name}"]
-        if offline:
+        # The flag the argv carries (env_offline above), not the parameter: the
+        # parameter was consumed by the offline return, and a UV_OFFLINE=1 run
+        # that failed used to describe itself without the --offline it passed.
+        if env_offline:
             described.append("--offline")
         if with_dependencies:
             count = len(with_dependencies)
@@ -1738,6 +2053,13 @@ class UVToolRunner:
                 while True:
                     elapsed = time.time() - start_time
                     if elapsed > timeout:
+                        break
+                    # The attempt can end while this thread sleeps or waits
+                    # for the scheduler: the stop flag is read right before
+                    # each callback, so an attempt that has ended gets no
+                    # further "in progress" line. The attempt's finally joins
+                    # this thread (bounded) before the install returns.
+                    if stop.is_set():
                         break
                     if callable(progress_callback):
                         progress_callback(
@@ -1879,7 +2201,26 @@ class UVToolRunner:
             except Exception as e:
                 # Not retried: this is the OSError shape -- ``uv`` itself missing,
                 # not executable, or a bad cwd -- and no amount of waiting fixes
-                # any of them.
+                # any of them. Two cases, told apart by the record spawn_run
+                # attaches to what it raises: a child that never started, and a
+                # child that STARTED and whose wait then failed. The second
+                # leaves the install's completion state unknown, exactly as a
+                # timeout does, so the memos drop as the timeout arm drops them;
+                # this arm used to keep them, and a remembered None then answered
+                # for a tool the failed wait had in fact installed.
+                started = getattr(e, _STARTED_CHILD_ATTRIBUTE, None)
+                if getattr(started, "process", None) is not None:
+                    invalidate_tool_version_cache(tool_name)
+                    from automated_security_helper.utils.subprocess_utils import (
+                        clear_find_executable_cache,
+                    )
+
+                    clear_find_executable_cache()
+                    raise UVToolRunnerError(
+                        f"Tool installation for {tool_name} started but its result "
+                        f"could not be read ({type(e).__name__}: {e}); whether the "
+                        f"tool is installed is unknown {shown_command}"
+                    )
                 raise UVToolRunnerError(
                     f"Unexpected error during tool installation for {tool_name}: {e}"
                 )
@@ -1935,7 +2276,7 @@ class UVToolRunner:
             # path shape as the missing retry this function was fixed for, so the
             # invariant is stated in the condition rather than left implicit.
             if retry_config is not None and attempt + 1 < attempts:
-                time.sleep(_install_retry_delay(retry_config, attempt))
+                _sleep_between_attempts(_install_retry_delay(retry_config, attempt))
 
         raise UVToolRunnerError(last_error)
 
@@ -1959,16 +2300,28 @@ class UVToolRunner:
         quiet: bool = False,
         values: Iterable[str] = (),
         python_request: Optional[str] = None,
+        offline: Optional[bool] = None,
+        with_dependencies: Optional[List[str]] = None,
     ) -> subprocess.CompletedProcess:
         """Run a UV tool with specified arguments and output handling support.
 
         Args:
-            tool_name: Name of the tool to run
+            tool_name: Name of the tool to run: the executable uv starts.
+            package_name: The package that provides ``tool_name``, when its name
+                differs (``jupyter-nbconvert`` comes from ``nbconvert``). It is
+                the base of the ``--from`` spec the extras and the constraint are
+                built on; without them it is passed as the ``--from`` spec
+                itself. A plugin that names its package only on the install
+                used to run ``uv tool run <tool_name>``, which resolves a
+                package named after the executable.
             args: Arguments to pass to the tool
             cwd: Working directory for the command
             capture_output: Whether to capture stdout/stderr
             text: Whether to return text output
-            check: Whether to raise exception on non-zero exit
+            check: Whether to raise exception on non-zero exit. A run that
+                timed out is a failed run under ``check`` on both branches
+                (with and without ``results_dir``); without ``check`` it is
+                returned as a ``TimedOutProcess``.
             timeout: Timeout in seconds
             package_extras: Optional list of package extras for --from parameter
             version_constraint: Optional version constraint for --from parameter
@@ -1988,6 +2341,18 @@ class UVToolRunner:
                 timeout line is redacted of).
             python_request: Optional interpreter request passed as
                 ``uv tool run --python``; None leaves the choice to uv.
+            offline: Whether this run is offline. None, the default, follows
+                ASH's own mode (``ASH_OFFLINE``). A scanner whose
+                ``options.offline: true`` runs offline while ASH is online passes
+                True, so its uv run resolves from the cache alone, as its own
+                mode says; the module-wide mode used to be the only one uv saw.
+            with_dependencies: The plugin's extra dependencies, passed as
+                ``uv tool run --with <dep>`` each, the same entries the install
+                passes with ``--with`` and the mixin counts among a run's inputs.
+                A run that resolves an ephemeral environment (the tool not
+                installed, or installed under another spec) lacked them, and a
+                tool whose plugin needs one (``jupyter`` beside nbconvert) ran
+                without it. Each is checked as the install checks its own.
 
         Returns:
             CompletedProcess result with enhanced output handling
@@ -2014,9 +2379,7 @@ class UVToolRunner:
         # Set up environment for offline mode if needed. If the caller
         # passed an explicit env, start from it; otherwise start from
         # os.environ when we need to set offline flags.
-        from automated_security_helper.core.constants import is_offline_mode
-
-        if is_offline_mode() or is_checking_only():
+        if _offline_for(offline) or is_checking_only():
             env = dict(env) if env is not None else snapshot_environ()
             env["UV_OFFLINE"] = "1"
             command.append("--offline")
@@ -2025,17 +2388,26 @@ class UVToolRunner:
             command.extend(["--python", python_request])
 
         # Build command with --from parameter if extras or version constraint specified
+        base_name = package_name or tool_name
+        # The package the --from spec is held to is the NAME inside
+        # ``package_name``, not the string whole: a caller passes the package
+        # with its constraint glued on ("nbconvert>=7.16.0,<8.0.0", the jupyter
+        # converter's), and the whole string compared against the parsed name
+        # never matched, so every such run was refused as a requirement for
+        # another package.
+        package = _requirement_name(base_name)
         if package_extras or version_constraint:
             # Build the --from specification
             if package_extras:
                 extras_str = ",".join(package_extras)
-                base_spec = f"{tool_name}[{extras_str}]"
+                base_spec = f"{base_name}[{extras_str}]"
             else:
-                base_spec = tool_name
+                base_spec = base_name
 
             from_spec = checked_requirement(
                 f"{base_spec}{version_constraint}" if version_constraint else base_spec,
                 f"the --from spec for {tool_name}",
+                package=package,
             )
 
             command.extend(
@@ -2045,12 +2417,30 @@ class UVToolRunner:
                 ]
             )
 
-        if package_name:
+        elif package_name and _canonical(package_name) != _canonical(tool_name):
+            # A package named apart from its command is always a --from (the
+            # bare run would resolve a package named after the executable); one
+            # named like the command passes none, exactly as the probes'
+            # UVToolMixin._uv_from_spec reads it, so the two argvs match. A
+            # package named like the command WITH a constraint is a --from too:
+            # the constraint is what the caller asked for.
             command.extend(
                 [
                     "--from",
                     checked_requirement(
-                        package_name, f"the --from spec for {tool_name}"
+                        package_name,
+                        f"the --from spec for {tool_name}",
+                        package=package,
+                    ),
+                ]
+            )
+
+        for position, dependency in enumerate(with_dependencies or [], start=1):
+            command.extend(
+                [
+                    "--with",
+                    checked_requirement(
+                        dependency, f"--with dependency {position} for {tool_name}"
                     ),
                 ]
             )
@@ -2226,12 +2616,15 @@ class UVToolRunner:
             # The same rule as the branch above: neither the exception's str
             # nor its stderr, which repeats the requirement uv could not
             # satisfy, may ride -- only how the command ended, in the fixed
-            # shape (a negative code is a signal death, never an exit).
+            # shape (a negative code is a signal death, never an exit). The
+            # chain is disavowed too: CalledProcessError's own text quotes the
+            # whole argv, and every traceback printer renders a kept context,
+            # so the fixed shape alone did not keep the argv out of a log.
             raise UVToolRunnerError(
                 f"UV tool run failed for {tool_name}: "
                 f"{_exit_description(e)} "
                 f"(uv tool run {tool_name}, arguments not shown)"
-            )
+            ) from None
         except subprocess.TimeoutExpired as e:
             # Returned, not raised: a raise reaches the mixin's catch-all, which
             # reads it as a uv run that never started.
@@ -2244,10 +2637,20 @@ class UVToolRunner:
             # child: one it did not end has no exit code of its own, which
             # TimedOutProcess's contract keeps as returncode None, with an
             # error that says so rather than reading as an ordinary timeout.
-            started = getattr(e, "_ash_started_child", None)
+            # The record's own reading (``not_stopped``) decides, as the
+            # results_dir branch's response does: it honors a stop the sandbox
+            # refused, where a bare poll of the process read the child as ended
+            # once closing the pipes ended it. A record without that method (an
+            # older stub) is read by its process's poll.
+            started = getattr(e, _STARTED_CHILD_ATTRIBUTE, None)
             process = getattr(started, "process", None)
-            still_running = process is not None and process.poll() is None
-            return TimedOutProcess(
+            read_not_stopped = getattr(started, "not_stopped", None)
+            if callable(read_not_stopped):
+                not_stopped = read_not_stopped()
+                still_running = not_stopped is not None
+            else:
+                still_running = process is not None and process.poll() is None
+            timed_out = TimedOutProcess(
                 args=command,
                 returncode=None if still_running else TIMEOUT_RETURNCODE,
                 stdout=_text(e.stdout),
@@ -2261,6 +2664,30 @@ class UVToolRunner:
                     + (", and the stop did not end it" if still_running else "")
                 ),
             )
+            if still_running:
+                # The recorded state rides as the result's own fields, as the
+                # results_dir branch carries it: the mixin reads the fact from
+                # them, never from the error's text.
+                timed_out.could_not_stop = True
+                read_pid = getattr(started, "not_stopped_pid", None)
+                pid = (
+                    read_pid() if callable(read_pid) else getattr(process, "pid", None)
+                )
+                if isinstance(pid, int) and not isinstance(pid, bool):
+                    timed_out.could_not_stop_pid = pid
+            if check:
+                # The caller asked for a raise on anything but a clean exit, as
+                # the results_dir branch gives it for a timed-out run: a timeout
+                # returned as a result here read as a run that completed. The
+                # fixed shape, as for a non-zero exit above, with the chain
+                # disavowed for the same reason: TimeoutExpired's text quotes
+                # the argv.
+                raise UVToolRunnerError(
+                    f"UV tool run failed for {tool_name}: "
+                    f"{_exit_description(timed_out)} "
+                    f"(uv tool run {tool_name}, arguments not shown)"
+                ) from None
+            return timed_out
         except Exception as e:
             from automated_security_helper.utils.subprocess_utils import (
                 spawn_run_failure_after_the_start,
@@ -2278,14 +2705,29 @@ class UVToolRunner:
             return after_the_start
 
     def get_tool_installation_info(
-        self, tool_name: str, package_name: Optional[str] = None
+        self,
+        tool_name: str,
+        package_name: Optional[str] = None,
+        *,
+        offline: Optional[bool] = None,
+        package: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get comprehensive installation information for a tool."""
+        """Get comprehensive installation information for a tool.
+
+        ``offline`` and ``package`` have the meaning they have for
+        ``get_tool_version``: the caller's own offline mode reaches the version
+        probe (a scanner offline by its options probed online here), and the
+        package the spec was built around is checked before the probe.
+        """
         is_uv_installed = (
             self.is_tool_installed(tool_name) if self.is_uv_available() else False
         )
         uv_version = (
-            self.get_tool_version(tool_name, package_name) if is_uv_installed else None
+            self.get_tool_version(
+                tool_name, package_name, offline=offline, package=package
+            )
+            if is_uv_installed
+            else None
         )
 
         # Simple pre-installed check
@@ -2311,6 +2753,9 @@ class UVToolRunner:
             "is_uv_installed": is_uv_installed,
             "is_pre_installed": is_pre_installed,
             "uv_version": uv_version,
+            # Not probed: the PATH copy is not run here (a dependency check
+            # starts no tool it may not use), so the field is always None and a
+            # caller that prints it says "unknown", not "None".
             "pre_installed_version": None,
             "pre_installed_path": pre_installed_path,
             "preferred_source": preferred_source,
@@ -2401,28 +2846,70 @@ class UVToolRunner:
             return {"cache_available": False, "error": str(e)}
 
     def validate_cached_tool(
-        self, tool_name: str, package_name: Optional[str] = None
+        self,
+        tool_name: str,
+        package_name: Optional[str] = None,
+        *,
+        offline: Optional[bool] = None,
+        package: Optional[str] = None,
+        values: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
-        """Validate that a cached tool is still functional."""
-        validation_result = {
+        """Validate that a cached tool is still functional.
+
+        ``offline`` and ``package`` have the meaning they have for
+        ``get_tool_version``. ``values`` has the meaning it has there too: the
+        caller's environment-read values, hidden from the carried version. The
+        mixin's [INSTALLATION_SKIP] line prints that version, and without the
+        plugin's values the probe answered under the no-caller-checked rule,
+        which hides the plugin-built spec but not an env-read value the tool
+        printed.
+
+        The answer tells a tool that failed from a probe that never ran:
+        ``probed`` is True only when the version probe spawned and exited, and
+        ``is_functional`` is True when it exited 0 (a version on stdout or not:
+        a tool that prints its version on stderr still runs). A probe that
+        timed out, that the sandbox refused, that could not spawn, or whose spec
+        the requirement check refused answers ``probed`` False with the cause in
+        ``error``; the caller decides whether that is grounds for a reinstall
+        (``UVToolMixin._install_uv_tool`` says it is not).
+        """
+        validation_result: Dict[str, Any] = {
             "tool_name": tool_name,
             "is_functional": False,
+            "probed": False,
             "version": None,
             "error": None,
         }
 
+        outcome: Dict[str, Any] = {}
         try:
             # Try to get version to validate functionality
             # refresh=True: this is the caller that decides whether a tool is
             # broken, so it must not inherit a memoized failure. A probe that
             # merely timed out would otherwise make every later caller report
             # is_functional=False for a tool that works.
-            version = self.get_tool_version(tool_name, package_name, refresh=True)
-            if version:
+            version = self.get_tool_version(
+                tool_name,
+                package_name,
+                refresh=True,
+                offline=offline,
+                package=package,
+                values=values,
+                probe_outcome=outcome,
+            )
+            validation_result["probed"] = bool(outcome.get("ran"))
+            validation_result["version"] = version
+            if version or (outcome.get("ran") and outcome.get("returncode") == 0):
                 validation_result["is_functional"] = True
-                validation_result["version"] = version
+            elif outcome.get("ran"):
+                validation_result["error"] = (
+                    f"the version probe exited {outcome.get('returncode')}"
+                )
             else:
-                validation_result["error"] = "Could not determine tool version"
+                validation_result["error"] = (
+                    "the version probe did not run: "
+                    f"{outcome.get('error') or 'no probe was started'}"
+                )
 
         except Exception as e:
             validation_result["error"] = str(e)
@@ -2463,6 +2950,61 @@ _uv_command_cache: Dict[str, Optional[List[str]]] = {}
 # uv its version probe ran, or the tool's own executable. A remembered command is
 # answered only while that file is still an executable file.
 _uv_command_binary: Dict[str, str] = {}
+# Whether ``uv tool run [--from <spec>] <tool> --version`` exited 0, keyed by
+# the tool, the spec, the offline mode and the uv that ran it -- NOT by the
+# scanned-tree scope the command memo above is keyed by. The probe's answer
+# does not depend on which tree is being scanned, only the lookups around it
+# do, so a workspace scan of N projects used to run N concurrent probes of one
+# tool (the first-import race ``_uv_tool_version_cache`` describes); with the
+# probe remembered here, the second project's lookup reuses the first's answer
+# and runs only its own tree-scoped lookups. Cleared with the other lookups.
+_uv_probe_answers: Dict[str, bool] = {}
+#: The probes that exited non-zero inside a sandbox scope, keyed by the probe's
+#: own key and the identity of the scope they ran in, each with a weak
+#: reference to that scope. That exit is the wrapper's view of the filesystem
+#: and network, and the policy behind that view is built per scope (the
+#: scanner's name decides its network, its requirements and read paths decide
+#: the rest), so one scope's miss is not another's even on one backend. It is
+#: not in ``_uv_probe_answers`` and no caller outside the scope reads it;
+#: inside the scope it spares each later lookup the same spawn, a ``--from``
+#: probe being up to ``_UV_TOOL_VERSION_PROBE_TIMEOUT`` long. Guarded by
+#: ``_uv_tool_runner_cache_lock``; cleared with the caches.
+_uv_scoped_probe_misses: Dict[str, Any] = {}
+
+
+def _scoped_miss_known(miss_key: str, scope: Any) -> bool:
+    """Whether this very scope already missed this probe (lock held).
+
+    The key carries the scope's id and the entry its weak reference, so an id
+    that a collected scope left behind and a new scope took over reads as no
+    miss: the entry is dropped and the probe runs.
+    """
+    reference = _uv_scoped_probe_misses.get(miss_key)
+    if reference is None:
+        return False
+    if reference() is scope:
+        return True
+    _uv_scoped_probe_misses.pop(miss_key, None)
+    return False
+
+
+def _remember_scoped_miss(miss_key: str, scope: Any) -> None:
+    """Remember that this scope missed this probe (lock held).
+
+    Entries of scopes that are gone are dropped as a new one is added, so the
+    memo does not outlive the scans it served.
+    """
+    try:
+        reference = _weakref.ref(scope)
+    except TypeError:
+        return
+    for stale in [k for k, r in _uv_scoped_probe_misses.items() if r() is None]:
+        _uv_scoped_probe_misses.pop(stale, None)
+    _uv_scoped_probe_misses[miss_key] = reference
+#: The retry window a timed-out ``get_uv_tool_command`` probe opened for its key:
+#: the monotonic time until which the uv probe is skipped for that key. Guarded
+#: by ``_uv_tool_runner_cache_lock``; cleared with the caches.
+_uv_command_probe_windows: Dict[str, float] = {}
 # Keyed by _lookup_key: the name, PATH and ASH_BIN_PATH. Found paths only: a miss
 # is looked up again on the next call.
 _uv_executable_cache: Dict[Any, str] = {}
@@ -2590,10 +3132,14 @@ _uv_tool_probe_locks: "_weakref.WeakValueDictionary[str, threading.Lock]" = (
 # scanners with no progress reporting (an earlier review finding).
 _UV_VERSION_PROBE_TIMEOUT = 5
 
-# Timeout for ``UVToolRunner.get_tool_version``. Higher than the constant above
-# on purpose, and the two are not merged. That probe resolves a bare tool name;
-# this one resolves a full ``--from`` spec with extras and a version constraint,
-# which on a cold uv cache means materializing an environment.
+# Timeout for ``UVToolRunner.get_tool_version``, and for ``get_uv_tool_command``'s
+# probe when it is given a ``--from`` spec. Higher than the constant above on
+# purpose, and the two are not merged. A probe of a bare tool name starts a tool
+# uv already has; a probe of a full ``--from`` spec with extras and a version
+# constraint, on a cold uv cache, means materializing an environment. Under the
+# 5 s budget that probe was killed on every dependency check (a timed-out probe
+# is never remembered), each kill leaving the half-written cache the resolver's
+# docstring warns about.
 #
 # Kept at its historical 15s rather than lowered now that the probe is
 # serialized. It is true that this is now the whole workspace's stall budget
@@ -2718,6 +3264,9 @@ def _reset_uv_tool_runner_caches() -> None:
         _lookup_generation += 1
         _uv_command_cache.clear()
         _uv_command_binary.clear()
+        _uv_probe_answers.clear()
+        _uv_scoped_probe_misses.clear()
+        _uv_command_probe_windows.clear()
         _uv_executable_cache.clear()
         _executable_cache.clear()
         _uv_tool_version_cache.clear()
@@ -2740,6 +3289,10 @@ def _forget_lookups() -> None:
         _lookup_generation += 1
         _uv_command_cache.clear()
         _uv_command_binary.clear()
+        # An install is exactly what changes a probe's answer.
+        _uv_probe_answers.clear()
+        _uv_scoped_probe_misses.clear()
+        _uv_command_probe_windows.clear()
         _uv_executable_cache.clear()
         _executable_cache.clear()
 
@@ -2885,11 +3438,11 @@ def bundled_uv_executable() -> Optional[str]:
     from, and the uv package ASH imports, located through the same ``sys.path``
     its other imports use. The uv found here is trusted as the interpreter is.
     When that environment is inside the tree being scanned (ASH started from a
-    repository's ``.venv``), the operator chose to run ASH from it and the
-    interpreter already runs code from it on every import, so refusing its uv
-    would protect nothing; a check that refuses programs inside the scanned tree
-    should exempt this uv for the reason it exempts the running interpreter.
-    ``find_uv_bin`` also looks in the base interpreter's scripts directory and in
+    repository's ``.venv``), the spawn layer refuses this uv as it refuses every
+    program inside the tree (only the running interpreter is exempt), so this
+    function's answer is not always one that can run: :func:`find_uv_or_none`
+    applies that rule before choosing it and falls through to a uv outside the
+    tree. ``find_uv_bin`` also looks in the base interpreter's scripts directory and in
     the user's (``~/.local/bin``) whatever the package's own location; those are
     not searched here unless the package itself was installed there (``pip
     install --user``). A uv anywhere else is a program like any other, found by
@@ -2920,6 +3473,33 @@ def _lookup_key(name: str) -> Any:
     )
 
 
+def _refused_inside_scanned_tree(path: str) -> Optional[str]:
+    """The scanned tree ``path`` lies in when the spawn layer would refuse it.
+
+    The same rule ``subprocess_utils._first_usable`` applies to a program it
+    is asked to start: inside one of the active scan's trees, and in-tree tools
+    not allowed. None outside a scan, when the operator allowed in-tree tools,
+    or when ``path`` is outside every tree. Decided here, before a candidate is
+    chosen, so a refusal is never the chosen uv's fate: the spawn of a refused
+    uv raises ``FileNotFoundError`` for every caller, and
+    ``UVToolRunner.uv_availability`` used to remember that as "uv absent" for
+    the rest of the process.
+    """
+    from automated_security_helper.utils.scanned_tree import is_inside_tree
+    from automated_security_helper.utils.subprocess_utils import (
+        in_tree_tools_allowed,
+        scanned_trees,
+    )
+
+    roots = scanned_trees()
+    if not roots or in_tree_tools_allowed():
+        return None
+    for root in roots:
+        if is_inside_tree(path, root):
+            return root
+    return None
+
+
 def find_uv_or_none() -> Optional[str]:
     """Return the path to the ``uv`` binary, or ``None`` if it is missing.
 
@@ -2927,6 +3507,13 @@ def find_uv_or_none() -> Optional[str]:
     ``find_executable``'s search: PATH, the ASH bin directory, /usr/local/bin.
     ASH's own copy is preferred over PATH's because it is the version ASH's
     dependency bounds were resolved against.
+
+    The bundled uv is skipped when it lies inside a tree the active scan is
+    scanning and in-tree tools are not allowed: the spawn layer refuses such a
+    program, so choosing it would make every uv call fail as if uv were absent.
+    The search falls through to a uv outside the tree, and the answer is
+    remembered per scan scope (:func:`_lookup_key`), so a scan of another tree
+    looks again.
     """
     key = _lookup_key("uv")
     with _uv_tool_runner_cache_lock:
@@ -2938,7 +3525,20 @@ def find_uv_or_none() -> Optional[str]:
             find_executable as _find_executable,
         )
 
-        resolved = bundled_uv_executable() or _find_executable("uv")
+        bundled = bundled_uv_executable()
+        if bundled is not None:
+            refused_in = _refused_inside_scanned_tree(bundled)
+            if refused_in is not None:
+                from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+
+                ASH_LOGGER.debug(
+                    f"The uv installed with ASH, {bundled}, lies inside the "
+                    f"scanned tree {refused_in}, where ASH does not run tools; "
+                    "looking for a uv outside the tree instead.",
+                    extra=NO_MARKUP,
+                )
+                bundled = None
+        resolved = bundled or _find_executable("uv")
         _remember_path(_uv_executable_cache, key, resolved)
         return resolved
 
@@ -2964,33 +3564,65 @@ def get_uv_tool_command(
     tool_name: str,
     *,
     fallback_binary: Optional[str] = None,
+    from_spec: Optional[str] = None,
+    offline: Optional[bool] = None,
+    package: Optional[str] = None,
 ) -> Optional[List[str]]:
     """Resolve the command list to invoke ``tool_name``.
 
     Resolution order:
 
-    1. If ``uv`` exists and ``uv tool run <tool_name> --version`` succeeds,
-       return ``["uv", "tool", "run", tool_name]``.
+    1. If ``uv`` exists and ``uv tool run [--from <from_spec>] <tool_name>
+       --version`` succeeds, return ``["uv", "tool", "run", tool_name]``, with
+       ``"--from", from_spec`` before the tool name when a spec was given: the
+       command carries the environment it was probed under.
     2. Else if ``fallback_binary`` (default: ``tool_name``) is found on PATH,
        return ``[<fallback_path>]``.
     3. Else return ``None`` (caller marks deps unsatisfied).
 
+    ``from_spec`` is the ``--from`` requirement the scan itself runs under
+    (``UVToolMixin._uv_from_spec``): ``uv tool run --from 'bandit[sarif]' bandit``
+    resolves a different environment than the bare ``uv tool run bandit``, so a
+    probe without it answers for an environment the scan never uses. With it the
+    probe runs ``uv tool run --from <from_spec> <tool_name> --version``. The spec
+    is checked first (``checked_requirement``, against ``package`` when the
+    caller names the package it built the spec around): a spec uv must not see,
+    a glued constraint naming another package among them, answers None with a
+    warning and no probe, so the dependency check never installs it.
+
+    ``offline`` is the caller's own offline mode (a scanner's
+    ``options.offline``); None follows ASH's (``_offline_for``).
+
     Memoized per process so the version probe runs only once per
-    ``(tool_name, fallback_binary)`` pair in each environment (PATH and
-    ASH_BIN_PATH). Thread-safe: a single shared lock guards reads, writes, and
+    ``(tool_name, fallback_binary, from_spec)`` triple in each environment (PATH,
+    ASH_BIN_PATH, and whether the probe is offline: an offline probe resolves
+    from uv's cache alone, so its miss is not an online probe's answer, nor the
+    reverse).
+    Thread-safe: a single shared lock guards reads, writes, and
     the underlying probe so concurrent threads racing on the same cache key see
     exactly one probe and a consistent result.
+
+    A probe that timed out opens a retry window of ``_UV_PROBE_RETRY_SECONDS``
+    for its key, as ``uv_availability`` does: callers in the window skip the uv
+    probe and take the PATH binary or None for that call, nothing is remembered,
+    and the probe runs again once the window has passed. Without it every
+    waiter on the key paid the probe's timeout in turn, each killed probe adding
+    to the half-written-cache risk the offline comment below describes.
 
     A remembered command is answered only while the file it starts, the uv the
     probe ran or the tool's own executable, is still an executable file. When it
     is gone the answer is None and an error names the file; the probe is not run
     again in the same environment.
 
-    A None is remembered only when the probe ran and neither it nor the direct
-    lookup found the tool. Probing again on every call would start the tool once
-    per caller, the concurrent first runs ``_uv_tool_version_cache`` explains, and
-    cost the probe's time again. With no uv found nothing was probed, so a None
-    is looked up again on the next call and a tool installed in between is found.
+    A None is remembered only when the probe ran to an exit and neither it nor
+    the direct lookup found the tool. Probing again on every call would start
+    the tool once per caller, the concurrent first runs ``_uv_tool_version_cache``
+    explains, and cost the probe's time again. With no uv found nothing was
+    probed, so a None is looked up again on the next call and a tool installed
+    in between is found. A probe that did not run to an exit, one that timed out
+    or whose spawn failed or was refused by the sandbox scope, is not uv's answer
+    about the tool: its None is answered for that call and looked up again on the
+    next, as a missing uv's is.
 
     The uv branch names ``uv`` bare while the probe ran ``find_uv_or_none``'s copy,
     which prefers the uv installed with ASH over PATH's. A spawn of the bare name
@@ -2998,9 +3630,35 @@ def get_uv_tool_command(
     spawns this command: the scanners test it for None. A caller that starts it must run the uv the probe ran
     (``find_uv_or_none()``), not the name.
     """
+    # Offline, probe offline, for the reason given in
+    # UVToolRunner.get_tool_version: an online probe here resolved and
+    # downloaded the tool from PyPI under ASH_OFFLINE, and the 5s timeout
+    # could leave a half-written uv cache behind. Read once, with the key: the
+    # offline answer and the online one are different questions. The caller's
+    # own mode when given, else ASH's.
+    offline = _offline_for(offline)
+    if from_spec:
+        try:
+            checked_requirement(
+                from_spec, f"the --from spec for {tool_name}", package=package
+            )
+        except UVToolRunnerError:
+            from automated_security_helper.utils.log import ASH_LOGGER
+
+            # The refusal in its own fixed words, not the caught error's text
+            # (see requirement_refusal); the tool's name is this call's own
+            # argument.
+            ASH_LOGGER.warning(
+                f"{tool_name}: "
+                f"{requirement_refusal(f'the --from spec for {tool_name}')}"
+            )
+            return None
     binary = fallback_binary or tool_name
     lookup = _lookup_key(binary)
-    cache_key = f"{tool_name}::{binary}::{lookup[1:]!r}"
+    cache_key = (
+        f"{tool_name}::{binary}::{from_spec or ''}::offline={int(offline)}"
+        f"::{lookup[1:]!r}"
+    )
 
     # Fast-path: cache hit under the coarse lock.
     with _uv_tool_runner_cache_lock:
@@ -3032,20 +3690,65 @@ def get_uv_tool_command(
         uv_path = find_uv_or_none()
         command: Optional[List[str]] = None
         started: Optional[str] = None
+        # Whether the probe ran to an exit. A probe that timed out, or whose
+        # spawn failed or was refused, answered nothing about the tool, and its
+        # None is not remembered (see above).
+        probe_exited = False
+        # The key of a probe that missed inside the active sandbox scope, and
+        # whether that miss is already known (see _uv_scoped_probe_misses).
+        scoped_miss_key: Optional[str] = None
+        scoped_miss = False
+        miss_scope = _probe_share_key()
         if uv_path is not None:
-            # Offline, probe offline, for the reason given in
-            # UVToolRunner.get_tool_version: an online probe here resolved and
-            # downloaded the tool from PyPI under ASH_OFFLINE, and the 5s timeout
-            # could leave a half-written uv cache behind.
-            from automated_security_helper.core.constants import is_offline_mode
-
-            probe_command = [uv_path, "tool", "run", tool_name, "--version"]
+            probe_offline = offline or is_checking_only()
+            probe_key = (
+                f"{tool_name}::{from_spec or ''}::offline={int(probe_offline)}"
+                f"::{uv_path}"
+            )
+            if miss_scope is not None:
+                scoped_miss_key = f"{probe_key}::scope={id(miss_scope)}"
+            with _uv_tool_runner_cache_lock:
+                remembered_probe = _uv_probe_answers.get(probe_key)
+                scoped_miss = scoped_miss_key is not None and _scoped_miss_known(
+                    scoped_miss_key, miss_scope
+                )
+            if remembered_probe is not None:
+                # The same question was answered for another scanned tree in
+                # this process: uv's answer about its copy of the tool does not
+                # depend on the tree, so the tool is not started again.
+                probe_exited = True
+                if remembered_probe:
+                    # With the --from it was probed under, as the probe below
+                    # answers: the bare command resolves another environment.
+                    command = ["uv", "tool", "run"]
+                    if from_spec:
+                        command.extend(["--from", from_spec])
+                    command.append(tool_name)
+                    started = uv_path
+        # A timed-out probe's retry window (see the docstring): while it is
+        # open the uv probe is skipped, and the call is answered as an
+        # inconclusive probe's is, from the PATH lookup and without a memo.
+        with _uv_tool_runner_cache_lock:
+            window_until = _uv_command_probe_windows.get(cache_key)
+            if window_until is not None and time.monotonic() >= window_until:
+                _uv_command_probe_windows.pop(cache_key, None)
+                window_until = None
+        if (
+            uv_path is not None
+            and not probe_exited
+            and window_until is None
+            and not scoped_miss
+        ):
+            probe_command = [uv_path, "tool", "run"]
             probe_env: Optional[Dict[str, str]] = None
             # Offline in check-only mode too, which must not download.
-            if is_offline_mode() or is_checking_only():
-                probe_command.insert(3, "--offline")
+            if probe_offline:
+                probe_command.append("--offline")
                 probe_env = snapshot_environ()
                 probe_env["UV_OFFLINE"] = "1"
+            if from_spec:
+                probe_command.extend(["--from", from_spec])
+            probe_command.extend([tool_name, "--version"])
             try:
                 probe = spawn_run(  # nosec B603 — fixed list of trusted strings
                     probe_command,
@@ -3053,11 +3756,61 @@ def get_uv_tool_command(
                     text=True,
                     check=False,
                     env=probe_env if probe_env is not None else snapshot_environ(),
-                    timeout=_UV_VERSION_PROBE_TIMEOUT,
+                    # A --from spec may have to build its environment first;
+                    # the bare name keeps the short budget (see the constants).
+                    timeout=(
+                        _UV_TOOL_VERSION_PROBE_TIMEOUT
+                        if from_spec
+                        else _UV_VERSION_PROBE_TIMEOUT
+                    ),
+                    # As every other probe in this module decodes: the locale
+                    # codec in strict mode raised UnicodeDecodeError, which is
+                    # neither a SubprocessError nor an OSError, out of this
+                    # resolver instead of falling back to the direct binary.
+                    encoding="utf-8",
+                    errors="replace",
                 )
+                # Neither memo has a scope in its key, on purpose: uv's answer
+                # about its copy of the tool does not depend on the tree. A
+                # non-zero exit from inside a sandbox scope is not that answer,
+                # though: the wrapper's view of the filesystem and network
+                # decides what the probe could reach there (as uv_availability
+                # and get_tool_version already read it), so remembered it
+                # would serve one scope's refusal to every caller on the
+                # host for the rest of the process. It counts as a probe that
+                # did not answer: this call falls back to the PATH binary and
+                # nothing is remembered. A success is uv's own, in any scope.
+                probe_exited = probe.returncode == 0 or _probe_scope_key() is None
                 if probe.returncode == 0:
-                    command = ["uv", "tool", "run", tool_name]
+                    # With the --from it was probed under: the bare command
+                    # resolves another environment than the one that answered.
+                    command = ["uv", "tool", "run"]
+                    if from_spec:
+                        command.extend(["--from", from_spec])
+                    command.append(tool_name)
                     started = uv_path
+                if probe_exited and not is_checking_only():
+                    with _uv_tool_runner_cache_lock:
+                        if _lookup_generation == generation:
+                            _uv_probe_answers[probe_key] = probe.returncode == 0
+                elif (
+                    probe.returncode != 0
+                    and scoped_miss_key is not None
+                    and not is_checking_only()
+                ):
+                    # The scope's own miss: remembered for that scope object
+                    # only, so each later lookup in it takes the PATH binary
+                    # without starting the probe again, and no caller outside
+                    # the scope, a neighbor on the same backend included, is
+                    # told what this scope's policy could not reach.
+                    with _uv_tool_runner_cache_lock:
+                        if _lookup_generation == generation:
+                            _remember_scoped_miss(scoped_miss_key, miss_scope)
+            except subprocess.TimeoutExpired:
+                with _uv_tool_runner_cache_lock:
+                    _uv_command_probe_windows[cache_key] = (
+                        time.monotonic() + _UV_PROBE_RETRY_SECONDS
+                    )
             except (subprocess.SubprocessError, OSError):
                 pass
 
@@ -3074,10 +3827,21 @@ def get_uv_tool_command(
             with _uv_tool_runner_cache_lock:
                 if _lookup_generation != generation:
                     return command
-                # A None is remembered only after a probe ran: probing again on each
-                # call is what the memo is for (see above). With no uv to probe, the
-                # lookups behind a None are searched again on the next call.
-                if command is not None or uv_path is not None:
+                # A probe that never exited (a timeout, a refused or failed
+                # spawn) answered nothing about uv's copy of the tool: this
+                # call runs the PATH binary it found, if any, and nothing is
+                # remembered, so the next call probes uv again. Remembered,
+                # one slow probe pinned the tool to its PATH binary for the
+                # rest of the process. A None is remembered only after a probe
+                # ran to an exit: probing again on each call is what the memo
+                # is for (see above). With no uv to probe, the lookups behind a
+                # None are searched again on the next call.
+                probe_inconclusive = uv_path is not None and not probe_exited
+                if probe_inconclusive:
+                    _uv_command_cache.pop(cache_key, None)
+                    _uv_command_binary.pop(cache_key, None)
+                    return command
+                if command is not None or probe_exited:
                     _uv_command_cache[cache_key] = command
                 else:
                     _uv_command_cache.pop(cache_key, None)

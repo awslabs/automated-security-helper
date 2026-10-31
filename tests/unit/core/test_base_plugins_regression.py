@@ -12,7 +12,6 @@ finally:return fixes for reporters (from test_finally_return_fix):
 - cloudwatch_logs_reporter.py :: validate_plugin_dependencies
 """
 
-import inspect
 import logging
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -31,16 +30,26 @@ pytestmark = pytest.mark.unit
 class TestReporterPluginConfigure:
     """configure() must write self.config, not self._config."""
 
-    def test_configure_sets_public_config(self):
-        """After configure(cfg), self.config should be cfg."""
-        from automated_security_helper.base.reporter_plugin import ReporterPluginBase
+    def test_configure_sets_public_config(self, tmp_path):
+        """After configure(cfg), self.config should be cfg.
 
-        source = inspect.getsource(ReporterPluginBase.configure)
-        # The fix should write self.config = config, not self._config = config
-        assert "self.config = config" in source, (
-            "configure() must assign to self.config, not self._config"
+        Read from the behavior, not the source text: ``configure`` holds the
+        section to the reporter's declared model before it assigns, so its
+        source no longer reads ``self.config = config``.
+        """
+        from tests.unit.base.test_reporter_plugin_low_declarations import (
+            _DeclaredConfig,
+            _reporter,
         )
-        assert "self._config" not in source, "configure() must not use self._config"
+
+        reporter = _reporter(tmp_path)
+        given = _DeclaredConfig(extension="regression.json")
+
+        reporter.configure(given)
+
+        assert reporter.config is given
+        assert getattr(reporter, "_config", None) is None
+        assert "_config" not in reporter.__dict__
 
 
 # ---------------------------------------------------------------------------

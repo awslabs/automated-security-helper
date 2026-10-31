@@ -974,14 +974,20 @@ THIRD_PARTY_LICENSES: dict[str, ThirdPartyLicense] = {
                 "NOTICE",
             ),
         ),
+        # The probe reads the manifest of the PINNED bundle directory only: a glob
+        # over every aws-guard-rules-registry-* directory printed each installed
+        # version, so the check passed as long as any of them was the pinned one,
+        # and an unset ASH_CFN_GUARD_RULES_DIR raised KeyError, which read as a
+        # version mismatch; now it prints nothing and says why on stderr.
         version_probe=(
             "python3",
             "-c",
             (
-                "import glob, json, os; "
+                "import glob, json, os, sys; "
+                "d = os.environ.get('ASH_CFN_GUARD_RULES_DIR'); "
+                "d or print('ASH_CFN_GUARD_RULES_DIR is not set', file=sys.stderr); "
                 "[print(json.load(open(m))['version']) for m in glob.glob(os.path.join("
-                "os.environ['ASH_CFN_GUARD_RULES_DIR'], 'aws-guard-rules-registry-*', "
-                "'.ash-rules-manifest.json'))]"
+                "d or '', 'aws-guard-rules-registry-1.0.2', '.ash-rules-manifest.json'))]"
             ),
         ),
     ),
@@ -1190,13 +1196,34 @@ def get_tool_asset(tool: str, target_platform: str, arch: str) -> ToolAsset:
             f"{tool} has no release-asset download table. "
             f"Tools provisionable by download: {', '.join(downloadable_tools())}"
         )
+    # A tool in the asset table but not in the version or URL table is a
+    # half-added entry; refused by name here, where a bare KeyError used to
+    # escape the graceful handling every other refusal gets.
+    missing = [
+        name
+        for name, entries in (
+            ("TOOL_VERSIONS", TOOL_VERSIONS),
+            ("_RELEASE_BASE_URLS", _RELEASE_BASE_URLS),
+        )
+        if tool not in entries
+    ]
+    if missing:
+        raise ToolNotProvisionableError(
+            f"{tool} has a release-asset download table but no entry in "
+            f"{' or '.join(missing)} in tool_downloads.py; a tool added in one "
+            "table and not the others cannot be downloaded."
+        )
 
     filename = table.get((target_platform, arch))
     if filename is None:
         available = ", ".join(f"{p}/{a}" for p, a in sorted(table))
+        # The table lists the platforms ASH installs the tool on, which can be
+        # fewer than the release publishes (uv's is linux-only by choice), so
+        # the refusal names the table, not the vendor.
         raise ToolNotProvisionableError(
-            f"{tool} {TOOL_VERSIONS[tool]} publishes no release asset for "
-            f"{target_platform}/{arch}. Available: {available}"
+            f"ASH's download table for {tool} {TOOL_VERSIONS[tool]} has no asset for "
+            f"{target_platform}/{arch}; it lists the platforms ASH installs the tool "
+            f"on, not everything the release publishes. Available: {available}"
         )
 
     taken_at = _DIGESTS_TAKEN_AT.get(tool)

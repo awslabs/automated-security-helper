@@ -38,19 +38,19 @@ here would emit n runs for one repository, each identical in root and differing
 only in which scanners contributed, which describes a workspace that does not
 exist and would make every consumer's per-run attribution meaningless.
 
-What merge_sarif_report does not do, and why there is an extra step
-------------------------------------------------------------------
+What merge_sarif_report does with a shard's tool components
+-----------------------------------------------------------
 ``merge_sarif_report`` was written to fold one *scanner's* SARIF into ASH's
-aggregate, so it reads ``runs[0].tool.driver`` and never looks at
-``runs[0].tool.extensions``. Merging two ASH *aggregates* is the case it was not
-written for: every shard's driver is ASH itself, and each shard's per-scanner
-tool components live in ``extensions``. Left alone, the rule metadata for every
-scanner owned by shards 1..n-1 would be silently dropped, and the merged report
-would carry results whose ``ruleId`` resolves to no rule -- findings with no
-description or help URI, which is a quiet quality loss rather than a visible
-error. :func:`_merge_tool_extensions` unions them afterwards, matching
-components on the same ``(name, fullName, organization)`` triple
-``merge_sarif_report`` itself uses so the two paths cannot disagree.
+aggregate, and merging two ASH *aggregates* is a different case: every shard's
+driver is ASH itself, and each shard's per-scanner tool components live in
+``runs[0].tool.extensions``. It folds both now: each incoming run's driver and
+every one of its ``extensions`` joins the aggregate's first run
+(``schemas/sarif_schema_model._fold_tool_component``), matched on the
+``(name, fullName, organization)`` triple, with a component already present
+taking the union of the rules by id. So the rule metadata of every scanner
+owned by shards 1..n-1 survives the merge, and a merged result's ``ruleId``
+still resolves to its rule's description and help URI. No second pass is
+needed here; a merge used to run one and union the same components again.
 
 Deduplication is deliberately absent, here as elsewhere. Two shards never own
 the same scanner (:func:`verify_shard_coverage` refuses that), so there is no
@@ -196,6 +196,8 @@ across shards is not recorded.
 
 from __future__ import annotations
 
+import copy
+import os
 import functools
 import hashlib
 import json
@@ -212,9 +214,11 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Sized,
     Tuple,
     Type,
+    cast,
 )
 
 import typer
@@ -272,7 +276,9 @@ from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.config.untrusted_source import SHARD_RECORDED
 from automated_security_helper.core.constants import (
     ASH_EXIT_USAGE_ERROR,
+    ASH_WORK_DIR_NAME,
     PYTHON_ONLY_SKIPPED_REASON,
+    SHARD_SPLIT_REASON_PREFIX,
 )
 from automated_security_helper.core.enums import (
     AshLogLevel,
@@ -307,6 +313,7 @@ from automated_security_helper.models.asharp_model import (
     FailedInputInfo,
     InputNotScanned,
     RefusedInputInfo,
+    waives_gate,
 )
 from automated_security_helper.models.core import (
     IgnoreFileExclusions,
@@ -509,15 +516,19 @@ def resolve_results_file(target: str | Path) -> Path:
     path = Path(target)
     if path.is_file():
         return path
+    # Shown as the operator typed it, not as the Path object spells it: on
+    # Windows a Path writes "\" for every "/" the operator gave, and a trailing
+    # separator is dropped on every host, so the refusal named a path the
+    # operator never typed.
     if not path.exists():
         raise ResultsPathError(
-            f"--results path does not exist: {_shown(path)}. Refusing to merge, "
+            f"--results path does not exist: {_shown(target)}. Refusing to merge, "
             f"because skipping an unreadable shard would produce a partial report "
             f"that reads as complete."
         )
     if not path.is_dir():
         raise ResultsPathError(
-            f"--results path is neither a file nor a directory: {_shown(path)}."
+            f"--results path is neither a file nor a directory: {_shown(target)}."
         )
 
     # Not through a symlink at any level beneath the directory, here or in the
@@ -892,12 +903,36 @@ def _verify_scanner_union(
 
     seen: Dict[str, Path] = {}
     statuses: Dict[str, set[str]] = {}
+    # Whether every row a name carries says the operator deselected the scanner
+    # (``excluded``), read beside the status; False as soon as one row does not.
+    deselected: Dict[str, bool] = {}
+    # Whether SOME row a name carries was written by the shard split ("assigned to
+    # another shard"), which sets the same ``excluded`` flag as a deselection: one
+    # such row is enough to deny the deselection exemption. Whether EVERY row was:
+    # that is the partition hole the refusal names as such.
+    left_to_another_shard: Dict[str, bool] = {}
+    left_to_another_shard_by_all: Dict[str, bool] = {}
     for results_file, results, _ in shards:
         for scanner, entry in results.scanner_results.items():
             key = _normalized(scanner)
             seen.setdefault(key, results_file)
             status = getattr(entry, "status", None)
             statuses.setdefault(key, set()).add(str(getattr(status, "value", status)))
+            deselected[key] = deselected.get(key, True) and bool(
+                getattr(entry, "excluded", False)
+            )
+            reason = getattr(entry, "skipped_reason", None)
+            # The prefix is the scan phase's own spelling (core/constants.py), the one
+            # place both writer and reader take it from.
+            split_row = isinstance(reason, str) and reason.startswith(
+                SHARD_SPLIT_REASON_PREFIX
+            )
+            left_to_another_shard[key] = (
+                left_to_another_shard.get(key, False) or split_row
+            )
+            left_to_another_shard_by_all[key] = (
+                left_to_another_shard_by_all.get(key, True) and split_row
+            )
 
     # An unclaimed row is only an offence when it claims its scanner's outcome is
     # KNOWN, and that narrowing is what keeps this check answering the question it
@@ -941,13 +976,48 @@ def _verify_scanner_union(
     # name recorded PASSED by one shard and ERROR by another is the original defect,
     # and taking the ERROR as permission would hide it. A name with no readable status
     # at all is not exempt either.
+    #
+    # A THIRD ROW SHAPE, written by ScanPhase since the constructor-failure
+    # recording moved ahead of the selection filter: a scanner whose constructor
+    # raised AND which the operator deselected (excluded, left out of --scanners,
+    # disabled in config) is recorded SKIPPED with ``excluded=True`` under its
+    # config name, which no shard claims because it never constructed. That row is
+    # the operator's own decision, not a partitioning disagreement, and the scan's
+    # record of it is right (the skip is real information), so it is exempt here
+    # when EVERY row the name carries is SKIPPED and excluded. A SKIPPED row with
+    # ``excluded`` False (one shard's selection or config left the scanner out while
+    # no shard owns it) stays refused: that is the shape the harm above describes.
+    #
+    # THE SHARD SPLIT WRITES THE SAME FLAG. A shard records every scanner outside
+    # its assignment SKIPPED with ``excluded=True`` too, its reason beginning
+    # "assigned to another shard". A name every shard left to "another shard" that
+    # no shard's assignment names is a PARTITION HOLE -- the very disagreement this
+    # check exists to refuse -- and on shards written before ``candidate_scanners``
+    # existed this function is the only detector of it. So the deselection
+    # exemption asks the reason as well: a row the split wrote is never a
+    # deselection, and such an orphan is refused, naming the hole.
     orphans = set(seen) - set(owner_by_scanner)
     exempted = sorted(
         name
         for name in orphans
-        if statuses.get(name) and statuses[name] <= _NEVER_ATTEMPTED_STATUSES
+        if statuses.get(name)
+        and (
+            statuses[name] <= _NEVER_ATTEMPTED_STATUSES
+            or (
+                statuses[name] == {ScannerStatus.SKIPPED.value}
+                and deselected.get(name, False)
+                and not left_to_another_shard.get(name, False)
+            )
+        )
     )
     unclaimed = sorted(orphans - set(exempted))
+    # Named as a hole only when EVERY row says "assigned to another shard": a name
+    # one shard left to another and another shard recorded otherwise is unclaimed
+    # on the mixed-status ground alone, and the sentence below would contradict its
+    # rows.
+    holes = [
+        name for name in unclaimed if left_to_another_shard_by_all.get(name, False)
+    ]
 
     # Ahead of the refusal below so the disclosure is emitted whether or not this
     # call goes on to raise. Both sets are drawn from `orphans`, so a merge can
@@ -965,7 +1035,8 @@ def _verify_scanner_union(
             shown_on_one_line(
                 f"{len(exempted)} scanner(s) appear in shard results that no shard "
                 f"was assigned: {exempt_detail}. Each row records the scanner as "
-                f"never attempted, which is why this is not refused as a "
+                f"never attempted, or as deselected by the operator (SKIPPED, "
+                f"excluded), which is why this is not refused as a "
                 f"partitioning disagreement and the merge continues. The coverage is "
                 f"still short: --fail-on-incomplete-scanners is what turns that into "
                 f"a non-zero exit code, and under --no-fail-on-incomplete-scanners "
@@ -988,23 +1059,67 @@ def _verify_scanner_union(
             f"them: {listed}. No shard ran them, so merging would report them as "
             f"deliberately skipped rather than never attempted. The status of each "
             f"is named above because the cause differs: the executors resolved "
-            f"different scanner sets (one missing a plugin module, or --python-only "
-            f"or a config override applied to some jobs and not others), or a "
+            f"different scanner sets (one missing a plugin module, or a config "
+            f"override applied to some jobs and not others), or a "
             f"scanner was excluded by every shard's partition. A scanner that failed "
             f"to construct, or whose plugin module failed to import, is recorded "
             f"ERROR or MISSING instead and is reported through "
-            f"--fail-on-incomplete-scanners rather than refused here."
+            f"--fail-on-incomplete-scanners rather than refused here; one the "
+            f"operator deselected is recorded SKIPPED as excluded and is not "
+            f"refused either."
+            + (
+                f" Of these, {_shown(', '.join(holes))} "
+                f"{'was' if len(holes) == 1 else 'were'} recorded by every shard "
+                f"as assigned to another shard while no shard's assignment names "
+                f"{'it' if len(holes) == 1 else 'them'}: a hole in the partition, "
+                f"so no shard ran {'it' if len(holes) == 1 else 'them'}."
+                if holes
+                else ""
+            )
         )
 
-    missing_from_owner = sorted(
+    unrecorded_by_owner = sorted(
         name
         for name, position in owner_by_scanner.items()
-        if name in seen
-        and not any(
+        if not any(
             _normalized(scanner) == name
             for scanner in shards[position][1].scanner_results
         )
     )
+    # Two shapes, split by whether some OTHER shard recorded the name. The
+    # refusal here covers only the first: another shard's skip marker is the sole
+    # trace, and the merge would adopt it, reporting a scanner that never ran as
+    # deliberately skipped. No flag can make that honest, so it is refused
+    # whatever was passed.
+    #
+    # The second shape, an owned scanner that NO shard recorded, belongs to the
+    # --fail-on-incomplete-scanners gate, not here: the scanner's whole shard may
+    # have run nothing, which is the gate's own case ("completed none of the
+    # scanners they owned"), and --no-fail-on-incomplete-scanners is documented as
+    # merging such a partial union anyway. An unconditional refusal here fired
+    # before that flag could be read, so a single shard whose scanners recorded
+    # nothing could no longer be merged to an exit code under the override, which
+    # it had always been. _verify_shard_contributions now refuses the shape under
+    # the gate, and the disclosure below is what remains of it when the gate is
+    # off: emitted whether or not the gated check goes on to raise, because this
+    # function cannot see the flag.
+    missing_from_owner = [name for name in unrecorded_by_owner if name in seen]
+    recorded_nowhere = [name for name in unrecorded_by_owner if name not in seen]
+    if recorded_nowhere:
+        unrecorded_detail = ", ".join(
+            f"{name} (owned by shard {shards[owner_by_scanner[name]][2].shard_index})"
+            for name in recorded_nowhere
+        )
+        ASH_LOGGER.warning(
+            shown_on_one_line(
+                f"{len(recorded_nowhere)} owned scanner(s) were recorded by no "
+                f"shard: {unrecorded_detail}. Nothing says they ran. Under "
+                f"--fail-on-incomplete-scanners the merge is refused for them; "
+                f"under --no-fail-on-incomplete-scanners the merged report leaves "
+                f"them out, and this line is the only record of it."
+            ),
+            extra=NO_MARKUP,
+        )
     if missing_from_owner:
         details = ", ".join(
             f"{_shown(name)} (owned by shard "
@@ -1112,7 +1227,16 @@ def _report_scanners_no_shard_selected(
     the merged report says SKIPPED either way. Silent when no shard
     recorded a selection, which is every results file written before
     ``selected_scanners`` existed. Inferring a hole from that absence would name
-    every scanner on every merge of an older fan-out's artifacts.
+    every scanner on every merge of an older fan-out's artifacts. For the same
+    reason a shard that recorded no selection beside shards that did is read
+    from its own rows: an assigned scanner it recorded as anything but SKIPPED
+    was intended, since it ran, and naming it as intended by no shard would call
+    a scanner that ran SKIPPED; one it recorded SKIPPED was left out, by its own
+    selection or by a config, and is named as it was before the field existed,
+    because the shard's assignment covers scanners it never meant to run
+    (``ShardAssignment``: ``--scanners bandit`` leaves grype assigned and
+    SKIPPED), so reading the whole assignment as intended hid a scanner one job
+    excluded and no job ran.
 
     A scanner its owning shard recorded as left out by ``--python-only`` is not in
     the warning when every shard ran with that flag. The flag is a selection too, so
@@ -1148,7 +1272,22 @@ def _report_scanners_no_shard_selected(
         for scanner in assignment.assigned_scanners:
             assigned[_normalized(scanner)] = assignment.shard_index
             owner_results[_normalized(scanner)] = results
-        for scanner in assignment.selected_scanners or []:
+        if assignment.selected_scanners is None:
+            # Written before the field existed, so it says nothing about what the
+            # shard left out, and its row for each scanner it owned says what
+            # became of it: a scanner that ran (any status but SKIPPED, a missing
+            # row included, which the contribution check names) was intended; a
+            # SKIPPED one was left out by that shard's own selection or config.
+            # Reading the whole assignment as intended hid the second kind, since
+            # an assignment covers scanners the shard never meant to run; reading
+            # it as an empty selection named the first kind as intended by no
+            # shard and said they show SKIPPED when they ran.
+            for scanner in assignment.assigned_scanners:
+                name = _normalized(scanner)
+                if _recorded_status(results, name) != ScannerStatus.SKIPPED.value:
+                    selected.add(name)
+            continue
+        for scanner in assignment.selected_scanners:
             selected.add(_normalized(scanner))
 
     unselected = sorted(set(assigned) - selected)
@@ -1278,6 +1417,20 @@ def _report_scanners_no_shard_selected(
     )
 
 
+def _recorded_status(results: AshAggregatedResults, name: str) -> str | None:
+    """The status value *results* recorded for the scanner *name* normalizes to.
+
+    None when no row names it. Read from ``scanner_results`` under the recorded
+    key, as :func:`_ran_partially` reads it, so a row recorded under another
+    spelling of the name is still found.
+    """
+    for recorded, entry in (results.scanner_results or {}).items():
+        if _normalized(recorded) == name:
+            status = getattr(entry, "status", None)
+            return getattr(status, "value", status)
+    return None
+
+
 def _skipped_reason(results: AshAggregatedResults, name: str) -> str | None:
     """The ``skipped_reason`` *results* recorded for the scanner *name* normalizes to."""
     for recorded in results.scanner_results or {}:
@@ -1299,10 +1452,16 @@ def _verify_shard_contributions(
     a fraction of which never ran -- and because that fraction produced no
     findings, the merged verdict is the same 0 a genuinely clean scan produces.
 
-    Also catches the case a status check structurally cannot: an owned scanner
-    with no entry at all, where there is no status to inspect.
-    :func:`_verify_scanner_union` catches that only when some *other* shard left a
-    skip marker under the same name, which is the usual but not the only shape.
+    Also names the case a status check structurally cannot: an owned scanner
+    with no entry at all, where there is no status to inspect. On a shard that
+    completed none of its scanners it is listed as ``(no result recorded)``
+    beside the statuses. On a shard that did complete some, the scanners it owns
+    but never recorded are refused separately: nothing else reads them, so they
+    would drop out of the merged report and out of the completeness gate with
+    nothing saying they were ever assigned. :func:`_verify_scanner_union` handles
+    the one shape this gate must not: an owned scanner that some *other* shard
+    recorded, usually as a skip marker, is refused there whatever the flag,
+    because merging would adopt that marker.
 
     A shard that owns nothing is not an offender. A shard count above the scanner
     count leaves surplus shards with an empty assignment, which
@@ -1329,6 +1488,7 @@ def _verify_shard_contributions(
     )
 
     offenders: List[str] = []
+    unrecorded: List[str] = []
     for _, results, assignment in shards:
         owned = [_normalized(name) for name in assignment.assigned_scanners]
         if not owned:
@@ -1337,6 +1497,7 @@ def _verify_shard_contributions(
         entries = {
             _normalized(name): entry for name, entry in results.scanner_results.items()
         }
+        absent = [name for name in owned if name not in entries]
         # A scanner recorded ERROR because its clean result came from a database the
         # policy rejects ran, and the merged scan exits 1 on that database. Counted
         # as completed here, as it was when that result was recorded PASSED, so the
@@ -1358,6 +1519,13 @@ def _verify_shard_contributions(
             )
             for name in owned
         ):
+            # The shard ran something, so it is not listed below; what it owns
+            # and never recorded is still refused, on its own line.
+            if absent:
+                unrecorded.append(
+                    f"shard {assignment.shard_index} of {assignment.shard_count}: "
+                    f"{', '.join(_shown(name) for name in absent)}"
+                )
             continue
 
         detail = []
@@ -1384,61 +1552,20 @@ def _verify_shard_contributions(
             f"scan as a whole one. Check whether those CI jobs had the scanners' "
             f"tools available. Pass --no-fail-on-incomplete-scanners to merge anyway."
         )
+    if unrecorded:
+        listed = "\n  ".join(unrecorded)
+        raise ShardCoverageError(
+            f"These shards owned scanners they recorded no result for:\n  {listed}\n"
+            f"Nothing says those scanners ran, so merging would leave them out of "
+            f"the report and out of the completeness gate, with nothing saying "
+            f"they were ever assigned. Check whether that shard's scan phase "
+            f"completed. Pass --no-fail-on-incomplete-scanners to merge anyway."
+        )
 
 
 # ---------------------------------------------------------------------------
 # Merging
 # ---------------------------------------------------------------------------
-
-
-def _merge_tool_extensions(
-    base: AshAggregatedResults, other: AshAggregatedResults
-) -> None:
-    """Union ``runs[0].tool.extensions`` from *other* into *base*.
-
-    Needed because ``merge_sarif_report`` reads only ``runs[0].tool.driver``; see
-    the module docstring. Components are matched on the same triple
-    ``merge_sarif_report`` uses, and rules are unioned by id for a component that
-    already exists, so a scanner appearing on two shards -- which coverage
-    verification forbids, but which would otherwise corrupt rule metadata --
-    cannot produce duplicate components.
-    """
-    if base.sarif is None or other.sarif is None:
-        return
-    if not base.sarif.runs or not other.sarif.runs:
-        return
-
-    incoming = other.sarif.runs[0].tool.extensions or []
-    if not incoming:
-        return
-
-    target_run = base.sarif.runs[0]
-    if target_run.tool.extensions is None:
-        target_run.tool.extensions = []
-
-    for component in incoming:
-        existing = next(
-            (
-                candidate
-                for candidate in target_run.tool.extensions
-                if candidate.name == component.name
-                and candidate.fullName == component.fullName
-                and candidate.organization == component.organization
-            ),
-            None,
-        )
-        if existing is None:
-            target_run.tool.extensions.append(component)
-            continue
-        if not component.rules:
-            continue
-        if existing.rules is None:
-            existing.rules = []
-        known_rule_ids = {rule.id for rule in existing.rules}
-        for rule in component.rules:
-            if rule.id not in known_rule_ids:
-                existing.rules.append(rule)
-                known_rule_ids.add(rule.id)
 
 
 def _merge_timing(
@@ -1463,16 +1590,67 @@ def _merge_timing(
     ]
     durations = [shard.metadata.summary_stats.duration or 0.0 for _, shard, _ in shards]
 
-    # Compared as strings. Every writer emits ISO-8601 through
-    # SummaryStats.set_times, and ISO-8601 sorts lexicographically in the same
-    # order it sorts chronologically, so min/max are correct without parsing.
-    # Mixed types would not compare, so the two lists are filtered to one kind.
+    # Compared as instants where every value parses as ISO-8601, as text
+    # otherwise. Every writer emits ISO-8601, but not one spelling of it: a
+    # datetime whose microsecond is zero is written without the fraction, and
+    # "10:00:00Z" sorts after "10:00:00.5Z" as text while it is the earlier
+    # instant. Mixed types would not compare, so each list is filtered to one kind.
+    # The parse (_parse_instant) accepts those two spellings on Python 3.10 too,
+    # whose fromisoformat refuses them, so the fallback is not the rule there.
     if starts and all(isinstance(value, str) for value in starts):
-        base.metadata.summary_stats.start = min(starts)
+        base.metadata.summary_stats.start = min(
+            starts, key=_instant_key(cast(Sequence[str], starts))
+        )
     if ends and all(isinstance(value, str) for value in ends):
-        base.metadata.summary_stats.end = max(ends)
+        base.metadata.summary_stats.end = max(
+            ends, key=_instant_key(cast(Sequence[str], ends))
+        )
     if durations:
         base.metadata.summary_stats.duration = max(durations)
+
+
+def _instant_key(values: Sequence[str]) -> Any:
+    """A ``min``/``max`` key that orders *values* as instants when it can.
+
+    Every value has to parse, and the parsed instants have to be all aware or
+    all naive, for the chronological order to be defined; otherwise the key is
+    the text itself, which is the order the merge used before.
+    """
+    parsed = []
+    for value in values:
+        try:
+            parsed.append(_parse_instant(value))
+        except ValueError:
+            return lambda text: text
+    aware = {instant.tzinfo is not None for instant in parsed}
+    if len(aware) != 1:
+        return lambda text: text
+    return _parse_instant
+
+
+def _parse_instant(value: str) -> datetime:
+    """``datetime.fromisoformat`` over every spelling the writers emit, on 3.10 too.
+
+    Python 3.10's parser rejects a ``Z`` suffix and a fraction that is not three
+    or six digits; 3.11 accepts both. Every value this module compares comes from
+    a shard's ``summary_stats``, written by whatever ASH produced it, so the two
+    shapes are normalized before parsing (``Z`` to ``+00:00``, the fraction
+    padded to six digits) and the recorded text is never changed. A value that
+    still does not parse raises ``ValueError``, as before, and the caller falls
+    back to text order.
+    """
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    dot = text.rfind(".")
+    if dot != -1:
+        end = dot + 1
+        while end < len(text) and text[end].isdigit():
+            end += 1
+        digits = text[dot + 1 : end]
+        if digits:
+            text = f"{text[:dot]}.{(digits + '000000')[:6]}{text[end:]}"
+    return datetime.fromisoformat(text)
 
 
 def _refuse_shards_without_a_config(
@@ -1556,12 +1734,27 @@ def merge_shard_results(
     # utils/inner_run_outcome.py.
     merged.validation_checkpoints = without_run_records(merged.validation_checkpoints)
 
+    # Every shard's row for each converter, gathered first and merged once below.
+    # Converters are not sharded: every shard converts the whole tree, so the
+    # rows normally agree. They are still each shard's own record, and one
+    # shard's runner can fail where another's succeeded -- nbconvert timing out,
+    # a tool missing -- so the rows are combined rather than the lowest-indexed
+    # one kept. Folding them two at a time meant the joined text of a partial
+    # union was read back as its parts on the next fold, which broke a message
+    # that itself held the join text; one pass over whole messages never splits.
+    # Shards are visited in index order, so the result does not depend on the
+    # order they were passed in.
+    converter_rows: Dict[str, List[ConverterStatusInfo]] = {
+        name: [row] for name, row in shards[0][1].converter_results.items()
+    }
+
     for _, shard, _ in shards[1:]:
         if merged.sarif is None:
             merged.sarif = shard.sarif.model_copy(deep=True) if shard.sarif else None
         elif shard.sarif is not None:
+            # Folds the shard's driver and every per-scanner extension too; see
+            # the module docstring.
             merged.sarif.merge_sarif_report(shard.sarif)
-            _merge_tool_extensions(merged, shard)
 
         # Every shard read the same config, so each recorded the same config
         # warnings; those are kept once. Other checkpoints are per shard.
@@ -1576,21 +1769,11 @@ def merge_shard_results(
         merged.used_suppressions.update(shard.used_suppressions)
 
         for name, converter_result in shard.converter_results.items():
-            # Converters are not sharded: every shard converts the whole tree, so
-            # the rows normally agree. They are still each shard's own record, and
-            # one shard's runner can fail where another's succeeded -- nbconvert
-            # timing out, a tool missing -- so the rows are combined rather than
-            # the lowest-indexed one kept. Shards are visited in index order, so
-            # the result does not depend on the order they were passed in.
-            base = merged.converter_results.get(name)
-            merged.converter_results[name] = (
-                converter_result.model_copy(deep=True)
-                if base is None
-                else _merge_converter_rows(base, converter_result)
-            )
+            converter_rows.setdefault(name, []).append(converter_result)
 
-        for name, report in shard.additional_reports.items():
-            merged.additional_reports.setdefault(name, report)
+        # additional_reports is not gathered here: _adopt_owning_shard_results below
+        # rebuilds the merged set from every shard, as copies, so a copy made here
+        # was made again there (twice per report, three times for the base shard's).
 
         # The shards' SBOMs are united in shard order by the rule a single scan
         # uses for its own (utils/sbom_merge.py). A shard whose SBOM is None adds
@@ -1600,6 +1783,15 @@ def merge_shard_results(
         # (vulnerabilities, services, annotations, compositions) are not carried,
         # and syft writes none of them.
         merged.cyclonedx = merge_cyclonedx_reports(merged.cyclonedx, shard.cyclonedx)
+
+    # One pass per converter over every shard's row; a converter one shard alone
+    # recorded keeps that shard's row, as a copy.
+    for name, rows in converter_rows.items():
+        merged.converter_results[name] = (
+            rows[0].model_copy(deep=True)
+            if len(rows) == 1
+            else _merge_converter_rows(rows)
+        )
 
     _adopt_owning_shard_results(merged, shards, owner_by_scanner)
     _merge_scan_set_records(merged, shards)
@@ -1630,6 +1822,19 @@ def merge_shard_results(
     # every count would still be the base shard's, so a merged report would show
     # the union's findings under one shard's totals.
     return populate_metrics_from_unified_source(aggregated_results=merged)
+
+
+def _copied(value: Any) -> Any:
+    """A deep copy of a shard's entry, a model or a plain mapping alike.
+
+    ``scanner_results`` entries are models; ``additional_reports`` values are
+    whatever a plugin wrote, dictionaries as a rule. The merged report holds
+    copies of both so that masking and later merges change nothing the caller
+    loaded.
+    """
+    if hasattr(value, "model_copy"):
+        return value.model_copy(deep=True)
+    return copy.deepcopy(value)
 
 
 def _merge_scan_set_records(
@@ -1692,67 +1897,118 @@ def _merge_scan_set_records(
     )
 
 
-def _merge_converter_rows(
-    base: ConverterStatusInfo, other: ConverterStatusInfo
-) -> ConverterStatusInfo:
-    """One converter's row for the union of two shards' rows.
+#: Joins the distinct failures, and the distinct dependency reasons, of one
+#: converter's merged row, for display. Never read back: each shard's message
+#: is kept whole, so a message that itself holds this text survives.
+_FAILURE_JOIN = "; "
+
+
+def _merge_converter_rows(rows: Sequence[ConverterStatusInfo]) -> ConverterStatusInfo:
+    """One converter's row for the union of every shard's rows, merged in one pass.
 
     Combined so that the completeness gate (``run_ash_scan.incomplete_converters``)
-    sees in the union whatever it would have seen in either shard:
+    sees in the union whatever it would have seen in any shard:
 
-    * ``failure``: every distinct one, in shard order.
+    * ``failure``: every distinct message, in shard order, joined by ``; `` for
+      display. Each shard's text is kept whole. Folding two rows at a time
+      meant reading a partial union's join back as its parts before the next
+      shard's text was added, so a message that itself held ``; `` (a
+      CalledProcessError's text does) was broken into fragments, a fragment
+      shared with another shard's message collapsed into it, and a third
+      shard's identical text was still appended again when the split did not
+      restore the original.
     * ``failed_inputs`` and ``refused_inputs``: every shard's, listed once per path
-      (and per archive member for a refusal), first record kept.
-    * ``dependencies_satisfied``: False if it was False in either shard, with the
-      candidate count of the shards where it was. Only a count of 0 exempts an
-      unavailable converter, so 0 is kept only when every such shard reported 0,
-      and a missing count stays missing.
-    * ``excluded``: True only if both shards excluded it; a shard that ran it is
+      (and per archive member for a refusal), first record kept, except that a
+      failed-input record the gate counts replaces an accepted one for the same
+      path, so an acceptance recorded by one shard cannot hide another shard's
+      tool failure.
+    * ``dependencies_satisfied``: False if it was False in any shard that ran
+      the converter, with the largest candidate count of those shards (missing
+      when any of them recorded none) and every distinct reason they recorded
+      (``dependency_unavailable_reason``), whole, joined for display. Only a
+      count of 0 exempts an unavailable converter, so 0 is kept only when every
+      such shard reported 0. A shard that excluded the converter never checked
+      its dependencies, so its dependency fields say nothing when another shard
+      ran it.
+    * ``excluded``: True only if every shard excluded it; a shard that ran it is
       not overridden by one that did not.
     * ``converted_paths``: the union, in order.
 
-    A field neither row set is left unset, so a simple dump of two agreeing rows is
-    the base row's dump. Neither input is modified.
+    A field no row set is left unset, so a simple dump of agreeing rows is the
+    first row's dump. No input is modified; the result is a copy of the first row
+    with the merged fields set.
     """
+    base = rows[0]
     update: Dict[str, Any] = {}
-    fields_set = base.model_fields_set | other.model_fields_set
+    fields_set: set[str] = set()
+    for row in rows:
+        fields_set |= row.model_fields_set
 
-    failures = list(dict.fromkeys(f for f in (base.failure, other.failure) if f))
+    failures = list(dict.fromkeys(row.failure for row in rows if row.failure))
     if failures:
-        update["failure"] = "; ".join(failures)
+        update["failure"] = _FAILURE_JOIN.join(failures)
 
-    if not (base.dependencies_satisfied and other.dependencies_satisfied):
+    # The rows that ran the converter decide its dependency fields; an excluded
+    # row's say nothing unless every row is excluded.
+    ran = [row for row in rows if not row.excluded] or list(rows)
+    if not all(row.dependencies_satisfied for row in ran):
         update["dependencies_satisfied"] = False
-        counts = [
-            row.candidate_inputs
-            for row in (base, other)
-            if not row.dependencies_satisfied
-        ]
+        unavailable = [row for row in ran if not row.dependencies_satisfied]
+        counts = [row.candidate_inputs for row in unavailable]
         if any(count is None for count in counts):
             update["candidate_inputs"] = None
         else:
             update["candidate_inputs"] = max(c for c in counts if c is not None)
+        reasons = list(
+            dict.fromkeys(
+                row.dependency_unavailable_reason
+                for row in unavailable
+                if row.dependency_unavailable_reason
+            )
+        )
+        # From the rows that ran it alone: with none recorded, the merged row has
+        # none, where leaving the field alone kept the first row's, an excluded
+        # row's "never checked" text included. A field no row set stays unset,
+        # as the docstring promises for every field.
+        if reasons:
+            update["dependency_unavailable_reason"] = _FAILURE_JOIN.join(reasons)
+        elif "dependency_unavailable_reason" in fields_set:
+            update["dependency_unavailable_reason"] = None
+    elif any(not row.dependencies_satisfied for row in rows):
+        # Every row that ran it had its dependencies, and a row that was excluded
+        # recorded dependencies_satisfied False: the merged row ran it.
+        update["dependencies_satisfied"] = True
+        update["dependency_unavailable_reason"] = None
+        if "candidate_inputs" in fields_set:
+            update["candidate_inputs"] = next(
+                row.candidate_inputs for row in ran if row.dependencies_satisfied
+            )
     elif "candidate_inputs" in fields_set:
         update["candidate_inputs"] = base.candidate_inputs
 
     if "excluded" in fields_set:
-        update["excluded"] = base.excluded and other.excluded
+        update["excluded"] = all(row.excluded for row in rows)
 
     failed: Dict[str, FailedInputInfo] = {}
-    for record in [*base.failed_inputs, *other.failed_inputs]:
-        failed.setdefault(record.path, record)
+    for record in [record for row in rows for record in row.failed_inputs]:
+        existing = failed.get(record.path)
+        # One record per path, and the one that counts against the completeness
+        # gate when the shards disagree: a record one shard's suppression
+        # accepted must not hide another shard's tool failure on the same file.
+        if existing is None or (waives_gate(existing) and not waives_gate(record)):
+            failed[record.path] = record
     if failed:
         update["failed_inputs"] = [r.model_copy() for r in failed.values()]
 
     refused: Dict[Tuple[str, Optional[str]], RefusedInputInfo] = {}
-    for refusal in [*base.refused_inputs, *other.refused_inputs]:
+    for refusal in [refusal for row in rows for refusal in row.refused_inputs]:
         refused.setdefault((refusal.path, refusal.member), refusal)
     if refused:
         update["refused_inputs"] = [r.model_copy() for r in refused.values()]
 
     if "converted_paths" in fields_set:
         update["converted_paths"] = list(
-            dict.fromkeys([*base.converted_paths, *other.converted_paths])
+            dict.fromkeys(path for row in rows for path in row.converted_paths)
         )
 
     merged = base.model_copy(deep=True)
@@ -1910,23 +2166,33 @@ def _adopt_owning_shard_results(
     scanner_results: Dict[str, Any] = {}
     additional_reports: Dict[str, Any] = {}
 
+    # Copies of the owning shard's entries, not the entries: the merged set is
+    # masked in place afterwards, and merge_shard_results promises its inputs
+    # stay as they were loaded.
     for position, (_, shard, _) in enumerate(shards):
         for name, entry in shard.scanner_results.items():
             if owner_by_scanner.get(_normalized(name)) == position:
-                scanner_results[name] = entry
+                scanner_results[name] = _copied(entry)
         for name, report in shard.additional_reports.items():
             if owner_by_scanner.get(_normalized(name)) == position:
-                additional_reports[name] = report
+                additional_reports[name] = _copied(report)
 
+    # Entries whose key names no known scanner are carried through untouched, the
+    # first shard's record kept. additional_reports is a free-form dictionary and
+    # a plugin may write to it under a key that is not a scanner name; dropping
+    # those would lose data that has nothing to do with sharding. The same holds
+    # for a scanner_results row that no shard owns: the ERROR or MISSING row of a
+    # scanner that failed to construct, or of a plugin module that failed to
+    # import, which _verify_scanner_union exempts from its refusal so that the
+    # merged report still names it. Dropping it here would undo that exemption.
+    for _, shard, _ in shards:
+        for name, entry in shard.scanner_results.items():
+            if _normalized(name) not in owner_by_scanner:
+                scanner_results.setdefault(name, _copied(entry))
+        for name, report in shard.additional_reports.items():
+            if _normalized(name) not in owner_by_scanner:
+                additional_reports.setdefault(name, _copied(report))
     merged.scanner_results = scanner_results
-
-    # Entries whose key names no known scanner are carried through untouched.
-    # additional_reports is a free-form dictionary and a plugin may write to it
-    # under a key that is not a scanner name; dropping those would lose data that
-    # has nothing to do with sharding.
-    for name, report in merged.additional_reports.items():
-        if _normalized(name) not in owner_by_scanner:
-            additional_reports.setdefault(name, report)
     merged.additional_reports = additional_reports
 
 
@@ -1963,8 +2229,75 @@ def _record_merge_provenance(
     )
 
 
+def _converter_acceptance_ids(merged: AshAggregatedResults, config: Any) -> Set[str]:
+    """The suppression ids the shards' convert phases registered as used.
+
+    The convert phase puts two kinds of id in ``used_suppressions``: the
+    ``accepted_by`` a converter wrote on a failed-input record when a suppression
+    accepted it, and, for an accepted record carrying no id (a write that failed,
+    a third-party converter's record, a results file written before the field
+    existed), the written id of the entry its path matches now. Both are read
+    back here the way the phase derived them, from the merged converter rows,
+    so the ``--ignore-suppressions`` clear keeps exactly what the phase recorded.
+    A record whose path matches no entry any more names nothing, as it would
+    there.
+    """
+    from automated_security_helper.utils.suppression_matcher import (
+        accepting_unconverted_input,
+        recorded_suppressions,
+        written_suppression_id,
+    )
+
+    ids: Set[str] = set()
+    uncovered: List[FailedInputInfo] = []
+    for row in merged.converter_results.values():
+        for record in getattr(row, "failed_inputs", None) or []:
+            if not getattr(record, "accepted", False):
+                continue
+            if getattr(record, "kind", None) != "input":
+                continue
+            carried = getattr(record, "accepted_by", None)
+            if isinstance(carried, str) and carried:
+                ids.add(carried)
+            else:
+                uncovered.append(record)
+    if not uncovered:
+        return ids
+    settings = getattr(config, "global_settings", None)
+    suppressions = getattr(settings, "suppressions", None)
+    recorded = recorded_suppressions(config)
+    for record in uncovered:
+        accepting = accepting_unconverted_input(
+            str(getattr(record, "path", "")), suppressions
+        )
+        if accepting is not None:
+            ids.add(written_suppression_id(accepting, recorded))
+    return ids
+
+
+def _shard_converter_acceptance_ids(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]], config: Any
+) -> Set[str]:
+    """The acceptance ids of every shard, each read from that shard's own rows.
+
+    The merged converter row keeps one record per path, and a record the
+    completeness gate counts replaces an accepted one for the same path
+    (``_merge_converter_rows``), so an acceptance one shard recorded and
+    another shard's tool failure displaced is no longer on the merged row. The
+    shard's convert phase did register that suppression as used, and it is still
+    in ``used_suppressions``; reading the ids from the shards' own rows is what
+    lets the ``--ignore-suppressions`` clear keep it.
+    """
+    ids: Set[str] = set()
+    for _, results in loaded:
+        ids |= _converter_acceptance_ids(results, config)
+    return ids
+
+
 def apply_aggregated_suppressions(
-    merged: AshAggregatedResults, plugin_context: PluginContext
+    merged: AshAggregatedResults,
+    plugin_context: PluginContext,
+    converter_acceptance_ids: Optional[Set[str]] = None,
 ) -> AshAggregatedResults:
     """Run the aggregated suppression pass ``ash scan`` runs, over the merged SARIF.
 
@@ -2003,14 +2336,41 @@ def apply_aggregated_suppressions(
     the call is what ``ash scan`` does, so skipping it is what keeps the verdicts
     equal in the configurations no fixture here exercises.
 
-    Under the flag the merge path applies nothing: ``apply_suppressions_to_sarif``
-    is skipped, and the output-directory exclusion is not applied here in either
-    case -- each shard already dropped its own output-directory results, as the
-    comment at the call site says.
+    Under the flag ``apply_suppressions_to_sarif`` is skipped, and the
+    suppressions ASH applied on the shards are lifted
+    (:func:`lift_ash_suppressions`). The shards ran without the flag, so their
+    results arrive carrying the config and inline suppressions each shard's own
+    pass attached, and the metrics count a result with any suppression as
+    suppressed. Left in place, the flag changed nothing on a sharded scan while
+    its help text promised every finding regardless of suppression status; a
+    scan run with the flag attaches none of them, so lifting them is what makes
+    the two commands answer alike on the suppressions. Not on the ignore paths
+    the operator supplied: a shard's ignore path dropped the result from the
+    shard's SARIF rather than attaching a suppression, so the merge has nothing
+    to lift there, and a scan run with the flag keeps results the sharded run
+    under the flag cannot bring back. An ignore path a delivered tree's own
+    config supplied (``client_supplied``) is the exception: the shard kept the
+    finding under it as a marked, suppressed result, and the lift removes that
+    suppression like the rest (``_warn_ignore_paths_the_flag_cannot_lift``
+    leaves those paths out of its list).
+    ``verify_verdict_settings_agree`` still refuses shards that disagree on their
+    ignore paths under the flag, the client-supplied entries included: it
+    compares the recorded list as written, the ``client_supplied`` mark is not
+    part of what it reads (``_as_written``), and the shards of one scan share one
+    delivered config, so a disagreement there is refused rather than guessed at.
+    The output-directory exclusion is not applied here in
+    either case -- each shard already dropped its own output-directory results,
+    as the comment at the call site says.
 
     Args:
         merged: The merged results, with metrics already populated from the union.
         plugin_context: Carries the scan's own config and ``ignore_suppressions``.
+        converter_acceptance_ids: The acceptance ids read from the shards' own
+            converter rows (:func:`_shard_converter_acceptance_ids`), kept by the
+            ``--ignore-suppressions`` clear beside the ones the merged rows
+            carry. A merged row holds one record per path, so an acceptance a
+            gate-counting record from another shard displaced is only on the
+            shard's row. None reads the merged rows alone.
 
     Returns:
         *merged*, with suppressions applied and metrics recomputed. Returned
@@ -2031,20 +2391,147 @@ def apply_aggregated_suppressions(
         # has no run ID and may run outside git, where git's answer is that
         # nothing is committed, so deciding again dropped a committed file every
         # shard kept. The merge keeps what the shards kept.
+        # The source directory's basename is not stripped off the URIs either.
+        # The pass strips it for offline opengrep, which writes URIs prefixed with
+        # the scanned directory's name; the merged URIs are already relative to
+        # each shard's scanned tree, and the merge's source directory is the
+        # collector's working directory, so the strip read ``src/a.py`` as
+        # ``a.py`` whenever the collector ran from a directory named ``src``, and
+        # every suppression, ignore path and finding id keyed on the path moved
+        # with it.
         if not plugin_context.ignore_suppressions:
             merged.sarif = apply_suppressions_to_sarif(
                 sarif_report=merged.sarif,
                 plugin_context=plugin_context,
                 used_suppressions=getattr(merged, "used_suppressions", None),
                 exclude_output_dir=False,
+                strip_source_dir_basename=False,
             )
+        else:
+            lift_ash_suppressions(merged.sarif)
+            # The record goes with the suppressions. ``used_suppressions`` is the
+            # union of what the shards' passes matched; a scan run with the flag
+            # never calls apply_suppressions_to_sarif, which is what fills it, so
+            # its results record none, and a merged results file whose SARIF now
+            # carries none of the shards' suppressions must not say they matched.
+            # The convert phase registers another kind of use in the same set:
+            # the id of the ``ash-unconverted-input`` suppression that accepted
+            # a failed input on a shard. The lift undoes nothing of that (the
+            # input was never converted, flag or no flag), so those ids stay.
+            merged.used_suppressions.intersection_update(
+                _converter_acceptance_ids(merged, plugin_context.config)
+                | (converter_acceptance_ids or set())
+            )
+            # Written into the results for a later ``ash report`` over the file,
+            # whose context carries no flag: the unused-suppressions reporter
+            # reads this field and says the suppressions were not evaluated,
+            # instead of subtracting the emptied record from the configured list
+            # and offering every entry as unused. ReportMetadata admits the
+            # field (extra="allow") ahead of its declaration.
+            merged.metadata.suppressions_ignored = True
+            _warn_ignore_paths_the_flag_cannot_lift(plugin_context.config)
 
     # Recomputed unconditionally, not only when suppressions ran. Under
-    # ``--ignore-suppressions`` the counts change only when a result in the output
-    # directory was removed; making this conditional would put the "did the counts
+    # ``--ignore-suppressions`` the counts change when a suppression the shards
+    # applied was lifted; making this conditional would put the "did the counts
     # get refreshed" question on the same branch as "did suppressions run", and the
     # exit code depends on the first.
     return populate_metrics_from_unified_source(aggregated_results=merged)
+
+
+def _warn_ignore_paths_the_flag_cannot_lift(config: Any) -> None:
+    """Name the ignore paths the shards scanned under, which the flag leaves in force.
+
+    ``--ignore-suppressions`` promises every finding regardless of suppression
+    status, as ``ash scan --ignore-suppressions`` gives it. An ignore path is not
+    a suppression the merge can lift: each shard dropped the results under it from
+    its own SARIF before the merge (``apply_suppressions_to_sarif``), and a dropped
+    result is not in the merge to bring back, so a sharded run under the flag
+    reports fewer findings than the scan would. Said at WARNING, with the paths,
+    so the difference is not read as the flag having no effect. Silent when the
+    merged config names none.
+
+    An ignore path a delivered tree's own config supplied (``client_supplied``)
+    is not one of them: the shards kept the finding under it as a marked,
+    suppressed result (``ignore_paths_that_skip_scanning``), and the lift
+    removes that suppression like the rest, so the flag does bring those
+    findings back and the path is left out of the list.
+    """
+    settings = getattr(config, "global_settings", None)
+    ignored = [
+        str(getattr(entry, "path", entry))
+        for entry in getattr(settings, "ignore_paths", None) or []
+        if getattr(entry, "client_supplied", False) is not True
+    ]
+    if not ignored:
+        return
+    ASH_LOGGER.warning(
+        shown_on_one_line(
+            f"--ignore-suppressions lifts the suppressions the shards attached, "
+            f"not the {len(ignored)} ignore path(s) they scanned under "
+            f"({', '.join(ignored)}): each shard dropped the results under them "
+            f"from its own results before the merge, and a dropped result cannot "
+            f"be brought back here, where ash scan --ignore-suppressions keeps "
+            f"them. For every finding, scan without the ignore paths or merge "
+            f"shards that recorded none."
+        ),
+        extra=NO_MARKUP,
+    )
+
+
+def _is_ash_applied_suppression(suppression: Any) -> bool:
+    """Whether ``apply_suppressions_to_sarif`` attached *suppression*.
+
+    Read from the structured mark first: every suppression that function attaches
+    carries ``properties.ashApplied`` (``sarif_utils.ash_applied_properties``),
+    and a client-supplied one ``clientSupplied`` as well, which counts too: it is
+    ASH's, attached by the same function and by nothing else, so a scan run with
+    ``--ignore-suppressions``, which never calls that function
+    (``ScanResultProcessor``), never carries it. A shard written before the mark
+    existed is read by the justification prefixes that module writes
+    (``ASH_SUPPRESSION_JUSTIFICATION_PREFIXES``); a scanner's own suppression
+    carries neither mark nor prefix.
+    """
+    from automated_security_helper.utils.sarif_utils import (
+        ASH_SUPPRESSION_JUSTIFICATION_PREFIXES,
+    )
+
+    properties = getattr(suppression, "properties", None)
+    if getattr(properties, "ashApplied", None) is True:
+        return True
+    if getattr(properties, "clientSupplied", None) is True:
+        return True
+    justification = getattr(suppression, "justification", None) or ""
+    return justification.startswith(ASH_SUPPRESSION_JUSTIFICATION_PREFIXES)
+
+
+def lift_ash_suppressions(sarif_report: Any) -> int:
+    """Remove the suppressions ASH applied from every result of *sarif_report*.
+
+    What ``--ignore-suppressions`` means on a merge. ``ash scan`` run with the
+    flag never calls ``apply_suppressions_to_sarif`` (``ScanResultProcessor``
+    skips it and runs the output-directory exclusion alone), so no config, inline
+    or client-supplied suppression reaches its results and every such finding
+    counts as actionable; the shards of a sharded scan ran without the flag and
+    attached theirs, so the merge removes them again to answer the same question.
+    Only what that function attaches is removed: a suppression a scanner wrote
+    into its own SARIF stays, as it stays on a scan run with the flag. A result
+    left with no suppression carries ``None``, the shape of a result never
+    suppressed.
+
+    Returns the number of suppressions removed.
+    """
+    removed = 0
+    for run in getattr(sarif_report, "runs", None) or []:
+        for result in getattr(run, "results", None) or []:
+            if not result.suppressions:
+                continue
+            kept = [
+                s for s in result.suppressions if not _is_ash_applied_suppression(s)
+            ]
+            removed += len(result.suppressions) - len(kept)
+            result.suppressions = kept or None
+    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -2381,9 +2868,25 @@ class ShardSettingsDisagreeError(ASHConfigValidationError):
     """
 
 
+#: The settings read for the exit code that decide nothing under
+#: ``--ignore-suppressions``: the suppression pass that reads them is skipped and
+#: the shards' own suppressions are lifted, so two shards that disagree on them
+#: still get one exit code. ``global_settings.ignore_paths`` is not among them:
+#: an ignore path the operator supplied does not attach a suppression, it drops
+#: the result from the shard's SARIF (``apply_suppressions_to_sarif``), and a
+#: dropped result is not in the merge to lift. Two shards that disagree on their
+#: ignore paths hand the merge two different sets of findings, so they are
+#: refused under the flag as without it. The list is compared as written, so a
+#: client-supplied entry (kept by its shard as a suppressed result the flag
+#: lifts) is compared too: the mark is not part of what is read, and shards of
+#: one scan share one delivered config.
+_SUPPRESSION_SETTINGS = frozenset({"global_settings.suppressions"})
+
+
 def verify_verdict_settings_agree(
     loaded: Sequence[Tuple[Path, AshAggregatedResults]],
     cli_values: Optional[Dict[str, Optional[bool]]] = None,
+    ignore_suppressions: bool = False,
 ) -> None:
     """Refuse shards whose recorded configs disagree on a setting the verdict reads.
 
@@ -2393,8 +2896,20 @@ def verify_verdict_settings_agree(
     produced under different settings. Compared after ``--config-overrides`` are
     applied, so an override that sets the value for every shard settles it, and a
     setting the command line's flag decides (``cli_values``, keyed as
-    ``VERDICT_FLAGS``) is not compared at all. A shard that recorded no
-    configuration at all is left out: it has no value to disagree with, and
+    ``VERDICT_FLAGS``) is not compared at all. Under ``--ignore-suppressions``
+    the suppression setting is not compared either: that flag skips the pass
+    that reads it and lifts the suppressions the shards attached, so it cannot
+    move the merged exit code, and refusing on it would deny the operator the
+    one flag that exists to take the suppressions out of it. The ignore-path
+    setting IS still compared under the flag: an ignore path the operator
+    supplied dropped results from the shard's SARIF, nothing lifts a dropped
+    result, so shards that disagree on it produced different findings. The
+    comparison does not tell a client-supplied entry (whose finding the shard
+    kept as a suppressed result, lifted by the flag) from the others, so shards
+    that disagree only on those are refused too; they share one delivered
+    config in a scan, and a refusal is the safe answer to a disagreement there.
+    A shard that recorded no configuration
+    at all is left out: it has no value to disagree with, and
     ``merge_shard_results`` refuses it, naming it as one with no scan configuration.
 
     Raises:
@@ -2402,6 +2917,8 @@ def verify_verdict_settings_agree(
             shard's value for it. An ``ASHConfigValidationError``.
     """
     decided = _decided_by_flags(cli_values)
+    if ignore_suppressions:
+        decided = decided | _SUPPRESSION_SETTINGS
     shards = []
     for path, results in _in_index_order(loaded):
         if results.ash_config is None:
@@ -2721,12 +3238,12 @@ def merge_command(
                 "Refuse the merge when a shard completed none of the scanners it "
                 "owned, and exit 1 when any scanner in the union is ERROR or "
                 "MISSING, or when every one is SKIPPED, such as when no selected "
-                "scanner had a file to scan. On by default: under "
+                "scanner had a file to scan. Under "
                 "--no-fail-on-incomplete-scanners, a shard whose scanners never ran "
                 "contributes no findings and the merged report reads as a "
-                "complete, clean scan. Defaults to the scan configuration's "
-                "value, then to true; pass --no-fail-on-incomplete-scanners to "
-                "merge a partial union anyway."
+                "complete, clean scan. Defaults to unset, which prefers the scan "
+                "configuration's value and then on; pass "
+                "--no-fail-on-incomplete-scanners to merge a partial union anyway."
             ),
         ),
     ] = None,
@@ -2843,7 +3360,9 @@ def merge_command(
         # Before the completion gate below, which reads one shard's
         # fail_on_incomplete_scanners: shards that disagree on it, or on any other
         # verdict setting, are refused the same way whichever shard that is.
-        verify_verdict_settings_agree(loaded, cli_verdict)
+        verify_verdict_settings_agree(
+            loaded, cli_verdict, ignore_suppressions=ignore_suppressions
+        )
         # Resolved before merging, because the contribution refusal has to happen
         # before a merged report exists on disk. Read from the shard results' own
         # config for the same reason the verdict is: a collector job need not have
@@ -2920,6 +3439,24 @@ def merge_command(
         raise typer.Exit(3)
 
     output_dir_path = _relocate_colliding_output_dir(Path(output_dir))
+    # The merged results file must not be one of the shard results files it is
+    # merged from: an --output-dir that holds a --results file would replace that
+    # shard's record with the merged report, and a second merge over the same
+    # directory would then read the merged report as one shard of itself.
+    overwritten = _results_file_the_merge_would_overwrite(output_dir_path, loaded)
+    if overwritten is not None:
+        print(
+            _refusal_text(
+                ResultsPathError(
+                    f"--output-dir {_shown(output_dir_path.as_posix())} holds the "
+                    f"shard results file {_shown(overwritten.as_posix())} given as "
+                    f"--results. Writing the merged {RESULTS_FILE_NAME} there would "
+                    f"replace that shard's results with the merged report. Name an "
+                    f"output directory that holds no shard's results."
+                )
+            )
+        )
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
     # The merged results and reports are written into the output directory, so a
     # link there or at reports/ is refused as a scan refuses it.
     try:
@@ -2942,7 +3479,10 @@ def merge_command(
     plugin_context = PluginContext(
         source_dir=Path.cwd(),
         output_dir=output_dir_path,
-        work_dir=output_dir_path.joinpath("work"),
+        # The name every other component derives for the work directory
+        # (core/constants.py), so a reporter or a suppression pass that reads
+        # ``work_dir`` finds the merge's where it finds a scan's.
+        work_dir=output_dir_path.joinpath(ASH_WORK_DIR_NAME),
         config=merged.ash_config,
         ignore_suppressions=ignore_suppressions,
     )
@@ -2986,17 +3526,31 @@ def merge_command(
         trusted_config, merged.ash_config, reporter_plugins
     )
 
-    merged = apply_aggregated_suppressions(merged, plugin_context)
+    merged = apply_aggregated_suppressions(
+        merged,
+        plugin_context,
+        converter_acceptance_ids=(
+            _shard_converter_acceptance_ids(loaded, merged.ash_config)
+            if ignore_suppressions
+            else None
+        ),
+    )
 
     # The first write to disk, made only after every refusal has had its say.
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
-    # Written after the suppression pass, not before. Writing first was the
-    # original order and it would now leave the merged results file describing a
-    # pre-suppression state while the reports and the exit code describe the
-    # post-suppression one -- two artifacts of the same run disagreeing about
-    # which findings are actionable.
     merged_file = output_dir_path.joinpath(RESULTS_FILE_NAME)
+    # A results file an earlier run left in a reused output directory goes now,
+    # before the report phases, so that no exit from them leaves it behind: a
+    # reporter that raises, a cancelled upload or a failed write below would
+    # otherwise leave the earlier run's file where a later ``ash report`` reads
+    # it as this merge's, and a reporter that reads the output directory while
+    # it runs would read it as this merge's results. Removing it only on the path
+    # refusal, as before, covered one of those exits. The sentence is kept for the
+    # refusal text, which still names what was removed.
+    earlier = _remove_an_earlier_results_file(merged_file)
+    if earlier:
+        logger.info(earlier.strip())
     if merged.ash_config is not None:
         # What the confinement took from the operator's config is recorded as
         # that file wrote it, as a shard records its own
@@ -3012,8 +3566,12 @@ def merge_command(
                 if tuple(reference.path)[:1] != ("ash_plugin_modules",)
             ),
         )
-    write_text_atomically(merged_file, merged.model_dump_json(indent=2))
-    logger.info(f"Wrote merged results to {merged_file}")
+    # The merged results file itself is written after the report phases below,
+    # as a scan writes its own after its report phase (interactions/run_ash_scan.py),
+    # and after the suppression pass above: written first it described a
+    # pre-suppression state while the reports and the exit code described the
+    # post-suppression one, and a reporter that refused its paths, or failed,
+    # left it behind recording nothing of that. Now such a run leaves none.
 
     # The plugins were loaded above, before anything was written.
     # A reporter that sends findings off the host runs only when the operator
@@ -3053,15 +3611,34 @@ def merge_command(
     )
     for notice in notices:
         logger.warning(notice)
-    # The off-host reporters run only when no format is requested (below), so
-    # only then is an operator section that sets options but no enabled named.
-    if not parsed_formats:
-        for reporter_class in reporter_plugins:
-            if reporter_class in off_host_reporters:
-                continue
-            warn_off_host_section_without_enabled(
-                reporter_class, _section(operator_config, reporter_class)
-            )
+    # Which requested formats an off-host reporter produces. A reporter is
+    # selected by its configured name, and the ExportFormat members name the
+    # off-host reporters too (aws-security-hub, s3, and the rest), so a
+    # --output-formats value can ask for one. The two report phases below split
+    # the request between them: the local reporters get the formats they
+    # produce, the off-host reporters get theirs, and a phase whose share is
+    # empty does not run, as naming only s3 to a scan runs only the s3 reporter.
+    requested_formats = set(parsed_formats)
+    off_host_format_names = {
+        plugin_config_key(reporter_class)
+        for reporter_class in reporter_plugins
+        if getattr(reporter_class, "sends_off_host", False) is True
+    }
+    requested_off_host = [f for f in parsed_formats if f in off_host_format_names]
+    local_formats = [f for f in parsed_formats if f not in off_host_format_names]
+    # An operator section that sets options but no enabled is named when the
+    # reporter would otherwise run: with no format requested, or with its own.
+    for reporter_class in reporter_plugins:
+        if reporter_class in off_host_reporters:
+            continue
+        if (
+            parsed_formats
+            and plugin_config_key(reporter_class) not in requested_formats
+        ):
+            continue
+        warn_off_host_section_without_enabled(
+            reporter_class, _section(operator_config, reporter_class)
+        )
 
     # ReportPhase writes reports/ash.<extension> for every enabled reporter, and
     # its progress display is used unconditionally, so a display is supplied with
@@ -3080,44 +3657,67 @@ def merge_command(
         asharp_model=merged,
     )
     try:
-        merged = report_phase.execute(
-            report_dir=output_dir_path.joinpath("reports"),
-            cli_output_formats=parsed_formats or None,
-            aggregated_results=merged,
-            python_based_plugins_only=False,
-        )
+        # The local phase runs with the formats the local reporters produce; a
+        # request that names only off-host formats runs no local reporter, and
+        # tells the operator about no format a reporter of the other phase
+        # produces. A requested off-host format whose reporter the operator did
+        # not enable is run by neither phase, so log_off_host_formats_not_run
+        # below says the report phase's line for it.
+        if not parsed_formats or local_formats:
+            merged = report_phase.execute(
+                report_dir=output_dir_path.joinpath("reports"),
+                cli_output_formats=local_formats or None,
+                aggregated_results=merged,
+                python_based_plugins_only=False,
+            )
         # The off-host reporters run with the operator's configuration, so their
-        # destinations are the operator's too. No --output-formats value names one,
-        # so, as in a scan, they run only when no format is requested. With
+        # destinations are the operator's too. As in a scan, they run when no
+        # format is requested or when --output-formats names one of them. With
         # neither --config nor --config-overrides there is no operator config and
         # every one is refused (select_merge_reporters), so the list is empty
         # then; the None check states that to the type checker. Overrides alone
         # are enough to enable and aim one.
-        if off_host_reporters and not parsed_formats and operator_config is not None:
+        off_host_to_run = off_host_reporters_to_run(off_host_reporters, operator_config)
+        log_off_host_formats_not_run(requested_off_host, off_host_to_run)
+        # Only the formats a reporter of this phase produces: the phase accounts
+        # for every requested format its reporters do not produce, so a format
+        # just named above would be named a second time with another reason, and
+        # a request naming only such formats would start a phase that runs nothing.
+        off_host_formats = off_host_formats_to_run(requested_off_host, off_host_to_run)
+        if off_host_to_run and (not parsed_formats or off_host_formats):
             off_host_context = PluginContext(
                 source_dir=Path.cwd(),
                 output_dir=output_dir_path,
-                work_dir=output_dir_path.joinpath("work"),
+                work_dir=output_dir_path.joinpath(ASH_WORK_DIR_NAME),
                 config=operator_config,
                 ignore_suppressions=ignore_suppressions,
             )
             merged = ReportPhase(
-                plugins=off_host_reporters,
+                plugins=off_host_to_run,
                 plugin_context=off_host_context,
                 progress_display=LiveProgressDisplay(show_progress=False),
                 asharp_model=merged,
             ).execute(
                 report_dir=output_dir_path.joinpath("reports"),
-                cli_output_formats=None,
+                cli_output_formats=off_host_formats or None,
                 aggregated_results=merged,
                 python_based_plugins_only=False,
             )
     except ReportPathRefused as exc:
         # Refused before any reporter wrote: a link at the reports directory or at
         # a report file, or a report file name outside it. Printed like the other
-        # refusals here, without a traceback.
-        print(f"[red]Refusing to write reports: {escape_markup(str(exc))}[/red]")
+        # refusals here, without a traceback. The merged results file is written
+        # only below, so a refused merge leaves none of its own; the one an
+        # earlier run left in a reused output directory was removed above, or
+        # named when it could not be, and the refusal says which.
+        print(
+            f"[red]Refusing to write reports: {escape_markup(str(exc))} No merged "
+            f"{RESULTS_FILE_NAME} was written.{escape_markup(earlier)}[/red]"
+        )
         raise typer.Exit(1)
+
+    write_text_atomically(merged_file, merged.model_dump_json(indent=2))
+    logger.info(f"Wrote merged results to {merged_file}")
 
     report_sarif_after = report_sarif_identity(output_dir_path)
     exit_code = _merged_exit_code(
@@ -3144,6 +3744,81 @@ def _section(config: Optional[AshConfig], reporter_class: type) -> Optional[Any]
         )
     except Exception:  # noqa: BLE001 -- an unknown reporter has no section
         return None
+
+
+def off_host_reporters_to_run(
+    off_host_reporters: Sequence[Type[ReporterPluginBase[Any]]],
+    operator_config: Optional[AshConfig],
+) -> List[Type[ReporterPluginBase[Any]]]:
+    """The off-host reporters the merge runs, given the operator's configuration.
+
+    An off-host reporter runs with the operator's configuration, so none can run
+    without one. :func:`select_merge_reporters` refuses every off-host reporter
+    when ``operator_config`` is None, so the list it returns is empty then and
+    this returns it unchanged. Should a caller ever hand this a non-empty list
+    with no operator configuration, the reporters are not run and the omission is
+    said at ERROR, naming them, rather than skipped in silence: a merge whose
+    uploads quietly did not happen would read as one that never asked for them.
+    """
+    if not off_host_reporters or operator_config is not None:
+        return list(off_host_reporters)
+    names = ", ".join(plugin_config_key(cls) for cls in off_host_reporters)
+    ASH_LOGGER.error(
+        f"The off-host reporter(s) {names} were selected to run but no operator "
+        f"configuration (--config or --config-overrides) was given to run them "
+        f"with, so they did not run. This is a defect in the reporter selection: "
+        f"report it with the command line used.",
+        extra=NO_MARKUP,
+    )
+    return []
+
+
+def off_host_formats_to_run(
+    requested_off_host: Sequence[str],
+    off_host_to_run: Sequence[Type[ReporterPluginBase[Any]]],
+) -> List[str]:
+    """The requested off-host formats a reporter of the off-host phase produces.
+
+    In request order, once each. A requested format whose reporter the operator
+    did not enable is :func:`log_off_host_formats_not_run`'s to name and is left
+    out here: the report phase names every requested format its own reporters do
+    not produce, so handing it the format would name it a second time, with a
+    reason (no such reporter) that is not the merge's. Empty when nothing was
+    requested, which leaves the phase to every reporter it was given.
+    """
+    running = {plugin_config_key(cls) for cls in off_host_to_run}
+    return [fmt for fmt in dict.fromkeys(requested_off_host) if fmt in running]
+
+
+def log_off_host_formats_not_run(
+    requested_off_host: Sequence[str],
+    off_host_to_run: Sequence[Type[ReporterPluginBase[Any]]],
+) -> List[str]:
+    """Say which requested off-host formats no report phase of the merge runs.
+
+    ``--output-formats`` can name an off-host reporter's format (``s3``, say). The
+    local report phase runs only with the formats the local reporters produce, so
+    it never sees such a name, and the off-host phase runs only the reporters the
+    operator enabled; a format naming one the operator did not enable would be
+    produced by neither phase and, without this, said by neither. The report
+    phase tells the operator about every requested format it will not produce
+    (``No report will be written for requested format ...``), so this says the
+    same line, at the same level, for the formats that fall between the two
+    phases, with the merge's own reason: only the operator's overrides turn an
+    off-host reporter on. Returns the formats named, in request order, once each.
+    """
+    running = {plugin_config_key(cls) for cls in off_host_to_run}
+    not_run = [fmt for fmt in dict.fromkeys(requested_off_host) if fmt not in running]
+    for fmt in not_run:
+        ASH_LOGGER.error(
+            f"No report will be written for requested format '{fmt}': its reporter "
+            f"sends findings off the host and the operator did not enable it for "
+            f"this merge. Only --config-overrides reporters.{fmt}.enabled=true turns "
+            f"such a reporter on (a --config file's 'enabled' is not read for it), "
+            f"so pass that override to get this report.",
+            extra=NO_MARKUP,
+        )
+    return not_run
 
 
 def select_merge_reporters(
@@ -3249,12 +3924,84 @@ def _relocate_colliding_output_dir(output_dir: Path) -> Path:
         return output_dir
 
     relocated = output_dir.joinpath(".ash", "ash_output")
+    # Checked again, not assumed: a working directory inside the relocated path
+    # (``ash merge --output-dir ../..`` from within a previous relocation) still
+    # has it as an ancestor, and the relocation then changed nothing but the
+    # message. Each step lands strictly inside the previous one only without
+    # links: a committed ``.ash/ash_output -> ..`` resolves every step back to
+    # the working directory, and a loop that read only the ancestor test never
+    # returned. So a step that does not resolve strictly deeper than the last
+    # ends the loop, and the link at the relocated path is left to
+    # refuse_linked_output_dir, which refuses it as any link there.
+    previous = resolved
+    while True:
+        deeper = relocated.resolve()
+        if not cwd.is_relative_to(deeper):
+            break
+        if deeper == previous or not deeper.is_relative_to(previous):
+            break
+        previous = deeper
+        relocated = relocated.joinpath(".ash", "ash_output")
     print(
         f"[bold yellow]output-dir has been adjusted to the following to avoid "
         f"collisions and potential impact to the reported tree: "
         f"{escape_markup(Path(relocated).as_posix())}[/bold yellow]"
     )
     return relocated
+
+
+def _remove_an_earlier_results_file(merged_file: Path) -> str:
+    """Remove a results file an earlier run left at *merged_file*; say what happened.
+
+    Called once the output directory exists and before the report phases, when
+    this run has written no results file of its own, so that no exit from those
+    phases leaves the file behind. A file from an earlier run in a reused output
+    directory would otherwise be read by a later ``ash report`` as this merge's
+    (the write-then-remove order this replaced removed it as a side effect).
+    Returns the sentence the log and a refusal text use: empty when there was no
+    file; a file that cannot be removed is named rather than raised over, so a
+    refusal is still printed as a refusal and the merge still runs.
+    """
+    if not merged_file.exists():
+        return ""
+    try:
+        merged_file.unlink()
+    except OSError as exc:
+        reason = exc.strerror or type(exc).__name__
+        return (
+            f" An earlier run's {RESULTS_FILE_NAME} at {merged_file.as_posix()} "
+            f"could not be removed ({reason}); it is not this merge's."
+        )
+    return (
+        f" An earlier run's {RESULTS_FILE_NAME} at {merged_file.as_posix()} was "
+        "removed."
+    )
+
+
+def _results_file_the_merge_would_overwrite(
+    output_dir: Path, loaded: Sequence[Tuple[Path, AshAggregatedResults]]
+) -> Optional[Path]:
+    """The ``--results`` file the merged results file would replace, if any.
+
+    Compared as the file system identifies a file (``os.path.samefile``: device
+    and inode, or the handle on Windows), so the same file named two ways, a
+    hard link to it, and a spelling that differs only in case on a file system
+    that ignores case are all caught; comparing resolved path text missed the
+    last two. A results directory given as ``--results`` is compared by the
+    file inside it. None when nothing is at the output path yet (no file can be
+    the same as a file that does not exist) or when the output directory holds
+    no shard's results file.
+    """
+    target = output_dir.joinpath(RESULTS_FILE_NAME)
+    if not target.exists():
+        return None
+    for results_file, _ in loaded:
+        try:
+            if os.path.samefile(target, results_file):
+                return results_file
+        except OSError:
+            continue
+    return None
 
 
 def _resolve_require_scanner_completion(

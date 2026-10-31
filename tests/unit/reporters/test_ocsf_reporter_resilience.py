@@ -20,9 +20,13 @@ import json
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+    ocsf_reporter as ocsf_module,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
     OcsfReporter,
     _metadata_for_project,
+    _shortfall_uid,
 )
 from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     FindingInfo,
@@ -42,6 +46,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PhysicalLocation2,
     PropertyBag,
     Region,
+    ReportingDescriptor,
     Result,
     Run,
     SarifReport,
@@ -279,12 +284,14 @@ class TestVulnerabilityExtractionFaults:
         assert vuln.title == "R1"
         assert vuln.affected_code is None or vuln.affected_code == []
 
-    def test_invalid_region_data_degrades_to_a_minimal_vulnerability(self, reporter):
-        """If Vulnerability() itself rejects the assembled data, a stub is returned.
+    def test_a_bad_location_is_skipped_and_the_vulnerability_read_whole(self, reporter):
+        """A region the schema refuses costs that one location, not the record.
 
-        A non-integer startLine survives every inner handler -- each one only
-        guards attribute access, not the model validation that happens after --
-        so it is the outermost handler that has to catch it.
+        Each affected_code entry is validated as it is built, so a non-integer
+        startLine is skipped on its own and the description, title and severity
+        read from the result are kept; the builder says the record is not
+        degraded. Before that, the whole Vulnerability was validated at once and
+        the outermost handler replaced all of it with the fixed fallback text.
         """
         result = Result(ruleId="R1", level=Level.error, message=Message(text="m"))
         location = Location(
@@ -298,11 +305,42 @@ class TestVulnerabilityExtractionFaults:
         location.physicalLocation.root.region.startLine = "not-a-line-number"
         result.locations = [location]
 
-        vuln = reporter._create_vulnerability_from_result(result)
+        vuln, degraded = reporter._build_vulnerability(result)
 
+        assert degraded is False
+        assert vuln.title == "R1", "the rule id is preserved"
+        assert vuln.desc == "m", "the message text is kept, not the fallback text"
+        assert vuln.severity == "CRITICAL", "level error, as the gate reads it"
+        assert not vuln.affected_code, "the one unreadable location is left out"
+
+    @staticmethod
+    def _reject_whole_vulnerabilities(monkeypatch):
+        """Vulnerability() rejects everything but the fallback's own shape, so
+        the outermost handler is reached whatever the locations held."""
+        real = ocsf_module.Vulnerability
+
+        def picky(**kwargs):
+            if kwargs.get("desc") != "Error processing vulnerability details":
+                raise ValueError("rejected by the schema")
+            return real(**kwargs)
+
+        monkeypatch.setattr(ocsf_module, "Vulnerability", picky)
+
+    def test_a_rejected_vulnerability_degrades_to_a_minimal_one(
+        self, reporter, monkeypatch
+    ):
+        """If Vulnerability() itself rejects the assembled data, a stub is
+        returned and the builder says it is degraded."""
+        self._reject_whole_vulnerabilities(monkeypatch)
+        result = Result(ruleId="R1", level=Level.error, message=Message(text="m"))
+
+        vuln, degraded = reporter._build_vulnerability(result)
+
+        assert degraded is True
         assert vuln.title == "R1", "the rule id is preserved in the fallback"
         assert vuln.desc == "Error processing vulnerability details"
         assert vuln.severity == "MEDIUM"
+        assert reporter._create_vulnerability_from_result(result).desc == vuln.desc
 
     def test_fallback_title_is_unknown_rule_when_the_rule_id_is_absent(self, reporter):
         result = Result(level=Level.error, message=Message(text="m"))
@@ -319,6 +357,21 @@ class TestVulnerabilityExtractionFaults:
 
         vuln = reporter._create_vulnerability_from_result(result)
 
+        assert vuln.title == "Unknown Rule"
+        assert vuln.desc == "m", "the message text survives the skipped location"
+        assert not vuln.affected_code
+
+    def test_a_rejected_vulnerability_without_a_rule_id_is_titled_unknown_rule(
+        self, reporter, monkeypatch
+    ):
+        """The whole-record fallback without a rule id: the stub's title is the
+        unknown-rule text and the builder says the record is degraded."""
+        self._reject_whole_vulnerabilities(monkeypatch)
+        result = Result(level=Level.error, message=Message(text="m"))
+
+        vuln, degraded = reporter._build_vulnerability(result)
+
+        assert degraded is True
         assert vuln.title == "Unknown Rule"
         assert vuln.desc == "Error processing vulnerability details"
 
@@ -452,21 +505,62 @@ class TestSuppressionStatusFaults:
 
 
 class TestVulnerabilityFindingFaults:
-    def test_non_string_message_text_falls_back_to_a_truncated_title(
+    def test_non_string_message_text_is_read_as_no_description(
         self, reporter, metadata
     ):
-        """A non-string message defeats the length checks used to build the title."""
+        """A non-string message is read as no message, and the title says so.
+
+        The message reader takes only string text, markdown or id, so a number
+        where the text should be is "No description" rather than a value that
+        defeats the title's length checks and trips the whole-FindingInfo
+        fallback.
+        """
         result = good_result(text="x")
         result.message.root.text = 12345
 
         finding = reporter._create_vulnerability_finding(result, metadata, 1)
 
-        assert finding.finding_info.title == "Error creating finding title"
-        assert finding.finding_info.desc == "Error extracting finding description"
+        assert finding.finding_info.title == "R1 - No description"
+        assert finding.finding_info.desc == "No description"
         assert finding.severity_id == SeverityId.integer_5, (
             "severity comes from result.level (error is CRITICAL, as in the gate) "
             "and must survive a bad message"
         )
+
+    def test_an_unreadable_rule_id_keeps_the_description_with_rules_declared(
+        self, reporter, metadata
+    ):
+        """The rule lookup uses the id the builder already read under its own
+        guard. It read the id from the result again, outside that guard and
+        inside the message-text handler, so a rule id that cannot be read lost
+        the finding's description as well (``No description``), with or
+        without rules declared. The builder-level case is
+        ``test_unreadable_rule_id_falls_back_to_unknown_rule``."""
+        report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(
+                        driver=ToolComponent(
+                            name="ASH", rules=[ReportingDescriptor(id="R1")]
+                        )
+                    ),
+                    results=[],
+                )
+            ],
+        )
+        rules = ocsf_module._rule_descriptors(report)
+        result = faulty_result(
+            "ruleId", message=Message(root=Message1(text="still readable"))
+        )
+
+        finding = reporter._create_vulnerability_finding(
+            result, metadata, 1, rules=rules
+        )
+
+        assert finding.finding_info.desc == "still readable"
+        assert finding.finding_info.title == "Unknown Rule - still readable"
+        assert finding.vulnerabilities[0].desc == "still readable"
 
     def test_primary_construction_failure_yields_a_low_unknown_fallback(
         self, reporter, metadata, monkeypatch
@@ -478,7 +572,9 @@ class TestVulnerabilityFindingFaults:
 
         finding = reporter._create_vulnerability_finding(good_result(), metadata, 7)
 
-        assert finding.severity_id == SeverityId.integer_2, "fallback severity is LOW"
+        assert finding.severity_id == SeverityId.integer_5, (
+            "the fallback keeps the gate's severity (error is CRITICAL)"
+        )
         assert finding.status_id == StatusId.integer_0, "fallback status is Unknown"
         assert finding.time == 7
         assert finding.finding_info.title == "Error processing finding R1"
@@ -550,6 +646,23 @@ class TestReportDegradation:
             "the ids in must equal the ids out"
         )
 
+    def test_a_sarif_that_cannot_be_enumerated_yields_an_error_response(
+        self, reporter, monkeypatch
+    ):
+        """The read raised out of report(), so no file was written and nothing
+        said why; the GitLab SAST reporter guards the same call."""
+        monkeypatch.setattr(
+            f"{MODULE}.recorded",
+            lambda model: (_ for _ in ()).throw(RuntimeError("cannot enumerate")),
+        )
+
+        payload = json.loads(reporter.report(make_model([good_result()])))
+
+        (error,) = payload
+        assert error["error"].startswith("ASH could not read the SARIF results")
+        assert "cannot enumerate" in error["error"]
+        assert error["processing_statistics"]["total_results_count"] == 0
+
     def test_a_truthy_but_empty_result_set_returns_an_empty_array(
         self, reporter, monkeypatch
     ):
@@ -588,17 +701,15 @@ class TestReportDegradation:
         assert isinstance(payload, list) and len(payload) == 1
         (error,) = payload
         assert error["error"] == "All findings failed to process"
-        # Pins a real defect in the statistics, not the intended numbers. This
-        # call site passes total_results_count into the processed_count
-        # parameter, so an "everything failed" response claims 2 processed, a
-        # total of 4 against 2 real inputs, and a 50% success rate when nothing
-        # succeeded. The error message is right; the counts are not. Fixing the
-        # call site to pass 0 will turn this test red, which is the point.
+        # The statistics count each input once. The call site used to pass
+        # total_results_count into the processed_count parameter, so an
+        # "everything failed" response claimed 2 processed, a total of 4 against
+        # 2 real inputs, and a 50% success rate when nothing succeeded.
         stats = error["processing_statistics"]
-        assert stats["processed_results_count"] == 2
+        assert stats["processed_results_count"] == 0
         assert stats["failed_results_count"] == 2
-        assert stats["total_results_count"] == 4
-        assert stats["success_rate_percent"] == 50.0
+        assert stats["total_results_count"] == 2
+        assert stats["success_rate_percent"] == 0
 
     def test_a_partial_failure_still_reports_the_findings_that_worked(
         self, reporter, monkeypatch
@@ -615,7 +726,78 @@ class TestReportDegradation:
 
         findings = json.loads(reporter.report(model))
 
-        assert [f["vulnerabilities"][0]["title"] for f in findings] == ["GOOD"]
+        # The finding that worked is reported, and the array says one is
+        # missing: a shortfall record with no vulnerabilities entry follows it.
+        converted = [f for f in findings if f["vulnerabilities"]]
+        assert [f["vulnerabilities"][0]["title"] for f in converted] == ["GOOD"]
+        shortfalls = [f for f in findings if not f["vulnerabilities"]]
+        # The uid is derived from the scanned project's name; this model keeps
+        # the default report metadata, whose project is named "ASH".
+        assert [f["finding_info"]["uid"] for f in shortfalls] == [_shortfall_uid("ASH")]
+
+    def test_rules_that_cannot_be_read_do_not_lose_the_findings(
+        self, reporter, monkeypatch
+    ):
+        """The table of declared rules was built after the guard that covers the
+        read of the results, so a tool or rules structure that could not be read
+        raised out of ``report()`` and no file was written. The findings are
+        written; only the messages given by id lose their rule text."""
+
+        def unreadable(sarif):
+            raise RuntimeError("rules unreadable")
+
+        monkeypatch.setattr(ocsf_module, "_rule_descriptors", unreadable)
+
+        (finding,) = json.loads(
+            reporter.report(make_model([good_result("R1", text="kept")]))
+        )
+
+        assert finding["vulnerabilities"][0]["title"] == "R1"
+        assert finding["finding_info"]["desc"] == "kept"
+
+    def test_a_model_whose_project_name_cannot_be_read_still_gets_its_records(
+        self, reporter, monkeypatch
+    ):
+        """The project name is read as an argument, ahead of the guard of the
+        shortfall record's builder, so a model property that raised there went
+        to the array's handler and every finding was dropped for the error
+        response. The name reads as absent: the findings and the shortfall
+        record are written, the record under the identity shared by every scan
+        whose name is unknown."""
+
+        class UnreadableMetadata:
+            def __init__(self, model):
+                self._model = model
+
+            def __getattr__(self, name):
+                if name == "metadata":
+                    raise RuntimeError("metadata unreadable")
+                return getattr(self._model, name)
+
+        def broken_vulnerability(self, result, rules=None):
+            raise RuntimeError("no vulnerability")
+
+        monkeypatch.setattr(OcsfReporter, "_build_vulnerability", broken_vulnerability)
+
+        record, shortfall = json.loads(
+            reporter.report(UnreadableMetadata(make_model([good_result("R1")])))
+        )
+
+        assert record["vulnerabilities"][0]["title"] == "R1"
+        assert shortfall["finding_info"]["uid"] == _shortfall_uid("")
+
+    def test_the_scan_identity_skips_a_holder_that_cannot_be_read(self):
+        class Configuration:
+            project_name = "configured"
+
+        class Model:
+            ash_config = Configuration()
+
+            @property
+            def metadata(self):
+                raise RuntimeError("metadata unreadable")
+
+        assert ocsf_module._scan_identity(Model()) == "configured"
 
     def test_when_every_finding_fails_to_serialize_an_error_response_is_returned(
         self, reporter, monkeypatch
@@ -642,9 +824,15 @@ class TestReportDegradation:
 
         (error,) = payload
         assert error["error"] == "All findings failed to serialize"
+        # The one input counts once: the call site used to pass the built count
+        # as the processed count too, so this response claimed 1 processed, a
+        # total of 2 against 1 real input, and a 50% success rate when nothing
+        # reached the output.
         stats = error["processing_statistics"]
-        assert stats["processed_results_count"] == 1
+        assert stats["processed_results_count"] == 0
         assert stats["failed_results_count"] == 1
+        assert stats["total_results_count"] == 1
+        assert stats["success_rate_percent"] == 0
 
     def test_suppressed_findings_are_reported_with_suppressed_status(self, reporter):
         result = good_result()

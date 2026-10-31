@@ -88,7 +88,7 @@ Community plugin modules
   Provide Python module paths for additional plugins, one per line. Leave blank to finish.
   Currently configured: ['my_org.legacy_plugins']
   Keep module 'my_org.legacy_plugins'? [Y/n]: n
-  Add a plugin module (blank to finish): my_org.ash_plugins
+  Add a plugin module (blank to finish): my_org_ash_plugins
   Add a plugin module (blank to finish):
 ╭────────────────────────────────────────────── Done ──────────────────────────────────────────────╮
 │ Config written to <WORKSPACE>/.ash/.ash.yaml                                                     │

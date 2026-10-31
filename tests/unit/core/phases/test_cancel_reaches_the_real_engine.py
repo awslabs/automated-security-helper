@@ -116,7 +116,7 @@ def test_a_scanner_finishing_during_the_cancels_wait_is_recorded(tmp_path, monke
             # The premise is a scanner RUNNING at the cancel. Raising before
             # s1 has started leaves s1 in the queue, where the cancel removes
             # it instead -- on an interpreter whose workers dequeue later
-            # (3.12), that was every run, and the cell measured nothing.
+            # (3.12), that was every run, and the test measured nothing.
             assert s1_started.wait(timeout=30), "s1 never started"
             cancel_came.set()
             raise ScanCancelled("the scan was cancelled while s0 was running")
@@ -153,7 +153,7 @@ def test_a_scanner_finishing_during_the_cancels_wait_is_recorded(tmp_path, monke
 def _a_cancel_with_a_finished_siblings_result_in_hand(tmp_path, monkeypatch):
     """Two scanners at the cancel: s1 finished FIRST, and the cancel (s0) is
     handed to the recording loop before s1 is -- an interleaving as_completed
-    is free to produce, pinned here by an ordering wrapper so the cell is
+    is free to produce, pinned here by an ordering wrapper so the test is
     deterministic. At the loop's break, s1's finished result is in hand but
     not yet handed over: exactly the state the drain ordering decides.
     Returns (executor, recorded, order, pool_cls); ``order`` logs s1's
@@ -187,7 +187,7 @@ def _a_cancel_with_a_finished_siblings_result_in_hand(tmp_path, monkeypatch):
         # Settle the premise "s1 finished first" before handing anything
         # over: s1's event fires before its future completes, so without
         # this wait a descheduled completion can leave s1 un-done at the
-        # break and the cell orders nothing. s0 raises once s1's event is
+        # break and the test orders nothing. s0 raises once s1's event is
         # set, so both futures complete promptly.
         concurrent.futures.wait(futures)
         cancel_future = next(
@@ -226,7 +226,7 @@ def test_a_result_in_hand_is_recorded_before_the_drain(tmp_path, monkeypatch):
     def shutdown_logs_the_drain(self, *args, **kwargs):
         # The drain is the WAITING shutdown. The cancel's own queue-shutdown
         # (wait=False, cancel_futures=True) precedes the sweep by design and
-        # waits for nothing, so it is not the drain this cell orders against.
+        # waits for nothing, so it is not the drain this test orders against.
         waits = args[0] if args else kwargs.get("wait", True)
         if waits and "drain" not in order:
             order.append("drain")
@@ -270,7 +270,7 @@ def test_an_interrupt_during_the_drain_keeps_the_results_in_hand(tmp_path, monke
     with pytest.raises(KeyboardInterrupt):
         executor.run_parallel(MagicMock())
 
-    assert interrupted, "the cell shows nothing: the drain was never entered"
+    assert interrupted, "this run pinned nothing: the drain was never entered"
     assert any(arg == ["done-s1"] for arg in recorded), (
         f"an interrupt during the drain lost the results in hand: {recorded}"
     )
@@ -397,7 +397,7 @@ def test_a_queued_scanner_is_not_started_after_the_cancel(tmp_path, monkeypatch)
         if any(arg == "done-s1" or arg == ["done-s1"] for arg in args):
             may_dequeue.set()
             assert a_gated_dequeue_returned.wait(timeout=30), (
-                "the cell shows nothing: no freed worker reached the queue"
+                "this run pinned nothing: no freed worker reached the queue"
             )
         return args[-1]
 
@@ -426,7 +426,7 @@ def test_a_scan_cancelled_by_one_scanner_starts_no_queued_scanner(
     bounded, until the worker has entered the start check for s1, so the race
     the contract decides is pinned on every interpreter -- a worker whose
     dequeue comes later (3.12's blocking get) otherwise loses it to the
-    queue-shutdown and the cell measures nothing."""
+    queue-shutdown and the test measures nothing."""
     from concurrent.futures import ThreadPoolExecutor
 
     ran: list = []
@@ -446,22 +446,24 @@ def test_a_scan_cancelled_by_one_scanner_starts_no_queued_scanner(
     )
     monkeypatch.setattr(executor, "_execute_scanner", fake_execute)
 
-    real_safe = ScannerExecutor._safe_execute_scanner
+    # The start check runs in _start_and_run, before _safe_execute_scanner is
+    # called, so a refused start never reaches _safe_execute_scanner. The note
+    # is made on entry to _start_and_run, where the worker for s1 arrives
+    # before the cancel refusal is raised.
+    real_start = ScannerExecutor._start_and_run
 
     def noting_the_start_check(self, scanner_name, scanner_plugin, scan_targets):
         if scanner_name == "s1":
             s1_reached_the_start_check.set()
-        return real_safe(self, scanner_name, scanner_plugin, scan_targets)
+        return real_start(self, scanner_name, scanner_plugin, scan_targets)
 
-    monkeypatch.setattr(
-        ScannerExecutor, "_safe_execute_scanner", noting_the_start_check
-    )
+    monkeypatch.setattr(ScannerExecutor, "_start_and_run", noting_the_start_check)
 
     real_shutdown = ThreadPoolExecutor.shutdown
 
     def shutdown_after_the_dequeue(self, *args, **kwargs):
         assert s1_reached_the_start_check.wait(timeout=30), (
-            "the cell shows nothing: the worker never reached s1's start check"
+            "this run pinned nothing: the worker never reached s1's start check"
         )
         return real_shutdown(self, *args, **kwargs)
 
@@ -478,7 +480,7 @@ def test_a_scan_cancelled_by_one_scanner_starts_no_queued_scanner(
     # almost always wins, and this assert catches the run in about 120
     # where it doesn't.
     assert s1_reached_the_start_check.is_set(), (
-        "the cell shows nothing: run_parallel ended without the worker "
+        "this run pinned nothing: run_parallel ended without the worker "
         "reaching s1's start check, so the race was never pinned"
     )
     late = [name for name in ran if name != "s0"]
@@ -536,7 +538,7 @@ def test_a_cancels_own_future_is_not_a_completed_scanner(tmp_path, monkeypatch):
         for event_type, kwargs in events
         if event_type == AshEventType.SCAN_COMPLETE and kwargs.get("scanner") == "s1"
     ]
-    assert completions, "the cell shows nothing: s1 never completed"
+    assert completions, "this run pinned nothing: s1 never completed"
     assert completions[0]["completed_count"] == 1, completions
     assert completions[0]["total_count"] == 2, completions
 
@@ -546,10 +548,13 @@ def test_a_recorded_failure_counts_as_a_completion_in_a_cancelled_run(
     tmp_path, monkeypatch
 ):
     """A scanner whose results could not be processed is recorded as a failure,
-    and that is a completion too: the next completed scanner's SCAN_COMPLETE
-    counts it. Three scanners -- s1's processing fails, s2 completes, s0
-    carries the cancel -- so s2's payload says 2 of 3, the failure counted and
-    the cancel's own future not."""
+    and that is a finished turn too: it is announced with its own SCAN_COMPLETE,
+    ``succeeded`` False, and the next completed scanner's SCAN_COMPLETE counts
+    it. Three scanners -- s1's processing fails, s2 completes, s0 carries the
+    cancel -- so s1's payload says it did not succeed, s2's says 2 of 3, the
+    failure counted and the cancel's own future not. (The failed turn used to
+    send no event at all; every finished turn is announced now, so a subscriber
+    that waits for the last turn sees it end.)"""
     import concurrent.futures
 
     from automated_security_helper.core.phases import scanner_executor as module
@@ -609,12 +614,17 @@ def test_a_recorded_failure_counts_as_a_completion_in_a_cancelled_run(
         for event_type, kwargs in events
         if event_type == AshEventType.SCAN_COMPLETE and kwargs.get("scanner") == "s2"
     ]
-    assert completions, "the cell shows nothing: s2 never completed"
-    assert not any(
-        kwargs.get("scanner") == "s1"
+    assert completions, "this run pinned nothing: s2 never completed"
+    failed_turns = [
+        kwargs
         for event_type, kwargs in events
-        if event_type == AshEventType.SCAN_COMPLETE
-    ), "the cell shows nothing: s1 completed instead of failing"
+        if event_type == AshEventType.SCAN_COMPLETE and kwargs.get("scanner") == "s1"
+    ]
+    assert len(failed_turns) == 1, failed_turns
+    assert failed_turns[0]["succeeded"] is False, (
+        "this run pinned nothing: s1 was announced as a success instead of a failure"
+    )
+    assert completions[0]["succeeded"] is True, completions
     assert completions[0]["completed_count"] == 2, completions
     assert completions[0]["total_count"] == 3, completions
 
@@ -1023,14 +1033,17 @@ def test_the_engine_starts_no_phase_after_a_cancel(tmp_path):
 def test_a_cancel_after_the_last_scanner_starts_writes_no_results_file(
     tmp_path, monkeypatch, cancelled
 ):
-    """The scan phase checks for a cancel before it writes the results file.
+    """A scan cancelled after its last scanner started writes no results file.
 
     A scanner busy in Python, rather than waiting on a child process, does not
     stop at a cancel: it returns. When it was the last to start, no scanner start
     was left to check the cancel, and the scan phase went on to write
     ash_aggregated_results.json for a scan the client had been told was
     cancelled. With no previous results to put back, nothing removed it. The
-    control, with no cancel, shows the phase does reach that write here.
+    scan phase now checks for the cancel at its end and writes nothing itself:
+    the orchestrator writes the results file once every phase has run, so the
+    scan is driven through it here. The control, with no cancel, shows the run
+    does reach that write.
 
     The scan phase checks each scanner's dependencies, which ran ``uv tool list``
     and ``uv tool run ... --version`` for bandit, checkov, detect-secrets and
@@ -1049,7 +1062,6 @@ def test_a_cancel_after_the_last_scanner_starts_writes_no_results_file(
         show_progress=False,
         show_summary=False,
     )
-    engine = orchestrator.execution_engine
     event = threading.Event()
 
     def the_last_scanner_returns(self, aggregated_results):
@@ -1064,14 +1076,14 @@ def test_a_cancel_after_the_last_scanner_starts_writes_no_results_file(
     ):
         ended = None
         try:
-            engine.execute_phases(phases=["scan"])
+            orchestrator.execute_scan(phases=["scan"])
         except BaseException as error:
             ended = error
 
     written = (output / "ash_aggregated_results.json").exists()
     if cancelled:
-        assert not written, "the scan phase wrote results after the cancel"
+        assert not written, "the scan wrote results after the cancel"
         assert isinstance(ended, ScanCancelled), repr(ended)
     else:
         assert ended is None, repr(ended)
-        assert written, "the control did not reach the scan phase's write"
+        assert written, "the control did not reach the results write"

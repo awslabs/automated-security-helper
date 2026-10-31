@@ -317,3 +317,47 @@ def test_writers_outside_every_run_at_once_keep_every_root(tmp_path, source):
             assert _resolved(output) in recorded, (index, output)
             assert _resolved(work) in recorded, (index, work)
     assert config._run_derived_roots == {}
+
+
+class _Warnings:
+    """A logger that keeps the warnings and drops every other record."""
+
+    def __init__(self):
+        self.messages = []
+
+    def warning(self, message, *args, **kwargs):
+        self.messages.append(message)
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
+def test_a_later_run_logs_a_refusal_an_earlier_run_already_logged(
+    tmp_path, source, monkeypatch
+):
+    """The warning is once per run: the same option and path refused in a
+    second run of one long-lived process (the MCP server) is logged again,
+    and refused twice inside one run it is logged once."""
+    config = AshConfig()
+    output, product = _output(tmp_path, "out")
+    logger = _Warnings()
+    monkeypatch.setattr(path_trust, "ASH_LOGGER", logger)
+    run = ["first-run"]
+    monkeypatch.setattr(path_trust, "current_run_log_scope", lambda: run[0])
+
+    def refuse():
+        return path_trust.refused_derived_product(
+            product,
+            source_dir=source,
+            key="config_file",
+            config=config,
+            derived_dirs=[output],
+        )
+
+    assert refuse() is True
+    assert refuse() is True
+    assert len(logger.messages) == 1, logger.messages
+
+    run[0] = "second-run"
+    assert refuse() is True
+    assert len(logger.messages) == 2, logger.messages

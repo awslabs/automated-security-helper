@@ -1,0 +1,267 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A line a location states and this module cannot read is not an absent line.
+
+An absent line matches at file level. A line given as ``10.5`` or ``"abc"`` read as
+no line too, so the location matched every line of its file; ``10.0`` was refused
+as well. ``str.isdigit`` admits a superscript digit that ``int()`` rejects, which
+raised ValueError out of the whole aggregation check, from the line helper and from
+an indexed field path with a superscript in the brackets.
+"""
+
+import sys
+
+import pytest
+
+from automated_security_helper.utils.meta_analysis.field_mapping import (
+    get_value_from_path,
+    parse_field_path,
+)
+from automated_security_helper.utils.meta_analysis.locations_match import (
+    _line_number,
+    locations_match,
+)
+from automated_security_helper.utils.meta_analysis.sarif_analysis import (
+    validate_sarif_aggregation,
+)
+
+pytestmark = pytest.mark.unit
+
+#: U+00B2, which str.isdigit accepts and int() refuses.
+SUPERSCRIPT_TWO = chr(0xB2)
+#: U+0663, an Arabic-Indic digit three, which int() reads as 3.
+ARABIC_INDIC_THREE = chr(0x663)
+
+
+def _sarif(uri="a.py", start=3, end=5):
+    return {
+        "physicalLocation": {
+            "artifactLocation": {"uri": uri},
+            "region": {"startLine": start, "endLine": end},
+        }
+    }
+
+
+def test_a_float_of_a_whole_value_is_the_line_it_names():
+    assert locations_match(_sarif(start=3.0, end=5.0), _sarif()) is True
+    # And it is a line, not a wildcard: far from 3 to 5, it does not match.
+    assert locations_match(_sarif(start=30.0, end=40.0), _sarif()) is False
+    assert locations_match(_sarif(), _sarif(start=30.0, end=40.0)) is False
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [10.5, "abc", True, float("nan"), float("inf"), "1e3", "-3", ""],
+    ids=repr,
+)
+def test_a_stated_line_that_reads_as_no_line_matches_nothing(bad):
+    # Each read as an absent line, which matches at file level, so all of these
+    # matched every line of the file.
+    assert locations_match(_sarif(start=bad, end=bad), _sarif()) is False
+    assert locations_match(_sarif(), _sarif(start=bad, end=bad)) is False
+    # One readable line beside an unreadable one is still not a placeable range.
+    assert locations_match(_sarif(start=3, end=bad), _sarif()) is False
+
+
+def test_a_superscript_digit_is_no_line_and_raises_nothing():
+    assert _line_number(SUPERSCRIPT_TWO) is None
+    location = _sarif(start=SUPERSCRIPT_TWO, end=SUPERSCRIPT_TWO)
+    assert locations_match(location, _sarif()) is False
+
+
+def test_an_absent_line_still_matches_at_file_level():
+    """The control: nothing stated is not the same as something unreadable."""
+    artifact = {"uri": "a.py"}
+    no_region = {"physicalLocation": {"artifactLocation": artifact}}
+    empty_region = {"physicalLocation": {"artifactLocation": artifact, "region": {}}}
+    null_lines = _sarif(start=None, end=None)
+
+    for location in (no_region, empty_region, null_lines):
+        assert locations_match(location, _sarif()) is True
+        assert locations_match(_sarif(), location) is True
+
+
+def test_two_locations_that_spell_an_unreadable_line_alike_are_one_location():
+    # A finding and its unchanged copy both carry the line as the scanner wrote
+    # it. Each side was refused for its own unreadable line, so the pair was lost
+    # while the exact-match check read the same two as equal.
+    assert locations_match(_sarif(start="abc", end=None), _sarif(start="abc", end=None))
+    assert locations_match(_sarif(start=10.5, end=10.5), _sarif(start=10.5, end=10.5))
+
+
+def test_two_locations_that_spell_an_unreadable_line_apart_are_two_locations():
+    assert not locations_match(
+        _sarif(start="abc", end=None), _sarif(start="xyz", end=None)
+    )
+    assert not locations_match(
+        _sarif(start="abc", end=None), _sarif(start="abc", end=7)
+    )
+
+
+def test_a_readable_line_beside_an_unreadable_one_is_compared_by_the_line_it_names():
+    """The pair is compared line by line as written when both sides state an
+    unreadable one; ``10`` and ``"10"`` are the same line, though the raw pair
+    ``("abc", 10)`` is not the raw pair ``("abc", "10")``."""
+    assert locations_match(_sarif(start="abc", end=10), _sarif(start="abc", end="10"))
+    assert locations_match(_sarif(start="abc", end=10.0), _sarif(start="abc", end="10"))
+    # The control: a different unreadable spelling, or a different line, is two.
+    assert not locations_match(
+        _sarif(start="abc", end=10), _sarif(start="xyz", end="10")
+    )
+    assert not locations_match(
+        _sarif(start="abc", end=10), _sarif(start="abc", end="11")
+    )
+
+
+def test_an_unreadable_line_beside_a_location_with_no_line_matches_at_file_level():
+    # The copy lost its region: the finding is there, its line is the lost field.
+    region_none = {
+        "physicalLocation": {"artifactLocation": {"uri": "a.py"}, "region": None}
+    }
+    unreadable = _sarif(start="abc", end=None)
+
+    assert locations_match(unreadable, region_none) is True
+    assert locations_match(region_none, unreadable) is True
+    # A readable line on the other side is still refused.
+    assert locations_match(unreadable, _sarif()) is False
+
+
+def _report(region):
+    return {
+        "runs": [
+            {
+                "results": [
+                    {
+                        "ruleId": "B101",
+                        "message": {"text": "assert used"},
+                        "locations": [
+                            {
+                                "physicalLocation": {
+                                    "artifactLocation": {"uri": "a.py"},
+                                    "region": region,
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+
+
+def test_a_copy_that_keeps_an_unreadable_line_is_a_matched_finding():
+    original = _report({"startLine": "abc"})
+    result = validate_sarif_aggregation(
+        {"bandit": original}, _report({"startLine": "abc"})
+    )
+
+    assert result["summary"]["total_findings"] == 1
+    assert result["summary"]["matched_findings"] == 1
+    assert result["unmatched_results"] == {}
+    assert result["summary"]["critical_missing_fields"] == 0
+
+
+def test_a_result_with_only_logical_locations_matches_its_own_copy():
+    """A location whose ``physicalLocation`` is JSON null names no file and no
+    line. Two of them are compatible, and results that carry nothing else of a
+    location are told apart by their message, as results with no location are."""
+    logical = {"physicalLocation": None, "logicalLocations": [{"name": "run"}]}
+
+    assert locations_match(logical, dict(logical)) is True
+
+    def only_logical(text):
+        return {
+            "runs": [
+                {
+                    "results": [
+                        {
+                            "ruleId": "B101",
+                            "message": {"text": text},
+                            "locations": [dict(logical)],
+                        }
+                    ]
+                }
+            ]
+        }
+
+    own = validate_sarif_aggregation(
+        {"bandit": only_logical("same")}, only_logical("same")
+    )
+    other = validate_sarif_aggregation(
+        {"bandit": only_logical("same")}, only_logical("different")
+    )
+
+    assert own["summary"]["matched_findings"] == 1
+    assert own["unmatched_results"] == {}
+    assert other["summary"]["matched_findings"] == 0
+
+
+def test_a_copy_that_lost_its_region_is_a_matched_finding_with_a_lost_line():
+    result = validate_sarif_aggregation(
+        {"bandit": _report({"startLine": "abc"})}, _report(None)
+    )
+
+    assert result["summary"]["matched_findings"] == 1
+    assert result["unmatched_results"] == {}
+    lost = [
+        field["path"]
+        for fields in result["missing_fields"]["bandit"].values()
+        for field in fields
+    ]
+    assert any(path.endswith("region.startLine") for path in lost), lost
+
+
+@pytest.fixture
+def small_digit_limit():
+    """The interpreter's limit on digits converted to an integer, at its minimum
+    for the test, so a long digit string raises without a huge one."""
+    if not hasattr(sys, "set_int_max_str_digits"):
+        pytest.skip("this interpreter has no limit on integer string conversion")
+    original = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(640)
+    yield 700
+    sys.set_int_max_str_digits(original)
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (7, 7),
+        (10.0, 10),
+        ("10", 10),
+        (" 7 ", 7),
+        (ARABIC_INDIC_THREE, 3),
+        (2.5, None),
+        (True, None),
+        (SUPERSCRIPT_TWO, None),
+        (None, None),
+    ],
+    ids=lambda value: ascii(value)[:20],
+)
+def test_the_line_number_reading(value, expected):
+    assert _line_number(value) == expected
+
+
+def test_more_digits_than_the_interpreter_converts_is_no_line(small_digit_limit):
+    assert _line_number("9" * small_digit_limit) is None
+
+
+def test_a_superscript_index_in_a_field_path_is_no_path():
+    # int() of the superscript raised ValueError, out of every caller that
+    # parses a path. This one needs no limit on integer conversion, so it runs on
+    # every interpreter.
+    path = f"a[{SUPERSCRIPT_TWO}]"
+    assert parse_field_path(path) is None
+    assert get_value_from_path({"a": [1, 2, 3]}, path) == {
+        "exists": False,
+        "value": None,
+    }
+    # An ASCII index is read as before.
+    assert parse_field_path("a[1]") == [("key", "a"), ("index", 1)]
+
+
+def test_an_index_of_more_digits_than_the_interpreter_converts_is_no_path(
+    small_digit_limit,
+):
+    assert parse_field_path("a[" + "9" * small_digit_limit + "]") is None

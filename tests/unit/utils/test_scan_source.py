@@ -32,6 +32,7 @@ import pytest
 
 import automated_security_helper.config.sandbox_grants as sandbox_grants
 from automated_security_helper.utils.get_scan_set import (
+    get_changed_files,
     git_common_dir,
     git_index_paths_below,
     git_repository_root,
@@ -902,19 +903,340 @@ def test_a_gitfile_pointing_at_a_real_worktrees_admin_dir_is_nested(isolated_tmp
 
 
 @pytest.mark.integration
-def test_git_dir_set_to_a_worktree_admin_dir_records_nothing(isolated_tmp, monkeypatch):
+def test_git_dir_set_to_a_worktree_admin_dir_does_not_move_the_root(
+    isolated_tmp, monkeypatch
+):
     """A pre-commit hook in a linked worktree runs with GIT_DIR set to that
-    worktree's admin dir (git 2.50.1). git then calls the current directory the
-    root, so a scan of services/api from the hook was labeled "."."""
+    worktree's admin dir and no GIT_WORK_TREE (git 2.50.1). git then calls the
+    current directory the root, so a scan of services/api from the hook was
+    labeled ".", and later recorded nothing. The root lookup now leaves GIT_DIR
+    out and lets git discover the repository from the scanned directory, so the
+    root is the real one and the label is the directory's own."""
     root = _repo_with_a_commit(isolated_tmp / "super")
     _git("worktree", "add", "-q", "-b", "side", "wt/x", cwd=root)
     api = root / "services" / "api"
     api.mkdir(parents=True)
     monkeypatch.setenv("GIT_DIR", (root / ".git" / "worktrees" / "x").as_posix())
-    assert git_repository_root(api) == api.resolve()
+    assert git_repository_root(api) == root.resolve()
 
-    assert recorded_scan_source(api, git_repository_root, {}) is None
-    assert host_scan_source_label(api, git_repository_root) is None
+    assert recorded_scan_source(api, git_repository_root, {}) == "services/api"
+    assert host_scan_source_label(api, git_repository_root) == "services/api"
+
+
+@pytest.mark.integration
+def test_a_hook_scanning_a_subdirectory_joins_the_diff_onto_the_real_root(
+    isolated_tmp, monkeypatch
+):
+    """With GIT_DIR and no GIT_WORK_TREE, ``rev-parse --show-toplevel`` in
+    ``<worktree>/src`` named ``<worktree>/src`` while ``diff --name-only`` named
+    ``src/app.py`` from the real root, so a ``--source-dir src
+    --changed-files-only`` scan from a pre-commit hook joined ``<worktree>/src/
+    src/app.py``, matched no finding, and reported nothing at exit 0."""
+    root = _repo_with_a_commit(isolated_tmp / "super")
+    _git("worktree", "add", "-q", "-b", "side", "wt/x", cwd=root)
+    worktree = root / "wt" / "x"
+    src = worktree / "src"
+    src.mkdir()
+    (src / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _git("add", "src/app.py", cwd=worktree)
+    _git("commit", "-qm", "add app", cwd=worktree)
+    monkeypatch.setenv("GIT_DIR", (root / ".git" / "worktrees" / "x").as_posix())
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+
+    found_root = git_repository_root(src)
+    changed = get_changed_files("HEAD~1", cwd=src)
+
+    assert found_root == worktree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+    joined = [found_root / p for p in changed]
+    assert all(p.is_file() for p in joined), joined
+
+
+def _bare_repository_with_a_deployed_tree(parent: Path) -> "tuple[Path, Path]":
+    """A bare clone and a checkout-less tree of its tip: (bare, tree).
+
+    The tip's second commit changes ``src/app.py``; the tree holds that file and no
+    ``.git`` entry, as a post-receive hook's deployment target does.
+    """
+    source = _repo_with_a_commit(parent / "source")
+    (source / "src").mkdir()
+    (source / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _git("add", "src/app.py", cwd=source)
+    _git("commit", "-qm", "add app", cwd=source)
+    bare = parent / "deploy.git"
+    _git("clone", "-q", "--bare", source.as_posix(), bare.as_posix(), cwd=parent)
+    tree = parent / "deployed"
+    (tree / "src").mkdir(parents=True)
+    shutil.copyfile(source / "src" / "app.py", tree / "src" / "app.py")
+    return bare, tree
+
+
+@pytest.mark.integration
+def test_a_bare_repository_named_with_its_work_tree_keeps_its_root_and_diff(
+    isolated_tmp, monkeypatch
+):
+    """A post-receive hook deploys a checkout by running git as ``GIT_DIR=<bare>
+    GIT_WORK_TREE=<tree>``; the tree has no ``.git`` entry for discovery to find.
+    Dropping both variables for the root lookup made such a scan read "not a
+    repository" and lose its changed-file filter. When the caller names an
+    existing work tree, the pair is passed through as it was, and the root and the
+    diff describe the repository the operator named."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    monkeypatch.setenv("GIT_DIR", bare.as_posix())
+    monkeypatch.setenv("GIT_WORK_TREE", tree.as_posix())
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    found_root = git_repository_root(tree / "src")
+    changed = get_changed_files("HEAD~1", cwd=tree / "src")
+
+    assert found_root == tree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+    assert all((found_root / p).is_file() for p in changed), changed
+
+
+@pytest.mark.integration
+def test_a_git_work_tree_naming_no_directory_is_not_honored(isolated_tmp, monkeypatch):
+    """git answers ``rev-parse --show-toplevel`` with GIT_WORK_TREE as given, even
+    when nothing exists there, so a stale export in a hook's environment would have
+    joined the diff's paths onto a path that is not there. Only an existing
+    directory is honored; otherwise the variables are dropped and the root is the
+    one git discovers, as for a hook that exports GIT_DIR alone."""
+    root = _repo_with_a_commit(isolated_tmp / "super")
+    _git("worktree", "add", "-q", "-b", "side", "wt/x", cwd=root)
+    api = root / "services" / "api"
+    api.mkdir(parents=True)
+    monkeypatch.setenv("GIT_DIR", (root / ".git" / "worktrees" / "x").as_posix())
+    monkeypatch.setenv("GIT_WORK_TREE", (isolated_tmp / "nowhere").as_posix())
+
+    assert git_repository_root(api) == root.resolve()
+    assert recorded_scan_source(api, git_repository_root, {}) == "services/api"
+
+
+@pytest.mark.integration
+def test_a_relative_git_work_tree_is_read_against_this_process_directory(
+    isolated_tmp, monkeypatch
+):
+    """A relative GIT_WORK_TREE means "relative to the directory of the process
+    that exported it", which is this process's own directory. Read against the
+    scanned directory instead, ``deployed`` exported from the tree's parent named
+    ``<tree>/src/deployed``, which does not exist, so the variables were dropped
+    and the tree, which has no ``.git`` entry, read as no repository. The value
+    is made absolute against this process's directory before git is started in
+    the scanned one, and the root and the diff describe the named tree."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    monkeypatch.chdir(isolated_tmp)
+    monkeypatch.setenv("GIT_DIR", bare.as_posix())
+    monkeypatch.setenv("GIT_WORK_TREE", "deployed")
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+    assert not (tree / "src" / "deployed").exists()
+
+    found_root = git_repository_root(tree / "src")
+    changed = get_changed_files("HEAD~1", cwd=tree / "src")
+
+    assert found_root == tree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+    assert all((found_root / p).is_file() for p in changed), changed
+
+
+@pytest.mark.integration
+def test_git_dir_alone_is_kept_when_the_repository_names_its_own_work_tree(
+    isolated_tmp, monkeypatch
+):
+    """With ``core.worktree`` set, GIT_DIR alone describes the layout: git takes
+    its working directory for the top only when neither GIT_WORK_TREE nor
+    ``core.worktree`` is given. The drop of GIT_DIR alone (the hook shape, where
+    the working directory would be taken for the top) also dropped this layout,
+    and discovery from a tree with no ``.git`` entry answered "not a repository"
+    where the base, passing GIT_DIR through, answered the configured tree."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    source = isolated_tmp / "source"
+    _git("config", "core.worktree", tree.as_posix(), cwd=source)
+    monkeypatch.setenv("GIT_DIR", (source / ".git").as_posix())
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    found_root = git_repository_root(tree / "src")
+    changed = get_changed_files("HEAD~1", cwd=tree / "src")
+
+    assert found_root == tree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
+@pytest.mark.integration
+def test_a_stale_git_dir_naming_another_repositorys_tree_is_not_honored(
+    isolated_tmp, monkeypatch
+):
+    """A GIT_DIR left exported for another repository whose config sets
+    ``core.worktree`` to its own tree is honored by git from any directory: the
+    root lookup answered that other tree and the diff ran against that other
+    history, so a scan of this repository read a root it was not in and a changed
+    set that intersected the scanned directory to nothing. GIT_DIR alone is kept
+    only when the configured tree holds the directory git starts in; otherwise
+    the variable is dropped and this repository's own git answers."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    source = isolated_tmp / "source"
+    other = _repo_with_a_commit(isolated_tmp / "other")
+    _git("config", "core.worktree", other.as_posix(), cwd=other)
+    monkeypatch.setenv("GIT_DIR", (other / ".git").as_posix())
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    found_root = git_repository_root(source / "src")
+    changed = get_changed_files("HEAD~1", cwd=source / "src")
+
+    assert found_root == source.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
+@pytest.mark.integration
+def test_an_empty_git_work_tree_is_read_as_unset(isolated_tmp, monkeypatch):
+    """A hook that exports ``GIT_WORK_TREE=`` (empty) means "not set"; git refuses
+    the empty string as a path ("The empty string is not a valid path", exit 128)
+    on the root lookup and the diff alike. Passed through beside a GIT_DIR whose
+    repository names its tree with ``core.worktree``, the empty value turned a
+    layout git honors with GIT_DIR alone into no root and every finding reported.
+    An empty location variable is left out of the copy git is started with."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    source = isolated_tmp / "source"
+    _git("config", "core.worktree", tree.as_posix(), cwd=source)
+    monkeypatch.setenv("GIT_DIR", (source / ".git").as_posix())
+    monkeypatch.setenv("GIT_WORK_TREE", "")
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    found_root = git_repository_root(tree / "src")
+    changed = get_changed_files("HEAD~1", cwd=tree / "src")
+
+    assert found_root == tree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
+@pytest.mark.integration
+def test_a_foreign_object_store_does_not_hide_the_diffs_revision(
+    isolated_tmp, monkeypatch
+):
+    """The changed-file diff compares two commits (``<base>...HEAD``), read from
+    the object store; an exported GIT_OBJECT_DIRECTORY naming another store (a
+    hook's quarantine left in the environment, a stale export) made that
+    revision unreadable ("bad revision", exit 128), so the filter fell back to
+    every finding. With no layout named, the diff reads the discovered
+    repository's own objects."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    source = isolated_tmp / "source"
+    elsewhere = isolated_tmp / "empty-objects"
+    elsewhere.mkdir()
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GIT_OBJECT_DIRECTORY", elsewhere.as_posix())
+
+    changed = get_changed_files("HEAD~1", cwd=source / "src")
+
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
+@pytest.mark.integration
+def test_a_relative_core_worktree_is_read_against_the_git_directory(
+    isolated_tmp, monkeypatch
+):
+    """git reads a relative ``core.worktree`` against the git directory itself
+    (``<source>/.git/../../deployed`` is ``<parent>/deployed``), and ``config
+    --get`` prints it as written. The containment check joins it onto GIT_DIR
+    before asking whether the tree holds the scanned directory; joined onto the
+    scanned directory instead, ``<tree>/../../deployed`` would name nothing and
+    the variable would be dropped, leaving a tree with no ``.git`` entry."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    source = isolated_tmp / "source"
+    _git("config", "core.worktree", "../../deployed", cwd=source)
+    monkeypatch.setenv("GIT_DIR", (source / ".git").as_posix())
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+    assert not (tree / ".." / ".." / "deployed").exists()
+
+    found_root = git_repository_root(tree)
+    changed = get_changed_files("HEAD~1", cwd=tree)
+
+    assert found_root == tree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
+@pytest.mark.integration
+def test_a_work_tree_named_without_its_repository_is_not_honored(
+    isolated_tmp, monkeypatch
+):
+    """GIT_WORK_TREE alone makes git discover the repository from the directory it
+    is started in and still report the named directory as the top, so the root
+    and the diff's names described two trees. Only a pair (GIT_DIR too) names a
+    layout; alone, the variable is dropped and the root is the discovered one."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    source = isolated_tmp / "source"
+    monkeypatch.delenv("GIT_DIR", raising=False)
+    monkeypatch.setenv("GIT_WORK_TREE", tree.as_posix())
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    assert git_repository_root(source / "src") == source.resolve()
+
+
+@pytest.mark.integration
+def test_a_pair_whose_tree_does_not_hold_the_scanned_directory_is_not_honored(
+    isolated_tmp, monkeypatch
+):
+    """A pair left exported for another checkout names a tree the scanned directory
+    is not in; honored, the scan read that checkout's root and changes, the
+    changed set intersected to nothing, and every finding was discarded at exit
+    0. The pair is honored only when the scanned directory is at or below the
+    named tree; otherwise discovery answers for the directory itself."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    source = isolated_tmp / "source"
+    monkeypatch.setenv("GIT_DIR", bare.as_posix())
+    monkeypatch.setenv("GIT_WORK_TREE", tree.as_posix())
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    assert git_repository_root(source / "src") == source.resolve()
+    changed = get_changed_files("HEAD~1", cwd=source / "src")
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
+@pytest.mark.integration
+def test_a_hooks_relative_git_dir_names_the_repository_it_was_exported_in(
+    isolated_tmp, monkeypatch
+):
+    """receive-pack starts a post-receive hook inside the repository with
+    ``GIT_DIR=.`` exported; the hook exports the tree it deploys to and scans it.
+    Passed on as written to a git started in the scanned tree, ``.`` named that
+    tree and git answered "not a git repository: '.'", so the root lookup gave
+    None and the diff fell back to every finding. Made absolute against this
+    process's directory, the repository the hook runs in, both answer for it."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    monkeypatch.chdir(bare)
+    monkeypatch.setenv("GIT_DIR", ".")
+    monkeypatch.setenv("GIT_WORK_TREE", tree.as_posix())
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    found_root = git_repository_root(tree / "src")
+    changed = get_changed_files("HEAD~1", cwd=tree / "src")
+
+    assert found_root == tree.resolve()
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
+
+
+@pytest.mark.integration
+def test_the_diff_with_no_directory_reads_a_work_tree_from_this_process_directory(
+    isolated_tmp, monkeypatch
+):
+    """``get_changed_files`` takes no directory by default and git then starts in
+    this process's own directory, so a GIT_WORK_TREE named there is read against
+    it. Joining the value onto a missing directory raised TypeError instead, out
+    of a ``try`` that catches only a missing git and a timeout, so a hook that
+    exported GIT_DIR and GIT_WORK_TREE and called the default crashed the scan."""
+    bare, tree = _bare_repository_with_a_deployed_tree(isolated_tmp)
+    monkeypatch.chdir(tree / "src")
+    monkeypatch.setenv("GIT_DIR", bare.as_posix())
+    # From <tree>/src the tree itself is ../../deployed (it is <parent>/deployed).
+    monkeypatch.setenv("GIT_WORK_TREE", "../../deployed")
+    monkeypatch.delenv("GIT_COMMON_DIR", raising=False)
+
+    changed = get_changed_files("HEAD~1")
+
+    assert changed is not None and [p.as_posix() for p in changed] == ["src/app.py"]
 
 
 @pytest.mark.integration
@@ -2735,6 +3057,20 @@ class TestTheGitEntryWalkStopsWhereGitsDiscoveryStops:
         (source.parents[1] / ".git").mkdir()
 
         assert not self._walks_to_git(monkeypatch, source, [source.parent, tmp_path])
+
+    def test_a_work_tree_alone_in_the_environment_does_not_start_git(
+        self, tmp_path, monkeypatch
+    ):
+        """GIT_WORK_TREE without GIT_DIR points git at no repository: the root
+        lookup drops it and git discovers from the directory, so the walk decides
+        and finds nothing here. GIT_DIR alone still does, so git is started."""
+        source = self._tree(tmp_path)
+        elsewhere = {"GIT_WORK_TREE": str(tmp_path / "elsewhere")}
+
+        assert not self._walks_to_git(monkeypatch, source, [tmp_path], elsewhere)
+        assert self._walks_to_git(
+            monkeypatch, source, [tmp_path], {"GIT_DIR": str(tmp_path / "r.git")}
+        )
 
     def test_a_ceiling_naming_the_source_itself_does_not_stop_the_walk(
         self, tmp_path, monkeypatch

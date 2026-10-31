@@ -48,15 +48,18 @@ neither refuses nor protects ``!``. What a batch file does with the arguments it
 given is its own business.
 """
 
+import atexit
 import contextlib
 import contextvars
 import enum
 import errno
+import gc
 import locale
 import logging
 import ntpath
 import os
 import platform
+import re
 import shutil
 import signal
 import subprocess  # nosec B404 - suprocess module required for the nature of this package to orchestrate SAST/SCA/IAC/SBOM scanners
@@ -94,6 +97,7 @@ from automated_security_helper.core.cancellation import (
     discard_tool_pid,
     raise_if_cancelled,
     record_tool_group,
+    stop_grace_in_progress,
 )
 from automated_security_helper.core.constants import (
     ASH_BIN_PATH,
@@ -110,6 +114,7 @@ from automated_security_helper.utils.terminal_text import (
     shown_not_obeyed,
     shown_on_one_line,
 )
+from automated_security_helper.utils.threads import ash_thread
 
 if TYPE_CHECKING:
     from automated_security_helper.utils.sandbox.backends import SpawnPlan
@@ -129,6 +134,11 @@ _find_executable_cache: Dict[
 # step against a clear; no search runs under it.
 _find_executable_generation = 0
 _find_executable_lock = threading.Lock()
+#: How many lookups the cache keeps. A long-running server scans many trees, and
+#: each tree's root is part of the key, so the cache grew with every scan; past
+#: the bound the oldest entries go. A miss is never kept: it is searched for
+#: again on every call anyway (_lookup), so keeping it only spent memory.
+_FIND_EXECUTABLE_CACHE_LIMIT = 1024
 
 
 def _is_executable_file(path: str) -> bool:
@@ -315,6 +325,23 @@ def could_not_stop_default(pid: Any) -> str:
     if isinstance(pid, int) and not isinstance(pid, bool):
         return f"{COULD_NOT_STOP_MARKER} {pid}), {COULD_NOT_STOP_SUFFIX}"
     return COULD_NOT_STOP_REASON
+
+
+#: The one spelling of a process id inside a could-not-stop reason: the
+#: parenthetical :func:`could_not_stop_default` writes and a referent such as
+#: ``python3 (pid 7)`` carries into :func:`could_not_stop_sentence`.
+_PROCESS_ID_PARENTHETICAL = re.compile(r"\s*\(pid [0-9]+\)")
+
+
+def without_process_ids(text: str) -> str:
+    """``text`` with every ``(pid N)`` parenthetical dropped, and nothing else.
+
+    For the texts a remote client is shown: a reason recorded by the executor
+    names the pid of the tool the stop could not end, which a server-side
+    operator can act on and a client on a network transport cannot, and should
+    not learn. ``could_not_stop_default(4242)`` becomes
+    :data:`COULD_NOT_STOP_REASON`; a text with no pid is returned as it is."""
+    return _PROCESS_ID_PARENTHETICAL.sub("", text)
 
 
 def response_could_not_stop(response: Any) -> bool:
@@ -653,10 +680,14 @@ def run_succeeded(result: Any) -> bool:
     if isinstance(result, dict):
         if any(result.get(flag) is True for flag in RESPONSE_FLAGS):
             return False
-        return result.get("returncode") == 0
-    if any(getattr(result, flag, False) is True for flag in RESPONSE_FLAGS):
-        return False
-    return getattr(result, "returncode", None) == 0
+        code = result.get("returncode")
+    else:
+        if any(getattr(result, flag, False) is True for flag in RESPONSE_FLAGS):
+            return False
+        code = getattr(result, "returncode", None)
+    # Through is_exit_code, as every exit-code reader: a returncode of False
+    # is a flag's stand-in, not a 0, and read as a success through ``== 0``.
+    return is_exit_code(code) and code == 0
 
 
 def signal_ending(returncode: Any, cmd_str: str) -> Optional[Tuple[int, str]]:
@@ -1165,10 +1196,55 @@ def _refusal_text(command: str, path: str, sandbox: bool) -> str:
     )
 
 
+def _own_path(path: str) -> str:
+    """``path`` as the process names it: absolute, case-folded, links kept."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _interpreter_family(path: str) -> str:
+    """The file name of ``path`` without a version, a ``w`` or ``.exe``.
+
+    ``python``, ``python3``, ``python3.12``, ``pythonw.exe`` and ``Python.EXE``
+    (the path is case-folded on Windows first) all read ``python``; a tool's
+    name, such as ``ruff`` or ``python-lint``, reads as itself.
+    """
+    name = os.path.basename(path).removesuffix(".exe")
+    return name.rstrip("0123456789.w")
+
+
 def _is_running_interpreter(candidate: str) -> bool:
-    """The Python running ASH: already started, so refusing it protects nothing."""
+    """The Python running ASH: already started, so refusing it protects nothing.
+
+    Compared by path first, never by inode alone. A tree's virtual environment
+    links its python to the interpreter running ASH, and ``samefile`` calls the
+    two one file; started through the venv's path, that python reads the tree's
+    pyvenv.cfg and site-packages, so the link is not the running interpreter.
+    The same holds for an in-tree link named after another tool, which would
+    start the interpreter with that tool's arguments. The interpreter's own path
+    is exempt, and so is a sibling name of it: a link beside ``sys.executable``
+    that is the same file (``python3`` next to the ``python`` ASH runs from, in
+    the tree's own venv when ASH is installed there) reads the same pyvenv.cfg,
+    so it IS the running interpreter under another name, and refusing it read a
+    tool that is already running as MISSING. Only a python-named sibling is
+    exempt: a link beside the interpreter that is named for another tool
+    (``<tree>/.venv/bin/ruff`` pointing at python) is refused, because the
+    interpreter would run with that tool's arguments. A link in another
+    directory, such as another venv's link to the base interpreter, stays
+    refused, and so does a tool installed beside the interpreter inside a
+    scanned tree.
+    """
+    if not sys.executable:
+        return False
+    own = _own_path(sys.executable)
+    path = _own_path(candidate)
+    if path == own:
+        return True
+    if os.path.dirname(path) != os.path.dirname(own):
+        return False
+    if _interpreter_family(path) not in ("python", _interpreter_family(own)):
+        return False
     try:
-        return os.path.samefile(candidate, sys.executable)
+        return os.path.samefile(path, own)
     except OSError:
         return False
 
@@ -1301,9 +1377,12 @@ def _lookup(command: str, sandbox: bool = False) -> Optional[str]:
         # Remembered only if no clear ran while the search was under way: a
         # search that began before an install found what was there before it,
         # and the clear after the install is what makes the next lookup search
-        # again.
+        # again. A miss is not remembered (it is searched for again on every
+        # call), and the cache is bounded, oldest entries first.
         with _find_executable_lock:
-            if generation == _find_executable_generation:
+            if generation == _find_executable_generation and cached[0] is not None:
+                while len(_find_executable_cache) >= _FIND_EXECUTABLE_CACHE_LIMIT:
+                    _find_executable_cache.pop(next(iter(_find_executable_cache)))
                 _find_executable_cache[key] = cached
     found, refused = cached
     if refused is not None and scope is not None:
@@ -1311,6 +1390,11 @@ def _lookup(command: str, sandbox: bool = False) -> Optional[str]:
         # later scan of the same tree sees why the tool is missing.
         scope.refusals.setdefault(command, refused)
         scope.events.append(command)
+    elif found is not None and scope is not None:
+        # A usable copy found now: an earlier refusal of this command is no
+        # longer why the tool is missing, since it is not. Left in place, the
+        # incomplete-scan message named a tool that did run as one not run.
+        scope.refusals.pop(command, None)
     return found
 
 
@@ -1405,11 +1489,17 @@ def _child_got_the_terminals_interrupt() -> bool:
     """
     if os.name == "nt":
         return _has_a_console()
-    try:
-        return os.tcgetpgrp(sys.stdin.fileno()) == os.getpgrp()
-    except (AttributeError, OSError, ValueError):
-        # No terminal: CI, a pipe.
-        return False
+    # Whichever standard stream is the terminal: ``ash scan < inputs`` has its
+    # input redirected and its output still at the terminal, and asked of the
+    # input alone the probe read "no terminal" and sent the typed Ctrl-C a
+    # second time.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            return os.tcgetpgrp(stream.fileno()) == os.getpgrp()
+        except (AttributeError, OSError, ValueError):
+            continue
+    # No terminal: CI, a pipe.
+    return False
 
 
 class HeldInterrupt:
@@ -1559,39 +1649,60 @@ def discard_tool_pid_before_reap(
 ) -> None:
     """Wait for the child's exit WITHOUT reaping it, then forget its record.
 
-    The blocking form of :func:`discard_tool_pid_once_exited`, for the arms
-    that know the child is ending (a kill was just sent, or the caller wants
-    to block until the end): ``waitid`` with ``WNOWAIT`` and no ``WNOHANG``
-    sleeps until the exit and leaves the child reapable, so the caller's
-    ``wait`` right after this still reaps it, and the record never outlives
-    the reap.
+    The waiting form of :func:`discard_tool_pid_once_exited`, for the arms
+    that know the child is ending (a kill was just sent) or want to block
+    until its end: ``waitid`` with ``WNOWAIT`` leaves the child reapable, so
+    the caller's ``wait`` right after this still reaps it, and the record
+    never outlives the reap.
+
+    ``just_killed`` says which of the two callers this is. For a child that
+    was just sent a kill the exit is observed in ``WNOHANG`` slices bounded by
+    ``_REAP_POLL_BOUND_SECONDS``: a blocking ``waitid`` on a child in
+    uninterruptible sleep held the caller for as long as the child chose to
+    stay, and one still alive after the bound survived the kill, so a die-now
+    sweep can do nothing more to it. For a healthy child the caller wants to
+    block on until its end (``just_killed=False``) ``waitid`` blocks, with no
+    bound and no slices, because dropping the record while the child lives
+    leaves it out of reach of the sweep for the rest of its run.
 
     On a build without ``waitid`` (CPython leaves it out on macOS, and
     Windows has none) the exit is polled for in slices with the record still
-    registered, and the record is discarded only once the poll sees the exit.
-    ``poll`` reaps, so on those builds the discard follows the reap by one
-    step, as in :func:`discard_tool_pid_once_exited`; what the poll closes is
-    the longer window in which the child was alive and its record already
-    gone, out of reach of a concurrent die-now sweep.
-
-    ``just_killed`` says which of the two callers this is. For a child that
-    was just sent a kill the poll is bounded by ``_REAP_POLL_BOUND_SECONDS``:
-    one still alive after that survived the kill, and a die-now sweep can do
-    nothing more to it. For a healthy child the caller wants to block on until
-    its end (``just_killed=False``) there is no bound, because dropping the
-    record while the child lives leaves it out of reach of the sweep for the
-    rest of its run.
+    registered, bounded the same way, and the record is discarded only once
+    the poll sees the exit. ``poll`` reaps, so on those builds the discard
+    follows the reap by one step, as in :func:`discard_tool_pid_once_exited`;
+    what the poll closes is the longer window in which the child was alive
+    and its record already gone, out of reach of a concurrent die-now sweep.
     """
     if process.returncode is None:
+        deadline = time.monotonic() + _REAP_POLL_BOUND_SECONDS if just_killed else None
         if hasattr(os, "waitid"):
-            try:
-                os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
-            except OSError:
-                pass
+            if deadline is None:
+                # The wait to the end blocks, as a wait with no bound should:
+                # a signal interrupts it as it does any blocking call. A
+                # refusal (ECHILD: reaped elsewhere) ends it as the exit would.
+                try:
+                    os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+                except OSError:
+                    pass
+            else:
+                # Observed in slices, with the bound the just-killed arm
+                # promises: a blocking waitid on a child in uninterruptible
+                # sleep held the caller for as long as the child chose to stay.
+                while True:
+                    try:
+                        waited = os.waitid(
+                            os.P_PID,
+                            process.pid,
+                            os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                        )
+                    except OSError:
+                        break
+                    if waited is not None:
+                        break
+                    if time.monotonic() >= deadline:
+                        break
+                    time.sleep(INTERRUPT_WAIT_SLICE_SECONDS)
         else:
-            deadline = (
-                time.monotonic() + _REAP_POLL_BOUND_SECONDS if just_killed else None
-            )
             while process.poll() is None and (
                 deadline is None or time.monotonic() < deadline
             ):
@@ -1604,7 +1715,7 @@ def stop_after_interrupt(
     grace: float = INTERRUPT_GRACE_SECONDS,
     *,
     child_got_the_interrupt: Optional[bool] = None,
-) -> None:
+) -> bool:
     """Pass the operator's interrupt on to *process* and give it *grace* to stop.
 
     For a child that stops cleanly on Ctrl-C itself: a container runtime, which
@@ -1617,6 +1728,13 @@ def stop_after_interrupt(
     the grace is killed, and so is one when the operator presses Ctrl-C again while
     waiting: on Windows within one slice of the wait. The caller re-raises the
     interrupt.
+
+    Returns whether the child is stopped as far as this process can tell: True
+    when it exited within the grace, or outlived it and the kill was accepted;
+    False when the kill was refused (EPERM, a setuid program the tool became), so
+    the child may still run and a caller raising a cancel can say so, as
+    _run_cancellable's cancel does. A second Ctrl-C while waiting raises its
+    KeyboardInterrupt instead of returning; a kill refused there is logged.
 
     ``child_got_the_interrupt`` says whether the child already has the operator's
     interrupt. The default, None, asks the terminal, which is right for a
@@ -1633,7 +1751,12 @@ def stop_after_interrupt(
     """
     if child_got_the_interrupt is None:
         child_got_the_interrupt = _child_got_the_terminals_interrupt()
+    # The exit is observed, and the record discarded, before any signal:
+    # send_signal and kill poll first, which reaps a child that has exited,
+    # and a record discarded after that reap could name a reused pid. The
+    # signal is still sent: on a child that has exited it does nothing.
     if not child_got_the_interrupt:
+        discard_tool_pid_once_exited(process)
         try:
             if os.name == "nt":
                 process.terminate()
@@ -1644,16 +1767,44 @@ def stop_after_interrupt(
     try:
         _wait_out(process, grace)
     except KeyboardInterrupt:
-        process.kill()
-        # Observed, discarded, then reaped: the die-now record must not
-        # outlive the reap (discard_tool_pid_before_reap).
-        discard_tool_pid_before_reap(process)
-        process.wait()
+        discard_tool_pid_once_exited(process)
+        if _kill_unless_refused(process):
+            # Observed, discarded, then reaped: the die-now record must not
+            # outlive the reap (discard_tool_pid_before_reap). The reap is
+            # bounded: a child SIGKILL did not end, in uninterruptible sleep
+            # say, is not waited for without end (_wait_after_kill).
+            discard_tool_pid_before_reap(process)
+            _wait_after_kill(process)
         raise
     except Exception:
-        process.kill()
+        discard_tool_pid_once_exited(process)
+        if not _kill_unless_refused(process):
+            return False
         discard_tool_pid_before_reap(process)
-        process.wait()
+        _wait_after_kill(process)
+    return True
+
+
+def _kill_unless_refused(process: "subprocess.Popen[Any]") -> bool:
+    """Kill *process*; False, logged, when the kernel refuses the signal.
+
+    ``kill`` raises PermissionError on a child this process may not signal,
+    such as a setuid program the tool became. Raised from a stop arm it
+    replaced the KeyboardInterrupt or the cancel the caller re-raises with an
+    OSError, and a child the kernel would not kill is not waited for either.
+    The callers of stop_after_interrupt record their child by pid
+    (record_tool_pid), and the discard that follows a kill runs only on an
+    accepted one, so a refused kill leaves that pid recorded for the SIGTERM
+    handler's die-now kill, which tries it again.
+    """
+    try:
+        process.kill()
+    except OSError as error:
+        ASH_LOGGER.warning(
+            f"Could not kill pid {process.pid}: {error}", extra=NO_MARKUP
+        )
+        return False
+    return True
 
 
 def _wait_out(process: "subprocess.Popen[Any]", grace: float) -> None:
@@ -1838,6 +1989,18 @@ def started_from_working_directory(
     return None
 
 
+def names_a_location(value: str) -> bool:
+    """Whether *value* spells a filesystem location (holds a path separator) rather
+    than a bare command name that PATH resolves. ``/`` is a separator on every
+    platform node runs on; ``os.sep`` and ``os.altsep`` cover the host's own.
+
+    One definition for the cdk-nag scanner's dependency check and the cdk-nag
+    wrapper, which read ``JSII_NODE`` by the same test and must not drift apart.
+    """
+    separators = {"/", os.sep, *([os.altsep] if os.altsep else [])}
+    return bool(value) and any(separator in value for separator in separators)
+
+
 #: The suffixes the operating system starts by running cmd.exe on the file. Which
 #: suffixes the lookup tries is decided where the candidate names are built.
 _BATCH_SUFFIXES = (".bat", ".cmd")
@@ -1955,20 +2118,32 @@ def _resolve_for_spawn(
     Any other name it does not find is passed on as it was, for ``subprocess`` to
     start or fail on.
     """
-    name = args[0]
+    name = os.fspath(args[0]) if isinstance(args[0], os.PathLike) else args[0]
     if os.path.dirname(name) and not _is_anchored(name):
         return FileNotFoundError(
             errno.ENOENT,
             f"{name} is a path relative to the working directory, which is not run",
             name,
         )
-    found = find_executable(name)
+    # The child's own PATH first, when the caller gave one that differs from
+    # ASH's: a tool's bin directory put first there names the copy the child
+    # would run, which ASH's PATH may shadow with another copy, and an in-tree
+    # copy refused on that PATH is a refusal to report, not a miss to fall
+    # through.
+    found, child_refused = _found_on_the_childs_path(name, env)
+    if found is None:
+        found = find_executable(name)
     if found:
         args[0] = found
         if _starts_through_cmd_exe(found):
             return _refusal_for_cmd_exe(args)
         return None
     refusal = in_tree_refusal(name)
+    if refusal is None and child_refused is not None:
+        refusal = (
+            f"{name} resolves on the child's PATH to {child_refused}, inside the "
+            "scanned tree, which is not run"
+        )
     if refusal is not None:
         return FileNotFoundError(errno.ENOENT, refusal, name)
     if os.path.dirname(name):
@@ -1986,6 +2161,43 @@ def _resolve_for_spawn(
     return None
 
 
+def _found_on_the_childs_path(
+    name: str, env: Optional[Dict[str, str]]
+) -> Tuple[Optional[str], Optional[str]]:
+    """The program as the CHILD's PATH names it, when the caller gave one, and
+    the in-tree copy that PATH named and the scan refused when nothing was chosen.
+
+    ``find_executable`` searches ASH's own PATH. A caller that hands the child
+    an environment of its own (a tool's bin directory put first) had argv[0]
+    resolved against ASH's PATH, or refused as not found, while the child's own
+    search would have found it. The child's anchored entries are searched the
+    way ASH's are, with the scan's in-tree refusal applied (``_first_usable``),
+    and before ASH's PATH, which may shadow the child's copy with another.
+    ``(None, None)`` when the caller gave no PATH of its own, or when it names
+    nothing; ``(None, refused)`` when its only copies were inside the scanned
+    tree, for the caller to report as the refusal it is.
+    """
+    if env is None or os.path.dirname(name):
+        return None, None
+    path_value = env.get("PATH")
+    if not path_value or path_value == os.environ.get("PATH"):
+        return None, None
+    entries = [
+        entry for entry in path_value.split(os.pathsep) if entry and _is_anchored(entry)
+    ]
+    if not entries:
+        return None, None
+
+    def candidates() -> Iterator[str]:
+        for candidate in _executable_candidate_names(name):
+            for entry in entries:
+                found = shutil.which(os.path.join(entry, candidate))
+                if found:
+                    yield found
+
+    return _first_usable(name, candidates(), _TREE_SCOPE.get())
+
+
 #: Whether a bare name ASH's lookup cannot resolve is refused on Windows instead of
 #: handed to CreateProcess, whose own search includes directories ASH does not check.
 _refuse_unresolved_on_windows = True
@@ -2000,7 +2212,9 @@ def resolve_command(
 
     For a caller that starts the process itself. When the program is a batch file on
     Windows the arguments have been checked for cmd.exe (see the module docstring),
-    and the copy goes to ``subprocess`` as it is.
+    and the copy goes to ``subprocess`` as it is. A string is the program's name,
+    as the spawn helpers read one (``_argv_list``); ``list()`` of it made it its
+    characters.
 
     Raises:
         FileNotFoundError: the program would come from the working directory (see
@@ -2009,7 +2223,7 @@ def resolve_command(
         OSError: an argument to a batch program is one cmd.exe would read
             differently (``errno.EINVAL``).
     """
-    resolved = list(args)
+    resolved = _argv_list(args)
     if resolved:
         refused = _resolve_for_spawn(resolved, cwd, env)
         if refused is not None:
@@ -2036,14 +2250,20 @@ def _prepare_spawn(
         prepare_spawn,
     )
 
-    if active_scope() is None:
+    scope = active_scope()
+    if scope is None:
         return None
     if shell or isinstance(args, str):
         # No builtin scanner spawns through a shell. Refused rather than wrapped as
         # `sh -c`, so that a string command cannot reach the sandbox unparsed.
-        raise SandboxUnavailable(
+        # Counted as the scope's other refusals are (scope.prepare_spawn), so a
+        # converter's row reports this one too.
+        refusal = SandboxUnavailable(
             "a scanner tried to start a shell command, which the sandbox does not wrap"
         )
+        scope.refused_spawns += 1
+        scope.last_refusal = str(refusal)
+        raise refusal
     return prepare_spawn(args, env, cwd)
 
 
@@ -2115,7 +2335,7 @@ class _StartedChild:
             return None
         if not self.stop_refused:
             try:
-                if self.process.poll() is not None:
+                if _has_exited(self.process):
                     return None
             except OSError:
                 return None
@@ -2146,6 +2366,44 @@ class _StartedChild:
         if self.exit_code() is None:
             return f"ASH stopped the tool after: {error}"
         return str(error)
+
+
+def _has_exited(process: subprocess.Popen) -> bool:
+    """Whether the child has ended, read so that another thread's reap cannot
+    make a dead child read as running.
+
+    The poll is asked first, once, and its answer stands when it says the child
+    ended, or when it raises (a caller's handler reads that raise as the
+    handling's own failure). ``Popen.poll`` answers from ``returncode`` alone
+    when another thread holds the reaping lock (the registry sweep's own poll,
+    _forget_exited_groups), so a child that thread was reaping read as still
+    running, and a stop that worked was flagged as one ASH could not perform.
+    A poll that says "running" is therefore checked against the kernel with
+    ``waitid`` and ``WNOWAIT`` where the build has it, which neither reaps nor
+    waits for the lock. A pid the kernel does not know as this process's child
+    (``ChildProcessError``: reaped by the other thread, or a recorded child
+    that was never spawned) answers with ``returncode``, which the reaper set
+    if it finished; the kernel is never asked to decide for a pid that is not
+    ours. Without ``waitid`` the poll is the answer.
+    """
+    # No ``returncode`` shortcut ahead of the poll: ``Popen.poll`` answers a
+    # set ``returncode`` from memory, so the shortcut saves nothing for a real
+    # child, and it would hide the raise of a poll whose child already carries
+    # a code, which the handlers below read as their own failure.
+    if process.poll() is not None:
+        return True
+    if os.name != "nt" and hasattr(os, "waitid"):
+        try:
+            waited = os.waitid(
+                os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
+            )
+        except ChildProcessError:
+            return process.returncode is not None
+        except (OSError, TypeError, ValueError, OverflowError):
+            return False
+        if waited is not None:
+            return True
+    return process.returncode is not None
 
 
 def _text_of(error: BaseException) -> str:
@@ -2426,20 +2684,52 @@ def _decoded(captured: Any, process: subprocess.Popen) -> Any:
     encoding = getattr(process.stdout, "encoding", None) or getattr(
         process.stderr, "encoding", None
     )
-    return captured.decode(encoding or "utf-8", errors="replace")
+    # The error handler the stream wrappers carry is the one communicate's own
+    # decode used. "strict" (TextIOWrapper's default when the caller named none)
+    # is not kept: a late read that raised UnicodeDecodeError would replace the
+    # wait's failure, which is what this read reports, with its own.
+    errors = getattr(process.stdout, "errors", None) or getattr(
+        process.stderr, "errors", None
+    )
+    if errors in (None, "strict"):
+        errors = "replace"
+    return _as_text_mode_reads(captured, encoding or "utf-8", errors)
 
 
-def _late_decoded(captured: Any, encoding: Optional[str]) -> Any:
+def _late_decoded(
+    captured: Any, encoding: Optional[str], errors: str = "replace"
+) -> Any:
     """Partial bytes a failed wait carried, decoded as the finished run's
     streams would have been: the caller's encoding, or when the caller named
     none the locale encoding Popen's text mode resolves to (under UTF-8 mode
-    the locale read answers utf-8, keeping the two in step). A decode pinned
-    to UTF-8 disagreed with the finished run on a non-UTF-8 locale.
-    TimeoutExpired carries the partial output undecoded, text mode or not."""
+    the locale read answers utf-8, keeping the two in step), and the caller's
+    error handler (every runner's default is replace). A decode pinned to
+    UTF-8 disagreed with the finished run on a non-UTF-8 locale.
+    TimeoutExpired carries the partial output undecoded, text mode or not.
+    "strict" is not kept, as _decoded does not keep it: this read runs inside
+    the timeout's handler, and a UnicodeDecodeError raised there, for a partial
+    read that ended in the middle of a character, would replace the timeout
+    the caller is owed."""
     if not isinstance(captured, bytes):
         return captured
-    return captured.decode(
-        encoding or locale.getpreferredencoding(False), errors="replace"
+    if errors in (None, "strict"):
+        errors = "replace"
+    return _as_text_mode_reads(
+        captured, encoding or locale.getpreferredencoding(False), errors
+    )
+
+
+def _as_text_mode_reads(captured: bytes, encoding: str, errors: str = "replace") -> str:
+    """*captured* as Popen's text mode would have read it: decoded with the
+    run's error handler, then with universal newlines (``\\r\\n`` and a lone
+    ``\\r`` become ``\\n``), the translation communicate's own text-mode decode
+    applies. A late or partial read decoded without it kept the ``\\r`` a
+    finished run would have dropped, so the same bytes read differently by the
+    way the wait ended."""
+    return (
+        captured.decode(encoding, errors=errors)
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
     )
 
 
@@ -2502,50 +2792,173 @@ def _run_plain(
     The runner of a spawn outside a sandbox and outside a cancel scope (_runner).
     It does what subprocess.run does, case by case: ``input`` (taken from kwargs,
     since the name is a builtin's) and ``capture_output`` set the pipes; a timeout
-    kills the child, reaps it and raises the TimeoutExpired communicate raised,
-    with the output read so far; any other error, KeyboardInterrupt included,
-    kills the child and is raised as it is; ``check`` raises CalledProcessError.
-    The pipes are closed and the child is waited for on the way out, as ``with
-    Popen`` does, but for at most _REAP_SECONDS (_reap): a child the kill did not
-    end, in uninterruptible sleep say, is left running and named, never waited
-    for without end. What it adds is the record of its child right after Popen
-    returns (_note_start), and for a failure while waiting, whether the child
-    still ran and what it had written (_note_failed_wait). Called with no record
-    held, it is subprocess.run with that bound.
+    kills the child and every process it started (with a timeout the child leads
+    a process group of its own, _start_in_own_group, stopped with _stop_tree),
+    reaps it and raises the TimeoutExpired communicate raised, with the output
+    read so far; any other error, KeyboardInterrupt included, kills the child
+    (its group, when it leads one) the same way and is raised as it is;
+    ``check`` raises CalledProcessError. The pipes are closed and the child is
+    waited for on the way out, as ``with Popen`` does, but for at most
+    _REAP_SECONDS (_reap): a child the kill did not end, in uninterruptible
+    sleep say, is left running and named, never waited for without end. What it
+    adds is the record of its child right after Popen returns (_note_start), and
+    for a failure while waiting, whether the child still ran and what it had
+    written (_note_failed_wait). A child that leads its own group also takes the
+    server-stop handshake a cancellable spawn takes: counted before Popen
+    (_begin_spawn, which refuses the spawn once the server is stopping) and
+    recorded once started (_record_spawn, which kills a child the server began
+    stopping under), so kill_running_groups never misses a group this runner
+    made; such a spawn ends as a ScanCancelled. Called with no record held
+    and no group of its own, it is subprocess.run with that bound.
     """
     input_data = kwargs.pop("input", None)
     _pipes_for(kwargs, input_data, capture_output)
-    process = subprocess.Popen(*popenargs, **kwargs)  # nosec B603 - callers pass list argv
-    started: Optional[_StartedChild] = None
-    try:
+    # With a timeout the child leads a process group of its own, as every
+    # unsandboxed spawn in a cancel scope does, so the kill at the timeout
+    # reaches what it started: a tool run through uv is uv's child, and killing
+    # uv alone left the tool running while the TimeoutExpired said the stop had
+    # worked. Without a timeout the child stays in ASH's own session and group,
+    # as subprocess.run leaves it: a child in a session of its own has no
+    # controlling terminal (a prompt through /dev/tty, as git, ssh or sudo
+    # make one, fails), gets no SIGHUP, SIGTSTP or SIGQUIT from the terminal,
+    # and is missed by a group-wide kill from outside, and a spawn with no bound
+    # to enforce has nothing to gain for that. A group this runner makes is
+    # counted and recorded as a cancellable spawn's is (_begin_spawn and
+    # _record_spawn below), so the server's last stop and the SIGTERM handler's
+    # die-now kill reach it when ASH ends without unwinding, and a server
+    # already stopping refuses or kills it instead of missing it; _reap forgets
+    # it.
+    if timeout is not None:
+        _start_in_own_group(kwargs)
+    # Whether the child leads a group this runner can treat as its own: read
+    # from the flag as it goes to Popen, not from the timeout. On POSIX
+    # _start_in_own_group only sets a default, so a caller's explicit
+    # start_new_session=False stands and the child then shares ASH's group,
+    # timeout or not; registering its pid as a group, or signalling the group
+    # its pid names, would reach a stranger's group that reused the id. A
+    # caller's own True counts the same as this runner's. On Windows the flag
+    # is a creation flag that is always ORed in, so the timeout is the answer.
+    if os.name == "nt":
+        own_group = timeout is not None
+    else:
+        own_group = bool(kwargs.get("start_new_session"))
+    # A Ctrl-C while the child is being started is held until the process is in
+    # hand (HeldInterrupt), as _run_stoppable and _run_cancellable hold theirs:
+    # a KeyboardInterrupt raised inside Popen, after the child exists and
+    # before Popen returns it, left this runner no process to stop, and a child
+    # that leads a session of its own (the timeout case above) never had the
+    # terminal's Ctrl-C, so it ran on, orphaned. Released inside the try that
+    # stops the child, once the start is noted and recorded; leaving the
+    # block puts the previous handler back in any case and hands it a Ctrl-C
+    # that was held.
+    argv = _as_argv(popenargs[0] if popenargs else kwargs.get("args", []))
+    with HeldInterrupt() as held:
+        # A child that leads its own group is counted before it starts and
+        # recorded once it has, as _run_cancellable counts its spawn, so a
+        # server stopping in between still kills it (kill_running_groups waits
+        # for the count), and one already stopping refuses the spawn here. A
+        # child in ASH's own group is never registered, so nothing counts it.
+        if own_group:
+            _begin_spawn(argv)
         try:
-            # Inside this handling: the child started when Popen returned, so a
-            # raise while noting the start is a failure after it, and the child
-            # is stopped like any other.
-            started = _note_start(process)
-            stdout, stderr = process.communicate(input_data, timeout=timeout)
-        except subprocess.TimeoutExpired as expired:
-            _send_stop(process, process.kill)
-            # On POSIX communicate already put what it read in the exception;
-            # Windows reads the pipes in threads joined at the timeout, so what
-            # they read is collected after the kill.
-            expired.stdout, expired.stderr = _output_after_stop(process, expired)
+            process = subprocess.Popen(*popenargs, **kwargs)  # nosec B603 - callers pass list argv
+        except BaseException:
+            if own_group:
+                _end_spawn()
             raise
-        except BaseException as error:
-            if started is None:
-                started = _claim_started(process)
-            was_running = process.poll() is None
-            _send_stop(process, process.kill)
-            _note_failed_wait(started, process, was_running, error)
-            raise
-        # communicate() waited for the child, so this returns its code at once.
-        retcode = process.wait()
-        if check and retcode:
-            raise subprocess.CalledProcessError(
-                retcode, process.args, output=stdout, stderr=stderr
-            )
-    finally:
-        _reap(_argv_of(process), process)
+        started: Optional[_StartedChild] = None
+        # Whether _begin_spawn's count is still held. Cleared just before the
+        # _record_spawn call, which never raises past its decrement, so the
+        # failure handling gives the count up exactly once (see
+        # _run_cancellable's count_spent for the one window left).
+        count_held = own_group
+        # Whether the child was already stopped at the server's stop, so the
+        # failure handling raises the cancel as it is instead of stopping it a
+        # second time.
+        stopped = False
+        try:
+            try:
+                # Inside this handling: the child started when Popen returned,
+                # so a raise while noting or recording the start is a failure
+                # after it, and the child is stopped like any other.
+                started = _note_start(process)
+                if own_group:
+                    count_held = False
+                    spawn_recorded = _record_spawn(process)
+                    if not spawn_recorded:
+                        # The server is stopping: _record_spawn killed the
+                        # child, or the kernel refused that kill and the tool
+                        # may still run; the cancel says which.
+                        stopped = True
+                        raise _server_stop_cancel(spawn_recorded, argv, process)
+                # A Ctrl-C held while the child was started is raised here,
+                # after the start is noted, inside the try that stops it.
+                held.release()
+                stdout, stderr = process.communicate(input_data, timeout=timeout)
+            except subprocess.TimeoutExpired as expired:
+                # SIGKILL at once, as subprocess.run kills its child at once: to
+                # the whole group where the child leads one, to the child alone
+                # where a caller kept it in ASH's group; a refused stop is
+                # logged and recorded (_stop_child). The record says ASH stopped
+                # it, so its signal is never read as the tool's exit code.
+                if started is not None:
+                    started.stopped = True
+                stop = (
+                    _stop_tree if own_group or _leads_its_own_group(process) else _kill
+                )
+                _stop_child(_argv_of(process), process, stop, 0.0, None)
+                # On POSIX communicate already put what it read in the
+                # exception; Windows reads the pipes in threads joined at the
+                # timeout, so what they read is collected after the kill.
+                expired.stdout, expired.stderr = _output_after_stop(process, expired)
+                raise
+            except BaseException as error:
+                if count_held:
+                    # A raise before _record_spawn took the count: given up
+                    # here, or every later kill_running_groups waits the full
+                    # spawn settle on a spawn that is not settling.
+                    _end_spawn()
+                if stopped:
+                    # Killed at the server's stop, or that kill refused: the
+                    # cancel says which, and a second stop here would signal a
+                    # group that is gone or repeat the refusal.
+                    raise
+                if started is None:
+                    started = _claim_started(process)
+                was_running = process.poll() is None
+                # The whole group where the child leads one (this runner's own,
+                # or a caller's start_new_session), as _run_cancellable chooses;
+                # a child in ASH's own group is killed alone, as subprocess.run
+                # does.
+                stop = (
+                    _stop_tree if own_group or _leads_its_own_group(process) else _kill
+                )
+                _stop_child(_argv_of(process), process, stop, 0.0, None)
+                _note_failed_wait(started, process, was_running, error)
+                raise
+            # communicate() waited for the child, so this returns its code at
+            # once.
+            retcode = process.wait()
+            if own_group and _stopped_by_the_server(retcode, process):
+                # The wait ended because the server's last step
+                # (kill_running_groups) signalled this recorded child: ASH's own
+                # doing, so the run ends as the cancel a child killed by
+                # _record_spawn is promised, as _run_cancellable ends it.
+                # Returned, the code would read as the tool's own ending (a
+                # SIGKILL ASH did not send), or with ``check`` as a
+                # CalledProcessError. Only a child this runner recorded is the
+                # server's to kill; one in ASH's own group is never signalled
+                # by it.
+                raise ScanCancelled(
+                    "the server is stopping, so "
+                    f"{_shown_tool(argv, _SPAWN_VALUES.get())} was stopped"
+                )
+            if check and retcode:
+                raise subprocess.CalledProcessError(
+                    retcode, process.args, output=stdout, stderr=stderr
+                )
+        finally:
+            _reap(_argv_of(process), process)
     return subprocess.CompletedProcess(process.args, retcode, stdout, stderr)
 
 
@@ -2616,10 +3029,14 @@ def _shown_tool(args: List[Any], values: Tuple[str, ...]) -> str:
     return text_without_values(str(shown_arguments(list(args))[0]), values)
 
 
+def _as_argv(args: Any) -> List[Any]:
+    """A command as a list, for naming it in a log line or a cancel's text."""
+    return list(args) if isinstance(args, (list, tuple)) else [args]
+
+
 def _argv_of(process: subprocess.Popen) -> List[Any]:
     """The child's command as a list, for naming it in a log line."""
-    args = process.args
-    return list(args) if isinstance(args, (list, tuple)) else [args]
+    return _as_argv(process.args)
 
 
 def _send_stop(process: subprocess.Popen, stop: Callable[[], None]) -> bool:
@@ -2675,10 +3092,18 @@ def _note_stop_refused(process: subprocess.Popen) -> None:
     if started is None or started.process is not process:
         return
     try:
-        if process.poll() is not None and (
-            os.name == "nt" or not _group_exists(process.pid)
-        ):
-            return
+        # Through _group_survives: as PID 1 a group left with nothing but the
+        # tool's unreaped children is a tool that is gone, not a survivor.
+        if _has_exited(process):
+            # Reaped here, once its exit is known: an exited leader not yet
+            # reaped is a zombie, and a zombie leader alone keeps its group id
+            # alive, so the group probe below read a tool that had ended before
+            # the stop as one the stop could not end, and its exit code was lost
+            # to the refusal. The poll of an ended child takes nothing a later
+            # reader would miss: Popen keeps the code it reaps.
+            process.poll()
+            if os.name == "nt" or not _group_survives(process.pid):
+                return
     except OSError:
         return
     started.stop_refused = True
@@ -2726,6 +3151,11 @@ def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProces
                 stdout, stderr = process.communicate(input_data, timeout=timeout)
             except subprocess.TimeoutExpired as expired:
                 stdout, stderr = expired.output, expired.stderr
+                # The child was running at the timeout, and ASH stops it: the
+                # record says so, so a later reading of the record never takes
+                # ASH's own signal for the tool's exit code.
+                if started is not None:
+                    started.stopped = True
                 # A SIGTERM the kernel refused has no grace to wait out.
                 if _send_stop(process, process.terminate):
                     try:
@@ -2741,6 +3171,13 @@ def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProces
                         # timeout would stop being one.
                         if _send_stop(process, process.kill):
                             _wait_after_kill(process)
+                    except BaseException:
+                        # A Ctrl-C during the grace: the escalation still
+                        # happens, so the child is not left SIGTERMed only, and
+                        # the interrupt goes on as it would have.
+                        if _send_stop(process, process.kill):
+                            _wait_after_kill(process)
+                        raise
                 expired.stdout, expired.stderr = stdout, stderr
                 raise
             except BaseException as error:
@@ -2773,7 +3210,7 @@ CANCEL_POLL_SECONDS = 0.25
 PROMPT_STOP_GRACE_SECONDS = 0.5
 
 
-def _stop_grace(cancel_event: threading.Event) -> float:
+def _stop_grace(cancel_event: Optional[threading.Event]) -> float:
     """The grace a child of a cancelled scan gets after SIGTERM before SIGKILL."""
     if getattr(cancel_event, "stop_promptly", False):
         return min(PROMPT_STOP_GRACE_SECONDS, SANDBOX_STOP_GRACE_SECONDS)
@@ -2798,21 +3235,31 @@ def _wait_out_grace(
     when it is set after, because the wait blocks on that event rather than
     sleeping, so a SIGTERM that reaches the server in the middle of a stop a cancel
     began is seen at once.
+
+    The group is read through _group_survives: when this process is PID 1, the
+    exited children of a stopped tool fall to it as zombies nobody else reaps,
+    and a group made only of those kept the wait going for the whole grace.
     """
     deadline = time.monotonic() + grace
     shortened = prompt is None
-    while process.poll() is None or (pgid is not None and _signal_group(pgid, 0)):
-        now = time.monotonic()
-        if not shortened and prompt is not None and prompt.is_set():
-            shortened = True
-            deadline = min(deadline, now + PROMPT_STOP_GRACE_SECONDS)
-        if now >= deadline:
-            return
-        step = min(_GRACE_POLL_SECONDS, deadline - now)
-        if shortened or prompt is None:
-            time.sleep(step)
-        else:
-            prompt.wait(step)
+    # Inside stop_grace_in_progress: a first Ctrl-C during this wait latches the
+    # registered scans' cancel and does not interrupt the wait, so the SIGKILL
+    # that follows the grace is still sent (a SIGTERM-ignoring tool would
+    # otherwise outlive the interrupted stop). The context's own docstring names
+    # this wait as the one it exists for; it had no caller until now.
+    with stop_grace_in_progress():
+        while process.poll() is None or (pgid is not None and _group_survives(pgid)):
+            now = time.monotonic()
+            if not shortened and prompt is not None and prompt.is_set():
+                shortened = True
+                deadline = min(deadline, now + PROMPT_STOP_GRACE_SECONDS)
+            if now >= deadline:
+                return
+            step = min(_GRACE_POLL_SECONDS, deadline - now)
+            if shortened or prompt is None:
+                time.sleep(step)
+            else:
+                prompt.wait(step)
 
 
 #: How long a cancellable spawn waits, once the child has been stopped or has
@@ -2845,9 +3292,35 @@ def _stop(
     as for _wait_out_grace.
     """
     process.terminate()
-    _wait_out_grace(
-        process, None, SANDBOX_STOP_GRACE_SECONDS if grace is None else grace, prompt
-    )
+    try:
+        _wait_out_grace(
+            process,
+            None,
+            SANDBOX_STOP_GRACE_SECONDS if grace is None else grace,
+            prompt,
+        )
+    except BaseException:
+        # A Ctrl-C during the grace: the SIGKILL still follows, so the child is
+        # not left SIGTERMed only while the interrupt goes on. A kill the kernel
+        # refuses (EPERM on a child that switched user) must not replace the
+        # interrupt being raised with an OSError the caller reads as a failure;
+        # it is what _stop_child's refusal path does for the ordinary stop: the
+        # spawn's record is marked (the response is graded by the refused stop,
+        # not a later poll) and the refusal is logged at WARNING.
+        try:
+            if process.poll() is None:
+                process.kill()
+        except OSError as error:
+            _note_stop_refused(process)
+            ASH_LOGGER.warning(
+                _logged_without(
+                    f"Could not stop {_argv_of(process)[0]} (pid {process.pid}) "
+                    f"after an interrupt: {error}",
+                    _SPAWN_VALUES.get(),
+                ),
+                extra=NO_MARKUP,
+            )
+        raise
     if process.poll() is None:
         process.kill()
         _wait_after_kill(process)
@@ -2873,6 +3346,25 @@ def _start_in_own_group(kwargs: Dict[str, Any]) -> None:
         kwargs.setdefault("start_new_session", True)
 
 
+def _plan_popen_kwargs(plan: "Optional[SpawnPlan]") -> Dict[str, Any]:
+    """The Popen keyword arguments a sandbox plan asks for beyond argv and env.
+
+    ``start_new_session=True`` when the plan says so (SpawnPlan.start_new_session):
+    the child leads a session of its own where the wrapper does not call setsid
+    itself, so the stop paths' group signals reach what the tool starts. Empty for
+    every other plan and for no plan, so such a spawn is passed exactly what it
+    was. Where the runner sets the flag itself (_start_in_own_group), the plan's
+    True is the same value. Read with a default, as the other reads of a plan
+    here go: a plan that does not carry the field (one built before it existed,
+    or a stand-in that only runs a cleanup) asks for nothing, instead of the
+    spawn failing before the child exists and the run being reported as a tool
+    that never started.
+    """
+    if plan is not None and getattr(plan, "start_new_session", False):
+        return {"start_new_session": True}
+    return {}
+
+
 def _signal_group(pgid: int, signum: int) -> bool:
     """Send signum to the process group; False when the group has no process left."""
     try:
@@ -2888,7 +3380,12 @@ def _windows_system_directory() -> Optional[str]:
     None when neither gives an absolute path. Read from the OS rather than from the
     search path, which on Windows starts in the current directory.
     """
-    import ctypes
+    try:
+        import ctypes
+    except ImportError:
+        # A Python built without _ctypes: the environment's answer stands alone,
+        # where the import used to raise past the stop and leave the child alive.
+        ctypes = None
 
     windll = getattr(ctypes, "windll", None)
     if windll is not None:
@@ -2956,7 +3453,27 @@ def _stop_tree(
         _wait_after_kill(process)
         return
     pgid = process.pid
-    if not _group_exists(pgid):
+    # The exit status already read, never poll(): a poll here would reap a
+    # leader whose exit was not yet observed, and the group its pid names
+    # would then read as a stranger's below while its orphans still run. Read
+    # with a default, as the other reads of a child's state here go through
+    # poll and wait: a stand-in child need not carry the attribute.
+    if getattr(process, "returncode", None) is not None and _pid_names_a_live_process(
+        pgid
+    ):
+        # The child was reaped, and a live process holds its pid. POSIX keeps a
+        # pid from reuse only while it names a live group, so the child's own
+        # group (its orphans) was gone before that process got the id, and the
+        # group the id names now is a stranger's. An own_group spawn reaches
+        # here with the child reaped when the wait ended after communicate
+        # returned; signalling the group then would have hit whoever took the
+        # id next. Nothing of ours is left to stop.
+        return
+    # Every group read here goes through _group_survives: as PID 1 this process
+    # holds the exited members of the group as zombies nobody else reaps, and a
+    # group left with nothing but those is a tool that is gone, not one to
+    # signal, wait out or record as a survivor.
+    if not _group_survives(pgid):
         if process.poll() is None:
             _stop(process, grace, prompt)
         return
@@ -2974,8 +3491,36 @@ def _stop_tree(
             if process.poll() is not None:
                 return
         else:
-            _wait_out_grace(process, pgid, grace, prompt)
-            if process.poll() is not None and not _group_exists(pgid):
+            try:
+                _wait_out_grace(process, pgid, grace, prompt)
+            except BaseException:
+                # A Ctrl-C during the grace: the group is still SIGKILLed, so
+                # the tool is not left SIGTERMed only while the interrupt goes
+                # on. The wait polls the leader on every pass, so the leader
+                # can be reaped and its group emptied during a sleep, and the
+                # id is then the kernel's to reuse (the case the guard below
+                # the wait exists for): the group is read before the kill, and
+                # a group gone with its leader reaped is not signalled. A
+                # refused kill (EPERM on a member the server may not signal) is
+                # marked and logged, not raised: the interrupt is what the
+                # caller handles, not an OSError in its place, and the record
+                # says the stop was refused, as _stop_child says for the
+                # ordinary stop.
+                if process.returncode is None or _group_survives(pgid):
+                    try:
+                        _signal_group(pgid, signal.SIGKILL)
+                    except OSError as error:
+                        _note_stop_refused(process)
+                        ASH_LOGGER.warning(
+                            _logged_without(
+                                f"Could not stop {_argv_of(process)[0]} (process "
+                                f"group {pgid}) after an interrupt: {error}",
+                                _SPAWN_VALUES.get(),
+                            ),
+                            extra=NO_MARKUP,
+                        )
+                raise
+            if process.poll() is not None and not _group_survives(pgid):
                 # The wait reaps the leader and can end with the group
                 # observed empty; the kernel has then released the id, and
                 # a new process group can hold it, so the final SIGKILL
@@ -2992,7 +3537,7 @@ def _stop_tree(
         # back is not racing a process that is still writing. A zombie whose new
         # parent has not reaped it yet still counts, hence the bound.
         settled = time.monotonic() + _KILLED_GROUP_SETTLE_SECONDS
-        while time.monotonic() < settled and _signal_group(pgid, 0):
+        while time.monotonic() < settled and _group_survives(pgid):
             time.sleep(0.02)
     _wait_after_kill(process)
     # The kernel reports a group kill as a success when it signalled ANY member,
@@ -3002,11 +3547,14 @@ def _stop_tree(
     # a group that still exists after one more settle is a survivor: recorded as
     # a stop that failed, the way a refused stop records one, so the run never
     # reads as a plain timeout while part of the tool may still be writing.
-    if _group_exists(pgid):
+    # Read through _group_survives: when this process is its container's init,
+    # the killed descendants fall to it as zombies that nobody else reaps, and
+    # a group made only of those is a tool that is gone, not one that survived.
+    if _group_survives(pgid):
         settled = time.monotonic() + _KILLED_GROUP_SETTLE_SECONDS
-        while time.monotonic() < settled and _group_exists(pgid):
+        while time.monotonic() < settled and _group_survives(pgid):
             time.sleep(0.02)
-        if _group_exists(pgid):
+        if _group_survives(pgid):
             _note_stop_refused(process)
 
 
@@ -3028,6 +3576,15 @@ _STOPPING = False
 #: _RUNNING_GROUPS_LOCK; kill_running_groups waits for it to reach 0.
 _SPAWNS_STARTING = 0
 
+#: The pids the server's stop signalled (_kill_group, through kill_running_groups
+#: or _record_spawn), for _stopped_by_the_server: a child in this set that then
+#: exited was ended by the server whatever code it died with, since a wrapper
+#: turns the SIGTERM a groupless child is sent first into the end of its own
+#: tree and exits with a code of its own. The stop is one-way, so the set only
+#: grows, by at most the number of recorded groups; a pid is never reused by a
+#: spawn the server admits after its stop began (_begin_spawn refuses them).
+_SERVER_KILLED: set = set()
+
 #: How long kill_running_groups waits for the spawns already starting to record
 #: their child. Popen returns in milliseconds; this allows for a busy host. A
 #: spawn still starting after it kills its child itself once it records it.
@@ -3044,16 +3601,36 @@ _LOCK_WAIT_SECONDS = 1.0
 
 
 def _forget_exited_groups() -> None:
-    """Drop the children that have exited. Called with _RUNNING_GROUPS_LOCK held.
+    """Drop the children whose process group is empty. Called with
+    _RUNNING_GROUPS_LOCK held.
 
-    poll() reaps them; once reaped a pid may be reused, so a child must not stay
-    recorded past that point -- in the SIGTERM handler's group mirror too, or
-    the die-now kill would aim at whatever holds the group id next.
+    poll() reaps the child; once reaped a pid may be reused, so a child must not
+    stay recorded past that point -- in the SIGTERM handler's group mirror too,
+    or the die-now kill would aim at whatever holds the group id next. A reaped
+    leader whose group still has members is kept: a sandbox wrapper exits while
+    the tool it started runs on, and the group id is the only handle a later
+    kill has on those processes. The kernel keeps a group id in use while any
+    member holds it, so the entry goes when the group does. A group this process
+    may no longer signal (EPERM: a member now runs as another user) still exists,
+    so its entry is kept rather than letting the probe raise out of a spawn. When
+    this process is PID 1 the orphans it inherited are reaped first, so a group
+    left with nothing but zombies reads as gone. A reaped leader's pid that some
+    live process holds again has been reused: the group that answers may be a
+    stranger's, so the entry is dropped, or the die-now kill would aim at
+    whatever holds the group id next. No process holding the pid means the
+    surviving group can only be the leader's own orphans.
     """
     for pid, process in list(_RUNNING_GROUPS.items()):
-        if process.poll() is not None:
-            del _RUNNING_GROUPS[pid]
-            discard_tool_group(pid)
+        if process.poll() is None:
+            continue
+        if (
+            os.name != "nt"
+            and not _pid_names_a_live_process(pid)
+            and _group_survives(pid)
+        ):
+            continue
+        del _RUNNING_GROUPS[pid]
+        discard_tool_group(pid)
 
 
 def _register_group(process: subprocess.Popen) -> None:
@@ -3160,6 +3737,36 @@ def _record_spawn(process: subprocess.Popen) -> _SpawnRecord:
     return _SpawnRecord.KILLED
 
 
+def _server_stop_cancel(
+    record: _SpawnRecord, args: List[Any], process: subprocess.Popen
+) -> ScanCancelled:
+    """The cancel a spawn ends in when _record_spawn found the server stopping.
+
+    For KILLED, _record_spawn killed the child, and the spawn ends as the
+    cancel a child killed at the server's stop is promised. For KILL_REFUSED
+    the kernel refused that kill: the tool may still run, so the cancel says
+    so, and carries the tool and pid as data the way the stop path's cancel
+    does -- the exit line names survivors from the field, never from the text.
+    The record also goes on the scan's event chain, so a later
+    raise_if_cancelled names it too. The tool through _shown_tool, record and
+    text both: argv0 can hold the caller's environment value, and
+    shown_arguments alone passes argv0 through. Shared by the runners that
+    take the handshake (_run_cancellable, and _run_plain for a child that
+    leads its own group), so the two texts have one home.
+    """
+    tool = _shown_tool(args, _SPAWN_VALUES.get())
+    if record is _SpawnRecord.KILL_REFUSED:
+        event = current_cancel_event()
+        if isinstance(event, CancelEvent):
+            event.note_could_not_stop(tool, process.pid)
+        return ScanCancelled(
+            "the server is stopping; "
+            + could_not_stop_sentence(f"{tool} (pid {process.pid})"),
+            could_not_stop=((tool, process.pid),),
+        )
+    return ScanCancelled(f"the server is stopping, so {tool} was stopped")
+
+
 def _server_stopping() -> bool:
     """Whether the server's last stop (kill_running_groups) has begun."""
     with _RUNNING_GROUPS_LOCK:
@@ -3170,17 +3777,45 @@ def _kill_group(process: subprocess.Popen) -> bool:
     """SIGKILL the child's process group, or the child when it leads none.
 
     True when something was signalled. On Windows, the child alone.
+
+    A child already reaped is signalled only while its pid still names its own
+    group: reaped, the pid can be another process's, and the group id another
+    group's. The kernel keeps a pid from reuse while it names a live group, so
+    a reaped leader whose group survives (a sandbox wrapper's) is still ours;
+    a reaped leader whose pid names a live PROCESS is a stranger's, and
+    nothing of ours is left to kill. A child that leads no group (a sandbox
+    wrapper before its setsid, a Landlock wrapper, whose scanner it forked into
+    a session of its own) is sent SIGTERM first, which such a wrapper turns
+    into the end of its tree, and SIGKILL after a short settle; killed
+    outright, the wrapper died and the scanner it started ran on. Every pid
+    signalled here is recorded in _SERVER_KILLED, so _stopped_by_the_server
+    reads the child's ending as the server's whatever code the wrapper exits
+    with.
     """
     if os.name == "nt":
         if process.poll() is None:
             process.kill()
+            _SERVER_KILLED.add(process.pid)
             return True
         return False
-    if _signal_group(process.pid, signal.SIGKILL):
-        return True
+    if process.returncode is not None:
+        if _pid_names_a_live_process(process.pid):
+            return False
+        # A reaped leader's group of nothing but zombies (this process as PID 1)
+        # is gone, not a group to signal: _group_survives reaps them first.
+        if not _group_survives(process.pid):
+            return False
+    if _leads_its_own_group(process) or process.returncode is not None:
+        if _signal_group(process.pid, signal.SIGKILL):
+            _SERVER_KILLED.add(process.pid)
+            return True
     if process.poll() is None:
-        # A sandbox wrapper that has not called setsid yet leads no group.
-        process.kill()
+        process.terminate()
+        try:
+            process.wait(timeout=_KILLED_GROUP_SETTLE_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        _SERVER_KILLED.add(process.pid)
         return True
     return False
 
@@ -3208,8 +3843,10 @@ def kill_running_groups() -> int:
     signal, if the kernel lets this signal through. Returns how many groups were
     signalled. POSIX only; on Windows nothing is recorded.
 
-    Only children not yet reaped are signalled: an unreaped child's pid is not
-    reused, so its group id names its group and no other.
+    A group is signalled while it is still recorded: an unreaped child's pid is
+    not reused, so its group id names its group and no other, and a reaped
+    leader's group is recorded only while no process holds its pid again, so the
+    id can only name the leader's own orphans (see _forget_exited_groups).
 
     A spawn that starts its child while this runs is not missed. _STOPPING is set
     first, so a spawn that has not started its child yet does not start it, and
@@ -3234,6 +3871,9 @@ def kill_running_groups() -> int:
     signalled = []
     for process in processes:
         try:
+            # _kill_group reads whether the child was reaped meanwhile (by
+            # another thread's sweep, or this lock-timeout fallback skipping
+            # the sweep) and signals no group id a reaped pid no longer names.
             if _kill_group(process):
                 signalled.append(process.pid)
         except OSError as error:
@@ -3242,7 +3882,9 @@ def kill_running_groups() -> int:
                 extra=NO_MARKUP,
             )
     settled = time.monotonic() + _KILLED_GROUP_SETTLE_SECONDS
-    while time.monotonic() < settled and any(_group_exists(pgid) for pgid in signalled):
+    while time.monotonic() < settled and any(
+        _group_survives(pgid) for pgid in signalled
+    ):
         time.sleep(0.02)
     return len(signalled)
 
@@ -3252,6 +3894,125 @@ def _group_exists(pgid: int) -> bool:
         return _signal_group(pgid, 0)
     except OSError:
         return True
+
+
+def _pid_names_a_live_process(pid: int) -> bool:
+    """Whether some process, zombie included, holds *pid* now. POSIX only.
+
+    ``kill(pid, 0)`` fails with ESRCH only when no process has the pid; a
+    refusal (EPERM) means one does, another user's. For a child this process
+    has reaped, True means the pid has been reused.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _this_process_is_init() -> bool:
+    """True when this process is PID 1: the reaper of every orphan on the host.
+
+    ASH is PID 1 when it is the entrypoint of its own container image.
+    """
+    return os.name != "nt" and os.getpid() == 1
+
+
+def _zombie_orphans_of_group(pgid: int) -> List[int]:
+    """The exited, unreaped children of this process in group *pgid*, from /proc.
+
+    Read from each ``/proc/<pid>/stat``: the state letter, the parent and the
+    group come right after the command name, which can hold spaces and
+    parentheses, so the fields are taken from after its closing parenthesis.
+    Empty where there is no /proc to read.
+
+    The leader itself, the child whose pid is the group id, is never listed: it
+    is a Popen's child, and a waitpid here would take its exit status from under
+    that Popen, whose next poll would then read ECHILD as a clean exit (code 0)
+    for a tool that was killed. Only the orphans the group's members left to
+    this process are reaped here.
+    """
+    me = os.getpid()
+    zombies: List[int] = []
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return zombies
+    for entry in entries:
+        if not entry.isdigit() or int(entry) == pgid:
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", "rb") as stat:
+                fields = stat.read().rpartition(b")")[2].split()
+        except OSError:
+            continue
+        if len(fields) < 3 or fields[0] != b"Z":
+            continue
+        try:
+            if int(fields[1]) == me and int(fields[2]) == pgid:
+                zombies.append(int(entry))
+        except ValueError:
+            continue
+    return zombies
+
+
+def _group_survives(pgid: int) -> bool:
+    """_group_exists, once the orphans this process inherited as init are reaped.
+
+    ``killpg(pgid, 0)`` succeeds while any member exists, a zombie included. A
+    killed tool's children are re-parented to PID 1, and when that is ASH (its
+    own container's init) nothing reaps them, so the group of a tool that is
+    gone kept existing and every stop of a tool that had children was recorded
+    as one ASH could not stop. Only this process's own exited children in the
+    group are waited for, each by its pid, and never the leader (its pid is the
+    group id, and its status is its Popen's to read), so no spawn's exit status
+    is taken from under its Popen.
+    """
+    if _this_process_is_init():
+        for pid in _zombie_orphans_of_group(pgid):
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+    return _group_exists(pgid)
+
+
+#: How often _wait_for_group_before_cleanup reads the group again.
+_GROUP_WAIT_POLL_SECONDS = 0.05
+
+
+def _wait_for_group_before_cleanup(process: Any) -> None:
+    """Wait, bounded, for the child's process group to end before a plan's cleanup.
+
+    A sandbox plan's cleanup starts with ``sweep_writable``, which removes what a
+    scanner left under its writable roots. A wrapper that execs the tool with no
+    reaper (the sandbox-exec setsid wrapper) can leave a grandchild running after
+    the child itself has exited, and the sweep then runs while that grandchild
+    still writes. When the child was started as the leader of its own group, the
+    group is read with the file's own :func:`_group_survives` every
+    ``_GROUP_WAIT_POLL_SECONDS`` until it is gone or
+    ``_KILLED_GROUP_SETTLE_SECONDS`` has passed. Nothing is signalled: a group
+    still there at the bound is logged at DEBUG and the cleanup runs as before.
+    A child that was not a group leader has no group under its pid, so the first
+    read returns False and nothing waits; ``None`` (no child started) and
+    Windows, where there are no process groups, return at once.
+    """
+    if process is None or os.name == "nt":
+        return
+    pid = getattr(process, "pid", None)
+    if not isinstance(pid, int) or pid <= 0:
+        return
+    deadline = time.monotonic() + _KILLED_GROUP_SETTLE_SECONDS
+    while _group_survives(pid):
+        if time.monotonic() >= deadline:
+            ASH_LOGGER.debug(
+                f"Process group {pid} still has a member after "
+                f"{_KILLED_GROUP_SETTLE_SECONDS}s; the sandbox cleanup runs now"
+            )
+            return
+        time.sleep(_GROUP_WAIT_POLL_SECONDS)
 
 
 def _kill(
@@ -3464,32 +4225,13 @@ def _run_cancellable(
                 started = _note_start(process)
                 count_spent = True
                 spawn_recorded = _record_spawn(process)
-                if spawn_recorded is _SpawnRecord.KILL_REFUSED:
-                    # The server is stopping, and the kernel refused
-                    # _record_spawn's kill: the tool may still run, so the
-                    # cancel says so, and carries the tool and pid as data the
-                    # way the stop path's cancel does (below) -- the exit line
-                    # names survivors from the field, never from the text. The
-                    # tool through _shown_tool, record and text both: argv0 can
-                    # hold the caller's environment value, and shown_arguments
-                    # alone passes argv0 through.
-                    stopped = True
-                    tool = _shown_tool(args, _SPAWN_VALUES.get())
-                    event = current_cancel_event()
-                    if isinstance(event, CancelEvent):
-                        event.note_could_not_stop(tool, process.pid)
-                    raise ScanCancelled(
-                        "the server is stopping; "
-                        + could_not_stop_sentence(f"{tool} (pid {process.pid})"),
-                        could_not_stop=((tool, process.pid),),
-                    )
                 if not spawn_recorded:
-                    # The server is stopping, and _record_spawn killed the child.
+                    # The server is stopping: _record_spawn killed the child,
+                    # or the kernel refused that kill and the tool may still
+                    # run. The cancel says which (_server_stop_cancel), and
+                    # ``stopped`` keeps the handler below from a second stop.
                     stopped = True
-                    raise ScanCancelled(
-                        "the server is stopping, so "
-                        f"{_shown_tool(args, _SPAWN_VALUES.get())} was stopped"
-                    )
+                    raise _server_stop_cancel(spawn_recorded, args, process)
                 # A Ctrl-C held while the child was started is raised here,
                 # after the child is noted and recorded, inside the try that
                 # stops it, as one that came during the wait is. The server-stop
@@ -3515,8 +4257,13 @@ def _run_cancellable(
                         if deadline is not None and time.monotonic() >= deadline:
                             # Marked before the stop, not after: a stop that fails
                             # must not be tried again below with the full cancel
-                            # grace.
+                            # grace. The record says so too: the child was
+                            # running at the timeout and ASH stops it, so a
+                            # later reading of the record never takes ASH's own
+                            # signal for the tool's exit code.
                             stopped = True
+                            if started is not None:
+                                started.stopped = True
                             if own_group or _leads_its_own_group(process):
                                 grace = (
                                     SANDBOX_STOP_GRACE_SECONDS
@@ -3591,16 +4338,13 @@ def _run_cancellable(
                             + ((tool, process.pid),),
                         ) from error
                 raise
-            if (
-                isinstance(process.returncode, int)
-                and process.returncode < 0
-                and _server_stopping()
-            ):
-                # The wait ended because a signal killed the child while the
-                # server's last stop (kill_running_groups) ran: ASH's own stop,
+            if _stopped_by_the_server(process.returncode, process):
+                # The wait ended because the server's last stop
+                # (kill_running_groups) signalled the child, or a signal of
+                # the stop's kind killed it while the stop ran: ASH's own stop,
                 # so the scan ends as a cancel, as a child killed by
-                # _record_spawn does. Returned normally, the -N would read as a
-                # signal ASH did not send.
+                # _record_spawn does. Returned normally, the code would read as
+                # the tool's own ending.
                 raise ScanCancelled(
                     "the server is stopping, so "
                     f"{_shown_tool(args, _SPAWN_VALUES.get())} was stopped"
@@ -3611,6 +4355,38 @@ def _run_cancellable(
     if check:
         result.check_returncode()
     return result
+
+
+#: The signals the server's last stop sends (kill_running_groups' SIGKILL, and
+#: the SIGTERM _kill_group sends a groupless child first), as negative codes.
+_SERVER_STOP_RETURNCODES = frozenset(
+    -number
+    for number in (getattr(signal, "SIGKILL", None), getattr(signal, "SIGTERM", None))
+    if number is not None
+)
+
+
+def _stopped_by_the_server(
+    returncode: Any, process: Optional[subprocess.Popen] = None
+) -> bool:
+    """Whether the child's ending is the server's own stop, and nothing else.
+
+    A child the server's stop signalled (``_kill_group``, recorded in
+    _SERVER_KILLED) was ended by it whatever code it died with: a wrapper that
+    turns the SIGTERM a groupless child is sent first into the end of its tree
+    exits with a code of its own (143, or the scanner's) within the settle, and
+    read by the signal number alone that ending was a normal run returned while
+    the server stopped. For a child the stop did not signal, or when no process
+    is given, only a SIGKILL or SIGTERM death while the server stops is ASH's: a
+    tool that died of a SIGSEGV, or that the operator killed with another
+    signal, in those same seconds is not a stop ASH performed, and reporting it
+    as one hid the tool's own ending.
+    """
+    if not _server_stopping():
+        return False
+    if process is not None and process.pid in _SERVER_KILLED:
+        return True
+    return is_exit_code(returncode) and returncode in _SERVER_STOP_RETURNCODES
 
 
 def _runner(sandboxed: bool) -> Any:
@@ -3683,7 +4459,9 @@ def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
     ``stdin=sys.stdin`` or ``stdin=0``.
     """
     if args and not kwargs.get("shell", False):
-        args = list(args)
+        # A string is the program's name, as subprocess.run reads it without a
+        # shell; list() turned it into its characters.
+        args = _argv_list(args)
         refused = _resolve_for_spawn(args, kwargs.get("cwd"), kwargs.get("env"))
         if refused is not None:
             raise refused
@@ -3699,11 +4477,13 @@ def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
                 _runner(sandboxed=False), args, kwargs, started
             )
         kwargs["env"] = _spawn_env(plan.env)
+        kwargs.update(_plan_popen_kwargs(plan))
         try:
             return _run_recording_the_start(
                 _runner(sandboxed=True), plan.argv, kwargs, started
             )
         finally:
+            _wait_for_group_before_cleanup(started.process)
             plan.run_cleanup()
     except BaseException as error:
         try:
@@ -3780,7 +4560,9 @@ def run_ended_with_the_server(
     raise_if_cancelled()
     cancel_event = current_cancel_event()
     if args and not kwargs.get("shell", False):
-        args = list(args)
+        # A copy, with a string read as the program's name (_argv_list): list()
+        # of a string made it its characters, the bug the other helpers fixed.
+        args = _argv_list(args)
         refused = _resolve_for_spawn(args, kwargs.get("cwd"), kwargs.get("env"))
         if refused is not None:
             raise refused
@@ -3793,6 +4575,45 @@ def run_ended_with_the_server(
         own_group=True,
         **kwargs,
     )
+
+
+def _argv_list(args: Any) -> Any:
+    """``args`` as a list of its own, for the program to be resolved in.
+
+    A list or a tuple is copied, so the caller's sequence is left as it was (and
+    a tuple, which cannot take the resolved program, no longer raises TypeError
+    outside the spawn's handling). A string without a shell is the program's
+    name, as subprocess reads it, so it becomes a one-element list; ``list()``
+    turned it into its characters and ran the wrong command. Anything else is
+    passed on for subprocess to accept or refuse.
+    """
+    if isinstance(args, (str, bytes, os.PathLike)):
+        return [args]
+    if isinstance(args, (list, tuple)):
+        return list(args)
+    return args
+
+
+def _resolved_or_refused(
+    args: Any,
+    cwd: "str | os.PathLike[str] | None",
+    env: Optional[Dict[str, str]],
+    shell: bool,
+) -> Optional[BaseException]:
+    """``_resolve_for_spawn`` as the spawn helpers call it: the refusal to raise
+    inside the spawn's own try, or None.
+
+    An exception the resolution itself raises (``os.getcwd`` on a deleted
+    working directory, a lookup that fails) is returned the same way, so the
+    helper reports a command that could not start instead of raising past the
+    result it promises.
+    """
+    if not args or shell:
+        return None
+    try:
+        return _resolve_for_spawn(args, cwd, env)
+    except Exception as error:  # noqa: BLE001 -- reported as the spawn's failure
+        return error
 
 
 #: The option whose values a shown command line writes as their keys.
@@ -3917,12 +4738,14 @@ def run_command(
         subprocess.TimeoutExpired: If the command times out
         PostRunError: If check=True and ASH failed after the command started
     """
-    # Copy args to avoid mutating the caller's list
-    args = list(args)
+    # Copy args to avoid mutating the caller's list. A string without a shell is
+    # the program's name (_argv_list); with a shell it goes to the shell as it is.
+    args = _argv_list(args) if not shell or not isinstance(args, str) else args
 
-    # Resolve the full path to the executable if possible. A refusal is raised in
-    # the try below, so it is reported as a command that could not start.
-    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
+    # Resolve the full path to the executable if possible. A refusal, or a
+    # failure of the resolution itself, is raised in the try below, so it is
+    # reported as a command that could not start.
+    refused = _resolved_or_refused(args, cwd, env, shell)
 
     # Log the command being executed
     # str() each argument: a Path or an int in the list made the join raise
@@ -3945,8 +4768,12 @@ def run_command(
         extra=NO_MARKUP,
     )
 
-    # Set encoding for Windows compatibility
-    if encoding is None and platform.system().lower() == "windows":
+    # Set encoding for Windows compatibility. In bytes mode (text=False) no
+    # encoding and no error handler are passed: either one switches Popen to
+    # text mode, so a caller that asked for bytes got str.
+    if not text:
+        encoding, errors = None, None
+    elif encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
     # A cancelled scan starts no more children. Outside the try below, whose
@@ -3982,6 +4809,7 @@ def run_command(
                 timeout=timeout,
                 encoding=encoding,
                 errors=errors,
+                **_plan_popen_kwargs(sandbox_plan),
             )
         ran = result
 
@@ -4006,11 +4834,19 @@ def run_command(
             )
             return signaled
 
-        # Log command result
+        # Log command result. A caller that asked for its command to be logged
+        # below INFO (a sweep's rm of a container that may be gone) gets the
+        # failure line at that level too; every other caller keeps WARNING.
         if result.returncode == 0:
             ASH_LOGGER.debug(f"Command succeeded with return code {result.returncode}")
         else:
-            ASH_LOGGER.warning(f"Command failed with return code {result.returncode}")
+            failure_line = f"Command failed with return code {result.returncode}"
+            if log_level < logging.INFO:
+                ASH_LOGGER.log(log_level, failure_line)
+            else:
+                # Through ``warning`` itself, the method a caller that watches
+                # this line patches or counts, never through ``log``.
+                ASH_LOGGER.warning(failure_line)
             # Built only when the record would be EMITTED: .debug() is gated
             # by the logger's level (isEnabledFor), and the record then has
             # to reach a handler whose level admits it (utils.log.delivers,
@@ -4067,13 +4903,20 @@ def run_command(
         ASH_LOGGER.error(_logged_without(timed_out, values), extra=NO_MARKUP)
         if check:
             raise
+        # TimeoutExpired carries what communicate had read undecoded, text mode
+        # or not, so a tool that wrote before the timeout handed a text-mode
+        # caller bytes; decoded as the finished run's streams would have been.
+        partial_stdout, partial_stderr = e.stdout, e.stderr
+        if text:
+            partial_stdout = _late_decoded(partial_stdout, encoding, errors)
+            partial_stderr = _late_decoded(partial_stderr, encoding, errors)
         # -1 rather than TIMEOUT_RETURNCODE because callers and tests already pin
         # it; the type carries the timeout so nothing has to infer it from the code.
         timed_out_result = TimedOutProcess(
             args=e.cmd,
             returncode=-1 if not_stopped is None else None,
-            stdout=e.stdout or "",
-            stderr=e.stderr
+            stdout=partial_stdout or "",
+            stderr=partial_stderr
             or f"Command timed out after {_timeout_token(e.timeout, values)}",
             error=timed_out,
         )
@@ -4182,15 +5025,24 @@ def _write_stream_log(
     preference: str,
     text: str,
 ) -> None:
-    """Write one captured stream to ``<results_dir>/<class_name>.<stream>.log``."""
+    """Write one captured stream to ``<results_dir>/<class_name>.<stream>.log``.
+
+    An empty stream truncates the log an earlier run left at the name, and
+    creates none: the file read back as this run's output used to be the
+    previous command's in the same results directory.
+    """
     if results_dir is None or preference not in ["write", "both"]:
         return
     from automated_security_helper.utils.sandbox.scope import active_scope
 
     results_dir_path = Path(results_dir)
-    results_dir_path.mkdir(parents=True, exist_ok=True)
     filename = f"{class_name}.{stream_name}.log" if class_name else f"{stream_name}.log"
     path = results_dir_path.joinpath(filename)
+    if not text:
+        if path.is_symlink() or not path.is_file():
+            return
+    else:
+        results_dir_path.mkdir(parents=True, exist_ok=True)
     # Not a plain open(): a sandboxed scanner can leave a symlink at this name, and
     # ASH is not sandboxed. See utils/sandbox/fs_guard.py. Under a sandbox the
     # scope's results directory is named as the root: the spawn released its own
@@ -4216,7 +5068,9 @@ def _write_stream_logs(
 ) -> List[str]:
     """Write each captured stream to its log, after the sandbox's cleanup.
 
-    ``streams`` is (name, preference, text) triples; empty texts are skipped.
+    ``streams`` is (name, preference, text) triples; an empty or absent text is
+    written as an empty log, so a log a previous run left at the name is
+    truncated rather than read back as this run's (the comment at ``todo``).
     The sandbox's cleanup runs first because its FIRST step is sweep_writable
     over the policy's writable dirs (inserted by scope.prepare_spawn), which
     removes a link a scanner left at a log's name before ASH writes there;
@@ -4239,7 +5093,14 @@ def _write_stream_logs(
     line.
     """
     clauses: List[str] = []
-    todo = [(name, pref, text) for name, pref, text in streams if text]
+    # An empty stream is still written: _write_stream_log truncates the log a
+    # previous run left at the name (and creates none), so the stale text is
+    # not read back as this run's.
+    todo = [
+        (name, pref, text or "")
+        for name, pref, text in streams
+        if pref in ("write", "both")
+    ]
     if todo and sandbox_plan is not None:
         sandbox_plan.run_cleanup()
     for stream_name, preference, text in todo:
@@ -4332,12 +5193,14 @@ def run_command_with_output_handling(
     """
     # The resolved program replaces the first element, so it is resolved in a copy:
     # the caller's list is left as it was, as in spawn_run, and a list passed again
-    # is resolved again from the name.
-    if isinstance(command, list):
-        command = list(command)
-    # Resolve the full path to the executable if possible. A refusal is raised in
-    # the spawn's try below, so it is reported as a command that could not start.
-    refused = _resolve_for_spawn(command, cwd, env) if command and not shell else None
+    # is resolved again from the name. A tuple is copied too, and a string
+    # without a shell is the program's name (_argv_list).
+    if not shell or not isinstance(command, str):
+        command = _argv_list(command)
+    # Resolve the full path to the executable if possible. A refusal, or a
+    # failure of the resolution itself, is raised in the spawn's try below, so
+    # it is reported as a command that could not start.
+    refused = _resolved_or_refused(command, cwd, env, shell)
 
     # Log the command being executed
     # Shown as in run_command: the join ran before the spawn's try.
@@ -4398,6 +5261,7 @@ def run_command_with_output_handling(
                     encoding=encoding,
                     errors=errors,
                     timeout=timeout,
+                    **_plan_popen_kwargs(sandbox_plan),
                 )
         except subprocess.TimeoutExpired:
             raise
@@ -4482,6 +5346,7 @@ def run_command_with_output_handling(
         # registered root is the second defense (see _write_stream_logs).
         # The plan's private directories go in the same cleanup.
         if sandbox_plan is not None:
+            _wait_for_group_before_cleanup(started.process)
             sandbox_plan.run_cleanup()
 
         # Use the actual returncode from the result
@@ -4549,8 +5414,8 @@ def run_command_with_output_handling(
                 continue
             # Decoded as the finished run's streams are (_late_decoded): the
             # caller's encoding, or the locale encoding text mode resolves to
-            # when the caller named none.
-            partial[stream_name] = _late_decoded(captured, encoding)
+            # when the caller named none, and the caller's error handler.
+            partial[stream_name] = _late_decoded(captured, encoding, errors)
         # Written where a completed run's output goes. What a tool printed
         # before it was killed is usually the only clue to why it hung, and
         # returning it was not enough: scanners default to "write", so the
@@ -4782,15 +5647,24 @@ def run_command_stream_output(
         flag to tell ASH's failure from the tool's, so a caller that needs one
         uses ``run_command_with_output_handling``, whose response sets
         ``post_run_error`` and keeps the tool's code.
+
+    Raises:
+        ScanCancelled: the scan was cancelled before the tool started, or while
+        it ran. In the second case the tool is stopped first, SIGTERM and then
+        SIGKILL after the cancel's grace, the whole process group when the tool
+        leads one; a tool that is silent when the cancel comes is stopped all
+        the same, by a watcher that reads the cancel every CANCEL_POLL_SECONDS.
     """
     # The resolved program replaces the first element, so it is resolved in a copy:
     # the caller's list is left as it was, as in spawn_run, and a list passed again
-    # is resolved again from the name.
-    if isinstance(args, list):
-        args = list(args)
-    # Resolve the full path to the executable if possible. A refusal is raised in
-    # the try below, so it is reported as a command that could not start.
-    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
+    # is resolved again from the name. A tuple is copied too, and a string
+    # without a shell is the program's name (_argv_list).
+    if not shell or not isinstance(args, str):
+        args = _argv_list(args)
+    # Resolve the full path to the executable if possible. A refusal, or a
+    # failure of the resolution itself, is raised in the try below, so it is
+    # reported as a command that could not start.
+    refused = _resolved_or_refused(args, cwd, env, shell)
 
     # Log the command being executed
     # str() each argument: a Path or an int in the list made the join raise
@@ -4807,7 +5681,15 @@ def run_command_stream_output(
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
+    # A cancelled scan starts no more children, as in run_command. Outside the
+    # try below, whose handler would report the cancel as a failed start.
+    raise_if_cancelled()
+    cancel_event = current_cancel_event()
+
     sandbox_plan = None
+    # Bound before the spawn: the finally below reads it, and a plan prepared
+    # before a Popen that raised leaves no child to wait for.
+    process: Optional[subprocess.Popen] = None
     try:
         try:
             # Inside the spawn's own try, as in run_command_with_output_handling: a
@@ -4830,6 +5712,7 @@ def run_command_stream_output(
                 shell=shell,
                 encoding=encoding,
                 errors=errors,
+                **_plan_popen_kwargs(sandbox_plan),
             )
         except Exception as e:
             # Around the spawn alone, as in run_command_with_output_handling: an
@@ -4844,59 +5727,156 @@ def run_command_stream_output(
         # UNRECORDED_RUN_RETURNCODE, never the tool's code: a 0 kept after a
         # failed stop would read as a clean run.
         failed = False
+        # The scan's cancel ends the run while the tool runs, not only between
+        # its output lines: read between lines alone, a tool that printed nothing
+        # more held a cancelled scan at the wait below for as long as it chose to
+        # run. A watcher in the scan's own context (ash_thread carries its
+        # cancellation scope and its log scope) reads the cancel every
+        # CANCEL_POLL_SECONDS and stops the child, the whole group when the child
+        # leads one, as the cancellable runner does; the line loop reads it too,
+        # and the lock makes the two readers one stop. The stop ends the child's
+        # output, so the loop and the wait below return, and the cancel is raised
+        # from this thread.
+        stop_once = threading.Lock()
+        prompt = getattr(cancel_event, "prompt", None)
+        watcher: Optional[threading.Thread] = None
+
+        def stop_on_cancel() -> bool:
+            """Stop the child once; False when the other reader is stopping it."""
+            if not stop_once.acquire(blocking=False):
+                return False
+            stop = _stop_tree if _leads_its_own_group(process) else _stop
+            _stop_child(args, process, stop, _stop_grace(cancel_event), prompt)
+            return True
+
+        def wait_for_the_watchers_stop() -> None:
+            """A stop the watcher began runs to its end before this thread goes
+            on: its SIGTERM grace, then its SIGKILL. Raising the cancel while the
+            watcher still waits out the grace put the finally's kill in front of
+            that grace (a tool that printed one more line after the SIGTERM lost
+            the grace it was given). Bounded by the grace and two reaps."""
+            if watcher is not None and watcher.is_alive():
+                watcher.join(timeout=_stop_grace(cancel_event) + 2 * _REAP_SECONDS)
+
+        watcher_done = threading.Event()
+
+        def watch_for_the_cancel() -> None:
+            while not watcher_done.wait(CANCEL_POLL_SECONDS):
+                if cancel_event.is_set():
+                    stop_on_cancel()
+                    return
+
         try:
+            # Started inside the try: a thread that cannot start raises, and the
+            # finally below then still kills and reaps the child.
+            if cancel_event is not None:
+                watcher = ash_thread(
+                    watch_for_the_cancel, name="ash-stream-cancel-watch", daemon=True
+                )
+                watcher.start()
             # Stream output, shown: it is the tool's, and quotes what it scanned.
             for line in process.stdout:
                 print(shown_not_obeyed(line.rstrip()))
+                if cancel_event is not None and cancel_event.is_set():
+                    if not stop_on_cancel():
+                        wait_for_the_watchers_stop()
+                    raise_if_cancelled()
 
             # Wait for process to complete
             process.wait()
+            # A cancel the watcher answered while the tool was silent: the child
+            # was stopped, and the cancel is raised here, in the caller's thread.
+            # A child that ended on its own keeps its code even in a scan since
+            # cancelled, as the cancellable runner keeps a completed result.
+            if stop_once.locked():
+                raise_if_cancelled()
+        except ScanCancelled:
+            raise
         except Exception as e:
             failed = True
             _log_unrecorded_run(cmd_str, e)
         finally:
+            watcher_done.set()
             try:
-                if process.poll() is None:
-                    process.kill()
-                    process.wait()
-            except Exception as e:
-                failed = True
-                _log_unrecorded_run(cmd_str, e)
-                # The kill can be delivered and then raise, so the child may be
-                # dead but unreaped, and a run that returns without reaping it
-                # leaves a zombie no caller can act on. A bounded wait reaps a
-                # dead child; one a failed stop left running is logged, on one
-                # line, and the code stays UNRECORDED_RUN_RETURNCODE either way.
+                # A stop the watcher is still waiting out keeps its grace: the
+                # kill below comes after it, not in front of it. The wait sits
+                # in a try of its own so that a second interrupt landing during
+                # it (a Ctrl-C while the first stop's grace runs) still reaches
+                # the kill, the reap and the close below; the first interrupt
+                # alone leaves the grace whole.
+                if stop_once.locked():
+                    wait_for_the_watchers_stop()
+            finally:
                 try:
-                    process.wait(timeout=0.5)
-                except Exception as reap_error:
-                    ASH_LOGGER.error(
-                        shown_on_one_line(
-                            f"Ran {cmd_str}, and the tool (pid {process.pid}) "
-                            f"was not reaped after a failed stop: {reap_error}"
-                        ),
-                        extra=NO_MARKUP,
-                    )
-            # The read end of the child's output, which nothing else closes. A
-            # close that fails loses no output, so it does not change the code;
-            # it is logged on one line.
-            close = getattr(process.stdout, "close", None)
-            if close is not None:
-                try:
-                    close()
+                    # Asked before the poll below, which reaps a leader that
+                    # has exited: the answer is then False for a group whose
+                    # members still run, and they were left running
+                    # (_run_cancellable asks first for the same reason).
+                    leads_group = _leads_its_own_group(process)
+                    if process.poll() is None or leads_group:
+                        # The whole group when the child leads one (the plan's
+                        # start_new_session, or a tool that called setsid): a
+                        # kill of the pid alone left the members the tool
+                        # started running, and holding the output directory
+                        # the cleanup below sweeps, and so did a leader that
+                        # had exited with members still running. SIGKILL at
+                        # once, as before, with the reap bounded as _stop_tree
+                        # bounds it; a child in ASH's own group is killed
+                        # alone and waited for, as before.
+                        if leads_group:
+                            _stop_tree(process, 0.0, None)
+                        else:
+                            process.kill()
+                            process.wait()
                 except Exception as e:
-                    ASH_LOGGER.error(
-                        shown_on_one_line(
-                            f"Ran {cmd_str}, and closing its output pipe failed: {e}"
-                        ),
-                        extra=NO_MARKUP,
-                    )
+                    failed = True
+                    _log_unrecorded_run(cmd_str, e)
+                    # The kill can be delivered and then raise, so the child
+                    # may be dead but unreaped, and a run that returns without
+                    # reaping it leaves a zombie no caller can act on. A
+                    # bounded wait reaps a dead child; one a failed stop left
+                    # running is logged, on one line, and the code stays
+                    # UNRECORDED_RUN_RETURNCODE either way.
+                    try:
+                        process.wait(timeout=0.5)
+                    except Exception as reap_error:
+                        ASH_LOGGER.error(
+                            shown_on_one_line(
+                                f"Ran {cmd_str}, and the tool (pid {process.pid}) "
+                                f"was not reaped after a failed stop: {reap_error}"
+                            ),
+                            extra=NO_MARKUP,
+                        )
+                # After the kill above: a watcher still inside a stop's grace
+                # returns once the child is gone. Bounded, as the reap is; a
+                # daemon thread left past the bound holds nothing of the run.
+                # Only a thread that is running is joined: one whose start()
+                # raised was built but never started, and a join on it would
+                # raise here, in front of the close and the code.
+                if watcher is not None and watcher.is_alive():
+                    watcher.join(timeout=_REAP_SECONDS)
+                # The read end of the child's output, which nothing else
+                # closes. A close that fails loses no output, so it does not
+                # change the code; it is logged on one line.
+                close = getattr(process.stdout, "close", None)
+                if close is not None:
+                    try:
+                        close()
+                    except Exception as e:
+                        ASH_LOGGER.error(
+                            shown_on_one_line(
+                                f"Ran {cmd_str}, and closing its output pipe "
+                                f"failed: {e}"
+                            ),
+                            extra=NO_MARKUP,
+                        )
         code = process.returncode
         if failed or not isinstance(code, int):
             return UNRECORDED_RUN_RETURNCODE
         return code
     finally:
         if sandbox_plan is not None:
+            _wait_for_group_before_cleanup(process)
             sandbox_plan.run_cleanup()
 
 
@@ -5006,12 +5986,14 @@ def create_process_with_pipes(
     """
     # The resolved program replaces the first element, so it is resolved in a copy:
     # the caller's list is left as it was, as in spawn_run, and a list passed again
-    # is resolved again from the name.
-    if isinstance(args, list):
-        args = list(args)
-    # Resolve the full path to the executable if possible. A refusal is raised in
-    # the try below, which logs and re-raises it as it does a failed Popen.
-    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
+    # is resolved again from the name. A tuple is copied too, and a string
+    # without a shell is the program's name (_argv_list).
+    if not shell or not isinstance(args, str):
+        args = _argv_list(args)
+    # Resolve the full path to the executable if possible. A refusal, or a
+    # failure of the resolution itself, is raised in the try below, which logs
+    # and re-raises it as it does a failed Popen.
+    refused = _resolved_or_refused(args, cwd, env, shell)
 
     # Log the command being executed
     # str() each argument: a Path or an int in the list made the join raise
@@ -5032,10 +6014,14 @@ def create_process_with_pipes(
 
     stderr = subprocess.STDOUT if stderr_to_stdout else subprocess.PIPE
 
-    # Set encoding for Windows compatibility
-    if encoding is None and platform.system().lower() == "windows":
+    # Set encoding for Windows compatibility. In bytes mode no encoding and no
+    # error handler are passed: either one switches Popen to text mode.
+    if not text:
+        encoding, errors = None, None
+    elif encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
 
+    sandbox_plan = None
     try:
         if refused is not None:
             raise refused
@@ -5055,11 +6041,74 @@ def create_process_with_pipes(
             shell=shell,
             encoding=encoding,
             errors=errors,
+            **_plan_popen_kwargs(sandbox_plan),
         )
         if sandbox_plan is not None:
-            # The caller owns the process, so the plan's temporary files go when it does.
-            weakref.finalize(process, sandbox_plan.run_cleanup)
+            # The caller owns the process, so the plan's temporary files go when it
+            # does; off the finalizer's own thread, see _run_cleanup_off_the_finalizer.
+            weakref.finalize(process, _run_cleanup_off_the_finalizer, sandbox_plan)
         return process
     except Exception as e:
-        ASH_LOGGER.error(f"Error creating process with pipes: {e}", extra=NO_MARKUP)
+        if sandbox_plan is not None:
+            # No process owns the plan: its writable-root registrations and its
+            # private temporary directory would otherwise outlive this call.
+            sandbox_plan.run_cleanup()
+        # Redacted of the spawn's values and kept to one line, as the start
+        # line above is: the error quotes the argv.
+        ASH_LOGGER.error(
+            shown_on_one_line(
+                _logged_without(
+                    f"Error creating process with pipes: {e}", _SPAWN_VALUES.get()
+                )
+            ),
+            extra=NO_MARKUP,
+        )
         raise
+
+
+def _run_cleanup_off_the_finalizer(plan: "SpawnPlan") -> None:
+    """Run *plan*'s cleanup from a Popen's finalizer without this thread's locks.
+
+    The cleanup releases the registration of the spawn's writable roots
+    (fs_guard.release_writable_root), which takes the registry's lock, and that
+    lock is not re-entrant. A garbage-collection finalizer runs inside whatever
+    allocation triggered the collection, which can be one this thread made
+    while holding that lock inside the registry: the release then waited on the
+    very thread it ran in. So the cleanup runs on a thread of its own, which
+    waits for the lock like any other caller. With the collector disabled
+    (weakref.finalize's own exit pass runs that way, with no registry call in
+    progress) no finalizer can interrupt an allocation, and the cleanup runs
+    inline so the temporary files are gone before the interpreter is. A thread
+    that cannot be started (Thread.start raises RuntimeError) runs the cleanup
+    inline once the interpreter is shutting down: once the interpreter is
+    finalizing (the flag that makes Thread.start refuse, set by CPython's order
+    after threading's shutdown and the atexit pass), or when the main thread is
+    no longer alive (threading's shutdown has run). The second case covers a
+    start that fails during the atexit pass for another reason: a callback
+    registered with atexit DURING its pass never runs (the pass iterates the
+    count it read at entry), so a finalizer firing inside another atexit
+    callback with the collector on has nothing to leave the cleanup to but
+    itself; no registry call of this thread can be in progress then.
+    Thread.start raises the same error mid-run when the process is out of
+    threads or memory, and inline there is the self-deadlock the thread exists
+    to avoid, so the cleanup is left to the exit pass instead (atexit, which
+    runs on the main thread with no registry call in progress), and logged.
+    """
+    if not gc.isenabled():
+        plan.run_cleanup()
+        return
+    # Through the factory, so the cleanup's lines belong to the run that made
+    # the plan (its log scope rides the copied context), not to no run.
+    worker = ash_thread(plan.run_cleanup, name="ash-sandbox-plan-cleanup", daemon=False)
+    try:
+        worker.start()
+    except RuntimeError as error:
+        if sys.is_finalizing() or not threading.main_thread().is_alive():
+            plan.run_cleanup()
+            return
+        atexit.register(plan.run_cleanup)
+        ASH_LOGGER.debug(
+            f"Could not start a thread for a sandbox plan's cleanup ({error}); "
+            f"it runs at exit instead",
+            extra=NO_MARKUP,
+        )

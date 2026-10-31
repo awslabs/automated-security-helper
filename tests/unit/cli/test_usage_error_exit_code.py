@@ -307,7 +307,7 @@ class TestTheCodeIsPublished:
         assert WORKSPACE_EXIT_CODES[USAGE_ERROR_EXIT] == "usage error"
 
     def test_every_place_that_names_it_agrees(self, in_tmp, started_processes):
-        """The CHANGELOG, the CLI reference's exit-code tables, the constants and the
+        """The CHANGELOG, the exit-codes reference page, the constants and the
         ash://exit-codes resource each name the usage-error code, and
         ``ash dependencies install``'s bad-selection code for an unknown --tool and a
         --plugin-type that is none of the three; and each of those exits with the
@@ -325,9 +325,11 @@ class TestTheCodeIsPublished:
         changelog = " ".join(
             (root / "CHANGELOG.md").read_text(encoding="utf-8").split()
         )
-        reference = (root / "docs" / "content" / "docs" / "cli-reference.md").read_text(
-            encoding="utf-8"
-        )
+        # The exit-code tables moved from docs/content/docs/cli-reference.md to
+        # the reference section's own page when the docs were restructured.
+        reference = (
+            root / "docs" / "content" / "reference" / "exit-codes.md"
+        ).read_text(encoding="utf-8")
         resource = json.loads(_build_ash_exit_codes())
         install = resource.get("commands", {}).get("ash dependencies install", {})
         bin_path = str(in_tmp / "bin")
@@ -337,8 +339,8 @@ class TestTheCodeIsPublished:
                 "A command-line usage error (an unknown option or a bad option value) "
                 f"now exits {USAGE_ERROR_EXIT} instead of 2." in changelog
             ),
-            "the CLI reference's table": re.search(
-                rf"^\| {USAGE_ERROR_EXIT} +\| Usage error", reference, re.MULTILINE
+            "the exit-codes reference's table": re.search(
+                rf"^\| {USAGE_ERROR_EXIT} \| A usage error", reference, re.MULTILINE
             )
             is not None,
             "ASH_EXIT_CODES": ASH_EXIT_CODES.get(USAGE_ERROR_EXIT) == "usage error",
@@ -354,13 +356,20 @@ class TestTheCodeIsPublished:
                 f"{plugin_type_named} `converter`, `scanner` and `reporter`, exit "
                 f"{BAD_SELECTION_EXIT}" in changelog
             ),
-            "the CLI reference's dependencies table": re.search(
-                rf"^\| {BAD_SELECTION_EXIT} \| A `--tool` name .*"
-                + re.escape(plugin_type_named),
-                reference,
-                re.MULTILINE,
-            )
-            is not None,
+            # The page names the two selections in its opening paragraph, not in
+            # a table row of their own.
+            # One pattern from the code through both selections, over the page with
+            # its whitespace normalized as the CHANGELOG's is, so a re-wrapped
+            # paragraph still reads and a phrase elsewhere on the page does not.
+            "the exit-codes reference's dependencies install sentence": (
+                re.search(
+                    rf"Two `ash dependencies install` selections exit "
+                    rf"{BAD_SELECTION_EXIT} instead: a `--tool` name[^.|]*, and a "
+                    r"`--plugin-type` other than `converter`, `scanner`, or `reporter`",
+                    " ".join(reference.split()),
+                )
+                is not None
+            ),
             "ASH_EXIT_BAD_SELECTION": ASH_EXIT_BAD_SELECTION == BAD_SELECTION_EXIT
             and "a --plugin-type that is none of" in ASH_EXIT_BAD_SELECTION_MEANING,
             "ash://exit-codes commands": install.get(str(BAD_SELECTION_EXIT))
@@ -477,7 +486,11 @@ def test_an_unknown_plugin_type_is_shown_with_its_controls_escaped(
     assert result.exit_code == BAD_SELECTION_EXIT, (
         f"exited {result.exit_code}: {result.output!r}"
     )
-    assert "\x1b" not in result.output, repr(result.output)
+    # The operator's control is shown as text, never written through: the raw
+    # sequence is absent and its escape is present. Not "no escape anywhere":
+    # the console's own styling carries escapes wherever the environment turns
+    # color on (the hosted Windows runners do), and that is not the operator's.
+    assert "x\x1b[31mred" not in result.output, repr(result.output)
     assert "x\\x1b[31mred" in result.output, repr(result.output)
     assert started_processes == [], "the install ran a process"
 
@@ -1587,6 +1600,7 @@ class TestModesThatRunASHAgainCarryTheCodeOut:
         inner = subprocess.CompletedProcess(args=["nix"], returncode=inner_code)
         with (
             patch.object(mod, "run_ash_nix", return_value=inner),
+            patch.object(mod, "nix_preflight", lambda: None),
             pytest.raises(SystemExit) as exit_info,
         ):
             mod._run_nix_mode(opts, logger)
@@ -1604,6 +1618,7 @@ class TestModesThatRunASHAgainCarryTheCodeOut:
         inner = subprocess.CompletedProcess(args=["nix"], returncode=100)
         with (
             patch.object(mod, "run_ash_nix", return_value=inner),
+            patch.object(mod, "nix_preflight", lambda: None),
             pytest.raises(SystemExit) as exit_info,
         ):
             mod._run_nix_mode(opts, MagicMock())

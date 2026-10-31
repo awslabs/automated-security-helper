@@ -274,6 +274,28 @@ class TestFileType:
             pytest.skip(f"cannot create a hard link here: {exc}")
         assert refused(tree / "hard.txt", tree).reason == REASON_HARDLINK
 
+    @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+    def test_refusal_reason_admits_a_hard_link_only_when_asked_and_no_symlink(
+        self, walk, layout
+    ):
+        """The answer a caller gets with ``allow_hardlinks`` is the answer of the
+        read it then makes: a hard-linked regular file is admitted, a symlink is
+        still refused, and the default answer is unchanged. The template readers
+        ask it this way, so a hard-linked template is counted and read."""
+        tree, host = layout
+        try:
+            os.link(host / "secret.txt", tree / "hard.txt")
+        except OSError as exc:  # pragma: no cover - filesystem without hard links
+            pytest.skip(f"cannot create a hard link here: {exc}")
+        assert refusal_reason(tree / "hard.txt", tree) == REASON_HARDLINK
+        assert refusal_reason(tree / "hard.txt", tree, allow_hardlinks=True) is None
+        if sys.platform != "win32":
+            (tree / "link.txt").symlink_to(host / "secret.txt")
+            assert (
+                refusal_reason(tree / "link.txt", tree, allow_hardlinks=True)
+                == REASON_SYMLINK
+            )
+
     @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs")
     def test_a_fifo_is_refused_without_blocking(self, walk, layout):
         tree, _ = layout

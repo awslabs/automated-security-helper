@@ -17,8 +17,26 @@ What these pin, and why each matters:
   and an exception by class name, text and base class. The scanner tells a parse
   failure from any other exception, and it prints ``type(e).__name__``.
 - A child that dies keeps the answers it gave. Only the template it was on fails, and a
-  new child takes the rest. A child that gave nothing, or ran into ``scan_timeout``,
-  fails what is pending, once.
+  new child takes the rest; that holds for a death on the first template too. A child
+  that never wrote its protocol header reached no template, so none is blamed: the list
+  goes to one more child. A second child in a row that gives nothing fails what is
+  pending at once when its failure is the first's: a second child with no header is a
+  startup failure every child shares, whatever its stderr says, and a child that did
+  start shares the failure when its exit code and its reason, with paths, hex addresses
+  and numbers masked, are the first's. Two started children that crash for their own
+  reasons do not; three answerless children in a row fail the rest whatever they say.
+  Any child that ran into ``scan_timeout`` fails what is pending at once. So a failure
+  every child shares is paid twice, not once per template.
+- A child the runner could not stop is recorded for the scanner's run-level gate even
+  when it had answered every template first; a response the parent could not read keeps
+  the runner's outcome for the child; a response past the size cap fails the template
+  whose answer crossed it by name of the cap; a child started for a template outside
+  the batch is recorded on the batch.
+- The response file is read without blocking and only when it is a regular file, so a
+  FIFO planted at its path cannot hang the parent; a response past the size cap keeps
+  the complete answers inside the cap.
+- A child that died or could not be stopped is recorded on the batch, for the scanner to
+  record on the plugin as it records any other tool's run.
 - The response file sits where a sandboxed child can write, so the parent does not
   follow a symlink there.
 - The scratch directory under the results directory is gone afterwards, so the results
@@ -29,6 +47,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -64,20 +83,24 @@ def _fake_child(
     returncode: int = 0,
     answer_first: Optional[int] = None,
     timed_out: bool = False,
+    stderr: Optional[str] = None,
 ):
     """A stand-in for run_command_with_output_handling that plays the child's part.
 
     Writes the header, then one answer line per template, as the real child does.
     ``answer_first`` stops after that many answers and reports ``returncode``: a child
-    that died part way. ``answers_by_template=None`` is a child that died before
-    writing anything.
+    that died part way (``answer_first=0`` is a child that wrote its header and died on
+    its first template). ``answers_by_template=None`` is a child that died before
+    writing anything, its header included. ``stderr`` replaces the default noise.
     """
+    stderr = (
+        "noise\n\x1b[31mTraceback\x1b[0m\nOSError: boom" if stderr is None else stderr
+    )
 
     def fake(command, **kwargs):
         calls.append(list(command))
         request_path, response_path = Path(command[-2]), Path(command[-1])
         request = json.loads(request_path.read_text(encoding="utf-8"))
-        stderr = "noise\n\x1b[31mTraceback\x1b[0m\nOSError: boom"
         if answers_by_template is None:
             return {"returncode": returncode, "stderr": stderr}
         templates = request["templates"]
@@ -143,10 +166,14 @@ def test_the_scratch_directory_is_removed(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
-def test_a_child_that_died_before_answering_fails_everything_once(
+def test_children_that_die_before_answering_fail_everything_after_two_tries(
     tmp_path, monkeypatch
 ):
-    templates = _templates(tmp_path, 2)
+    """A failure every child shares (here, every child dies at once) costs two children:
+    the first never reached a template, so it fails none and the same list goes to one
+    more child; the second, dying the same way before its header, proves the failure is
+    not any template's and fails everything still pending."""
+    templates = _templates(tmp_path, 3)
     calls: List[List[str]] = []
     _patch_spawn(monkeypatch, _fake_child(None, calls, returncode=1))
     outdir = tmp_path / "out"
@@ -160,7 +187,118 @@ def test_a_child_that_died_before_answering_fails_everything_once(
             assert "exited 1" in message
             assert "OSError: boom" in message
             assert "\x1b[" not in message, "terminal color codes leaked into the error"
-    assert len(calls) == 1, "a child that answered nothing must not be restarted"
+    assert len(calls) == 2, (
+        "a second answerless child in a row must fail the rest, not be started once "
+        f"per template; got {len(calls)} children for {len(templates)} templates"
+    )
+
+
+@pytest.mark.unit
+def test_the_headerless_retry_is_started_under_a_small_limit(tmp_path, monkeypatch):
+    """The second child is started only while more than a floor of the limit is left,
+    so one started with less does not time out for nothing. The floor was a fixed five
+    seconds whatever the limit, so under a limit of two seconds the retry the batch
+    promises never ran: every template read "time ran out" with almost the whole
+    limit unspent. The floor is bounded by half the limit."""
+    templates = _templates(tmp_path, 3)
+    calls: List[List[str]] = []
+    _patch_spawn(monkeypatch, _fake_child(None, calls, returncode=1))
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, timeout=2, values=()
+    ):
+        for t in templates:
+            with pytest.raises(RuntimeError) as raised:
+                _call(t, outdir)
+            message = str(raised.value)
+            assert "exited 1" in message, message
+            assert "time ran out" not in message, message
+    assert len(calls) == 2, (
+        f"the headerless retry was not started; got {len(calls)} children"
+    )
+
+
+@pytest.mark.unit
+def test_a_child_that_dies_on_the_first_template_fails_only_that_template(
+    tmp_path, monkeypatch
+):
+    """The same crash on a later template failed only that one; the first was treated
+    differently and failed the whole batch. At the base the second and third templates
+    here were failed with the first child's reason and no second child was started.
+    The child here wrote its header and died ON the first template (``answer_first=0``);
+    a child with no header at all is the next test's."""
+    templates = _templates(tmp_path, 3)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    calls: List[List[str]] = []
+    dies = _fake_child({}, calls, returncode=139, answer_first=0)
+    finishes = _fake_child(answers, calls)
+
+    def fake(command, **kwargs):
+        return (dies if not calls else finishes)(command, **kwargs)
+
+    _patch_spawn(monkeypatch, fake)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
+        with pytest.raises(RuntimeError, match="exited 139"):
+            _call(templates[0], outdir)
+        assert _call(templates[1], outdir) is None
+        assert _call(templates[2], outdir) is None
+    assert len(calls) == 2
+
+
+@pytest.mark.unit
+def test_a_child_with_no_header_gives_its_first_template_back_to_the_next_child(
+    tmp_path, monkeypatch
+):
+    """A child that never wrote its protocol header never reached a template (an OOM
+    kill at startup, a spawn that did not happen), so no template is blamed for it: the
+    whole list goes to one more child, and when that one starts nothing is lost. Before
+    this read the first template was failed as if the child had died on it, and a
+    one-off startup failure graded a template that was never evaluated as failed."""
+    templates = _templates(tmp_path, 3)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    fake, calls = _children_in_turn(
+        _fake_child(None, [], returncode=137),
+        _fake_child(answers, []),
+    )
+    _patch_spawn(monkeypatch, fake)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ) as batch:
+        for t in templates:
+            assert _call(t, outdir) is None
+    assert len(calls) == 2, calls
+    # The child that died is still a recorded child, for the scanner's exit codes.
+    assert [r.get("returncode") for r in batch.failed_child_responses] == [137]
+
+
+@pytest.mark.unit
+def test_a_child_with_no_header_then_a_started_crash_fails_only_the_crashed_template(
+    tmp_path, monkeypatch
+):
+    """The mixed run: the first child never started, the second started and died on
+    the first template, the third finishes. The first template fails with the second
+    child's reason, nothing is taken as shared, and the rest are evaluated."""
+    templates = _templates(tmp_path, 3)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    fake, calls = _children_in_turn(
+        _fake_child(None, [], returncode=137),
+        _fake_child({}, [], returncode=139, answer_first=0),
+        _fake_child(answers, []),
+    )
+    _patch_spawn(monkeypatch, fake)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
+        with pytest.raises(RuntimeError, match="exited 139"):
+            _call(templates[0], outdir)
+        assert _call(templates[1], outdir) is None
+        assert _call(templates[2], outdir) is None
+    assert len(calls) == 3, calls
 
 
 @pytest.mark.unit
@@ -325,7 +463,11 @@ def test_the_scanner_passes_its_scan_timeout():
 
 @pytest.mark.unit
 @pytest.mark.parametrize("content", ["{not json", "[]", '{"protocol": 999}\n'])
-def test_a_malformed_response_fails_the_batch_once(tmp_path, monkeypatch, content):
+def test_a_malformed_response_fails_the_batch_after_two_tries(
+    tmp_path, monkeypatch, content
+):
+    """A malformed response is an answerless child: two children, never one per
+    template."""
     templates = _templates(tmp_path, 3)
     calls: List[List[str]] = []
 
@@ -342,7 +484,7 @@ def test_a_malformed_response_fails_the_batch_once(tmp_path, monkeypatch, conten
         for t in templates:
             with pytest.raises(RuntimeError):
                 _call(t, outdir)
-    assert len(calls) == 1
+    assert len(calls) == 2
 
 
 @pytest.mark.unit
@@ -401,6 +543,15 @@ def test_control_a_child_that_keeps_sys_path_0_imports_from_the_scanned_director
     The child changes into ASH's working directory, and under ``-c`` the ``''``
     entry follows it, so the planted ``cdk_nag.py`` is what it imports. Shows the
     test below can fail.
+
+    The planted module leaves its mark and then raises an ImportError, which the
+    wrapper answers itself, before it imports aws_cdk: this control runs no jsii
+    and starts no node. It used to let the planted module import quietly and wait
+    for ``_build_nag_pack`` to refuse it, but that refusal sits after the aws_cdk
+    import, so the control needed a working node in the child. Under the unit tool
+    guard the child resolves node to the guard's stand-in, first on its PATH, jsii
+    read the stand-in's empty output as its handshake, and the control failed for
+    that reason on every POSIX run, with the stand-in's start counted at teardown.
     """
     first_statement = "sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; "
     assert first_statement in cdk_nag_worker._CHILD_BOOTSTRAP
@@ -409,8 +560,16 @@ def test_control_a_child_that_keeps_sys_path_0_imports_from_the_scanned_director
         "_CHILD_BOOTSTRAP",
         cdk_nag_worker._CHILD_BOOTSTRAP.replace(first_statement, ""),
     )
-    marker = _run_from_a_planted_repository(tmp_path, monkeypatch)
+    marker, response = _run_from_a_planted_repository(tmp_path, monkeypatch)
     assert "cdk_nag" in marker.read_text()
+    assert response is not None and response.failure is not None
+    assert PLANTED_IMPORT_MESSAGE in response.failure
+
+
+#: What the planted ``cdk_nag.py`` raises once it has left its mark. The wrapper
+#: answers an ImportError from ``import cdk_nag`` with a response that carries the
+#: exception's text, so the control reads this back without any jsii.
+PLANTED_IMPORT_MESSAGE = "planted cdk_nag imported from the scanned directory"
 
 
 def _run_from_a_planted_repository(tmp_path, monkeypatch):
@@ -421,6 +580,14 @@ def _run_from_a_planted_repository(tmp_path, monkeypatch):
         (repo / f"{name}.py").write_text(
             f"open({str(marker)!r}, 'a').write({name!r})\n", encoding="utf-8"
         )
+    # The planted cdk_nag leaves its mark and then refuses to import, so the child
+    # never gets as far as aws_cdk, jsii or node; the wrapper's own handling of an
+    # import failure answers with a response naming it.
+    (repo / "cdk_nag.py").write_text(
+        f"open({str(marker)!r}, 'a').write('cdk_nag')\n"
+        f"raise ImportError({PLANTED_IMPORT_MESSAGE!r})\n",
+        encoding="utf-8",
+    )
     monkeypatch.chdir(repo)
     monkeypatch.delenv("PYTHONSAFEPATH", raising=False)
     template = tmp_path / "t.yaml"
@@ -429,10 +596,8 @@ def _run_from_a_planted_repository(tmp_path, monkeypatch):
     )
     outdir = tmp_path / "out"
     with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir, values=()):
-        # The planted cdk_nag has no packs, so the child's answer is re-raised here.
-        with pytest.raises(Exception, match="Unknown cdk-nag pack"):
-            _call(template, outdir)
-    return marker
+        response = _call(template, outdir)
+    return marker, response
 
 
 @pytest.mark.integration
@@ -607,8 +772,8 @@ def test_logs_are_replayed_with_their_origin(tmp_path, monkeypatch, caplog):
 
 @pytest.mark.unit
 def test_template_names_match_get_shortest_name_in_the_parent(tmp_path, monkeypatch):
-    """Built from the parent's directory, then used from another one, as the child
-    does."""
+    """The shared helper told the parent's directory, then used from another one, as
+    the child does."""
     parent = tmp_path / "parent"
     inside = parent / "cfn" / "t.yaml"
     inside.parent.mkdir(parents=True)
@@ -618,10 +783,91 @@ def test_template_names_match_get_shortest_name_in_the_parent(tmp_path, monkeypa
     candidates = (inside, str(inside), Path(sys.executable), ".", "missing.yaml")
     monkeypatch.chdir(parent)
     expected = [get_shortest_name(c) for c in candidates]
-    emulated = cdk_nag_worker._shortest_name_relative_to(Path.cwd())
     monkeypatch.chdir(elsewhere)
-    assert [emulated(c) for c in candidates] == expected
-    assert emulated(inside) == "cfn/t.yaml"
+    assert [get_shortest_name(c, cwd=parent) for c in candidates] == expected
+    assert get_shortest_name(inside, cwd=parent) == "cfn/t.yaml"
+    # A relative name and the existence check are resolved against the given
+    # directory too, not against the directory the process is in.
+    assert get_shortest_name("cfn/t.yaml", cwd=parent) == "cfn/t.yaml"
+    assert get_shortest_name(Path("cfn/t.yaml"), cwd=parent) == "cfn/t.yaml"
+    assert not (elsewhere / "cfn" / "t.yaml").exists()
+
+
+@pytest.mark.unit
+def test_the_name_function_the_child_installs_is_the_shared_helper_for_the_parent(
+    tmp_path, monkeypatch
+):
+    """What ``_evaluate`` puts on the wrapper answers as ``get_shortest_name`` does in
+    the parent, for a path under the parent's directory and for paths outside it.
+
+    At the base the child installed a copy of the helper: it gave back a missing path
+    as it was given (a ``Path`` stayed a ``Path``) where the shared helper gives text,
+    so the two answered differently for a template that was not on disk.
+    """
+    import io
+
+    from automated_security_helper.utils import cdk_nag_wrapper
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    parent = tmp_path / "parent"
+    inside = parent / "cfn" / "t.yaml"
+    inside.parent.mkdir(parents=True)
+    inside.write_text("Resources: {}\n", encoding="utf-8")
+    sibling = tmp_path / "parent2" / "t.yaml"
+    sibling.parent.mkdir()
+    sibling.write_text("Resources: {}\n", encoding="utf-8")
+    elsewhere = tmp_path / "child"
+    elsewhere.mkdir()
+    candidates = (
+        inside,
+        str(inside),
+        sibling,
+        Path(sys.executable),
+        ".",
+        "missing.yaml",
+        Path("missing.yaml"),
+        "cfn/t.yaml",
+    )
+
+    seen: List[object] = []
+
+    def fake_run(**kwargs):
+        seen.append(cdk_nag_wrapper.get_shortest_name)
+        return None
+
+    # _evaluate rebinds the wrapper's name, the logger's handlers and its level, and
+    # changes directory; each is put back when the test ends.
+    monkeypatch.setattr(cdk_nag_wrapper, "run_cdk_nag_against_cfn_template", fake_run)
+    monkeypatch.setattr(
+        cdk_nag_wrapper, "get_shortest_name", cdk_nag_wrapper.get_shortest_name
+    )
+    monkeypatch.setattr(ASH_LOGGER, "handlers", list(ASH_LOGGER.handlers))
+    monkeypatch.setattr(ASH_LOGGER, "level", ASH_LOGGER.level)
+    monkeypatch.chdir(parent)
+    expected = [get_shortest_name(c) for c in candidates]
+
+    monkeypatch.chdir(elsewhere)
+    request = {
+        "cwd": str(parent),
+        "templates": [str(inside)],
+        "options": {
+            "nag_packs": ["AwsSolutionsChecks"],
+            "outdir": None,
+            "include_compliant_checks": False,
+            "stack_name": None,
+            "honor_template_suppressions": True,
+        },
+    }
+    cdk_nag_worker._evaluate(request, io.StringIO())
+    assert len(seen) == 1
+    installed = seen[0]
+    monkeypatch.chdir(elsewhere)
+
+    assert [installed(c) for c in candidates] == expected
+    assert installed(inside) == "cfn/t.yaml"
+    assert installed(sibling) == sibling.as_posix()
+    assert installed(Path("missing.yaml")) == "missing.yaml"
+    assert not hasattr(cdk_nag_worker, "_shortest_name_relative_to")
 
 
 @pytest.mark.integration
@@ -773,3 +1019,525 @@ def test_each_child_gets_a_directory_of_its_own(tmp_path, monkeypatch):
 
     with pytest.raises(FileExistsError):
         cdk_nag_worker._run_child(["t.yaml"], {}, outdir, tmp_path, None, ())
+
+
+# ---------------------------------------------------------------------------
+# The child's shortest names: a sibling of the working directory
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_a_sibling_directory_sharing_the_cwds_name_prefix_is_not_made_relative(
+    tmp_path,
+):
+    """``/work2/t.yaml`` is not inside ``/work``. With a bare string-prefix test the
+    sibling was taken for a path inside, ``relative_to`` raised ValueError, and the
+    template was counted as a failed target. The child names templates with the shared
+    helper told the parent's directory, so the helper's component test decides it."""
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    sibling = tmp_path / "work2" / "t.yaml"
+    sibling.parent.mkdir()
+    sibling.write_text("Resources: {}\n", encoding="utf-8")
+
+    assert get_shortest_name(sibling, cwd=cwd) == sibling.as_posix()
+    inside = cwd / "t.yaml"
+    inside.write_text("Resources: {}\n", encoding="utf-8")
+    assert get_shortest_name(inside, cwd=cwd) == "t.yaml"
+    assert get_shortest_name(cwd, cwd=cwd) == cwd.as_posix()
+
+
+# ---------------------------------------------------------------------------
+# The response file: a FIFO cannot hang the parent, and the cap keeps what fits
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs on this platform")
+def test_a_fifo_at_the_response_path_does_not_hang_the_parent(tmp_path):
+    """At the base ``_read_answers`` opened the FIFO read-only and blocked for a writer
+    that never comes; the regular-file check after the open was never reached. The
+    read runs in a thread so the base's hang reads as a timeout, not a stuck suite."""
+    import threading
+
+    fifo = tmp_path / "response.jsonl"
+    os.mkfifo(fifo)
+    result: List[object] = []
+
+    def read():
+        result.append(cdk_nag_worker._read_answers(fifo))
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    reader.join(timeout=5)
+    if reader.is_alive():
+        # Release the blocked open so the thread can end, then fail.
+        writer = os.open(fifo, os.O_WRONLY | getattr(os, "O_NONBLOCK", 0))
+        os.close(writer)
+        reader.join(timeout=5)
+        pytest.fail("_read_answers blocked on a FIFO at the response path")
+    assert result == [[]]
+
+
+@pytest.mark.unit
+def test_a_response_past_the_cap_keeps_the_complete_answers_inside_it(
+    tmp_path, monkeypatch
+):
+    """At the base a response larger than the cap returned no answers at all, so a child
+    that evaluated every template failed the whole batch."""
+    header = json.dumps({"protocol": cdk_nag_worker.PROTOCOL_VERSION}) + "\n"
+    answer = json.dumps({"status": "not-cloudformation", "logs": []}) + "\n"
+    # Two complete answers fit; the third crosses the cap.
+    cap = len(header) + 2 * len(answer) + len(answer) // 2
+    monkeypatch.setattr(cdk_nag_worker, "_MAX_RESPONSE_BYTES", cap)
+    response = tmp_path / "response.jsonl"
+    response.write_text(header + answer * 3, encoding="utf-8")
+
+    answers = cdk_nag_worker._read_answers(response)
+
+    assert len(answers) == 2, answers
+    started, _, cut = cdk_nag_worker._read_response(response)
+    assert started is True
+    assert cut is True, "a response past the cap has to say so, for the reason"
+
+
+# ---------------------------------------------------------------------------
+# What the scanner can record about the children
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_the_batch_records_a_child_ash_could_not_stop(tmp_path, monkeypatch):
+    """The scanner reads it after its loop and records the could-not-stop state the
+    run-level gate reads; at the base nothing left this module but per-template text."""
+    templates = _templates(tmp_path, 2)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    _patch_spawn(monkeypatch, _could_not_stop_child(answers, answer_first=1))
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, timeout=5, values=()
+    ) as batch:
+        assert _call(templates[0], outdir) is None
+        with pytest.raises(RuntimeError):
+            _call(templates[1], outdir)
+
+    assert batch.could_not_stop_response is not None
+    assert batch.could_not_stop_response.get("could_not_stop") is True
+    assert batch.could_not_stop_response.get("could_not_stop_pid") == 4242
+
+
+@pytest.mark.unit
+def test_the_batch_records_the_exit_code_of_a_child_that_died(tmp_path, monkeypatch):
+    templates = _templates(tmp_path, 2)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    _patch_spawn(monkeypatch, _fake_child(answers, [], returncode=139, answer_first=1))
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ) as batch:
+        assert _call(templates[0], outdir) is None
+        with pytest.raises(RuntimeError, match="exited 139"):
+            _call(templates[1], outdir)
+
+    assert [r.get("returncode") for r in batch.failed_child_responses] == [139]
+    assert batch.could_not_stop_response is None
+
+
+@pytest.mark.unit
+def test_a_relative_work_root_still_hands_the_child_paths_it_can_find(
+    tmp_path, monkeypatch
+):
+    """The child runs with the work directory as its cwd and takes the request and
+    response paths on its argv, so they must be absolute. At the base a relative
+    ``outdir`` produced relative argv paths, resolved by the child against its own cwd,
+    and the request was never found."""
+    monkeypatch.chdir(tmp_path)
+    templates = _templates(tmp_path, 1)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    calls: List[List[str]] = []
+    _patch_spawn(monkeypatch, _fake_child(answers, calls))
+
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], Path("relative-out"), values=()
+    ):
+        assert _call(templates[0], Path("relative-out")) is None
+
+    request_path, response_path = Path(calls[0][-2]), Path(calls[0][-1])
+    assert request_path.is_absolute(), request_path
+    assert response_path.is_absolute(), response_path
+
+
+def _children_in_turn(*fakes):
+    """Dispatch each child start to the next fake in order."""
+    calls: List[List[str]] = []
+
+    def fake(command, **kwargs):
+        index = min(len(calls), len(fakes) - 1)
+        calls.append(list(command))
+        return fakes[index](command, **kwargs)
+
+    return fake, calls
+
+
+@pytest.mark.unit
+def test_two_answerless_children_with_different_reasons_are_not_one_shared_failure(
+    tmp_path, monkeypatch
+):
+    """Two neighboring templates each crash a STARTED child (its header is written) for
+    their own reason: the second crash is not the first's, so the third template still
+    gets its own child instead of being failed with the second template's reason, as it
+    was before this read."""
+    templates = _templates(tmp_path, 3)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    fake, calls = _children_in_turn(
+        _fake_child({}, [], returncode=134, answer_first=0),
+        _fake_child({}, [], returncode=139, answer_first=0),
+        _fake_child(answers, []),
+    )
+    _patch_spawn(monkeypatch, fake)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
+        with pytest.raises(RuntimeError, match="exited 134"):
+            _call(templates[0], outdir)
+        with pytest.raises(RuntimeError, match="exited 139"):
+            _call(templates[1], outdir)
+        assert _call(templates[2], outdir) is None
+    assert len(calls) == 3
+
+
+@pytest.mark.unit
+def test_three_answerless_children_in_a_row_fail_the_rest_whatever_their_reasons(
+    tmp_path, monkeypatch
+):
+    """The bound: a run of started children crashing with differing reasons stops at the
+    third child."""
+    templates = _templates(tmp_path, 4)
+    fake, calls = _children_in_turn(
+        _fake_child({}, [], returncode=1, answer_first=0),
+        _fake_child({}, [], returncode=2, answer_first=0),
+        _fake_child({}, [], returncode=3, answer_first=0),
+    )
+    _patch_spawn(monkeypatch, fake)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
+        with pytest.raises(RuntimeError, match="exited 1 "):
+            _call(templates[0], outdir)
+        with pytest.raises(RuntimeError, match="exited 2 "):
+            _call(templates[1], outdir)
+        with pytest.raises(RuntimeError, match="exited 3 "):
+            _call(templates[2], outdir)
+        with pytest.raises(RuntimeError, match="exited 3 "):
+            _call(templates[3], outdir)
+    assert len(calls) == 3
+
+
+@pytest.mark.unit
+def test_two_children_that_never_started_are_one_shared_failure_whatever_they_said(
+    tmp_path, monkeypatch
+):
+    """A child that wrote no protocol header never reached its templates: a startup
+    failure (the interpreter did not start, ASH's own import failed) that every child
+    shares. The two children here fail with texts that stay different once paths and
+    numbers are masked, so the textual signal alone would take the second for a new
+    failure and pay a third child. The structural signal decides instead: two
+    headerless children, and the rest is failed with the second's reason."""
+    templates = _templates(tmp_path, 3)
+    fake, calls = _children_in_turn(
+        _fake_child(
+            None,
+            [],
+            returncode=1,
+            stderr='Traceback\n  File "/tmp/ash-work/cdk-nag/run-one/request.json"\n'
+            "ModuleNotFoundError: No module named 'automated_security_helper'",
+        ),
+        _fake_child(
+            None,
+            [],
+            returncode=1,
+            stderr="ImportError: libpython3.so: cannot open shared object file",
+        ),
+    )
+    _patch_spawn(monkeypatch, fake)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
+        for t in templates:
+            with pytest.raises(RuntimeError, match="cannot open shared object file"):
+                _call(t, outdir)
+    assert len(calls) == 2, calls
+    # The control for the reading: the two reasons do not mask to one signature, so
+    # only the header rule can have joined them.
+    assert cdk_nag_worker._failure_signature(
+        {"returncode": 1}, "exited 1 before answering: No module named 'x'"
+    ) != cdk_nag_worker._failure_signature(
+        {"returncode": 1}, "exited 1 before answering: cannot open shared object file"
+    )
+
+
+@pytest.mark.unit
+def test_a_started_childs_crash_whose_text_differs_only_in_paths_and_numbers_is_shared(
+    tmp_path, monkeypatch
+):
+    """Two started children die the same way; only a pid and a scratch path in the
+    stderr differ. Masked, the reasons are one, so the second child proves the failure
+    shared and the rest is failed, where an exact compare paid a third child."""
+    templates = _templates(tmp_path, 3)
+    fake, calls = _children_in_turn(
+        _fake_child(
+            {},
+            [],
+            returncode=134,
+            answer_first=0,
+            stderr="FATAL ERROR: heap out of memory (pid 4242)\n"
+            "at /tmp/ash-work/cdk-nag/run-one/bin/jsii-runtime.js",
+        ),
+        _fake_child(
+            {},
+            [],
+            returncode=134,
+            answer_first=0,
+            stderr="FATAL ERROR: heap out of memory (pid 4301)\n"
+            "at /tmp/ash-work/cdk-nag/run-two/bin/jsii-runtime.js",
+        ),
+    )
+    _patch_spawn(monkeypatch, fake)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ):
+        for t in templates:
+            with pytest.raises(RuntimeError, match="heap out of memory"):
+                _call(t, outdir)
+    assert len(calls) == 2, calls
+
+
+@pytest.mark.unit
+def test_the_failure_signature_masks_paths_and_numbers_but_keeps_the_exit_code():
+    one = cdk_nag_worker._failure_signature(
+        {"returncode": 134},
+        "exited 134 before answering: at /tmp/w/run-one/x.js | pid 4242",
+    )
+    two = cdk_nag_worker._failure_signature(
+        {"returncode": 134},
+        "exited 134 before answering: at /tmp/w/run-two/x.js | pid 4301",
+    )
+    other_code = cdk_nag_worker._failure_signature(
+        {"returncode": 139},
+        "exited 139 before answering: at /tmp/w/run-one/x.js | pid 4242",
+    )
+    assert one == two
+    assert one != other_code
+
+
+@pytest.mark.unit
+def test_the_failure_signature_masks_hex_addresses_too():
+    """faulthandler prints the current thread as a hex id and a node fatal-error line
+    prints native frames as hex addresses; both differ from run to run. Masking digits
+    alone left the hex letters, so the same crash read as two failures and cost a third
+    child. (Short addresses here; real ones are longer and differ the same way.)"""
+    one = cdk_nag_worker._failure_signature(
+        {"returncode": 134},
+        "exited 134 before answering: Current thread 0x7f3c2a | at 0x55d1a2",
+    )
+    two = cdk_nag_worker._failure_signature(
+        {"returncode": 134},
+        "exited 134 before answering: Current thread 0x7e9c1b | at 0x55e2f3",
+    )
+    assert one == two
+    assert one != cdk_nag_worker._failure_signature(
+        {"returncode": 134}, "exited 134 before answering: Current thread 0x7f3c2a"
+    )
+
+
+@pytest.mark.unit
+def test_a_response_that_outgrew_the_cap_fails_the_cut_template_by_name_of_the_cap(
+    tmp_path, monkeypatch
+):
+    """The batch above the read: the child exited clean having answered every template,
+    and the third answer crossed the cap. The two inside it pass; the third is failed
+    with a reason that names the cap, not as a worker that "exited 0 before answering",
+    and no child is counted as answerless for it."""
+    header = json.dumps({"protocol": cdk_nag_worker.PROTOCOL_VERSION}) + "\n"
+    templates = _templates(tmp_path, 3)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    answer = json.dumps(NOT_CFN) + "\n"
+    cap = len(header) + 2 * len(answer) + len(answer) // 2
+    monkeypatch.setattr(cdk_nag_worker, "_MAX_RESPONSE_BYTES", cap)
+    calls: List[List[str]] = []
+    _patch_spawn(monkeypatch, _fake_child(answers, calls))
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ) as batch:
+        assert _call(templates[0], outdir) is None
+        assert _call(templates[1], outdir) is None
+        with pytest.raises(RuntimeError, match="outgrew") as raised:
+            _call(templates[2], outdir)
+    assert "exited 0 before answering" not in str(raised.value)
+    assert str(cap) in str(raised.value)
+    assert len(calls) == 1, calls
+    # Recorded as a child that did not answer everything it was asked, with the exit
+    # code it had: a clean one.
+    assert [r.get("returncode") for r in batch.failed_child_responses] == [0]
+
+
+@pytest.mark.unit
+def test_an_answer_too_deep_for_the_parser_ends_the_answers_without_raising(tmp_path):
+    """``json.loads`` raises RecursionError, not ValueError, on a deeply nested line;
+    uncaught it escaped the read and the batch lost the child's outcome. The answers
+    before the line are kept; the line and what follows are not answers."""
+    deep = "[" * 100000 + "]" * 100000
+    response = tmp_path / "response.jsonl"
+    response.write_text(
+        json.dumps({"protocol": cdk_nag_worker.PROTOCOL_VERSION})
+        + "\n"
+        + json.dumps(NOT_CFN)
+        + "\n"
+        + deep
+        + "\n"
+        + json.dumps(NOT_CFN)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    started, answers, cut = cdk_nag_worker._read_response(response)
+
+    assert started is True
+    assert answers == [NOT_CFN]
+    assert cut is False
+
+
+@pytest.mark.unit
+def test_a_read_that_raises_keeps_the_childs_outcome_and_its_could_not_stop_state(
+    tmp_path, monkeypatch
+):
+    """The runner's outcome is known before the response is read. A read that raised
+    (ELOOP from O_NOFOLLOW on a symlink the sandboxed child swapped in after the
+    checks) escaped ``_run_child``, the batch dropped the outcome, and a new child was
+    started beside one the runner could not stop, the hazard the could-not-stop branch
+    exists to prevent."""
+    import errno
+
+    def swapped(path):
+        raise OSError(errno.ELOOP, "Too many levels of symbolic links", str(path))
+
+    monkeypatch.setattr(cdk_nag_worker, "_read_response", swapped)
+    _patch_spawn(
+        monkeypatch,
+        _header_only_outcome(
+            {"returncode": None, "could_not_stop": True, "stderr": "wait failed"}
+        ),
+    )
+
+    answers, reason, fail_rest, recorded = cdk_nag_worker._run_child(
+        ["a.yaml", "b.yaml"], {}, tmp_path / "out", tmp_path, 30.0, ()
+    )
+
+    assert answers == []
+    assert fail_rest is True
+    assert recorded.get("could_not_stop") is True
+    assert recorded.get("worker_started") is False
+    assert "no new worker was started" in reason
+
+
+@pytest.mark.unit
+def test_a_read_that_raises_on_a_clean_exit_names_the_read_in_the_reason(
+    tmp_path, monkeypatch
+):
+    def swapped(path):
+        raise OSError(40, "Too many levels of symbolic links", str(path))
+
+    monkeypatch.setattr(cdk_nag_worker, "_read_response", swapped)
+    _patch_spawn(monkeypatch, _header_only_outcome({"returncode": 0, "stderr": ""}))
+
+    answers, reason, fail_rest, recorded = cdk_nag_worker._run_child(
+        ["a.yaml"], {}, tmp_path / "out", tmp_path, 30.0, ()
+    )
+
+    assert answers == []
+    assert fail_rest is False
+    assert recorded.get("returncode") == 0
+    assert "could not be read (OSError)" in reason
+
+
+def _header_only_outcome(outcome):
+    """A runner whose child wrote the protocol header and nothing more."""
+
+    def fake(command, **kwargs):
+        Path(command[-1]).write_text(
+            json.dumps({"protocol": cdk_nag_worker.PROTOCOL_VERSION}) + "\n",
+            encoding="utf-8",
+        )
+        return dict(outcome)
+
+    return fake
+
+
+@pytest.mark.unit
+def test_a_child_that_answered_everything_but_could_not_be_stopped_is_recorded(
+    tmp_path, monkeypatch
+):
+    """The child wrote every answer, then hung in teardown past the limit and the stop
+    failed. Before this read ``_run_child`` returned on the complete answers before the
+    stop state was looked at, so the response was treated as a clean success and the
+    run-level could-not-stop gate never saw a process that may still be running."""
+    templates = _templates(tmp_path, 2)
+    answers = {t.as_posix(): NOT_CFN for t in templates}
+    _patch_spawn(monkeypatch, _could_not_stop_child(answers, answer_first=2))
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, timeout=5, values=()
+    ) as batch:
+        assert _call(templates[0], outdir) is None
+        assert _call(templates[1], outdir) is None
+
+    assert batch.could_not_stop_response is not None
+    assert batch.could_not_stop_response.get("could_not_stop_pid") == 4242
+    # Not a failed child: every template was answered, so no exit-code record.
+    assert batch.failed_child_responses == []
+
+
+@pytest.mark.unit
+def test_a_child_started_outside_the_batch_is_recorded_on_the_batch(
+    tmp_path, monkeypatch
+):
+    """``answer_for`` evaluates a template outside the batch in a child of its own; that
+    child's death reached no record before this read, because the single-template batch
+    it ran in was thrown away with its records."""
+    inside, outside = _templates(tmp_path, 2)
+    _patch_spawn(monkeypatch, _fake_child({}, [], returncode=139, answer_first=0))
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch([str(inside)], outdir, values=()) as batch:
+        with pytest.raises(RuntimeError, match="exited 139"):
+            _call(outside, outdir)
+
+    assert [r.get("returncode") for r in batch.failed_child_responses] == [139]
+
+
+@pytest.mark.unit
+def test_a_runner_that_raised_before_any_child_ran_leaves_no_child_record(
+    tmp_path, monkeypatch
+):
+    """The runner raising is not a child's exit; nothing is recorded for the scanner's
+    exit-code recorder to read. Before this read an empty response was appended."""
+    templates = _templates(tmp_path, 2)
+
+    def raising(*args, **kwargs):
+        raise RuntimeError("the scratch directory could not be made")
+
+    monkeypatch.setattr(cdk_nag_worker, "_run_child", raising)
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch(
+        [str(t) for t in templates], outdir, values=()
+    ) as batch:
+        for t in templates:
+            with pytest.raises(RuntimeError, match="scratch directory"):
+                _call(t, outdir)
+
+    assert batch.failed_child_responses == []
+    assert batch.could_not_stop_response is None

@@ -4,21 +4,31 @@
 import json
 import shutil
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     Annotated,
     Any,
     Callable,
     Dict,
+    Iterator,
     List,
     Literal,
     Optional,
+    Sequence,
     Set,
     Tuple,
     cast,
 )
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    model_validator,
+)
 
 from automated_security_helper.base.plugin_context import PluginContext
 
@@ -39,6 +49,7 @@ from automated_security_helper.core.progress import (
 from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
 )
+from automated_security_helper.core.phases.scan_phase import scan_phase_completed
 from automated_security_helper.core.execution_engine import (
     ScanExecutionEngine as ScanExecutionEngine,
 )
@@ -71,7 +82,6 @@ from automated_security_helper.utils.get_scan_set import (
     scan_set,
 )
 from automated_security_helper.utils.inner_run_outcome import (
-    INNER_RUN_OUTCOME_FILE,
     ExistingResultsRefused,
     existing_results_problem,
     without_run_records,
@@ -80,8 +90,13 @@ from automated_security_helper.utils.error_text import (
     carry_environment_values,
     config_environment_values,
     error_text,
+    text_without_values,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.process_env import (
+    hold_environ,
+    release_environ,
+)
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 from automated_security_helper.utils.output_dir_links import (
@@ -96,7 +111,10 @@ from automated_security_helper.utils.report_path_links import (
     refuse_a_linked_reports_dir,
 )
 from automated_security_helper.utils.subprocess_utils import scanning_tree
-from automated_security_helper.core.cancellation import raise_if_cancelled
+from automated_security_helper.core.cancellation import (
+    ScanCancelled,
+    raise_if_cancelled,
+)
 from automated_security_helper.core.previous_results import PreviousResults
 
 # One lock for every instance's used-check in execute_scan. Module-level rather
@@ -197,12 +215,25 @@ class ASHScanOrchestrator(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
-    source_dir: Annotated[Path, Field(description="Source directory to scan")] = (
-        Path.cwd()
-    )
-    output_dir: Annotated[Path, Field(description="Output directory for results")] = (
-        Path.cwd().joinpath(".ash", "ash_output")
-    )
+    # Defaults are computed per instance, not when this module is imported:
+    # Path.cwd() at class definition froze the importing process's directory into
+    # every orchestrator built later, and gave output_dir a cwd-derived value that
+    # left model_post_init's source-derived default (``<source_dir>/.ash/ash_output``)
+    # unreachable, so a caller naming only source_dir got an output directory
+    # under some other tree.
+    source_dir: Annotated[
+        Path, Field(default_factory=Path.cwd, description="Source directory to scan")
+    ]
+    output_dir: Annotated[
+        Path | None,
+        Field(
+            default=None,
+            description=(
+                "Output directory for results; None derives "
+                "<source_dir>/.ash/ash_output when the orchestrator is built"
+            ),
+        ),
+    ]
     work_dir: Annotated[
         Path | None, Field(description="Working directory for scan operations")
     ] = None
@@ -491,9 +522,15 @@ class ASHScanOrchestrator(BaseModel):
     # Sentinel: True after initialize() has run successfully
     _initialized: bool = False
     # The previous scan's results while this one runs; see core/previous_results.py.
-    # None when nothing is set aside: keep_previous_results is off, or this is a
-    # report-only run over existing results.
+    # None when keep_previous_results is off, or this is a report-only run over
+    # existing results. Kept when set_aside failed, so that a held set an earlier
+    # killed scan left is still dropped once this scan has its results (below).
     _previous_results: Optional[PreviousResults] = None
+    # Whether set_aside moved this scan's predecessor out of the way. False when
+    # it raised: this scan then replaced the previous results as it wrote, and a
+    # restore at its end would put back not them but whatever older set the
+    # directory held, so nothing is put back; the held set is dropped on success.
+    _previous_results_set_aside: bool = PrivateAttr(default=False)
 
     # This scan's ID. The scan set is written to the output directory under it, and
     # the plugins get it on their context (PluginContext.run_id), so they read back
@@ -527,6 +564,7 @@ class ASHScanOrchestrator(BaseModel):
             for name, value in (
                 ("config_path", self.config_path),
                 ("config_overrides", self.config_overrides),
+                ("config_base_gate", self.config_base_gate),
                 ("untrusted_config", self.untrusted_config),
                 ("client_overrides", self.client_overrides),
                 ("remote_client", self.remote_client),
@@ -560,6 +598,46 @@ class ASHScanOrchestrator(BaseModel):
         elif not isinstance(self.output_dir, Path):
             self.output_dir = Path(self.output_dir)
 
+        if self.config is not None:
+            # initialize() assigns the configuration it resolves, or adopts
+            # resolved_config, over this field, so a config given here was read
+            # by nothing. A caller that built one wants resolved_config.
+            ASH_LOGGER.warning(
+                "The config passed to the constructor is not used: initialize() "
+                "resolves its own configuration, or adopts resolved_config when "
+                "one is given. Pass the configuration as resolved_config."
+            )
+
+    @property
+    def _output_path(self) -> Path:
+        """``output_dir`` as a Path: model_post_init gives it a value when it is
+        built without one, so a reader after construction has a directory."""
+        return cast(Path, self.output_dir)
+
+    def __copy__(self) -> "ASHScanOrchestrator":
+        return self._with_its_own_run_id(super().__copy__())
+
+    def __deepcopy__(
+        self, memo: Optional[Dict[int, Any]] = None
+    ) -> "ASHScanOrchestrator":
+        return self._with_its_own_run_id(super().__deepcopy__(memo))
+
+    @staticmethod
+    def _with_its_own_run_id(
+        copied: "ASHScanOrchestrator",
+    ) -> "ASHScanOrchestrator":
+        """A copy of an orchestrator that has not been initialized gets a run id
+        of its own.
+
+        ``model_copy`` copies the private attributes, so two copies of one
+        template shared a run id, wrote their scan sets to the same file under
+        it and read each other's list back. An initialized orchestrator holds
+        the engine and the context built under its id, so its copy keeps it.
+        """
+        if not copied._initialized:
+            copied._run_id = new_run_id()
+        return copied
+
     def initialize(self) -> None:
         """Perform all filesystem I/O and engine setup.
 
@@ -572,8 +650,29 @@ class ASHScanOrchestrator(BaseModel):
         # tree for this as well as for execute_scan; see
         # utils/subprocess_utils.scanning_tree. Scoped to the call, so nothing is
         # left registered if it raises.
-        with scanning_tree(self.source_dir):
+        with scanning_tree(self.source_dir), self._offline_scope():
             self._initialize()
+
+    @contextmanager
+    def _offline_scope(self) -> Iterator[None]:
+        """Hold ``ASH_OFFLINE=YES`` for the body when this run is offline.
+
+        ``offline`` was a declared field that nothing read: the environment
+        variable is the one thing the plugins read (core/constants.is_offline_mode),
+        so a caller that built the orchestrator with ``offline=True`` and set no
+        variable of its own ran every scanner online. The hold is counted
+        (utils/process_env.hold_environ), so it nests with the CLI's and the
+        workspace's own, and the variable returns to what it was when the last
+        holder leaves.
+        """
+        if not self.offline:
+            yield
+            return
+        hold_environ("ASH_OFFLINE", "YES")
+        try:
+            yield
+        finally:
+            release_environ("ASH_OFFLINE")
 
     def _initialize(self) -> None:
         ASH_LOGGER.info(f"Initializing ASH v{get_ash_version()}")
@@ -583,6 +682,11 @@ class ASHScanOrchestrator(BaseModel):
                 "Using the configuration supplied by the caller; skipping resolution"
             )
             config = self.resolved_config
+            if self.severity_threshold_restriction is not None:
+                # The restriction below rewrites thresholds in place. The caller
+                # keeps this object, and a workspace hands the same one to more
+                # than one scan, so the scan works on a copy of its own.
+                config = config.model_copy(deep=True)
         else:
             # Before resolution: resolve_config answers a missing named file
             # with the default config, and this scan must not run on it.
@@ -639,7 +743,7 @@ class ASHScanOrchestrator(BaseModel):
         # committed is refused as the committed entry it is, with exit 3 and its
         # path, as the CLI and the MCP tools refuse it (core/committed_output.py),
         # and one git does not track as a link (_refuse_linked_output_dir).
-        if is_link(self.output_dir):
+        if is_link(self._output_path):
             self._refuse_committed_results_paths()
             self._refuse_linked_output_dir()
         self._build_engine(config)
@@ -656,11 +760,10 @@ class ASHScanOrchestrator(BaseModel):
         # settles them otherwise.
         try:
             self._prepare_output_dir()
+            self._apply_metadata()
         except BaseException:
             self.settle_previous_results(restore=True)
             raise
-
-        self._apply_metadata()
 
         self._initialized = True
         ASH_LOGGER.info("ASH Orchestrator and ScanExecutionEngine initialized")
@@ -672,16 +775,29 @@ class ASHScanOrchestrator(BaseModel):
         would without keep_previous_results, and they do not come back if it
         fails.
         """
-        self._previous_results = PreviousResults(self.output_dir)
+        self._previous_results = PreviousResults(self._output_path)
         try:
             self._previous_results.set_aside()
+            self._previous_results_set_aside = True
         except OSError as e:
             ASH_LOGGER.warning(
                 f"Could not set the previous results in {self.output_dir} aside "
                 f"({error_text(e)}); this scan replaces them as it writes, and they will not "
                 "come back if it fails."
             )
-            self._previous_results = None
+            # The handle stays: a held set a killed earlier scan left (which
+            # set_aside would have kept as the last complete results) is still
+            # discarded when this scan finishes. Dropping the handle here left
+            # that stale set in place, and the next MCP scan took it for the
+            # last complete results and deleted this scan's.
+            self._previous_results_set_aside = False
+            # The scan goes on and replaces what is at the top level
+            # (_prepare_output_dir removes it), so the marker a restore left
+            # beside it no longer describes the directory: with it in place,
+            # holds_restored_results read this scan's own output as results put
+            # back after a failed scan. A set aside that completes removes the
+            # marker itself.
+            self._previous_results.forget_restored_marker()
 
     def _remove_kept_previous_results(self) -> None:
         """Without keep_previous_results: remove what a scan that kept them left.
@@ -695,7 +811,7 @@ class ASHScanOrchestrator(BaseModel):
         complete set and remove this scan's.
         """
         try:
-            PreviousResults(self.output_dir).discard()
+            PreviousResults(self._output_path).discard()
         except OSError as e:
             ASH_LOGGER.warning(
                 f"Could not remove the previous results an MCP scan kept in "
@@ -707,12 +823,20 @@ class ASHScanOrchestrator(BaseModel):
 
         After the engine is built and the committed-files check has passed, so a
         refused command line leaves the output directory as it was.
+
+        The previous run's result files go unless this scan set them aside: a
+        set aside that FAILED leaves them at the top level (the handle stays,
+        for the stale held set it still discards), and this scan replaces them
+        as it writes, so they are removed here as they are for a scan that
+        keeps nothing. Left in place, the previous results file passed for this
+        run's until its own write, which the MCP progress tracker reads as a
+        complete scan.
         """
         ASH_LOGGER.verbose("Setting up working directories")
 
         self.ensure_directories()
 
-        if self.existing_results_path is None and self._previous_results is None:
+        if self.existing_results_path is None and not self._previous_results_set_aside:
             self._remove_previous_result_files()
 
     def _build_engine(self, config: AshConfig) -> None:
@@ -724,13 +848,45 @@ class ASHScanOrchestrator(BaseModel):
         """
         exec_engine_params: Dict[str, Any] = {}
         if self.existing_results_path is not None:
+            # UTF-8, as every writer of the results file writes it; the locale
+            # encoding read it as cp1252 on Windows and failed, or re-saved it as
+            # mojibake, on non-ASCII text in the findings.
             with warning_of_dropped_keys(self.existing_results_path) as context:
-                asharp_model = AshAggregatedResults.model_validate_json(
-                    Path(self.existing_results_path).read_text(), context=context
-                )
-            # A field the record holds as an environment reference it cannot
-            # hold takes this run's own value (config/recorded_config.py).
-            take_own_values(asharp_model.ash_config, config)
+                try:
+                    existing_text = Path(self.existing_results_path).read_text(
+                        encoding="utf-8"
+                    )
+                except (OSError, UnicodeDecodeError) as e:
+                    # The same refusal execute_scan gives for a file that goes
+                    # away or cannot be read after this point, not a bare OSError
+                    # that no entry point reads as one.
+                    values = config_environment_values(config)
+                    raise ASHValidationError(
+                        f"Failed to load existing results: {error_text(e, values)}"
+                    ) from e
+                try:
+                    asharp_model = AshAggregatedResults.model_validate_json(
+                        existing_text,
+                        context=context,
+                    )
+                except ValidationError as e:
+                    # A truncated or malformed file: the same refusal as a file
+                    # that cannot be read, described without its input and
+                    # redacted of the values the config read from the
+                    # environment, not a bare pydantic ValidationError that no
+                    # entry point reads as a results file that did not load.
+                    values = config_environment_values(config)
+                    raise ASHValidationError(
+                        f"Failed to load existing results: {error_text(e, values)}"
+                    ) from e
+            # Without the records an earlier run left about itself, as the reload
+            # in _execute_scan does: the report phase reads a "reports written"
+            # record on the model as this run's own, so a model that carried an
+            # earlier run's would have its files counted as written here.
+            asharp_model.validation_checkpoints = without_run_records(
+                asharp_model.validation_checkpoints
+            )
+            self._adopt_this_runs_values(asharp_model, config)
             exec_engine_params = {"asharp_model": asharp_model}
 
         # Under this scan's run id, so the context records its directories on
@@ -741,7 +897,12 @@ class ASHScanOrchestrator(BaseModel):
                 context=PluginContext(
                     source_dir=self.source_dir,
                     output_dir=self.output_dir,
-                    work_dir=self.output_dir.joinpath(ASH_WORK_DIR_NAME),
+                    # The caller's work_dir when one was given: it is the
+                    # directory the end-of-scan cleanup removes, and it was never
+                    # the one the plugins wrote (the context always got
+                    # output_dir/converted), so the cleanup deleted a directory
+                    # ASH never used while the converted tree stayed.
+                    work_dir=self.engine_work_dir(),
                     config=config,
                     ignore_suppressions=self.ignore_suppressions,
                     run_id=self._run_id,
@@ -765,6 +926,9 @@ class ASHScanOrchestrator(BaseModel):
                 verbose=self.verbose,
                 debug=self.debug,
                 python_based_plugins_only=self.python_based_plugins_only,
+                # Declared on this class, documented as the pre-commit and CI
+                # mode, and read by the engine, which was never told.
+                simple_mode=self.simple_mode,
                 ash_plugin_modules=self.ash_plugin_modules,
                 plugin_module_names=self.plugin_module_names,
                 output_formats=[f.value for f in self.output_formats] or None,
@@ -774,6 +938,19 @@ class ASHScanOrchestrator(BaseModel):
                 selection_origin=self.selection_origin,
                 changed_files=self.changed_files,
             )
+
+    def engine_work_dir(self) -> Path:
+        """The directory the plugins convert into: ``work_dir`` when the caller
+        set one, else ``<output_dir>/converted``.
+
+        One answer for the engine's context and for the end-of-scan cleanup, so
+        what the cleanup removes (``work_dir``, when set) is what the plugins
+        used. With ``work_dir`` unset the default under the output directory is
+        the plugins', and the cleanup leaves it, as it always has.
+        """
+        if self.work_dir is not None:
+            return Path(self.work_dir)
+        return self._output_path.joinpath(ASH_WORK_DIR_NAME)
 
     def restrict_to_changed_files(self, changed_files: Optional[Set[Path]]) -> None:
         """Narrow this run's results to *changed_files*, after :meth:`initialize`.
@@ -831,9 +1008,38 @@ class ASHScanOrchestrator(BaseModel):
             return
         loaded = self.existing_results_path is not None
 
+        # The values this run's configuration read from the environment: a
+        # project name among them is a value, not a label, and the reports print
+        # metadata.project_name as text.
+        environment_values = list(config_environment_values(self.config))
         for key, value in self.metadata.items():
             if key == "project_name":
-                if isinstance(value, str) and value.strip():
+                if (
+                    isinstance(value, str)
+                    and value.strip()
+                    and (
+                        value.strip() in environment_values
+                        or text_without_values(value.strip(), environment_values)
+                        != value.strip()
+                    )
+                ):
+                    # A workspace hands each project its resolved display label,
+                    # which can be the project_name its config read from the
+                    # environment, or a label that holds such a value; written
+                    # here it reached the per-project HTML, Markdown, text and
+                    # flat JSON reports as text. Compared by redaction, not by
+                    # equality alone: a name that quotes a value inside a longer
+                    # label was written. Equality still counts as well, because
+                    # the redaction leaves a short value (under four characters)
+                    # alone unless the text quotes it, so a label that is exactly
+                    # such a value would otherwise be applied. The name the
+                    # engine recorded (the masked or reference form) stands.
+                    ASH_LOGGER.warning(
+                        "Ignoring a project_name in scan metadata that is a value "
+                        "the configuration read from the environment; keeping "
+                        f"{model.metadata.project_name!r}"
+                    )
+                elif isinstance(value, str) and value.strip():
                     model.metadata.project_name = value.strip()
                 else:
                     ASH_LOGGER.warning(
@@ -924,13 +1130,35 @@ class ASHScanOrchestrator(BaseModel):
             ASHValidationError: one of those is a symlink or a junction.
         """
         try:
-            refuse_linked_output_dir(self.source_dir, self.output_dir)
+            refuse_linked_output_dir(self.source_dir, self._output_path)
         except OutputDirLinkRefused as refusal:
             raise ASHValidationError(str(refusal)) from refusal
 
-    def _restrict_severity_threshold(self, config: AshConfig, restriction: str) -> None:
+    def _adopt_this_runs_values(
+        self, loaded: AshAggregatedResults, config: AshConfig | None
+    ) -> None:
+        """Make the config recorded in loaded results this run's own.
+
+        A field the record holds as an environment reference it cannot hold
+        takes this run's value (config/recorded_config.py), and the severity
+        restriction the caller asked for applies to the recorded thresholds as it
+        does to *config*: the report over saved results gates on what the saved
+        config says, so a restriction that reached only ``self.config`` did not
+        change whether the run it was asked for passed.
+        """
+        take_own_values(loaded.ash_config, config)
+        restriction = self.severity_threshold_restriction
+        if restriction is not None and loaded.ash_config is not None:
+            self._restrict_severity_threshold(
+                loaded.ash_config, restriction, announce=False
+            )
+
+    def _restrict_severity_threshold(
+        self, config: AshConfig, restriction: str, announce: bool = True
+    ) -> None:
         """Run at the stricter of ``restriction`` and every configured threshold
-        of *config*, the run's resolved configuration (``self.config``).
+        of *config*, the run's resolved configuration (``self.config``) or the
+        one saved results record.
 
         The global threshold and each scanner's own one, which decides that
         scanner's verdict when it is set (the executor's determine_status and
@@ -938,53 +1166,226 @@ class ASHScanOrchestrator(BaseModel):
         Tightening only the global one left a repository's bandit CRITICAL in
         charge of bandit when the client asked for HIGH. A scanner with no
         threshold of its own follows the global one, so it is left unset.
-        """
-        from automated_security_helper.utils.severity_ladder import stricter_of
 
-        requested = restriction.upper()
+        A restriction that is not a ladder value is refused: ``stricter_of`` ranks
+        an unknown string after CRITICAL, so it won every comparison and was
+        written into the configuration as the threshold. Blank means none.
+        ``announce`` False leaves the log lines to the first application.
+
+        Raises:
+            ASHConfigValidationError: *restriction* names no threshold. A refused
+                input like an invalid configuration (exit 3 in the CLI's handlers),
+                not a crash; still an ASHValidationError.
+        """
+        from automated_security_helper.utils.severity_ladder import (
+            normalize_threshold,
+            stricter_of,
+        )
+
+        if not restriction.strip():
+            return
+        requested = normalize_threshold(restriction)
+        if requested is None:
+            raise ASHConfigValidationError(
+                f"The severity threshold {restriction!r} is not one of ALL, LOW, "
+                "MEDIUM, HIGH or CRITICAL."
+            )
+        values = config_environment_values(config)
+
+        def shown(text: object) -> str:
+            # A ladder word prints as it is. Anything else in a threshold field
+            # can be a value the configuration read from the environment.
+            if normalize_threshold(text) is not None:
+                return str(text)
+            return text_without_values(str(text), values)
+
         settings = config.global_settings
         configured = settings.severity_threshold
         effective = stricter_of(configured, requested)
         if effective != configured:
-            ASH_LOGGER.info(
-                f"Severity threshold {effective} requested, stricter than the "
-                f"configured {configured}; the scan uses {effective}"
-            )
+            if announce:
+                ASH_LOGGER.info(
+                    f"Severity threshold {shown(effective)} requested, stricter "
+                    f"than the configured {shown(configured)}; the scan uses "
+                    f"{shown(effective)}"
+                )
             # The configured threshold is a ladder value, and stricter_of ranks
             # every value that is not one after CRITICAL, so it is replaced only
             # by a stricter ladder value: the cast names that and checks nothing.
             settings.severity_threshold = cast(
                 Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"], effective
             )
-        elif requested != configured:
+        elif requested != configured and announce:
             ASH_LOGGER.info(
                 f"Severity threshold {requested} requested, looser than "
-                f"the configured {configured}; the configured threshold stands"
+                f"the configured {shown(configured)}; the configured threshold stands"
             )
 
-        for name, options in self._scanner_options():
+        for name, options in self._scanner_options(config):
             own = (
                 options.get("severity_threshold")
                 if isinstance(options, dict)
                 else getattr(options, "severity_threshold", None)
             )
-            if not own:
+            if own is None:
                 continue
-            tightened = stricter_of(own, requested)
+            if not isinstance(own, str):
+                # Not a threshold the ladder can rank (False, 0, a list): left
+                # as the scanner's own setting for its validation to refuse,
+                # never handed to stricter_of, which reads strings.
+                if announce:
+                    ASH_LOGGER.warning(
+                        f"{name}'s severity_threshold is not a ladder value "
+                        f"({type(own).__name__}); the requested {requested} is not "
+                        f"applied to it"
+                    )
+                continue
+            if not own.strip():
+                # An empty string is set, not unset: the executor reads it as
+                # the scanner's own threshold and grades that scanner with no
+                # gate, so the client's floor was loosened for exactly it. It
+                # takes the run's effective global threshold, which is what an
+                # unset threshold follows.
+                tightened = effective
+            else:
+                tightened = stricter_of(own, requested)
             if tightened == own:
                 continue
-            ASH_LOGGER.info(
-                f"Severity threshold {requested} requested, stricter than "
-                f"{name}'s configured {own}; {name} uses {tightened}"
-            )
+            if announce:
+                ASH_LOGGER.info(
+                    f"Severity threshold {requested} requested, stricter than "
+                    f"{name}'s configured {shown(own)}; {name} uses "
+                    f"{shown(tightened)}"
+                )
             if isinstance(options, dict):
                 options["severity_threshold"] = tightened
             else:
                 options.severity_threshold = tightened
 
-    def _scanner_options(self) -> List[Tuple[str, Any]]:
-        """Each configured scanner's ``options``: declared scanners and extra ones."""
-        segment = getattr(self.config, "scanners", None)
+    def _record_config_warnings(self, results: Any) -> None:
+        """Add this run's config resolution warnings to *results*' validation
+        checkpoints, each once.
+
+        Over saved results the checkpoints already hold the warnings the saved
+        run recorded, so an unconditional append doubled every one that this
+        run's resolution also gave, and a warning that repeated in the list was
+        appended each time. A checkpoint is the same one when its type and
+        message are.
+        """
+        if self.config is None or not self.config._resolution_warnings:
+            return
+        checkpoints = results.validation_checkpoints
+        recorded = {
+            str(checkpoint.get("message"))
+            for checkpoint in checkpoints
+            if isinstance(checkpoint, dict)
+            and checkpoint.get("type") == "config_warning"
+        }
+        for warning in self.config._resolution_warnings:
+            if str(warning) in recorded:
+                continue
+            recorded.add(str(warning))
+            checkpoints.append(
+                {
+                    "type": "config_warning",
+                    "severity": "warning",
+                    "message": warning,
+                    "metadata": {
+                        "source": "config_resolution",
+                        "impact": (
+                            "A configuration input was not applied as "
+                            "written; the message says which and how."
+                        ),
+                    },
+                }
+            )
+
+    def _writes_results_file(self, phases: Sequence[str]) -> bool:
+        """Whether this run owns the results file: a scan ran (not a report over
+        existing results) and there is an output directory to write into."""
+        return bool(
+            "scan" in phases and self.existing_results_path is None and self.output_dir
+        )
+
+    def _remove_results_file_written_before_a_cancel(self) -> None:
+        """Remove the results file this run wrote when the cancel landed during
+        the write. Only its own file: the previous results, if any were kept,
+        sit in the held set, and the caller puts them back. A removal that fails
+        is logged; the cancel is what the caller sees."""
+        results_file = self._output_path / "ash_aggregated_results.json"
+        try:
+            results_file.unlink(missing_ok=True)
+        except OSError as e:
+            ASH_LOGGER.warning(
+                f"The scan was cancelled while its results file was written, and "
+                f"the file could not be removed: {error_text(e)}"
+            )
+
+    def _write_results_after_failure(self, phases: Sequence[str]) -> None:
+        """Write the results the engine holds when a phase AFTER the scan raised.
+
+        The scan phase used to write ash_aggregated_results.json at its own
+        end, so a report phase that raised still left the scan's results on
+        disk for a later --use-existing. The one write now sits after every
+        phase; this keeps that file on a failure after the scan phase, from
+        the model the engine built. Whether the scan phase ran to its end is
+        read from the phase's own record (``scan_phase_completed``: the
+        checkpoint named ``SCAN_PHASE_COMPLETION_CHECKPOINT`` in scan_phase.py,
+        which the phase records once its results are complete), not from the
+        model's existence: the engine holds its model from construction, so a
+        failure in the convert phase or anywhere before the scan phase, or a
+        scan phase that raised midway, writes nothing, as the base did. Also
+        nothing when this run does not own the file. A write that fails is
+        logged, never raised: the original failure is what the caller sees.
+        """
+        if not self._writes_results_file(phases):
+            return
+        engine = self.execution_engine
+        # The model the phases hand along is the engine's ``_results``: the
+        # scan phase may return a new object rather than the one it was given
+        # (scan_phase.py allows either), and the engine syncs ``_asharp_model``
+        # to ``_results`` only at the end of its final suppression pass, in
+        # the changed-files narrowing and after the report phase. A failure
+        # between the scan phase's end and that sync (the suppression and
+        # metrics steps at the start of the report arm, or in the scan arm
+        # when there is no report phase) leaves ``_asharp_model`` holding the
+        # model the engine started with, which carries no completion
+        # checkpoint, so nothing was written for a scan phase that did run to
+        # its end. ``_asharp_model`` is the fallback: an engine that holds no
+        # ``_results`` model (the stubs the tests stand in) is read as before.
+        results = None
+        if engine is not None:
+            results = getattr(engine, "_results", None)
+            if not isinstance(results, AshAggregatedResults):
+                results = getattr(engine, "_asharp_model", None)
+        if not isinstance(results, AshAggregatedResults):
+            return
+        if not scan_phase_completed(results):
+            ASH_LOGGER.debug(
+                "No results file written after the failure: the scan phase did "
+                "not run to its end"
+            )
+            return
+        try:
+            results.save_model(self._output_path)
+            ASH_LOGGER.info(
+                f"Saved the scan's results to {self.output_dir} before the failure "
+                f"is reported"
+            )
+        except Exception as e:
+            ASH_LOGGER.warning(
+                f"Could not save the scan's results after the failure: {error_text(e)}"
+            )
+
+    def _scanner_options(self, config: Any) -> List[Tuple[str, Any]]:
+        """Each scanner's ``options`` in *config*: declared scanners and extra ones.
+
+        Of the configuration it is given, not ``self.config``: the severity
+        restriction is applied to the saved results' recorded config as well, and
+        read ``self.config`` (None in a caller that passes its own) whatever it
+        was handed.
+        """
+        segment = getattr(config, "scanners", None)
         if segment is None:
             return []
         entries: List[Tuple[str, Any]] = [
@@ -1011,10 +1412,12 @@ class ASHScanOrchestrator(BaseModel):
         cannot be removed is left: the scan overwrites it. Not the log files: the
         logger truncates them when it opens them. run_ash_scan's
         _discard_prior_run_artifacts removes the same names. An earlier inner
-        run's refusal record too (utils/inner_run_outcome.py).
+        run's outcome record (utils/inner_run_outcome.py) is one of them, so
+        the committed-output refusal sees it where it used to be named here
+        alone.
         """
-        for name in (*PREVIOUS_RUN_FILE_NAMES, INNER_RUN_OUTCOME_FILE):
-            old_file = self.output_dir / name
+        for name in PREVIOUS_RUN_FILE_NAMES:
+            old_file = self._output_path / name
             try:
                 old_file.unlink(missing_ok=True)
             except OSError as e:
@@ -1046,13 +1449,13 @@ class ASHScanOrchestrator(BaseModel):
         opened them; nothing here writes them.
         """
         if self.existing_results_path is None:
-            refuse_committed_entries(self.output_dir, not_on_disk=LOG_FILE_NAMES)
+            refuse_committed_entries(self._output_path, not_on_disk=LOG_FILE_NAMES)
             return
         files, directories = report_over_existing_results_writes(
             inspect=False, cleanup=not self.no_cleanup
         )
         refuse_committed_entries(
-            self.output_dir,
+            self._output_path,
             files=files,
             directories=directories,
             not_on_disk=LOG_FILE_NAMES,
@@ -1093,7 +1496,12 @@ class ASHScanOrchestrator(BaseModel):
             # If we're using existing results, only ensure the reports directory
             # exists. A plain mkdir: a link there was refused at the top of this
             # method, and the existing-results load refuses one made since.
-            if self.existing_results_path and self.existing_results_path.exists():
+            #
+            # By whether a path was given, not whether the file is there: a file
+            # that has gone fails to load with that said, instead of the scan
+            # falling through to the branch that clears the working directories
+            # and then reporting a scan that never ran.
+            if self.existing_results_path is not None:
                 self.output_dir.joinpath("reports").mkdir(parents=True, exist_ok=True)
             else:
                 # Otherwise, set up all working directories. initialize has made
@@ -1154,7 +1562,10 @@ class ASHScanOrchestrator(BaseModel):
         With keep_previous_results, the previous scan's results, set aside by
         initialize, are dropped once the phases have finished, and put back if the
         scan ends any other way: an exception, a cancel (ScanCancelled), Ctrl-C. A
-        cancel that lands after the last phase counts as ending without results.
+        cancel that lands after the last phase counts as ending without results;
+        one read at the results-file write itself puts them back too when
+        settle_on_success is True, and leaves them set aside, for the caller to
+        settle, when it is False (_write_results_file).
 
         Args:
             phases (List[ExecutionPhaseType], optional): The phases to execute.
@@ -1177,12 +1588,22 @@ class ASHScanOrchestrator(BaseModel):
                     "ASHScanOrchestrator for a new scan."
                 )
             self._scan_executed = True
+        # Resolved once, here, so the phases that ran and the phases the write
+        # reads are the same list: the write reads "scan" in them, and a None
+        # that reached it unresolved read as no scan, so the default call
+        # (every phase) wrote no results file.
+        if phases is None:
+            phases = ["convert", "scan", "report"]
         try:
             # The run id the plugin context recorded its directories under
             # (_build_engine), in this thread and in the scanner pool's copies
             # of its context. source_dir is the scanned tree for the phases' tool
             # lookups too (utils/subprocess_utils.scanning_tree).
-            with scanning_tree(self.source_dir), derived_roots_scope(self._run_id):
+            with (
+                scanning_tree(self.source_dir),
+                derived_roots_scope(self._run_id),
+                self._offline_scope(),
+            ):
                 results = self._execute_scan(phases)
             raise_if_cancelled()
         except BaseException:
@@ -1193,9 +1614,78 @@ class ASHScanOrchestrator(BaseModel):
             # config that serves many scans does not keep every finished
             # scan's directories.
             forget_derived_roots(self.config, self._run_id)
+        # Outside the arm above: a cancel read at the write ends the scan with no
+        # results file. With settle_on_success False the previous results stay
+        # set aside for the caller to settle, as the CLI's own write after its
+        # own check left them. With True the caller settles nothing later (that
+        # is what True says), so they are put back here: left set aside, a
+        # cancel at the write stranded them in the held directory.
+        try:
+            self._write_results_file(phases, results)
+        except BaseException:
+            if settle_on_success:
+                self.settle_previous_results(restore=True)
+            raise
         if settle_on_success:
             self.settle_previous_results(restore=False)
         return results
+
+    def _write_results_file(
+        self, phases: Sequence[str] | None, results: AshAggregatedResults
+    ) -> None:
+        """Write ash_aggregated_results.json once, after every phase has run.
+
+        The scan phase used to write it at its own end, before the engine's
+        changed-files narrowing, final suppression pass, metrics rebuild and
+        report phase, and the MCP progress tracker reads the file's existence
+        as the scan being complete. The CLI rewrites the file after execute_scan
+        returns; a direct caller of the orchestrator keeps this one as the final
+        file. Not for a report over existing results, which rewrites nothing of
+        the scan it reports on.
+
+        The cancel is read before the write and once more after it. A cancel
+        read before the write leaves no file; one that lands while the file is
+        being written takes the file this run wrote with it: a client polling a
+        cancelled scan reads that file as finished results. Either way the
+        cancel propagates from here, outside execute_scan's arm that puts the
+        previous results back. execute_scan puts them back when it settles (its
+        ``settle_on_success``), and otherwise they stay set aside for the caller
+        to settle, as the CLI's single write (after its own check) left them.
+
+        A write that FAILS is a failed scan, as it was when the write sat inside
+        _execute_scan: the previous results are put back here, and the failure
+        is raised as ASHValidationError with the run's environment values
+        redacted and carried, the shape _execute_scan's own arm gives a failure.
+        """
+        if not self._writes_results_file(phases or []):
+            return
+        raise_if_cancelled()
+        if not isinstance(results, AshAggregatedResults):
+            ASH_LOGGER.warning(
+                f"The engine returned {type(results).__name__}, not "
+                f"AshAggregatedResults; no results file was written to "
+                f"{self.output_dir}"
+            )
+            return
+        ASH_LOGGER.debug(f"Saving AshAggregatedResults to {self.output_dir}")
+        try:
+            results.save_model(self._output_path)
+        except Exception as e:
+            values = config_environment_values(self.config)
+            ASH_LOGGER.error(
+                f"Could not write the results file: {error_text(e, values)}"
+            )
+            self.settle_previous_results(restore=True)
+            wrapper = ASHValidationError(
+                f"Scan execution failed: {error_text(e, values)}"
+            )
+            carry_environment_values(wrapper, values)
+            raise wrapper
+        try:
+            raise_if_cancelled()
+        except ScanCancelled:
+            self._remove_results_file_written_before_a_cancel()
+            raise
 
     def settle_previous_results(self, restore: bool) -> None:
         """Put the previous results back, or drop them. Never raises.
@@ -1205,6 +1695,10 @@ class ASHScanOrchestrator(BaseModel):
         has its results whether or not the old ones could be deleted.
         """
         if self._previous_results is None:
+            return
+        if restore and not self._previous_results_set_aside:
+            # Nothing of this scan's predecessor was moved, so there is nothing
+            # of it to put back; what the held set holds is an older scan's.
             return
         try:
             if restore:
@@ -1238,24 +1732,23 @@ class ASHScanOrchestrator(BaseModel):
         ASH_LOGGER.verbose(f"Executing phases: {phases}")
 
         try:
-            # If existing results path is provided, load the model from it
-            if self.existing_results_path and self.existing_results_path.exists():
+            # If existing results path is provided, load the model from it. By
+            # whether a path was given: a file that has gone fails below as
+            # results that could not be loaded, where a scan would otherwise
+            # start and the phases would find no model.
+            if self.existing_results_path is not None:
                 if "inspect" in phases:
                     # The inspect phase writes analysis/, which initialize did not
                     # check for a report over existing results.
                     refuse_committed_entries(
-                        self.output_dir, files=(), directories=("analysis",)
+                        self._output_path, files=(), directories=("analysis",)
                     )
                 ASH_LOGGER.info(
                     f"Loading existing results from {self.existing_results_path}"
                 )
                 problem = None
                 try:
-                    from automated_security_helper.models.asharp_model import (
-                        AshAggregatedResults,
-                    )
-
-                    with open(self.existing_results_path, "r") as f:
+                    with open(self.existing_results_path, "r", encoding="utf-8") as f:
                         model_data = json.load(f)
 
                     # Load the model from the existing results
@@ -1269,10 +1762,9 @@ class ASHScanOrchestrator(BaseModel):
                     asharp_model.validation_checkpoints = without_run_records(
                         asharp_model.validation_checkpoints
                     )
-                    # A field the record holds as an environment reference it
-                    # cannot hold takes this run's own value
-                    # (config/recorded_config.py).
-                    take_own_values(asharp_model.ash_config, self.config)
+                    # This run's own values and severity restriction over the
+                    # recorded config (config/recorded_config.py).
+                    self._adopt_this_runs_values(asharp_model, self.config)
 
                     # Update the execution engine's model
                     if self.execution_engine is not None and hasattr(
@@ -1315,9 +1807,16 @@ class ASHScanOrchestrator(BaseModel):
                 # Ensure the reports directory exists but don't clean up any other
                 # directories. Outside the handler above, which would report a link
                 # refused here as results that failed to load.
-                ensure_reports_dir(self.output_dir.joinpath("reports"))
+                ensure_reports_dir(self._output_path.joinpath("reports"))
             # Only identify files to scan if we're not using existing results
             elif "convert" in phases or "scan" in phases:
+                # Before the walk: a scan with no engine walked the whole tree and
+                # wrote its scan set before the check below said it had nothing to
+                # run the phases with.
+                if self.execution_engine is None:
+                    raise RuntimeError(
+                        "Execution engine was never initialized; cannot execute scan phases."
+                    )
                 ASH_LOGGER.info("Identifying non-ignored files to include in scans")
                 exclusions: Dict[str, Any] = {}
                 links_not_scanned: List[Dict[str, str]] = []
@@ -1357,6 +1856,13 @@ class ASHScanOrchestrator(BaseModel):
                     f"Found {len(self.source_scan_set)} files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified."
                 )
 
+            # Before the phases, so the report phase writes them: they were added
+            # to the returned model after the reports were out, so no report said
+            # that a configuration input had not been applied as written.
+            held_model = getattr(self.execution_engine, "_asharp_model", None)
+            if isinstance(held_model, AshAggregatedResults):
+                self._record_config_warnings(held_model)
+
             try:
                 # Execute all phases.
                 #
@@ -1378,30 +1884,41 @@ class ASHScanOrchestrator(BaseModel):
                 ASH_LOGGER.debug("Scan execution completed successfully")
             except Exception as e:
                 ASH_LOGGER.error(f"Execution failed: {error_text(e, values)}")
+                # The scan phase used to write the results file at its own
+                # end, so a report phase that raised still left the scan's
+                # results for a later --use-existing. The write moved below
+                # this block; a failure after the scan phase keeps that file
+                # by writing what the engine holds. A cancel is not an
+                # Exception and still writes nothing.
+                self._write_results_after_failure(phases)
                 raise
 
-            # Add config resolution warnings to validation checkpoints
-            if self.config is not None and self.config._resolution_warnings:
-                for warning in self.config._resolution_warnings:
-                    asharp_model_results.validation_checkpoints.append(
-                        {
-                            "type": "config_warning",
-                            "severity": "warning",
-                            "message": warning,
-                            "metadata": {
-                                "source": "config_resolution",
-                                "impact": (
-                                    "A configuration input was not applied as "
-                                    "written; the message says which and how."
-                                ),
-                            },
-                        }
-                    )
+            # Again on what the phases returned: a model the engine replaced
+            # while it ran did not get the first pass, and one that did is not
+            # given its warnings twice.
+            self._record_config_warnings(asharp_model_results)
+
+            # The results file is written by execute_scan once this returns,
+            # outside the arm that puts the previous results back
+            # (_write_results_file): the scan phase used to write it at its own
+            # end, before the engine's changed-files narrowing, final
+            # suppression pass, metrics rebuild and report phase.
 
             if not self.no_cleanup:
                 if self.work_dir and Path(self.work_dir).exists():
                     ASH_LOGGER.verbose("Cleaning up working directory...")
-                    shutil.rmtree(self.work_dir)
+                    try:
+                        shutil.rmtree(self.work_dir)
+                    except OSError as e:
+                        # Every phase has finished and the results are written
+                        # next; a working directory that could not be removed is
+                        # not a failed scan. Raised, it turned a completed scan into
+                        # a failure and, with keep_previous_results, deleted the
+                        # new results and restored the old ones.
+                        ASH_LOGGER.warning(
+                            f"Could not remove the working directory "
+                            f"{Path(self.work_dir).as_posix()}: {error_text(e, values)}"
+                        )
             return asharp_model_results
 
         except ASHValidationError as e:

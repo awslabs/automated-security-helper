@@ -48,15 +48,18 @@ def test_a_chain_the_scan_loads_keeps_its_values_in_the_pre_check(
     )
     from automated_security_helper.config.sandbox_grants import scanned_trees
 
-    # Local-caller mode, as the sibling get_config cells run: no configured
-    # roots, no shared workspace, so the base gate permits the chain and
-    # nothing here is a client-delivered file.
+    # Local-caller mode, as the sibling get_config cells run: no scan roots, no
+    # shared workspace, so the base gate permits the chain and nothing here is a
+    # client-delivered file. The named config sits in a configured config root,
+    # so it is the operator's: the scan reads a named file the operator did not
+    # set aside with every chain file confined (client_named_config_is_untrusted),
+    # and the control below reads with the repository's settings only.
+    operator = tmp_path / "operator"
     monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
-    monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(operator))
     monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
     monkeypatch.setenv("ASH_PRE_CHECK_CELL", _VALUE)
 
-    operator = tmp_path / "operator"
     source = operator / "repo"
     source.mkdir(parents=True)
     # The repository's file writes a case-variant twin of the operator's

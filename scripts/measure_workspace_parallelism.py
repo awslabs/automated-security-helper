@@ -94,8 +94,11 @@ Known limitations
 * The ``dominant`` shape does not yet produce a dominant project; see above.
 * The discard pass warms the tool cache, not the filesystem cache, and not any
   state inside a scanner's own cache directory.
-* ``MISSING`` scanners cost nothing. A host with more scanner tools installed will
-  show larger absolute times in both arms; the ratio is the portable part.
+* Both arms run the same two scanners, bandit and checkov (``GATE_SCANNERS``), so
+  the measurement does not depend on which tools a host happens to have. Left at
+  the default set, a host missing any default-enabled scanner made every timed
+  scan exit 1 (the completeness gate is on by default) and the measurement was
+  abandoned instead of run.
 * The projects are Python-and-Terraform only, so the mix of scanners is not
   representative of a polyglot workspace.
 """
@@ -104,6 +107,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import statistics
 import subprocess  # nosec B404 -- this tool runs ASH as a child process to time it
@@ -224,6 +228,24 @@ def write_fixture(
     return definition, keys[0]
 
 
+#: The scanners both arms run, named rather than left at the default set.
+#:
+#: The fixture is Python and Terraform, which these two cover. The default set
+#: includes tools most hosts do not have, and a MISSING default scanner makes a
+#: scan exit 1 under the completeness gate, which time_once rightly refuses as a
+#: timing sample -- so on such a host the measurement never ran at all. Naming
+#: the set is what the verification gates do too (``GATE_SCANNERS`` in
+#: verify_external_target_scan.py and verify_multi_project_attribution.py).
+GATE_SCANNERS: Sequence[str] = ("bandit", "checkov")
+
+
+def _scanner_arguments() -> List[str]:
+    arguments: List[str] = []
+    for scanner in GATE_SCANNERS:
+        arguments += ["--scanners", scanner]
+    return arguments
+
+
 def single_project_command(project_dir: Path, output_dir: Path) -> List[str]:
     return [
         sys.executable,
@@ -238,7 +260,7 @@ def single_project_command(project_dir: Path, output_dir: Path) -> List[str]:
         "scan",
         "--no-progress",
         "--simple",
-    ]
+    ] + _scanner_arguments()
 
 
 def workspace_command(definition: Path, output_dir: Path) -> List[str]:
@@ -255,27 +277,63 @@ def workspace_command(definition: Path, output_dir: Path) -> List[str]:
         "scan",
         "--no-progress",
         "--simple",
-    ]
+    ] + _scanner_arguments()
 
 
-def time_once(command: Sequence[str], repo_root: Path, output_dir: Path) -> float:
+#: Wall-clock bound on one timed child, in seconds. A scan that hangs would
+#: otherwise hold the tool forever; past this bound the measurement is abandoned
+#: the way a failed scan abandons it.
+DEFAULT_TIMEOUT_SECONDS = 1800.0
+
+
+def child_environment(parent: Dict[str, str]) -> Dict[str, str]:
+    """The environment a timed child runs with.
+
+    The child prints under whatever locale the host has; a non-ASCII character in
+    a scanner's output under a C locale would otherwise crash the child and abort
+    the measurement, so it is told to write UTF-8, as the verification gates do.
+    ``PYTHONSAFEPATH`` is dropped because ``-m`` with the repository as ``cwd``
+    is how the working tree, not an installed copy, is what gets timed.
+    """
+    env = dict(parent)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env.setdefault("PYTHONUTF8", "1")
+    env.pop("PYTHONSAFEPATH", None)
+    return env
+
+
+def time_once(
+    command: Sequence[str],
+    repo_root: Path,
+    output_dir: Path,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+) -> float:
     """Wall clock for one child process, in seconds.
 
     The output directory is removed first so no run is credited with reusing
     another's results, and ``cwd`` is the repository root so ``-m`` runs the
-    working tree rather than an installed copy.
+    working tree rather than an installed copy. A child that runs past
+    ``timeout`` is stopped and the measurement abandoned.
     """
     shutil.rmtree(output_dir, ignore_errors=True)
     output_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
-    completed = subprocess.run(  # nosec B603 -- list args, no shell, argv[0] is sys.executable
-        list(command),
-        cwd=str(repo_root),
-        capture_output=True,
-        text=True,
-        errors="replace",
-        check=False,
-    )
+    try:
+        completed = subprocess.run(  # nosec B603 -- list args, no shell, argv[0] is sys.executable
+            list(command),
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            errors="replace",
+            check=False,
+            timeout=timeout,
+            env=child_environment(dict(os.environ)),
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"a timed scan ran past the {timeout:g}s timeout and was stopped, so "
+            f"there is no duration to record"
+        ) from None
     elapsed = time.monotonic() - started
     # A scan that failed outright is not a timing sample. Exit 2 is findings at or
     # above threshold, which is the expected outcome for this fixture.
@@ -320,6 +378,35 @@ def format_table(arms: Iterable[Arm]) -> str:
     return "\n".join(lines)
 
 
+def _positive_int(text: str) -> int:
+    """An argparse type for a count that must be at least 1.
+
+    Zero or a negative count used to be accepted and crash late: an empty sample
+    list in ``summary()``, an empty key list in ``write_fixture``, a zero divisor
+    in the floor arithmetic, each after minutes of completed timed runs.
+    """
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an integer") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"{text!r} must be at least 1")
+    return value
+
+
+def _positive_seconds(text: str) -> float:
+    """An argparse type for a finite, positive number of seconds."""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number") from None
+    if not value > 0 or value == float("inf"):
+        raise argparse.ArgumentTypeError(
+            f"{text!r} must be a finite number of seconds above 0"
+        )
+    return value
+
+
 def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -327,18 +414,27 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
             "tool cache warmed for both arms and the arms alternated."
         )
     )
-    parser.add_argument("--projects", type=int, default=5)
+    parser.add_argument("--projects", type=_positive_int, default=5)
     parser.add_argument(
         "--bound",
-        type=int,
+        type=_positive_int,
         default=4,
         help="max_parallel_projects (default 4, the shipped default)",
     )
     parser.add_argument(
         "--repetitions",
-        type=int,
+        type=_positive_int,
         default=3,
         help="timed runs per arm (default 3; a single run reports no spread)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=_positive_seconds,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help=(
+            f"seconds one timed scan may take before the measurement is abandoned "
+            f"(default {DEFAULT_TIMEOUT_SECONDS:g})"
+        ),
     )
     parser.add_argument(
         "--shape",
@@ -352,7 +448,7 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--files-per-project",
-        type=int,
+        type=_positive_int,
         default=12,
         help="scannable Python files in a small project (default 12)",
     )
@@ -382,7 +478,7 @@ def measure_shape(
         "  discard pass to warm the tool cache, so neither arm is the cold one...",
         flush=True,
     )
-    time_once(workspace, repo_root, output_dir)
+    time_once(workspace, repo_root, output_dir, args.timeout)
 
     single_arm = Arm("one project alone", single, [])
     workspace_arm = Arm(f"{args.projects} projects, bound {args.bound}", workspace, [])
@@ -396,7 +492,7 @@ def measure_shape(
             else (workspace_arm, single_arm)
         )
         for arm in order:
-            elapsed = time_once(arm.command, repo_root, output_dir)
+            elapsed = time_once(arm.command, repo_root, output_dir, args.timeout)
             arm.samples.append(elapsed)
             # flush: a run takes minutes, and with stdout redirected to a file
             # Python block-buffers, so without this the log stays empty until the

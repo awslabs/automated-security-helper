@@ -59,6 +59,7 @@ from typing import (
 
 import jsonpatch
 from pydantic import ValidationError
+from pydantic_core import to_jsonable_python
 
 from automated_security_helper.config.ash_config import (
     ALWAYS_DENIED_PATHS,
@@ -245,37 +246,48 @@ def _match_segments(pattern_segs: List[str], path_segs: List[str]) -> bool:
       * `*` alone matches exactly one whole segment.
       * Otherwise the segment is fnmatch'd (so `aws_*` matches `aws_region`).
     """
-    # Standard glob match with `**` support, implemented as a small DP.
-    # Use a recursive matcher with memoization on (i, j) indices.
-    cache: Dict[tuple, bool] = {}
+    # Standard glob match with `**` support, as a forward pass over the
+    # pattern: `positions` is every index of `path_segs` the pattern's
+    # segments so far can have consumed up to. Iterative on purpose: the
+    # recursive matcher this replaces ran one frame per segment and raised
+    # RecursionError for a pointer with thousands of segments, which fits in
+    # the 64 KiB a client may send, escaping the RuntimePatchDeniedError
+    # contract with an uncaught exception.
+    return _glob_positions(pattern_segs, path_segs, stop_at_end=False)
 
-    def helper(i: int, j: int) -> bool:
-        if (i, j) in cache:
-            return cache[(i, j)]
-        if i == len(pattern_segs):
-            result = j == len(path_segs)
-        elif pattern_segs[i] == "**":
-            # zero or more segments
-            if helper(i + 1, j):
-                result = True
-            elif j < len(path_segs) and helper(i, j + 1):
-                result = True
-            else:
-                result = False
-        elif j == len(path_segs):
-            result = False
-        elif pattern_segs[i] == "*":
-            result = helper(i + 1, j + 1)
+
+def _glob_positions(
+    pattern_segs: List[str], path_segs: List[str], stop_at_end: bool
+) -> bool:
+    """The forward glob pass shared by `_match_segments` and
+    `_pattern_reaches_into`.
+
+    With `stop_at_end` False the pattern must consume exactly the path: True
+    when, after every pattern segment, the path's end is a reachable position.
+    With it True the pattern may run past the path: True as soon as the path's
+    end is reachable, however many pattern segments are left (the pattern
+    names the location or one beneath it).
+    """
+    end = len(path_segs)
+    positions = {0}
+    for segment in pattern_segs:
+        if stop_at_end and end in positions:
+            return True
+        if segment == "**":
+            # zero or more segments: every position at or after one reached.
+            positions = set(range(min(positions), end + 1))
+        elif segment == "*":
+            positions = {j + 1 for j in positions if j < end}
         else:
             # Use fnmatch to support partial-segment globs like `aws_*`.
-            if fnmatch.fnmatchcase(path_segs[j], pattern_segs[i]):
-                result = helper(i + 1, j + 1)
-            else:
-                result = False
-        cache[(i, j)] = result
-        return result
-
-    return helper(0, 0)
+            positions = {
+                j + 1
+                for j in positions
+                if j < end and fnmatch.fnmatchcase(path_segs[j], segment)
+            }
+        if not positions:
+            return False
+    return end in positions
 
 
 def _pattern_reaches_into(pattern_segs: List[str], subtree_segs: List[str]) -> bool:
@@ -287,38 +299,14 @@ def _pattern_reaches_into(pattern_segs: List[str], subtree_segs: List[str]) -> b
     so an entry naming a descendant never fired for a write at an ancestor.
 
     `subtree_segs` is a concrete path, not a pattern; only `pattern_segs` is
-    globbed. The two base cases are the whole difference from
-    `_match_segments`.
+    globbed. The one difference from `_match_segments` is the end condition:
+    once the pattern has consumed every segment of the concrete path it names
+    this location or one beneath it, either way a location the write at
+    `subtree_segs` reaches, however many pattern segments are left; a pattern
+    exhausted while the path continues names a strict ancestor, outside the
+    path's subtree. Iterative like `_match_segments`, and for the same reason.
     """
-    cache: Dict[tuple, bool] = {}
-
-    def helper(i: int, j: int) -> bool:
-        if j == len(subtree_segs):
-            # The pattern consumed every segment of the concrete path, so it
-            # names this location or one beneath it. Either way it names a
-            # location the write at `subtree_segs` reaches.
-            return True
-        if (i, j) in cache:
-            return cache[(i, j)]
-        if i == len(pattern_segs):
-            # Pattern exhausted while the path continues: the pattern names a
-            # strict ancestor of the path, which is outside the path's subtree.
-            result = False
-        elif pattern_segs[i] == "**":
-            # zero or more segments
-            result = helper(i + 1, j) or helper(i, j + 1)
-        elif pattern_segs[i] == "*":
-            result = helper(i + 1, j + 1)
-        else:
-            # Use fnmatch to support partial-segment globs like `aws_*`.
-            if fnmatch.fnmatchcase(subtree_segs[j], pattern_segs[i]):
-                result = helper(i + 1, j + 1)
-            else:
-                result = False
-        cache[(i, j)] = result
-        return result
-
-    return helper(0, 0)
+    return _glob_positions(pattern_segs, subtree_segs, stop_at_end=True)
 
 
 def _path_matches(pattern: str, path: str) -> bool:
@@ -501,9 +489,11 @@ def _respellings(pattern: str, path: str, plugin_keys: PluginKeys) -> List[str]:
 
     Respelling lets the usual matching run on a path the lookup would read as a
     plugin the pattern names. The pattern's section segment may be a glob too
-    (``/*/trivy-repo/...``); each plugin section it matches is tried. A plugin
-    segment of ``*`` or ``**`` already matches every segment, and a section
-    segment of ``**`` already reaches every path below it.
+    (``/*/trivy-repo/...``); each plugin section it matches is tried. A section
+    segment of ``**`` is tried too: standing for the one section segment, it puts
+    the pattern's next segment at the plugin key (``/**/trivy-repo/**``), and
+    matched as written that segment reads the key in one spelling only. A plugin
+    segment of ``*`` or ``**`` already matches every segment.
     """
     pattern_segs = _path_segments(pattern)
     path_segs = _path_segments(path)
@@ -513,7 +503,7 @@ def _respellings(pattern: str, path: str, plugin_keys: PluginKeys) -> List[str]:
     section, written = path_segs[0], path_segs[1]
     if section not in _PLUGIN_SECTIONS or plugin in ("*", "**") or written == plugin:
         return []
-    if section_glob == "**" or not fnmatch.fnmatchcase(section, section_glob):
+    if not fnmatch.fnmatchcase(section, section_glob):
         return []
     key = _key_named_by(plugin, written, section, plugin_keys)
     if key is None or key == written:
@@ -951,6 +941,14 @@ def config_document_denials(
         if config is not None
         else None
     )
+    # The leaves the trusted config read from the environment: never exempt by
+    # equality, since a document that repeats such a value would learn, from
+    # the absence of a refusal, that the value was right.
+    environment_pointers = (
+        _environment_read_pointers(config, dump)
+        if config is not None and dump is not None
+        else []
+    )
     # A client-patched copy is the trusted profile written whole, so a leaf it
     # repeats can differ from ``dump`` only in how it is written: a defaulted key
     # the writer left out, a spelling the model normalizes. Such a leaf is also
@@ -1015,17 +1013,63 @@ def config_document_denials(
             continue
         if kind != "patch" and config is not None and dump is not None:
             present, value = _trusted_value(config, dump, path, plugin_keys)
-            if present and (
-                (kind == "key" and repeats_trusted)
-                or (kind != "key" and value == _as_json(op["value"]))
+            # A leaf whose trusted value came from the environment gets no
+            # exemption in either comparison: an equal value there is the one
+            # oracle a denied field must not answer.
+            environment_read = kind != "key" and _covered(
+                environment_pointers, path, plugin_keys
+            )
+            # Both comparisons are of JSON values (_same_json_value): Python's
+            # == says True == 1 and 1 == 1.0, which exempted a write that
+            # changes a denied leaf's type.
+            if (
+                present
+                and not environment_read
+                and (
+                    (kind == "key" and repeats_trusted)
+                    or (
+                        kind != "key" and _same_json_value(value, _as_json(op["value"]))
+                    )
+                )
             ):
                 continue
-            if present and kind != "key" and repeats_trusted:
+            if present and not environment_read and kind != "key" and repeats_trusted:
                 read_present, read_value = as_read(path)
-                if read_present and value == read_value:
+                if read_present and _same_json_value(value, read_value):
                     continue
         denials.append(DocumentDenial(key, path, reason, kind == "patch"))
     return denials
+
+
+def _environment_read_pointers(config: AshConfig, dump: Dict[str, Any]) -> List[str]:
+    """The JSON pointers, in ``dump``'s keys, of the values ``config``'s files read
+    from the environment: the leaves ``config_document_denials``' repeat
+    exemption never applies to.
+
+    From the record's value rewrites (``_written_references``) and the
+    references the load kept (``_environment_references``), each placed in the
+    dump as a runtime patch's pointers name it (config_validator.dumped_path). A
+    reference with no place in the dump names no leaf.
+    """
+    from automated_security_helper.config.config_validator import dumped_path
+
+    paths: List[Tuple[Any, ...]] = []
+    for rewrite in getattr(config, "_written_references", None) or []:
+        if getattr(rewrite, "kind", None) == "value":
+            paths.append(tuple(rewrite.path))
+    for reference in getattr(config, "_environment_references", None) or ():
+        if not getattr(reference, "key", False):
+            paths.append(tuple(getattr(reference, "path", ()) or ()))
+    pointers: List[str] = []
+    for path in paths:
+        if not path:
+            continue
+        at = dumped_path(config, dump, path)
+        if at:
+            pointers.append(
+                "/" + "/".join(_escape_pointer_segment(str(segment)) for segment in at)
+            )
+    return list(dict.fromkeys(pointers))
 
 
 def _built_in_reporter_names() -> frozenset:
@@ -1316,6 +1360,7 @@ def apply_runtime_patch(
             # compares one character: the refusal is the same whatever the op's
             # value, and no op is applied.
             raise RuntimePatchDeniedError(op, INTO_TEXT_REFUSAL)
+        references.refuse_a_write_over(op)
         references.follow(op, patched)
         followed.follow(op, patched)
         failure = None
@@ -1324,9 +1369,11 @@ def apply_runtime_patch(
                 # Against the configuration as written: a setting read from the
                 # environment holds the reference its file wrote, so a test op
                 # answers whether the client wrote that reference, never
-                # whether it guessed the value.
+                # whether it guessed the value. And as JSON, the form the op's
+                # own value has: the dump is a Python one, where a date or a
+                # path an operator's file set is an object no JSON value equals.
                 jsonpatch.apply_patch(
-                    _as_written(base, references.rewrites, patched),
+                    to_jsonable_python(_as_written(base, references.rewrites, patched)),
                     [op],
                     in_place=False,
                 )
@@ -1509,6 +1556,11 @@ class _ReferencesThroughPatch:
         self._shadow: Any = copy.deepcopy(dumped) if rewrites else None
         self._tokens: Dict[str, int] = {}
         self._holders: Dict[int, Any] = {}
+        #: The dump paths of the values read from the environment that a model
+        #: typed (a number, a true/false value): no string token can stand in
+        #: for one, so an op that writes over one is refused instead
+        #: (refuse_a_write_over).
+        self._typed: List[Tuple[str, ...]] = []
         self._lost = False
         for ident, (rewrite, at) in enumerate(zip(rewrites, self._where)):
             if at is None:
@@ -1520,10 +1572,44 @@ class _ReferencesThroughPatch:
                     token = f"ash-reference-{secrets.token_hex(16)}"
                     container[at[-1]] = token
                     self._tokens[token] = ident
+                elif _holds_a_typed_value(container, at[-1]):
+                    self._typed.append(tuple(str(part) for part in at))
             elif rewrite.kind == "key":
                 holder = _node_at(self._shadow, at)
                 if isinstance(holder, dict):
                     self._holders[ident] = holder
+
+    def refuse_a_write_over(self, op: Dict[str, Any]) -> None:
+        """Refuse ``op`` when it writes over a value the base read from the
+        environment that a model typed (a number, a true/false value), or
+        removes or replaces what holds one.
+
+        Such a value carries no token: the tokens are strings, and a number is
+        not one. Followed through the patch, its rewrite was kept whatever an
+        op wrote at its place, so the session copy wrote the profile's reference
+        where the client's own number stood, and a test op against the written
+        form answered for the client's value. An op whose path is the leaf, or
+        a place above it (a mapping or list entry that holds it, replaced or
+        removed whole), is refused outright; a move's source is such a path too.
+        Only the strict tracker refuses: the lenient one follows the
+        configuration's own references, which the strict one already guards.
+        """
+        if not self._strict or not self._typed:
+            return
+        if op.get("op") not in ("add", "replace", "remove", "move", "copy"):
+            return
+        pointers = [op.get("path", "")]
+        if op.get("op") == "move":
+            pointers.append(op.get("from", ""))
+        for pointer in pointers:
+            if not isinstance(pointer, str):
+                continue
+            segments = _path_segments(pointer)
+            for at in self._typed:
+                if list(at[: len(segments)]) == segments:
+                    raise RuntimePatchDeniedError(
+                        op, TYPED_VALUE_READ_FROM_THE_ENVIRONMENT_REFUSAL
+                    )
 
     def track(self, op: Dict[str, Any]) -> None:
         """Apply ``op``, which applied to the configuration, to the copy with
@@ -1674,6 +1760,24 @@ KEY_READ_FROM_THE_ENVIRONMENT_REFUSAL = (
     "there"
 )
 
+#: The refusal of an op that writes over a value the profile read from the
+#: environment and a model typed (a number, a true/false value), or replaces or
+#: removes what holds one. It names no value or location.
+TYPED_VALUE_READ_FROM_THE_ENVIRONMENT_REFUSAL = (
+    "the path writes over a value the profile read from the environment that is "
+    "not text, or replaces what holds it; such a value cannot be followed "
+    "through a patch, so nothing at or above it can be patched"
+)
+
+#: The refusal of an op that adds or removes a list entry above a mapping that
+#: holds a key the profile read from the environment, which would move the
+#: mapping to another index. It names no value or location.
+LIST_SHIFT_ABOVE_A_KEY_READ_FROM_THE_ENVIRONMENT_REFUSAL = (
+    "the path adds or removes an entry of a list that holds a mapping with a "
+    "key the profile read from the environment, which would move that mapping "
+    "to another index; such a list cannot be patched at an index"
+)
+
 #: The refusal of every op on a profile that reads a key from the environment
 #: where the configuration has built-in keys. One text, naming no key or value:
 #: the profile's keys are answered the same whatever the variable holds.
@@ -1802,6 +1906,30 @@ def _refuse_a_key_read_from_the_environment(
         known[mapping] = known.get(mapping, set()) | named
     for op in patch_ops:
         segments = _path_segments(op.get("path", ""))
+        # An add or remove at an index of a list that holds such a mapping
+        # moves the mapping to another index, and every later op's path is
+        # then matched against the index the mapping no longer has: refused
+        # outright, whatever the index, rather than tracked (a move's source
+        # is a remove). An append (the "-" index) moves nothing.
+        shifting = [segments] if op.get("op") in ("add", "remove", "copy") else []
+        if op.get("op") == "move":
+            source = op.get("from", "")
+            shifting = [segments] + (
+                [_path_segments(source)] if isinstance(source, str) else []
+            )
+        for shifted in shifting:
+            if not shifted or not _LIST_INDEX.fullmatch(shifted[-1]):
+                continue
+            depth = len(shifted) - 1
+            for mapping in known:
+                if (
+                    depth < len(mapping)
+                    and _LIST_INDEX.fullmatch(mapping[depth])
+                    and tuple(shifted[:depth]) == mapping[:depth]
+                ):
+                    raise RuntimePatchDeniedError(
+                        None, LIST_SHIFT_ABOVE_A_KEY_READ_FROM_THE_ENVIRONMENT_REFUSAL
+                    )
         for mapping in list(known):
             depth = len(mapping)
             if len(segments) <= depth:
@@ -1847,6 +1975,18 @@ def _node_at(document: Any, path: Tuple[Any, ...]) -> Any:
         else:
             return None
     return node
+
+
+def _holds_a_typed_value(container: Any, segment: Any) -> bool:
+    """Whether ``container[segment]`` is a value a model typed from text: a
+    number or a true/false value (never a string, None or a container)."""
+    if isinstance(container, dict):
+        held = container.get(segment)
+    elif isinstance(container, list) and isinstance(segment, int):
+        held = container[segment] if 0 <= segment < len(container) else None
+    else:
+        return False
+    return isinstance(held, (bool, int, float)) and not isinstance(held, str)
 
 
 def _holds_text(container: Any, segment: Any) -> bool:

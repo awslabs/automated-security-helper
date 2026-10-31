@@ -19,19 +19,19 @@ permissions:
   contents: read
 jobs:
   ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.7.0
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.7.1
     permissions:
       contents: read
       checks: write
       pull-requests: write
     with:
-      ash-version: v3.7.0
+      ash-version: v3.7.1
       ash-args: --fail-on-incomplete-scanners --no-allow-stale-content-db
       collect-sarif-report: false
   sarif:
     needs: ash
     if: ${{ !cancelled() && needs.ash.outputs.artifact-id != '' }}
-    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.7.0
+    uses: awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.7.1
     permissions:
       contents: read
       security-events: write
@@ -56,10 +56,10 @@ code 1.
 
 ASH's zizmor scanner reports each `uses:` line that names a tag as `zizmor/unpinned-uses` at
 HIGH, so a scan of a repository that holds this file fails until you pin both lines to a
-commit. `git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v3.7.0`
-prints the commit that `v3.7.0` names. Replace the `v3.7.0` after each `@`, and the
+commit. `git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v3.7.1`
+prints the commit that `v3.7.1` names. Replace the `v3.7.1` after each `@`, and the
 `ash-version` value, with that SHA, and end each `uses:` line with the comment
-`# v3.7.0`.
+`# v3.7.1`.
 
 A pull request scan reads the configuration in the branch it scans, so the branch can change
 the gate. The workflow passes the `fail-on-findings` choice on the command line, and the
@@ -310,7 +310,7 @@ jobs:
       security-events: write
       actions: read # private repositories only
     env:
-      INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+      INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -444,7 +444,7 @@ the install and scan steps of the job above:
   uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
   with:
     path: ~/.ash/bin
-    key: ash-tools-${{ runner.os }}-${{ runner.arch }}-v3.7.0
+    key: ash-tools-${{ runner.os }}-${{ runner.arch }}-v3.7.1
 - name: Install scanner tools
   working-directory: ${{ runner.temp }}
   run: |

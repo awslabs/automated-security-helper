@@ -321,12 +321,25 @@ def act_job_results(log: str) -> list[ActJobResult]:
 def act_result_problems(
     log: str, expected: Mapping[str, str], runs: Mapping[str, int] | None = None
 ) -> list[str]:
-    """Every job in ``expected`` must have ended, in every matrix run, as expected.
+    """Every job in ``expected`` must have ended, in every matrix run, as expected, and
+    no other job may have run.
 
-    With ``runs``, a job must also have ended exactly that many times.
+    With ``runs``, a job must also have ended exactly that many times. ``expected`` is
+    the plan: a job it leaves out is one whose ``if`` the plan read as false before the
+    run, so act may report it skipped, or not at all, and nothing else; any other
+    result for it (a success, and above all a failure) means the plan's reading was
+    wrong and the job's own outcome would otherwise go unchecked.
     """
     results = act_job_results(log)
     problems = []
+    for run in results:
+        if run.job in expected or run.result == "skipped":
+            continue
+        matrix = f" {json.dumps(run.matrix, sort_keys=True)}" if run.matrix else ""
+        problems.append(
+            f"job {run.job}{matrix} ended {run.result}, though the plan expected act "
+            "not to run it"
+        )
     for job, want in expected.items():
         ended = [r for r in results if r.job == job]
         if not ended:
@@ -414,7 +427,9 @@ def _command_text(text: str) -> str:
 
 
 def resume_token_problems(
-    log: str, steps: Iterable[str | tuple[str, str]]
+    log: str,
+    steps: Iterable[str | tuple[str, str]],
+    optional: Iterable[tuple[str, str]] = (),
 ) -> list[str]:
     """Each run of each step in ``steps`` stops workflow commands and prints its resume.
 
@@ -424,12 +439,14 @@ def resume_token_problems(
     line of its own after the stop line. A wanted step must also have run, in each
     run of its job (each matrix entry) that act reported a result for, since a step
     that never ran was never checked; a step named alone, in some job, once act
-    reported any job's result. A job act reported no result for is not this check's:
-    act_result_problems names it.
+    reported any job's result. A pair in ``optional`` (a step with an ``if``) is
+    checked in each run it had, and may have had none. A job act reported no result
+    for is not this check's: act_result_problems names it.
     """
     wanted = list(steps)
     names = {step for step in wanted if isinstance(step, str)}
     pairs = {tuple(step) for step in wanted if not isinstance(step, str)}
+    may_skip = {tuple(step) for step in optional}
     runs = _act_step_runs(log)
     problems = []
     for run in runs:
@@ -470,6 +487,8 @@ def resume_token_problems(
                 )
             continue
         job, name = step
+        if (job, name) in may_skip:
+            continue
         for matrix in [
             matrix for reported_job, matrix in reported if reported_job == job
         ]:
@@ -602,17 +621,29 @@ def stub_sarif_problems(sarif: Path, stub_record: Path) -> list[str]:
     return []
 
 
-def written_after_problems(path: Path, *, started: float) -> list[str]:
-    """``path`` must exist and have been written at or after ``started``, a POSIX time.
+#: The slack a file's mtime gets against a step's start: a file unpacked from an
+#: artifact zip carries its zip entry's date_time, which has 2-second resolution and
+#: rounds down, so a file written within 2 s after the step started can read up to
+#: 2 s before it.
+DOS_TIME_SLACK_S = 2.0
 
-    In act's host mode every job shares one working directory, so a file an earlier
-    job wrote is still there when a later one runs; only one written after the later
-    step started can be that step's output.
+
+def written_after_problems(path: Path, *, started: float) -> list[str]:
+    """``path`` must exist and have been written at or after ``started``, a POSIX time,
+    within ``DOS_TIME_SLACK_S``.
+
+    act's host executor runs each job in its own copy of the project and removes it at
+    the job's end (measured: the project's own ``.ash/ash_output`` is never written, so
+    the harness reads the artifact the job uploaded), so ``path`` is a file unpacked
+    from that artifact with the mtime its zip entry recorded, which is the file's own
+    (reports._EXTENDED_TIMESTAMP). A file the job's checkout already held, or one a step
+    that did not write left in place, carries an mtime before the step started; only one
+    written after the step started can be that step's output.
     """
     path = Path(path)
     if path.is_symlink() or not path.is_file():
         return [f"{path} is missing"]
-    if path.stat().st_mtime < started:
+    if path.stat().st_mtime < started - DOS_TIME_SLACK_S:
         return [
             (
                 f"{path} was last written before the step that writes it started, so "
@@ -627,13 +658,15 @@ def merged_sarif_problems(
 ) -> list[str]:
     """The merged SARIF must be written by the merge step and be the one uploaded.
 
-    In act's host mode every job shares one working directory, so a SARIF a shard
-    wrote is still there when the merge job runs; only one written after the merge step
-    started can be its output.
+    ``sarif`` is the file unpacked from the merge job's own uploaded artifact, with the
+    mtime its zip entry recorded (written_after_problems says why); a SARIF the merge
+    step did not write, one its checkout held or a download left in place, carries an
+    mtime before the merge step started, and only one written after it can be the
+    merge's output.
     """
     sarif = Path(sarif)
     problems = []
-    if sarif.is_file() and sarif.stat().st_mtime < merge_started:
+    if sarif.is_file() and sarif.stat().st_mtime < merge_started - DOS_TIME_SLACK_S:
         problems.append(
             f"{sarif} was last written before the merge step started, so it is not "
             "the merge's output"

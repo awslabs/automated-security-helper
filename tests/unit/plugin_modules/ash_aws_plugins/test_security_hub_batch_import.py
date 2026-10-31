@@ -1142,15 +1142,20 @@ def test_exact_duplicates_get_an_ordinal_and_are_all_sent(tmp_path):
 
 
 @pytest.mark.unit
-def test_one_fingerprint_reported_twice_at_one_place_is_sent_once(tmp_path, caplog):
-    """Security Hub processes only the first of several findings sharing an Id.
+def test_two_results_sharing_a_fingerprint_at_one_place_are_two_findings(
+    tmp_path, caplog
+):
+    """Two results of one scanner and rule with the same fingerprint at the same
+    lines are two findings, not one reported twice.
 
-    Equal fingerprints at the same location are the scanner saying it is one
-    finding, so it is sent once, with a WARNING because a result was not sent.
+    A fingerprint tells findings apart only across locations, so the identity
+    key (utils/finding_identity.py) tells two results at one location apart
+    whatever value they share; each gets its own Id, both are sent, and nothing
+    is skipped as a duplicate or warned about as sent once.
     """
     securityhub, stub = _stubbed_client("securityhub")
     capture = _Capture(securityhub)
-    stub.add_response("batch_import_findings", _ok(1))
+    stub.add_response("batch_import_findings", _ok(2))
     fingerprint = {"matchBasedId/v1": "4f1c0e"}
 
     with caplog.at_level(logging.WARNING):
@@ -1167,16 +1172,10 @@ def test_one_fingerprint_reported_twice_at_one_place_is_sent_once(tmp_path, capl
             )
         )
 
-    assert len(capture.findings) == 1
-    assert document["duplicates_skipped"] == 1
-    # Not "the same ... message": the second result was reworded. Only results
-    # with the same fingerprints at one place share an Id.
-    assert any(
-        r.levelno == logging.WARNING
-        and "same scanner, rule, file, location and fingerprints" in r.getMessage()
-        and "sent once" in r.getMessage()
-        for r in caplog.records
-    )
+    assert len(capture.findings) == 2
+    assert len({finding["Id"] for finding in capture.findings}) == 2
+    assert document["duplicates_skipped"] == 0
+    assert not any("sent once" in r.getMessage() for r in caplog.records)
 
 
 # --------------------------------------------------------------------------- #
@@ -3488,9 +3487,13 @@ def test_the_resolve_hands_the_chain_walk_the_environment_chosen_paths(
     handed: list = []
     real = module._with_operator_chain_reporters
 
-    def spying(trusted, chain, repository_files, reads, environment_paths):
+    # The walk takes the count of scanned roots as well (``roots``); the spy
+    # accepts what the resolve passes and hands it on unchanged.
+    def spying(trusted, chain, repository_files, reads, environment_paths, roots=1):
         handed.append(set(environment_paths))
-        return real(trusted, chain, repository_files, reads, environment_paths)
+        return real(
+            trusted, chain, repository_files, reads, environment_paths, roots=roots
+        )
 
     monkeypatch.setattr(module, "_with_operator_chain_reporters", spying)
     with caplog.at_level(logging.WARNING):
@@ -5609,9 +5612,14 @@ def _scoped_model(rule: str):
         del model.metadata.__pydantic_extra__["changed_files_only"]
     elif rule == "a target of the scanner failed":
         # cdk-nag style: 10 templates attempted, 4 failed, rolled up to FAILED.
+        # The report carries the scanner's name as a scan writes it: the
+        # metrics readers (core/unified_metrics.own_target_reports) read only a
+        # report that names its scanner, so one without the name would count
+        # as no report and the scanner as having lost no target.
         model.scanner_results["bandit"].status = ScannerStatus.FAILED
         model.additional_reports["bandit"] = {
             "source": {
+                "scanner_name": "bandit",
                 "target_type": "source",
                 "status": "FAILED",
                 "targets_attempted": 10,

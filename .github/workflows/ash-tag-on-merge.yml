@@ -110,7 +110,10 @@ jobs:
           # v3.8.0 needs this: it ships breaking changes as a minor, and the
           # release page is where users pinned to <4 look.
           #
-          # Covered by tests/unit/test_release_notes_workflow.py.
+          # Covered by tests/unit/test_release_notes_workflow.py (the release body) and,
+          # for the curated-notes failure's advice below, by
+          # tests/unit/test_floating_major_tag_workflow.py
+          # (TestTheCuratedNotesFailureNamesTheRecovery).
           NOTES_FILE="${RUNNER_TEMP:-/tmp}/release-notes-${TAG}.md"
           CURATED=".github/release-notes/${TAG}.md"
           awk -v tag="$TAG" '
@@ -123,8 +126,12 @@ jobs:
             # publishing would lose the curated notes. A re-run cannot pick up a
             # fix: the checkout is pinned to this pull request's merge commit, and a
             # re-run replays the same event payload, so it reads the same
-            # CHANGELOG.md and fails the same way. Recovery is a new chore(release):
-            # pull request whose regenerated entry includes the file.
+            # CHANGELOG.md and fails the same way. Two recoveries change the outcome:
+            # a new chore(release): pull request whose regenerated entry includes the
+            # file (commitizen regenerates the entry without bumping the version), or
+            # keeping this merge commit by creating the release by hand at it
+            # (`gh release create <tag> --target <merge sha>` with the notes), after
+            # which a run of this job exits at the release-exists check above.
             if ! python3 - "$CURATED" "$NOTES_FILE" <<'PY'
           import sys
           curated = open(sys.argv[1], encoding="utf-8").read().strip()
@@ -132,7 +139,7 @@ jobs:
           sys.exit(0 if curated and curated in notes else 1)
           PY
             then
-              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen (the template includes the file) and merge it as a new chore(release): pull request. A re-run of this job reads the same CHANGELOG.md from the same merge commit and fails the same way."
+              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen without bumping the version (the template includes the file) and merge it as a new chore(release): pull request, or keep this merge commit: create the release by hand with gh release create ${TAG} --target ${MERGE_SHA} and the entry plus the curated notes as its body, after which a run of this job finds the release and exits without publishing. A plain re-run of this job reads the same CHANGELOG.md from the same merge commit and fails the same way."
               exit 1
             fi
           fi

@@ -46,7 +46,7 @@ rather than just its plumbing:
 
 import base64
 import json
-import re
+import os
 import sys
 import types
 from pathlib import Path
@@ -73,9 +73,10 @@ STACK_NAME = "ASHCDKNagScanner"
 TEMPLATE_SEGMENT = "--tmp--secure-s3-template--yaml"
 
 # ``MyDataBucketPolicy`` deliberately precedes ``MyDataBucket`` so that a substring search for
-# "MyDataBucket" would hit the *policy* line first. The wrapper uses a word-boundary regex, so
-# the reported line must be the later one. See
-# test_finding_line_number_uses_word_boundary_not_substring.
+# "MyDataBucket" would hit the *policy* line first. The wrapper places a finding on the
+# line that declares the resource under the Resources key (the declaration-key search,
+# "A finding is placed on the resource's declaration" below), so the reported line must
+# be the later one. See test_finding_line_number_uses_word_boundary_not_substring.
 TEMPLATE_YAML = """Resources:
   MyDataBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -216,11 +217,16 @@ def cdk_doubles(monkeypatch):
                 "validate() is CDK's to call during synth, not the wrapper's"
             )
 
+    # Each real cdk-nag 3.x pack exposes the name it writes its ``pluginReports[]``
+    # entry under as ``name`` (the ``IPolicyValidationPlugin`` property), which is also
+    # the prefix of every rule id it mints. Not derivable from the class name:
+    # ``HIPAASecurityChecks`` reports as ``HIPAA.Security`` (see the HIPAA fixture
+    # above). The doubles carry it so the real name reader is exercised against them.
     class AwsSolutionsChecks(NagPack):
-        pass
+        name = "AwsSolutions"
 
     class HIPAASecurityChecks(NagPack):
-        pass
+        name = "HIPAA.Security"
 
     class NotANagPack:
         """Present so the isclass/issubclass filter has something to reject."""
@@ -632,10 +638,16 @@ def test_the_parser_reads_violating_constructs_not_violating_resources(
 
     response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
 
-    assert response.results == {"AwsSolutions": []}, (
+    # No finding under any pack: the decoy's violatingResources was not read. The
+    # violation cites no construct at all, so the pack that reported failure is a failed
+    # pack (no entry, a failure naming it) rather than a compliant evaluation.
+    assert not any(response.results.values()), (
         "violatingResources must not be read; if it is, the real report's null value "
         "silently yields zero findings"
     )
+    assert response.results == {}
+    assert response.failure is not None
+    assert "AwsSolutions" in response.failure
 
 
 def test_one_violation_citing_two_constructs_becomes_two_findings(
@@ -720,8 +732,10 @@ def test_finding_line_number_uses_word_boundary_not_substring(
         f"means the search matched MyDataBucketPolicy on an earlier line."
     )
     assert region.endLine == BUCKET_DECLARATION_LINE
-    assert region.startColumn == BUCKET_DECLARATION_COLUMN
-    assert region.endColumn == BUCKET_DECLARATION_COLUMN + len("MyDataBucket")
+    # The constant is the 0-based index of the id in its line; SARIF counts columns
+    # from 1, and endColumn names the character after the region.
+    assert region.startColumn == BUCKET_DECLARATION_COLUMN + 1
+    assert region.endColumn == BUCKET_DECLARATION_COLUMN + 1 + len("MyDataBucket")
     # The snippet is the rendered resource, not the raw template line.
     assert "AWS::S3::Bucket" in region.snippet.text
 
@@ -783,8 +797,14 @@ def test_resource_absent_from_template_is_dropped(cdk_doubles, template_file, ou
         # demote every real error to a warning and slip it under a severity gate.
         ("error", Level.error, Kind.fail),
         ("ERROR", Level.error, Kind.fail),
-        ("warning", Level.warning, Kind.informational),
-        ("info", Level.warning, Kind.informational),
+        # A violation is a failed rule at every severity; the level carries the severity.
+        # SARIF 2.1.0 3.27.10 gives level=none to every kind but fail, so the
+        # warning/informational pair the wrapper used to write was not a SARIF result,
+        # and a consumer reading kind took a real violation for a non-problem.
+        ("warning", Level.warning, Kind.fail),
+        # cdk-nag's info level is SARIF's note, not warning: rendered as warning, an
+        # informational rule graded a step above what its pack declared.
+        ("info", Level.note, Kind.fail),
     ],
 )
 def test_report_severity_is_normalized_before_the_level_comparison(
@@ -835,27 +855,34 @@ def test_normalize_rule_level_maps_only_the_documented_strings():
 # ---------------------------------------------------------------------------
 
 
+#: The compliance table, one row per (compliance, rule level, exception reason) with the
+#: (level, kind) it maps to. One table for the parametrized test and for the distinctness
+#: guard below, so an edit to a row reaches both.
+_COMPLIANCE_ROWS = [
+    # Non-compliant + Error is the only combination that fails the scan, and the only one
+    # the v3 report can currently produce.
+    ("Non-Compliant", "Error", "N/A", Level.error, Kind.fail),
+    # Non-compliant at a lower rule level is still a failed rule, at that level.
+    ("Non-Compliant", "Warning", "N/A", Level.warning, Kind.fail),
+    ("Non-Compliant", "Info", "N/A", Level.note, Kind.fail),
+    # A suppression with a stated reason is routed to human review.
+    (
+        "Suppressed",
+        "Error",
+        "Accepted risk, tracked separately",
+        Level.none,
+        Kind.review,
+    ),
+    # A suppression with no stated reason is not review-worthy.
+    ("Suppressed", "Error", "N/A", Level.none, Kind.informational),
+    # A compliant record carries no severity signal at all.
+    ("Compliant", "Error", "N/A", Level.none, Kind.informational),
+]
+
+
 @pytest.mark.parametrize(
     "compliance, rule_level, exception_reason, expected_level, expected_kind",
-    [
-        # Non-compliant + Error is the only combination that fails the scan, and the only one
-        # the v3 report can currently produce.
-        ("Non-Compliant", "Error", "N/A", Level.error, Kind.fail),
-        # Non-compliant at a lower rule level warns instead of failing.
-        ("Non-Compliant", "Warning", "N/A", Level.warning, Kind.informational),
-        # A suppression with a stated reason is routed to human review.
-        (
-            "Suppressed",
-            "Error",
-            "Accepted risk, tracked separately",
-            Level.none,
-            Kind.review,
-        ),
-        # A suppression with no stated reason is not review-worthy.
-        ("Suppressed", "Error", "N/A", Level.none, Kind.informational),
-        # A compliant record carries no severity signal at all.
-        ("Compliant", "Error", "N/A", Level.none, Kind.informational),
-    ],
+    _COMPLIANCE_ROWS,
 )
 def test_compliance_maps_to_distinct_level_and_kind(
     compliance, rule_level, exception_reason, expected_level, expected_kind
@@ -868,21 +895,22 @@ def test_compliance_maps_to_distinct_level_and_kind(
     ) == (expected_level, expected_kind)
 
 
-def test_the_four_compliance_rows_are_mutually_distinct():
+def test_the_compliance_rows_other_than_compliant_are_mutually_distinct():
     """Guard against the parametrized table above collapsing to one case.
 
     If a future edit makes several rows expect the same (level, kind), the table would be
-    testing one behavior N times while still looking thorough. The compliant row is excluded
-    because it shares (none, informational) with an unreasoned suppression by design -- the
-    four rows below are the ones required to stay distinct.
+    testing one behavior N times while still looking thorough. The rows are read from the
+    table itself (a literal copy here guarded nothing: editing the table could not make it
+    fail). The compliant row is excluded because it shares (none, informational) with an
+    unreasoned suppression by design; the other five are required to stay distinct.
     """
     rows = [
-        (Level.error, Kind.fail),
-        (Level.warning, Kind.informational),
-        (Level.none, Kind.review),
-        (Level.none, Kind.informational),
+        (level, kind)
+        for compliance, _rule_level, _reason, level, kind in _COMPLIANCE_ROWS
+        if compliance != "Compliant"
     ]
-    assert len(set(rows)) == len(rows)
+    assert len(rows) == 5, rows
+    assert len(set(rows)) == len(rows), rows
 
 
 def test_every_finding_from_a_v3_report_is_non_compliant(
@@ -2329,6 +2357,38 @@ def test_with_a_scan_root_a_symlinked_template_is_refused_before_it_is_read(
             assert SCANNED_TREE_MARKER.lower() not in path.read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+def test_with_a_scan_root_a_hard_linked_template_is_read(
+    cdk_doubles, include_contents, tmp_path, outdir
+):
+    """A hard-linked regular file is the tree's own bytes under a second name.
+
+    The read refused it as it refuses a symlink, and the scanner took the refusal
+    as a skip, so a repository that hard-links its templates was reported clean.
+    The read now admits it: the template is modeled, synthesized from the checked
+    text, and its findings come back.
+    """
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "t.yaml").write_text(TEMPLATE_YAML, encoding="utf-8")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    try:
+        os.link(elsewhere / "t.yaml", tree / "t.yaml")
+    except OSError as exc:  # pragma: no cover - filesystem without hard links
+        pytest.skip(f"cannot create a hard link here: {exc}")
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(
+        tree / "t.yaml", outdir, nag_packs=["AwsSolutionsChecks"], scan_root=tree
+    )
+
+    assert response is not None
+    assert response.failure is None
+    assert len(response.results["AwsSolutions"]) == 1
+    assert include_contents == [TEMPLATE_YAML]
+
+
 def test_the_debug_log_does_not_dump_the_template(cdk_doubles, template_file, outdir):
     """The model is the template's content; the debug line gives a count instead."""
     import logging
@@ -2363,14 +2423,17 @@ def test_the_debug_log_does_not_dump_the_template(cdk_doubles, template_file, ou
 def test_a_link_left_at_the_copys_name_is_not_written_through(
     cdk_doubles, include_contents, template_file, outdir, tmp_path
 ):
-    """The copy for CfnInclude is created fresh, never through what is at its name."""
+    """The copy for CfnInclude is created fresh, never through what is at its name.
+
+    The synth directory is named by the wrapper's own namer, and the test asserts the
+    wrapper synthesized INTO it: a copy of the old sanitizer regex here planted the link
+    in a directory the wrapper no longer used once the namer changed, and the test then
+    passed whatever the wrapper did with a link at the real copy's name."""
     other = tmp_path / "elsewhere.yaml"
     other.write_text("unchanged\n", encoding="utf-8")
     synth_dir = outdir.joinpath(
-        re.sub(
-            r"(\/|\\|\.)+",
-            "--",
-            str(cdk_nag_wrapper.get_shortest_name(input=template_file)).lstrip("/"),
+        cdk_nag_wrapper._synth_directory_name(
+            template_file, cdk_nag_wrapper.get_shortest_name(input=template_file)
         )
     )
     synth_dir.mkdir(parents=True)
@@ -2379,6 +2442,10 @@ def test_a_link_left_at_the_copys_name_is_not_written_through(
 
     _run(template_file, outdir, scan_root=template_file.parent)
 
+    assert [Path(app.outdir) for app in cdk_doubles.apps] == [synth_dir], (
+        "the link was planted where the wrapper did not synthesize, so the test "
+        "measured nothing"
+    )
     assert other.read_text(encoding="utf-8") == "unchanged\n"
     assert include_contents == [TEMPLATE_YAML]
 
@@ -2579,3 +2646,1195 @@ def test_a_template_suppression_is_logged_as_given(
     assert "cfn[/x]/template.yaml" in shown, shown
     assert f"template's own cdk_nag metadata: {reason}" in shown, shown
     assert "[yellow]" not in shown and "\\[" not in shown, shown
+
+
+# ---------------------------------------------------------------------------
+# A pack that reported failure without a violation did not evaluate the template
+# ---------------------------------------------------------------------------
+#
+# CDK records a plugin whose validate() threw as a failed plugin report with zero
+# violations. Read as ``{pack: []}``, that was an evaluated, compliant template: the
+# emptiness of the violations list was read before the plugin's own conclusion.
+
+
+def test_a_failed_plugin_report_with_no_violations_is_a_failure_not_a_clean_evaluation(
+    cdk_doubles, template_file, outdir
+):
+    """At the base this returned ``failure=None`` and ``{"AwsSolutions": []}``."""
+    cdk_doubles.report_text = _report(
+        _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="failure")
+    )
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response is not None
+    assert response.failure is not None, (
+        "a pack that reported failure and listed no violation evaluated nothing; "
+        "the response must say so"
+    )
+    assert "AwsSolutions" in response.failure
+
+
+def test_a_failed_packs_recorded_error_reaches_the_failure_text(
+    cdk_doubles, template_file, outdir
+):
+    cdk_doubles.report_text = json.dumps(
+        {
+            "version": "54.0.0",
+            "title": "Validation Report",
+            "pluginReports": [
+                {
+                    "pluginName": "AwsSolutions",
+                    "conclusion": "failure",
+                    "violations": [],
+                    "metadata": {"error": "validate() threw: node heap exhausted"},
+                }
+            ],
+        }
+    )
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is not None
+    assert "node heap exhausted" in response.failure
+
+
+def test_a_failed_pack_beside_one_that_ran_still_fails_the_template_and_keeps_findings(
+    cdk_doubles, template_file, outdir
+):
+    """One pack evaluated the template and found a violation; the other threw.
+
+    The finding is kept (it is a fact about the template) and the response still carries
+    ``failure``, because the second pack's rules were never evaluated.
+    """
+    cdk_doubles.report_text = _report(
+        _plugin_report(
+            plugin_name="AwsSolutions", violations=[_violation()], conclusion="failure"
+        ),
+        _plugin_report(
+            plugin_name="HIPAA.Security", violations=[], conclusion="failure"
+        ),
+    )
+
+    response = _run(
+        template_file, outdir, nag_packs=["AwsSolutionsChecks", "HIPAASecurityChecks"]
+    )
+
+    assert len(response.results["AwsSolutions"]) == 1
+    assert response.failure is not None
+    # Only the pack that evaluated nothing is named as failed.
+    assert "reported failure without evaluating a rule: HIPAA.Security)" in (
+        response.failure
+    ), response.failure
+
+
+def test_a_successful_pack_with_no_violations_is_still_a_clean_evaluation(
+    cdk_doubles, template_file, outdir
+):
+    """The negative control for the conclusion read: success with nothing to list is clean."""
+    cdk_doubles.report_text = _report(
+        _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="success")
+    )
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is None
+    assert response.results == {"AwsSolutions": []}
+
+
+# ---------------------------------------------------------------------------
+# A requested pack with no entry in the report never ran
+# ---------------------------------------------------------------------------
+#
+# From aws-cdk-lib 2.262.0 CDK's own CloudFormation Validate plugin writes an entry into
+# every report, so the "no plugin reported" guard can no longer notice a requested pack
+# that produced no entry. The packs are checked for presence by the name they report under.
+
+
+def test_the_real_name_reader_reads_the_doubles_as_the_real_packs_report(
+    cdk_doubles, template_file, outdir
+):
+    """The presence check depends on ``_plugin_report_name`` answering what CDK writes
+    as ``pluginName``; every other test here used to patch the reader away, so the one
+    real call in this file saw a nameless double and the reader's own answer was never
+    pinned. The doubles carry the real packs' ``name`` and the reader reads it."""
+    cdk_doubles.report_text = _report(
+        _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="success"),
+        _plugin_report(
+            plugin_name="HIPAA.Security", violations=[], conclusion="success"
+        ),
+    )
+
+    response = _run(
+        template_file, outdir, nag_packs=["AwsSolutionsChecks", "HIPAASecurityChecks"]
+    )
+
+    assert response.failure is None
+    assert [
+        cdk_nag_wrapper._plugin_report_name(pack) for pack in cdk_doubles.pack_instances
+    ] == ["AwsSolutions", "HIPAA.Security"]
+
+
+def test_a_requested_pack_absent_from_the_report_is_a_failure(
+    cdk_doubles, template_file, outdir, monkeypatch
+):
+    cdk_doubles.report_text = _report(
+        _plugin_report(
+            plugin_name="CloudFormation Validate", violations=[], conclusion="success"
+        )
+    )
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is not None, (
+        "CloudFormation Validate reported and AwsSolutions did not; at the base the "
+        "non-empty report read as a clean evaluation"
+    )
+    assert "AwsSolutions" in response.failure
+
+
+def test_a_requested_pack_present_in_the_report_is_not_a_failure(
+    cdk_doubles, template_file, outdir, monkeypatch
+):
+    """The negative control: the requested pack's entry is there, beside CDK's own."""
+    cdk_doubles.report_text = _report(
+        _plugin_report(
+            plugin_name="CloudFormation Validate", violations=[], conclusion="success"
+        ),
+        _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="success"),
+    )
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is None
+
+
+def test_a_pack_whose_name_cannot_be_read_is_stood_for_by_an_unrequested_entry_and_said(
+    cdk_doubles, template_file, outdir, monkeypatch, caplog
+):
+    """The requested pack exposes no readable name, so its entry cannot be looked for by
+    name. The one entry that is neither a requested name nor CDK's own plugin's stands
+    for it, and the match is said at WARNING because the names cannot be paired; with
+    no such entry the template fails (the report_rows tests pin that side). This test
+    used to assert only ``failure is None`` on the same report, which also held when the
+    presence check was skipped for a nameless pack in silence."""
+    monkeypatch.setattr(cdk_nag_wrapper, "_plugin_report_name", lambda plugin: None)
+    cdk_doubles.report_text = _report(
+        _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="success")
+    )
+
+    with caplog.at_level("WARNING"):
+        response = _run(template_file, outdir, nag_packs=["HIPAASecurityChecks"])
+
+    assert response.failure is None
+    paired = [
+        r.getMessage() for r in caplog.records if "cannot be paired" in r.getMessage()
+    ]
+    assert len(paired) == 1, [r.getMessage() for r in caplog.records]
+    assert "'AwsSolutions'" in paired[0]
+
+
+# ---------------------------------------------------------------------------
+# A violation that cannot be placed on a resource is said out loud
+# ---------------------------------------------------------------------------
+
+
+def test_a_construct_with_no_path_is_logged_not_dropped_in_silence(
+    cdk_doubles, template_file, outdir, caplog
+):
+    cdk_doubles.report_text = _report(
+        _plugin_report(
+            violations=[
+                {
+                    "ruleName": "AwsSolutions-S1",
+                    "description": DEFAULT_DESCRIPTION,
+                    "severity": "error",
+                    "violatingConstructs": [{"constructPath": None}],
+                    "violatingResources": None,
+                }
+            ]
+        )
+    )
+
+    with caplog.at_level("WARNING"):
+        response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    # The pack reported failure and nothing it listed could be placed, so the template
+    # is not shown compliant on it: no entry, and a failure that names the pack.
+    assert response.results == {}
+    assert response.failure is not None
+    assert "AwsSolutions" in response.failure
+    assert any(
+        "AwsSolutions-S1" in r.message and "constructPath" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+
+
+def test_a_construct_naming_no_resource_of_the_template_is_logged_not_dropped_in_silence(
+    cdk_doubles, template_file, outdir, caplog
+):
+    cdk_doubles.report_text = _one_violation_report(
+        construct_paths=[_construct_path("NotInThisTemplate")]
+    )
+
+    with caplog.at_level("WARNING"):
+        response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.results == {"AwsSolutions": []}
+    assert any(
+        "NotInThisTemplate" in r.message and "not a resource" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+
+
+# ---------------------------------------------------------------------------
+# Each template gets its own synth directory, and never another's report
+# ---------------------------------------------------------------------------
+#
+# Before the fix the sanitizer folded every separator and dot into the same two dashes,
+# so ``a/b.yaml`` and ``a.b.yaml`` shared one synth directory, and a template whose synth
+# wrote no report was graded from the other template's validation-report.json. The
+# directory name now ends in a digest of the template's full path
+# (``_synth_directory_name``).
+
+
+def test_templates_whose_names_sanitize_alike_get_distinct_synth_directories(
+    cdk_doubles, tmp_path, outdir
+):
+    nested = tmp_path / "a" / "b.yaml"
+    nested.parent.mkdir()
+    nested.write_text(TEMPLATE_YAML, encoding="utf-8")
+    dotted = tmp_path / "a.b.yaml"
+    dotted.write_text(TEMPLATE_YAML, encoding="utf-8")
+    cdk_doubles.report_text = _one_violation_report()
+
+    first = _run(nested, outdir, nag_packs=["AwsSolutionsChecks"])
+    second = _run(dotted, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert first.outdir != second.outdir, (
+        "two templates must never synthesize into one directory; at the base both "
+        f"landed in {first.outdir}"
+    )
+    assert first.outdir.parent == outdir and second.outdir.parent == outdir
+
+
+def test_a_report_left_by_an_earlier_synth_is_not_read_as_this_synths_answer(
+    cdk_doubles, template_file, outdir
+):
+    """The second run of the same template writes no report and must say so.
+
+    At the base the first run's validation-report.json was still in the synth directory
+    and was read as the second run's result: ``failure=None`` with the old finding.
+    """
+    cdk_doubles.report_text = _one_violation_report()
+    first = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+    assert len(first.results["AwsSolutions"]) == 1
+
+    cdk_doubles.report_text = None
+    second = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert second.failure is not None, (
+        "a synth that wrote no report was answered with the previous run's report"
+    )
+    assert second.results == {}
+
+
+# ---------------------------------------------------------------------------
+# The per-finding shortest-name call is guarded like the other two
+# ---------------------------------------------------------------------------
+
+
+def test_a_shortest_name_failure_inside_the_finding_loop_keeps_the_findings(
+    cdk_doubles, template_file, outdir, monkeypatch
+):
+    """Three failures: the two guarded sites, then the one inside the finding loop.
+
+    At the base the third call had no handler, so a template in a sibling directory whose
+    name starts with the working directory's name raised ValueError there and every
+    finding it had was lost.
+    """
+    from automated_security_helper.utils.get_shortest_name import get_shortest_name
+
+    stub = _FailingShortestName(
+        get_shortest_name,
+        3,
+        ValueError("is not in the subpath of the working directory"),
+    )
+    monkeypatch.setattr(cdk_nag_wrapper, "get_shortest_name", stub)
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert stub.calls >= 3, stub.calls
+    assert len(response.results["AwsSolutions"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# A finding is placed on the resource's declaration, not on its first mention
+# ---------------------------------------------------------------------------
+
+
+TEMPLATE_WITH_EARLY_MENTIONS = """Resources:
+  MyDataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: MyDataBucket
+    Properties:
+      Bucket: !Ref MyDataBucket
+  MyDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: placeholder-name
+"""
+
+
+def test_the_finding_line_is_the_resources_declaration_not_an_earlier_reference(
+    cdk_doubles, tmp_path, outdir
+):
+    """``DependsOn`` and ``Ref`` mention the id on lines 4 and 6; it is declared on 7.
+
+    At the base the first word-boundary mention won, so the finding sat on the policy's
+    ``DependsOn`` line, and a same-line ``ash-ignore`` there would have been applied to it.
+    """
+    template = tmp_path / "early.yaml"
+    template.write_text(TEMPLATE_WITH_EARLY_MENTIONS, encoding="utf-8")
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    assert region.startLine == 7, region
+    # Declared at index 2 of its line, which is SARIF column 3.
+    assert region.startColumn == 3, region
+
+
+def test_a_short_id_that_is_also_a_type_suffix_is_placed_on_its_declaration(
+    cdk_doubles, tmp_path, outdir
+):
+    """``Bucket`` ends ``AWS::S3::Bucket`` on another resource's Type line first."""
+    template = tmp_path / "short.yaml"
+    template.write_text(
+        "Resources:\n"
+        "  Other:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "  Bucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Properties:\n"
+        "      BucketName: placeholder-name\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report(
+        construct_paths=[_construct_path("Bucket")]
+    )
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    assert region.startLine == 4, region
+
+
+def test_a_json_declaration_is_found_by_its_quoted_key(cdk_doubles, tmp_path, outdir):
+    template = tmp_path / "t.json"
+    template.write_text(
+        json.dumps(
+            {
+                "Resources": {
+                    "MyDataBucketPolicy": {
+                        "Type": "AWS::S3::BucketPolicy",
+                        "Properties": {"Bucket": {"Ref": "MyDataBucket"}},
+                    },
+                    "MyDataBucket": {
+                        "Type": "AWS::S3::Bucket",
+                        "Properties": {"BucketName": "placeholder-name"},
+                    },
+                }
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    lines = template.read_text(encoding="utf-8").splitlines()
+    declaration = next(
+        i
+        for i, line in enumerate(lines, start=1)
+        if line.strip().startswith('"MyDataBucket"')
+    )
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    assert region.startLine == declaration, (region, lines)
+
+
+def test_a_colon_in_the_template_name_is_folded_out_of_the_synth_directory_name(
+    cdk_doubles, tmp_path, outdir
+):
+    """A name that keeps a colon is drive-qualified on Windows (``C:--other--t--yaml``),
+    and ``joinpath`` then discards the output directory when the drives differ. The
+    sanitizer folds the colon with the separators; pinned here with a colon that a
+    POSIX filename may carry, since the drive-letter shape cannot exist on this host."""
+    template = tmp_path / "drive:like.yaml"
+    template.write_text(TEMPLATE_YAML, encoding="utf-8")
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert ":" not in Path(response.outdir).name, response.outdir
+    assert Path(response.outdir).parent == outdir
+
+
+def test_an_unrequested_plugins_failure_does_not_fail_the_template(
+    cdk_doubles, template_file, outdir, monkeypatch, caplog
+):
+    """CDK's own CloudFormation Validate plugin writes into the same report. Its failure
+    says nothing about the requested packs' rules, so it is logged, not counted; before
+    this read every failed entry counted, and an unrequested plugin's error failed every
+    template and dropped every cdk-nag finding with it."""
+    cdk_doubles.report_text = json.dumps(
+        {
+            "version": "54.0.0",
+            "title": "Validation Report",
+            "pluginReports": [
+                {
+                    "pluginName": "CloudFormation Validate",
+                    "conclusion": "failure",
+                    "violations": [],
+                    "metadata": {"error": "validator crashed"},
+                },
+                {
+                    "pluginName": "AwsSolutions",
+                    "conclusion": "success",
+                    "violations": [],
+                },
+            ],
+        }
+    )
+
+    with caplog.at_level("WARNING"):
+        response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is None, response.failure
+    assert any(
+        "CloudFormation Validate" in r.message and "not requested" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]
+
+
+def test_a_requested_packs_failure_still_fails_the_template_when_names_are_known(
+    cdk_doubles, template_file, outdir, monkeypatch
+):
+    """The control for the previous test: the same failed entry under a requested name."""
+    cdk_doubles.report_text = _report(
+        _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="failure")
+    )
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is not None
+    assert "AwsSolutions" in response.failure
+
+
+def test_a_nameless_requested_packs_failure_still_fails_the_template_beside_a_named_one(
+    cdk_doubles, template_file, outdir, monkeypatch, caplog
+):
+    """Two packs requested; only one exposes a readable name. The nameless pack's failed,
+    violation-less entry is not in the requested-name set, so a reader that trusts that set
+    takes it for an unrequested plugin's failure and the template reads clean on the named
+    pack's success. With a requested pack unnamed, every failed entry counts (fail closed)."""
+    monkeypatch.setattr(
+        cdk_nag_wrapper,
+        "_plugin_report_name",
+        lambda plugin: (
+            "AwsSolutions" if type(plugin).__name__ == "AwsSolutionsChecks" else None
+        ),
+    )
+    cdk_doubles.report_text = _report(
+        _plugin_report(plugin_name="AwsSolutions", violations=[], conclusion="success"),
+        _plugin_report(
+            plugin_name="HIPAA.Security", violations=[], conclusion="failure"
+        ),
+    )
+
+    with caplog.at_level("WARNING"):
+        response = _run(
+            template_file,
+            outdir,
+            nag_packs=["AwsSolutionsChecks", "HIPAASecurityChecks"],
+        )
+
+    assert response.failure is not None, (
+        "the nameless pack's failure was read as unrequested"
+    )
+    assert "HIPAA.Security" in response.failure
+    assert not any("not requested" in r.message for r in caplog.records), [
+        r.message for r in caplog.records
+    ]
+
+
+TEMPLATE_WITH_OUTPUT_FIRST = """Outputs:
+  MyDataBucket:
+    Value: !Ref MyDataBucket
+Resources:
+  MyDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: placeholder-name
+"""
+
+
+def test_an_output_named_like_the_resource_does_not_take_the_finding(
+    cdk_doubles, tmp_path, outdir
+):
+    """Outputs are their own namespace, so an Output spelled like the resource is legal.
+    The declaration is the key line inside the Resources section, line 5 here; before
+    this read the Output's key line at the same indent won by coming first."""
+    template = tmp_path / "output-first.yaml"
+    template.write_text(TEMPLATE_WITH_OUTPUT_FIRST, encoding="utf-8")
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    assert region.startLine == 5, region
+
+
+def _declaration_line(template, resource_log_id, response):
+    """The line that declares the id under the TOP-LEVEL ``Resources`` key.
+
+    Read from the top-level key onward, not from the file's start: these templates
+    put an Output or a nested key of the same spelling before the section on purpose,
+    and the first such line in the file is the decoy, not the declaration.
+    """
+    lines = template.read_text(encoding="utf-8").splitlines()
+    # Unindented, with a JSON object's opening brace allowed before the key, so that
+    # ``{"Resources": {`` on line 1 and a bare ``"Resources": {`` both read as the key.
+    resources_at = next(
+        i
+        for i, line in enumerate(lines, start=1)
+        if line == line.lstrip()
+        and line.lstrip("{").lstrip().startswith(("Resources:", '"Resources":'))
+    )
+    declaration = next(
+        i
+        for i, line in enumerate(lines, start=1)
+        if i > resources_at
+        and (
+            line.strip().startswith(f"{resource_log_id}:")
+            or line.strip().startswith(f'"{resource_log_id}":')
+        )
+    )
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    return declaration, region.startLine, lines
+
+
+def test_a_folded_description_reading_resources_does_not_open_the_section_early(
+    cdk_doubles, tmp_path, outdir
+):
+    """``Description: >`` folds its text over indented lines, one of which reads
+    ``Resources: ...``. That line matches the section key's shape at indent 2 and the
+    next top-level key ends the section at once, so a reader that stops at the first
+    candidate finds no key line and falls to the first mention, the Output's line.
+    The real section, shallower and later, is where the declaration is."""
+    template = tmp_path / "folded.yaml"
+    template.write_text(
+        "Description: >\n"
+        "  Resources: one bucket, one queue.\n"
+        "Outputs:\n"
+        "  MyDataBucket:\n"
+        "    Value: !Ref MyDataBucket\n"
+        "Resources:\n"
+        "  MyDataBucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Properties:\n"
+        "      BucketName: placeholder-name\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    declaration, start_line, lines = _declaration_line(
+        template, "MyDataBucket", response
+    )
+    assert declaration == 7, lines
+    assert start_line == declaration, (start_line, lines)
+
+
+def test_a_resources_key_nested_under_metadata_does_not_open_the_section_early(
+    cdk_doubles, tmp_path, outdir
+):
+    """The same shape with a real nested key: ``Metadata: {Resources: {...}}`` is legal,
+    and its section holds no logical id; the top-level section after it does."""
+    template = tmp_path / "nested.yaml"
+    template.write_text(
+        "Metadata:\n"
+        "  Resources:\n"
+        "    Note: a nested key named like the section\n"
+        "Outputs:\n"
+        "  MyDataBucket:\n"
+        "    Value: !Ref MyDataBucket\n"
+        "Resources:\n"
+        "  MyDataBucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Properties:\n"
+        "      BucketName: placeholder-name\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    declaration, start_line, lines = _declaration_line(
+        template, "MyDataBucket", response
+    )
+    assert declaration == 8, lines
+    assert start_line == declaration, (start_line, lines)
+
+
+def test_json_whose_object_opens_on_the_resources_line_is_read_as_a_section(
+    cdk_doubles, tmp_path, outdir
+):
+    """``{"Resources": {`` on line 1: the brace before the key hid the section, and the
+    finding went to an earlier ``Ref`` of the id inside another resource."""
+    template = tmp_path / "brace-first.json"
+    template.write_text(
+        '{"Resources": {\n'
+        '  "MyDataBucketPolicy": {\n'
+        '    "Type": "AWS::S3::BucketPolicy",\n'
+        '    "Properties": {"Bucket": {"Ref": "MyDataBucket"}}\n'
+        "  },\n"
+        '  "MyDataBucket": {\n'
+        '    "Type": "AWS::S3::Bucket",\n'
+        '    "Properties": {"BucketName": "placeholder-name"}\n'
+        "  }\n"
+        "}}\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    declaration, start_line, lines = _declaration_line(
+        template, "MyDataBucket", response
+    )
+    assert declaration == 6, lines
+    assert start_line == declaration, (start_line, lines)
+
+
+def test_unindented_json_falls_back_to_the_whole_file_key_search_not_the_first_mention(
+    cdk_doubles, tmp_path, outdir
+):
+    """Every key sits at the section's own depth, so the section reads as empty; the
+    whole-file shallowest-key search that ran before the section bound existed is what
+    places the finding, not the first mention (the ``Ref`` on line 5)."""
+    template = tmp_path / "flat.json"
+    template.write_text(
+        "{\n"
+        '"Resources": {\n'
+        '"MyDataBucketPolicy": {\n'
+        '"Type": "AWS::S3::BucketPolicy",\n'
+        '"Properties": {"Bucket": {"Ref": "MyDataBucket"}}\n'
+        "},\n"
+        '"MyDataBucket": {\n'
+        '"Type": "AWS::S3::Bucket",\n'
+        '"Properties": {"BucketName": "placeholder-name"}\n'
+        "}\n"
+        "}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    declaration, start_line, lines = _declaration_line(
+        template, "MyDataBucket", response
+    )
+    assert declaration == 7, lines
+    assert start_line == declaration, (start_line, lines)
+
+
+def test_a_json_output_named_like_the_resource_does_not_take_the_finding(
+    cdk_doubles, tmp_path, outdir
+):
+    template = tmp_path / "output-first.json"
+    template.write_text(
+        json.dumps(
+            {
+                "Outputs": {"MyDataBucket": {"Value": {"Ref": "MyDataBucket"}}},
+                "Resources": {
+                    "MyDataBucket": {
+                        "Type": "AWS::S3::Bucket",
+                        "Properties": {"BucketName": "placeholder-name"},
+                    }
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    lines = template.read_text(encoding="utf-8").splitlines()
+    resources_at = next(
+        i
+        for i, line in enumerate(lines, start=1)
+        if line.strip().startswith('"Resources"')
+    )
+    declaration = next(
+        i
+        for i, line in enumerate(lines, start=1)
+        if i > resources_at and line.strip().startswith('"MyDataBucket"')
+    )
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    assert region.startLine == declaration, (region, lines)
+
+
+def test_a_resources_section_written_on_one_line_places_the_finding_on_that_line(
+    cdk_doubles, tmp_path, outdir
+):
+    """Compact JSON writes the whole Resources object on its key's line, so the section
+    body is empty; the whole-file fallback then found the Output's key line (line 4), the
+    collision the section bound exists to stop, and a same-line ``ash-ignore`` on the
+    Output would have been applied to the resource's finding. The section key line
+    itself holds the declaration."""
+    template = tmp_path / "compact.json"
+    template.write_text(
+        "{\n"
+        '  "Resources": {"MyDataBucket": {"Type": "AWS::S3::Bucket", '
+        '"Properties": {"BucketName": "placeholder-name"}}},\n'
+        '  "Outputs": {\n'
+        '    "MyDataBucket": {"Value": {"Ref": "MyDataBucket"}}\n'
+        "  }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    assert region.startLine == 2, region
+    # The id's first character, past its opening quote, as a 1-based SARIF column.
+    assert region.startColumn == 18, region
+
+
+def test_a_flow_style_yaml_resources_section_places_the_finding_on_its_line(
+    cdk_doubles, tmp_path, outdir
+):
+    template = tmp_path / "flow.yaml"
+    template.write_text(
+        "Resources: {MyDataBucket: {Type: AWS::S3::Bucket, "
+        "Properties: {BucketName: placeholder-name}}}\n"
+        "Outputs:\n"
+        "  MyDataBucket:\n"
+        "    Value: !Ref MyDataBucket\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    region = _only_finding(response).locations[0].physicalLocation.root.region
+    assert region.startLine == 1, region
+    assert region.startColumn == 13, region
+
+
+def test_unindented_json_with_outputs_first_keeps_the_finding_out_of_outputs(
+    cdk_doubles, tmp_path, outdir
+):
+    """Every key at depth 0, Outputs before Resources: the section body reads as empty
+    and the whole-file fallback's "shallowest" key meant "first in the file", the
+    Output's. The fallback leaves the other top-level sections' bodies out."""
+    template = tmp_path / "flat-outputs-first.json"
+    template.write_text(
+        "{\n"
+        '"Outputs": {\n'
+        '"MyDataBucket": {"Value": {"Ref": "MyDataBucket"}}\n'
+        "},\n"
+        '"Resources": {\n'
+        '"MyDataBucket": {\n'
+        '"Type": "AWS::S3::Bucket",\n'
+        '"Properties": {"BucketName": "placeholder-name"}\n'
+        "}\n"
+        "}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    declaration, start_line, lines = _declaration_line(
+        template, "MyDataBucket", response
+    )
+    assert declaration == 6, lines
+    assert start_line == declaration, (start_line, lines)
+
+
+def test_the_template_is_read_once_for_every_finding_of_it(
+    cdk_doubles, tmp_path, outdir, monkeypatch
+):
+    """The declaration search used to re-read the whole template per finding, under
+    the environment lock and inside the worker's scan timeout; one object per template
+    now answers every id of it, and a repeated id is answered from its first read."""
+    built = []
+    real = cdk_nag_wrapper._TemplateLocations
+
+    class Counting(real):
+        def __init__(self, template_lines):
+            built.append(len(template_lines))
+            super().__init__(template_lines)
+
+    monkeypatch.setattr(cdk_nag_wrapper, "_TemplateLocations", Counting)
+    template = tmp_path / "many.yaml"
+    template.write_text(TEMPLATE_WITH_EARLY_MENTIONS, encoding="utf-8")
+    cdk_doubles.report_text = _report(
+        _plugin_report(
+            violations=[
+                _violation(rule_name="AwsSolutions-S1"),
+                _violation(rule_name="AwsSolutions-S2"),
+                _violation(rule_name="AwsSolutions-S10"),
+            ]
+        )
+    )
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert len(response.results["AwsSolutions"]) == 3
+    assert built == [len(TEMPLATE_WITH_EARLY_MENTIONS.splitlines())], built
+    # Every finding of the one resource sits on the one declaration line.
+    assert {
+        finding.locations[0].physicalLocation.root.region.startLine
+        for finding in response.results["AwsSolutions"]
+    } == {7}
+
+
+def test_template_locations_answer_an_id_once_and_agree_with_the_one_shot_search():
+    lines = TEMPLATE_WITH_EARLY_MENTIONS.splitlines(keepends=True)
+    locations = cdk_nag_wrapper._TemplateLocations(lines)
+
+    first = locations.of("MyDataBucket")
+
+    assert first == (7, 2)
+    assert locations.of("MyDataBucket") is first
+    assert first == cdk_nag_wrapper._resource_location(lines, "MyDataBucket")
+    assert locations.of("NoSuchResource") == (None, None)
+
+
+UNINDENTED_JSON_WITH_RESOURCE_METADATA = (
+    "{\n"
+    '"Resources": {\n'
+    '"First": {\n'
+    '"Type": "AWS::SNS::Topic",\n'
+    '"Properties": {"TopicName": {"Ref": "Next"}},\n'
+    '"Metadata": {"cdk_nag": {"rules_to_suppress": []}}},\n'
+    '"Next": {\n'
+    '"Type": "AWS::S3::Bucket",\n'
+    '"Properties": {"BucketName": "placeholder-name"}}\n'
+    "},\n"
+    '"Outputs": {"Out": {"Value": {"Ref": "Next"}}}\n'
+    "}\n"
+)
+
+
+def test_a_resource_level_metadata_in_unindented_json_is_not_a_section():
+    """``Metadata`` is a legal resource attribute (cdk_nag's suppressions live there) as
+    well as a top-level section. In unindented JSON a resource's Metadata sits at indent
+    0 like the sections do, and taken for one it excluded the lines after it from the
+    whole-file fallback, the next resource's declaration included; that finding then
+    went to the first mention of the id, an earlier ``"Ref"``. A section key is one only
+    outside the Resources object's braces."""
+    lines = UNINDENTED_JSON_WITH_RESOURCE_METADATA.splitlines(keepends=True)
+    locations = cdk_nag_wrapper._TemplateLocations(lines)
+
+    assert locations.of("Next") == (7, 1), lines[6]
+    assert locations.of("First") == (3, 1), lines[2]
+
+
+def test_a_resource_level_metadata_in_indented_yaml_is_not_a_section():
+    """The indented control: a resource's ``Metadata`` sits deeper than the Resources key
+    and is bounded by indent; the top-level Outputs section still is one."""
+    lines = (
+        "Resources:\n"
+        "  First:\n"
+        "    Type: AWS::SNS::Topic\n"
+        "    Properties:\n"
+        "      TopicName: !Ref Next\n"
+        "    Metadata:\n"
+        "      cdk_nag:\n"
+        "        rules_to_suppress: []\n"
+        "  Next:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "Outputs:\n"
+        "  Next:\n"
+        "    Value: !Ref Next\n"
+    ).splitlines(keepends=True)
+    locations = cdk_nag_wrapper._TemplateLocations(lines)
+
+    assert locations.of("Next") == (9, 2), lines[8]
+    assert locations.of("First") == (2, 2), lines[1]
+
+
+def test_an_id_that_ends_another_key_is_not_found_inside_it_on_a_one_line_section():
+    """``Bucket`` on a one-line section used to match inside ``"MyBucket":``."""
+    line = (
+        '{"Resources": {"MyBucket": {"Type": "AWS::S3::Bucket"}, '
+        '"Bucket": {"Type": "AWS::S3::Bucket"}}}\n'
+    )
+    locations = cdk_nag_wrapper._TemplateLocations([line])
+
+    assert locations.of("Bucket") == (1, line.index('"Bucket":') + 1)
+    assert locations.of("MyBucket") == (1, line.index('"MyBucket":') + 1)
+
+
+# ---------------------------------------------------------------------------
+# A failed pack's recorded error text stays on the failure reason, out of ash.log
+# ---------------------------------------------------------------------------
+
+
+def test_a_failed_packs_recorded_error_is_on_the_failure_reason_not_in_the_log(
+    cdk_doubles, template_file, outdir, monkeypatch, caplog
+):
+    """CDK writes a pack that threw as ``Validation plugin '<name>' failed: <message>``,
+    and the message can interpolate values resolved out of the template, which ash.log is
+    kept free of (the not-evaluated rows drop their description for the same reason).
+    The text stays on the per-template failure reason; the log names the pack only."""
+    entry = _plugin_report(
+        plugin_name="AwsSolutions", violations=[], conclusion="failure"
+    )
+    entry["error"] = "Validation plugin 'AwsSolutions' failed: resolved-template-value"
+    cdk_doubles.report_text = _report(entry)
+
+    with caplog.at_level("WARNING"):
+        response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response.failure is not None
+    assert "resolved-template-value" in response.failure
+    assert not any(
+        "resolved-template-value" in r.getMessage() for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+    assert any(
+        "reported 'failure' with no violations and recorded an error" in r.getMessage()
+        for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+# ---------------------------------------------------------------------------
+# An Output written over several lines in unindented JSON
+# ---------------------------------------------------------------------------
+
+UNINDENTED_JSON_WITH_A_MULTI_LINE_OUTPUT = (
+    "{\n"
+    '"Outputs": {\n'
+    '"Other": {\n'
+    '"Value": "x"\n'
+    "},\n"
+    '"MyDataBucket": {"Value": {"Ref": "MyDataBucket"}}\n'
+    "},\n"
+    '"Resources": {\n'
+    '"MyDataBucket": {\n'
+    '"Type": "AWS::S3::Bucket"}\n'
+    "}\n"
+    "}\n"
+)
+
+
+def test_an_output_written_over_several_lines_does_not_end_the_outputs_section():
+    """The Outputs section used to be bounded by indent, ending at the first ``}`` at
+    its own indent, which in unindented JSON closes the first Output's object, not the
+    section. The later Output named like the resource then stayed in the whole-file
+    fallback and, sitting first, took the resource's finding, so a same-line
+    ``ash-ignore`` on the Output would have applied to it. A JSON section is bounded by
+    its braces, as the Resources object is."""
+    lines = UNINDENTED_JSON_WITH_A_MULTI_LINE_OUTPUT.splitlines(keepends=True)
+    locations = cdk_nag_wrapper._TemplateLocations(lines)
+
+    assert locations.of("MyDataBucket") == (9, 1), lines[8]
+
+
+def test_a_one_line_outputs_section_is_left_out_of_the_fallback_whole():
+    """The one-line control: the section's key line holds its whole body, and no key
+    on it declares a resource."""
+    lines = (
+        "{\n"
+        '"Outputs": {"MyDataBucket": {"Value": "x"}},\n'
+        '"Resources": {\n'
+        '"MyDataBucket": {\n'
+        '"Type": "AWS::S3::Bucket"}\n'
+        "}\n"
+        "}\n"
+    ).splitlines(keepends=True)
+    locations = cdk_nag_wrapper._TemplateLocations(lines)
+
+    assert locations.of("MyDataBucket") == (4, 1), lines[3]
+
+
+# ---------------------------------------------------------------------------
+# A bare JSII_NODE is resolved through the scan lookup before jsii starts it
+# ---------------------------------------------------------------------------
+
+
+def test_a_bare_jsii_node_is_resolved_to_the_path_the_check_approved(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """jsii hands JSII_NODE to the spawn as given; a bare name is looked up by the
+    spawn, which on Windows reads the working directory (the scanned repository)
+    before PATH. The dependency check approved the PATH copy, so the wrapper hands
+    jsii that copy's absolute path, through the same lookup every tool of the scan
+    gets."""
+    resolved = _fake_node(tmp_path / "installed" / "bin")
+    asked: list = []
+
+    def lookup(command, root):
+        asked.append((command, Path(root)))
+        return str(resolved), None
+
+    monkeypatch.setattr(cdk_nag_wrapper, "lookup_for_scan", lookup)
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert [command for command, _ in asked] == ["nodejs"]
+    assert jsii_node_during_the_call == [str(resolved)]
+    assert os.environ.get("JSII_NODE") == "nodejs", "the operator's value is restored"
+
+
+def test_a_bare_jsii_node_found_only_in_the_tree_is_refused(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    monkeypatch.setattr(
+        cdk_nag_wrapper,
+        "lookup_for_scan",
+        lambda command, root: (None, f"{command} found only in the scanned tree"),
+    )
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    with pytest.raises(RuntimeError, match="found only in the scanned tree"):
+        _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert jsii_node_during_the_call == [], "cdk-nag started anyway"
+
+
+def test_a_bare_jsii_node_on_no_path_is_left_as_the_operator_set_it(
+    cdk_doubles,
+    template_file,
+    outdir,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """Neither on PATH nor in the tree: the value stands and jsii's own error names
+    what it could not start."""
+    monkeypatch.setattr(cdk_nag_wrapper, "lookup_for_scan", lambda c, r: (None, None))
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert jsii_node_during_the_call == ["nodejs"]
+
+
+def test_a_bare_jsii_node_reached_only_through_the_working_directory_is_refused(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """The lookup answers (None, None) for a name that is neither on PATH nor refused
+    in the tree, which leaves a copy in the working directory unruled out: Windows
+    starts one from there before it reads PATH, and the scanned repository is usually
+    the working directory. The default branch (no JSII_NODE) refuses that copy; the
+    bare-name branch ran it. The decision is a function-level one, so the working
+    directory search is stood in for and the test needs no Windows."""
+    copy = tmp_path / "repo" / "nodejs.exe"
+    asked: list = []
+
+    def started(name, cwd=None, env=None):
+        asked.append(name)
+        return str(copy)
+
+    monkeypatch.setattr(cdk_nag_wrapper, "lookup_for_scan", lambda c, r: (None, None))
+    monkeypatch.setattr(cdk_nag_wrapper, "started_from_working_directory", started)
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    with pytest.raises(RuntimeError, match="through the working directory") as raised:
+        _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert asked == ["nodejs"]
+    assert str(copy) in str(raised.value)
+    assert jsii_node_during_the_call == [], "cdk-nag started anyway"
+    assert os.environ.get("JSII_NODE") == "nodejs", "the operator's value is restored"
+
+
+def test_a_bare_jsii_node_with_no_working_directory_copy_is_left_as_set(
+    cdk_doubles,
+    template_file,
+    outdir,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """The control: the working directory search is asked about the bare name and finds
+    nothing, so the operator's value stands. Asking is part of the assertion, so a
+    stand-in that is never reached cannot pass for it."""
+    asked: list = []
+
+    def started(name, cwd=None, env=None):
+        asked.append(name)
+        return None
+
+    monkeypatch.setattr(cdk_nag_wrapper, "lookup_for_scan", lambda c, r: (None, None))
+    monkeypatch.setattr(cdk_nag_wrapper, "started_from_working_directory", started)
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert asked == ["nodejs"]
+    assert jsii_node_during_the_call == ["nodejs"]
+
+
+def test_a_bare_jsii_node_found_on_path_does_not_ask_the_working_directory(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """The other control: a name PATH resolves is started by its absolute path, so the
+    working directory is never a candidate and is not searched."""
+    resolved = _fake_node(tmp_path / "installed" / "bin")
+    asked: list = []
+
+    def started(name, cwd=None, env=None):
+        asked.append(name)
+        return str(tmp_path / "repo" / "nodejs.exe")
+
+    monkeypatch.setattr(
+        cdk_nag_wrapper, "lookup_for_scan", lambda c, r: (str(resolved), None)
+    )
+    monkeypatch.setattr(cdk_nag_wrapper, "started_from_working_directory", started)
+    monkeypatch.setenv("JSII_NODE", "nodejs")
+
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert asked == []
+    assert jsii_node_during_the_call == [str(resolved)]

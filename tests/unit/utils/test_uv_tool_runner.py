@@ -624,8 +624,11 @@ def _install_harness(runner, outcome_for_attempt):
             "automated_security_helper.utils.subprocess_utils._run_plain",
             side_effect=_run,
         ),
+        # The backoff is handed whole to the wait helper, which splits it into
+        # cancel-polling chunks; recording the helper's argument reads the
+        # schedule the retry chose, not the chunking.
         patch(
-            "automated_security_helper.utils.uv_tool_runner.time.sleep",
+            "automated_security_helper.utils.uv_tool_runner._sleep_between_attempts",
             side_effect=sleeps.append,
         ),
     ):
@@ -652,7 +655,7 @@ class TestInstallRetriesActuallyHappen:
     defect does not move.
 
     So these assert the two things it does move: how many installs are attempted,
-    and what ``time.sleep`` is handed between them. Jitter is off wherever an
+    and what the backoff wait is handed between them. Jitter is off wherever an
     exact interval is asserted, so the schedule is arithmetic rather than a
     range. Nothing here measures wall clock, which would flake low on a fast
     machine and high on a loaded one.
@@ -2141,6 +2144,22 @@ class TestRetryDelayIsAlwaysSleepable:
         intervals = [_install_retry_delay(config, n) for n in range(3)]
         assert intervals == [0.0, 0.0, 0.0], intervals
 
+    def test_a_zero_base_delay_stays_zero_when_the_power_overflows(self):
+        """``0.0 * inf`` is NaN, and NaN read as the cap: a config asking for
+        no wait between attempts slept ``max_delay`` from the attempt the
+        power overflowed. The base is assigned after construction, past the
+        bound ``__post_init__`` puts on it, as the clamp test above does."""
+        config = UVToolRetryConfig(base_delay=0.0, max_delay=60.0, jitter=False)
+        config.exponential_base = 1e6
+        late = [_install_retry_delay(config, n) for n in (0, 51, 52, 60)]
+        assert late == [0.0, 0.0, 0.0, 0.0], late
+
+    def test_a_positive_base_whose_power_overflows_reads_as_the_cap(self):
+        """The control: with a base to grow from, the overflow is the cap."""
+        config = UVToolRetryConfig(base_delay=1.0, max_delay=60.0, jitter=False)
+        config.exponential_base = 1e6
+        assert _install_retry_delay(config, 60) == 60.0
+
 
 class TestTheAttemptCountCannotFallBelowOne:
     """``1 + max_retries`` must never collapse ``range(attempts)`` to empty.
@@ -2299,9 +2318,12 @@ class TestTheProgressMonitorCoversTheWholeRetriedRun:
     def _blocking_outcomes(first_block: float, second_block: float, windows: list):
         """Two attempts that occupy real time: the first fails, the second succeeds.
 
-        ``threading.Event().wait`` rather than ``time.sleep`` deliberately -- the
-        install harness patches the module's ``time.sleep`` to record intervals,
-        so a sleep here would return instantly and occupy no time at all.
+        ``threading.Event().wait`` rather than ``time.sleep`` deliberately. The
+        install harness once patched the module's ``time.sleep`` to record the
+        intervals, which made a sleep here return instantly and occupy no time at
+        all; it now patches ``_sleep_between_attempts``, the wait between attempts,
+        and leaves ``time.sleep`` alone. The Event wait stays so this helper keeps
+        occupying real time whatever the harness stubs next.
         """
 
         def outcome(attempt_number):
@@ -2515,18 +2537,17 @@ class TestTheProgressMonitorCoversTheWholeRetriedRun:
             arrives between these two marks came from a monitor outliving its own
             attempt, and no grace period is needed to say so.
 
-            The 0.4s backoff and the 0.02s monitor cadence are far enough apart to
-            tell apart by size, which matters because the pre-fix monitor polls
-            with this same ``time.sleep``.
+            Only the backoff reaches this seam: it is patched onto
+            ``_sleep_between_attempts``, which the install loop calls once per
+            gap, while the monitor polls with the module's ``time.sleep``, which
+            stays real. So every call here is a backoff and marks the gap; no
+            size check is needed to tell a backoff from a monitor tick.
             """
-            if seconds > 0.1:
-                with lock:
-                    gap_marks.append(len(records))
-                threading.Event().wait(seconds)
-                with lock:
-                    gap_marks.append(len(records))
-            else:
-                threading.Event().wait(seconds)
+            with lock:
+                gap_marks.append(len(records))
+            threading.Event().wait(seconds)
+            with lock:
+                gap_marks.append(len(records))
 
         with (
             _install_harness(runner, _outcomes) as (installs, _),
@@ -2535,7 +2556,7 @@ class TestTheProgressMonitorCoversTheWholeRetriedRun:
             # interval instead of taking it, and this test needs a real gap
             # between the two attempts to look for callbacks inside.
             patch(
-                "automated_security_helper.utils.uv_tool_runner.time.sleep",
+                "automated_security_helper.utils.uv_tool_runner._sleep_between_attempts",
                 side_effect=_sleep_really,
             ),
         ):
@@ -3341,11 +3362,14 @@ class TestAMemoizedFailureIsRecoverable:
 class TestProbeLocksAreNamespaced:
     """The two probes must not share a lock object.
 
-    get_tool_version keys on "<tool>::<package>" and get_uv_tool_command on
-    "<tool>::<fallback_binary>", so get_tool_version("bandit", "bandit") and
-    get_uv_tool_command("bandit") both produced "bandit::bandit". These are
-    non-reentrant threading.Lock, so sharing one is a deadlock waiting for a
-    refactor that makes either call into the other.
+    Before the keys were namespaced, get_tool_version keyed on
+    "<tool>::<package>" and get_uv_tool_command on "<tool>::<fallback_binary>",
+    so get_tool_version("bandit", "bandit") and get_uv_tool_command("bandit")
+    both produced "bandit::bandit". These are non-reentrant threading.Lock, so
+    sharing one is a deadlock waiting for a refactor that makes either call into
+    the other. Today the version probe keys on "version::<tool>" (the tool alone,
+    see the second test) and the command probe on
+    "command::<tool>::<fallback_binary>::<environment>".
     """
 
     def test_the_two_probes_use_different_lock_keys(self, runner):
@@ -3374,19 +3398,67 @@ class TestProbeLocksAreNamespaced:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="bandit 1.9.4\n", stderr=""
             )
+            # Two specs of one tool, so that a key built from the package ("bandit"
+            # and the spec below) would tell them apart and a key built from the
+            # tool does not. Each spec has its own memo, so each takes the lock.
             runner.get_tool_version("bandit", "bandit")
+            runner.get_tool_version("bandit", "bandit[sarif,toml]>=1.7.8,<2.0.0")
             with patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
                 return_value=UV_PATH,
             ):
                 get_uv_tool_command("bandit")
 
-        assert "version::bandit::bandit" in seen
+        # The version probe's lock is keyed by the TOOL alone, so two spec keys
+        # of one tool take ONE lock (the next test pins it): they can resolve to
+        # the same installed environment, and locking them apart reopened the
+        # first-import race the lock exists to close. How many environments a
+        # ``--from`` spec can name is ``_uv_from_spec``'s separate question.
+        assert seen.count("version::bandit") == 2, seen
+        assert not any(key.startswith("version::bandit[") for key in seen), seen
         # The command probe's key goes on to name the environment it was made in.
         assert any(key.startswith("command::bandit::bandit::") for key in seen), seen
         # The collision the namespacing exists to prevent.
         assert "bandit::bandit" not in seen
         assert len(set(seen)) == 2
+
+    def test_two_spec_keys_of_one_tool_share_the_version_lock(self, runner):
+        """The version lock is keyed by the TOOL, not by the tool::spec memo key.
+
+        ``bandit`` and ``bandit==1.9.4`` are two memo keys that resolve to one
+        installed environment, and probing them under two locks reopened the
+        first-import race the lock exists to close. So both calls must take the
+        same lock, ``version::bandit``, while their memos stay apart (the second
+        call still probes, which is what the two subprocess runs show). A key
+        that carried the spec, ``version::bandit::bandit==1.9.4``, fails the
+        equality below.
+        """
+        import automated_security_helper.utils.uv_tool_runner as mod
+
+        real = mod._get_or_create_probe_lock
+        seen: list = []
+
+        def recording(cache_key):
+            seen.append(cache_key)
+            return real(cache_key)
+
+        runner._uv_available_cache = True
+        with (
+            patch.object(mod, "_get_or_create_probe_lock", recording),
+            patch(
+                "automated_security_helper.utils.subprocess_utils._run_plain"
+            ) as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="bandit 1.9.4\n", stderr=""
+            )
+            runner.get_tool_version("bandit", "bandit")
+            runner.get_tool_version("bandit", "bandit==1.9.4")
+
+        assert seen == ["version::bandit", "version::bandit"], seen
+        # Two memo keys, so the second call probed again rather than reading the
+        # first call's answer: the lock is shared, the memo is not.
+        assert mock_run.call_count == 2
 
 
 class TestRunToolContract:
@@ -3456,6 +3528,32 @@ def test_a_timeouts_token_matches_subprocess_utils_for_any_value():
         assert uv_tool_runner._timeout_token(value) == subprocess_utils._timeout_token(
             value
         ), value
+
+
+def _pin_posix_signal_gate(monkeypatch):
+    """Make subprocess_utils read the platform as POSIX for one test.
+
+    ``signal_death`` reads a negative returncode as a signal only off Windows
+    (``os.name != "nt"``), and ``_exit_description`` takes that gate. A test
+    that asserts the signal wording therefore reads the POSIX side of the gate;
+    without the pin it fails on a Windows host, where -9 is the process's own
+    exit status and the message says "exited -9". The ``os`` seen by
+    subprocess_utils is replaced by a stand-in whose ``name`` is "posix" and
+    whose every other attribute is the real module's (the same shape the
+    Windows-side test uses with "nt").
+    """
+    from automated_security_helper.utils import subprocess_utils as spu
+
+    class _PosixOs:
+        name = "posix"
+
+        def __getattr__(self, attribute):
+            return getattr(os, attribute)
+
+    monkeypatch.setattr(spu, "os", _PosixOs())
+    assert spu.signal_death(-9, "x") is not None, (
+        "the platform gate was not taken: signal_death read -9 as an exit"
+    )
 
 
 class TestARefusedRequirementIsLoggedWithoutItsText:
@@ -3652,13 +3750,19 @@ class TestARefusedRequirementIsLoggedWithoutItsText:
         ],
     )
     def test_the_run_exit_error_names_how_the_command_ended(
-        self, runner, tmp_path, response, expected, never
+        self, runner, tmp_path, monkeypatch, response, expected, never
     ):
         """A signal death, a timeout and a child the stop did not end are not
         ordinary exits: "the command exited 124" misreads a timeout, "exited
         None" reads as nonsense, and the old str(CalledProcessError) at least
         said "died with <signal>". Each ending is named by its own value-free
-        words."""
+        words.
+
+        The signal case reads the POSIX side of the platform gate: on Windows a
+        negative returncode is the process's own exit status, never a signal
+        (the test below pins that side), so the gate is pinned to "posix" here
+        and the case reads the same on every host."""
+        _pin_posix_signal_gate(monkeypatch)
 
         def returns_response(*args, **kwargs):
             return dict(response)
@@ -3674,9 +3778,11 @@ class TestARefusedRequirementIsLoggedWithoutItsText:
         assert expected in message, message
         assert never not in message, message
 
-    def test_the_fallback_runs_signal_death_is_not_an_exit(self, runner):
+    def test_the_fallback_runs_signal_death_is_not_an_exit(self, runner, monkeypatch):
         """The fallback branch sees signal deaths as negative returncodes on
-        the raised CalledProcessError; the same value-free naming applies."""
+        the raised CalledProcessError; the same value-free naming applies. The
+        platform gate is pinned to "posix": on Windows -9 is an exit status."""
+        _pin_posix_signal_gate(monkeypatch)
 
         def raises_signal_death(cmd, *args, **kwargs):
             raise subprocess.CalledProcessError(-9, cmd, stderr="killed")
@@ -3807,11 +3913,32 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
                 " install input"
             ),
         ),
+        ("scanners/cdk_nag_scanner.py", 'os.environ.get("JSII_NODE")'): (
+            1,
+            (
+                "the operator's node path for jsii (_jsii_node_value):"
+                " contributed through the scanner's _environment_values() so"
+                " the run's redaction and shown_uv_output's origin filter both"
+                " see it; the dependency check only asks whether it names a"
+                " file, and cdk-nag's node is not installed through uv, so it"
+                " is never a uv install input"
+            ),
+        ),
         ("scanners/cfn_nag_scanner.py", 'os.environ.get("RI_DEVKIT")'): (
             1,
             (
                 "a presence check only; the value itself is never used, so"
                 " nothing of it can print"
+            ),
+        ),
+        ("scanners/cfn_nag_scanner.py", 'os.environ.get("DEVELOPER_DIR")'): (
+            1,
+            (
+                "a filesystem probe for the macOS developer tools"
+                " (_macos_developer_tools_present): the value is one candidate"
+                " directory tested for usr/bin/clang while the scanner is"
+                " constructed; it is never passed to a process or a uv install"
+                " input, and nothing of it prints"
             ),
         ),
         ("scanners/_trivy_scanner_base.py", 'os.environ.get("TRIVY_CONFIG")'): (
@@ -3830,6 +3957,24 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
                 " and passed to the trivy binary; never a uv install input"
             ),
         ),
+        ("scanners/_trivy_scanner_base.py", 'os.environ.get("TRIVY_IGNOREFILE")'): (
+            1,
+            (
+                "read inside _environment_values itself, so the value joins the"
+                " run's redaction set by that call; it is the operator's trivy"
+                " ignore file path, passed to the trivy binary; never a uv"
+                " install input"
+            ),
+        ),
+        ("scanners/_trivy_scanner_base.py", 'os.environ.get("TRIVY_SECRET_CONFIG")'): (
+            1,
+            (
+                "read inside _environment_values itself, so the value joins the"
+                " run's redaction set by that call; it is the operator's trivy"
+                " secret config path, passed to the trivy binary; never a uv"
+                " install input"
+            ),
+        ),
         ("scanners/gitleaks_scanner.py", "os.environ.get(<dynamic>)"): (
             1,
             (
@@ -3840,9 +3985,11 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
         ("scanners/gitleaks_scanner.py", 'os.environ.get("GITLEAKS_CONFIG")'): (
             1,
             (
-                "the re-scan's GITLEAKS_CONFIG made absolute for the gitleaks"
-                " child's environment; gitleaks is not installed through uv, so"
-                " it is never a uv install input"
+                "GITLEAKS_CONFIG as the operator set it (_config_env_value, the"
+                " module's one read site): the first run anchors a non-absolute"
+                " value and passes it as --config, and the re-scan makes it"
+                " absolute for the gitleaks child's environment; gitleaks is"
+                " not installed through uv, so it is never a uv install input"
             ),
         ),
         (
@@ -4334,3 +4481,42 @@ def test_a_tools_own_version_answer_keeps_its_version_and_hides_the_spec():
 
     assert shown.startswith("vtool 1.0 "), shown
     assert "==1.0" not in shown, shown
+
+
+def test_a_value_holding_input_is_hidden_whole_not_only_its_value():
+    """The value layer runs before the input arm, so by the time the arm
+    looked for a hidden input's own spelling the value inside it already read
+    as the value layer's placeholder, and a raw replace of the input found
+    nothing: the input's REMAINDER -- here a repository path, elsewhere an
+    index URL -- printed around a hidden value, against the contract that an
+    input holding a value is hidden, not partly shown. The arm now matches
+    the input in that respelled form too. The whole-input case (the input IS
+    the value) keeps the value layer's own placeholder: respelling it would
+    re-label every hidden value in the text as an argument. The tool's own
+    name and uninvolved text stay."""
+    from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+    host = "example.invalid"
+    spec = f"tool @ git+https://{host}/it's-a-spec.git"
+    shown = shown_uv_output(
+        f"uv tool run --from {spec} tool failed to resolve",
+        (host,),
+        plugin_inputs=(spec,),
+        tool_name="tool",
+        limit=None,
+    )
+
+    assert host not in shown, shown
+    assert "it's-a-spec" not in shown, shown
+    assert "git+https" not in shown, shown
+    expected = "uv tool run --from <argument 1 not shown> tool failed to resolve"
+    assert shown == expected, shown
+
+    whole = shown_uv_output(
+        f"index {host} refused the request",
+        (host,),
+        plugin_inputs=(host,),
+        tool_name="tool",
+        limit=None,
+    )
+    assert whole == "index <value> refused the request", whole

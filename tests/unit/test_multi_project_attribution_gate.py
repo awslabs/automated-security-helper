@@ -67,6 +67,11 @@ gate = _load_gate()
 # ---------------------------------------------------------------------------
 
 
+def _producer(rule_id: str) -> str:
+    """The scanner that produces a rule ID: checkov's are CKV, the rest bandit's."""
+    return "checkov" if rule_id.startswith("CKV") else "bandit"
+
+
 def _result(
     rule_id: str,
     *,
@@ -88,7 +93,7 @@ def _result(
         "level": "error",
         "message": {"text": "fixture"},
         "properties": {
-            "scanner_name": "bandit",
+            "scanner_name": _producer(rule_id),
             "workspace_project": project,
             "workspace_uri": f"{relative_path}/{relative}",
         },
@@ -118,12 +123,28 @@ def workspace_root(tmp_path):
 
 @pytest.fixture
 def output_dir(tmp_path, workspace_root):
-    """A per-project output tree of the shape the executor writes."""
+    """A per-project output tree of the shape the executor writes.
+
+    Each project's own results file carries its own ``scanner_results``, with
+    both selected scanners run and tripped, because the gate reads them: the
+    rollup's worst-status and summed-count view cannot show one project in which
+    a selected scanner did not run, so that is asserted per project.
+    """
     out = tmp_path / "output"
     for project in gate.FIXTURE_PROJECTS:
         subtree = out / "projects" / project.key
         (subtree / "scanners" / "bandit" / "source").mkdir(parents=True)
-        (subtree / gate.RESULTS_FILENAME).write_text("{}", encoding="utf-8")
+        (subtree / gate.RESULTS_FILENAME).write_text(
+            json.dumps(
+                {
+                    "scanner_results": {
+                        scanner: {"status": "FAILED", "finding_count": 1}
+                        for scanner in gate.GATE_SCANNERS
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
     return out
 
 
@@ -138,6 +159,12 @@ def healthy(workspace_root, output_dir):
     """
     runs = []
     projects = []
+    # The rollup carries both scanners the gate selects, each with its own share of
+    # the findings, so a check that reads only one of them cannot pass on this file.
+    rollup = {
+        scanner: {"finding_count": 0, "actionable_finding_count": 0}
+        for scanner in gate.GATE_SCANNERS
+    }
     for index, project in enumerate(gate.FIXTURE_PROJECTS):
         results = [
             _result("B307", project=project.key),
@@ -171,7 +198,21 @@ def healthy(workspace_root, output_dir):
         # makes the strict 'src < project-b' inequality hold, and it holds by a
         # margin equal to the number of bandit findings rather than by everything
         # being gated.
-        actionable = 1 if project.threshold == "CRITICAL" else len(live)
+        live_checkov = sum(
+            1 for entry in live if entry["properties"]["scanner_name"] == "checkov"
+        )
+        if project.threshold == "CRITICAL":
+            actionable_by_scanner = {"bandit": 0, "checkov": 1}
+        else:
+            actionable_by_scanner = {
+                "bandit": len(live) - live_checkov,
+                "checkov": live_checkov,
+            }
+        actionable = sum(actionable_by_scanner.values())
+        rollup["bandit"]["finding_count"] += len(live) - live_checkov
+        rollup["checkov"]["finding_count"] += live_checkov
+        for scanner, count in actionable_by_scanner.items():
+            rollup[scanner]["actionable_finding_count"] += count
         runs.append(
             {
                 "tool": {"driver": {"name": "ASH"}},
@@ -212,15 +253,16 @@ def healthy(workspace_root, output_dir):
             "exit_code": 2,
             "projects": projects,
             "unconvertible_finding_paths": 0,
+            # The execution knobs the root config sets, as the real payload
+            # reports them (WorkspaceResults.max_parallel_projects /
+            # project_timeout): check_execution_knobs_reached_the_run reads
+            # them on every evaluation, so a healthy file has to carry them.
+            "max_parallel_projects": gate.ROOT_MAX_PARALLEL_PROJECTS,
+            "project_timeout": float(gate.ROOT_PROJECT_TIMEOUT_SECONDS),
         },
         "scanner_results": {
-            "bandit": {
-                "status": "PASSED",
-                "finding_count": sum(p["finding_count"] for p in projects),
-                "actionable_finding_count": sum(
-                    p["actionable_finding_count"] for p in projects
-                ),
-            },
+            scanner: {"status": "PASSED", **counts}
+            for scanner, counts in rollup.items()
         },
         "sarif": {"version": "2.1.0", "runs": runs},
     }
@@ -241,11 +283,11 @@ class TestHealthyResultsPass:
         assert outcome.violations == []
         assert outcome.passed
 
-    def test_exit_zero_is_also_tolerated(self, healthy, output_dir):
-        """In case a future default turns fail_on_findings off."""
+    def test_exit_zero_with_exceeding_projects_is_refused(self, healthy, output_dir):
+        """The healthy file has projects over their thresholds, so 0 contradicts it."""
         healthy["workspace"]["exit_code"] = 0
         outcome = _evaluate(healthy, output_dir, exit_code=0, repo_root=REPO_ROOT)
-        assert outcome.violations == []
+        assert any("exited 0 although" in v for v in outcome.violations)
 
 
 # ---------------------------------------------------------------------------
@@ -718,7 +760,13 @@ class TestSuppressionScopeRegression:
                 if entry["ruleId"] != gate.SUPPRESSED_RULE_ID
             ]
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
-        assert any("no longer fires" in v for v in outcome.violations)
+        # The message names the rule as absent "neither live nor suppressed" and
+        # tells the reader which of the two causes to check; "no longer fires"
+        # is the comment's phrase for one of them, not the message's.
+        assert any(
+            "does not appear in" in v and "neither live nor suppressed" in v
+            for v in outcome.violations
+        ), outcome.violations
 
 
 #: Every rule the healthy results show in the suppressing project besides the one
@@ -897,6 +945,58 @@ class TestOutputSubtreeRegression:
         assert any("no 'scanners' directory" in v for v in outcome.violations)
 
 
+class TestASelectedScannerSkippedInOneProject:
+    """The rollup hides one project; the project's own results file does not.
+
+    The rollup status is the worst across the projects and its count is their
+    sum, so checkov SKIPPED in one project (its Terraform file lost) sat behind
+    three FAILED projects with non-zero counts, and the rollup-level checks
+    passed. The healthy rollup is left exactly as it is here, so the only thing
+    that can report the gap is the per-project read.
+    """
+
+    def _rewrite_own(self, output_dir, key, scanner_results):
+        (output_dir / "projects" / key / gate.RESULTS_FILENAME).write_text(
+            json.dumps({"scanner_results": scanner_results}), encoding="utf-8"
+        )
+
+    def test_a_skipped_scanner_in_one_project_fails_behind_a_healthy_rollup(
+        self, healthy, output_dir
+    ):
+        self._rewrite_own(
+            output_dir,
+            "project-b",
+            {
+                "bandit": {"status": "FAILED", "finding_count": 3},
+                "checkov": {"status": "SKIPPED", "finding_count": 0},
+            },
+        )
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        gaps = [
+            v
+            for v in outcome.violations
+            if "'project-b'" in v and "'checkov'" in v and "SKIPPED" in v
+        ]
+        assert gaps, outcome.violations
+        # Named as a root cause, like a rollup-level gap, and the rollup checks
+        # themselves stayed quiet: the rollup is the healthy fixture's.
+        assert gaps[0] in outcome.root_violations
+        assert not any("absent from scanner_results" in v for v in outcome.violations)
+        assert not any("in the rollup" in v for v in outcome.violations)
+
+    def test_a_scanner_absent_from_one_projects_own_file_fails(
+        self, healthy, output_dir
+    ):
+        self._rewrite_own(
+            output_dir, "src", {"bandit": {"status": "FAILED", "finding_count": 3}}
+        )
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any(
+            "'src'" in v and "no scanner_results entry for 'checkov'" in v
+            for v in outcome.violations
+        ), outcome.violations
+
+
 # ---------------------------------------------------------------------------
 # Status, exit code, and fixture scoping
 # ---------------------------------------------------------------------------
@@ -907,7 +1007,8 @@ class TestScannerRollupRegression:
 
     def test_a_rollup_actionable_of_zero_fails(self, healthy, output_dir):
         """The exact shape of the defect: initialised, defaulted, never summed."""
-        healthy["scanner_results"]["bandit"]["actionable_finding_count"] = 0
+        for entry in healthy["scanner_results"].values():
+            entry["actionable_finding_count"] = 0
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any(
             "would conclude this workspace is clean" in v for v in outcome.violations
@@ -922,6 +1023,12 @@ class TestScannerRollupRegression:
 
     def test_a_rollup_finding_total_that_disagrees_fails(self, healthy, output_dir):
         healthy["scanner_results"]["bandit"]["finding_count"] += 5
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any("finding total" in v for v in outcome.violations)
+
+    def test_the_other_selected_scanners_count_is_read_too(self, healthy, output_dir):
+        """The rollup sums both selected scanners, so checkov's share is checked."""
+        healthy["scanner_results"]["checkov"]["finding_count"] += 5
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any("finding total" in v for v in outcome.violations)
 
@@ -1041,11 +1148,33 @@ class TestFailedAndSkippedProjects:
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert any("status ERROR" in v for v in outcome.violations)
 
-    def test_a_scanner_that_is_missing_is_tolerated(self, healthy, output_dir):
-        """MISSING means the tool is not installed on this runner."""
+    def test_an_unselected_scanner_that_is_missing_is_tolerated(
+        self, healthy, output_dir
+    ):
+        """MISSING on a scanner the gate did not select is a normal runner state."""
         healthy["scanner_results"]["semgrep"] = {"status": "MISSING"}
         outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
         assert outcome.violations == []
+
+    @pytest.mark.parametrize("status", ["MISSING", "SKIPPED"])
+    def test_a_selected_scanner_that_did_not_run_fails_the_gate(
+        self, healthy, output_dir, status
+    ):
+        """The gate reads checkov's status as well as bandit's."""
+        healthy["scanner_results"]["checkov"]["status"] = status
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any("'checkov'" in v and status in v for v in outcome.violations)
+        assert any("'checkov'" in v for v in outcome.root_violations)
+
+    def test_a_selected_scanner_absent_from_the_rollup_fails_the_gate(
+        self, healthy, output_dir
+    ):
+        del healthy["scanner_results"]["checkov"]
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any(
+            "'checkov'" in v and "absent from scanner_results" in v
+            for v in outcome.violations
+        )
 
 
 class TestFixtureScoping:
@@ -1242,9 +1371,12 @@ class TestWorkflowWiring:
         assert "multi-project-attribution" in workflow["jobs"], sorted(workflow["jobs"])
         return workflow["jobs"]["multi-project-attribution"]
 
-    def test_the_job_runs_on_ubuntu_and_windows(self, job):
+    def test_the_job_runs_on_linux_and_windows(self, job):
+        # The Linux leg is the arm64 Ubuntu image: bandit and checkov are Python tools,
+        # and the ubuntu-latest hosted pool queued this job for 2598 s on one measured
+        # run while the arm64 label queued jobs in seconds (the note on the matrix).
         assert set(job["strategy"]["matrix"]["os"]) == {
-            "ubuntu-latest",
+            "ubuntu-24.04-arm",
             "windows-latest",
         }
 

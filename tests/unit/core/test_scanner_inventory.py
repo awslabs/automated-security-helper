@@ -651,7 +651,7 @@ class TestDescribeScannerProbeFallback:
     """The integration seam: describe_scanner probes only reachable, versionless."""
 
     def _patch_probe(self, monkeypatch, recorder):
-        def _probe(command):
+        def _probe(command, cwd=None):
             recorder.append(command)
             return "9.9.9"
 

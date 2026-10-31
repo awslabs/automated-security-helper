@@ -560,9 +560,12 @@ class TestBareReference:
     def test_two_bare_references_in_one_value_are_left_as_written(
         self, tmp_path, monkeypatch
     ):
-        """The pattern's default group runs to the last ``}``, so ``${A}/${B}``
-        reads as ``A`` with trailing text inside the braces. Without the check for
-        that shape the value became A's value alone and B's half was dropped."""
+        """``${A}/${B}``: the first reference has no colon and another closing
+        brace follows it, so the resolver leaves the value as written. Without
+        the check for that shape the value became A's value alone and B's half
+        was dropped. (The pattern once read the default up to the last ``}``,
+        which made this shape a reference with text inside its braces; it now
+        ends at the first brace, and the text after the match is tested.)"""
         monkeypatch.setenv("ASH_TEST_FIRST", "first")
         monkeypatch.setenv("ASH_TEST_SECOND", "second")
         value = "${ASH_TEST_FIRST}/${ASH_TEST_SECOND}"
@@ -607,17 +610,21 @@ class TestBareReference:
 class TestOneReferencePerValueAtItsStart:
     """A value holds one reference, at its start; anything else is the value's text.
 
-    The documented contract (docs/content/docs/config-overrides.md, "Write one
-    reference per value, at its start"): a reference runs to the last ``}`` in
-    the value, a reference after other text is not resolved, and neither is a
-    second reference. These cells pin each shape the contract names, so the
-    behavior stays a documented choice.
+    The contract, pinned here (no page of docs/ states it; the file an earlier
+    docstring cited does not exist): a reference is ``${VAR}`` or
+    ``${VAR:default}`` and ends at the brace that pairs with its opening one (a
+    default may hold brace pairs, see test_a_default_holding_braces_is_read_whole),
+    a reference after other text is not resolved, a second reference is not
+    resolved, and a first reference followed by another closing brace
+    (``${A}/${B}``, ``${A:x}${B}``) is left as written whether or not it wrote a
+    default (test_a_reference_followed_by_another_brace_is_left_as_written).
+    These tests pin each shape, so the behavior stays a deliberate choice.
     """
 
     def test_two_adjacent_references_are_left_as_written(self, tmp_path, monkeypatch):
         """``${A}${B}``, like ``${A}/${B}``: a second reference is not resolved,
-        and the first, with no colon and text before the last ``}``, is not a
-        reference this resolver reads. Nothing is read from the environment."""
+        and the first, with no colon and another closing brace after it, is not
+        a reference this resolver reads. Nothing is read from the environment."""
         monkeypatch.setenv("ASH_TEST_FIRST", "first")
         monkeypatch.setenv("ASH_TEST_SECOND", "second")
         value = "${ASH_TEST_FIRST}${ASH_TEST_SECOND}"
@@ -636,18 +643,24 @@ class TestOneReferencePerValueAtItsStart:
         config = _load(tmp_path, f"project_name: {value}\n")
         assert config.project_name == value
 
-    def test_a_second_reference_after_a_default_reads_as_the_default(self, monkeypatch):
-        """``${A:x}${B}``: the reference runs to the last ``}``, so the default
-        is ``x}${B``. Set, A replaces the whole value; unset, the default is the
-        value. The documented arms, pinned so a change to them is a decision."""
+    def test_a_second_reference_after_a_default_is_left_as_written(self, monkeypatch):
+        """``${A:x}${B}``: a reference followed by another closing brace is the
+        composite case whether or not it wrote a default, so the value is left
+        as written, as ``${A}${B}`` is. The reference used to run to the LAST
+        ``}``, which dropped the trailing text when A was set and made the
+        default the garbled ``x}${B`` when it was not; a first cut then ended
+        it at the first brace and resolved A around a literal ``${B}``, which a
+        typed field accepts in the middle of a value where it refuses a value
+        that still reads as a reference at its start."""
         monkeypatch.setenv("ASH_TEST_FIRST", "first")
         monkeypatch.delenv("ASH_TEST_UNSET", raising=False)
         assert (
-            resolve_env_references("${ASH_TEST_FIRST:x}${ASH_TEST_SECOND}") == "first"
+            resolve_env_references("${ASH_TEST_FIRST:x}${ASH_TEST_SECOND}")
+            == "${ASH_TEST_FIRST:x}${ASH_TEST_SECOND}"
         )
         assert (
             resolve_env_references("${ASH_TEST_UNSET:x}${ASH_TEST_SECOND}")
-            == "x}${ASH_TEST_SECOND"
+            == "${ASH_TEST_UNSET:x}${ASH_TEST_SECOND}"
         )
 
 
@@ -743,3 +756,60 @@ def test_an_env_tag_on_a_collection_is_refused_by_both_readers(tmp_path, written
         refusals.append(str(excinfo.value).splitlines()[0])
     assert refusals[0] == refusals[1]
     assert refusals[0].startswith("expected a scalar node"), refusals[0]
+
+
+class TestTheOneNameRule:
+    """The loader's secret-name exclusion is ``is_refused_config_environment_name``.
+
+    The loader read the suffix tuple alone, so a qualified, glued or
+    digit-suffixed credential name (``ASH_API_KEY_PROD``, ``ASH_API_KEY2``,
+    ``ASH_APIKEY``) had no suffix match and was interpolated from an in-tree
+    config while the masking rule classed the same name as a secret. The one
+    rule reads the tuple, the listed names and the secret-shaped reading.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "ASH_API_KEY_PROD",
+            "ASH_API_KEY2",
+            "ASH_APIKEY",
+            "ASH_DB_PASSWORD_2",
+            "ASH_GITHUBTOKEN",
+        ],
+    )
+    def test_a_qualified_or_glued_secret_name_is_left_as_written(
+        self, tmp_path, monkeypatch, log_records, name
+    ):
+        monkeypatch.setenv(name, CANARY)
+        reference = REFERENCE.format(name=name)
+
+        config = _load(tmp_path, f"project_name: {reference}\n")
+
+        assert config.project_name == reference
+        assert CANARY not in config.model_dump_json()
+        assert _secret_shaped(name) and not config_env_var_is_interpolatable(name)
+        messages = [record.getMessage() for record in log_records]
+        assert not [m for m in messages if CANARY in m], messages
+
+    @pytest.mark.parametrize(
+        "name",
+        # A flag or a limit named after the word, not the word's value: the one
+        # rule admits these, as the tuple did.
+        [
+            "ASH_AUTH_ENABLED",
+            "ASH_PASS_THRESHOLD",
+            "ASH_KEYS_DIR",
+            "ASH_S3_BUCKET_NAME",
+        ],
+    )
+    def test_control_a_name_that_only_contains_the_word_still_resolves(
+        self, tmp_path, monkeypatch, name
+    ):
+        monkeypatch.setenv(name, CANARY)
+
+        config = _load(tmp_path, f"project_name: {REFERENCE.format(name=name)}\n")
+
+        assert config.project_name == CANARY
+        assert config_env_var_is_interpolatable(name)
+        assert not _secret_shaped(name)

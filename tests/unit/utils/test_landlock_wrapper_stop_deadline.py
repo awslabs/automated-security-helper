@@ -38,8 +38,10 @@ GRACE_SECONDS = 0.5
 # is stopped, "exit" for one that exits at once, "late" for one whose stop takes
 # longer than STOP_REAP_DEADLINE_SECONDS to end it (each signal the wrapper sends
 # waits 0.4 s first). Writes "ready <scanner pid>" once the stop signals are held
-# for the handler, "reaping" when the reap loop starts, and "kill <pid>" for each
-# signal the wrapper sends.
+# for the handler, "reaping" when the reap loop starts, and "kill <id>" for each
+# signal the wrapper sends, whether to a pid (os.kill) or to a process group
+# (os.killpg): the scanner calls setsid in the wrapper's child setup, so its group
+# id is its pid, and a group signal to it is written with the scanner's pid too.
 DRIVER = """
 import importlib.util, os, sys, time
 
@@ -48,25 +50,40 @@ wrapper = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wrapper)
 announced = []
 send = os.kill
+send_group = os.killpg
 # Above the kernel's largest pid (2**22), so no process has it and every kill of
 # it fails; the loop sees this descendant on every pass.
 NEVER_GONE = 2**22 + 1
 late = sys.argv[2] == "late"
 
 
-def never_gone():
+def never_gone(*_args, **_kwargs):
+    # Called as the wrapper calls _descendants: with its deadline, which this
+    # descendant ignores, since the loop's own deadline is what is measured.
     if not announced:
         announced.append(True)
         os.write(1, b"reaping\\n")
     return [NEVER_GONE]
 
 
-def recorded(target, signum):
+def recorded(target):
+    # One line per signal, by pid or by group: the wrapper stops a scanner through
+    # its group (os.killpg), and signals the pid itself only when the scanner has
+    # left that group, so a recorder on os.kill alone would see no stop at all.
     if target != NEVER_GONE:
         os.write(1, b"kill %d\\n" % target)
         if late:
             time.sleep(0.4)
+
+
+def recorded_kill(target, signum):
+    recorded(target)
     return send(target, signum)
+
+
+def recorded_killpg(group, signum):
+    recorded(group)
+    return send_group(group, signum)
 
 
 def restrict():
@@ -75,7 +92,8 @@ def restrict():
 
 
 wrapper._descendants = never_gone
-os.kill = recorded
+os.kill = recorded_kill
+os.killpg = recorded_killpg
 command = ["/bin/true"] if sys.argv[2] == "exit" else ["/bin/sleep", "30"]
 sys.exit(wrapper.run_and_reap(command, restrict))
 """
@@ -96,7 +114,7 @@ def _driver(scanner: str):
 
 
 def _killed(process: subprocess.Popen) -> set:
-    """The pids the wrapper signalled after the last line read."""
+    """The pids and group ids the wrapper signalled after the last line read."""
     lines = process.stdout.read().split(b"\n")
     return {int(line.split()[1]) for line in lines if line.startswith(b"kill ")}
 

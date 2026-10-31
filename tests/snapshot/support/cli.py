@@ -173,10 +173,15 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     the path, but the box was padded to the real path's length first, so the border
     lands in a different column on every machine. A display-only cwd of fixed length
     keeps the geometry the same everywhere. Relative file access still goes to the
-    real working directory, because only ``os.getcwd`` is replaced. A directory made
-    through the displayed absolute path (``os.path.abspath`` reads ``os.getcwd``) is
-    made at the same place under the real working directory, so no test needs a
-    writable ``/workspace``. Register DISPLAYED_CWD with
+    real working directory, because only ``os.getcwd`` is replaced. A file or
+    directory the product reaches through the displayed absolute path
+    (``os.path.abspath`` reads ``os.getcwd``) is reached at the same place under the
+    real working directory, so no test needs a writable ``/workspace``: ``Path.mkdir``
+    is redirected, and so are the ``os`` calls the guarded staged write makes by
+    name (``utils/sandbox/fs_guard.open_for_atomic_write`` takes ``os.path.abspath``
+    of its target, then opens the staging file, stats, renames and unlinks beside
+    it). Before that redirect every config the wizard wrote under this context
+    failed with ENOENT at the staging open. Register DISPLAYED_CWD with
     ``snapshot_normalizer.add_root`` so its Windows spelling (backslashes)
     snapshots like the POSIX one.
 
@@ -192,16 +197,75 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     real_cwd = pathlib.Path(os.getcwd())
     real_mkdir = pathlib.Path.mkdir
 
-    def mkdir_below_the_real_cwd(self, *args, **kwargs):
+    def part_below_the_displayed_cwd(candidate):
+        """The part of ``candidate`` below the displayed cwd, or None when it is elsewhere.
+
+        The displayed name is rooted with no drive. On Windows, ``ntpath`` gives a
+        rooted path the current drive when it makes it absolute (``realpath`` of
+        a relative config path joins it onto the faked ``os.getcwd()``, then
+        ``abspath`` prefixes the drive), so a path the product derived under the
+        displayed cwd reads ``C:\\workspace\\demo-project\\...`` there and is
+        matched with its own drive in front of the displayed name too.
+        """
         try:
-            below = pathlib.PurePath(self).relative_to(native_cwd)
+            return candidate.relative_to(native_cwd)
         except ValueError:
+            pass
+        if not candidate.drive:
+            return None
+        try:
+            return candidate.relative_to(candidate.drive + native_cwd)
+        except ValueError:
+            return None
+
+    def mkdir_below_the_real_cwd(self, *args, **kwargs):
+        below = part_below_the_displayed_cwd(pathlib.PurePath(self))
+        if below is None:
             return real_mkdir(self, *args, **kwargs)
         return real_mkdir(real_cwd / below, *args, **kwargs)
+
+    def below_the_real_cwd(path):
+        """A path under the displayed cwd, moved under the real one; others as given.
+
+        Descriptors, bytes paths and paths elsewhere pass through untouched; a
+        relative path is never under the displayed name, so it passes through too.
+        """
+        if path is None or isinstance(path, int):
+            return path
+        try:
+            text = os.fspath(path)
+        except TypeError:
+            return path
+        if isinstance(text, bytes):
+            return path
+        below = part_below_the_displayed_cwd(pathlib.PurePath(text))
+        if below is None:
+            return path
+        return str(real_cwd / below)
+
+    def one_path(real):
+        def call(path, *args, **kwargs):
+            return real(below_the_real_cwd(path), *args, **kwargs)
+
+        return call
+
+    def two_paths(real):
+        def call(src, dst, *args, **kwargs):
+            return real(
+                below_the_real_cwd(src), below_the_real_cwd(dst), *args, **kwargs
+            )
+
+        return call
 
     with monkeypatch.context() as mp:
         mp.setattr(os, "getcwd", lambda: native_cwd)
         mp.setattr(pathlib.Path, "mkdir", mkdir_below_the_real_cwd)
+        # The calls fs_guard.open_for_atomic_write makes by name on its abspath'd
+        # target and the staging file beside it; each reaches the real cwd.
+        for name in ("open", "stat", "lstat", "unlink", "remove", "chmod"):
+            mp.setattr(os, name, one_path(getattr(os, name)))
+        for name in ("replace", "rename"):
+            mp.setattr(os, name, two_paths(getattr(os, name)))
         accessor = getattr(pathlib, "_NormalAccessor", None)  # Python 3.10 only
         if accessor is not None and hasattr(accessor, "getcwd"):
             mp.setattr(accessor, "getcwd", staticmethod(lambda: native_cwd))

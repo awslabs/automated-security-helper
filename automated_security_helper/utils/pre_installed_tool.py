@@ -9,7 +9,7 @@ bandit, checkov and semgrep run through ``uv tool run --from <requirement>``.
 When ``uv tool list`` cannot see the tool but an executable of the same name is
 on PATH, the scanners logged "Using pre-installed <tool> at <path>" and then
 ran through uv anyway. Under ``ASH_OFFLINE`` that is ``uv tool run --offline
---from 'bandit[sarif,toml]>=1.7.0,<2.0.0'``, which has to resolve the
+--from 'bandit[sarif,toml]>=1.7.8,<2.0.0'``, which has to resolve the
 requirement from uv's cache. A container whose tools were installed under one
 ``$HOME`` and that runs under another sees an empty tool dir and an empty cache,
 so the resolve fails and the scanner reports ERROR with uv's resolver output
@@ -26,9 +26,11 @@ How the check works
    is also the first import of the tool from that environment, done once and
    serially, before parallel scans can race to build stevedore's per-user
    entry-point cache (see ``UVToolRunner.get_tool_version``).
-2. The executable's Python environment is located: a ``python`` next to the
-   resolved executable (a venv's ``bin``/``Scripts`` directory, which is where a
-   ``uv tool`` symlink leads), else the interpreter named by its shebang.
+2. The executable's Python environment is located: the interpreter its ``#!``
+   line names (a console script's own environment), else, for a script another
+   interpreter runs or a Windows launcher, a ``python`` next to the resolved
+   executable (a venv's ``bin``/``Scripts`` directory, which is where a
+   ``uv tool`` symlink leads). A native binary with neither has no environment.
    A program packaged by nixpkgs is neither: see "Nix-wrapped programs" below.
 3. ``uv pip install --dry-run --offline --no-cache --no-config --python <env>
    <requirement>`` decides. uv evaluates extras, environment markers and the
@@ -70,24 +72,36 @@ Verdicts
 ``satisfied``: run the executable directly.
 ``unsatisfied``: it runs, but its environment does not satisfy the requirement;
 ``detail`` names the missing extras or the version mismatch.
-``unverifiable``: no Python environment could be located (a native binary, a
-Windows launcher), uv is absent, or uv failed for a reason other than
-resolution. Callers keep their previous behavior for this verdict rather than
+``unverifiable``: no Python environment could be located (a native binary;
+a Windows launcher takes the interpreter beside it), uv is absent, or uv
+failed for a reason other than resolution. Callers keep their previous behavior for this verdict rather than
 guessing in either direction.
 """
 
 from __future__ import annotations
 
 import os
+import time
 import re
 import shutil
 import subprocess
 import tempfile
 import threading
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Sequence, Tuple
-from automated_security_helper.utils.error_text import ESCAPE_CODES
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeGuard,
+    Union,
+)
+from automated_security_helper.utils.error_text import ESCAPE_CODES, text_without_values
 from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.process_env import environ_for_parsed_output
 
@@ -129,6 +143,10 @@ _ANSI_ESCAPE = ANSI_ESCAPE
 # A makeWrapper script is a few kB; the addsitedir line of a large closure is
 # tens of kB. Neither file needs to be read past this.
 _WRAPPER_READ_LIMIT = 1 << 20
+# How many ``exec -a "$0"`` hops find_nix_python_environment follows before it
+# gives up: a wrapper of a wrapper of a wrapper is the deepest shape seen, and a
+# bound keeps two scripts that exec each other from being followed forever.
+_NIX_MAX_EXEC_HOPS = 4
 
 
 @dataclass(frozen=True)
@@ -153,8 +171,19 @@ class PreInstalledToolVerdict:
     summary: str = ""
 
 
+#: How long a memoized verdict answers for its copy. The key carries the
+#: executable's own mtime, which does not move when the ENVIRONMENT around it
+#: does (a package installed into the venv that provides it), and the memo is
+#: never cleared in production: an in-process MCP server kept a stale verdict
+#: for as long as it lived. A scan's repeated checks of one copy fall well
+#: inside this; a later scan in a long-lived process probes again.
+_VERDICT_MEMO_SECONDS = 600.0
+
+#: key -> (verdict, the monotonic time it was stored). The key is the copy's
+#: resolved path and mtime, the requirement, the caller's values and the uv
+#: that judged (or "" when none did).
 _verdict_cache: Dict[
-    Tuple[str, int, str, Tuple[str, ...]], PreInstalledToolVerdict
+    Tuple[str, int, str, Tuple[str, ...], str], Tuple[PreInstalledToolVerdict, float]
 ] = {}
 _verdict_cache_lock = threading.Lock()
 
@@ -231,29 +260,71 @@ def build_requirement(
 
 
 def find_tool_interpreter(executable: str) -> Optional[str]:
-    """The Python interpreter whose environment provides ``executable``, if any."""
-    resolved = Path(os.path.realpath(executable))
-    for name in _INTERPRETER_NAMES:
-        candidate = resolved.parent / name
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
+    """The Python interpreter whose environment provides ``executable``, if any.
 
+    A console script names its interpreter on its ``#!`` line, and that is the
+    environment that provides it. A script another interpreter runs (a shell
+    wrapper a package installed into a venv's ``bin``) is provided by the
+    environment beside it, so the interpreter in its directory is read, as it is
+    for a Windows launcher (an ``.exe`` entry point, whose shebang is embedded
+    past the file's start). A native binary with no ``#!`` line and no ``.exe``
+    suffix has no interpreter: it used to be judged against whatever python sat
+    in its directory, an unrelated environment, and read as unsatisfied.
+    """
+    resolved = Path(os.path.realpath(executable))
     try:
         with open(resolved, "rb") as handle:
             first_line = handle.readline(1024)
     except OSError:
         return None
-    if not first_line.startswith(b"#!"):
+    if first_line.startswith(b"#!"):
+        parts = first_line[2:].decode("utf-8", errors="replace").split()
+        if not parts:
+            return None
+        interpreter = parts[0]
+        if Path(interpreter).name == "env" and len(parts) > 1:
+            interpreter = find_executable(parts[1]) or ""
+        if "python" in Path(interpreter).name.lower():
+            return interpreter if Path(interpreter).is_file() else None
+        # Another interpreter's script: the environment beside it, below.
+    elif os.name != "nt" and resolved.suffix.lower() != ".exe":
         return None
-    parts = first_line[2:].decode("utf-8", errors="replace").split()
-    if not parts:
-        return None
-    interpreter = parts[0]
-    if Path(interpreter).name == "env" and len(parts) > 1:
-        interpreter = find_executable(parts[1]) or ""
-    if "python" not in Path(interpreter).name.lower():
-        return None
-    return interpreter if Path(interpreter).is_file() else None
+    for name in _INTERPRETER_NAMES:
+        candidate = resolved.parent / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def _in_user_site(executable: str) -> bool:
+    """Whether ``executable`` sits in the user scripts directory (``pip install
+    --user``), the one place a console script's shebang interpreter does not
+    describe the environment that provides it."""
+    import sysconfig
+
+    # The directory is what is compared, never a scheme's name: posix_user and
+    # osx_framework_user both put scripts at ``{userbase}/bin``, and the
+    # running interpreter's own userbase is already ~/Library/Python/X.Y on a
+    # macOS framework build, so asking for one scheme rather than the other
+    # returns the same directory. Every user scheme's scripts directory is
+    # offered, so a platform whose preferred scheme differs from ``os.name``'s
+    # still matches. What this does not see is a copy ``pip install --user``
+    # put in another Python's user scripts directory (another version's
+    # ~/Library/Python/X.Y/bin): that directory is not this process's.
+    try:
+        parent = Path(os.path.realpath(executable)).parent
+    except (OSError, ValueError):
+        return False
+    for scheme in sysconfig.get_scheme_names():
+        if not scheme.endswith("_user"):
+            continue
+        try:
+            scripts = sysconfig.get_path("scripts", scheme)
+            if scripts and parent == Path(os.path.realpath(scripts)):
+                return True
+        except (KeyError, ValueError, OSError):
+            continue
+    return False
 
 
 def _read_head(path: Path) -> Optional[str]:
@@ -288,13 +359,20 @@ def find_nix_python_environment(
     if text is None:
         return None
 
-    if _python_shebang(text) is None:
+    # A program can be wrapped more than once (a makeWrapper around a
+    # makeWrapper, as a flake that adds an environment variable to a packaged
+    # tool produces): each hop's script execs the next. Only one hop used to be
+    # followed, so a twice-wrapped tool was "unverifiable", and offline a Nix
+    # tool that cannot be verified is refused.
+    hops = 0
+    while _python_shebang(text) is None:
         match = _NIX_EXEC_LINE.search(text)
-        if match is None:
+        if match is None or hops >= _NIX_MAX_EXEC_HOPS:
             return None
         text = _read_head(Path(os.path.realpath(match.group(1))))
         if text is None:
             return None
+        hops += 1
 
     interpreter = _python_shebang(text)
     sitedirs = _NIX_SITEDIR_LIST.search(text)
@@ -307,10 +385,14 @@ def find_nix_python_environment(
 def _stage_nix_metadata(site_dirs: Sequence[str], target: Path) -> int:
     """Copy each distribution's METADATA from ``site_dirs`` into ``target``.
 
-    A ``.dist-info`` name seen earlier on the list is skipped, so ``sys.path``
-    order decides. Returns the number of distributions staged.
+    A distribution seen earlier on the list is skipped, so ``sys.path`` order
+    decides, as it does for the program's own imports. Seen means the same
+    distribution NAME (PEP 503 normalized): two versions of one distribution on
+    the list, or two spellings of its name, are one import, and staging both
+    gave uv two candidates for one requirement. Returns the number staged.
     """
     staged = 0
+    seen: set[str] = set()
     for site_dir in site_dirs:
         try:
             entries = sorted(Path(site_dir).glob("*.dist-info"))
@@ -321,16 +403,73 @@ def _stage_nix_metadata(site_dirs: Sequence[str], target: Path) -> int:
             destination = target / dist_info.name
             if destination.exists() or not metadata.is_file():
                 continue
+            name = _distribution_name(dist_info, metadata)
+            if name in seen:
+                continue
             destination.mkdir()
             shutil.copyfile(metadata, destination / "METADATA")
+            seen.add(name)
             staged += 1
     return staged
 
 
-def _run(
-    command: List[str], timeout: int
-) -> Optional[subprocess.CompletedProcess[str]]:
-    """Run one probe in an empty directory; None when it could not run.
+def _distribution_name(dist_info: Path, metadata: Path) -> str:
+    """The PEP 503 name of the distribution ``dist_info`` describes.
+
+    Read from METADATA's ``Name`` header, where the name is spelled whole. The
+    directory's stem is the fallback for a METADATA with no such header: its
+    name part is cut from the version at the first ``-``, which misreads a
+    name that carries one itself (``foo-bar-2.0.dist-info`` read as ``foo``),
+    so a second version of a distribution under that spelling was staged as
+    another distribution beside the first.
+    """
+    from packaging.utils import canonicalize_name
+
+    try:
+        with metadata.open("rb") as handle:
+            for raw in handle:
+                line = raw.decode("utf-8", "replace")
+                if not line.strip():
+                    break
+                if line[:5].lower() == "name:":
+                    return canonicalize_name(line[5:].strip())
+    except OSError:
+        pass
+    stem = dist_info.name[: -len(".dist-info")]
+    return canonicalize_name(stem.split("-", 1)[0])
+
+
+@dataclass(frozen=True)
+class _ProbeFailure:
+    """A probe that could not run, with the spawn's own error.
+
+    The verdict's detail carries ``error``: "could not execute" alone read the
+    same for a too-long argument list, a busy text file, an exhausted file table
+    and an out-of-memory spawn, and the operator could not tell which.
+    """
+
+    error: str
+
+
+#: What ``_run`` and ``_probe`` answer: the probe's result, a failure to run it
+#: (with the cause), or None from an older stub that knows only "did not run".
+_ProbeAnswer = Union[subprocess.CompletedProcess[Any], _ProbeFailure, None]
+
+
+def _ran(answer: _ProbeAnswer) -> TypeGuard[subprocess.CompletedProcess[Any]]:
+    """True when the probe ran to an answer: not None, not a ``_ProbeFailure``."""
+    return answer is not None and not isinstance(answer, _ProbeFailure)
+
+
+def _probe_cause(answer: _ProbeAnswer) -> str:
+    """The failure's own words after the caller's sentence, or nothing."""
+    if isinstance(answer, _ProbeFailure) and answer.error:
+        return f": {answer.error}"
+    return ""
+
+
+def _run(command: List[str], timeout: int) -> _ProbeAnswer:
+    """Run one probe in an empty directory; a ``_ProbeFailure`` when it could not run.
 
     ASH is usually started in the repository it scans, and a tool reads modules
     and configuration from where it starts, so a probe does not start there.
@@ -353,14 +492,14 @@ def _run(
             return _probe(command, timeout, empty)
     except SandboxUnavailable:
         raise
-    except OSError:
+    except OSError as error:
         # No empty directory to start it in: it is not started from anywhere else.
-        return None
+        return _ProbeFailure(
+            f"no empty directory to start it in ({type(error).__name__}: {error})"
+        )
 
 
-def _probe(
-    command: List[str], timeout: int, cwd: Optional[str]
-) -> Optional[subprocess.CompletedProcess[str]]:
+def _probe(command: List[str], timeout: int, cwd: Optional[str]) -> _ProbeAnswer:
     """``command`` run with its output read, from ``cwd`` when there is one.
 
     ``command``'s output is read here, so it runs without the caller's display
@@ -384,8 +523,88 @@ def _probe(
         )
     except SandboxUnavailable:
         raise
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except (OSError, subprocess.SubprocessError) as error:
+        # The error's own words ride to the verdict: a timeout, E2BIG, ETXTBSY,
+        # EMFILE and ENOMEM used to read alike as "could not execute".
+        return _ProbeFailure(f"{type(error).__name__}: {error}")
+
+
+#: uv's warning for an extra the installed package does not declare, as a
+#: substring of its flowed output: "The package `bandit==1.7.0` does not have an
+#: extra named `sarif`".
+_UV_UNKNOWN_EXTRA_MARKER = "does not have an extra named"
+#: The same warning with the backticked package fragment captured whole: uv
+#: prints it for every package in the resolution, so the check has to tell the
+#: requested package's missing extra from a transitive dependency's. The fragment
+#: is read by ``_names_in_fragment``, not by a fixed ``name==version`` shape, so a
+#: spelling with another operator, an ``@ url`` or a ``name-version`` join still
+#: names its package.
+_UV_UNKNOWN_EXTRA_PATTERN = r"The package `([^`]+)` " + _UV_UNKNOWN_EXTRA_MARKER
+#: A distribution name, as PEP 503 spells it, at the head of a fragment.
+_NAME_HEAD = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _names_in_fragment(fragment: str) -> frozenset[str]:
+    """The canonical package names uv's backticked fragment can be naming.
+
+    ``bandit==1.7.0``, ``bandit>=1.7``, ``bandit @ file:///x`` and ``bandit[sarif]``
+    parse as requirements and name ``bandit``. A ``name-version`` join (``bandit-1.7.0``)
+    parses too, as the name ``bandit-1.7.0``, so the head before a ``-<digit>`` is
+    offered as well; and a fragment the parser refuses falls back to its leading
+    name-shaped run. Empty when nothing in the fragment reads as a name.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
+    names = set()
+    try:
+        names.add(canonicalize_name(Requirement(fragment).name))
+    except (InvalidRequirement, ValueError):
+        pass
+    head = _NAME_HEAD.match(fragment)
+    if head is not None:
+        names.add(canonicalize_name(head.group(0)))
+        joined = re.match(r"(.+?)-\d", head.group(0))
+        if joined is not None:
+            names.add(canonicalize_name(joined.group(1)))
+    return frozenset(names)
+
+
+def _requested_package_lacks_an_extra(requirement: str, flowed: str) -> bool:
+    """Whether uv's unknown-extra warning in ``flowed`` names the package that
+    ``requirement`` asks for.
+
+    uv prints the warning for every package in the resolution, a transitive
+    dependency included (one asking for ``urllib3[secure]`` with urllib3 2.x
+    installed), and such a copy is satisfied all the same: only the requested
+    package's own missing extra means the copy never provides what the extra
+    brings. The bare marker matched any package's warning, so a satisfied copy
+    read as unsatisfied and, offline, was refused in favor of ``uv tool run
+    --offline``, the fallback this module exists to prevent.
+
+    Fail-closed on wording drift: when the marker is present but no backticked
+    fragment reads as a package (uv changed the line's shape), the answer is the
+    bare marker's, unsatisfied, never "satisfied" by a pattern that saw nothing.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
+    if _UV_UNKNOWN_EXTRA_MARKER not in flowed:
+        return False
+    try:
+        requested = canonicalize_name(Requirement(requirement).name)
+    except (InvalidRequirement, ValueError):
+        # Not a requirement the parser reads (a URL, a path): the marker's own
+        # reading, as before.
+        return True
+    named = [
+        _names_in_fragment(match.group(1))
+        for match in re.finditer(_UV_UNKNOWN_EXTRA_PATTERN, flowed)
+    ]
+    readable = [names for names in named if names]
+    if not readable:
+        return True
+    return any(requested in names for names in readable)
 
 
 def _dry_run(
@@ -403,6 +622,12 @@ def _dry_run(
         "--offline",
         "--no-cache",
         "--no-config",
+        # A tool installed into a system interpreter marked EXTERNALLY-MANAGED
+        # (PEP 668: Debian's and Fedora's python3) is refused by uv before it
+        # resolves anything, so such a copy could never verify. The dry run
+        # changes nothing, so the refusal protects nothing here; the flag lets
+        # the resolve run, and the verdict still comes from what resolves.
+        "--break-system-packages",
         "--python",
         interpreter,
     ]
@@ -410,14 +635,37 @@ def _dry_run(
         command += ["--target", target]
     if no_deps:
         command.append("--no-deps")
-    from automated_security_helper.utils.sandbox.scope import also_runs
+    from automated_security_helper.utils.sandbox.scope import (
+        also_runs,
+        reads_directory,
+    )
 
     # uv runs the interpreter to inspect it, so under --sandbox the spawn needs the
-    # interpreter's environment as well as uv's own directory.
-    with also_runs(interpreter):
+    # interpreter's environment as well as uv's own directory. With --target it
+    # reads what is installed in that directory, the staged Nix metadata under
+    # TMPDIR, which neither grant reaches: that one directory is granted too.
+    with ExitStack() as grants:
+        grants.enter_context(also_runs(interpreter))
+        if target is not None:
+            try:
+                grants.enter_context(reads_directory(target))
+            except ValueError as refusal:
+                # The staging directory resolves to one the sandbox never grants
+                # (TMPDIR is a home directory, so the directory sits directly in
+                # it). The check cannot run under the sandbox: it answers
+                # "unverifiable", as a staging that could not be done does, not
+                # with an exception out of the scanner's dependency check.
+                reason = (
+                    f"could not grant uv its staging directory to check "
+                    f"{requirement!r}: {refusal}"
+                )
+                return "unverifiable", reason
         result = _run(command + [requirement], _UV_DRY_RUN_TIMEOUT)
-    if result is None:
-        return "unverifiable", f"could not run uv to check {requirement!r}"
+    if not _ran(result):
+        return (
+            "unverifiable",
+            f"could not run uv to check {requirement!r}{_probe_cause(result)}",
+        )
     # uv colors its output into a pipe when FORCE_COLOR or CLICOLOR_FORCE is
     # set, and a terminal-aware uv can also write non-color codes: the escapes
     # would otherwise land in the reason a user reads, and a non-color code
@@ -431,6 +679,14 @@ def _dry_run(
     # Matched with every run of whitespace as one space, so a message wrapped
     # across lines still matches.
     flowed = " ".join(output.split())
+    if _requested_package_lacks_an_extra(requirement, flowed):
+        # The installed version declares no extra of a requested name (it
+        # predates the extra): uv warns, installs nothing for it and reports
+        # no changes, so the "satisfied" reading below would run a copy that
+        # never provides what the extra brings. Matched for the requested
+        # package alone: the same warning about a transitive dependency's
+        # extra says nothing about this copy.
+        return "unsatisfied", output
     if result.returncode == 0 and "Would make no changes" in flowed:
         return "satisfied", ""
     if result.returncode == 0 or any(m in flowed for m in _UV_UNSATISFIABLE_MARKERS):
@@ -497,9 +753,9 @@ def verify_pre_installed_tool(
 ) -> PreInstalledToolVerdict:
     """Decide whether ``executable`` satisfies ``package[extras]version_constraint``.
 
-    Memoized per (resolved path, file mtime, requirement, values): scanners
-    call their dependency check several times per run, and the ``--version``
-    probe of a large tool takes seconds. ``values`` is the caller's env-read
+    Memoized per (resolved path, file mtime, requirement, values, uv path) for
+    ``_VERDICT_MEMO_SECONDS``: scanners call their dependency check several
+    times per run, and the ``--version`` probe of a large tool takes seconds. ``values`` is the caller's env-read
     set: the probe's stderr excerpt is redacted with it BEFORE it is cut, so
     a cut cannot split a value and leave a fragment the downstream
     whole-spelling redaction misses; it is part of the memo key because the
@@ -518,7 +774,7 @@ def verify_pre_installed_tool(
     # values while the probe excerpt was cached unredacted under it.
     values = tuple(values)
     try:
-        validate_version_constraint(version_constraint)
+        canonical = validate_version_constraint(version_constraint)
     except ValueError as error:
         # Never handed to the dry run below: uv resolves whatever the requirement
         # names, and a path or URL would be built to read its metadata.
@@ -529,6 +785,10 @@ def verify_pre_installed_tool(
             str(error),
             summary="the version constraint is not a valid PEP 440 specifier",
         )
+    # The validated form, not the raw value: the validator accepts a constraint
+    # it has to normalize (an empty clause from a trailing comma, spaces inside
+    # a clause), and the raw spelling then reached uv malformed.
+    version_constraint = canonical or None
     requirement = build_requirement(package, extras, version_constraint)
     resolved = os.path.realpath(executable)
     try:
@@ -542,7 +802,14 @@ def verify_pre_installed_tool(
             summary="the copy does not exist",
         )
 
-    key = (resolved, mtime, requirement, tuple(values))
+    # The uv that judges is part of the question: a verdict made with one uv
+    # (or with none, "unverifiable") was served to a caller passing another.
+    if uv_executable is None:
+        from automated_security_helper.utils.uv_tool_runner import find_uv_or_none
+
+        uv_executable = find_uv_or_none()
+
+    key = (resolved, mtime, requirement, tuple(values), uv_executable or "")
     answered = _answer_without_a_probe(key)
     if answered is not None:
         return answered
@@ -586,19 +853,31 @@ def verify_pre_installed_tool(
                 executable,
                 requirement,
                 f"the scanner sandbox refused the check: {refusal}",
+                # The field contract reserves an empty summary for a satisfied
+                # verdict; a caller recording the summary (the jupyter
+                # converter's reason) named no cause for this one.
+                summary="the scanner sandbox refused the check",
             )
 
         with _verdict_cache_lock:
-            _verdict_cache[key] = verdict
+            _verdict_cache[key] = (verdict, time.monotonic())
         return verdict
 
 
 def _answer_without_a_probe(
-    key: Tuple[str, int, str, Tuple[str, ...]],
+    key: Tuple[str, int, str, Tuple[str, ...], str],
 ) -> Optional[PreInstalledToolVerdict]:
-    """The memoized verdict for ``key``, or None when the copy has to be probed."""
+    """The memoized verdict for ``key``, or None when the copy has to be probed:
+    nothing remembered, or a verdict older than ``_VERDICT_MEMO_SECONDS``."""
     with _verdict_cache_lock:
-        return _verdict_cache.get(key)
+        remembered = _verdict_cache.get(key)
+        if remembered is None:
+            return None
+        verdict, stored_at = remembered
+        if time.monotonic() - stored_at > _VERDICT_MEMO_SECONDS:
+            _verdict_cache.pop(key, None)
+            return None
+        return verdict
 
 
 def _verify(
@@ -611,12 +890,12 @@ def _verify(
     values: Tuple[str, ...] = (),
 ) -> PreInstalledToolVerdict:
     probe = _run([executable, "--version"], _VERSION_PROBE_TIMEOUT)
-    if probe is None:
+    if not _ran(probe):
         return PreInstalledToolVerdict(
             "unverifiable",
             executable,
             requirement,
-            f"could not execute {executable}",
+            f"could not execute {executable}{_probe_cause(probe)}",
             summary="the copy could not be executed",
         )
     if probe.returncode != 0:
@@ -673,6 +952,10 @@ def _verify(
 
     if uv_executable is None:
         # The uv installed with ASH first, then PATH; see find_uv_or_none.
+        # Reached only by a caller that did not resolve uv itself: the
+        # memoizing caller (verify_pre_installed_tool) resolves it before
+        # building its key and passes it here, so the key and the judgment
+        # there share one uv.
         from automated_security_helper.utils.uv_tool_runner import find_uv_or_none
 
         uv_executable = find_uv_or_none()
@@ -691,31 +974,52 @@ def _verify(
                 summary="no uv was found beside ASH's interpreter or on PATH",
             )
         nix_interpreter, site_dirs = nix_environment
-        with tempfile.TemporaryDirectory(prefix="ash-nix-metadata-") as target:
-            if _stage_nix_metadata(site_dirs, Path(target)) == 0:
-                return PreInstalledToolVerdict(
-                    "unverifiable",
+        from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="ash-nix-metadata-") as target:
+                if _stage_nix_metadata(site_dirs, Path(target)) == 0:
+                    return PreInstalledToolVerdict(
+                        "unverifiable",
+                        executable,
+                        requirement,
+                        f"{executable} is a Nix-wrapped Python program, but no "
+                        "distribution metadata was found on its site-packages paths",
+                        from_nix=True,
+                        version=version,
+                        summary="it is a Nix-wrapped Python program with no "
+                        "distribution metadata on its site-packages paths",
+                    )
+                return _judge(
                     executable,
+                    package,
+                    extras,
+                    version_constraint,
                     requirement,
-                    f"{executable} is a Nix-wrapped Python program, but no "
-                    "distribution metadata was found on its site-packages paths",
-                    from_nix=True,
-                    version=version,
-                    summary="it is a Nix-wrapped Python program with no "
-                    "distribution metadata on its site-packages paths",
+                    uv,
+                    nix_interpreter,
+                    target,
+                    f"its Nix environment ({nix_interpreter}, {len(site_dirs)} store paths)",
+                    version,
+                    values=values,
                 )
-            return _judge(
+        except SandboxUnavailable:
+            # The scope's refusal, handled by verify_pre_installed_tool.
+            raise
+        except OSError as error:
+            # The staging (the temporary directory, a mkdir, a copy of one
+            # METADATA) could not be done: a verdict, not an exception out of
+            # the scanner's dependency check.
+            return PreInstalledToolVerdict(
+                "unverifiable",
                 executable,
-                package,
-                extras,
-                version_constraint,
                 requirement,
-                uv,
-                nix_interpreter,
-                target,
-                f"its Nix environment ({nix_interpreter}, {len(site_dirs)} store paths)",
-                version,
-                values=values,
+                f"{executable} is a Nix-wrapped Python program whose distribution "
+                f"metadata could not be staged for uv: {error}",
+                from_nix=True,
+                version=version,
+                summary="its Nix environment's distribution metadata could not "
+                "be staged for uv",
             )
 
     interpreter = find_tool_interpreter(executable)
@@ -727,6 +1031,24 @@ def _verify(
             f"could not locate the Python environment that provides {executable}",
             version=version,
             summary="no Python environment could be located for the copy",
+        )
+
+    if _in_user_site(executable):
+        # ``pip install --user`` puts the script in the user scripts directory
+        # and its packages in the user site, which the interpreter's shebang
+        # does not name and uv's dry run does not inspect: it judges the
+        # interpreter's own environment, where the package is absent, so such a
+        # copy read as unsatisfied and, offline, was refused. It cannot be
+        # judged from here, which is what "unverifiable" says.
+        return PreInstalledToolVerdict(
+            "unverifiable",
+            executable,
+            requirement,
+            f"{executable} is installed in the user site (pip install --user), "
+            "whose packages uv's dry run of the interpreter's own environment "
+            "does not inspect",
+            version=version,
+            summary="the copy is installed in the user site, which cannot be inspected",
         )
 
     if uv is None:
@@ -801,24 +1123,40 @@ def _judge(
     # constraint, only on this failure path. The constraint probe is --no-deps:
     # it asks about the package's own version, and with dependencies included a
     # gap further down the tree would be misreported as a version mismatch.
-    missing = tuple(
-        extra
-        for extra in extras
-        if _dry_run(uv, interpreter, build_requirement(package, [extra], None), target)[
-            0
-        ]
-        == "unsatisfied"
+    # The extras are probed only when the bare package resolves: each extra's
+    # probe resolves the whole tree, so a dependency the environment lacks (or
+    # the package's own absence) read as every requested extra missing, and the
+    # real cause, the resolver's own, was suppressed below.
+    package_resolves = not extras or (
+        _dry_run(uv, interpreter, package, target)[0] != "unsatisfied"
+    )
+    missing = (
+        tuple(
+            extra
+            for extra in extras
+            if _dry_run(
+                uv, interpreter, build_requirement(package, [extra], None), target
+            )[0]
+            == "unsatisfied"
+        )
+        if package_resolves
+        else ()
     )
     reasons = []
-    # The summary's parallel parts name no extra, no constraint text and no
-    # path: the caller's own shown requirement (and the verdict's
-    # missing_extras field) carry what was asked, in redacted form.
+    # The summary's parallel parts name no constraint text and no path. They
+    # do name the missing extras: those are the caller's own requirement's
+    # words, and a refusal that says only "missing extra" tells the reader
+    # nothing the remedy does not have to repeat. The summary is the field
+    # whose text reaches the results, so it is redacted with the caller's
+    # values: an extra spelled by an env-read value prints as that value's
+    # placeholder there, as it does in every other text the results carry.
     summary_parts = []
     if missing:
-        reasons.append(
+        named_missing = (
             f"missing extra{'s' if len(missing) > 1 else ''}: {', '.join(missing)}"
         )
-        summary_parts.append(f"missing extra{'s' if len(missing) > 1 else ''}")
+        reasons.append(named_missing)
+        summary_parts.append(text_without_values(named_missing, values))
     if (
         version_constraint
         and _dry_run(

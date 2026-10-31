@@ -201,7 +201,8 @@ def test_the_console_escapes_a_path_from_the_scanned_tree(tmp_path, monkeypatch)
     _print_workspace_summary(result, opts, ras.time.time())
     output = rendered(console)
 
-    assert "web/evil\\n[bold]x[/bold]/package-lock.json" in output, output
+    # The newline is written as the console's escape (``\x0a``), the markup shown as text.
+    assert "web/evil\\x0a[bold]x[/bold]/package-lock.json" in output, output
 
 
 def test_a_projects_scan_set_drops_are_listed_as_ashs(tmp_path):

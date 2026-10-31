@@ -59,7 +59,11 @@ def _chain(error: BaseException) -> Iterator[BaseException]:
     context only adds redaction; honoring the flag would leave the quote of a
     ValidationError raised ``from None`` unredacted. Python's own renderers
     already honor the flag, so a ``from None`` refusal prints without its
-    context everywhere."""
+    context everywhere.
+
+    An exception group's members are walked too, each with its own chain:
+    Python's renderers print every member's message, so a ValidationError
+    inside a group is quoted with its inputs unless it is found here."""
     seen: Set[int] = set()
     pending: List[Optional[BaseException]] = [error]
     while pending:
@@ -70,6 +74,51 @@ def _chain(error: BaseException) -> Iterator[BaseException]:
         yield current
         pending.append(current.__context__)
         pending.append(current.__cause__)
+        pending.extend(_members_of(current))
+
+
+def _members_of(error: BaseException) -> List[BaseException]:
+    """The members of ``error`` when it is an exception group, else none."""
+    # getattr's default covers AttributeError alone; an error whose lookup
+    # raises something else (a proxying error class) names no group, and a
+    # printer that raised here would replace the error it was printing, as
+    # carried_environment_values says of its carried-values read.
+    try:
+        members = getattr(error, "exceptions", None)
+    except Exception:  # noqa: BLE001 -- whatever the error's lookup raised
+        return []
+    if not isinstance(members, tuple):
+        return []
+    return [member for member in members if isinstance(member, BaseException)]
+
+
+def _group_members(error: BaseException) -> List[BaseException]:
+    """Each member of ``error`` when it is a group, and of each group among them,
+    in order. Raised-from and raised-during links are not followed: this is what
+    the group itself holds, which its own text does not show."""
+    found: List[BaseException] = []
+    seen: Set[int] = {id(error)}
+    pending = list(reversed(_members_of(error)))
+    while pending:
+        member = pending.pop()
+        if id(member) in seen:
+            continue
+        seen.add(id(member))
+        found.append(member)
+        pending.extend(reversed(_members_of(member)))
+    return found
+
+
+def _own_text(error: BaseException) -> str:
+    """``str(error)``, or a line naming its type when its own ``__str__`` raises.
+
+    The printers here report an error; one whose message cannot be rendered
+    must not replace the error it is reporting with the renderer's own.
+    """
+    try:
+        return str(error)
+    except Exception:  # noqa: BLE001 -- whatever the error's __str__ raised
+        return f"<{type(error).__name__}: its message could not be rendered>"
 
 
 def _with_carried_values(error: BaseException, values: Iterable[str]) -> List[str]:
@@ -123,10 +172,20 @@ def _files_quoted(error: OSError) -> Optional[Tuple[str, str]]:
     filename, filename2 = error.filename, error.filename2
     if not isinstance(filename, str) or not isinstance(filename2, (str, type(None))):
         return None
-    quoted, given = f": {filename!r}", f": '{filename}'"
+    # Inside the quotes repr chose: double quotes around a name that holds a
+    # single quote and no double quote, single quotes otherwise. Single quotes
+    # written in every case left such a name between mismatched quotes.
+    quoted, given = f": {filename!r}", f": {_quoted_as_given(filename)}"
     if filename2 is not None:
-        quoted, given = f"{quoted} -> {filename2!r}", f"{given} -> '{filename2}'"
+        quoted = f"{quoted} -> {filename2!r}"
+        given = f"{given} -> {_quoted_as_given(filename2)}"
     return quoted, given
+
+
+def _quoted_as_given(name: str) -> str:
+    """*name* as given, between the quote characters ``repr`` puts around it."""
+    quote = repr(name)[0]
+    return f"{quote}{name}{quote}"
 
 
 def _files_as_given(error: BaseException, text: str) -> str:
@@ -186,22 +245,38 @@ def _described(error: BaseException, values: Iterable[str], counted: bool) -> st
     )
 
     values = list(environment_strings(values))
-    text = str(error)
+    text = _own_text(error)
     descriptions: List[str] = []
+    # A group's own text counts its members and names none ("2 sub-exceptions"),
+    # so a ValidationError that is one of them, found nowhere in that text,
+    # would be described by nothing at all.
+    members = {id(member) for member in _group_members(error)}
+    unquoted: List[str] = []
     withheld = False
     for validation_error in validation_errors_in(error):
         described = describe_validation_error(validation_error, values)
         if counted:
             described = f"{_counted(validation_error)}: {described}"
         if validation_error is error:
-            return _ESCAPE_CODES.sub("", described)
+            # Redacted as the other path is below: as written by the describer,
+            # then stripped of codes and matched again, so a value an escape
+            # code split in a location's text is not re-joined in clear by the
+            # strip alone.
+            return _without_escape_codes(
+                _redacted_keeping_codes(described, values) if values else described
+            )
+        quoting = text
         text, changed = _without_refused_inputs(text, validation_error, described)
         withheld = withheld or changed
         descriptions.append(described)
+        if text == quoting and id(validation_error) in members:
+            unquoted.append(described)
     if withheld:
         text = "; ".join(
             [f"{type(error).__name__} ({MESSAGE_WITHHELD})", *descriptions]
         )
+    elif unquoted:
+        text = "; ".join([text, *unquoted])
     text = _files_as_given(error, text)
     # Redacted as text_without_values redacts (the raw text first, so a value
     # that itself holds codes is matched as written, then stripped and matched
@@ -210,22 +285,48 @@ def _described(error: BaseException, values: Iterable[str], counted: bool) -> st
     # are not terminals: a code in an exception's message, such as a file name a
     # repository chose, must not reach them. The sinks that print it to a
     # terminal show what remains (utils/terminal_text.py).
-    return _ESCAPE_CODES.sub(
-        "", _redacted_keeping_codes(text, values) if values else text
+    return _without_escape_codes(
+        _redacted_keeping_codes(text, values) if values else text
     )
 
 
 def os_error_without_named_file(e: OSError, named: "os.PathLike[str] | str") -> str:
     """``error_text(e)``, without the OSError's own filename when it names
     ``named``: a message built around it already names that file
-    (``could not read <file>: ...``), so the error's copy said it twice."""
+    (``could not read <file>: ...``), so the error's copy said it twice.
+
+    The rest of Python's own text is kept: the code as Python heads it
+    (``[WinError N]`` where the error carries a Windows error code, ``[Errno N]``
+    otherwise) and the second file of a two-file error (``-> 'other'``), as given.
+    An error whose filename is a file descriptor (an int) names no path, so its
+    text is ``error_text(e)`` as it is.
+    """
     from pathlib import Path
 
-    filename = os.fsdecode(e.filename) if e.filename else ""
-    if e.strerror and filename and Path(filename) == Path(named):
-        errno_part = f"[Errno {e.errno}] " if e.errno is not None else ""
-        return f"{errno_part}{e.strerror}"
-    return error_text(e)
+    filename = e.filename
+    if not isinstance(filename, (str, bytes, os.PathLike)):
+        return error_text(e)
+    try:
+        name = os.fsdecode(filename)
+    except TypeError:
+        return error_text(e)
+    if not (e.strerror and name and Path(name) == Path(named)):
+        return error_text(e)
+    winerror = getattr(e, "winerror", None)
+    if winerror is not None:
+        code = f"[WinError {winerror}] "
+    elif e.errno is not None:
+        code = f"[Errno {e.errno}] "
+    else:
+        code = ""
+    text = f"{code}{e.strerror}"
+    other = e.filename2
+    if isinstance(other, (str, bytes, os.PathLike)):
+        try:
+            text = f"{text} -> {_quoted_as_given(os.fsdecode(other))}"
+        except TypeError:
+            pass
+    return text
 
 
 def error_text(error: BaseException, values: Iterable[str] = ()) -> str:
@@ -237,7 +338,9 @@ def error_text(error: BaseException, values: Iterable[str] = ()) -> str:
     whose message quotes it (``f"... {e}"``), has that quote replaced the same
     way. One that quotes it with neither link (raised after the ``except``
     block, say) is left as it is: the ValidationError is not in its chain
-    (_chain), so nothing here can know its inputs. An OSError in the
+    (_chain), so nothing here can know its inputs. A ValidationError that is a
+    member of an exception group, which the group's own text only counts
+    ("1 sub-exception"), is described after that text. An OSError in the
     chain names its files as given rather than by repr (see the module's
     docstring); any other error's text is ``str(error)`` unchanged. Every
     complete escape sequence is removed from the result, since the text is kept
@@ -308,8 +411,8 @@ def traceback_text(
     text = _files_as_given(error, text)
     # Redacted and stripped as in _described: the traceback is kept in results
     # and reports, so no complete code survives it.
-    return _ESCAPE_CODES.sub(
-        "", _redacted_keeping_codes(text, values) if values else text
+    return _without_escape_codes(
+        _redacted_keeping_codes(text, values) if values else text
     )
 
 
@@ -534,11 +637,11 @@ def _redacted_keeping_codes(
 
     if min_length is None:
         first = redact_values(text, values)
-        stripped = _ESCAPE_CODES.sub("", first)
+        stripped = _without_escape_codes(first)
         again = redact_values(stripped, values)
     else:
         first = redact_values(text, values, min_length=min_length)
-        stripped = _ESCAPE_CODES.sub("", first)
+        stripped = _without_escape_codes(first)
         again = redact_values(stripped, values, min_length=min_length)
     return first if again == stripped else again
 
@@ -560,8 +663,8 @@ def redact_then_split(text: str, values: Iterable[str]) -> List[str]:
     """
     values = list(environment_strings(values))
     if not values:
-        return _ESCAPE_CODES.sub("", text).splitlines()
-    return _ESCAPE_CODES.sub("", _redacted_keeping_codes(text, values)).splitlines()
+        return _without_escape_codes(text).splitlines()
+    return _without_escape_codes(_redacted_keeping_codes(text, values)).splitlines()
 
 
 #: Every complete CSI sequence, color included: the shown layers strip these
@@ -586,11 +689,15 @@ CSI_CODES = _CSI_CODES
 #: and the trim dropped the text behind it. The hyperlink form
 #: ("\x1b]8;;https://host\x1b\\") is OSC, not CSI, so the CSI strip leaves
 #: it, and one inside a value splits the contiguous match the same way a
-#: color code does. The body excludes ESC, BEL and U+009C, so an
-#: unterminated OSC never swallows the text behind it; a cut-off OSC at a
-#: read's edge is the trim's incomplete-code branch, not this pattern's.
-#: Other C1 bytes, DCS and APC stay unstripped, as before.
-_OSC_CODES = re.compile(r"\x1b\][^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)")
+#: color code does. The body excludes ESC, BEL and U+009C, and a line break,
+#: so an unterminated OSC never swallows the text behind it: one that is not
+#: ended on its own line is left as it is rather than matched up to a BEL or
+#: a U+009C lines later, which dropped every line between them from the
+#: saved text (ECMA-48 admits a line break in a command string; a line is
+#: the unit every sink here keeps). A cut-off OSC at a read's edge is the
+#: trim's incomplete-code branch, not this pattern's. Other C1 bytes, DCS and
+#: APC stay unstripped, as before.
+_OSC_CODES = re.compile(r"\x1b\][^\x07\x1b\x9c\r\n]*(?:\x07|\x1b\\|\x9c)")
 OSC_CODES = _OSC_CODES
 
 #: Every escape sequence the shown layers strip: the CSI set and the OSC
@@ -600,6 +707,98 @@ OSC_CODES = _OSC_CODES
 #: code another keeps.
 _ESCAPE_CODES = re.compile(rf"(?:{_CSI_CODES.pattern}|{_OSC_CODES.pattern})")
 ESCAPE_CODES = _ESCAPE_CODES
+
+
+#: The bytes a CSI sequence may hold between its "[" and its final byte: the
+#: parameter bytes 0x30-0x3F and the intermediate bytes 0x20-0x2F, as
+#: _CSI_CODES admits them.
+_CSI_MIDDLE = frozenset(chr(code) for code in range(0x20, 0x40))
+
+#: The final byte of a CSI sequence, 0x40-0x7E, as _CSI_CODES admits it.
+_CSI_FINAL = frozenset(chr(code) for code in range(0x40, 0x7F))
+
+#: What ends an OSC sequence on its own: BEL or the C1 string terminator. The
+#: third ending, ESC then a backslash, arrives as two characters and is read
+#: where the ESC's next character is.
+_OSC_END = frozenset({"\x07", "\x9c"})
+
+#: What an OSC body may not hold (_OSC_CODES): a sequence that meets one of
+#: these before its end is never completed.
+_OSC_BREAK = frozenset({"\r", "\n"})
+
+
+def _without_escape_codes(text: str) -> str:
+    """*text* with every complete escape sequence removed, until none is left.
+
+    One removal is not enough: removing an inner sequence can join the bytes on
+    either side of it into a sequence that was not there before ("\\x1b[" then
+    "\\x1b[2K" then "m" is "\\x1b[m" once the inner one goes), and that one has
+    to be removed too. The result is the fixed point of removing complete sequences,
+    read in ONE pass over the text: each ESC that could still begin a sequence
+    is kept open on a stack, a character is read against the innermost open one,
+    a sequence that completes is dropped (so what came before its ESC and what
+    follows now touch, and the next character is read against the sequence
+    outside it), and an open sequence that meets a character no sequence admits
+    is closed as text, together with every one outside it, since a text ESC
+    inside a sequence's body ends that sequence for good. A sequence is matched
+    against the patterns above at most once, when it completes or when it is
+    closed, so the cost is linear in the text: removing sequences pass by pass
+    until none was left re-read the whole text once per nesting level, and
+    "\\x1b[" repeated k times before "m" repeated k times cost about k squared.
+    """
+    if "\x1b" not in text:
+        return text
+    kept: List[str] = []
+    # Indexes in ``kept`` of each ESC that may still begin a sequence, innermost
+    # last.
+    open_escapes: List[int] = []
+    for character in text:
+        kept.append(character)
+        if character == "\x1b":
+            open_escapes.append(len(kept) - 1)
+            continue
+        while open_escapes:
+            start = open_escapes[-1]
+            if len(kept) - start == 2:
+                # The character after an ESC: "[" opens a CSI, "]" an OSC. A
+                # backslash may end an OSC this ESC sits inside, so the ESC is
+                # closed as text and the backslash is read against that OSC.
+                if character in "[]":
+                    break
+                open_escapes.pop()
+                if character == "\\" and open_escapes:
+                    continue
+                open_escapes.clear()
+                break
+            kind = kept[start + 1]
+            if kind not in "[]":
+                # An ESC whose next character was itself an ESC that is now
+                # closed as text: no sequence starts with two of them.
+                open_escapes.clear()
+                break
+            if kind == "[":
+                if character in _CSI_FINAL:
+                    if _CSI_CODES.fullmatch("".join(kept[start:])):
+                        del kept[start:]
+                        open_escapes.pop()
+                    else:
+                        open_escapes.clear()
+                    break
+                if character in _CSI_MIDDLE:
+                    break
+                open_escapes.clear()
+                break
+            if character in _OSC_END or (character == "\\" and kept[-2] == "\x1b"):
+                if _OSC_CODES.fullmatch("".join(kept[start:])):
+                    del kept[start:]
+                    open_escapes.pop()
+                else:
+                    open_escapes.clear()
+                break
+            if character in _OSC_BREAK:
+                open_escapes.clear()
+            break
+    return "".join(kept)
 
 
 def shown_tool_stderr(text: str, values: Iterable[str]) -> str:
@@ -623,7 +822,7 @@ def shown_tool_stderr(text: str, values: Iterable[str]) -> str:
     through shown_uv_output instead, which adds those spellings and the
     plugin-input origin filter.
     """
-    return _ESCAPE_CODES.sub("", text_without_values(text, values))
+    return _without_escape_codes(text_without_values(text, values))
 
 
 def pattern_error_text(
@@ -690,15 +889,29 @@ def log_unexpected_error(
             logged = f"{context}: {text}"
         else:
             # The error itself, as before, unless an OSError in it names a file,
-            # which its own text quotes by repr.
-            logged = error if text == str(error) else text
+            # which its own text quotes by repr, or its own __str__ raises,
+            # which would fail the record's formatting in the handler.
+            try:
+                own: Optional[str] = str(error)
+            except Exception:  # noqa: BLE001 -- whatever the error's __str__ raised
+                own = None
+            logged = error if own is not None and text == own else text
         try:
-            getattr(error, "__notes__", None)
+            # Every member of the chain: the handlers' formatter walks them all
+            # as traceback_text does, and before Python 3.11's guard a notes
+            # lookup that raises on any of them fails the record's formatting,
+            # losing the record. Logged pre-rendered instead, through
+            # traceback_text's own fallback.
+            for member in _chain(error):
+                getattr(member, "__notes__", None)
         except Exception:
-            # The handlers' formatter walks the error as traceback_text does,
-            # and before Python 3.11's guard a notes lookup that raises
-            # fails the record's formatting, losing the record. Logged
-            # pre-rendered instead, through traceback_text's own fallback.
+            logger.error(f"{logged}\n{traceback_text(error)}".rstrip(), extra=NO_MARKUP)
+            return
+        if _names_a_file_by_repr(error):
+            # The handlers' formatter would render the traceback from the
+            # error, whose own text quotes its files by repr: the doubled
+            # backslashes this module removes. Pre-rendered, the names are as
+            # given, through traceback_text.
             logger.error(f"{logged}\n{traceback_text(error)}".rstrip(), extra=NO_MARKUP)
             return
         logger.error(logged, exc_info=error, extra=NO_MARKUP)
@@ -716,4 +929,31 @@ def log_unexpected_error(
     if context is not None:
         message = f"{context}: {message}"
     logger.error(message, extra=NO_MARKUP)
-    logger.debug("".join(traceback.format_tb(error.__traceback__)), extra=NO_MARKUP)
+    # The frames alone, redacted as traceback_text redacts them: a frame's path
+    # or source line can quote a value, and the file handlers write what they
+    # are given.
+    frames = "".join(traceback.format_tb(error.__traceback__))
+    # An exception group's members have frames of their own, which the group's
+    # traceback does not hold; each is headed by its type, never its message.
+    for member in _group_members(error):
+        frames += f"{type(member).__name__}, a member of the group:\n" + "".join(
+            traceback.format_tb(member.__traceback__)
+        )
+    if values:
+        frames = _without_escape_codes(_redacted_keeping_codes(frames, values))
+    logger.debug(frames, extra=NO_MARKUP)
+
+
+def _names_a_file_by_repr(error: BaseException) -> bool:
+    """Whether an OSError in ``error``'s chain has Python's own text quote a file
+    whose repr differs from the name as given (a backslash, a control)."""
+    for current in _chain(error):
+        if (
+            not isinstance(current, OSError)
+            or type(current).__str__ is not OSError.__str__
+        ):
+            continue
+        quoted = _files_quoted(current)
+        if quoted is not None and quoted[0] != quoted[1]:
+            return True
+    return False

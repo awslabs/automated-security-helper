@@ -5,7 +5,9 @@
 
 import bz2
 import contextlib
+import errno
 import gzip
+import hashlib
 import importlib
 import io
 import lzma
@@ -26,9 +28,11 @@ from typing import (
     List,
     Literal,
     Optional,
+    Set,
     Tuple,
 )
 import zipfile
+import zlib
 
 from pydantic import Field, PositiveInt
 
@@ -48,9 +52,9 @@ from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
     scan_set,
 )
-from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.utils.scan_output_dirs import record_converted_sources
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     relative_display,
@@ -101,6 +105,104 @@ NESTED_ARCHIVE_SUFFIXES = (
     "nupkg",
     "deb",
     "rpm",
+)
+
+#: Member names with no extension that scanners read, so KNOWN_SCANNABLE_EXTENSIONS,
+#: which admits members by their extension, cannot name them: container and build
+#: files (checkov, semgrep, opengrep), dependency manifests (grype, syft),
+#: private keys (detect-secrets, gitleaks: the ``id_*`` names and ``identity``,
+#: OpenSSH's legacy default name for a private key) and a README, a text file the
+#: secret scanners read like any other. Compared against the member's base name
+#: as read through ``_base_name``, case-folded; a name with a variant suffix
+#: (``Dockerfile.prod``, ``Makefile_linux``, ``id_rsa.old``, ``.env.local``) is
+#: admitted by its stem (_SCANNABLE_MEMBER_STEMS, _SCANNABLE_DOTFILE_STEMS).
+SCANNABLE_MEMBER_NAMES = frozenset(
+    {
+        "Dockerfile",
+        "Containerfile",
+        "Jenkinsfile",
+        "Makefile",
+        "Pipfile",
+        "Gemfile",
+        "Rakefile",
+        "Vagrantfile",
+        "Procfile",
+        "Brewfile",
+        "Podfile",
+        "README",
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+        "identity",
+        "credentials",
+        ".git-credentials",
+        ".pgpass",
+        ".htpasswd",
+        ".env",
+        "authorized_keys",
+        "known_hosts",
+    }
+)
+#: Compared case-folded: ``dockerfile`` and ``MAKEFILE`` are the same files.
+_SCANNABLE_MEMBER_NAMES_FOLDED = frozenset(n.casefold() for n in SCANNABLE_MEMBER_NAMES)
+#: Names admitted by their first word before a ``.``, ``-`` or ``_``: a Dockerfile,
+#: Containerfile or Makefile with a stage or variant suffix (``Dockerfile.prod``,
+#: ``Dockerfile-prod``, ``Makefile_linux``), and a key file with a backup suffix
+#: (``id_rsa.old``, ``id_ed25519-2024``). Case-folded.
+_SCANNABLE_MEMBER_STEMS = frozenset(
+    {
+        "dockerfile",
+        "containerfile",
+        "makefile",
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+    }
+)
+#: Dotfiles admitted by the name up to their second ``.``: an environment file
+#: with a stage suffix (``.env.local``, ``.env.production``), which detect-secrets
+#: reads as it reads ``.env``. A dotfile's stem starts at its leading ``.``, so
+#: the split _SCANNABLE_MEMBER_STEMS is read with would leave it empty.
+#: Case-folded.
+_SCANNABLE_DOTFILE_STEMS = frozenset({".env"})
+
+#: Extensions scanners read that KNOWN_SCANNABLE_EXTENSIONS leaves out: ES module
+#: and TypeScript module spellings and component files (semgrep, opengrep), C++
+#: spellings beside .cpp and .h, key and certificate material, credential and
+#: registry settings files, and dependency lockfiles and Go module files (grype,
+#: syft, the npm and pnpm audits). Compared lowercased, through _archive_suffix.
+SCANNABLE_MEMBER_SUFFIXES = frozenset(
+    {
+        "mjs",
+        "cjs",
+        "mts",
+        "cts",
+        "vue",
+        "svelte",
+        "cc",
+        "cxx",
+        "hh",
+        "hxx",
+        "pem",
+        "key",
+        "crt",
+        "cer",
+        "pub",
+        "p12",
+        "pfx",
+        "jks",
+        "npmrc",
+        "yarnrc",
+        "netrc",
+        "pypirc",
+        "lock",
+        "mod",
+        "sum",
+        "dockerfile",
+        "containerfile",
+    }
 )
 
 #: The options of ArchiveConverterConfigOptions that bound what extracting an archive
@@ -262,6 +364,43 @@ def _zip_end_record(handle: BinaryIO) -> Optional[List[Any]]:
         return None
 
 
+def _zip_directory_start(
+    handle: BinaryIO, end_record: List[Any], directory_bytes: int
+) -> Optional[int]:
+    """Where the central directory starts, as this Python's zipfile starts reading
+    it, or None where zipfile would build no entry.
+
+    The directory ends where the end record says (``_ECD_LOCATION``) and is
+    ``directory_bytes`` long, which allows for data before the zip. For a zip64
+    archive the two shapes of zipfile ASH runs under disagree about the
+    location: the current ``_EndRecData64`` moves it to the zip64 end record,
+    right after the directory, while the releases before that fix leave it at
+    the plain end record and have ``_RealGetContents`` take the zip64 end record
+    and its locator (76 bytes) off the start itself. Whichever this interpreter
+    does, the directory's first entry carries the entry signature, so the start
+    tried is the one that does. Before this the walk began 76 bytes into the
+    directory on the older shape, met no signature there and counted nothing,
+    so the member pre-count never refused a zip64 archive.
+    """
+    location = end_record[_zipfile_private("_ECD_LOCATION")]
+    candidates = [location - directory_bytes]
+    if end_record[_zipfile_private("_ECD_SIGNATURE")] == _zipfile_private(
+        "stringEndArchive64"
+    ):
+        candidates.append(
+            candidates[0]
+            - _zipfile_private("sizeEndCentDir64")
+            - _zipfile_private("sizeEndCentDir64Locator")
+        )
+    for start in candidates:
+        if start < 0:
+            continue
+        handle.seek(start)
+        if handle.read(len(_ZIP_DIRECTORY_ENTRY)) == _ZIP_DIRECTORY_ENTRY:
+            return start
+    return None
+
+
 def _zip_has_more_entries_than(handle: BinaryIO, limit: int) -> bool:
     """Whether opening a zip would make zipfile build more than ``limit`` entries.
 
@@ -283,8 +422,8 @@ def _zip_has_more_entries_than(handle: BinaryIO, limit: int) -> bool:
     if end_record[_zipfile_private("_ECD_ENTRIES_TOTAL")] > limit:
         return True
     directory_bytes = end_record[_zipfile_private("_ECD_SIZE")]
-    start = end_record[_zipfile_private("_ECD_LOCATION")] - directory_bytes
-    if start < 0:
+    start = _zip_directory_start(handle, end_record, directory_bytes)
+    if start is None:
         return False
     handle.seek(start)
     counted = 0
@@ -409,10 +548,14 @@ _TAR_READ_CAP = 1024 * 1024
 
 #: What the header pass may read in all: this much, plus _TAR_HEADER_BYTES_PER_MEMBER
 #: for every member read so far. A member costs 512 bytes of header, and with a pax
-#: header (GNU tar's pax format writes one per member) about 1.5 KiB; a GNU sparse
-#: 1.0 map is read from the archive here too.
+#: header (GNU tar's pax format writes one per member) about 1.5 KiB; one that
+#: carries extended attributes, ACLs or a long path runs to several KiB, and a GNU
+#: sparse 1.0 map is read from the archive here too. The per-member allowance
+#: covers a pax header of up to about 7 KiB on its own: at 2048 it covered 1 KiB,
+#: and every member over that drew on the base, so a tar of thousands of such
+#: members was refused as unreadable once the base was spent.
 _TAR_HEADER_BYTES_BASE = 4 * 1024 * 1024
-_TAR_HEADER_BYTES_PER_MEMBER = 2048
+_TAR_HEADER_BYTES_PER_MEMBER = 8192
 
 
 def _zstd_file_class() -> Any:
@@ -511,27 +654,183 @@ class _BoundedTarStream(io.RawIOBase):
         return data
 
 
+#: How much of a gzip file _GzipMembersStream reads and decompresses at a time.
+_GZIP_READ_CHUNK = 64 * 1024
+
+
+class _GzipMembersStream(io.RawIOBase):
+    """A gzip file's decompressed bytes, member after member, read through zlib.
+
+    ``gzip.GzipFile`` reads a file as a run of gzip members and fails the whole
+    read at bytes after the last member that are not another member's header
+    (BadGzipFile), and the tar listing reads every byte there is
+    (utils/tar_listing.py), so a .tar.gz followed by anything, a few bytes of
+    padding or a signature a tool appended, lost every member it held. Here the
+    bytes after the last member end the stream, as gzip(1) ends it ("trailing
+    garbage ignored"); a member cut short still raises (EOFError, as GzipFile
+    raises), and zlib checks each member's CRC and length as it ends. At most
+    _GZIP_READ_CHUNK compressed and _COPY_CHUNK decompressed bytes are held at a
+    time. Seekable as GzipFile is: forward by reading, backward by starting over.
+    """
+
+    def __init__(self, raw: BinaryIO) -> None:
+        super().__init__()
+        self._raw = raw
+        self._start = raw.tell()
+        self._rewind()
+
+    def _rewind(self) -> None:
+        self._raw.seek(self._start)
+        self._decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16)
+        self._pending = b""
+        self._pos = 0
+        self._ended = False
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def tell(self) -> int:
+        return self._pos
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_CUR:
+            offset += self._pos
+        elif whence != io.SEEK_SET:
+            raise ValueError("Seek from end not supported")
+        if offset < self._pos:
+            self._rewind()
+        while self._pos < offset:
+            if not self.read(min(_COPY_CHUNK, offset - self._pos)):
+                break
+        return self._pos
+
+    def read(self, size: Optional[int] = -1) -> bytes:
+        wanted = None if size is None or size < 0 else size
+        out = bytearray()
+        while wanted is None or len(out) < wanted:
+            if not self._pending and (self._ended or not self._fill()):
+                break
+            take = len(self._pending) if wanted is None else wanted - len(out)
+            out += self._pending[:take]
+            self._pending = self._pending[take:]
+        self._pos += len(out)
+        return bytes(out)
+
+    def _fill(self) -> bool:
+        """Decompress the next piece into ``_pending``; False at the stream's end."""
+        decompressor = self._decompressor
+        if not decompressor.eof:
+            data = decompressor.unconsumed_tail or self._raw.read(_GZIP_READ_CHUNK)
+            if not data:
+                raise EOFError(
+                    "Compressed file ended before the end-of-stream marker was reached"
+                )
+            self._pending = decompressor.decompress(data, _COPY_CHUNK)
+            return True
+        rest = decompressor.unused_data
+        if len(rest) < 2:
+            rest += self._raw.read(_GZIP_READ_CHUNK)
+        if rest[:2] != b"\x1f\x8b":
+            # The gzip data ends here: nothing follows, or bytes that are not
+            # another member's, which gzip(1) ignores too.
+            self._ended = True
+            return False
+        self._decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16)
+        self._pending = self._decompressor.decompress(rest, _COPY_CHUNK)
+        return True
+
+
+def _is_bzip2_head(head: bytes) -> bool:
+    """Whether ``head``, a file's first six bytes, starts a bzip2 stream: the
+    ``BZh`` signature, a block size of 1 to 9, and the start of the magic that
+    follows, a block's (the digits of pi) or, for a stream of no blocks, the end
+    of stream's (the digits of the square root of pi). ``BZh`` alone is three
+    printable bytes, and an uncompressed tar whose first member is named
+    ``BZh...`` starts with them too: read as bzip2, that tar failed to
+    decompress and was recorded as unreadable, though it was a tar through and
+    through.
+    """
+    return (
+        len(head) >= 6
+        and head[:3] == b"BZh"
+        and head[3] in b"123456789"
+        and head[4:6] in (b"\x31\x41", b"\x17\x72")
+    )
+
+
+def _spells_a_tar_header(block: bytes) -> bool:
+    """Whether ``block`` holds a tar member header whose checksum holds.
+
+    The test that reads a stream as an uncompressed tar before any compressor's
+    magic is consulted. A short block, a block of zeros (the end-of-archive
+    block) and a block whose checksum fails all read False here, so those
+    streams keep the magic sniff; how an end-of-archive block counts for a
+    caller that asks "is this a tar" is _is_tar_header's decision, not this one.
+    """
+    try:
+        tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
+    except tarfile.HeaderError:
+        return False
+    return True
+
+
 @contextlib.contextmanager
 def _tar_stream(handle: BinaryIO) -> Iterator[_BoundedTarStream]:
     """The archive's tar stream, decompressed by its leading bytes, and bounded.
 
-    Chosen from the magic bytes rather than by letting tarfile try each
-    decompressor in turn: gzip, bzip2, xz, and zstd where this Python has it. Any
-    other content is read as an uncompressed tar.
+    A first block that is a tar header (_spells_a_tar_header: its checksum
+    holds) is an uncompressed tar whatever its first bytes spell, since a member name is
+    free to start with a compressor's signature (``BZh91AY&SY-notes.txt`` spells
+    bzip2's whole head) and no compressed stream carries a valid tar checksum.
+    Otherwise the decompressor is chosen from the magic bytes rather than by
+    letting tarfile try each in turn: gzip (through _GzipMembersStream, which
+    ends at bytes after the gzip data instead of failing on them), bzip2 (by
+    its six-byte head, _is_bzip2_head), xz, and zstd where this Python has it.
+    Any other content is read as an uncompressed tar. archive_kind probes a tar
+    through this same stream, so what it accepts and what is extracted agree.
     """
-    head = handle.read(6)
+    block = handle.read(tarfile.BLOCKSIZE)
     handle.seek(0)
+    head = block[:6]
     with contextlib.ExitStack() as stack:
         inner: Any = handle
-        if head[:2] == b"\x1f\x8b":
-            inner = stack.enter_context(gzip.GzipFile(fileobj=handle, mode="rb"))
-        elif head[:3] == b"BZh":
+        if _spells_a_tar_header(block):
+            pass
+        elif head[:2] == b"\x1f\x8b":
+            inner = stack.enter_context(_GzipMembersStream(handle))
+        elif _is_bzip2_head(head):
             inner = stack.enter_context(bz2.BZ2File(handle))
         elif head == b"\xfd7zXZ\x00":
             inner = stack.enter_context(lzma.LZMAFile(handle))
         elif head[:4] == b"\x28\xb5\x2f\xfd" and _zstd_file_class() is not None:
             inner = stack.enter_context(_zstd_file_class()(handle))
         yield _BoundedTarStream(inner)
+
+
+def _admitted_size(member: tarfile.TarInfo, tar_ref: Any) -> int:
+    """The bytes ``member`` is admitted to the extraction limits for.
+
+    Its declared size, as tarfile reports it once the member's pax or GNU sparse
+    header has been applied, or the extent of stored data tarfile skips past to
+    reach the next header where that is larger. For a sparse member the reported
+    size is its real size and the stored data is shorter, which the declared size
+    covers. A header that declares a small real size over a long stored extent
+    (an old GNU sparse header with its real-size field at 0) would be admitted at
+    the small size while the header pass seeks past the long extent, decompressing
+    it for a compressed tar, with no limit counting it; the extent counts then.
+    ``tar_ref.offset`` is the next header's position, set by tarfile as the member
+    is read; a ``tar_ref`` without one (a plain list) admits the declared size.
+    """
+    offset = getattr(tar_ref, "offset", None)
+    offset_data = getattr(member, "offset_data", None)
+    if not isinstance(offset, int) or not isinstance(offset_data, int):
+        return member.size
+    extent = offset - offset_data
+    occupied = -(-member.size // tarfile.BLOCKSIZE) * tarfile.BLOCKSIZE
+    return extent if extent > occupied else member.size
 
 
 def _tar_members_within(
@@ -552,7 +851,7 @@ def _tar_members_within(
     """
     members = []
     for member in tar_ref:
-        budget.admit(member.name, member.size)
+        budget.admit(member.name, _admitted_size(member, tar_ref))
         member.pax_headers = {}
         members.append(member)
         if stream is not None:
@@ -626,21 +925,105 @@ def _plain_gzip_name(archive_file: str) -> Optional[str]:
     return inner or None
 
 
+def _is_tar_header(block: bytes, *, empty_is_tar: bool) -> bool:
+    """Whether ``block``, the first 512 bytes of a stream, is a tar header that
+    ``tarfile.open`` would open the stream on.
+
+    A header whose checksum holds, whatever its type (a member, a pax header, a
+    GNU long name), with a size this Python's tarfile takes: ``TarInfo._block``
+    refuses a negative one where tarfile does, and the member is then not read.
+    A short block, or one whose checksum fails, is not a header.
+
+    An end-of-archive block of zeros is the one block the two callers read
+    differently, and ``empty_is_tar`` says which way. ``tarfile.open`` opens an
+    archive on it (a tar of end blocks only is an empty tar; ``is_tarfile`` says
+    True), which is what a file NAMED as a tar is held to (_holds_a_tar). A
+    ``.gz`` of one file is told from a tarball by its content, and a gzip whose
+    content starts with zeros is a file of zeros, not a tarball
+    (_gzip_holds_a_tar), the reading the plain-gzip decision has always made.
+    """
+    try:
+        info = tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
+        block_of = getattr(info, "_block", None)
+        if block_of is not None and _tarfile_sizes(info):
+            block_of(info.size)
+    except tarfile.EOFHeaderError:  # type: ignore[attr-defined]  # missing from the typeshed stub
+        return empty_is_tar
+    except tarfile.HeaderError:
+        return False
+    return True
+
+
+#: The header types tarfile reads a body for by the size field, through
+#: ``TarInfo._block``: an extended header (pax, a GNU long name or link, a GNU
+#: sparse member) is read whole; a regular file's data, or an unknown type's, is
+#: seeked past. tarfile sizes nothing else (a directory, a link, a device, a fifo),
+#: so a negative size on one of those opens.
+_SIZED_HEADER_TYPES = frozenset(
+    {
+        tarfile.XHDTYPE,
+        tarfile.XGLTYPE,
+        tarfile.SOLARIS_XHDTYPE,
+        tarfile.GNUTYPE_LONGNAME,
+        tarfile.GNUTYPE_LONGLINK,
+        tarfile.GNUTYPE_SPARSE,
+    }
+)
+
+
+def _tarfile_sizes(info: tarfile.TarInfo) -> bool:
+    """Whether tarfile applies ``_block`` to this header's size when it reads the
+    member: for a regular file or an unknown type (``_proc_builtin``) and for an
+    extended header (``_proc_pax``, ``_proc_gnulong``, ``_proc_sparse``), and not
+    for a directory, link, device or fifo, whose size field it never reads. The
+    probe refuses a negative size exactly where tarfile would.
+    """
+    return (
+        info.isreg()
+        or info.type not in tarfile.SUPPORTED_TYPES
+        or info.type in _SIZED_HEADER_TYPES
+    )
+
+
 def _gzip_holds_a_tar(handle: BinaryIO) -> bool:
     """Whether a gzip file's content starts with a tar header.
 
     Reads one block of the decompressed content. A damaged stream raises, and the
-    archive is then refused as unreadable.
+    archive is then refused as unreadable. Content that starts with a block of
+    zeros is one file of zeros, not a tarball (``empty_is_tar=False``): the
+    decision that sends a ``.gz`` to the plain-gzip path.
     """
     handle.seek(0)
     with gzip.GzipFile(fileobj=handle, mode="rb") as stream:
         block = stream.read(tarfile.BLOCKSIZE)
     handle.seek(0)
+    return _is_tar_header(block, empty_is_tar=False)
+
+
+def _holds_a_tar(handle: BinaryIO) -> bool:
+    """Whether ``handle`` holds a tar, compressed or not: its first block is a tar
+    header.
+
+    One block is read, through the same decompressor and bounded stream the
+    listing reads through (_tar_stream), so the probe decompresses and holds no
+    more than that block. ``tarfile.is_tarfile`` would open the archive and read
+    its first member's header whole: a pax header or a GNU long name is read to
+    the size it declares, before any bound the converter puts on header reads
+    exists. Content the decompressor or the stream refuses is not a tar the
+    converter reads; the caller records why when the name says it should be one.
+    The handle is left at its start.
+    """
+    handle.seek(0)
     try:
-        tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
-    except tarfile.HeaderError:
+        with _tar_stream(handle) as stream:
+            block = stream.read(tarfile.BLOCKSIZE)
+    except Exception:
         return False
-    return True
+    finally:
+        handle.seek(0)
+    # A file named as a tar whose first block is zeros is an empty tar, as
+    # tarfile.open reads it (``is_tarfile`` says True): extracted to nothing.
+    return _is_tar_header(block, empty_is_tar=True)
 
 
 def _base_name(name: str) -> str:
@@ -655,6 +1038,36 @@ def _archive_suffix(name: str) -> str:
     """A path's last suffix, lowercased, after _base_name; empty when it has none."""
     base = _base_name(name)
     return base.rsplit(".", 1)[-1].lower() if "." in base else ""
+
+
+def _member_is_scannable(member_name: str) -> bool:
+    """Whether some scanner reads an archive member of this name, so extracting it
+    puts it before one: by its extension (KNOWN_SCANNABLE_EXTENSIONS and
+    SCANNABLE_MEMBER_SUFFIXES), or by its name where it has no extension
+    (SCANNABLE_MEMBER_NAMES), or by its stem where the name carries a variant
+    suffix: a Dockerfile, Containerfile or Makefile with a stage or variant
+    (``Dockerfile.prod``, ``Makefile_linux``), a key file with a backup suffix
+    (``id_rsa.old``), an environment file with a stage (``.env.local``). Names
+    are read through ``_base_name`` and ``_archive_suffix``, the spelling
+    authorities, and compared case-folded."""
+    suffix = _archive_suffix(member_name)
+    if suffix in KNOWN_SCANNABLE_EXTENSIONS or suffix in SCANNABLE_MEMBER_SUFFIXES:
+        return True
+    base = _base_name(member_name).casefold()
+    if base in _SCANNABLE_MEMBER_NAMES_FOLDED:
+        return True
+    if base.startswith("."):
+        # A dotfile's stem runs to its second ".": .env.local is an .env file.
+        return "." + base[1:].split(".", 1)[0] in _SCANNABLE_DOTFILE_STEMS
+    stem = base.split(".", 1)[0]
+    if stem in _SCANNABLE_MEMBER_STEMS:
+        return True
+    if stem.startswith("id_"):
+        # A key name carries its own underscore, so a variant is read before
+        # "-" only (id_ed25519-2024); id_rsa.old was admitted by the "." split.
+        return stem.split("-", 1)[0] in _SCANNABLE_MEMBER_STEMS
+    # Dockerfile-prod, Makefile_linux: the first word before "-" or "_".
+    return re.split(r"[-_]", stem, maxsplit=1)[0] in _SCANNABLE_MEMBER_STEMS
 
 
 def _is_archive_name(name: str) -> bool:
@@ -688,12 +1101,14 @@ def archives_extracted_whole(context: object) -> FrozenSet[str]:
     none left out because no scanner reads its extension. A member left out because
     an ignore path names it still counts, since it is left out on purpose.
 
-    snyk-code's copy of the source leaves out exactly these, because their members
-    reach Snyk with the converted files, where ignore paths apply member by member.
-    The record lives on the run's PluginContext, so it is empty when this run's
-    convert phase did not run the converter (it is off, or the phase was left out)
-    and holds no archive the converter refused, failed on or could not read; each
-    of those stays in the copy.
+    For a consumer that copies the source whole, such as snyk-code's upload: such
+    a copy may leave out exactly these, because their members reach the scanner
+    with the converted files, where ignore paths apply member by member. No
+    scanner in this tree reads the record yet, so every archive still goes in
+    such a copy as it is. The record lives on the run's PluginContext, so it is
+    empty when this run's convert phase did not run the converter (it is off, or
+    the phase was left out) and holds no archive the converter refused, failed on
+    or could not read; each of those is for the copy to keep.
     """
     return frozenset(getattr(context, _EXTRACTED_WHOLE, None) or ())
 
@@ -714,11 +1129,14 @@ def archive_kind(name: str, handle: BinaryIO) -> Optional[Literal["zip", "tar"]]
     file, compressed or not, and None for one it does not extract (a .gz of one
     file, or a file that only has an archive's name).
 
-    convert() extracts by this, and snyk-code's copy of the source leaves out each
-    file it accepts: the members reach Snyk with the converted files, where ignore
-    paths apply to them one by one. The handle is left at its start. Names are
+    convert() extracts by this, and a consumer that copies the source whole may
+    leave out each file it accepts (archives_extracted_whole): the members reach
+    the scanner with the converted files, where ignore paths apply to them one by
+    one. The handle is left at its start. Names are
     read through ``_base_name``, the spelling authority, so a trailing dot or
-    space does not change the kind.
+    space does not change the kind. A tar is told by its first block, read
+    through the bounded stream (_holds_a_tar), not by opening it with tarfile,
+    which reads the first header whole.
     """
     try:
         if not is_archive_name(name):
@@ -727,7 +1145,7 @@ def archive_kind(name: str, handle: BinaryIO) -> Optional[Literal["zip", "tar"]]
         if _base_name(name).lower().endswith(".zip") and zipfile.is_zipfile(handle):
             return "zip"
         handle.seek(0)
-        return "tar" if tarfile.is_tarfile(handle) else None
+        return "tar" if _holds_a_tar(handle) else None
     finally:
         handle.seek(0)
 
@@ -746,13 +1164,52 @@ def _named_kind(name: str) -> Optional[str]:
 
 
 _MEMBER_ABSOLUTE = "its path is absolute"
+_MEMBER_NUL = "its path holds a NUL character, which no file name can"
 _MEMBER_PARENT = "its path contains a '..' component"
+_MEMBER_ENCRYPTED = "it is encrypted, and an encrypted member is not extracted"
 _MEMBER_ESCAPES = "it would be extracted outside the destination directory"
 _MEMBER_LINK = "it is a symbolic or hard link"
 _MEMBER_NOT_REGULAR = "it is not a regular file"
 _MEMBER_SPARSE_BEYOND_SIZE = (
     "it is a sparse file whose map places data beyond the size it declares, or "
     "writes the same bytes twice"
+)
+#: How a later member bound for the path an earlier member took is told apart: it
+#: is written beside the earlier one under a numbered name, so both are scanned.
+#: One unpacker keeps the first of two members with one name and another keeps
+#: the last, so scanning only one would leave out the bytes a consumer may get.
+_MEMBER_RENAMED = (
+    "an earlier member of the archive is extracted to the same path, so this one "
+    "is written as '{renamed}' and both are scanned"
+)
+#: The same case for a member given as a bare name: there is no member object to
+#: rename, so the later name is refused instead of being written over the earlier.
+_MEMBER_SAME_PATH = (
+    "an earlier member of the archive is extracted to the same path, and a member "
+    "given by name alone cannot be renamed beside it"
+)
+#: A member whose path runs through a path an earlier member of the archive is
+#: written to as a file (``x.js`` before ``x.js/y.js``), and a member written as a
+#: file to a path earlier members are extracted below (``a/b.js`` before ``a``).
+#: Each is refused alone: the extractor fails on it, and an archive holding such a
+#: pair used to lose every member, those already written included, so anyone who
+#: could commit an archive could keep all of its content from being scanned by
+#: adding ``a`` and ``a/b``. inspect_members reads every name before anything is
+#: written, so the pair is known in time.
+_MEMBER_UNDER_A_FILE = (
+    "its path runs through '{path}', which an earlier member of the archive is "
+    "extracted to as a file"
+)
+_MEMBER_OVER_A_DIRECTORY = (
+    "earlier members of the archive are extracted below its path, so it cannot "
+    "be written there as a file"
+)
+#: The one line that stands for the renamed members past MEMBER_REFUSALS_LISTED,
+#: so an archive of thousands of repeated names does not log a line apiece.
+_MEMBERS_RENAMED_UNLISTED = (
+    "{count} more members are each extracted to the same path as an earlier "
+    "member of the archive, so each is written under a numbered name beside it "
+    "and all are scanned"
 )
 _NOT_EXTRACTED = (
     "it is an archive or compressed file of a format that is not extracted (the "
@@ -887,14 +1344,125 @@ def _failure_reason(error: Exception, target: Optional[Path]) -> str:
     return f"{type(error).__name__}: {error}"
 
 
+#: The errors that say the ARCHIVE cannot be read: a damaged or truncated zip, tar
+#: or compressed stream, a compression method zipfile does not implement, or
+#: names that are not text. An error of any other type during extraction (no
+#: space or no permission in the work directory, a link the filesystem guard
+#: refused, a resource limit, a defect) is the run's, not the archive's.
+_ARCHIVE_UNREADABLE_ERRORS: Tuple[type, ...] = (
+    _UnreadableArchive,
+    zipfile.BadZipFile,
+    tarfile.TarError,
+    EOFError,
+    gzip.BadGzipFile,
+    zlib.error,
+    lzma.LZMAError,
+    UnicodeDecodeError,
+    NotImplementedError,
+)
+
+#: The OSError numbers that say the RUN could not write: the work directory is
+#: full, over quota, read-only, or not this user's to write, the process or the
+#: host is out of file descriptors or memory, the device failed, or a path is
+#: busy. Every other OSError raised while an archive is extracted comes from the
+#: archive: a member name a filesystem refuses (too long, not valid in its
+#: encoding), a member that names a file where an earlier member made a directory
+#: or the reverse, a decompressor's "Invalid data stream" (BZ2File raises OSError
+#: for a damaged bz2 stream). A run's failure is never accepted by a suppression,
+#: so an errno left out of this set would let the host's own fault be waived.
+_RUN_ERRNOS = frozenset(
+    {
+        errno.ENOSPC,
+        errno.EDQUOT,
+        errno.EACCES,
+        errno.EPERM,
+        errno.EROFS,
+        errno.EMFILE,
+        errno.ENFILE,
+        errno.EIO,
+        errno.ENOMEM,
+        errno.EBUSY,
+    }
+)
+
+#: Decompressor error classes read by name: the zstd module is optional and its
+#: error class is imported only where it is used (_zstd_file_class).
+_DECOMPRESSOR_ERROR_NAMES = frozenset({"ZstdError"})
+
+
+def _failure_kind(error: Exception) -> Literal["input", "tool"]:
+    """Whether a failure to extract an archive is about the archive ("input") or
+    about the run ("tool").
+
+    The kind decides who may waive the completeness gate: an ``ash-unconverted-input``
+    suppression on the archive's path accepts an INPUT error, an archive the
+    operator has reviewed and knows cannot be read, and never a TOOL error, which
+    says this run could not do its work (the work directory full or unwritable,
+    a guard refusing a path, memory exhausted, a defect): accepting that would
+    hide a loss of coverage no review of the archive explains, and the record
+    would say the archive was at fault. An OSError is read by its number: the
+    run's when it names the work directory's state (_RUN_ERRNOS), the archive's
+    otherwise.
+    """
+    if isinstance(error, _ARCHIVE_UNREADABLE_ERRORS):
+        return "input"
+    if type(error).__name__ in _DECOMPRESSOR_ERROR_NAMES:
+        return "input"
+    if isinstance(error, OSError):
+        return "tool" if error.errno in _RUN_ERRNOS else "input"
+    return "tool"
+
+
+#: The most bytes of UTF-8 an archive's folded path may take in the name of the
+#: directory it is extracted into (_target_name). A file name is 255 bytes at most
+#: on the common filesystems, and the rest of the name is a digest where one is
+#: added and the counter _unused_target may append.
+_TARGET_NAME_MAX_BYTES = 200
+#: How many characters of the archive path's SHA-256 tell two cut names apart.
+_TARGET_DIGEST_CHARS = 12
+
+
+def _target_name(archive_file: str, archive_display: str) -> str:
+    """The name of the directory ``archive_file`` is extracted into, under
+    ``results_dir``: ``archive_display``, its path relative to the scanned tree,
+    folded into one component (get_normalized_filename), and where that is
+    longer than _TARGET_NAME_MAX_BYTES, cut to that and given a digest of the
+    same path, so two cut names stay apart. The folded path was the one relative
+    to the process working directory, so a run from outside the tree wrote the
+    host's absolute path into the directory's name and two runs named one
+    archive two ways; and a deep or absolute path ran past the 255 bytes a file
+    name may take, so making the directory failed and the archive was recorded
+    as a failed input for the length of its own path.
+    """
+    folded = get_normalized_filename(archive_display)
+    if len(folded.encode("utf-8")) <= _TARGET_NAME_MAX_BYTES:
+        return folded
+    cut = (
+        folded.encode("utf-8")[:_TARGET_NAME_MAX_BYTES]
+        .decode("utf-8", "ignore")
+        .rstrip("-_")
+    )
+    digest = hashlib.sha256(
+        archive_display.encode("utf-8", "surrogateescape")
+    ).hexdigest()[:_TARGET_DIGEST_CHARS]
+    ASH_LOGGER.debug(
+        shown_on_one_line(
+            f"Extracting {archive_display} under {cut}-{digest}: its folded "
+            "path is longer than a file name may be"
+        )
+    )
+    return f"{cut}-{digest}"
+
+
 def _unused_target(results_dir: Path, name: str) -> Path:
     """``results_dir / name``, or with ``-2``, ``-3`` ... appended if that exists.
 
-    The name comes from get_normalized_filename, which folds ``/`` and ``.`` to
-    ``__`` and other runs of non-word characters to ``-``, so two archives can map
-    to one name (``a b.zip`` and ``a-b.zip``). Each archive is extracted into a
-    directory no other archive wrote, so removing it on a failure removes only what
-    this archive wrote, and two archives never overwrite each other's members.
+    The name comes from _target_name: get_normalized_filename, which folds ``/``
+    and ``.`` to ``__`` and other runs of non-word characters to ``-``, so two
+    archives can map to one name (``a b.zip`` and ``a-b.zip``), cut where it is
+    too long for a file name. Each archive is extracted into a directory no
+    other archive wrote, so removing it on a failure removes only what this
+    archive wrote, and two archives never overwrite each other's members.
     """
     target = results_dir / name
     counter = 2
@@ -913,9 +1481,8 @@ def member_source_path(
 
     *archive* is the archive's path relative to the scanned tree, with ``/``. The
     member's extracted path, ``archive/<the archive's folded name>/<member>`` below
-    ASH's work directory, follows the directory ASH runs from
-    (get_shortest_name), so an ignore path written against it matches from one
-    directory and not another; this one does not move.
+    ASH's work directory, is ASH's own layout, not the tree's; an ignore path is
+    written in the tree's terms, so this is the path it is matched against.
 
     The member is named by the file its extraction writes on this host. Its name is
     split where the extractor splits it, on ``/`` and on the host's separators, and
@@ -932,21 +1499,178 @@ def member_source_path(
     written for the file there, or a tree pattern such as ``vendor/**``, would
     silently leave a different file inside the archive out of the scan.
     """
-    separators = {"/", os.sep} | ({os.altsep} if os.altsep else set())
+    return f"{archive}/{_member_written_path(member_name, kind)}"
+
+
+def _member_written_path(
+    member_name: str, kind: Optional[Literal["zip", "tar"]] = None
+) -> str:
+    """The path below the extraction directory that a member of this name is
+    written to, with ``/`` separators: the member's name split where the
+    extractor splits it, less its empty and ``.`` parts, a leading ``/``, and for a
+    zip its ``..`` parts, as zipfile drops them. See member_source_path. Two
+    members whose names read the same here are written to one file.
+    """
     parts = [member_name]
-    for separator in separators:
+    for separator in _written_separators():
         parts = [piece for part in parts for piece in part.split(separator)]
     dropped = {"", ".", ".."} if kind == "zip" else {"", "."}
-    member = "/".join(part for part in parts if part not in dropped)
-    return f"{archive}/{member}"
+    if kind == "zip" and _on_windows():
+        # zipfile writes the member's name on Windows with the characters the
+        # host forbids replaced and each part's trailing dots and spaces taken
+        # off (its _sanitize_windows_name), so the file written is named by
+        # that spelling, and an ignore path written for it has to match it.
+        parts = [part.translate(_WINDOWS_NAME_TABLE).rstrip(" .") for part in parts]
+    return "/".join(part for part in parts if part not in dropped)
+
+
+def _written_separators() -> Set[str]:
+    """The characters the extractor splits a member's name on, on this host: ``/``
+    and the host's own separators. On POSIX that is ``/`` alone, so a backslash is
+    part of a name there (_member_written_path)."""
+    return {"/", os.sep} | ({os.altsep} if os.altsep else set())
+
+
+def _written_key(member_name: str, kind: Optional[Literal["zip", "tar"]]) -> str:
+    """The key two members are compared by to tell whether they are written to one
+    file: the written path (_member_written_path), as the host compares names
+    (os.path.normcase) and case-folded, since the output directory may sit on a
+    case-insensitive filesystem (APFS, NTFS), where ``X.js`` and ``x.js`` are one
+    file. On a case-sensitive one the fold only renames a member that would have
+    been a second file, so nothing is lost either way.
+    """
+    return os.path.normcase(_member_written_path(member_name, kind)).casefold()
+
+
+def _written_prefix_keys(
+    member_name: str, kind: Optional[Literal["zip", "tar"]]
+) -> List[str]:
+    """The keys (_written_key) of the directories a member of this name is written
+    below, the top first: ``a`` and ``a/b`` for ``a/b/c.js``, none for ``c.js``.
+    A member written to one of them as a file, or a member whose own key is one
+    of another member's, cannot be extracted beside that member: the extractor
+    fails on whichever comes later (NotADirectoryError, IsADirectoryError), so
+    inspect_members refuses that one alone instead.
+    """
+    parts = _member_written_path(member_name, kind).split("/")
+    return [
+        _written_key("/".join(parts[:count]), kind) for count in range(1, len(parts))
+    ]
+
+
+def _named_member(
+    member: "str | zipfile.ZipInfo | tarfile.TarInfo",
+) -> Optional[Tuple[str, Optional[Literal["zip", "tar"]]]]:
+    """The member's name and the archive kind it comes from, or None for a member
+    of a type inspect_members does not read."""
+    if isinstance(member, tarfile.TarInfo):
+        return member.name, "tar"
+    if isinstance(member, zipfile.ZipInfo):
+        return member.filename, "zip"
+    if isinstance(member, str):
+        return member, None
+    return None
+
+
+def _renamed_member_name(
+    member_name: str,
+    kind: Optional[Literal["zip", "tar"]],
+    taken: Set[str],
+    written: Dict[str, str],
+    counters: Dict[str, int],
+) -> str:
+    """``member_name`` with a counter before its extension (``vendor/m~2.js``,
+    ``Dockerfile~2``): the first such name that no member of the archive is named
+    by (``taken``, every member's _written_key, read before any is renamed) and no
+    earlier member is written to (``written``). A name only ``written`` was checked
+    against could be a later member's own, which then lost its name to the rename.
+
+    The directory part is kept, split where the extractor splits it
+    (_written_separators), so the member lands beside the one it would have
+    overwritten: on POSIX ``a\\b.js`` is one file at the archive's top and is
+    renamed ``a\\b~2.js``, not moved under a directory ``a``.
+
+    ``counters`` holds, per written key, the counter the next rename of that key
+    starts from, so N members bound for one path cost N names, not N squared.
+    """
+    cut = max(member_name.rfind(separator) for separator in _written_separators())
+    head, base = member_name[: cut + 1], member_name[cut + 1 :]
+    stem, dot, extension = base.rpartition(".")
+    key = _written_key(member_name, kind)
+    counter = counters.get(key, 2)
+    while True:
+        if stem and dot:
+            renamed_base = f"{stem}~{counter}.{extension}"
+        else:
+            renamed_base = f"{base}~{counter}"
+        renamed = f"{head}{renamed_base}"
+        counter += 1
+        renamed_key = _written_key(renamed, kind)
+        if renamed_key not in taken and renamed_key not in written:
+            counters[key] = counter
+            return renamed
+
+
+#: The characters Windows forbids in a file name; zipfile writes each as ``_``.
+_WINDOWS_ILLEGAL_NAME_CHARACTERS = ':<>|"?*'
+_WINDOWS_NAME_TABLE = str.maketrans(
+    dict.fromkeys(_WINDOWS_ILLEGAL_NAME_CHARACTERS, "_")
+)
+
+
+def _on_windows() -> bool:
+    """Whether the extractor writes names as Windows takes them (see
+    _member_written_path); a function, so a test can read the other host's shape."""
+    return os.name == "nt"
+
+
+#: The zip general-purpose flag that marks a member as encrypted.
+_ZIP_ENCRYPTED_FLAG = 0x1
+
+#: The compression methods zipfile extracts; anything else (Deflate64, PPMd,
+#: an implode or shrink of old tools) raises NotImplementedError out of
+#: extractall.
+_ZIP_METHODS_EXTRACTED = frozenset(
+    method
+    for method in (
+        zipfile.ZIP_STORED,
+        zipfile.ZIP_DEFLATED,
+        zipfile.ZIP_BZIP2,
+        zipfile.ZIP_LZMA,
+        getattr(zipfile, "ZIP_ZSTANDARD", None),
+    )
+    if method is not None
+)
+
+
+def _zip_member_problem(member: zipfile.ZipInfo) -> Optional[str]:
+    """Why zipfile could not extract this member's content, or None: it is
+    encrypted (zipfile asks for a password and the converter has none), or its
+    compression method is one zipfile does not implement. ``extractall`` raised
+    on the first such member and the converter then removed every member it had
+    already written, so one such member lost the whole archive; refused one by
+    one here, the rest of the archive is extracted and the refusal is recorded.
+    """
+    if member.flag_bits & _ZIP_ENCRYPTED_FLAG:
+        return _MEMBER_ENCRYPTED
+    if member.compress_type not in _ZIP_METHODS_EXTRACTED:
+        return (
+            f"its compression method ({member.compress_type}) is not one zipfile "
+            "can extract"
+        )
+    return None
 
 
 def _member_name_problem(member_name: str) -> Optional[str]:
     """Why an archive member's name is unsafe to extract, or None.
 
     Read on the text with both separators, so a name written on Windows is judged
-    the same way on every platform.
+    the same way on every platform. A NUL in the name is refused first: no file
+    system takes one, and the escape check below (Path.resolve) raised
+    ValueError on it, which failed the whole archive rather than the member.
     """
+    if "\x00" in member_name:
+        return _MEMBER_NUL
     normalized = member_name.replace("\\", "/")
     if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
         return _MEMBER_ABSOLUTE
@@ -1053,16 +1777,46 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
         return False
 
+    def _ignore_paths_skipping_scanning(self) -> List[IgnorePathWithReason]:
+        """The ignore paths that keep an archive, or a member of one, out of the scan.
+
+        One reading for the archive itself (_skipped) and for its members
+        (inspect_members): an expired entry no longer applies
+        (active_ignore_paths); of the rest, only the entries the operator supplied
+        skip extraction, and --ignore-suppressions lifts them all
+        (ignore_paths_that_skip_scanning). A client-supplied entry skips nothing
+        here: a delivered tree's own config must not keep its members out of the
+        scan, so the member is extracted and scanned and its findings are
+        reported. For a file in the tree the SARIF step then marks such a finding
+        suppressed under the client's entry; for an archive member it does not,
+        because the finding sits at the member's extracted path under the work
+        directory and the step has no mapping from that path back to the
+        member's source path (member_source_path), so the finding is reported as
+        an ordinary result. That is the safe side (nothing the client's config
+        names is hidden), and the mapping is a recorded gap.
+        """
+        return ignore_paths_that_skip_scanning(
+            active_ignore_paths(self.context.config.global_settings.ignore_paths),
+            ignore_suppressions=self.context.ignore_suppressions,
+        )
+
     def _skipped(self, path: str) -> bool:
         """Whether ``path`` from the scan set is a directory or under an ignore path."""
         if Path(path).is_dir():
             ASH_LOGGER.debug(f"Skipping directory: {path}")
             return True
-        for ignore_path in ignore_paths_that_skip_scanning(
-            active_ignore_paths(self.context.config.global_settings.ignore_paths),
-            ignore_suppressions=self.context.ignore_suppressions,
-        ):
+        ignore_paths = self._ignore_paths_skipping_scanning()
+        if not ignore_paths:
+            return False
+        try:
             rel_path = Path(path).relative_to(self.context.source_dir).as_posix()
+        except ValueError:
+            # Not lexically under the tree (reached through a link, or spelled
+            # another way): an ignore path is written relative to the tree and
+            # names no such path. Raising here made the archive a failed input
+            # of the run's kind with nothing wrong with the archive.
+            return False
+        for ignore_path in ignore_paths:
             if ignore_path_matches(rel_path, ignore_path.path):
                 ASH_LOGGER.debug(
                     f"Skipping conversion of ignored path: {path} due to global ignore_path '{ignore_path.path}' with reason '{ignore_path.reason}'"
@@ -1103,6 +1857,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         stopped: List[int],
         budget_spent: bool = False,
         ended: Optional[List[int]] = None,
+        archive_file: Optional[str] = None,
     ) -> None:
         """Record ``archive``, a tar, as extracted only in part. Where the header at
         byte ``unreadable[0]`` (the first that could not be read) named a member,
@@ -1112,8 +1867,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         shared budget of them (``budget_spent``), nothing after that was.
 
         Its results row names the byte, and the archive is then not recorded whole
-        (archives_extracted_whole), so snyk-code's copy keeps it. The warning names
-        the archive on one line, since its name comes from the scanned tree.
+        (archives_extracted_whole), so a consumer that copies the source whole
+        keeps it. The warning names the archive on one line, since its name comes
+        from the scanned tree.
         """
         parts = []
         if unreadable:
@@ -1153,8 +1909,20 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # the unextracted remainder is tried-and-could-not coverage lost, so it
         # is a FAILED input (a refusal without a limit is invisible to the
         # gate). The extracted members stay, and archives_extracted_whole
-        # holds the archive back from whole-archive consumers.
-        self.record_failed_input(archive, f"it was extracted only in part: {detail}")
+        # holds the archive back from whole-archive consumers. Recorded by the
+        # path the scan set gave, as every failed input is: record_failed_input
+        # relativizes it against the tree, and the display name, relativized
+        # again, would resolve against the working directory instead. An
+        # archive that cannot be read whole is an INPUT error (there is no tool
+        # here), which an ash-unconverted-input suppression on the archive's
+        # path may accept. A listing stopped by the RUN's shared budget of
+        # skipped blocks is the run's doing, not the archive's: that record is
+        # a TOOL error, which no suppression accepts.
+        self.record_failed_input(
+            archive if archive_file is None else archive_file,
+            f"it was extracted only in part: {detail}",
+            kind="tool" if (stopped and budget_spent) else "input",
+        )
 
     def inspect_members(
         self,
@@ -1169,19 +1937,31 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         A member is refused, with a warning naming it, when it is a link (a tar
         symlink or hard link, or a zip entry whose mode marks it a symlink), is not a
         regular file, is a sparse tar member whose map reaches past its declared
-        size, or has a name that is absolute, contains ``..`` or would land outside
+        size, is a zip entry zipfile cannot extract (encrypted, or compressed by a
+        method it does not implement; _zip_member_problem), or has a name that is
+        absolute, holds a NUL, contains ``..`` or would land outside
         ``target_path``, or, with ignore paths set, one that was not read as
         UTF-8 (``member_name_not_utf_8``), which no ignore path can be compared with.
         A member named as an archive or compressed file (a suffix in
         ``NESTED_ARCHIVE_SUFFIXES``, in any case) is refused as well: extraction is
         one level deep, and the refusal is what reports its contents as not scanned.
-        Members without a scannable extension are left out
+        Members no scanner reads (_member_is_scannable: not by their extension,
+        and not by their name where they have none) are left out
         without a refusal, so a refusal is only reported for a member that would
         otherwise have been extracted; each one no ignore path names is added to
         ``unscannable``, when it is given, since its archive was then not extracted
-        whole. A member an ignore path names in the scanned tree's terms
-        (member_source_path) is left out too: it is never extracted, so no scanner
-        reads it, snyk-code included, which would upload it.
+        whole. A notebook member is extracted as it is and added there too: the
+        jupyter converter reads the scan set, not this converter's output, so its
+        code cells reach no scanner as code. A member an ignore path names in the
+        scanned tree's terms (member_source_path) is left out too: it is never
+        extracted, so no scanner reads it, snyk-code included, which would upload
+        it. A member written to the same path as an earlier member of the archive
+        (``vendor//m.js`` after ``vendor/m.js``, a tar's repeated name, or two
+        spellings of one name on a case-insensitive filesystem) is written beside
+        the earlier one under a numbered name (``vendor/m~2.js``,
+        _renamed_member_name) that no member of the archive is named by, with a
+        warning naming both, so neither silently overwrites the other and both are
+        scanned; past MEMBER_REFUSALS_LISTED such members one line counts the rest.
 
         Args:
             members: The archive's members.
@@ -1199,6 +1979,27 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # Refusals by reason: how many were listed, and how many more were not.
         listed: Dict[str, int] = {}
         unlisted: Dict[str, int] = {}
+        # The path each admitted member is written to (_written_key: as the host
+        # compares names, case-folded), so a later member bound for the same
+        # file is written beside the earlier one under a numbered name, and both
+        # are scanned, rather than one written over the other.
+        written: Dict[str, str] = {}
+        # The directories the admitted members are written below (every prefix
+        # of their written paths, _written_prefix_keys), so a later member bound
+        # for one of them as a file, or one whose path runs through an admitted
+        # member's file, is refused alone instead of failing the whole archive
+        # at extraction (NotADirectoryError, IsADirectoryError).
+        directories: Set[str] = set()
+        # Every member's key before any is renamed, so a renamed member never
+        # takes the name of a member that comes later in the archive.
+        taken: Set[str] = set()
+        for member in members:
+            named = _named_member(member)
+            if named is not None:
+                taken.add(_written_key(*named))
+        # Per written key, where the next rename of it starts counting.
+        rename_counters: Dict[str, int] = {}
+        renamed_count = 0
         for member in members:
             kind: Optional[Literal["zip", "tar"]] = None
             if isinstance(member, tarfile.TarInfo):
@@ -1219,7 +2020,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 # it would not become a link, but it is not a file either.
                 is_link = stat.S_ISLNK(member.external_attr >> 16)
                 is_regular = True
-                content_problem = None
+                content_problem = _zip_member_problem(member)
             elif isinstance(member, str):
                 member_name = member
                 is_link = False
@@ -1238,10 +2039,15 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             # Through _archive_suffix (the spelling authority), so a member's
             # trailing dot or case does not hide a scannable file.
             member_ext = _archive_suffix(member_name)
-            if not nested and member_ext not in KNOWN_SCANNABLE_EXTENSIONS:
+            if not nested and not _member_is_scannable(member_name):
                 if ignored_by is None and unscannable is not None:
                     unscannable.append(member_name)
                 continue
+            if member_ext == "ipynb" and ignored_by is None and unscannable is not None:
+                # Extracted below as it is, but not converted: the jupyter
+                # converter reads the scan set, so no scanner reads this
+                # notebook's code as code, and the archive is not whole.
+                unscannable.append(member_name)
 
             if ignored_by is not None:
                 ASH_LOGGER.debug(
@@ -1267,6 +2073,55 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 problem = content_problem
             if problem is None and nested:
                 problem = _MEMBER_NESTED_ARCHIVE
+            if problem is None:
+                destination = _written_key(member_name, kind)
+                prefixes = _written_prefix_keys(member_name, kind)
+                through = next((key for key in prefixes if key in written), None)
+                if through is not None:
+                    # x.js before x.js/y.js: the later member cannot be written
+                    # under a file, and is refused alone, naming the file.
+                    problem = _MEMBER_UNDER_A_FILE.format(path=written[through])
+                elif destination in directories:
+                    # a/b.js before a: the later member cannot be written as a
+                    # file where the earlier members' directory stands.
+                    problem = _MEMBER_OVER_A_DIRECTORY
+                elif destination in written and isinstance(member, str):
+                    # A bare name has no member object whose name the extractor
+                    # would read, so it cannot be renamed beside the earlier
+                    # member; the later name is refused, as every duplicate was
+                    # before members were renamed.
+                    problem = _MEMBER_SAME_PATH
+                elif destination in written:
+                    # Renamed on the member object itself: zipfile and tarfile
+                    # write each member to the path its name holds, so the
+                    # renamed member lands beside the earlier one and the scan
+                    # reads both, whichever of the two a consumer's unpacker
+                    # keeps. The notice names the archive when inspect_members
+                    # knows it.
+                    renamed = _renamed_member_name(
+                        member_name, kind, taken, written, rename_counters
+                    )
+                    renamed_count += 1
+                    if renamed_count <= MEMBER_REFUSALS_LISTED:
+                        ASH_LOGGER.warning(
+                            shown_on_one_line(
+                                f"Archive member '{member_name}'"
+                                + (f" of '{archive}'" if archive is not None else "")
+                                + ": "
+                                + _MEMBER_RENAMED.format(renamed=renamed)
+                            )
+                        )
+                    if isinstance(member, tarfile.TarInfo):
+                        member.name = renamed
+                    else:
+                        member.filename = renamed
+                    member_name = renamed
+                    destination = _written_key(renamed, kind)
+                if problem is None:
+                    written[destination] = member_name
+                    # A rename changes the base name alone, so the prefixes of
+                    # the name as read are the renamed member's too.
+                    directories.update(prefixes)
             if problem is not None:
                 if listed.get(problem, 0) < MEMBER_REFUSALS_LISTED:
                     listed[problem] = listed.get(problem, 0) + 1
@@ -1277,9 +2132,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
             # The member's name, not the member object: its str is the repr,
             # which spells the name tar's or zip's own way beside an address.
-            ASH_LOGGER.verbose(
-                shown_on_one_line(f"Found .{member_ext} file: {member_name}")
-            )
+            label = f".{member_ext} file" if member_ext else "file"
+            ASH_LOGGER.verbose(shown_on_one_line(f"Found {label}: {member_name}"))
             filtered_members.append(member)
         for problem, count in unlisted.items():
             if archive is None:
@@ -1288,6 +2142,15 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 self.record_refused_input(
                     TreeInputRefused(archive, problem), unlisted_members=count
                 )
+        if renamed_count > MEMBER_REFUSALS_LISTED:
+            ASH_LOGGER.warning(
+                shown_on_one_line(
+                    (f"Archive '{archive}': " if archive is not None else "")
+                    + _MEMBERS_RENAMED_UNLISTED.format(
+                        count=renamed_count - MEMBER_REFUSALS_LISTED
+                    )
+                )
+            )
         return filtered_members
 
     def convert(self) -> List[Path]:
@@ -1308,12 +2171,19 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             f"Searching for archive files in search_path within the ASH scan set: {self.context.source_dir}"
         )
 
-        # Find all archive files to scan from the scan set
+        # Find all archive files to scan from the scan set. The workspace's output
+        # directory goes with the scan's own: when this run's recorded list cannot
+        # be read back, the walk here leaves it out as the orchestrator's did,
+        # instead of extracting archives from another project's output.
+        workspace_output_dir = getattr(self.context, "workspace_output_dir", None)
         archive_files = scan_set(
             source=self.context.source_dir,
             output=self.context.output_dir,
             honor_ignore_files=honors_ignore_files(self.context.config),
             run_id=getattr(self.context, "run_id", None),
+            workspace_output_dir=(
+                None if workspace_output_dir is None else str(workspace_output_dir)
+            ),
         )
         # Paths as the scan set gives them: stripping them would turn a file whose
         # name ends in a space into one that does not exist.
@@ -1355,9 +2225,13 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             return results
 
         self.results_dir.mkdir(parents=True, exist_ok=True)
-        ignore_paths = active_ignore_paths(
-            self.context.config.global_settings.ignore_paths
-        )
+        # The members are filtered by the same ignore paths as the archives
+        # themselves (_skipped): a client-supplied entry and, under
+        # --ignore-suppressions, every entry leaves a member in, so its findings
+        # are reported instead of the member never reaching a scanner (a
+        # member's finding under a client-supplied entry is reported unmarked;
+        # see _ignore_paths_skipping_scanning).
+        ignore_paths = self._ignore_paths_skipping_scanning()
         # Shared by every tar this conversion lists, so many small compressed
         # tars that each decompress to one listing's limit of blocks cost what a
         # few do.
@@ -1367,6 +2241,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
         # Shared by every archive below; only an archive that is extracted uses it.
         scan_budget = _ScanBudget()
+        # Each extraction directory and the archive it came from, recorded beside
+        # the output once the loop ends (record_converted_sources): a finding in
+        # an extracted member is placed by the archive under --changed-files-only.
+        sources: Dict[Path, str] = {}
         for archive_file in archive_files:
             # The target directory once this iteration has made it: a directory
             # no other archive wrote (see _unused_target), so a failure part way
@@ -1384,10 +2262,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 if self._skipped(archive_file):
                     continue
 
-                short_archive_file = get_shortest_name(archive_file)
-                normalized_archive_file = get_normalized_filename(short_archive_file)
                 target_path = _unused_target(
-                    Path(self.results_dir), normalized_archive_file
+                    Path(self.results_dir), _target_name(archive_file, archive_display)
                 )
                 ASH_LOGGER.verbose(
                     shown_on_one_line(
@@ -1433,11 +2309,16 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         and head[:2] == b"\x1f\x8b"
                         and not _gzip_holds_a_tar(archive_handle)
                     ):
-                        # One compressed file, not an archive of files.
+                        # One compressed file, not an archive of files. Its one
+                        # member is named by the ignore paths as any other is,
+                        # by the archive's path and then its own
+                        # (member_source_path), so an entry written for the
+                        # decompressed file keeps it out of the scan.
                         if not self.inspect_members(
                             [plain_gzip],
                             target_path=target_path,
                             archive=archive_display,
+                            ignore_paths=ignore_paths,
                         ):
                             continue
                         target_path.mkdir()
@@ -1446,6 +2327,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             archive_handle, target_path / plain_gzip, plain_gzip, budget
                         )
                         results.append(target_path)
+                        sources[target_path] = archive_display
                         scan_budget.commit(budget)
                         continue
 
@@ -1515,10 +2397,14 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             # Every member is admitted against the extraction limits
                             # as its header is read; its extended header has been
                             # applied to it by then, so it is dropped rather than
-                            # kept for every member until extraction.
+                            # kept for every member until extraction. Admitted for
+                            # the stored extent the pass skips where that exceeds
+                            # the declared size (_admitted_size).
                             tar_members = []
                             for member in tar_ref:
-                                budget.admit(member.name, member.size)
+                                budget.admit(
+                                    member.name, _admitted_size(member, tar_ref)
+                                )
                                 member.pax_headers = {}
                                 tar_members.append(member)
                                 tar_stream.allow_another_member()
@@ -1555,22 +2441,27 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                 stopped,
                                 budget_spent=skipped_blocks.spent,
                                 ended=ended,
+                                archive_file=archive_file,
                             )
                     elif _named_kind(archive_file) is not None:
                         # Named as an archive the converter extracts, and none can
                         # be read from it (a tar's first header is damaged, a .zip
                         # holds neither a zip nor a tar): none of it is read, and
-                        # snyk-code's copy holds it back, so its results row says
-                        # that no scanner reads it. A .gz of one file is no such
+                        # it is not recorded whole, so its results row says that
+                        # no scanner reads it. A .gz of one file is no such
                         # name, and is left to the scanners as it is. Recorded as
                         # a FAILED input, not a refusal: the completeness gate
                         # reads failed_inputs, and an archive that could not be
                         # read is coverage lost; a refusal without a limit is
-                        # invisible to it.
+                        # invisible to it. An input error, by the scan-set path
+                        # (see _record_extracted_in_part): no tool is involved,
+                        # and a reviewed ash-unconverted-input suppression may
+                        # accept the file.
                         self.record_failed_input(
-                            archive_display,
+                            archive_file,
                             f"it is named as {_named_kind(archive_file)} but "
                             "could not be read as one",
+                            kind="input",
                         )
                         continue
                     else:
@@ -1583,13 +2474,13 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
                 # Add the extracted directory to results
                 results.append(target_path)
+                sources[target_path] = archive_display
                 scan_budget.commit(budget)
                 if unscannable:
                     ASH_LOGGER.debug(
                         shown_on_one_line(
                             f"{archive_display} not extracted whole: no scanner "
-                            f"reads {len(unscannable)} of its members by their "
-                            "extension"
+                            f"reads {len(unscannable)} of its members as they are"
                         )
                     )
                 if (
@@ -1609,7 +2500,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     TreeInputRefused(archive_display, exceeded.reason),
                     limit=exceeded.option,
                 )
-            except IsADirectoryError as e:
+            except (IsADirectoryError, NotADirectoryError) as e:
+                # IsADirectoryError: a member named like a directory an earlier
+                # member made; NotADirectoryError: a member under a path an
+                # earlier member made a file (``x.js`` before ``x.js/y.js``).
+                # Both are the archive's layout.
                 if Path(archive_file).is_dir():
                     # The scan-set entry is a directory: nothing to extract.
                     ASH_LOGGER.debug(
@@ -1622,7 +2517,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     if created_target is not None:
                         shutil.rmtree(created_target, ignore_errors=True)
                     self.record_failed_input(
-                        archive_file, _failure_reason(e, created_target)
+                        archive_file, _failure_reason(e, created_target), kind="input"
                     )
             except Exception as e:
                 # Named for the converter, a .zip, .tar or .gz it could not read: a
@@ -1633,11 +2528,21 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 # scanners do not read a partial extraction as the archive.
                 # Recorded, not only logged: the completeness gate reads
                 # failed_inputs, and an archive that could not be extracted is
-                # coverage lost.
+                # coverage lost. As an INPUT error where the error says the
+                # archive cannot be read (_failure_kind): this converter runs no
+                # tool, so the default kind, "tool", told the operator to fix a
+                # tool that does not exist and let no ash-unconverted-input
+                # suppression accept the archive. An error of the run (no space
+                # or permission in the work directory, a guard's refusal, a
+                # defect) stays a TOOL error, which no suppression accepts.
                 if created_target is not None:
                     shutil.rmtree(created_target, ignore_errors=True)
                 self.record_failed_input(
-                    archive_file, _failure_reason(e, created_target)
+                    archive_file,
+                    _failure_reason(e, created_target),
+                    kind=_failure_kind(e),
                 )
 
+        if sources:
+            record_converted_sources(self.results_dir, self.context.work_dir, sources)
         return results

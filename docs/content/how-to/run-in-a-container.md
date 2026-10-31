@@ -102,11 +102,11 @@ The image installs ASH from source, chosen from how ASH was installed on the hos
 
 | Host install | Source of the image |
 |---|---|
-| From a git URL with a tag, such as `@v3.7.0` | That tag, cloned from GitHub when the image builds. |
+| From a git URL with a tag, such as `@v3.7.1` | That tag, cloned from GitHub when the image builds. |
 | From a git URL with a branch, such as `@main` | The tip of that branch when the image builds, which can differ from the commit installed on the host. |
 | From a git URL with no ref | The installed commit, fetched from GitHub by its commit ID. |
 | A clone of the ASH repository, an editable install of one, or `pip install <directory>` | That source tree, built with its own `Dockerfile`, so the image holds the same ASH as the host. |
-| Any other install, such as Homebrew, a wheel or sdist file, or an archive URL | The commit the package was built from, fetched by its commit ID. A package built outside a git checkout of ASH, such as from a source tarball, records no commit: the image then installs the release tag of the installed version, such as `v3.7.0`, and ASH logs a warning that this is a guess. A development or pre-release version has no release tag, so the build stops before it starts and asks for `--ash-revision-to-install`. |
+| Any other install, such as Homebrew, a wheel or sdist file, or an archive URL | The commit the package was built from, fetched by its commit ID. A package built outside a git checkout of ASH, such as from a source tarball, records no commit: the image then installs the release tag of the installed version, such as `v3.7.1`, and ASH logs a warning that this is a guess. A development or pre-release version has no release tag, so the build stops before it starts and asks for `--ash-revision-to-install`. |
 
 `--ash-revision-to-install` overrides the table with a tag, a branch, or a full
 40-character commit ID. It accepts letters, digits, dots, hyphens, underscores, and
@@ -322,8 +322,8 @@ the image with your registry's name:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-export ASH_IMAGE_NAME=registry.example.com/security/ash:3.7.0
-ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.7.0 \
+export ASH_IMAGE_NAME=registry.example.com/security/ash:3.7.1
+ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.7.1 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
@@ -337,10 +337,10 @@ context, so the image contains exactly the ref it cloned:
 
 <!-- doctest: illustrative reason="needs a container runtime and network access" -->
 ```bash
-git clone --depth 1 --branch v3.7.0 https://github.com/awslabs/automated-security-helper.git
+git clone --depth 1 --branch v3.7.1 https://github.com/awslabs/automated-security-helper.git
 cd automated-security-helper
 docker build --target non-root --build-arg UID=1001 --build-arg GID=1001 \
-  --tag registry.example.com/security/ash:3.7.0 .
+  --tag registry.example.com/security/ash:3.7.1 .
 ```
 
 Build arguments:

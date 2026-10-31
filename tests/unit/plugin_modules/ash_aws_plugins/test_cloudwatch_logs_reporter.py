@@ -374,12 +374,12 @@ def test_cloudwatch_logs_reporter_report_put_events_error(mock_boto3, ash_temp_p
     ):
         result = reporter.report(model)
 
-    # Verify error was logged
+    # Verify error was logged, with the failure's own text
     reporter._plugin_log.assert_called_once()
-    assert (
-        "Error when publishing results to CloudWatch Logs"
-        in reporter._plugin_log.call_args[0][0]
-    )
+    logged = reporter._plugin_log.call_args[0][0]
+    assert "Error when publishing results to CloudWatch Logs" in logged
+    assert "Invalid sequence token" in logged
 
-    # Verify result contains error message
-    assert "Invalid sequence token" in result
+    # A failed publish produces no report: None, never the error text, which
+    # the report phase would write to ash.cwlog.json as a report.
+    assert result is None

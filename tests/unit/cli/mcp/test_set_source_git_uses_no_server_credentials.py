@@ -11,8 +11,8 @@ variables. The required behavior:
   credential helper from any config scope, ``GIT_TERMINAL_PROMPT=0``, no system
   or global git config, no inherited proxy or token variables. Every git
   invocation of a delivery counts, including the fetch and checkout for a ref.
-* a non-null ``ssh_key_id`` the operator has not registered is refused. Nothing
-  registers keys yet, so every non-null id is refused.
+* a non-blank ``ssh_key_id`` the operator has not registered is refused. Nothing
+  registers keys yet, so every non-blank id is refused; ``""`` is unset.
 * local sources (``file://`` URLs and plain paths) are refused outright.
 * a remote host is refused unless it is on an operator-configured allowlist,
   which is empty by default.
@@ -375,6 +375,17 @@ class TestSshKeyId:
             _deliver(clean_policy_env, REMOTE_URLS[1], ssh_key_id="operator-key-1")
 
         assert not git.git_calls, "git ran for an ssh_key_id nobody registered"
+
+    @pytest.mark.unit
+    def test_an_empty_ssh_key_id_is_unset_and_the_clone_runs(
+        self, git, clean_policy_env
+    ) -> None:
+        """``ssh_key_id=""`` names no key, so it is read as omitted."""
+        _deliver(clean_policy_env, REMOTE_URLS[0], ssh_key_id="")
+
+        clone = git.git_calls[0]["cmd"]
+        assert "clone" in clone
+        assert clone[clone.index("--") + 1] == REMOTE_URLS[0]
 
 
 # ---------------------------------------------------------------------------

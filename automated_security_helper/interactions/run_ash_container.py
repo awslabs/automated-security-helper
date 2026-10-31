@@ -59,6 +59,7 @@ from automated_security_helper.core.enums import (
     ExportFormat,
 )
 from automated_security_helper.core.cancellation import (
+    CancelEvent,
     ScanCancelled,
     current_cancel_event,
     raise_if_cancelled,
@@ -81,6 +82,7 @@ from automated_security_helper.utils.console import (
 )
 from automated_security_helper.utils.subprocess_utils import (
     ALLOW_IN_TREE_TOOLS_ENV,
+    could_not_stop_sentence,
     create_completed_process,
     in_tree_tools_allowed,
     raise_called_process_error,
@@ -155,8 +157,10 @@ def _runner_marker_args(
     return args
 
 
-# Memoizes the buildx capability probe, keyed by resolved runner path.
-_BUILDX_SUPPORT_CACHE: dict[str, bool] = {}
+# Memoizes the buildx capability probe, keyed by the wrapper prefix and the resolved
+# runner path (the words, not their joined text: two different word lists can join
+# to the same string).
+_BUILDX_SUPPORT_CACHE: dict[tuple[str, ...], bool] = {}
 
 
 def _validate_ash_revision(revision: str) -> bool:
@@ -184,6 +188,10 @@ def _validate_ash_revision(revision: str) -> bool:
 
 #: Set on a result run_ash_container returns before any container ran.
 _NOT_STARTED_ATTR = "ash_container_not_started"
+
+#: Set on a failed result whose container may still be running, so the record of
+#: the container is kept for the next sweep (_execute_container).
+_MAY_STILL_RUN_ATTR = "ash_container_may_still_run"
 
 
 def _not_started(result):
@@ -308,9 +316,17 @@ def get_ash_revision(quiet: bool = False) -> str | None:
                 f"Found direct_url.json file for module @ {direct_url_json_path.as_posix()}"
             )
         try:
-            direct_url_json = json.loads(direct_url_json_path.read_text())
+            # Read as UTF-8, as _recorded_direct_url reads the same file: the two
+            # LOCAL decisions then read the same bytes the same way.
+            direct_url_json = json.loads(
+                direct_url_json_path.read_text(encoding="utf-8")
+            )
             if isinstance(direct_url_json, dict) and "url" in direct_url_json:
                 url = direct_url_json["url"]
+                if not isinstance(url, str):
+                    # Caught below: a record of the wrong shape falls back to the
+                    # recorded revision, as an unreadable one does.
+                    raise TypeError("the url in direct_url.json is not a string")
                 if url.startswith("file://") and _source_tree_in(direct_url_json):
                     info(
                         "ASH installed from local file path, building with LOCAL source"
@@ -324,7 +340,7 @@ def get_ash_revision(quiet: bool = False) -> str | None:
                     # build recorded follows below. Never LOCAL: a LOCAL build with
                     # no ASH tree would have nothing to build but the working
                     # directory, the repository being scanned.
-                    ASH_LOGGER.info(
+                    info(
                         "ASH was installed from a local path that holds no ASH source "
                         "tree, so the image installs the revision its package build "
                         "recorded"
@@ -339,6 +355,10 @@ def get_ash_revision(quiet: bool = False) -> str | None:
                         or vcs_info.get("commit_id")
                         or ASH_REPO_LATEST_REVISION
                     )
+                    if not isinstance(revision, str):
+                        raise TypeError(
+                            "the vcs_info revision in direct_url.json is not a string"
+                        )
                     return_val = revision
                     info(
                         f"Resolved source revision for ASH to use during container image build: {return_val}"
@@ -522,8 +542,14 @@ def validate_path(path: str | Path) -> Path:
     # Convert to absolute path
     abs_path = Path(path).resolve()
 
-    # Check if the path exists
-    if not abs_path.exists():
+    # Check if the path exists. A path that cannot be looked at (an unsearchable
+    # parent) is refused the same way, not raised past the caller's ValueError
+    # handling as a traceback.
+    try:
+        exists = abs_path.exists()
+    except OSError as e:
+        raise ValueError(f"Path cannot be checked: {abs_path} ({e.strerror or e})")
+    if not exists:
         raise ValueError(f"Path does not exist: {abs_path}")
 
     return abs_path
@@ -533,6 +559,31 @@ def validate_path(path: str | Path) -> Path:
 # interrupted local scan does. This was SIGTERM, which killed the runtime before it
 # could pass anything on. Shared with Nix mode, which runs its shell the same way.
 _stop_after_interrupt = subprocess_utils.stop_after_interrupt
+
+#: Set on the OSError that ``run_cmd_direct`` raises when the runtime could not be
+#: started, to tell it from an OSError raised once the runtime was running.
+RUNTIME_NOT_STARTED_ATTRIBUTE = "ash_runtime_not_started"
+
+
+def _stop_the_runtime(process, **kwargs) -> bool:
+    """:func:`_stop_after_interrupt`, with a kill if it is itself cut short.
+
+    The helper handles a second Ctrl-C while it waits out the grace (a
+    KeyboardInterrupt) and kills the runtime then. A second SIGTERM, the order a
+    CI job's cancel sends after a first one, reaches this process as a SystemExit
+    raised by the run step (``_termination_raises``), which the helper does not
+    handle: it unwound out of the wait with the runtime still running after ASH
+    had exited. Anything that ends the helper early is followed by a kill before
+    it goes on.
+    """
+    try:
+        return _stop_after_interrupt(process, **kwargs)
+    except BaseException:
+        try:
+            process.kill()
+        except OSError:
+            pass  # it has already exited, or the kernel refuses the signal
+        raise
 
 
 def _shown_command_text(cmd_list: Sequence[object]) -> str:
@@ -622,16 +673,72 @@ def _streamed_line(
     (``scan_report=False``, the default, which is also the carrier's default:
     the image build, and the runtime's own stderr) keeps that default band for
     every value, because the exemption's reason -- the report's own words --
-    does not apply there."""
+    does not apply there.
+
+    The stream is read a line at a time, so a value that holds a line break is
+    matched by each of its lines: the whole value never appears in one line, and
+    a child that quotes it back prints it one line at a time."""
     from automated_security_helper.utils.error_text import text_without_values
     from automated_security_helper.utils.numeric_text import MIN_ANYWHERE_LENGTH
 
+    hidden_values = _value_lines(hidden_values)
+    strict_values = _value_lines(strict_values)
     if not scan_report:
         return text_without_values(line, tuple(hidden_values) + tuple(strict_values))
     out = line
     if strict_values:
         out = text_without_values(out, strict_values)
     return text_without_values(out, hidden_values, min_length=MIN_ANYWHERE_LENGTH)
+
+
+#: A line of a multi-line value that is the value's shape and carries none of it: a
+#: PEM armor or separator line, a line of punctuation alone, a JSON pair under a
+#: structure key (``type``, ``version``, ``kind``, ``schema``, ``format``) with a
+#: short scalar, or a JSON pair whose value is a bare ``true``, ``false`` or
+#: ``null``. Hidden on its own, one of these would be hidden wherever the report
+#: quotes the same words (the private-key header a finding describes, a JSON
+#: ``"type": "service_account"`` in an example). A pair under any other key keeps
+#: its scalar, however short, because that is where an access key id or a short
+#: password sits, so it stays a value of its own.
+_STRUCTURE_LINE = re.compile(
+    r"""^(?:
+        -{3,}[^\n]*  # PEM armor, a rule line
+      | [\W_]+  # punctuation alone
+      | "(?:type|kind|version|schema|schema_version|api_version|apiversion|format)"
+        \s*:\s*(?:"[^"\n]{0,24}"|true|false|null|-?\d{1,6})\s*,?
+      | "[^"\n]{1,30}"\s*:\s*(?:true|false|null)\s*,?
+    )$""",
+    re.VERBOSE | re.IGNORECASE,
+)
+
+
+def _value_lines(values: Tuple[str, ...]) -> Tuple[str, ...]:
+    """``values`` with each one that holds a line break followed by its lines.
+
+    Each line is stripped, and only a line long enough to be matched as a value
+    of its own (``MIN_REDACTED_LENGTH``) is added: a brace or a blank line of a
+    multi-line value would otherwise hide every brace of the output. A line that
+    is only the value's shape (``_STRUCTURE_LINE``) is left out for the same
+    reason. Nothing is added twice, so the answer can be passed through again
+    unchanged.
+    """
+    from automated_security_helper.utils.numeric_text import MIN_REDACTED_LENGTH
+
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+        if "\n" in value or "\r" in value:
+            for part in value.splitlines():
+                part = part.strip()
+                if _STRUCTURE_LINE.fullmatch(part):
+                    continue
+                if len(part) >= MIN_REDACTED_LENGTH and part not in seen:
+                    seen.add(part)
+                    out.append(part)
+    return tuple(out)
 
 
 def run_cmd_direct(
@@ -707,20 +814,36 @@ def run_cmd_direct(
         stream = CommandSafeStream(
             (lambda: sys.stderr) if is_stderr else (lambda: sys.stdout)
         )
+        # The pipe is drained to its end whatever the console does with the
+        # copy: a reader that stopped at the first failed console write (a
+        # closed stdout, a terminal gone) left the child blocked on a full
+        # pipe, and the wait below then never ended. The failure is reported
+        # once; later lines are kept in the buffer and not shown.
+        console_failed = False
         try:
             for line in iter(pipe.readline, ""):
                 buffer.write(line)
-                stream.write(
-                    _streamed_line(
-                        line,
-                        hidden_values,
-                        strict_values,
-                        # The runtime's own stderr is never the scan's report:
-                        # a mount failure can quote an environment value as a
-                        # path segment, so it keeps the strict band.
-                        scan_report=scan_report_stream and not is_stderr,
+                if console_failed:
+                    continue
+                try:
+                    stream.write(
+                        _streamed_line(
+                            line,
+                            hidden_values,
+                            strict_values,
+                            # The runtime's own stderr is never the scan's report:
+                            # a mount failure can quote an environment value as a
+                            # path segment, so it keeps the strict band.
+                            scan_report=scan_report_stream and not is_stderr,
+                        )
                     )
-                )
+                except Exception as e:
+                    console_failed = True
+                    echo(
+                        f"Error writing {'stderr' if is_stderr else 'stdout'} to the "
+                        f"console: {str(e)}",
+                        err=True,
+                    )
         except Exception as e:
             error_msg = f"Error reading {'stderr' if is_stderr else 'stdout'}: {str(e)}"
             echo(error_msg, err=True)
@@ -743,12 +866,30 @@ def run_cmd_direct(
     # hand, and released inside the block below (subprocess_utils.HeldInterrupt).
     with subprocess_utils.HeldInterrupt() as held:
         # Create process using subprocess_utils
-        process = subprocess_utils.create_process_with_pipes(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
-            args=args,
-            env=dict(env) if env is not None else None,
-            text=True,
-            shell=shell,
-        )
+        try:
+            process = subprocess_utils.create_process_with_pipes(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+                args=args,
+                env=dict(env) if env is not None else None,
+                text=True,
+                shell=shell,
+            )
+        except OSError as error:
+            # The only OSError that means no runtime exists: any raised later
+            # is from a runtime that was running (_execute_container).
+            setattr(error, RUNTIME_NOT_STARTED_ATTRIBUTE, True)
+            raise
+        # Line endings untranslated: in universal-newline mode a carriage
+        # return ends a line and is read back as a line feed, so every
+        # progress redraw the runtime printed became a line of its own on the
+        # console and in the captured copy. Each line is still read one at a
+        # time, so the console rewrites in place as the runtime meant.
+        for pipe in (process.stdout, process.stderr):
+            reconfigure = getattr(pipe, "reconfigure", None)
+            if reconfigure is not None:
+                try:
+                    reconfigure(newline="")
+                except (OSError, ValueError, TypeError):
+                    pass
         # The runtime shares this process's group, so the die-now branches'
         # group kill cannot name it: recorded by pid and forgotten the
         # moment its exit is observed, before the reap.
@@ -782,17 +923,34 @@ def run_cmd_direct(
                     # The signal was delivered to this process alone, so the
                     # runtime has not been interrupted yet, whatever the
                     # terminal probe would say.
-                    _stop_after_interrupt(process, child_got_the_interrupt=False)
+                    stopped = _stop_the_runtime(process, child_got_the_interrupt=False)
                     for reader in readers:
                         # A thread that was never started cannot be joined.
                         if reader.ident is not None:
                             reader.join(timeout=5.0)
+                    if stopped:
+                        raise ScanCancelled(
+                            "the scan was cancelled while the container runtime ran"
+                        )
+                    # The grace ran out and the kernel refused the kill, so the
+                    # runtime may still run. The cancel says so and carries the
+                    # pid as data, as the spawn layer's cancels do, and the
+                    # event records it for the exit line, which names survivors
+                    # from the records, never from the text.
+                    if isinstance(cancel_event, CancelEvent):
+                        cancel_event.note_could_not_stop(
+                            "container runtime", process.pid
+                        )
                     raise ScanCancelled(
-                        "the scan was cancelled while the container runtime ran"
+                        "the scan was cancelled while the container runtime ran; "
+                        + could_not_stop_sentence(
+                            f"the container runtime (pid {process.pid})"
+                        ),
+                        could_not_stop=(("container runtime", process.pid),),
                     )
                 time.sleep(0.1)
         except KeyboardInterrupt:
-            _stop_after_interrupt(process)
+            _stop_the_runtime(process)
             for reader in readers:
                 # A thread that was never started cannot be joined.
                 if reader.ident is not None:
@@ -801,6 +959,23 @@ def run_cmd_direct(
             # scan does. Returning the runtime's status instead made a Ctrl-C read as
             # the container's own failure: -15, which sys.exit turned into 241.
             raise
+        except SystemExit:
+            # A SIGTERM relayed as an exit by the run step's _termination_raises:
+            # the signal was delivered to this process alone, so the runtime has
+            # received nothing. Without this arm the exit unwound past the wait
+            # with the runtime left running.
+            stopped = _stop_the_runtime(process, child_got_the_interrupt=False)
+            if not stopped:
+                # The kill was refused, so the runtime may outlive the exit
+                # after all: recorded on the scan's event, when there is one,
+                # for the exit line. The exit itself is re-raised unchanged.
+                event = current_cancel_event()
+                if isinstance(event, CancelEvent):
+                    event.note_could_not_stop("container runtime", process.pid)
+            for reader in readers:
+                if reader.ident is not None:
+                    reader.join(timeout=5.0)
+            raise
         finally:
             # The stop paths and the loop above discard the record themselves;
             # this net catches an exit that landed between an observation and
@@ -808,9 +983,18 @@ def run_cmd_direct(
             # the one a die-now signal must still be able to kill.
             subprocess_utils.discard_tool_pid_once_exited(process)
 
-    # Join threads before reading buffers to avoid race condition
+    # Join threads before reading buffers to avoid race condition. The join is
+    # bounded: a pipe a grandchild still holds open never closes. A reader still
+    # running then is said once, so a captured copy read without its tail is
+    # not taken for the whole output.
     for reader in readers:
         reader.join(timeout=5.0)
+    if any(reader.is_alive() for reader in readers):
+        ASH_LOGGER.warning(
+            "The container runtime exited but its output was still being read "
+            "after 5 seconds (a process it started may hold the pipe open); "
+            "the captured copy of its output may be incomplete."
+        )
 
     # Get the captured output (safe now that threads are joined)
     stdout = stdout_buffer.getvalue()
@@ -885,12 +1069,12 @@ def _get_oci_wrapper_prefix() -> List[str]:
     oci_wrapper = os.environ.get("OCI_RUNNER_WRAPPER", "").strip(" \t\n")
     if not oci_wrapper:
         return []
-    # shlex.split, with the whitespace narrowed to IFS's.
-    lexer = shlex.shlex(oci_wrapper, posix=True)
-    lexer.whitespace = " \t\n"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    return list(lexer)
+    # A plain split on those three characters, as the wrappers split it: no quote
+    # or backslash processing. A POSIX shlex removed backslashes (a Windows path
+    # lost its separators), read quotes as grouping (a quoted word differed from
+    # ./ash's) and raised ValueError on an unbalanced quote, which escaped
+    # run_ash_container after the previous run's output had been cleared.
+    return [word for word in re.split(r"[ \t\n]+", oci_wrapper) if word]
 
 
 def sweep_leftovers_before_run(oci_runner: str | None) -> List[str]:
@@ -1250,7 +1434,13 @@ def _non_root_stage_uid_refusal(
     """
     if build_target != BuildTarget.NON_ROOT.value:
         return None
-    if int(container_uid) == 0:
+
+    def is_zero(digits: str) -> bool:
+        # Without int(): a string of digits past the interpreter's conversion
+        # limit raised ValueError here, after the pattern check had passed it.
+        return digits.strip().lstrip("0") == ""
+
+    if is_zero(container_uid):
         return (
             "The non-root image stage creates a user with UID 0, which is root: ASH "
             "is running as root, or --container-uid 0 was given. Pass --build-target "
@@ -1258,7 +1448,7 @@ def _non_root_stage_uid_refusal(
             "--container-gid work only when the output directory is writable by that "
             "UID: the container runs as that user and writes its reports there."
         )
-    if int(container_gid) == 0:
+    if is_zero(container_gid):
         return (
             "The non-root image stage gives its user GID 0, which is root's group: "
             "ASH is running with GID 0, or --container-gid 0 was given. Pass "
@@ -1277,14 +1467,21 @@ def _runner_supports_buildx(resolved_oci_runner: str) -> bool:
     podman, and ``_OCI_RUNNER_CANDIDATES`` reaches ``docker`` before ``podman``, so
     on such a host every name-based check passes for something that has no buildx
     at all. Asking the binary is the only thing that separates the two.
+
+    Asked through ``OCI_RUNNER_WRAPPER``, as the build runs: a wrapper that runs
+    the runtime as another user, or on another host, can have a buildx the bare
+    binary does not, or none where the bare binary has one. The answer is kept
+    per wrapper and path.
     """
-    if resolved_oci_runner in _BUILDX_SUPPORT_CACHE:
-        return _BUILDX_SUPPORT_CACHE[resolved_oci_runner]
+    probe = [*_get_oci_wrapper_prefix(), resolved_oci_runner]
+    key = tuple(probe)
+    if key in _BUILDX_SUPPORT_CACHE:
+        return _BUILDX_SUPPORT_CACHE[key]
 
     supported = False
     try:
         result = subprocess_utils.run_command(
-            [resolved_oci_runner, "buildx", "version"],
+            [*probe, "buildx", "version"],
             capture_output=True,
             check=False,
             log_level=logging.DEBUG,
@@ -1301,7 +1498,7 @@ def _runner_supports_buildx(resolved_oci_runner: str) -> bool:
         ASH_LOGGER.debug(
             f"{resolved_oci_runner} does not provide buildx -- skipping layer cache"
         )
-    _BUILDX_SUPPORT_CACHE[resolved_oci_runner] = supported
+    _BUILDX_SUPPORT_CACHE[key] = supported
     return supported
 
 
@@ -1591,8 +1788,10 @@ def _build_image(
     #
     # ASH_BASE_OCI_LAYOUT, when this runtime can take it, replaces the override: it is only set
     # on a cache hit, where the pre-pull made no registry call and exported no override, so the
-    # two do not meet in CI. If both were set by hand, the verified layout wins, since it names
-    # content the override would have to fetch.
+    # two do not meet in CI. If both were set by hand, the verified layout wins where this
+    # runtime can take it (docker needs buildx for an oci-layout context, see
+    # _base_oci_layout_args), since it names content the override would have to fetch; where it
+    # cannot, the layout is already in the engine's store and the override applies.
     base_layout_args = _base_oci_layout_args(
         resolved_oci_runner, buildx=bool(cache_args)
     )
@@ -1666,9 +1865,16 @@ def _custom_containerfile_stage_refusal(
     if stage is None or custom_containerfile is None:
         return None
     try:
-        text = Path(custom_containerfile).read_text(encoding="utf-8")
+        # utf-8-sig: a byte order mark on the first line is not part of the FROM
+        # it starts, and the build reads the line past it.
+        text = Path(custom_containerfile).read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return None  # the build reports a file it cannot read
+    # As the build reads the file: a comment line is dropped, wherever it is
+    # (one inside a continued instruction included), and a line continued with
+    # a backslash, blanks after it or not, is one instruction with the next.
+    text = re.sub(r"(?m)^[ \t]*#[^\n]*\n?", "", text)
+    text = re.sub(r"\\[ \t]*\r?\n", " ", text)
     if any(name.lower() == stage for name in _FROM_AS_STAGE.findall(text)):
         return None
     return (
@@ -1688,6 +1894,7 @@ def _build_custom_image(
     quiet: bool,
     debug: bool,
     target: str | None = None,
+    force: bool = False,
 ) -> str:
     """Build a custom image layered on top of the base ASH image.
 
@@ -1695,6 +1902,9 @@ def _build_custom_image(
         base_image_name: Name of the base image to build on top of.
         custom_containerfile: Path to the custom Containerfile/Dockerfile.
         target: The custom file's stage to build, or None for the whole file.
+        force: Build without the layer cache (``--no-cache``), as ``--force`` builds
+            the base image: the custom file's own stages are otherwise served from
+            the cache whatever the base image became.
 
     Returns:
         The image name of the custom image.
@@ -1721,6 +1931,8 @@ def _build_custom_image(
     )
     if target is not None:
         custom_build_cmd.extend(["--target", target])
+    if force:
+        custom_build_cmd.append("--no-cache")
     if quiet:
         custom_build_cmd.append("-q")
     custom_build_cmd.append(Path(custom_containerfile).parent.as_posix())
@@ -2203,6 +2415,18 @@ def _refuse_absolute_extends(config: str) -> None:
         ENVIRONMENT_VALUE_SHOWN,
     )
 
+    def real_path_of(file: Path, ref: str, in_file: str) -> Path:
+        # A NUL in an entry cannot name a file on any host, and os.path.realpath
+        # raises ValueError for it; refused as the chain's other unusable
+        # entries are, instead of escaping the host's checks uncaught.
+        try:
+            return _real_path(file.parent / ref)
+        except ValueError:
+            raise ContainerInputError(
+                f"'{EXTENDS_KEY}: {ref!r}' in {in_file} holds a NUL character, "
+                "which cannot name a file. Remove it from the entry."
+            ) from None
+
     start = _real_path(config)
     # The entries of each file, read once: a file that cannot be read maps to
     # None and ends the walk there.
@@ -2229,7 +2453,12 @@ def _refuse_absolute_extends(config: str) -> None:
         for ref, _, env_read in entries[current] or ():
             if Path(ref).is_absolute() or Path(ref).drive:
                 continue
-            walk.append((_real_path(current.parent / ref), hidden or env_read))
+            in_file = (
+                ENVIRONMENT_VALUE_SHOWN
+                if hidden
+                else (str(config) if current == start else str(current))
+            )
+            walk.append((real_path_of(current, ref, in_file), hidden or env_read))
 
     def shown(file: Path) -> str:
         if file in hidden_files:
@@ -2252,7 +2481,7 @@ def _refuse_absolute_extends(config: str) -> None:
                     "mounted at their place relative to the config. Write the "
                     "base relative to the file that extends it."
                 )
-            pending.append(_real_path(current.parent / ref))
+            pending.append(real_path_of(current, ref, shown(current)))
 
 
 def _refuse_output_over_the_source(
@@ -2270,7 +2499,11 @@ def _refuse_output_over_the_source(
         return
     source = Path(source_dir).resolve()
     output = Path(output_dir).resolve()
-    if source == output or source.is_relative_to(output):
+    if (
+        source == output
+        or source.is_relative_to(output)
+        or _is_at_or_above(output_dir, source_dir)
+    ):
         raise ContainerInputError(
             f"The output directory {output} is the source directory {source} or a "
             "directory above it. Container mode mounts the output read-write at "
@@ -2278,6 +2511,35 @@ def _refuse_output_over_the_source(
             "writable through /out. Use an output directory inside the source "
             "(the default .ash/ash_output) or outside it, not above it."
         )
+
+
+def _is_at_or_above(ancestor: Path | str, path: Path | str) -> bool:
+    """Whether ``ancestor`` is ``path`` or a directory above it, by identity.
+
+    The directories are compared by device and inode (``os.path.samestat``), not
+    by name: a bind mount, or another spelling of the case on a case-insensitive
+    volume, names the same directory under a path the real-path comparison does
+    not match. ``path`` is walked as given, then as its real path and that path's
+    parents. A path that cannot be looked at matches nothing, and so does one
+    whose volume reports no inode (``st_ino`` 0: some SMB and FUSE mounts, some
+    Windows drives), where every directory on the device would otherwise compare
+    equal: the real-path comparison beside this one still decides what it can.
+    """
+    try:
+        wanted = os.stat(ancestor)
+    except OSError:
+        return False
+    if wanted.st_ino == 0:
+        return False
+    real = Path(os.path.realpath(path))
+    for candidate in (Path(path), real, *real.parents):
+        try:
+            status = os.stat(candidate)
+        except OSError:
+            continue
+        if status.st_ino != 0 and os.path.samestat(status, wanted):
+            return True
+    return False
 
 
 def _refuse_linked_output_dir(
@@ -3121,7 +3383,9 @@ def _unreadable_config(config: str | None) -> str | None:
     """
     if config is None:
         return None
-    if not config or not Path(config).is_file():
+    # _is_file: a path under an unsearchable directory is refused, not raised as
+    # the PermissionError Path.is_file re-raises on Python 3.10 to 3.13.
+    if not config or not _is_file(Path(config)):
         return (
             f"Config file not found: {config}. --config (or ASH_CONFIG) has to name "
             "an existing file: container mode mounts it read-only for the scan inside "
@@ -3515,6 +3779,7 @@ CONTAINER_ENV_NOT_PASSED = frozenset(
         "ASH_DEBUG",
         "ASH_OFFLINE",
         "ASH_SCAN_SOURCE",
+        OUTER_RUN_ID_ENV,
         "COLUMNS",
         "LINES",
         # ASH's own settings.
@@ -3932,7 +4197,12 @@ def _write_env_file(
     # that is merely old (container_leftovers.sweep_env_dirs).
     record_env_dir(directory)
     real = _real_path(directory)
-    if any(real.is_relative_to(_real_path(tree)) for tree in (source_dir, output_dir)):
+    # By real path, and by the directories' identity (_is_at_or_above): a bind
+    # mount or a case alias reaches the tree under another name.
+    if any(
+        real.is_relative_to(_real_path(tree)) or _is_at_or_above(tree, directory)
+        for tree in (source_dir, output_dir)
+    ):
         shutil.rmtree(directory, ignore_errors=True)
         raise ContainerInputError(
             f"The temporary directory {tempfile.gettempdir()} is inside the source or "
@@ -4070,7 +4340,10 @@ def _termination_raises(env_file_dir: Path | None) -> Iterator[None]:
         return
 
     previous = signal.getsignal(signal.SIGTERM)
-    if previous == signal.SIG_IGN:
+    if previous is None or previous == signal.SIG_IGN:
+        # None: the handler was installed outside Python, so it cannot be read
+        # here and could not be put back; a relay installed over it would be
+        # restored as None, which signal.signal refuses, after the run.
         yield
         return
 
@@ -4278,6 +4551,19 @@ def container_input_refusal(
         operator_environment_names(config, env_config, source_dir, reads)
     except ContainerInputError as e:
         return str(e)
+    except RuntimeError as e:
+        # Python 3.10 to 3.12 raise RuntimeError, not OSError, for a symlink
+        # loop met while a path is resolved: that one is a refusal, not a
+        # traceback. Any other RuntimeError (RecursionError and
+        # NotImplementedError are subclasses, and so is a bug's) keeps its
+        # traceback.
+        if "symlink loop" not in str(e).lower():
+            raise
+        return (
+            f"A path the container run would mount cannot be resolved: {e}. "
+            "Container mode mounts the source, the output and the config by "
+            "their real paths, so each has to resolve to a directory or a file."
+        )
     return None
 
 
@@ -4320,6 +4606,7 @@ def _assemble_run_command(
     fail_on_incomplete_scanners: bool | None = None,
     workspace_config: str | None = None,
     ignore_suppressions: bool = False,
+    min_severity: str | None = None,
     log_level: AshLogLevel | str | None = None,
     outer_run_id: str | None = None,
     environment_names: List[str] | None = None,
@@ -4619,6 +4906,20 @@ def _assemble_run_command(
         ash_args.append("--no-fail-on-incomplete-scanners")
     if ignore_suppressions:
         ash_args.append("--ignore-suppressions")
+    # Forwarded in workspace mode only. The host returns a workspace scan's
+    # exit code as the container computed it, so a minimum it never saw was
+    # applied nowhere; a one-directory scan's exit code is recomputed on the
+    # host, where --min-severity is applied, and forwarding it there would
+    # have the container print a clean summary the host then judges again.
+    # The member's value, not its text: str() of a MinSeverity is its class and
+    # member name, which the scan inside refuses as an unknown severity.
+    severity_text = str(getattr(min_severity, "value", min_severity))
+    if (
+        workspace_relative_file is not None
+        and min_severity
+        and severity_text.lower() != "low"
+    ):
+        ash_args.extend(["--min-severity", severity_text])
 
     for phase in phases:
         ash_args.extend(
@@ -4771,21 +5072,70 @@ def _execute_container(cmd: List[str], debug: bool, env: Dict[str, str] | None =
     shown = text_without_values(shown, subprocess_utils._SPAWN_VALUES.get())
     if debug:
         echo(f"Running container command: {shown}")
+    # The values the run carries (the spawn's recorded values) are hidden in the
+    # streamed copy of the child's output line by line; the copy kept on the
+    # result is hidden the same way, each line of a value that holds a line
+    # break included (_value_lines, as the stream has it), so a caller that
+    # prints or logs it after the run, when the record is gone, cannot show them.
+    carried = _value_lines(
+        tuple(subprocess_utils._SPAWN_VALUES.get())
+        + tuple(subprocess_utils._SPAWN_STRICT_VALUES.get())
+    )
+
+    # The kept copy is hidden in the default band for every carried value, which is
+    # stricter than the stream: the stream's loosened band lets a bare word that
+    # equals a short carried value (a severity, a region) print as the report wrote
+    # it (_streamed_line). That exemption rests on the line being the scan's own
+    # report as it streams; the copy is read later by callers that print or log it
+    # once the run's values are no longer recorded, with no way to tell a report line
+    # from the runtime's own text, so it keeps the band that hides the short value
+    # everywhere.
+    def hidden(text):
+        return text_without_values(text, carried) if isinstance(text, str) else text
+
     try:
         result = run_cmd_direct(cmd, debug=debug, env=env)
+        result.stdout = hidden(result.stdout)
+        result.stderr = hidden(result.stderr)
         result.shown_command = shown
         if debug:
             echo(f"Container execution completed with return code: {result.returncode}")
         return result
     except CalledProcessError as e:
+        e.output = hidden(e.output)
+        e.stderr = hidden(e.stderr)
         e.shown_command = shown
         if debug:
-            # str(e) names the command, which carries the same values.
+            # The command as it may be shown (each --config-overrides value as its
+            # key): str(e) quotes the raw argv, override values included.
             echo(
-                "Container execution failed with error: "
-                f"{text_without_values(str(e), subprocess_utils._SPAWN_VALUES.get())}"
+                f"Container execution failed with code {e.returncode}: "
+                f"Command '{shown}' returned non-zero exit status {e.returncode}."
             )
         return e
+    except OSError as e:
+        if not getattr(e, RUNTIME_NOT_STARTED_ATTRIBUTE, False):
+            # Raised after the runtime started (a signal to it refused, a pipe
+            # closed under the wait): the container may be running, so this is
+            # a failed run and not one that never started. Reported as the
+            # non-zero status the caller already handles, with the record of
+            # the container left for the next sweep.
+            message = f"The container runtime failed while it ran: {hidden(str(e))}"
+            echo(message, err=True)
+            failed = create_completed_process(
+                args=[], returncode=1, stdout="", stderr=message
+            )
+            setattr(failed, _MAY_STILL_RUN_ATTR, True)
+            return failed
+        # The runtime could not be started (a runner path that is gone, a
+        # permission the host refuses). Reported as a run that never started,
+        # so the caller exits with the refusal's code instead of a traceback
+        # and drops the record of a container that never existed.
+        message = f"The container runtime could not be started: {hidden(str(e))}"
+        echo(message, err=True)
+        return _not_started(
+            create_completed_process(args=[], returncode=1, stdout="", stderr=message)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -4838,6 +5188,7 @@ def run_ash_container(
     shard_count: int | None = None,
     workspace_config: str | None = None,
     ignore_suppressions: bool = False,
+    min_severity: str | None = None,
     outer_run_id: str | None = None,
     reads: OperatorConfigReads | None = None,
 ):
@@ -5007,12 +5358,20 @@ def run_ash_container(
     # Resolve ASH revision. One given was checked above (container_build_refusal);
     # an explicit revision decides the build, and the install is consulted (and
     # logs which source it builds from) only when none was given.
+    resolved_revision: str | None
     if ash_revision_to_install is not None:
         resolved_revision = ash_revision_to_install
-    else:
+    elif build:
         resolved_revision = get_ash_revision()
+    else:
+        # Only a build installs a revision; looking one up echoes and logs the
+        # source it builds from, which a run of a present image does not do.
+        resolved_revision = None
 
-    if resolved_revision is not None and resolved_revision != "LOCAL":
+    # Only a build installs the revision, so only a build is refused for one the
+    # build cannot take. A revision derived from the install (a direct_url.json
+    # with an odd ref) refused a --no-build run that would have installed nothing.
+    if build and resolved_revision is not None and resolved_revision != "LOCAL":
         if not _validate_ash_revision(resolved_revision):
             message = _invalid_revision_message(resolved_revision)
             secho(message, fg=typer.colors.RED)
@@ -5038,6 +5397,17 @@ def run_ash_container(
         os.environ.get("ASH_IMAGE_NAME")
         or f"automated-security-helper:{resolved_build_target}"
     )
+    if not build and custom_containerfile is not None:
+        # A build with --custom-containerfile tags its result as the custom
+        # image (_build_custom_image) and runs that. With --no-build the same
+        # option names the image a build produced, so the run uses it too: the
+        # stock ci image it ran instead is the custom image's base, as root and
+        # without the custom tooling. ASH_IMAGE_NAME names the BASE the custom
+        # file is layered on, in a build and in a run alike: the build tags the
+        # base with it and the custom image with the fixed tag, so a run that
+        # took the variable as the image to run (as this branch did when the
+        # variable was set) ran the base again, with the same two gaps.
+        ash_base_image_name = "automated-security-helper:custom"
     # Held to the characters ./ash and Invoke-ASH take, with their message and code,
     # before anything is built or run: a name that starts with '-' reaches the runner
     # as an option of its own, and no image name holds any other character. The whole
@@ -5163,6 +5533,7 @@ def run_ash_container(
                         target=_custom_containerfile_stage(
                             build_target, custom_containerfile
                         ),
+                        force=force,
                     )
 
         except Exception as e:
@@ -5225,22 +5596,41 @@ def run_ash_container(
             source_dir = Path.cwd()
             ASH_LOGGER.info(f"Using current directory as source: {source_dir}")
 
-        if output_dir:
-            try:
+        # The link rule once more, on the paths as given, right before the
+        # directory is made: the check ahead of the build judged the paths as
+        # they were then, and a link that appeared during the build would
+        # otherwise be created through and resolved past here. The source
+        # under the name the operator gave (named_source), as the first check
+        # had it: the rule looks below the source under its given name and its
+        # real path, and source_dir is the resolved one by now.
+        try:
+            _refuse_linked_output_dir(named_source, output_dir)
+        except ContainerOutputLinkRefused as e:
+            secho(shown_on_one_line(str(e)), fg=typer.colors.RED)
+            return _not_started(
+                create_completed_process(
+                    args=[], returncode=3, stdout="", stderr=str(e)
+                )
+            )
+        try:
+            if output_dir:
                 output_dir = Path(output_dir)
                 output_dir.mkdir(parents=True, exist_ok=True)
                 output_dir = output_dir.resolve()
-            except Exception as e:
-                secho(f"Error creating output directory: {e}", fg=typer.colors.RED)
-                return _not_started(
-                    create_completed_process(
-                        args=[], returncode=1, stdout="", stderr=str(e)
-                    )
+            else:
+                # The default is made under the same guard as a named one: a
+                # directory that cannot be made is a run that never started,
+                # not a traceback.
+                output_dir = source_dir.joinpath("ash_output")
+                output_dir.mkdir(parents=True, exist_ok=True)
+                ASH_LOGGER.info(f"Using default output directory: {output_dir}")
+        except Exception as e:
+            secho(f"Error creating output directory: {e}", fg=typer.colors.RED)
+            return _not_started(
+                create_completed_process(
+                    args=[], returncode=1, stdout="", stderr=str(e)
                 )
-        else:
-            output_dir = source_dir.joinpath("ash_output")
-            output_dir.mkdir(parents=True, exist_ok=True)
-            ASH_LOGGER.info(f"Using default output directory: {output_dir}")
+            )
 
         container_name = new_container_name()
         env_file_dir: Path | None = None
@@ -5250,7 +5640,11 @@ def run_ash_container(
         # (KeyboardInterrupt) or SIGTERM (_termination_raises) all reach the finally.
         # The write is inside this try, so an exit between it and the run is cleaned
         # up too. What no code can close is the store of the returned pair into the
-        # names below, and the push of the exit after the writer returns.
+        # names below, and the push of the exit after the writer returns. Nor the
+        # window between the write and the entry into _termination_raises below:
+        # a SIGTERM at its default disposition there ends the process with no
+        # finally. The directory is recorded as it is made (record_env_dir), so
+        # the next container- or nix-mode start's sweep deletes it, unread.
         try:
             try:
                 # The source as the refusal ahead of the build judged it, so the
@@ -5314,6 +5708,7 @@ def run_ash_container(
                     shard_count=shard_count,
                     workspace_config=workspace_config,
                     ignore_suppressions=ignore_suppressions,
+                    min_severity=min_severity,
                     log_level=log_level,
                     outer_run_id=outer_run_id,
                     environment_names=environment_names,
@@ -5353,9 +5748,12 @@ def run_ash_container(
                         run_cmd, debug=debug, env=_run_environment(outer_run_id)
                     )
                     code = getattr(result, "returncode", None)
-                    if not (isinstance(code, int) and code < 0):
+                    ended_by_signal = isinstance(code, int) and code < 0
+                    may_still_run = getattr(result, _MAY_STILL_RUN_ATTR, False)
+                    if not (ended_by_signal or may_still_run):
                         # A client the kernel ended by a signal says nothing of
-                        # its container.
+                        # its container, and neither does a failure raised while
+                        # the runtime ran: the record stays for the next sweep.
                         discard_record(record)
                     return result
         finally:

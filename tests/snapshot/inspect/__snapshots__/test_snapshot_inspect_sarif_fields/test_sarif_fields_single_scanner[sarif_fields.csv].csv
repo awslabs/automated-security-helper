@@ -1,10 +1,17 @@
 field,scanners
+runs[].results[].fingerprints,bandit
 runs[].results[].fingerprints.bandit/v1,bandit
 runs[].results[].level,bandit
+runs[].results[].locations,bandit
+runs[].results[].locations[].physicalLocation,bandit
+runs[].results[].locations[].physicalLocation.artifactLocation,bandit
 runs[].results[].locations[].physicalLocation.artifactLocation.uri,bandit
+runs[].results[].locations[].physicalLocation.region,bandit
 runs[].results[].locations[].physicalLocation.region.endLine,bandit
+runs[].results[].locations[].physicalLocation.region.snippet,bandit
 runs[].results[].locations[].physicalLocation.region.snippet.text,bandit
 runs[].results[].locations[].physicalLocation.region.startLine,bandit
+runs[].results[].message,bandit
 runs[].results[].message.text,bandit
 runs[].results[].properties,bandit
 runs[].results[].ruleId,bandit

@@ -24,7 +24,7 @@ pytestmark = pytest.mark.unit
 
 VARIABLE = "ASH_PLUGIN_LIST_NEEDLE"
 #: Bandit's default tool_version, printed whole only when the column is wide.
-UNCROPPED = '">=1.7.0,<2.0.0"'
+UNCROPPED = '">=1.7.8,<2.0.0"'
 WIDE = {"COLUMNS": "1000", "NO_COLOR": "1"}
 
 

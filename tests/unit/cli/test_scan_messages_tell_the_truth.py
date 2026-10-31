@@ -744,12 +744,12 @@ _ACTIONABLE = "{stats.actionable} actionable findings"
 class TestTheDocumentedPythonExampleRuns:
     """The advanced-usage example is the entry point's contract, so it has to run.
 
-    It imports only names that exist (the migration guide's copy too), reads
-    ``summary_stats`` off the results' metadata, and
-    keeps a scan with findings from ending the call with ``SystemExit(2)`` before
-    the print, as the FAQ's shorter copy does too. Only the scan itself is stubbed:
-    the import, the keyword binding, the exit-code verdict and the attribute access
-    are real.
+    It imports only names that exist, reads ``summary_stats`` off the results'
+    metadata, and keeps a scan with findings from ending the call with
+    ``SystemExit(2)`` before the print, as the FAQ's shorter copy does too. Only the
+    scan itself is stubbed: the import, the keyword binding, the exit-code verdict
+    and the attribute access are real. The migration guide, which carried a copy of
+    the example, is no longer in the docs.
     """
 
     @pytest.mark.parametrize(
@@ -759,8 +759,6 @@ class TestTheDocumentedPythonExampleRuns:
             for page in (
                 "docs/content/docs/advanced-usage.md",
                 "docs/content/docs/advanced-usage.md.template",
-                "docs/content/docs/migration-guide.md",
-                "docs/content/docs/migration-guide.md.template",
             )
         ]
         + [("docs/content/faq.md", "## Can I use ASH programmatically?", _ACTIONABLE)],

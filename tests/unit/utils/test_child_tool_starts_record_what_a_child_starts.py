@@ -13,14 +13,22 @@ audit hook's prelude and a few lines of their own, never ASH.
 
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
 
-from tests.utils.child_tool_starts import POSIX_ONLY, SHADOWED_EXIT, ChildToolStarts
+from tests.utils import tool_guard
+from tests.utils.child_tool_starts import (
+    POSIX_ONLY,
+    SHADOWED_EXIT,
+    ChildToolStarts,
+    readers,
+)
 from tests.utils.helpers import checkout_env
 
 pytestmark = POSIX_ONLY
@@ -185,8 +193,8 @@ def test_a_direct_posix_spawn_start_is_recorded_once(tmp_path):
 @pytest.mark.integration
 def test_a_cwd_popen_then_a_direct_spawn_of_the_same_tool_records_two(tmp_path):
     """A Popen given a cwd takes the fork_exec path and reports no posix_spawn
-    echo, so it must arm no echo drop: a direct posix_spawn of the same tool
-    right after it is a second start, not the first one's echo."""
+    echo, so a direct posix_spawn of the same tool right after it is a second
+    start, not the first one's echo: the record names two."""
     started = ChildToolStarts(tmp_path)
     quiet = _program_named(tmp_path / "beside-the-interpreter", "uv")
 
@@ -204,6 +212,30 @@ def test_a_cwd_popen_then_a_direct_spawn_of_the_same_tool_records_two(tmp_path):
     assert done.returncode == 0, done.stderr
     recorded = started.starts()
     assert len(recorded) == 2, recorded
+
+
+@pytest.mark.integration
+def test_a_popen_that_spawns_with_close_fds_off_is_recorded_once(tmp_path):
+    """Before Python 3.13 subprocess takes the posix_spawn path only with close_fds
+    off (a directory in the executable, no cwd and no pipes besides): its second
+    report of that one start, os.posix_spawn from Popen._posix_spawn, is the echo
+    the frame reader drops, and this is the real child that reaches that reader.
+    From 3.13 the path is taken with close_fds on as well, and the record reads
+    the same either way: one Popen line, no posix_spawn line."""
+    started = ChildToolStarts(tmp_path)
+    quiet = _program_named(tmp_path / "beside-the-interpreter", "uv")
+
+    done = _run_child(
+        tmp_path,
+        started,
+        "import subprocess\n"
+        f"subprocess.run([{str(quiet)!r}, '--version'], close_fds=False)\n",
+    )
+
+    assert done.returncode == 0, done.stderr
+    recorded = started.starts()
+    assert len(recorded) == 1, recorded
+    assert recorded[0].startswith("subprocess.Popen uv "), recorded
 
 
 @pytest.mark.integration
@@ -350,6 +382,39 @@ def test_child_env_passes_pythonpath_through_unchanged(tmp_path):
     assert env["PYTHONPATH"] == "/x"
 
 
+@pytest.mark.unit
+def test_child_env_changes_exactly_path_and_the_uv_variables(tmp_path):
+    """The contract the structural check of the child-scan tests trusts: child_env
+    adds the stand-ins to PATH's front and sets uv's three variables, and every
+    other variable, known to it or not, reaches the child as given. The mapping
+    it is given is read, never written."""
+    started = ChildToolStarts(tmp_path)
+    given = {"PATH": "/usr/bin:/bin", "PYTHONPATH": "p", "X": "y"}
+    before = dict(given)
+
+    env = started.child_env(given)
+
+    changed = {name for name in env if env[name] != given.get(name)}
+    assert changed == {"PATH", "UV_CACHE_DIR", "UV_TOOL_DIR", "UV_OFFLINE"}, changed
+    assert set(given) <= set(env), "a variable given was dropped"
+    assert env["PATH"] == f"{started.directory}{os.pathsep}/usr/bin:/bin"
+    assert env["PYTHONPATH"] == "p"
+    assert env["X"] == "y"
+    assert given == before, "the caller's mapping was written to"
+
+
+@pytest.mark.unit
+def test_child_env_puts_the_stand_ins_first_even_with_no_path_given(tmp_path):
+    """A caller that sets no PATH still gets the stand-ins first: the prelude's
+    check would otherwise end the child for a PATH that finds no stand-in."""
+    started = ChildToolStarts(tmp_path)
+
+    env = started.child_env({"HOME": "/h"})
+
+    assert env["PATH"].split(os.pathsep)[0] == str(started.directory)
+    assert env["HOME"] == "/h"
+
+
 @pytest.mark.integration
 def test_an_entry_a_uv_left_in_its_directories_is_recorded(tmp_path):
     """The second record: a start no audit hook saw, shown by what it left."""
@@ -366,3 +431,253 @@ def test_an_entry_a_uv_left_in_its_directories_is_recorded(tmp_path):
 
     assert done.returncode == 0, done.stderr
     assert started.starts() == ["uv-cache/entry"]
+
+
+# The prelude's readers, run in this process on an argv that is never started
+# (``readers``): what the child's hook would make of each command line.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "argv, command",
+    [
+        pytest.param(["sh", "-c", "uv sync"], "uv sync", id="c-then-the-string"),
+        pytest.param(["bash", "-lc", "uv sync"], "uv sync", id="c-ends-a-cluster"),
+        pytest.param(
+            ["bash", "-c", "-e", "uv sync"], "uv sync", id="an-option-after-c"
+        ),
+        pytest.param(
+            ["sh", "-c", "-o", "pipefail", "uv sync"],
+            "uv sync",
+            id="a-valued-option-after-c",
+        ),
+        pytest.param(
+            ["bash", "-o", "pipefail", "-c", "uv sync"],
+            "uv sync",
+            id="a-valued-option-before-c",
+        ),
+        pytest.param(
+            ["bash", "--rcfile", "rc", "-c", "uv sync"],
+            "uv sync",
+            id="a-valued-long-option-before-c",
+        ),
+        pytest.param(["bash", "--norc", "-c", "uv sync"], "uv sync", id="a-long-flag"),
+        pytest.param(
+            ["sh", "-c", "--", "uv sync"], "uv sync", id="double-dash-ends-the-options"
+        ),
+        pytest.param(
+            ["sh", "-c", "-", "uv sync"], "uv sync", id="a-lone-dash-ends-the-options"
+        ),
+        pytest.param(["sh", "-s", "-c", "uv sync"], "uv sync", id="s-then-c"),
+        pytest.param(["sh", "-sc", "uv sync"], "uv sync", id="s-and-c-in-one-cluster"),
+        pytest.param(
+            ["bash", "-euo", "pipefail", "-c", "uv sync"],
+            "uv sync",
+            id="a-valued-letter-inside-a-cluster-before-c",
+        ),
+        pytest.param(
+            ["bash", "-co", "pipefail", "uv sync"],
+            "uv sync",
+            id="c-and-a-valued-letter-in-one-cluster",
+        ),
+        pytest.param(
+            ["bash", "-oo", "pipefail", "errexit", "-c", "uv sync"],
+            "uv sync",
+            id="two-valued-letters-take-two-values",
+        ),
+    ],
+)
+def test_the_shell_command_string_is_the_first_operand_after_every_option(
+    argv, command
+):
+    """A shell reads all of its options before it takes the command string, so the
+    string is the first operand after them, wherever -c sat among the options; the
+    old walk took the word right after the cluster holding c, and so read ``-e`` or
+    ``-o`` as the command, and the one before this read ``pipefail`` as the command
+    of ``bash -euo pipefail -c STRING``, so a tool named by path in STRING started
+    with no stand-in seeing it."""
+    assert readers()["_shell_command_line"](argv) == command
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "argv",
+    [
+        pytest.param(["sh", "-c", "uv sync"], id="c-then-the-string"),
+        pytest.param(["bash", "-euo", "pipefail", "-c", "uv sync"], id="a-cluster"),
+        pytest.param(["bash", "-co", "pipefail", "uv sync"], id="c-with-a-value"),
+        pytest.param(["bash", "--mystery", "-c", "uv sync"], id="options-unread"),
+        pytest.param(["sh", "script.sh", "-c", "uv sync"], id="a-script"),
+        pytest.param(["sh", "-c", "--", "uv sync"], id="double-dash"),
+        pytest.param(["sh", "-c"], id="c-with-no-string"),
+    ],
+)
+def test_the_exec_d_shell_walk_answers_as_the_conftests_own_does(argv):
+    """The two shell walks are one function in two processes: the text the child
+    runs answers each command line as the root conftest's function does here,
+    index and options-read flag alike."""
+    from tests import conftest as root_conftest
+
+    assert readers()["_shell_command_string"](argv) == (
+        root_conftest._shell_command_string(argv)
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "argv",
+    [
+        pytest.param(["sh", "--", "-c", "uv sync"], id="a-script-named-dash-c"),
+        pytest.param(["sh", "script.sh", "-c", "uv sync"], id="a-script-before-c"),
+        pytest.param(["sh", "-c"], id="c-with-no-string"),
+        pytest.param(
+            ["bash", "--mystery", "-c", "uv sync"], id="an-unknown-long-option"
+        ),
+        pytest.param(["sh", "-e", "uv sync"], id="no-c-at-all"),
+    ],
+)
+def test_a_shell_argv_with_no_readable_command_string_gives_none(argv):
+    """After ``--`` the next word is a script, however it is spelled; a script before
+    any -c ends the options; a long option the reader does not know might take a
+    value, so where the string would be is a guess, and the reader says so with
+    None rather than naming the wrong word."""
+    assert readers()["_shell_command_line"](argv) is None
+
+
+@pytest.mark.unit
+def test_a_tool_named_by_path_after_a_shell_option_is_among_the_words():
+    """The case the module docstring promises: a tool named by path inside the
+    shell's command string is a word the hook compares, even when an option
+    follows -c."""
+    words = readers()["_words_of"](["bash", "-c", "-e", "/venv/bin/uv sync"])
+
+    assert "/venv/bin/uv" in words, words
+    assert "-e" not in words, words
+
+
+def _frame_of(module_name: str, function_name: str) -> types.SimpleNamespace:
+    """A stand-in for the frame an audit event fired in: its code's name and the
+    ``__name__`` of the module that code belongs to, which is all the reader
+    reads of a frame."""
+    code = types.SimpleNamespace(co_name=function_name)
+    return types.SimpleNamespace(f_code=code, f_globals={"__name__": module_name})
+
+
+@pytest.mark.unit
+def test_a_posix_spawn_made_by_subprocess_for_a_popen_is_its_echo():
+    """subprocess reports a Popen it starts with posix_spawn twice, the second
+    time from Popen._posix_spawn; that frame, and only that frame, marks the
+    second report."""
+    popen_reported = readers()["_popen_reported"]
+
+    assert popen_reported(_frame_of("subprocess", "_posix_spawn")) is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "frame",
+    [
+        pytest.param(_frame_of("__main__", "<module>"), id="the-childs-own-code"),
+        pytest.param(
+            _frame_of("subprocess", "_execute_child"), id="forked-not-spawned"
+        ),
+        pytest.param(
+            _frame_of("my_subprocess", "_posix_spawn"), id="a-same-named-helper"
+        ),
+        pytest.param(None, id="no-frame"),
+    ],
+)
+def test_a_posix_spawn_made_by_anything_else_is_a_start_of_its_own(frame):
+    """A direct os.posix_spawn, one from another module's function of the same
+    name, or an event with no frame to read, is recorded: nothing before it is
+    assumed to have been its first report, so no shared arm and no thread can
+    drop it."""
+    assert readers()["_popen_reported"](frame) is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "argv, word",
+    [
+        pytest.param(
+            "python3 -m detect_secrets scan", "detect-secrets", id="os-system-string"
+        ),
+        pytest.param(
+            ["sh", "-c", "python -m uv.__main__ pip install x"],
+            "uv",
+            id="inside-a-shell-c-string",
+        ),
+        pytest.param(
+            ["bash", "-c", "cd /x && /opt/py/bin/python3.12 -Im detect_secrets"],
+            "detect-secrets",
+            id="an-interpreter-by-path-after-other-words",
+        ),
+        pytest.param(
+            ["python3", "-W", "ignore", "-m", "uv", "--version"],
+            "uv",
+            id="the-program-itself",
+        ),
+    ],
+)
+def test_a_module_run_by_an_interpreter_inside_a_shell_line_is_a_word(argv, word):
+    """The -m rule holds for an interpreter that is a word of a shell command
+    line as it does for one that is the program: the module's top-level package,
+    spelled with the hyphen a probed name uses, is among the words compared, so
+    ``python -m detect_secrets`` inside a shell line is recorded as the direct
+    form is."""
+    assert word in readers()["_words_of"](argv)
+
+
+@pytest.mark.unit
+def test_a_shell_line_with_no_interpreter_adds_no_module_word():
+    """The control: a shell line whose words run no Python module is read word
+    by word and nothing is added."""
+    assert readers()["_words_of"]("ls -l /tmp") == ["ls", "-l", "/tmp"]
+
+
+@pytest.mark.unit
+def test_the_prelude_carries_the_conftests_tables_and_the_guards_walk(tmp_path):
+    """The child reads a command line with the sets and the shell walk the root
+    conftest reads with and the -m walk the tool guard runs, taken from those homes
+    when the prelude is built, so none can drift from its copy: there is no copy.
+    The future import comes first, so the walks' annotations are never evaluated
+    in the child."""
+    from tests import conftest as root_conftest
+
+    text = ChildToolStarts(tmp_path).prelude()
+
+    assert text.startswith("from __future__ import annotations\n")
+    for name in (
+        "_SHELLS",
+        "_SHELL_OPTIONS_WITH_A_VALUE",
+        "_SHELL_CLUSTER_LETTERS_WITH_A_VALUE",
+        "_SHELL_LONG_FLAGS",
+    ):
+        expected = f"{name} = {tuple(sorted(getattr(root_conftest, name)))!r}\n"
+        assert text.count(expected) == 1, name
+    assert text.count(inspect.getsource(root_conftest._shell_command_string)) == 1
+    assert text.count(inspect.getsource(tool_guard._module_run_by)) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "argv",
+    [
+        pytest.param(["python3", "-m", "uv", "--version"], id="m-then-the-module"),
+        pytest.param(["python3", "-Im", "uv"], id="m-ends-a-cluster"),
+        pytest.param(["python3", "-muv"], id="the-module-inside-the-cluster"),
+        pytest.param(["python3", "-W", "ignore", "-m", "uv"], id="a-valued-w-before-m"),
+        pytest.param(["python3", "-X", "utf8", "-m", "uv"], id="a-valued-x-before-m"),
+        pytest.param(["python3", "-c", "import uv"], id="c-ends-the-options"),
+        pytest.param(
+            ["python3", "script.py", "-m", "uv"], id="a-script-ends-the-options"
+        ),
+        pytest.param(["python3", "-", "-m", "uv"], id="a-lone-dash-ends-the-options"),
+        pytest.param(["python3", "-m"], id="m-with-no-module"),
+        pytest.param([b"python3", b"-m", b"detect_secrets"], id="bytes"),
+    ],
+)
+def test_the_exec_d_walk_answers_as_the_guards_own_does(argv):
+    """The two walkers are one function in two processes: the text the child runs
+    answers each command line as the tool guard's function does here."""
+    assert readers()["_module_run_by"](argv) == tool_guard._module_run_by(argv)

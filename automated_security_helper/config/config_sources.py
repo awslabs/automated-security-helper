@@ -75,7 +75,10 @@ config by the same rules (``resolve_config``'s ``overlay_config_path``).
 
 ``move`` and ``copy`` are refused, as in ``runtime_patch.py``; #289 asks for
 ``add``, ``remove`` and ``replace``, and ``test`` is allowed because it reads
-only.
+only. A file an MCP client chose (one the "Environment variables" rule refuses
+by its own names, not only as a base of a refused file) may not use ``test``:
+whether such a file loads would say whether a value it may not read equals the
+one it guessed.
 
 Base paths
 ----------
@@ -292,6 +295,11 @@ from automated_security_helper.core.exceptions import (
     ASHConfigUnsetVariableError,
 )
 from automated_security_helper.utils.error_text import os_error_without_named_file
+from automated_security_helper.utils.link_chain import (
+    LINK_HOPS,
+    first_unsafe_link,
+    names_a_windows_share,
+)
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -336,13 +344,151 @@ SOURCE_KIND_PYPROJECT = "pyproject"
 
 _PATCH_OPS = {"add", "remove", "replace", "test"}
 _URL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
-# A [tool.ash] or [tool.ash.*] header, or a top-level dotted `tool.ash...` key.
-# Only consulted for a pyproject.toml that failed to parse, to decide whether it
-# was meant to configure ASH, and to report the table's line.
+# The `tool` and `ash` keys as TOML lets them be written: bare, or as a basic or
+# a literal string (`"tool"`, `'ash'`), which name the same key.
+_TOOL_KEY = r"""(?:tool|"tool"|'tool')"""
+_ASH_KEY = r"""(?:ash|"ash"|'ash')"""
+# A [tool.ash] or [tool.ash.*] header, a [[tool.ash.*]] array-of-tables header,
+# a top-level dotted `tool.ash...` key, or a top-level `tool = { ... }` inline
+# table that holds an `ash` key. Only consulted for a pyproject.toml that
+# failed to parse, to decide whether it was meant to configure ASH, and to
+# report the table's line (_tool_ash_declared, which also reads the other
+# spelling: an `ash` key under a [tool] table).
 _TOOL_ASH_PATTERN = re.compile(
-    r"^[ \t]*(\[[ \t]*tool[ \t]*\.[ \t]*ash[ \t]*[\].]|tool[ \t]*\.[ \t]*ash[ \t]*[.=])",
+    rf"^[ \t]*(\[\[?[ \t]*{_TOOL_KEY}[ \t]*\.[ \t]*{_ASH_KEY}[ \t]*[\].]"
+    rf"|{_TOOL_KEY}[ \t]*\.[ \t]*{_ASH_KEY}[ \t]*[.=]"
+    rf"|{_TOOL_KEY}[ \t]*=[ \t]*\{{(?:[^\n]*?[{{,])?[ \t]*{_ASH_KEY}[ \t]*[.=])",
     re.MULTILINE,
 )
+# A bare `[tool]` table header, and an `ash` key (`ash = {...}` or `ash.x = ...`)
+# on a line of its own; the key counts only between a [tool] header and the next
+# header, where TOML puts it under tool. The text is decoded with no newline
+# translation, so a CRLF file's header line ends in a carriage return before
+# the `$`; the trailing class admits it, where the other two patterns need no
+# such care because they do not anchor at the line's end.
+_TOOL_TABLE_HEADER = re.compile(
+    rf"^[ \t]*\[[ \t]*{_TOOL_KEY}[ \t]*\][ \t]*(?:#.*)?[ \t\r]*$", re.MULTILINE
+)
+# A table header: a dotted key path between one pair of brackets or two, never
+# one of each (`[a]]` and `[[a]` are no header), with a comment after it at most.
+# Any line starting with `[` used to count, so a row of a multi-line array value
+# (`  ["a", "b"],`, `[3]`) ended the table early, the `ash` key under it was
+# missed, and an unparsable pyproject written that way was skipped as holding no
+# ASH settings. A row such as `[3]` or `[true]` has a header's exact shape, so a
+# line is tested as a header only outside a multi-line value (`_table_end`).
+_TOML_KEY = r"""(?:[A-Za-z0-9_-]+|"(?:[^"\\\n]|\\.)*"|'[^'\n]*')"""
+_KEY_PATH = rf"{_TOML_KEY}(?:[ \t]*\.[ \t]*{_TOML_KEY})*"
+_ANY_TABLE_HEADER = re.compile(
+    rf"^[ \t]*(?:\[[ \t]*{_KEY_PATH}[ \t]*\]|\[\[[ \t]*{_KEY_PATH}[ \t]*\]\])"
+    r"[ \t]*(?:#.*)?[ \t\r]*$",
+    re.MULTILINE,
+)
+_ASH_KEY_LINE = re.compile(rf"^[ \t]*{_ASH_KEY}[ \t]*[.=]", re.MULTILINE)
+
+
+def _tool_ash_declared(text: str) -> Optional[int]:
+    """The offset in ``text``, a pyproject.toml's text, where it declares ASH
+    settings, or None when it declares none.
+
+    Read by the lines alone, for a text that did not parse: a ``[tool.ash]`` or
+    ``[tool.ash.*]`` table header, a ``[[tool.ash.*]]`` array-of-tables header, a
+    top-level dotted ``tool.ash...`` key, a top-level ``tool = { ash = ... }``
+    inline table, or an ``ash`` key under a bare ``[tool]`` table, with either key
+    bare or quoted (``[tool."ash"]``). A spelling that went unread made an
+    unparsable pyproject written that way be skipped as holding no ASH settings,
+    and the scan ran with the defaults while its configuration sat unread.
+    """
+    match = _TOOL_ASH_PATTERN.search(text)
+    if match is not None:
+        return match.start()
+    scanned_to = 0
+    for header in _TOOL_TABLE_HEADER.finditer(text):
+        if header.start() < scanned_to:
+            # Inside a table already read to its end, so inside a value that
+            # table left open: no header, and its lines were searched with the
+            # table's. Reading it again made a file of repeated ``[tool]`` and
+            # open-bracket pairs cost the square of its length.
+            continue
+        table_end = _table_end(text, header.end())
+        scanned_to = table_end
+        key = _ASH_KEY_LINE.search(text, header.end(), table_end)
+        if key is not None:
+            return key.start()
+    return None
+
+
+def _table_end(text: str, start: int) -> int:
+    """The offset of the first table header at or after ``start`` that is not
+    inside a multi-line value, or the end of ``text``.
+
+    ``start`` is the end of a header's line. The lines after it are read in
+    order, tracking the brackets a value leaves open (an array written over
+    several lines) and a multi-line string, and a line is tested as a header
+    only outside both. The text did not parse, so this is a reading by lines and
+    not a parser: a bracket inside a quoted string or after a ``#`` is not
+    counted, and a value left unclosed hides every header after it, which keeps
+    scanning the table the key might be in rather than ending it early.
+    """
+    depth = 0
+    multiline: Optional[str] = None
+    position = start
+    while position < len(text):
+        newline = text.find("\n", position)
+        line_end = len(text) if newline < 0 else newline
+        line = text[position:line_end]
+        if depth == 0 and multiline is None and _ANY_TABLE_HEADER.match(line):
+            return position
+        depth, multiline = _brackets_left_open(line, depth, multiline)
+        position = line_end + 1
+    return len(text)
+
+
+def _brackets_left_open(
+    line: str, depth: int, multiline: Optional[str]
+) -> Tuple[int, Optional[str]]:
+    """The array depth and the open multi-line string delimiter after ``line``,
+    given those before it. Quoted strings and comments hold no brackets."""
+    index = 0
+    while index < len(line):
+        if multiline is not None:
+            closing = line.find(multiline, index)
+            if closing < 0:
+                return depth, multiline
+            index = closing + len(multiline)
+            multiline = None
+            continue
+        char = line[index]
+        if char == "#":
+            break
+        if char in "\"'":
+            if line.startswith(char * 3, index):
+                multiline = char * 3
+                index += 3
+            else:
+                index = _end_of_string(line, index)
+            continue
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth = max(0, depth - 1)
+        index += 1
+    return depth, multiline
+
+
+def _end_of_string(line: str, start: int) -> int:
+    """The index just past the single-line string that opens at ``start``, or the
+    end of ``line`` when it does not close there. A basic string reads a
+    backslash as escaping the next character; a literal one does not."""
+    quote = line[start]
+    index = start + 1
+    while index < len(line):
+        if quote == '"' and line[index] == "\\":
+            index += 2
+        elif line[index] == quote:
+            return index + 1
+        else:
+            index += 1
+    return len(line)
 
 
 def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
@@ -369,8 +515,13 @@ def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
     `extends` merging and `patch` pointers use the same rule, for the same
     reason: a base and a child are as likely to spell a section differently as a
     file and an override are.
+
+    A key that is not a string (a YAML number or boolean key) has no
+    ``-``/``_`` twin and is matched only as itself; read as text, it made the
+    merge of any file holding one fail with an AttributeError. A null key is
+    refused before this point (``deep_merge``).
     """
-    if key in container:
+    if key in container or not isinstance(key, str):
         return key
     for variant in (key.replace("-", "_"), key.replace("_", "-")):
         if variant != key and variant in container:
@@ -657,7 +808,9 @@ def _descriptor_path(fd: int, named: Path, identity: FileIdentity) -> Optional[P
     return resolved
 
 
-def open_config_for_judgment(path: Path) -> Optional[OpenedConfig]:
+def open_config_for_judgment(
+    path: Path, follow_links: bool = True
+) -> Optional[OpenedConfig]:
     """``path`` opened for a grant check, or None when it leads to no regular file.
 
     Only a path that leads to a regular file now is opened, and the opened
@@ -666,16 +819,25 @@ def open_config_for_judgment(path: Path) -> Optional[OpenedConfig]:
     judges the name as before. The open does not wait on a FIFO that was swapped in
     since and does not make a terminal the process's controlling one. A name that
     cannot be opened (absent, unreadable) gives None as well.
+
+    With ``follow_links`` False the last component of ``path`` must not be a
+    link: one that is gives None, and the open itself refuses a leaf made a link
+    since the check (``O_NOFOLLOW``, where the platform has it). A caller that
+    already judged the path a name resolves to opens that resolved path this way,
+    so a leaf swapped for a link after the judgment is never opened through it.
     """
+    nofollow = 0 if follow_links else getattr(os, "O_NOFOLLOW", 0)
     try:
-        if not stat.S_ISREG(os.stat(path).st_mode):
+        info = os.stat(path) if follow_links else os.lstat(path)
+        if not stat.S_ISREG(info.st_mode):
             return None
         fd = os.open(
             path,
             os.O_RDONLY
             | getattr(os, "O_NONBLOCK", 0)
             | getattr(os, "O_NOCTTY", 0)
-            | getattr(os, "O_BINARY", 0),
+            | getattr(os, "O_BINARY", 0)
+            | nofollow,
         )
     except (OSError, ValueError):
         return None
@@ -829,10 +991,10 @@ def _tool_ash_line(path: Path) -> Optional[int]:
         text = _read_toml_text(path)
     except (OSError, UnicodeDecodeError, ASHConfigSourceError):
         return None
-    match = _TOOL_ASH_PATTERN.search(text)
-    if match is None:
+    declared = _tool_ash_declared(text)
+    if declared is None:
         return None
-    return text.count("\n", 0, match.start()) + 1
+    return text.count("\n", 0, declared) + 1
 
 
 #: The name prefix of a scan's server-written copy of a session profile. The
@@ -1174,8 +1336,26 @@ def parse_error_kind(error: BaseException) -> str:
 
 @dataclass(frozen=True)
 class ConfigSource:
+    """A config source discovery found: its path, its kind, and, under a
+    caller's ``permit``, the identity of the file the path led to when the permit
+    checked it (the opened descriptor's, taken after the permit admitted the name;
+    ``ABSENT_FILE`` when the name led to no file, or to another than the one
+    judged), None when no permit checked it.
+
+    The identity is what the caller's read is held to (``resolve_config`` hands
+    it to the load as ``expect``, which ``read_config_bytes`` compares with the
+    opened file): a source that passed the check and was swapped for a link out
+    of the grant before the open is refused at the open, instead of read.
+
+    The descriptor the identity came from is closed when discovery returns. A
+    read discovery makes itself (the pyproject read) compares the identity while
+    the inode is still in use; a read the caller makes later compares a
+    (device, inode) pair that a recycled inode number could match.
+    """
+
     path: Path
     kind: str
+    identity: Optional[FileIdentity] = None
 
     @property
     def label(self) -> str:
@@ -1198,27 +1378,36 @@ class ConfigDiscovery:
     notes: List[str] = field(default_factory=list)
 
 
-def pyproject_has_ash_table(path: Path) -> bool:
+def pyproject_has_ash_table(path: Path, expect: Optional[FileIdentity] = None) -> bool:
     """Whether `path` is a pyproject.toml that configures ASH.
 
     A pyproject.toml that does not parse (including one that is not UTF-8,
     which TOML requires) is skipped unless its text declares a ``tool.ash``
     table, in which case it is an error: skipping it would scan with the default
     config while the repository's own config sat unread. Read errors propagate.
+
+    ``expect`` is the identity a caller took when it checked the path
+    (``ConfigSource.identity``, taken by discovery's permit check): every read
+    here is held to it, so a name made to lead to another file after the check
+    is refused (``ConfigFileChangedError``) and not read. Without it the
+    identity is the file the name leads to now.
     """
     undecoded: Optional[str] = None
-    # The file the name leads to now: the first read decides that it is not
-    # UTF-8, and the read of its bytes below must be of that same file, so one
-    # swapped in between is refused (OSError, ESTALE) and not scanned for the
-    # pattern in its place.
-    seen = identity_to_hold(path)
+    # The file the name leads to now, or the one the caller checked: the first
+    # read decides that it is not UTF-8, and the read of its bytes below must be
+    # of that same file, so one swapped in between is refused (OSError, ESTALE)
+    # and not scanned for the pattern in its place.
+    seen = expect if expect is not None else identity_to_hold(path)
     try:
         text = _read_toml_text(path, expect=seen)
     except UnicodeDecodeError as exc:
-        # Latin-1 decodes any byte string, which is all the pattern needs.
-        if not _TOOL_ASH_PATTERN.search(
-            read_config_bytes(path, expect=seen).decode("latin-1")
-        ):
+        # Latin-1 decodes any byte string, which is all the pattern needs. A
+        # leading UTF-8 byte order mark is dropped first, as _read_toml_text
+        # drops it from a file that is UTF-8: decoded as Latin-1 it is three
+        # characters in front of the first line, and a [tool.ash] header there
+        # no longer started its line.
+        raw = read_config_bytes(path, expect=seen).removeprefix(b"\xef\xbb\xbf")
+        if _tool_ash_declared(raw.decode("latin-1")) is None:
             return False
         # The decoder's message is not repeated (unparsed_config_reason);
         # parse_error_kind gives the error's type, because this message names
@@ -1233,8 +1422,11 @@ def pyproject_has_ash_table(path: Path) -> bool:
     unparsed: Optional[str] = None
     try:
         document = _parse_toml(text)
-    except (_TOMLDecodeError, RecursionError) as exc:
-        if not _TOOL_ASH_PATTERN.search(text):
+    except (ValueError, RecursionError) as exc:
+        # TOMLDecodeError is a ValueError; so is the one int() raises for a
+        # number longer than the interpreter's digit limit, which tomllib lets
+        # through undressed. Either is this file not parsing.
+        if _tool_ash_declared(text) is None:
             ASH_LOGGER.debug(
                 f"Skipping {Path(path).as_posix()} as a config source: it has no "
                 f"[tool.ash] table, and it does not parse {parse_error_kind(exc)}"
@@ -1281,7 +1473,10 @@ def _unreadable_pyproject(
 
 
 def _pyproject_is_a_source(
-    path: Path, found_before: List[ConfigSource], notes: List[str]
+    path: Path,
+    found_before: List[ConfigSource],
+    notes: List[str],
+    expect: Optional[FileIdentity] = None,
 ) -> bool:
     """Probe pyproject.toml without letting it break an unrelated config.
 
@@ -1301,6 +1496,11 @@ def _pyproject_is_a_source(
 
     What cannot be used behind a higher-precedence source is appended to
     ``notes`` rather than logged; see ``ConfigDiscovery``.
+
+    ``expect`` is the identity discovery's permit check took for the name
+    (``ConfigSource.identity``); the read for the table is held to it
+    (``pyproject_has_ash_table``), so a file swapped in after the check is
+    refused as one that cannot be read, not read outside the grant.
     """
     # Classified from os.stat and its errno, so each name that cannot be followed
     # is reported for what it is.
@@ -1328,7 +1528,7 @@ def _pyproject_is_a_source(
             notes,
         )
     try:
-        return pyproject_has_ash_table(path)
+        return pyproject_has_ash_table(path, expect=expect)
     except OSError as exc:
         return _unreadable_pyproject(path, found_before, exc, notes)
     except ASHConfigSourceError as exc:
@@ -1369,6 +1569,15 @@ def _not_permitted(found: Path) -> ASHConfigInputNotPermittedError:
     return ASHConfigInputNotPermittedError(
         f"{found.as_posix()}, a config source found in the scanned directory, "
         "reaches a file outside the directories this caller may read config from."
+    )
+
+
+def _search_dir_not_permitted(search_dir: Path) -> ASHConfigInputNotPermittedError:
+    # Names the directory as given, never what it leads to.
+    return ASHConfigInputNotPermittedError(
+        f"{search_dir.as_posix()}, the directory to look for a config source in, "
+        "leads through a network share, a device path or a link ASH cannot "
+        "read, so ASH does not look inside it."
     )
 
 
@@ -1446,14 +1655,177 @@ def discovery_candidates(search_dir: Path) -> Iterator[Path]:
         yield search_dir / ASH_PYPROJECT_FILE_NAME
 
 
-def _permitted(path: Path, permit: PermitBase) -> bool:
-    if _on_windows() and _is_a_link(path):
-        # Resolving a link on Windows can open a connection to the host a UNC
-        # target names, so a linked source is refused unresolved, as an extends
-        # base whose spelling leaves the root is (_resolve_base_path).
-        return False
+#: Links followed before a chain is given up on as unjudgeable: the bound
+#: ``os.path.realpath`` applies to a chain of links before it stops following.
+#: The reading itself is ``utils/link_chain`` (the one copy, shared with the MCP
+#: sandbox gates); the bound is a module attribute so a test can shorten it, and
+#: it is passed to the walk at call time.
+_LINK_HOPS = LINK_HOPS
+
+
+def _refused_before_resolving(path: Path) -> bool:
+    """Whether resolving `path` on Windows could connect to a host, or cannot be ruled out.
+
+    Resolving a path there opens what it names, so this reads the path from text
+    and from ``os.lstat`` / ``os.readlink`` alone (``utils/link_chain``), which
+    open a link's own entry and never what it names. True when:
+
+    - the spelling names a share or a device (a UNC path, or a device-prefixed
+      path whose device is not a drive letter, or a drive path with a ``..``
+      step behind a device prefix);
+    - a link on the way, ANY component from the anchor down and not only the
+      last, or a link that link leads to, names a share or a device, or its
+      target cannot be read, or its chain is longer than ``_LINK_HOPS``;
+    - a component that is there cannot be examined, so whether it is a link
+      cannot be told.
+
+    A link that leads only to local names is followed and the components under it
+    are judged where it leads, as resolving would read them; a component that is
+    not there ends the walk with nothing judged, and the permit judges the path
+    as it does on every other platform. A relative link target is walked name by
+    name from the directory the link is in: ``os.lstat`` of the whole collapsed
+    spelling would follow a link among its parents, and open the share at the
+    check meant to prevent it.
+    """
+    text = os.fspath(path)
+    if names_a_windows_share(text):
+        return True
+    return first_unsafe_link(text, hops=_LINK_HOPS) is not None
+
+
+def _resolved_if_permitted(path: Path, permit: PermitBase) -> Optional[Path]:
+    """The path ``path`` resolves to when ``permit`` admits it, else None.
+
+    Nothing is opened. The caller that reads the file takes its identity from a
+    descriptor opened after this judgment (``_identity_held_after_the_judgment``),
+    never from the name.
+    """
+    if _on_windows() and _refused_before_resolving(path):
+        # Resolving a path on Windows can open a connection to the host a UNC
+        # spelling or a link target names, so a path that leads to a share, or
+        # one a link on the way makes unreadable, is refused unresolved, as an
+        # extends base whose spelling leaves the root is (_resolve_base_path).
+        # Every component is read, not the last alone: a link in a parent
+        # directory is followed by the lstat of the whole spelling. A link that
+        # leads only to local names is resolved below and judged as the file it
+        # names.
+        return None
     # realpath reads links and opens nothing, and does not raise on a loop.
-    return permit(Path(os.path.realpath(path)))
+    resolved = Path(os.path.realpath(path))
+    return resolved if permit(resolved) else None
+
+
+def _permitted(path: Path, permit: PermitBase) -> bool:
+    return _resolved_if_permitted(path, permit) is not None
+
+
+def _descriptor_leads_to_the_judged_path(opened: OpenedConfig, resolved: Path) -> bool:
+    """Whether the descriptor ``opened`` leads to ``resolved``, the path judged.
+
+    The path the kernel reports for the descriptor is compared with the judged
+    one as text. A file system that ignores case can report the on-disk case of
+    a name the judgment spelled as it was typed (``/repo/.ASH.yaml`` for
+    ``/repo/.ash.yaml``), and a legitimate config was then refused as changed
+    after it was checked, a race that never happened. A path that differs only in
+    case therefore counts when no component of the judged path is a link now and
+    the judged path is the very file the descriptor holds (the same device and
+    inode). The judged path was resolved before the permit, so it names no link;
+    one that does now was swapped in since, and a parent directory made a link
+    to a sibling that differs from it in case alone would otherwise make the
+    descriptor's path look like the judged one while the file is not the one the
+    permit saw. The test is that resolving the judged path again gives it back
+    unchanged: resolution reads links and never changes case on a case-sensitive
+    file system, and the judged path is already in the case the system reports
+    where it ignores case. Any other difference, and a descriptor whose path
+    cannot be told, stays a refusal: no identity vouches for a file the permit
+    did not see.
+    """
+    if opened.real is None:
+        return False
+    if opened.real == resolved:
+        return True
+    if str(opened.real).casefold() != str(resolved).casefold():
+        return False
+    try:
+        leaf = os.lstat(resolved)
+        # lstat refuses a link at the last component only, and follows one in
+        # any parent: the judged path must still lead to itself.
+        again = Path(os.path.realpath(resolved))
+    except (OSError, ValueError):
+        return False
+    return (
+        again == resolved
+        and not _is_a_symlink_or_reparse_point(leaf)
+        and (leaf.st_dev, leaf.st_ino) == opened.identity
+    )
+
+
+def _identity_held_after_the_judgment(
+    path: Path, resolved: Path, held: Optional[List[OpenedConfig]]
+) -> FileIdentity:
+    """What a read of ``path`` is held to, once the permit admitted ``resolved``.
+
+    ``resolved``, the path that was judged, is opened now, after the judgment (a
+    name the permit refused is never opened), and the identity is the
+    descriptor's, when the descriptor leads to that very path
+    (``OpenedConfig.real``). It is the judged path that is opened and not the
+    name ``path``: a link re-pointed between the judgment and the open would
+    make the open reach a file outside the grant. The open does not follow a
+    link at the last component, so a leaf swapped for one since the judgment is
+    not opened through it either. The identity is never looked up from the name
+    again: that was a second lookup beside the one the judgment made, so a link
+    re-pointed between the two had its new target held as the file judged. It is
+    ``ABSENT_FILE`` when the judged path leads to no regular file now (a
+    directory, a dangling link, an unreadable name, a leaf made a link), when
+    the descriptor's path is not the judged one (a difference in case alone is
+    settled by the inode, provided no component of the judged path is a link
+    now, ``_descriptor_leads_to_the_judged_path``), and when
+    the descriptor's path cannot be told: no identity vouches for a file the
+    permit did not see, and a read held to ``ABSENT_FILE`` refuses whatever file
+    is at the name by then.
+
+    With ``held`` the descriptor is appended to it and stays open for the caller to
+    close, so the inode stays in use while the caller's own reads compare the
+    identity: a freed inode number can be given to a file made afterwards, which
+    would pass a compare made on a closed descriptor. Discovery closes what it
+    holds when it returns, so it protects its own reads (the pyproject read); a
+    caller that compares ``ConfigSource.identity`` in a later read of its own
+    compares an identity no descriptor keeps in use any more.
+    """
+    opened = open_config_for_judgment(resolved, follow_links=False)
+    if opened is None:
+        return ABSENT_FILE
+    identity = (
+        opened.identity
+        if _descriptor_leads_to_the_judged_path(opened, resolved)
+        else ABSENT_FILE
+    )
+    if held is not None:
+        held.append(opened)
+    else:
+        opened.close()
+    return identity
+
+
+def check_search_directory(
+    search_dir: Path, permit: Optional[PermitBase] = None
+) -> None:
+    """Refuse a directory to look for a config source in that leads to a share.
+
+    Under ``permit`` on Windows only. Every lookup of a name under `search_dir`
+    (``discovery_candidates``, ``_existing_candidates``) is an ``os.lstat`` of a
+    spelling that passes through it, which follows a link among its components;
+    so a caller that looks under a directory it was handed judges the directory
+    first, whether or not any config name is there, and calls this before the
+    first lookup.
+
+    Raises:
+        ASHConfigInputNotPermittedError: when the directory names a share or a
+            device, or a link on the way leads to one or cannot be read. The
+            message names the directory as given.
+    """
+    if permit is not None and _on_windows() and _refused_before_resolving(search_dir):
+        raise _search_dir_not_permitted(search_dir)
 
 
 def _existing_candidates(
@@ -1465,6 +1837,7 @@ def _existing_candidates(
     anything looks inside it: whether a name exists there would otherwise answer
     whether a file exists in a directory the caller may not read.
     """
+    check_search_directory(search_dir, permit)
     dot_ash = search_dir / ".ash"
     if permit is not None and _name_exists(dot_ash) and not _permitted(dot_ash, permit):
         raise _not_permitted(dot_ash)
@@ -1484,13 +1857,35 @@ def _existing_candidates(
 
 
 def _check_candidates(
-    candidates: List[ConfigSource], permit: Optional[PermitBase]
-) -> None:
+    candidates: List[ConfigSource],
+    permit: Optional[PermitBase],
+    held: Optional[List[OpenedConfig]] = None,
+) -> List[ConfigSource]:
+    """``candidates``, each checked against ``permit`` and, when one checked,
+    carrying the identity of the file its path led to at the check.
+
+    The identity binds the caller's read to the file that was judged: the permit
+    alone left the milliseconds between its check and the open, in which the name
+    could be made to lead to a file outside the grant. It is the opened
+    descriptor's (``_identity_held_after_the_judgment``), taken after the permit
+    admitted the name and never looked up from the name afterwards, so the judged
+    file and the held file are one at the check. A candidate the permit refuses
+    is not opened. ``held`` collects the descriptors, left open for the caller to
+    close once its own reads have compared the identities; discovery closes them
+    when it returns, so its protection against a freed inode number being reused
+    covers the reads it makes itself. Without a permit nothing is checked and no
+    identity is taken, as before.
+    """
     if permit is None:
-        return
+        return list(candidates)
+    checked: List[ConfigSource] = []
     for candidate in candidates:
-        if not _permitted(candidate.path, permit):
+        resolved = _resolved_if_permitted(candidate.path, permit)
+        if resolved is None:
             raise _not_permitted(candidate.path)
+        identity = _identity_held_after_the_judgment(candidate.path, resolved, held)
+        checked.append(replace(candidate, identity=identity))
+    return checked
 
 
 def check_discovery_candidates(search_dir: Path, permit: Optional[PermitBase]) -> None:
@@ -1498,10 +1893,16 @@ def check_discovery_candidates(search_dir: Path, permit: Optional[PermitBase]) -
 
     The check ``discover_config_source(search_dir, permit=permit)`` makes before
     it opens anything, for a caller that refuses before a scan starts (MCP
-    ``scan_directory``). Opens nothing itself.
+    ``scan_directory``). Opens nothing itself: each candidate is judged by the
+    path it resolves to and no identity is taken, since the caller reads none.
     """
     search_dir = Path(search_dir)
-    _check_candidates(_existing_candidates(search_dir, permit), permit)
+    candidates = _existing_candidates(search_dir, permit)
+    if permit is None:
+        return
+    for candidate in candidates:
+        if not _permitted(candidate.path, permit):
+            raise _not_permitted(candidate.path)
 
 
 def discover_config_source(
@@ -1520,15 +1921,24 @@ def discover_config_source(
     source as found. Without it nothing is checked.
     """
     search_dir = Path(search_dir)
-    candidates = _existing_candidates(search_dir, permit)
-    _check_candidates(candidates, permit)
+    # The descriptors each admitted source was held by stay open until this
+    # function returns, so the pyproject read below compares its identity while
+    # the inode is still in use.
+    held: List[OpenedConfig] = []
     found: List[ConfigSource] = []
     notes: List[str] = []
-    for candidate in candidates:
-        if candidate.kind != SOURCE_KIND_PYPROJECT or _pyproject_is_a_source(
-            candidate.path, found, notes
-        ):
-            found.append(candidate)
+    try:
+        candidates = _check_candidates(
+            _existing_candidates(search_dir, permit), permit, held
+        )
+        for candidate in candidates:
+            if candidate.kind != SOURCE_KIND_PYPROJECT or _pyproject_is_a_source(
+                candidate.path, found, notes, expect=candidate.identity
+            ):
+                found.append(candidate)
+    finally:
+        for opened in held:
+            opened.close()
     if not found:
         return ConfigDiscovery()
     return ConfigDiscovery(selected=found[0], ignored=found[1:], notes=notes)
@@ -1540,8 +1950,17 @@ def check_discovered_source(path: Path, permit_base: Optional[PermitBase]) -> No
     See "Base paths". Nothing is checked without ``permit_base``. Raises
     ``ASHConfigInputNotPermittedError`` naming ``path`` as it was found, never the
     file it resolves to.
+
+    Resolved with ``os.path.realpath``, as ``_permitted`` resolves a candidate:
+    it reads links, opens nothing and does not raise on a symlink loop, where
+    ``Path.resolve`` raised a bare RuntimeError on one on Python 3.10 to 3.12
+    in place of a config refusal. A loop resolves to itself and is judged as
+    the path it was found at. Judged by ``_permitted``, the check discovery
+    makes of each candidate, so on Windows a found file that is a link is
+    refused unresolved: resolving it can open a connection to the host a UNC
+    target names, which discovery's own check never does.
     """
-    if permit_base is None or permit_base(Path(path).resolve()):
+    if permit_base is None or _permitted(Path(path), permit_base):
         return
     raise ASHConfigInputNotPermittedError(
         f"{Path(path).as_posix()}, the config file found in the scanned directory, "
@@ -1858,7 +2277,12 @@ def toml_config_table(path: Path, text: str) -> Any:
     unparsed: Optional[str] = None
     try:
         document = _parse_toml(text)
-    except _TOMLDecodeError as exc:
+    except (ValueError, RecursionError) as exc:
+        # TOMLDecodeError, the ValueError int() raises for a number past the
+        # interpreter's digit limit, which tomllib lets through undressed, and
+        # the RecursionError of a text nested past the interpreter's recursion
+        # limit, which left read_config_file raw (parse_config_text and
+        # pyproject_has_ash_table word it the same way).
         unparsed = unparsed_config_reason(path, exc)
     if unparsed is not None:
         # Outside the handler (unparsed_config_reason).
@@ -1952,8 +2376,16 @@ def read_config_text(path: Path, expect: Optional[FileIdentity] = None) -> str:
     parse_config_text_literally: a caller that needs both of its views parses
     them from this one read, so a file changed in between cannot give two
     different ones. A path that is not a regular file is refused before it is
-    opened (``refuse_unless_a_file``); a TOML file loses a leading byte order
-    mark, and one that is not UTF-8 is refused as read_config_file refuses it.
+    opened (``refuse_unless_a_file``); a TOML or JSON file loses a leading byte
+    order mark (as ``read_config_file`` drops it: tomllib and json refuse one),
+    and a TOML file that is not UTF-8 is refused as read_config_file refuses it.
+
+    Every read goes through ``read_config_bytes``: a non-blocking open of a
+    regular file, held to ``expect`` when the caller took an identity, and
+    bounded by ``ASH_CONFIG_MAX_FILE_BYTES``. Without an identity this used to
+    fall back to a plain blocking ``open()`` and an unbounded read, so the
+    config validator, the linter, MCP profile loading and the literal
+    re-resolution read whole files with no bound.
     """
     path = Path(path)
     refuse_unless_a_file(path)
@@ -1966,12 +2398,13 @@ def read_config_text(path: Path, expect: Optional[FileIdentity] = None) -> str:
             undecoded = unparsed_config_reason(path, exc)
         # Outside the handler (unparsed_config_reason).
         raise ASHConfigUnparsedError(undecoded)
-    if expect is not None:
-        # The chain walk checked this file's identity (_resolve_base_path, or
-        # the root's caller); the read must open that same file.
-        return read_config_bytes(path, expect=expect).decode("utf-8")
-    with open(path, mode="r", encoding="utf-8") as f:
-        return f.read()
+    text = read_config_bytes(path, expect=expect).decode("utf-8")
+    if is_json_file(path):
+        # json.loads refuses a leading byte order mark; read_config_file
+        # decodes a JSON file as utf-8-sig, so the scan's own parse of this
+        # text (parse_config_text) must see the same text.
+        return text.removeprefix(chr(0xFEFF))
+    return text
 
 
 #: The name a chain walk refuses a file by while it reads a file its rule
@@ -2091,15 +2524,28 @@ def text_reads_the_environment(path: Path, text: str) -> bool:
     environment when ``path`` is loaded: an ``!ENV`` scalar or a plain YAML
     scalar the loader resolves as one (a key included), or a TOML string
     value starting with a reference (``_resolve_toml_env``). JSON reads
-    nothing. A text that does not parse reads nothing; its load says why."""
+    nothing. A text that does not parse reads nothing; its load says why. A
+    text nested past the interpreter's recursion limit is NOT answered that
+    way: this check's parse and the load's parse run at different depths of
+    the stack, so a text at the edge of the limit could pass here and then
+    parse, with its references read. A check that cannot judge the text
+    refuses it as an unparsed config (ASHConfigUnparsedError, in the words
+    ``parse_config_text`` uses for the same file), where the RecursionError
+    used to escape this check raw."""
     path = Path(path)
     if is_json_file(path):
         return False
     if is_toml_file(path):
+        unparsed: Optional[str] = None
         try:
             document = _toml_document(path, text)
         except ASHConfigSourceError:
             return False
+        except RecursionError as exc:
+            unparsed = unparsed_config_reason(path, exc)
+        if unparsed is not None:
+            # Outside the handler (unparsed_config_reason).
+            raise ASHConfigUnparsedError(unparsed)
         pending: List[Any] = [document]
         while pending:
             value = pending.pop()
@@ -2110,23 +2556,36 @@ def text_reads_the_environment(path: Path, text: str) -> bool:
             elif isinstance(value, str) and ENV_REFERENCE_PATTERN.match(value):
                 return True
         return False
-    return _yaml_reads_the_environment(_NamedText(text, str(path)))
+    return _yaml_reads_the_environment(_NamedText(text, str(path)), path)
 
 
-def _yaml_reads_the_environment(stream: Any) -> bool:
+def _yaml_reads_the_environment(stream: Any, path: Optional[Path] = None) -> bool:
     """Whether the YAML in ``stream`` holds a scalar the loader reads from the
     environment: one tagged ``!ENV``, or a plain scalar the loader tags so
     (``load_yaml_config`` registers ENV_REFERENCE_PATTERN as an implicit
-    resolver). False for a stream that does not parse."""
+    resolver). False for a stream that does not parse. A stream nested past
+    the interpreter's recursion limit is refused as an unparsed config when
+    ``path`` names the file (``text_reads_the_environment``, a check that may
+    not answer "reads nothing" for a text it could not judge), and answers
+    False without one (``uses_env_references``, a lint convenience whose load
+    words the depth itself)."""
 
     class _Loader(yaml.SafeLoader):
         pass
 
     _Loader.add_implicit_resolver("!ENV", ENV_REFERENCE_PATTERN, None)
+    unparsed: Optional[str] = None
     try:
         root = yaml.compose(stream, Loader=_Loader)
     except (UnicodeDecodeError, yaml.YAMLError):
         return False
+    except RecursionError as exc:
+        if path is None:
+            return False
+        unparsed = unparsed_config_reason(path, exc)
+    if unparsed is not None:
+        # Outside the handler (unparsed_config_reason).
+        raise ASHConfigUnparsedError(unparsed)
     pending = [root] if root is not None else []
     # An alias is the node it names, so a node can be reached twice, and a
     # recursive alias reaches itself.
@@ -2171,7 +2630,8 @@ def _toml_document(path: Path, text: str) -> Any:
     unparsed: Optional[str] = None
     try:
         document = _parse_toml(text)
-    except _TOMLDecodeError as exc:
+    except ValueError as exc:
+        # TOMLDecodeError, and int()'s digit-limit ValueError (toml_config_table).
         unparsed = unparsed_config_reason(path, exc)
     if unparsed is not None:
         # Outside the handler (unparsed_config_reason).
@@ -2211,7 +2671,9 @@ def read_config_file_as_written(path: Path) -> Any:
     return read_config_file_literally(path, keep_env_tags=True)
 
 
-def read_config_file_literally(path: Path, keep_env_tags: bool = False) -> Any:
+def read_config_file_literally(
+    path: Path, keep_env_tags: bool = False, expect: Optional[FileIdentity] = None
+) -> Any:
     """``read_config_file`` without reading the environment.
 
     Every value that would be read from the environment (an ``!ENV`` scalar, a
@@ -2221,8 +2683,16 @@ def read_config_file_literally(path: Path, keep_env_tags: bool = False) -> Any:
     came from the environment, and to report an ``extends`` failure without
     them. A path that is not a regular file is refused before it is opened
     (``refuse_unless_a_file``).
+
+    ``expect`` is passed to ``read_config_text``, as ``read_config_file`` passes
+    it. A chain walk hands a reader that takes it the identity it vetted, so the
+    literal re-resolution of a refused chain reads the file the first
+    resolution read, and refuses one swapped in between
+    (``ConfigFileChangedError``).
     """
-    return parse_config_text_literally(path, read_config_text(path), keep_env_tags)
+    return parse_config_text_literally(
+        path, read_config_text(path, expect=expect), keep_env_tags
+    )
 
 
 class TagWrittenReference(str):
@@ -2264,10 +2734,12 @@ def parse_config_text_literally(
     if is_toml_file(path):
         return _toml_document(path, text)
 
-    from automated_security_helper.utils.yaml_aliases import NoRecursiveAliasLoader
+    from automated_security_helper.config.ash_config import _NoAliasSafeLoader
 
-    # A recursive alias is refused as parse_config_text's loader refuses it.
-    class _LiteralLoader(NoRecursiveAliasLoader):
+    # Every alias is refused, as parse_config_text's loader (load_yaml_config)
+    # refuses it: a literal reading that admitted one read a document the load
+    # never reads.
+    class _LiteralLoader(_NoAliasSafeLoader):
         pass
 
     def as_written(loader: yaml.SafeLoader, node: yaml.ScalarNode) -> str:
@@ -2335,7 +2807,12 @@ def default_confinement_root(
             errno.ELOOP, os.strerror(errno.ELOOP)
         )
     if source_dir is not None:
-        source_real = Path(source_dir).resolve()
+        # realpath, as check_discovered_source resolves: it reads links and does
+        # not raise on a symbolic link loop, where Path.resolve raised a bare
+        # RuntimeError on Python 3.10 to 3.12. A source directory that loops
+        # holds no config, and the root falls back to the config's own
+        # directory, as it does from 3.13 on.
+        source_real = Path(os.path.realpath(source_dir))
         if config_real.is_relative_to(source_real):
             return source_real
     parent = config_real.parent
@@ -2916,6 +3393,15 @@ def deep_merge(base: Any, overlay: Any, model: Optional[type[BaseModel]] = None)
     """
     if not isinstance(base, dict) or not isinstance(overlay, dict):
         return copy.deepcopy(overlay)
+    if None in overlay:
+        # A null key is what a key written as a reference to a set but empty
+        # variable resolves to (_empty_key_reference_names): it spells no key,
+        # and no later step reads it. It is refused here, as this merge has
+        # always refused it, so the chain's catch-all words the refusal and
+        # names the variable, and no scan runs on a file whose key the host
+        # and a container would read differently. Not an
+        # ASHConfigSourceError, which the catch-all passes through unworded.
+        raise ValueError("a mapping key is null")
     merged = copy.deepcopy(base)
     rest = dict(overlay)
     settings = _settings_of(model) if model is not None else {}
@@ -2936,13 +3422,19 @@ def deep_merge(base: Any, overlay: Any, model: Optional[type[BaseModel]] = None)
         )
     if model is not None and issubclass(model, _PluginConfigSegment):
         # A plugin's section: every spelling get_plugin_config reads for the
-        # same plugin is one section, under the overlay's spelling.
+        # same plugin is one section, under the overlay's spelling. A key that
+        # is not a string (a YAML number, boolean or null) names no plugin, so
+        # it joins nothing here and is merged below by itself.
         for key in list(rest):
+            if not isinstance(key, str):
+                continue
             names = plugin_key_lookup_names(key)
             same = [
                 other
                 for other in merged
-                if other not in settings and plugin_key_lookup_names(other) & names
+                if isinstance(other, str)
+                and other not in settings
+                and plugin_key_lookup_names(other) & names
             ]
             if not same:
                 continue
@@ -3364,6 +3856,30 @@ def _tested_path_shown(
     return f"'{respelled}'"
 
 
+def _refuse_a_clients_test_op(ops: Any, where: str) -> None:
+    """Refuse a ``test`` operation in the ``patch`` of a file an MCP client chose.
+
+    A test op compares a place of the configuration with the value it gives,
+    and the file loads only when the two are equal. A client's file that
+    extends the operator's config could so learn, from whether it loaded,
+    whether a value it may not read was the one it guessed: a wrong guess was
+    refused as a failed test and a right one loaded. Every test op of such a
+    file is refused before any operation applies, in one text whatever the
+    configuration holds at its path, so no outcome depends on that value.
+    ``where`` is how the message names the file.
+    """
+    if not isinstance(ops, list):
+        return
+    for index, op in enumerate(ops):
+        if isinstance(op, dict) and op.get("op") == "test":
+            raise ASHConfigSourceError(
+                f"'{PATCH_KEY}' entry {index} in {where} is a test op, which a "
+                "config file chosen by this caller may not use: it compares "
+                "values of the configuration the file is given, which the "
+                "caller may not read. Remove the test op."
+            )
+
+
 def _apply_patch(
     document: Dict[str, Any],
     ops: Any,
@@ -3403,8 +3919,11 @@ def _apply_patch(
     # the environment, and jsonpatch's own messages quote the document.
     for index, op in enumerate(ops):
         if not isinstance(op, dict) or not isinstance(op.get("path"), str):
+            # The keys are named as shown_ops shows them: a key the file read
+            # from the environment is the value it read, and is <value> there.
+            shown_keys = shown_ops[index] if isinstance(shown_ops[index], dict) else op
             got = (
-                f"a mapping with keys {', '.join(sorted(map(str, op)))}"
+                f"a mapping with keys {', '.join(sorted(map(str, shown_keys)))}"
                 if isinstance(op, dict)
                 else f"a {type(op).__name__}"
             )
@@ -3478,12 +3997,18 @@ def _file_references(
     data: Any,
     reader: Callable[[Path], Any],
     text: Optional[str] = None,
+    parsed_as: Optional[Path] = None,
 ) -> List[EnvironmentReference]:
     """What the file at ``path``, which ``reader`` read as ``data``, read from the
     environment, each at the place the file wrote it (environment_record).
 
     The as-written view is parsed from ``text``, the text the resolution read
-    (``_ChainState.texts``), so both views are of one read. The file is never
+    (``_ChainState.texts``), so both views are of one read, in the format of
+    ``parsed_as`` (``path`` by default): the name whose suffix the resolution
+    parsed the text under. The root is parsed as the path the caller named,
+    so for a root that is a link to a file with another suffix the as-written
+    view parsed in the target's format read nothing while the data held the
+    values, and none of its reads was recorded. The file is never
     read from disk again, including for a text that does not parse (nothing is
     recorded then): a file swapped after the read would pair the swapped text
     against data the swap never produced, missing a reference the read made
@@ -3509,7 +4034,9 @@ def _file_references(
         setattr(unheld, _UNHELD_TEXT_MARK, True)
         raise unheld
     try:
-        written = parse_config_text_literally(path, text, keep_env_tags=True)
+        written = parse_config_text_literally(
+            parsed_as if parsed_as is not None else path, text, keep_env_tags=True
+        )
         # Folded as ``data`` was folded, so the two views pair up at a
         # respelled known-plugin section (plugin_section_names).
         written = fold_known_plugin_sections(written)
@@ -3625,6 +4152,13 @@ def refuse_past_expansion_bound(value: Any, subject: str, lead_in: str = "") -> 
     pending = [value] if isinstance(value, (dict, list)) else []
     while pending:
         item = pending.pop()
+        if isinstance(item, dict):
+            # A mapping's keys are written out too, once per place the
+            # mapping is aliased from: charged like its values, so an aliased
+            # long key repeated across many aliased mappings cannot pass the
+            # text budget on its values alone.
+            for key in item:
+                charged(key)
         children = item.values() if isinstance(item, dict) else item
         for child in children:
             charged(child)
@@ -3809,8 +4343,14 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
     """
     node = document
     for segment in reference.path:
+        if not isinstance(node, (dict, list)):
+            # The place is gone: a later file wrote a scalar where the
+            # reference's mapping or list was. Indexing a string with the
+            # reference's list index would read one character of it, and a
+            # character equal to the value read would keep the reference.
+            return False
         try:
-            node = node[segment]
+            node = typing.cast(Any, node)[segment]
         except (TypeError, KeyError, IndexError):
             # The merge folds a section spelled with "-" into one spelled
             # with "_" and the other way around, so the reference's spelling
@@ -4193,6 +4733,9 @@ def _resolve(
         # path the caller gave and not the target of a symlink.
         refuse_unless_a_file(path)
         env_refused = state.refuse_env(path)
+        # Whether the rule refuses this file for itself, not only as a base of
+        # a file it refuses: the file's own patch is then the client's.
+        refused_for_itself = env_refused
         data = _read_into_state(
             path,
             state,
@@ -4206,7 +4749,11 @@ def _resolve(
         # A base whose path came from the environment is named `<value>`, and
         # so is everything its own path was built from.
         hidden = real in state.environment_paths
-        if not real.is_file():
+        # is_regular_file, not Path.is_file: before Python 3.14 is_file raised
+        # PermissionError for a base under a directory that cannot be searched,
+        # and the base then failed as an unforeseen error of the file that
+        # extends it instead of with the refusal below.
+        if not is_regular_file(real):
             # The cause says which path problem it is (missing, a directory, a
             # link loop), so the MCP category mapping answers it as a path
             # problem, never with format advice (config_load_category reads
@@ -4230,9 +4777,8 @@ def _resolve(
             ) from cause
         # Judged by the name the entry spells as well as the file it reaches, as
         # the root is: a base reached through a client's link is the client's.
-        env_refused = (
-            env_refused_above or state.refuse_env(named) or state.refuse_env(real)
-        )
+        refused_for_itself = state.refuse_env(named) or state.refuse_env(real)
+        env_refused = env_refused_above or refused_for_itself
         unquoted: Optional[str] = None
         # Whether the read was refused because the file is no longer the one that
         # was checked. A reworded error below drops its cause, so the fact rides
@@ -4314,9 +4860,15 @@ def _resolve(
     # cannot get past it; the message quotes no value. The read itself refuses
     # such a file before it resolves a reference (_read_into_state); this stays
     # for a caller's reader that does not parse through parse_config_text.
+    # The name whose suffix the text was parsed under: the root is read as the
+    # caller named it (above), a base as the path it resolved to. The checks
+    # of the held text below read it in that same format, so a root that is a
+    # link to a file with another suffix is judged as it was parsed and not as
+    # its target would be.
+    parsed_as = path if not stack else real
     if env_refused:
         held_text = state.texts.get(real)
-        if held_text is not None and text_reads_the_environment(real, held_text):
+        if held_text is not None and text_reads_the_environment(parsed_as, held_text):
             raise _environment_read_refusal(state.shown(real))
 
     # Each known plugin's section keyed by its declared spelling, before this
@@ -4345,7 +4897,9 @@ def _resolve(
     # which are read below. The order decides only which of two references at
     # one position that resolved to the same text is recorded: the extending
     # file's, whose value the merge keeps.
-    read = _file_references(real, data, state.reader, state.texts.get(real))
+    read = _file_references(
+        real, data, state.reader, state.texts.get(real), parsed_as=parsed_as
+    )
     state.read.extend(read)
     own_references, from_ops = _split_references(read, data)
     # This file's references and, after the loop below, its bases': the ones
@@ -4402,6 +4956,12 @@ def _resolve(
             from_environment=bool(read_bases),
         )
         ops = own.pop(PATCH_KEY, None)
+        # The operations as the file wrote them, whose values the references
+        # read from the environment were taken from: anchoring below rewrites
+        # an operator path in a value, and a token planted for a reference
+        # matches the value as read, so the anchored copy would drop the
+        # reference of every value it rewrote (_placed_through_patch).
+        written_ops = ops
         if anchor:
             from automated_security_helper.config.operator_paths import (
                 anchor_patch_operations,
@@ -4441,6 +5001,16 @@ def _resolve(
                 expect=checked,
                 operator_context=operator_file,
             )
+            if not isinstance(base_document, dict):
+                # A base's own patch can replace its whole document (the root
+                # pointer). Merged, a non-mapping replaced everything the bases
+                # before it set, and this file's own keys then replaced it in
+                # turn, so the base and each earlier one were dropped silently.
+                raise ASHConfigSourceError(
+                    f"Base config {state.shown(base_path)}, extended by "
+                    f"{state.shown(real)}, must be a mapping once its own "
+                    f"'{PATCH_KEY}' is applied, got {type(base_document).__name__}"
+                )
             merged = deep_merge(merged, base_document, AshConfig)
             if unconfined is not None:
                 unconfined = deep_merge(unconfined, base_unconfined, AshConfig)
@@ -4453,6 +5023,12 @@ def _resolve(
         if owned is not None and operator_file:
             _owned_plugin_keys(own, owned)
         if ops is not None:
+            if refused_for_itself:
+                # A file the chain's rule refuses for itself is one an MCP
+                # client chose (see "Environment variables"), so its patch is
+                # the client's. A base it extends is refused with it for the
+                # environment, but that base's own patch is not the client's.
+                _refuse_a_clients_test_op(ops, state.shown(real))
             shown_data = with_environment_values_shown(data, read)
             patched = _apply_patch(
                 merged,
@@ -4478,10 +5054,12 @@ def _resolve(
                 ),
             )
             # Each reference at the place its value has once the patch has
-            # applied, which only the patch says.
+            # applied, which only the patch says. Followed through the
+            # operations as written: anchoring changes values only, so they
+            # move each value where the anchored ones moved it.
             state.references[first:] = _placed_through_patch(
                 merged,
-                ops,
+                written_ops,
                 state.references[first:],
                 from_ops,
                 where=state.shown(real),
@@ -4636,16 +5214,14 @@ def resolve_config_document(
     )
     data: Any = None
     blind_for: Optional[ASHConfigSourceError] = None
+    # The root is read as the file its caller checked (`expect`), or as the file
+    # the name leads to now when the caller handed no identity; one swapped in
+    # before the open is refused. The same identity holds the literal
+    # re-resolution of a refused chain (_environment_blind_error), so a root
+    # swapped between the two resolutions is refused there too.
+    held = expect if expect is not None else identity_to_hold(config_path)
     try:
-        # The root is read as the file its caller checked (`expect`), or as the
-        # file the name leads to now when the caller handed no identity; one
-        # swapped in before the open is refused.
-        data, _unconfined, _owned = _resolve(
-            config_path,
-            (),
-            state,
-            expect=expect if expect is not None else identity_to_hold(config_path),
-        )
+        data, _unconfined, _owned = _resolve(config_path, (), state, expect=held)
     except ASHConfigSourceError as error:
         if reader is read_config_file_literally:
             raise
@@ -4674,9 +5250,17 @@ def resolve_config_document(
         for opened in state.held:
             opened.close()
     if blind_for is not None:
-        raise _environment_blind_error(
-            config_path, root, permit_base, blind_for
-        ) from None
+        blind = _environment_blind_error(
+            config_path, root, permit_base, blind_for, expect=held
+        )
+        # The fresh error's traceback carries this frame, and a walker that
+        # prints frame locals (a debugger, a verbose traceback renderer) would
+        # print what the chain read from the environment: `state` holds every
+        # reference read with its value, and `blind_for` is the refused error,
+        # whose text can quote one. Both are dropped from the frame before the
+        # raise, so the error leaves with a frame that holds no value.
+        del state, blind_for
+        raise blind from None
     places: Dict[Tuple[Any, ...], List[Tuple[Any, ...]]] = {
         reference.place_key: [] for reference in state.read
     }
@@ -4710,6 +5294,7 @@ def _environment_blind_error(
     root: Path,
     permit_base: Optional[PermitBase],
     error: ASHConfigSourceError,
+    expect: Optional[FileIdentity] = None,
 ) -> ASHConfigSourceError:
     """Why `config_path`'s chain does not resolve, without environment values.
 
@@ -4727,7 +5312,15 @@ def _environment_blind_error(
     key as written); otherwise it is the generic base-file reason. A refusal
     by `permit_base` is returned as it is (ASHConfigInputNotPermittedError),
     so callers report it as a refusal.
+
+    `expect` is the identity the first resolution held the root to. The literal
+    resolution is held to it as well, so a root swapped in between is refused
+    (``ConfigFileChangedError``) and not read. The caller raises the error
+    returned here ``from None``, which drops what it was raised from, so the
+    fact that a file changed rides on the error as a mark
+    (``_FILE_CHANGED_MARK``), whichever of the two resolutions met the change.
     """
+    changed = config_file_changed(error)
     if isinstance(error, ASHConfigUnsetVariableError):
         # The literal reading below would find nothing wrong: the reference fails
         # only once the environment is read, because the variable is unset. So
@@ -4751,14 +5344,33 @@ def _environment_blind_error(
             confine_to=root,
             permit_base=permit_base,
             reader=read_config_file_literally,
+            expect=expect,
         )
     except ASHConfigSourceError as literal_error:
+        changed = changed or config_file_changed(literal_error)
         if "${" not in str(literal_error):
-            return literal_error
-    except (yaml.YAMLError, OSError, ValueError):
+            # Without its traceback: that traceback runs through this frame,
+            # whose local `error` is the refused error (its text can quote a
+            # value read from the environment) and whose own traceback keeps
+            # the real resolution's frames, and their state, alive. The
+            # caller raises the returned error with the chain cut (`from
+            # None`), but a traceback is carried on the error itself, so it
+            # is cut here, where it would otherwise leave with the frame.
+            if changed:
+                # The caller raises this error `from None`, which drops the
+                # ConfigFileChangedError it was raised from, and with it the
+                # fact that a file changed after it was checked, whether the
+                # first resolution or this one met the change. The fact rides
+                # on the error itself, as it does on a reworded base error; the
+                # mark carries no path.
+                setattr(literal_error, _FILE_CHANGED_MARK, True)
+            return literal_error.with_traceback(None)
+    except (yaml.YAMLError, OSError, ValueError) as literal_failure:
         # The file reads with the environment but not without it; nothing more
-        # can be said without quoting what the environment supplied.
-        pass
+        # can be said without quoting what the environment supplied. A root
+        # that changed since it was checked is the exception: that is said, on
+        # the mark below, and quotes nothing.
+        changed = changed or config_file_changed(literal_failure)
     # Not "the base named through a variable is missing": that base may exist,
     # and a file it extends be the one missing.
     names = tuple(getattr(error, _EMPTY_KEY_REFERENCE_NAMES_MARK, ()))
@@ -4792,9 +5404,15 @@ def _environment_blind_error(
             "extends) is missing, cannot be read, or is outside the directory bases "
             "must stay inside"
         )
-    if isinstance(error, ASHConfigInputNotPermittedError):
-        return ASHConfigInputNotPermittedError(reason)
-    return ASHConfigSourceError(reason)
+    blind: ASHConfigSourceError = (
+        ASHConfigInputNotPermittedError(reason)
+        if isinstance(error, ASHConfigInputNotPermittedError)
+        else ASHConfigSourceError(reason)
+    )
+    if changed:
+        # The caller raises this error `from None`; the fact rides on the error.
+        setattr(blind, _FILE_CHANGED_MARK, True)
+    return blind
 
 
 def _is_same_file(a: Path, b: Path) -> bool:
@@ -4814,7 +5432,13 @@ def load_config_with_references(
     document = resolve_config_document(
         Path(config_path), anchor_relative_paths=anchor_relative_paths
     )
-    config = AshConfig.model_validate(document.data, strict=True)
+    # The strict_file_load context, as build_config and validate_config_document
+    # validate a document: it selects the named refusal of a typed field's
+    # environment reference rather than pydantic's message about the resolved
+    # text.
+    config = AshConfig.model_validate(
+        document.data, strict=True, context={"strict_file_load": True}
+    )
     config._environment_references = tuple(document.environment_references)
     return config
 
@@ -4845,6 +5469,13 @@ def uses_env_references(path: Path) -> bool:
     so those commands refuse the file. TOML and JSON files return False: the
     rewriting commands refuse TOML already, and JSON is not interpolated. A file
     that does not parse returns False, and the caller's own load reports why.
+
+    The file is read as every config file is (``read_config_bytes``): opened
+    without blocking, read only when the opened file is a regular file, and at
+    most ``ASH_CONFIG_MAX_FILE_BYTES`` of it. A plain ``open`` here waited on a
+    FIFO swapped in after the check below and read a file of any size. A file
+    that cannot be read within those bounds returns False, and the caller's own
+    load refuses it the same way.
     """
     path = Path(path)
     if is_toml_file(path) or is_json_file(path):
@@ -4855,7 +5486,7 @@ def uses_env_references(path: Path) -> bool:
         # The caller's load refuses it; opening a FIFO here would wait for ever.
         return False
     try:
-        with open(path, mode="r", encoding="utf-8") as f:
-            return _yaml_reads_the_environment(f)
-    except OSError:
+        text = read_config_bytes(path).decode("utf-8")
+    except (OSError, UnicodeDecodeError, ASHConfigSourceError):
         return False
+    return _yaml_reads_the_environment(_NamedText(text, str(path)))

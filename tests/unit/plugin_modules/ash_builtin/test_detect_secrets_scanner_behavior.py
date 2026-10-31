@@ -238,8 +238,20 @@ def test_missing_library_reason_names_installs_that_resolve_to_ash(
     commands = re.findall(r"`([^`]*)`", reason)
     assert len(commands) == 2, reason
     # Both run uv through the interpreter that runs ASH: a bare `pip` in a uv-made
-    # environment is some other Python's pip.
-    uv_pip = [sys.executable, "-m", "uv", "pip", "install", "--python", sys.executable]
+    # environment is some other Python's pip. With -P (3.11 and later) so the
+    # cwd's modules do not shadow uv, and --no-config so a uv.toml in the cwd
+    # (the scanned repository) does not steer the install (ash_install's hint).
+    uv_pip = [
+        sys.executable,
+        *(["-P"] if sys.version_info >= (3, 11) else []),
+        "-m",
+        "uv",
+        "pip",
+        "install",
+        "--no-config",
+        "--python",
+        sys.executable,
+    ]
     expected = [
         *uv_pip,
         "--reinstall-package",
@@ -989,11 +1001,9 @@ def test_excluded_files_are_never_handed_to_detect_secrets(scanner, monkeypatch)
     Both directions are asserted: the excluded file is absent and the kept file
     is present, so the test cannot pass by handing over nothing at all.
 
-    The pattern is anchored on a full filename because it is matched against the
-    *absolute* path, which includes pytest's per-test tmp directory -- and that
-    directory is named after the test. A loose pattern like "excluded_" matches
-    the directory name of any test whose own name contains it, silently
-    excluding every file and emptying the scan set.
+    The pattern is matched against each file's path relative to the scan root
+    (the converted target here), never the absolute path, so pytest's per-test
+    tmp directory, which is named after the test, cannot match it.
     """
     # The scan runs in a worker subprocess, so the list handed to scan_files is
     # observed as the worker's request: the worker passes request["paths"] to
@@ -1007,9 +1017,16 @@ def test_excluded_files_are_never_handed_to_detect_secrets(scanner, monkeypatch)
 
     source_with_planted_key(scanner.context.work_dir, name="skipme_settings.py")
     source_with_planted_key(scanner.context.work_dir, name="keepme_settings.py")
+    # A second pattern that can match only the absolute path: the name of the
+    # directory pytest made for this test, which holds the scan root. Matched
+    # against the absolute path it would exclude every file; the docstring's
+    # claim is that it excludes none.
+    tmp_component = scanner.context.work_dir.parent.name
+    assert tmp_component and tmp_component not in "keepme_settings.py"
     scanner.config.options.scan_settings.filters_used = [
         DetectSecretsScanSettingsFiltersUsed(
-            path=EXCLUDE_FILTER_PATH, pattern=[r"skipme_settings\.py$"]
+            path=EXCLUDE_FILTER_PATH,
+            pattern=[r"skipme_settings\.py$", re.escape(tmp_component)],
         )
     ]
 

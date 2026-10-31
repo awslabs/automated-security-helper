@@ -297,6 +297,20 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
             def unlink(self, *args, **kwargs):
                 return None
 
+            def exists(self):
+                # make_private_dir asks each ancestor whether it exists before it
+                # makes the missing ones with os.mkdir; a stand-in that exists
+                # makes nothing, which is what the stubbed mkdir did before the
+                # walk was added. A False would send a Windows-shaped path to
+                # os.stat on this host.
+                return True
+
+            def is_dir(self):
+                # make_private_dir then asks the ancestor it found whether it is
+                # a directory, to refuse a file where a level goes; a pure path
+                # has no such call, and the stand-in is the directory it found.
+                return True
+
         class _Sandbox:
             root = _WindowsDir(r"C:\ash-mcp\session-a")
 

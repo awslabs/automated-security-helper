@@ -12,6 +12,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline i
     BedrockModelClient,
     BedrockPromptBuilder,
     BedrockReportPipeline,
+    CallOutcome,
     ReportSection,
 )
 
@@ -105,8 +106,10 @@ class TestBedrockPromptBuilder:
         assert "FINDING 2" in prompt
 
     def test_severity_analysis_empty_findings(self):
+        """Nothing to analyze is no prompt: the pipeline skips an empty one
+        instead of sending the model a placeholder sentence."""
         prompt = self.builder.severity_analysis([], "error")
-        assert "No findings" in prompt
+        assert prompt == ""
 
     def test_executive_summary_includes_scan_overview(self):
         findings = [_make_finding(level="error"), _make_finding(level="warning")]
@@ -151,8 +154,9 @@ class TestBedrockPromptBuilder:
         assert "2" in prompt
 
     def test_secret_advice_empty(self):
+        """No secret findings is no prompt, for the same reason."""
         prompt = self.builder.secret_advice([])
-        assert "No secret findings" in prompt
+        assert prompt == ""
 
     def test_technical_analysis_includes_rule_id(self):
         findings = [_make_finding(rule_id="BANDIT-101")]
@@ -358,7 +362,7 @@ class TestBedrockReportPipeline:
     ):
         if client is None:
             client = MagicMock()
-            client.try_call.return_value = "section content"
+            client.call.return_value = CallOutcome("section content", ok=True)
         if prompt_builder is None:
             prompt_builder = MagicMock()
             prompt_builder.prepare_prompt.side_effect = lambda msg, **kw: msg
@@ -382,10 +386,10 @@ class TestBedrockReportPipeline:
 
         def capture_call(prompt, system_prompt):
             call_order.append(system_prompt)
-            return "content"
+            return CallOutcome("content", ok=True)
 
         client = MagicMock()
-        client.try_call.side_effect = capture_call
+        client.call.side_effect = capture_call
         prompt_builder = MagicMock()
         prompt_builder.prepare_prompt.side_effect = lambda msg, **kw: msg
 
@@ -407,16 +411,24 @@ class TestBedrockReportPipeline:
 
         assert call_order == ["sys-A", "sys-B", "sys-C"]
 
-    def test_skips_section_on_client_failure(self):
-        """When client returns error string for a section, pipeline omits that section's content."""
+    @pytest.mark.parametrize("model_specific", [True, False])
+    def test_a_failed_section_keeps_its_error_text_and_the_run_goes_on(
+        self, model_specific
+    ):
+        """A section whose call fails is in the results with the failure's own
+        text, whatever ``model_specific`` says (the pipeline walks no
+        fallbacks, so the flag changes nothing here), and the sections after it
+        are still asked."""
         client = MagicMock()
 
         def fail_b(prompt, system_prompt):
             if "sys-B" in system_prompt:
-                return "*Error: model failed*"
-            return "ok content"
+                return CallOutcome(
+                    "*Error: model failed*", ok=False, model_specific=model_specific
+                )
+            return CallOutcome("ok content", ok=True)
 
-        client.try_call.side_effect = fail_b
+        client.call.side_effect = fail_b
         prompt_builder = MagicMock()
         prompt_builder.prepare_prompt.side_effect = lambda msg, **kw: msg
 
@@ -435,16 +447,22 @@ class TestBedrockReportPipeline:
         prompts = {"a": "pa", "b": "pb", "c": "pc"}
         results = pipeline.run(prompts)
 
-        # Section B failed — its content should be the error string but pipeline continues
-        assert results["a"] == "ok content"
-        assert results["c"] == "ok content"
-        # All three sections were attempted
-        assert client.try_call.call_count == 3
+        assert results == {
+            "a": "ok content",
+            "b": "*Error: model failed*",
+            "c": "ok content",
+        }
+        # All three sections were attempted, each once, in order.
+        assert [c.args[1] for c in client.call.call_args_list] == [
+            "sys-A",
+            "sys-B",
+            "sys-C",
+        ]
 
     def test_caching_returns_same_result_on_second_call(self):
         """With caching enabled, second call for same key skips client."""
         client = MagicMock()
-        client.try_call.return_value = "cached content"
+        client.call.return_value = CallOutcome("cached content", ok=True)
         prompt_builder = MagicMock()
         prompt_builder.prepare_prompt.side_effect = lambda msg, **kw: msg
 
@@ -462,11 +480,11 @@ class TestBedrockReportPipeline:
         pipeline.run({"a": "prompt"})
 
         # Client only called once due to caching
-        assert client.try_call.call_count == 1
+        assert client.call.call_count == 1
 
     def test_caching_disabled_calls_client_each_time(self):
         client = MagicMock()
-        client.try_call.return_value = "fresh content"
+        client.call.return_value = CallOutcome("fresh content", ok=True)
         prompt_builder = MagicMock()
         prompt_builder.prepare_prompt.side_effect = lambda msg, **kw: msg
 
@@ -482,7 +500,7 @@ class TestBedrockReportPipeline:
         pipeline.run({"a": "prompt"})
         pipeline.run({"a": "prompt"})
 
-        assert client.try_call.call_count == 2
+        assert client.call.call_count == 2
 
 
 # ---------------------------------------------------------------------------

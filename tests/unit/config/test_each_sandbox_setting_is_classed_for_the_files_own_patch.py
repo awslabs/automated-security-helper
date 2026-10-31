@@ -8,10 +8,10 @@ rewrites by the setting's class:
 
 - ``mode`` is read by ``_own_mode_after_patch``;
 - ``network_scanners`` restricts, so a patch cuts the list down and never drops it;
-- the three additive lists (``_ADDITIVE_SANDBOX_SETTINGS``: ``extra_read_paths``,
-  ``read_path_scanners``, ``env_scanners``) only add access, so what a patch leaves
-  of them is cut down to the entries that both the list the file wrote and the list
-  the patch leaves name.
+- the four additive lists (``_ADDITIVE_SANDBOX_SETTINGS``: ``extra_read_paths``,
+  ``read_path_scanners``, ``env_scanners``, ``environment``) only add access, so
+  what a patch leaves of them is cut down to the entries that both the list the file
+  wrote and the list the patch leaves name.
 
 A setting in no class is dropped. That is safe for a setting that adds access, and
 wrong for one that restricts (a deny list, a ``false`` for a network switch): the
@@ -60,11 +60,12 @@ def test_the_three_classes_do_not_overlap():
     )
 
 
-def test_the_additive_lists_are_the_three_that_only_add_access():
+def test_the_additive_lists_are_the_four_that_only_add_access():
     assert _ADDITIVE_SANDBOX_SETTINGS == {
         "extra_read_paths",
         "read_path_scanners",
         "env_scanners",
+        "environment",
     }
 
 

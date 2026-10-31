@@ -14,16 +14,18 @@ takes.
 These cells read what each runner does with the child; no process is started and
 no signal is sent. The stand-in for Popen delivers the Ctrl-C the way the
 interpreter does, by calling the handler installed at that moment, and returns a
-recorded stand-in child. The runners' stops are replaced by recorders. Two cells
+recorded stand-in child. The runners' stops are replaced by recorders. Four tests
 read the hold itself: a release that cannot put the handler back leaves nothing
-held, and hands a Ctrl-C that was held to the previous handler.
+held, and hands a Ctrl-C that was held to the previous handler; leaving the
+``with`` block puts the handler back after such a release, and after a body that
+raised before any release.
 """
 
 import os
 import signal
 import subprocess
 import threading
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import pytest
 
@@ -79,21 +81,32 @@ class _Stops:
 
     def __init__(self) -> None:
         self.stopped: List[Tuple[str, object]] = []
+        #: The group registry as it stood each time the child was to be ended:
+        #: after the reap it reads empty whether the group was recorded and
+        #: forgotten or never recorded, so only this read tells the two apart.
+        self.registered: List[Dict[int, object]] = []
 
 
 @pytest.fixture
 def stops(monkeypatch):
     """The stop of the paths under test replaced by a recorder, and a registry of
-    their own, so no signal is sent and no other test's record is met."""
+    their own, so no signal is sent and no other test's record is met. The count
+    of spawns still starting is their own too, at zero: the cases compare it with
+    its value at their start, and a path that kept its count would otherwise
+    leave it raised for every later test."""
     recorded = _Stops()
     monkeypatch.setattr(subprocess_utils, "_RUNNING_GROUPS", {})
-    monkeypatch.setattr(
-        subprocess_utils,
-        "_stop_child",
-        lambda args, process, stop, grace, prompt: recorded.stopped.append(
-            (stop.__name__, process)
-        ),
-    )
+    monkeypatch.setattr(subprocess_utils, "_SPAWNS_STARTING", 0)
+
+    def record_the_ending(args, process, how, grace, prompt) -> None:
+        recorded.stopped.append((how.__name__, process))
+        recorded.registered.append(dict(subprocess_utils._RUNNING_GROUPS))
+
+    monkeypatch.setattr(subprocess_utils, "_stop_child", record_the_ending)
+    # The stand-in child has no process, so the real question (os.getpgid on its
+    # pid) could only fail, and a failure reads as "end the group as well"; the
+    # path without a group of its own is pinned on a child that leads none.
+    monkeypatch.setattr(subprocess_utils, "_leads_its_own_group", lambda process: False)
     return recorded
 
 
@@ -147,6 +160,7 @@ def test_run_cancellable_stops_a_child_whose_start_a_ctrl_c_interrupted(
     # The whole group, by the tree stop; the record the child was given before
     # the release is dropped by the reap.
     assert stops.stopped == [("_stop_tree", child)]
+    assert stops.registered == [{child.pid: child}], "the group was not recorded"
     assert "communicate" not in child.calls, "the Ctrl-C was raised after the wait"
     assert subprocess_utils._RUNNING_GROUPS == {}
     assert subprocess_utils._SPAWNS_STARTING == starting, "the start count was kept"
@@ -244,6 +258,39 @@ def test_a_release_that_cannot_put_the_handler_back_hands_over_a_held_ctrl_c(
         _ctrl_c_arrives()
 
 
+def test_a_handler_that_failed_to_go_back_is_put_back_on_leaving(
+    default_sigint, restore_fails_once
+):
+    """The hold forgot it held the signal before putting the handler back, so a
+    failure there left the recording handler in place, and every later Ctrl-C was
+    swallowed. Leaving the ``with`` block puts it back: ``HeldInterrupt.__exit__``
+    restores again after a release whose restore failed, and raises the failure."""
+    with pytest.raises(OSError, match="could not be set"):
+        with subprocess_utils.HeldInterrupt() as held:
+            held.release()
+
+    assert restore_fails_once, "the failing restore was never reached"
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+    with pytest.raises(KeyboardInterrupt):
+        _ctrl_c_arrives()
+
+
+def test_a_ctrl_c_after_the_block_whose_handler_did_not_go_back_is_not_lost(
+    default_sigint, restore_fails_once
+):
+    """The block raised before release, and putting the handler back on leaving
+    failed, so the recording handler stayed installed and every later Ctrl-C was
+    recorded for a block that was over. Once the block is left, a Ctrl-C goes to
+    the handler that was held."""
+    with pytest.raises(OSError, match="could not be set"):
+        with subprocess_utils.HeldInterrupt():
+            raise FileNotFoundError("runtime")
+
+    assert restore_fails_once, "the failing restore was never reached"
+    with pytest.raises(KeyboardInterrupt):
+        _ctrl_c_arrives()
+
+
 def _stopped_by_terminate(child: _Child, stops: _Stops) -> None:
     assert "terminate" in child.calls, child.calls
 
@@ -252,8 +299,26 @@ def _stopped_as_a_group(child: _Child, stops: _Stops) -> None:
     assert stops.stopped == [("_stop_tree", child)]
 
 
+def _stopped_alone(child: _Child, stops: _Stops) -> None:
+    assert stops.stopped == [("_stop", child)]
+
+
+def _run_cancellable_without_a_group():
+    """The cancellable runner as a sandboxed spawn calls it: the child is not put
+    in a group of its own (its wrapper calls setsid itself), and a child that leads
+    none is stopped alone."""
+    return subprocess_utils._run_cancellable(
+        ["tool"],
+        cancel_event=threading.Event(),
+        graceful_timeout=False,
+        own_group=False,
+    )
+
+
 #: Each path with the stop its failure handling owes the child, read the way the
-#: Ctrl-C cells above read it.
+#: Ctrl-C tests above read it. The hold and its release are the same block of
+#: _run_cancellable with or without a group of the child's own; what own_group
+#: changes is how the child is started and which ending it gets.
 _PATHS_WITH_STOPS = [
     pytest.param(
         lambda: subprocess_utils._run_stoppable(["tool"]),
@@ -261,6 +326,11 @@ _PATHS_WITH_STOPS = [
         id="run_stoppable",
     ),
     pytest.param(_run_cancellable_path, _stopped_as_a_group, id="run_cancellable"),
+    pytest.param(
+        _run_cancellable_without_a_group,
+        _stopped_alone,
+        id="run_cancellable_without_a_group",
+    ),
 ]
 
 
@@ -269,7 +339,9 @@ def test_a_path_whose_release_fails_leaves_no_ctrl_c_held(
     path, stopped_the_child, default_sigint, monkeypatch, stops, restore_fails_once
 ):
     """Each path stops the child when its release fails and raises the failure.
-    A Ctrl-C after that is not held for a start that is over."""
+    The previous handler is back on the way out (the hold is left even though
+    its own restore failed), so a Ctrl-C after that is not held for a start that
+    is over."""
     child = _Child()
     _popen_that_starts(monkeypatch, child, ctrl_c=False)
 
@@ -279,6 +351,7 @@ def test_a_path_whose_release_fails_leaves_no_ctrl_c_held(
     assert restore_fails_once, "the failing restore was never reached"
     stopped_the_child(child, stops)
 
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
     with pytest.raises(KeyboardInterrupt):
         _ctrl_c_arrives()
 

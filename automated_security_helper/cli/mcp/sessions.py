@@ -53,13 +53,22 @@ from __future__ import annotations
 
 import contextlib
 import os
-import shutil
 import sys
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Set
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    TypeGuard,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from typing_extensions import Self
@@ -68,6 +77,7 @@ from automated_security_helper.cli.mcp.session_paths import (
     SESSION_MARKER,
     hidden_deleting_name,
     is_a_deleting_name,
+    make_private_dir,
     mark_session_workspace,
     session_directory,
     validated_path_component,
@@ -134,23 +144,18 @@ CHANGE_REFUSED_BY_CHANGE = "other-change"
 CHANGE_REFUSED_BY_WRITE = "write"
 
 
-#: Why :meth:`MCPSession.try_begin_write` refused: the TTL sweep is removing the
-#: session, so its state is gone once it is done.
-WRITE_REFUSED_BY_SWEEP = "sweep"
-
-#: Why :meth:`MCPSession.try_begin_write` refused: a change that deletes the
-#: session's directory (``clear_source`` or the end of the session) holds it.
-#: Its removal may or may not have reached the upload's files yet.
-WRITE_REFUSED_BY_CHANGE = "change"
-
-
 class MCPSession(BaseModel):
     """Per-connection state for an MCP client.
 
     Fields:
         id: Stable connection identifier provided by the transport.
         workspace_root: Per-session scratch directory. The disconnect hook
-            rmtrees this path; do NOT place shared state here.
+            rmtrees this path; do NOT place shared state here. None while the
+            workspace root cannot be resolved (no home directory and no
+            ``ASH_MCP_WORKSPACE_ROOT``, say): ``MCPSessionRegistry.session_for``
+            hands the session out anyway, since a scan needs its claim and lock
+            and not its directory, and ``get_or_create`` fills the path in once
+            the root resolves.
         created_at: UTC timestamp the session was created.
 
     A client's binding is not a field of this model. The directory it delivered
@@ -167,8 +172,12 @@ class MCPSession(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     id: str = Field(description="Stable per-connection identifier.")
-    workspace_root: Path = Field(
-        description="Per-session scratch dir; disconnect rmtrees this.",
+    workspace_root: Optional[Path] = Field(
+        default=None,
+        description=(
+            "Per-session scratch dir; disconnect rmtrees this. None until the "
+            "workspace root resolves."
+        ),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -426,16 +435,6 @@ def _session_holds_a_binding() -> Callable[[str], bool]:
     return holds_binding
 
 
-#: Sessions the registry holds before it looks for idle ones to forget. A stateless
-#: server with ``--trust-upstream-session-id`` sees one new id per client, and no
-#: end of session, so without this the map only grows (a session that never
-#: delivered anything has no workspace directory for the TTL sweep to find).
-SESSION_MAP_EVICT_ABOVE = 1024
-
-#: How long a session must have gone unrequested, and idle, to be forgotten.
-IDLE_SESSION_SECONDS = 300.0
-
-
 class MCPSessionRegistry:
     """Process-local registry of MCP sessions keyed by connection id.
 
@@ -462,7 +461,11 @@ class MCPSessionRegistry:
         self.sessionless_scans = ScanCount()
         self._explicit_parent = workspace_parent
         if workspace_parent is not None:
-            workspace_parent.mkdir(parents=True, exist_ok=True)
+            # Private from the moment each level exists, as the default root
+            # the session paths make is: this parent's listing is the live
+            # session ids. Made under the umask it was 0o755, and every session
+            # directory created beneath it warned of a listable parent.
+            make_private_dir(workspace_parent)
 
     @property
     def _workspace_parent(self) -> Path:
@@ -477,21 +480,33 @@ class MCPSessionRegistry:
     def session_for(self, session_id: str) -> MCPSession:
         """Return the session for ``session_id``, adding it to the map if needed.
 
-        Creates nothing on disk. This is the call for a caller that needs the
-        session's claim or lock and not its directory: a scan, and a change to
-        the delivered tree, whose functions create and mark the directory
-        themselves when they write there. A scan of a directory the operator
-        granted therefore starts even when the workspace root can't be created.
+        Creates nothing on disk, and resolves nothing it has to: this is the
+        call for a caller that needs the session's claim or lock and not its
+        directory: a scan, and a change to the delivered tree, whose functions
+        create and mark the directory themselves when they write there. A scan
+        of a directory the operator granted therefore starts even when the
+        workspace root can't be resolved (no home directory and no
+        ``ASH_MCP_WORKSPACE_ROOT``) or created; the session's
+        ``workspace_root`` is then None until :meth:`get_or_create` resolves it
+        (:meth:`_workspace_for`).
 
         Repeated calls with the same id return the same instance, so the lock
         and the claim are shared by every caller of one session.
 
         Raises:
             ValueError: if ``session_id`` is not usable as a single path
-                component. The id names a directory that ``get_or_create``
-                creates and ``disconnect`` removes, so it is validated here
-                rather than trusted from the caller; ``cli/mcp/session_paths.py``
-                holds the rule, shared with the other surfaces that build a
+                component, or names a directory the server keeps under the
+                workspace root for itself: the presence registries
+                (``.stdio-servers``, ``.ash-mcp-scans``), their guard file
+                (``.lock``, :data:`PRESENCE_LOCK_NAME`) and any spelling of a
+                reserved name that opens the same directory on a
+                case-insensitive filesystem
+                (``session_identity.is_reserved_session_id``). The stdio
+                session's own id is admitted: its workspace is a session's. The
+                id names a directory that ``get_or_create`` creates and
+                ``disconnect`` removes, so it is validated here rather than
+                trusted from the caller; ``cli/mcp/session_paths.py`` holds the
+                component rule, shared with the other surfaces that build a
                 per-session path.
 
         Validated before the map lookup, not after. Checking only on the
@@ -500,6 +515,7 @@ class MCPSessionRegistry:
         """
         from automated_security_helper.cli.mcp.session_identity import (
             UNIDENTIFIED_SESSION_ID,
+            is_reserved_session_id,
         )
 
         if session_id == UNIDENTIFIED_SESSION_ID:
@@ -508,6 +524,11 @@ class MCPSessionRegistry:
                 "session state"
             )
         session_id = validated_path_component(session_id)
+        if not _is_the_stdio_session(session_id) and is_reserved_session_id(session_id):
+            raise ValueError(
+                f"session_id {session_id!r} names a directory the server keeps "
+                "under its workspace root for itself, so it cannot name a session"
+            )
         with self._lock:
             existing = self._sessions.get(session_id)
             if existing is not None:
@@ -515,10 +536,27 @@ class MCPSessionRegistry:
                 return existing
             if len(self._sessions) >= SESSION_MAP_EVICT_ABOVE:
                 self._forget_idle_sessions()
-            workspace = session_directory(self._workspace_parent, session_id)
-            session = MCPSession(id=session_id, workspace_root=workspace)
+            session = MCPSession(
+                id=session_id, workspace_root=self._workspace_for(session_id)
+            )
             self._sessions[session_id] = session
             return session
+
+    def _workspace_for(self, session_id: str) -> Optional[Path]:
+        """The session's directory under the workspace root, or None for now.
+
+        ``resolve_workspace_root`` raises ``RuntimeError`` when no home directory
+        can be determined, and joining the id under the root can raise ``OSError``
+        resolving the parent. Neither refuses the session: :meth:`session_for`
+        creates nothing on disk, and :meth:`get_or_create`, which does, resolves
+        the path again and lets that error out to the caller that needs the
+        directory. :meth:`disconnect` resolves it again too, so a session handed
+        out with no path still has its directory removed when it ends.
+        """
+        try:
+            return session_directory(self._workspace_parent, session_id)
+        except (RuntimeError, OSError):
+            return None
 
     def _forget_idle_sessions(self) -> None:
         """Drop entries nobody has asked for lately and nothing runs on.
@@ -541,15 +579,27 @@ class MCPSessionRegistry:
         """Return the session for ``session_id`` with its workspace directory.
 
         :meth:`session_for`, plus the session's directory and its marker,
-        created when missing.
+        created when missing. A session handed out while the workspace root
+        could not be resolved has no ``workspace_root`` yet; it is resolved
+        here, and the error is this caller's, since it needs the directory.
 
         Raises:
             ValueError: as :meth:`session_for`.
+            RuntimeError: when the workspace root can't be resolved (no home
+                directory and no ``ASH_MCP_WORKSPACE_ROOT``).
             OSError: when the directory can't be created.
         """
         session = self.session_for(session_id)
-        if not session.workspace_root.is_dir():
-            mark_session_workspace(session.workspace_root)
+        workspace = session.workspace_root
+        if workspace is None:
+            workspace = session_directory(self._workspace_parent, session_id)
+            with self._lock:
+                if session.workspace_root is None:
+                    session.workspace_root = workspace
+                else:
+                    workspace = session.workspace_root
+        if not workspace.is_dir():
+            mark_session_workspace(workspace)
         return session
 
     def get(self, session_id: str) -> Optional[MCPSession]:
@@ -576,9 +626,9 @@ class MCPSessionRegistry:
         The delivered source tree itself lives inside the workspace directory
         and goes with it.
 
-        Idempotent: calling on an unknown id is a no-op. The rmtree uses
-        ``ignore_errors=True`` so a partially-deleted workspace doesn't
-        wedge the registry.
+        Idempotent: calling on an unknown id is a no-op. The removal is best
+        effort (:meth:`_remove_workspace`): what it cannot remove stays on disk,
+        named in one warning, and never wedges the registry.
         """
         # Lazy imports: both modules belong to this package's import web, and a
         # module-level import here would be a cycle.
@@ -598,7 +648,17 @@ class MCPSessionRegistry:
             session = self._sessions.pop(session_id, None)
             if session is None:
                 return
-            doomed = self._rename_for_removal_locked(session.id, session.workspace_root)
+            workspace = session.workspace_root
+            if workspace is None:
+                # Handed out while the root could not be resolved
+                # (_workspace_for answered None for a passing failure), and no
+                # get_or_create resolved it since. The source-delivery tools
+                # resolve the root themselves and may have built the directory
+                # meanwhile, so it is resolved again here, as get_or_create
+                # does, and removed with the session; a root that still cannot
+                # be resolved leaves nothing to remove.
+                workspace = self._workspace_for(session.id)
+            doomed = self._rename_for_removal_locked(session.id, workspace)
         if doomed is not None:
             self._remove_workspace(doomed)
 
@@ -638,9 +698,43 @@ class MCPSessionRegistry:
         return doomed
 
     def _remove_workspace(self, workspace: Path) -> None:
-        """rmtree ``workspace``, ignoring what cannot be removed."""
-        if workspace.exists():
-            shutil.rmtree(workspace, ignore_errors=True)
+        """Delete ``workspace``, and say so when some of it could not be removed.
+
+        ``source_delivery._remove_tree`` clears the read-only bit of an entry the
+        delete refuses and tries again, as the removal of an ended session does;
+        what it still cannot remove stays on disk, and a silent return would
+        report that as removed. Under its hidden delete name
+        (``.<session id>.deleting-<uuid4>``) the leftover is cleared by the TTL
+        sweep once it is older than the TTL, marker or no marker
+        (:func:`sweep_stale_workspaces`); one left at the session's own path
+        (the rename aside was refused) may have lost its marker to the delete,
+        and the sweep never removes an unmarked directory, so the warning says
+        it stays until removed by hand.
+        """
+        from automated_security_helper.cli.mcp.source_delivery import _remove_tree
+
+        if not workspace.exists():
+            return
+        if _remove_tree(workspace):
+            return
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        if is_a_deleting_name(workspace.name):
+            outlook = (
+                "The TTL sweep removes what is left once it is older than the TTL."
+            )
+        else:
+            outlook = (
+                "It could not be renamed aside first, so what is left stands at "
+                "the session's own path, may have lost its session marker, and "
+                "stays until it is removed by hand."
+            )
+        ASH_LOGGER.warning(
+            "Could not remove all of %s, the workspace of a session that "
+            "disconnected: some entry in it cannot be removed by this account. %s",
+            workspace,
+            outlook,
+        )
 
     def __contains__(self, session_id: object) -> bool:
         with self._lock:
@@ -702,11 +796,77 @@ def _remove_session_state(session_id: str) -> None:
     try:
         # end_session holds the session's lock already.
         remove_session_workspace(session_id)
-    except ValueError:
-        # An id that cannot name a directory never had a workspace.
+    except (ValueError, RuntimeError):
+        # An id that cannot name a directory never had a workspace, and with no
+        # workspace root (no home directory, RuntimeError) there is none to
+        # remove; the bound profile and the entry are the server's own and are
+        # cleared either way.
         pass
     clear_session_state(session_id)
     get_default_registry().forget(session_id)
+
+
+def _set_session_state_aside(session_id: str, sandbox: Path) -> Optional[Path]:
+    """:func:`_remove_session_state` up to the delete of the tree, for a caller holding the presence guard.
+
+    The guard is held so that the check for a scan's entry and the removal of the
+    workspace are one step: once the workspace is renamed to its hidden delete
+    name, a :class:`ScanPresence` taking the guard next finds no marker at the
+    session's path and registers nothing, so the delete of the renamed tree
+    needs no guard. Held through the whole delete, as it was, the guard made
+    every other server sharing the root wait out an ``rmtree`` of any size:
+    their scans' registrations, their sweeps, and the busy gate of a change to
+    a session's tree (:func:`a_scan_in_another_server_holds`), which now answers
+    busy after its bounded wait.
+
+    So this does the rename aside (``source_delivery._set_aside_for_removal``:
+    None when nothing is on disk, the workspace itself when the rename is
+    refused), drops the delivered-source record, the bound profile and the
+    registry entry, and returns the path to give :func:`_remove_set_aside_tree`
+    once the guard is released. ``sandbox`` is the session's directory the caller
+    resolved; the caller has already decided the session has one (a session with
+    none takes :func:`_remove_session_state` and no guard).
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_session_state,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        _drop_session_source_dir,
+        _remove_tree,
+        _set_aside_for_removal,
+    )
+
+    doomed = _set_aside_for_removal(sandbox, session_id)
+    if doomed is not None and doomed == sandbox:
+        # The rename was refused, or the stat failed with anything but
+        # FileNotFoundError (source_delivery._set_aside_for_removal returns the
+        # workspace itself for both): the tree still stands at the session's
+        # own path with its marker, so what makes the released-guard delete
+        # safe does not hold for it. It is deleted here, inside the caller's
+        # guard, as every delete was before the two steps were split; deleted
+        # after the release, a ScanPresence in another server could take the
+        # guard, find the marker and register under the deletion. Nothing is
+        # left for the caller to delete.
+        _remove_tree(doomed)
+        doomed = None
+    _drop_session_source_dir(session_id)
+    clear_session_state(session_id)
+    get_default_registry().forget(session_id)
+    return doomed
+
+
+def _remove_set_aside_tree(doomed: Optional[Path]) -> None:
+    """Delete what :func:`_set_session_state_aside` renamed aside, guard released.
+
+    ``source_delivery._remove_tree`` clears read-only bits and retries, as the
+    removal of an ended session always did; what it still cannot remove stays
+    under the hidden delete name, which the TTL sweep clears once it is older
+    than the TTL (``_remove_stale_leftover``). Nothing is raised.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import _remove_tree
+
+    if doomed is not None:
+        _remove_tree(doomed)
 
 
 def end_session(session_id: str) -> bool:
@@ -781,13 +941,20 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
     are dropped with the workspace, as the TTL sweep does.
 
     A session with no workspace directory has nothing a scan could be reading, and
-    no registry is opened for it. A reserved id (stdio's ``__default__``) never has
-    a presence entry, so it is removed without opening the registry: ending it
-    creates nothing under ``.ash-mcp-scans``. Only ``ValueError`` and
-    ``RuntimeError`` (an id that names no directory, no workspace root) mean there
-    is no workspace: an ``OSError`` from the stat of the directory says nothing
-    about whether it exists, so that case takes the guarded path like a session
-    whose directory is there.
+    no registry is opened for it. A reserved name other than the stdio session's
+    (``session_identity.is_reserved_session_id``: a presence registry, the
+    registries' guard file :data:`PRESENCE_LOCK_NAME`, the unidentified sentinel,
+    a spelling of the stdio id that opens its directory on a case-insensitive
+    filesystem) never has a presence entry and has no workspace of its own: what
+    stands at the name under the root is the server's, so only the in-memory
+    state is cleared for it and nothing on disk is touched. The stdio session is
+    shared by every stdio server of one user, and a scan of it in a sibling
+    server holds a presence entry like a replica's scan of a session
+    (:func:`_publishes_scan_presence`), so ending it reads the registry as for
+    any session. Only ``ValueError`` and ``RuntimeError`` (an id that names no
+    directory, no workspace root) mean there is no workspace: an ``OSError``
+    from the stat of the directory says nothing about whether it exists, so
+    that case takes the guarded path like a session whose directory is there.
 
     If the presence lock cannot be taken, nothing proves that no scan holds the
     session, so the tree stays on disk. The TTL sweep needs the same lock, so
@@ -801,6 +968,11 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
     registry entry) is cleared now, so such a root does not build up state for
     the life of the process.
 
+    The stdio session is the exception to a refused lock: its workspace is removed
+    as it was before the registry covered it. Nothing registers a scan on a root
+    whose registry is refused, and the TTL sweep never collects the stdio
+    workspace (a reserved name), so a tree left for it would stay for good.
+
     An ``OSError`` after the lock was taken (the check for a scan, the removal) is
     logged with one warning and ends the call as a refused lock does.
 
@@ -813,6 +985,12 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
         is_reserved_session_id,
     )
 
+    if is_reserved_session_id(session_id) and not _is_the_stdio_session(session_id):
+        # A presence registry, the unidentified sentinel, or an alias of the
+        # stdio id: the directory of that name is the server's, not a
+        # session's, so it is never removed as one.
+        _forget_session_in_memory(session_id)
+        return True
     try:
         root = _workspace_root()
         sandbox = session_directory(root, session_id)
@@ -827,7 +1005,7 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
         # instead of answering False. The workspace may exist, so the removal
         # takes the guarded path below, as ``ScanPresence`` registers for it.
         has_workspace = True
-    if not has_workspace or is_reserved_session_id(session_id):
+    if not has_workspace or not _publishes_scan_presence(session_id):
         _remove_session_state(session_id)
         return True
     holder = root / SCAN_PRESENCE_DIR / session_id
@@ -836,15 +1014,26 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
             try:
                 stack.enter_context(_scan_presence_guard(root))
             except OSError as exc:
+                if _is_the_stdio_session(session_id):
+                    # Nothing registers a scan on a root whose registry is
+                    # refused, and the TTL sweep never collects the stdio
+                    # workspace, so a tree left for it would stay for good:
+                    # it is removed as before the registry covered it.
+                    _remove_session_state(session_id)
+                    return True
                 _forget_session_in_memory(session_id)
                 _warn_guard_refused_once(root, exc, f"ending session {session_id!r}")
                 return None
             if _a_scan_holds(holder):
                 return False
-            _remove_session_state(session_id)
+            doomed = _set_session_state_aside(session_id, sandbox)
             with contextlib.suppress(OSError):
                 holder.rmdir()
-            return True
+        # The guard is released: the tree, renamed to its hidden delete name,
+        # is deleted without holding up the other servers' registrations,
+        # sweeps and busy gates (_set_session_state_aside says why that is safe).
+        _remove_set_aside_tree(doomed)
+        return True
     except OSError as exc:
         # The check for a scan or the removal failed after the lock was taken.
         # Nothing proves that no scan holds the session, so the tree stays for
@@ -888,13 +1077,64 @@ def _forget_session_in_memory(session_id: str) -> None:
 
 
 def finish_ended_session(session_id: Optional[str]) -> None:
-    """Complete the removal of a session that ended while its scan or write ran."""
+    """Complete the removal of a session that ended while its scan or write ran.
+
+    The stdio session is shared by every stdio server of one user, and its end
+    is decided by the exiting server under the presence registry's lock, when no
+    other server is live (:meth:`StdioServerPresence.__exit__`). A scan that
+    outlived that decision completes it here, later, when a server started
+    since may be using the workspace, so the question is asked again: another
+    live server keeps the workspace, and its removal falls to the last one out.
+    """
     if session_id is None:
         return
     with _ended_lock:
         pending = session_id in _ended_while_scanning
-    if pending:
+    if not pending:
+        return
+    if not _is_the_stdio_session(session_id):
         end_session(session_id)
+        return
+    # The end runs under the registry's lock, where the question is answered,
+    # so a server registering between the answer and the removal is counted or
+    # starts after it; a registry that cannot be read keeps the workspace.
+    if StdioServerPresence.a_server_is_live(if_none=lambda: end_session(session_id)):
+        # The workspace stays for the live server (or for the last one out,
+        # when the registry could not be read), but this server's own memory
+        # of the session ended with it: its bound profile, delivered-source
+        # record and registry entry are the exiting server's, not the
+        # sibling's, so they are dropped as end_session would have dropped them.
+        _forget_session_in_memory(session_id)
+        with _ended_lock:
+            _ended_while_scanning.discard(session_id)
+
+
+def _is_the_stdio_session(session_id: str) -> bool:
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+    )
+
+    return session_id == DEFAULT_SESSION_ID
+
+
+def _publishes_scan_presence(session_id: Optional[str]) -> TypeGuard[str]:
+    """Whether a scan of ``session_id`` is marked for the other servers sharing the root.
+
+    Every session with a workspace is, the stdio session included: every stdio
+    server of one user resolves the same ``<root>/__default__``, so a scan of it
+    in one server is as invisible to a sibling server's change as a replica's
+    scan of a session is to another replica's, and the sibling would replace or
+    remove the tree under it. The other reserved names (the unidentified
+    sentinel, the two registries; ``session_identity.is_reserved_session_id``)
+    name no session and never have a workspace.
+    """
+    from automated_security_helper.cli.mcp.session_identity import (
+        is_reserved_session_id,
+    )
+
+    if not session_id:
+        return False
+    return _is_the_stdio_session(session_id) or not is_reserved_session_id(session_id)
 
 
 #: ``error_type`` the MCP tools return for :class:`SessionWorkspaceBusyError`.
@@ -984,11 +1224,16 @@ def per_session_scan_limit(session_id: Optional[str]) -> Optional[int]:
     """How many scans ``session_id`` may run at once, or None for no limit.
 
     The operator's ``mcp-resource-management.max_concurrent_scans_per_session``,
-    read from ``ASH_CONFIG`` (``get_default_config``), never from the config a
-    scan resolves: that can be the scanned tree's own or one a client delivered,
-    and a limit the limited party can raise is no limit. Read per scan, so a
-    changed ``ASH_CONFIG`` applies to the next one; a file that no longer loads
-    leaves the default. 0 is no limit.
+    read from ``ASH_CONFIG``, never from the config a scan resolves: that can be
+    the scanned tree's own or one a client delivered, and a limit the limited
+    party can raise is no limit. Read as the server's other limits are
+    (``mcp_tools._resource_limits``, ``default_config_for_tree``): loaded as a
+    scan rooted at the server's working directory loads it, so what an
+    ``ASH_CONFIG`` file inside this checkout writes for an operator-only option
+    is left out and does not make the file unloadable for this read while the
+    scan itself reads past it; the two reads of one file then agree on its
+    limits. Read per scan, so a changed ``ASH_CONFIG`` applies to the next one;
+    a file that no longer loads leaves the default. 0 is no limit.
 
     Only a caller of a network transport is limited. stdio has one session, the
     local client's, and nobody to share the host with.
@@ -1008,12 +1253,14 @@ def per_session_scan_limit(session_id: Optional[str]) -> Optional[int]:
     from automated_security_helper.config.ash_config import (
         MCPResourceManagementConfig,
     )
-    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.config.default_config import (
+        default_config_for_tree,
+    )
 
     if not caller_is_remote(session_id):
         return None
     try:
-        settings = get_default_config().mcp_resource_management
+        settings = default_config_for_tree().mcp_resource_management
     except Exception:  # noqa: BLE001 -- an unloadable ASH_CONFIG keeps the default
         settings = MCPResourceManagementConfig()
     return settings.max_concurrent_scans_per_session or None
@@ -1061,7 +1308,15 @@ def session_scan_limit_refusal(
 #: ``session_identity.is_reserved_session_id`` refuses it as a session id in any
 #: letter case.
 STDIO_SERVERS_DIR = ".stdio-servers"
-_STDIO_SERVERS_LOCK = ".lock"
+
+#: The guard file of each presence registry, locked around every change to the
+#: registry. Not a session id either (``session_identity.is_reserved_session_id``
+#: refuses it in any letter case, trailing periods and spaces dropped): under
+#: ``SCAN_PRESENCE_DIR`` a session's holder directory and the guard file share
+#: one parent, so a session of this name would have its holder where the file
+#: is, could register no scan, and could never be swept.
+PRESENCE_LOCK_NAME = ".lock"
+_STDIO_SERVERS_LOCK = PRESENCE_LOCK_NAME
 
 
 class PresenceLockError(Exception):
@@ -1155,11 +1410,28 @@ def _try_lock(handle: Any) -> _LockOutcome:
 
 
 def _lock_blocking(handle: Any) -> None:
+    """Take an exclusive lock on ``handle``, waiting for as long as it takes.
+
+    On POSIX ``flock`` waits. On Windows ``msvcrt.locking`` with ``LK_LOCK``
+    tries once a second for ten seconds and then raises ``OSError``, so a
+    server that waits behind a sibling's registration or exit for longer than
+    that would read the refusal as "no registry", run uncounted, and have the
+    default workspace removed under it by the next server to exit. The lock is
+    asked for again until it is granted; only an error that is not the lock's
+    refusal (a closed handle, say) is raised.
+    """
     if sys.platform == "win32":
+        import errno
         import msvcrt
 
         handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        while True:
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                return
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EDEADLK):
+                    raise
     else:
         import fcntl
 
@@ -1205,7 +1477,9 @@ class StdioServerPresence:
 
         try:
             registry = self._registry()
-            registry.mkdir(parents=True, exist_ok=True)
+            # Private from the moment each level exists (the workspace root among
+            # them when it is made here), as a session workspace is.
+            make_private_dir(registry)
             with open(registry / _STDIO_SERVERS_LOCK, "a+b") as guard:
                 _lock_blocking(guard)
                 # Entries of servers that were killed are dropped here as well as
@@ -1298,6 +1572,55 @@ class StdioServerPresence:
                 live = True
         return live
 
+    @staticmethod
+    def a_server_is_live(*, if_none: Optional[Callable[[], object]] = None) -> bool:
+        """Whether any stdio server holds a locked entry in the presence registry.
+
+        Read under the registry's lock file, as the exit check is, and
+        ``if_none`` runs there, before the lock is dropped, when no server is
+        live: a server registering meanwhile is either counted or starts after
+        ``if_none`` ran, the promise the class makes for the exit check. The
+        answer is True as well when the registry cannot be made, read or
+        locked: a passing failure (a file table full, a directory read that
+        fails) must not read as "no server is live" and remove the default
+        workspace under a live sibling, so nothing runs on its account, the
+        way the exit check keeps the workspace on an error. Said out loud,
+        since the workspace then stays until the last server out removes it.
+        """
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        try:
+            registry = StdioServerPresence._registry()
+            if not registry.parent.is_dir():
+                # No workspace root: nothing of the default workspace exists to
+                # remove, and a deferred end does not make the root to say so.
+                raise FileNotFoundError(str(registry.parent))
+            make_private_dir(registry)
+            guard = open(registry / _STDIO_SERVERS_LOCK, "a+b")
+        except (OSError, RuntimeError) as exc:
+            ASH_LOGGER.warning(
+                "Could not read the stdio server presence registry (%s): the "
+                "default workspace is kept as if a server were live.",
+                exc,
+            )
+            return True
+        with guard:
+            try:
+                _lock_blocking(guard)
+                live = StdioServerPresence._another_server_is_live(registry)
+            except (OSError, RuntimeError) as exc:
+                ASH_LOGGER.warning(
+                    "Could not read the stdio server presence registry (%s): "
+                    "the default workspace is kept as if a server were live.",
+                    exc,
+                )
+                return True
+            if live:
+                return True
+            if if_none is not None:
+                if_none()
+            return False
+
     def abandon_for_tests(self) -> None:
         """Drop the lock but keep the entry, as a server that died would."""
         if self._handle is not None:
@@ -1311,7 +1634,66 @@ class StdioServerPresence:
 #: Not a session workspace: it carries no session marker, and
 #: ``session_identity.is_reserved_session_id`` refuses it as a session id.
 SCAN_PRESENCE_DIR = ".ash-mcp-scans"
-_SCAN_PRESENCE_LOCK = ".lock"
+_SCAN_PRESENCE_LOCK = PRESENCE_LOCK_NAME
+
+#: How long a TTL sweep waits for the scan presence lock another server holds,
+#: in seconds: "about a second", as the MCP page puts it. A sweep that cannot
+#: take the lock within it removes nothing more and leaves the remaining
+#: sessions to its next sweep, so another server cannot hold up the request
+#: that set the sweep off, or an interrupt, for as long as it keeps the lock.
+#: Registering a scan still waits for as long as it takes (``_lock_blocking``):
+#: a scan that ran unregistered could have its tree removed under it.
+_SWEEP_LOCK_WAIT_SECONDS = 1.0
+
+#: How long the busy gate of a change to a session's tree
+#: (:func:`a_scan_in_another_server_holds`) waits for the scan presence lock
+#: another server holds, in seconds. The gate runs on one of the server's few
+#: delivery threads while it holds the session's change, so a wait as long as
+#: the holder keeps the lock (another server's sweep deleting a tree, or its
+#: shutdown ending every session in turn) would hold that thread and refuse
+#: this server's own scans of the session meanwhile. A lock still held at the
+#: end of the wait is answered as "busy", which the caller reports as the
+#: retryable refusal it reports for a scan.
+_BUSY_GATE_LOCK_WAIT_SECONDS = _SWEEP_LOCK_WAIT_SECONDS
+
+#: How often a bounded wait asks for the lock again.
+_LOCK_POLL_SECONDS = 0.05
+
+
+class _PresenceLockHeld(Exception):
+    """Another process held the scan presence lock for the whole bounded wait."""
+
+
+def _is_lock_held_refusal(exc: OSError) -> bool:
+    """True if ``exc`` is a non-blocking lock call's "someone else holds it"."""
+    import errno
+
+    names = ("EACCES", "EAGAIN", "EWOULDBLOCK", "EDEADLK")
+    codes = {getattr(errno, name, None) for name in names}
+    return exc.errno is not None and exc.errno in codes
+
+
+def _lock_within(handle: Any, seconds: float) -> None:
+    """Take an exclusive lock on ``handle``, asking for up to ``seconds``.
+
+    The lock is asked for without waiting (``_try_lock``) every
+    ``_LOCK_POLL_SECONDS`` until it is granted or the time is up, which raises
+    :class:`_PresenceLockHeld`. A refusal that is not "another holder has it"
+    (a filesystem without locks, a closed handle) is raised as the ``OSError``
+    it is, so the caller reports it as the guard refusals are reported.
+    """
+    import time
+
+    deadline = time.monotonic() + seconds
+    while True:
+        error = _try_lock(handle).error
+        if error is None:
+            return
+        if not _is_lock_held_refusal(error):
+            raise error
+        if time.monotonic() >= deadline:
+            raise _PresenceLockHeld
+        time.sleep(_LOCK_POLL_SECONDS)
 
 
 def _workspace_root() -> Path:
@@ -1323,14 +1705,36 @@ def _workspace_root() -> Path:
 
 
 @contextlib.contextmanager
-def _scan_presence_guard(root: Path) -> Iterator[None]:
-    """Hold the lock that registering a scan and the sweep's check-and-remove share."""
+def _scan_presence_guard(root: Path, *, wait: Optional[float] = None) -> Iterator[None]:
+    """Hold the lock that registering a scan and the sweep's check-and-remove share.
+
+    ``wait`` is None to wait for as long as it takes (registering a scan), or the
+    seconds to ask for the lock before giving up with :class:`_PresenceLockHeld`
+    (the TTL sweep, ``_SWEEP_LOCK_WAIT_SECONDS``; the busy gate of a change to a
+    session's tree, ``_BUSY_GATE_LOCK_WAIT_SECONDS``).
+    """
     registry = root / SCAN_PRESENCE_DIR
-    registry.mkdir(exist_ok=True)
+    make_private_dir(registry)
     with open(registry / _SCAN_PRESENCE_LOCK, "a+b") as guard:
-        _lock_blocking(guard)
+        if wait is None:
+            _lock_blocking(guard)
+        else:
+            _lock_within(guard, wait)
         _forget_guard_refusal_warning()
         yield
+
+
+def _note_sweep_left_the_lock(root: Path) -> None:
+    """Say, at info level, that a sweep gave the lock up to another server."""
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    ASH_LOGGER.info(
+        "The TTL sweep could not take the scan presence lock %s within %.0f s "
+        "because another server holds it; it removed nothing more this pass and "
+        "leaves the remaining sessions to its next sweep.",
+        root / SCAN_PRESENCE_DIR / _SCAN_PRESENCE_LOCK,
+        _SWEEP_LOCK_WAIT_SECONDS,
+    )
 
 
 class ScanPresence:
@@ -1345,14 +1749,28 @@ class ScanPresence:
     under one lock file, so a scan that starts while a sweep removes its
     session's workspace either is seen by it or finds the workspace gone.
 
-    Nothing is registered, and nothing is reported, for a session with no
-    workspace on disk or no resolvable workspace root: nothing of the session's
+    The stdio session registers like any other: every stdio server of one user
+    shares its workspace, so a sibling server's change has to see a scan of it
+    (:func:`_publishes_scan_presence`), and the busy gate of a change reads the
+    registry (:func:`a_scan_in_another_server_holds`). Nothing is registered,
+    and nothing is reported, for a session with no workspace on disk or no
+    resolvable workspace root: nothing of the session's
     is there to protect, and a scan of a directory the operator granted creates
-    nothing under the root. A root whose registry can't be used leaves the scan
+    nothing under the root. Nothing is registered for a reserved name either
+    (``session_identity.is_reserved_session_id``), the registries' guard file's
+    among them: a session of that name would have its holder directory where the
+    guard file is. A root whose registry can't be used leaves the scan
     unregistered rather than failing it, with a warning: a refused guard shares
     the process-wide warn-once latch (:func:`_warn_guard_refused_once`) with the
     TTL sweep and ``end_session``. A scan whose entry exists but can't be locked
     does not start: ``__enter__`` raises :class:`PresenceLockError`.
+
+    The scan's end is a use of the workspace: ``__exit__`` sets the workspace's
+    modification time to now, registered or not, before the entry is dropped.
+    The TTL sweep reads liveness from that time, and a scan that ran longer than
+    the TTL on a workspace nothing else touched would otherwise leave it older
+    than the cutoff the moment the entry went, so the next pass would remove
+    the tree and the results the scan had just written under it.
 
     Limits: as ``StdioServerPresence``, a server on another host sharing the root
     through a filesystem that does not share these locks can't see them.
@@ -1362,16 +1780,14 @@ class ScanPresence:
         self._session_id = session_id
         self._entry: Optional[Path] = None
         self._handle: Any = None
+        # The workspace found on entry, touched on exit; None when none was.
+        self._sandbox: Optional[Path] = None
 
     def __enter__(self) -> Self:
         import uuid
 
-        from automated_security_helper.cli.mcp.session_identity import (
-            is_reserved_session_id,
-        )
-
         session_id = self._session_id
-        if not session_id or is_reserved_session_id(session_id):
+        if not _publishes_scan_presence(session_id):
             return self
         try:
             root = _workspace_root()
@@ -1405,6 +1821,7 @@ class ScanPresence:
             return self
         if not has_workspace:
             return self
+        self._sandbox = sandbox
         guarded = False
         try:
             with _scan_presence_guard(root):
@@ -1451,6 +1868,12 @@ class ScanPresence:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
+        sandbox, self._sandbox = self._sandbox, None
+        if sandbox is not None:
+            # Before the entry goes: while it is held no sweep removes the
+            # workspace, and once it is gone the workspace's age is what keeps
+            # it. Whatever ended the scan, its end was a use.
+            _touch_workspace(sandbox)
         if self._entry is None:
             return
         entry, handle = self._entry, self._handle
@@ -1515,6 +1938,76 @@ def scan_presence_held(session_id: str) -> bool:
         return False
 
 
+def a_scan_in_another_server_holds(session_id: str) -> bool:
+    """True while a scan of ``session_id`` in another server sharing the root holds its presence.
+
+    For the busy gate of a change to the session's tree
+    (``source_delivery._no_scan_running``), which holds the session's change when
+    it asks: that excludes every scan of this process, and a scan of this process
+    holds its presence entry only while it holds the session, so a live entry
+    under ``<root>/.ash-mcp-scans/<session id>/`` is another server's. A replica
+    behind a load balancer and a sibling stdio server of the same user are the
+    two: the stdio session is shared by every stdio server of one user, and a
+    scan of it registers like any other (:func:`_publishes_scan_presence`).
+    Entries of scans whose server died are dropped on the way, as everywhere the
+    registry is read.
+
+    No guard is taken for a session with no workspace on disk: no scan of it can
+    be registered (:class:`ScanPresence` registers a session with a workspace
+    only), and the first delivery into a fresh root creates the workspace itself,
+    under a root that may not exist yet.
+
+    Fails open, with one warning: when the guard can't be taken (``OSError``) the
+    answer is False. A root whose registry is refused is one where
+    :class:`ScanPresence` runs unregistered too, so there is nothing there to
+    read, and the change goes on as it did before the registry existed; the
+    process-wide latch (:func:`_warn_guard_refused_once`) reports the refusal
+    once. As :func:`scan_presence_held` says, False is "no scan is known to
+    hold", not permission; what holds the session for the change is the
+    session's change.
+
+    Bounded: the guard is asked for ``_BUSY_GATE_LOCK_WAIT_SECONDS``, not for
+    as long as another server keeps it. The gate runs on a delivery thread
+    while it holds the session's change, so a wait as long as another server's
+    sweep (a whole tree removal under the guard) or shutdown (every session
+    ended in turn) would hold that thread and refuse this server's own scans
+    of the session meanwhile. A lock still held at the end of the wait answers
+    True: "busy", not "a scan was seen", which the caller reports as the same
+    retryable refusal, so the client asks again rather than the thread waits.
+    """
+    try:
+        root = _workspace_root()
+        sandbox = session_directory(root, session_id)
+        has_workspace = sandbox.is_dir()
+    except (RuntimeError, ValueError):
+        # No workspace root, or an id that names no directory under it: no
+        # scan of it registered anything.
+        return False
+    except OSError:
+        # ``Path.is_dir()`` re-raises EACCES, EIO and ESTALE on Python <= 3.13
+        # instead of answering False. The workspace may exist, so the registry
+        # is read.
+        has_workspace = True
+    if not has_workspace:
+        return False
+    try:
+        with _scan_presence_guard(root, wait=_BUSY_GATE_LOCK_WAIT_SECONDS):
+            return _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id)
+    except _PresenceLockHeld:
+        # Another server kept the lock for the whole wait: whatever it is doing
+        # under it (a sweep's removal, a shutdown's ends), the registry cannot
+        # be read now, and a change that went on regardless could replace the
+        # tree under a scan that holds an entry behind that lock.
+        return True
+    except OSError as exc:
+        _warn_guard_refused_once(
+            root,
+            exc,
+            f"checking for a scan of session {session_id!r} in another server",
+        )
+        return False
+
+
 def _last_used(sandbox: Path) -> float:
     """The newest mtime of the sandbox directory and its direct children."""
     newest = sandbox.lstat().st_mtime
@@ -1534,16 +2027,41 @@ def touch_session_workspace(session_id: str) -> None:
 
     try:
         sandbox = session_directory(resolve_workspace_root(), session_id)
+    except (OSError, ValueError, RuntimeError):
+        return
+    _touch_workspace(sandbox)
+
+
+def _touch_workspace(sandbox: Path) -> None:
+    """Set ``sandbox``'s modification time to now, if it is a directory of its own.
+
+    A symlink is left alone: the sweep never follows one, and touching it would
+    touch what it points at. A workspace that is gone, or that cannot be touched,
+    is left as it is.
+    """
+    try:
         if sandbox.is_dir() and not sandbox.is_symlink():
             os.utime(sandbox)
-    except (OSError, ValueError, RuntimeError):
+    except OSError:
         pass
 
 
 def sweep_stale_workspaces(
-    ttl_seconds: float, now: Optional[float] = None
+    ttl_seconds: float,
+    now: Optional[float] = None,
+    *,
+    in_use: Optional[Collection[str]] = None,
 ) -> List[str]:
     """Remove session workspaces nobody used for longer than ``ttl_seconds``.
+
+    ``in_use`` names the sessions the caller knows to be live (the HTTP
+    boundary's: the sessions whose sse event stream is open right now). Those
+    are kept whatever their age: an open stream that has sent no message for
+    longer than the TTL is idle, not ended, and its workspace, bound profile and
+    delivered-source record end with the stream (``end_session``), not with the
+    sweep. The keep is this process's knowledge only; a caller that shares the
+    root with other servers also marks those workspaces used
+    (``touch_session_workspace``), since another server's sweep reads age alone.
 
     Only directories ASH created are considered. A session workspace carries
     ``session_paths.SESSION_MARKER``, and anything else under the root (an
@@ -1559,8 +2077,10 @@ def sweep_stale_workspaces(
 
     "Used" is the newest modification time of the sandbox directory and its
     direct children; every HTTP request that names a session refreshes it
-    (:func:`touch_session_workspace`), and every delivery writes there. Skipped,
-    and never queued for later:
+    (:func:`touch_session_workspace`), every delivery writes there, and the end
+    of every scan of the session refreshes it (:class:`ScanPresence`), so a scan
+    that ran longer than the TTL does not leave its workspace stale the moment
+    it returns. Skipped, and never queued for later:
 
     - a session whose scan runs in this process (its claim or lock is held) or
       whose tree is being changed, because the sweep takes the session's change
@@ -1580,7 +2100,12 @@ def sweep_stale_workspaces(
 
     Entries that are not directories, are symlinks, or do not name a single
     directory are left alone, and so is a name the session registry refuses
-    (``MCPSessionRegistry.session_for``): the sweep goes on to the next entry.
+    (``MCPSessionRegistry.session_for``), or a workspace whose removal raises
+    (an ``OSError``, ``RuntimeError`` or ``ValueError`` out of the registry or
+    the removal): that one is logged with its id and left for the next pass, and
+    the sweep goes on to the next entry rather than ending the pass with every
+    later entry unread. (The registry's refusal of the unidentified sentinel is
+    defensive here: a reserved name is skipped before the registry is asked.)
 
     This is also what removes a session whose end :func:`end_session` deferred
     for a scan in another server: that scan's end is not seen here.
@@ -1591,7 +2116,12 @@ def sweep_stale_workspaces(
     (:func:`_warn_guard_refused_once`) and returns ``[]`` without opening
     a registry entry for any workspace. A per-workspace lookup would create the
     entry that :func:`end_session` forgot, and refresh its idle time on every
-    pass.
+    pass. The guard is asked for for about a second (``_SWEEP_LOCK_WAIT_SECONDS``),
+    here and again before each removal: a sweep that cannot take it, because
+    another server sharing the root holds it, removes nothing more and leaves
+    the remaining sessions to its next sweep (:func:`_note_sweep_left_the_lock`),
+    so another server cannot hold up the request that set the sweep off, or an
+    interrupt, for as long as it keeps the lock.
 
     Returns:
         The session ids whose workspaces were removed.
@@ -1619,6 +2149,9 @@ def sweep_stale_workspaces(
             continue
         if is_reserved_session_id(session_id):
             continue
+        if in_use is not None and session_id in in_use:
+            # Still issued by the caller: its end comes through end_session.
+            continue
         try:
             validated_path_component(session_id)
             if not _is_stale_workspace(entry, cutoff):
@@ -1629,16 +2162,68 @@ def sweep_stale_workspaces(
     if not stale:
         return []
     try:
-        with _scan_presence_guard(root):
+        with _scan_presence_guard(root, wait=_SWEEP_LOCK_WAIT_SECONDS):
             pass
+    except _PresenceLockHeld:
+        # Another server holds the lock: this pass removes nothing and the
+        # request that set it off is answered; the next sweep tries again.
+        _note_sweep_left_the_lock(root)
+        return []
     except OSError as exc:
         _warn_guard_refused_once(root, exc, "running the TTL sweep")
         return []
     removed: List[str] = []
     for entry in stale:
-        if _remove_if_still_stale(root, entry.name, entry, cutoff):
-            removed.append(entry.name)
+        try:
+            if _remove_if_still_stale(root, entry.name, entry, cutoff):
+                removed.append(entry.name)
+        except _PresenceLockHeld:
+            # The lock was taken by another server between two workspaces:
+            # nothing more is removed this pass (the page's promise), and the
+            # remaining stale workspaces are left to the next sweep.
+            _note_sweep_left_the_lock(root)
+            break
+        except (OSError, RuntimeError, ValueError) as exc:
+            # One workspace's failure (a registry refusal, a removal that
+            # raised past its own handling) is that workspace's: it is named
+            # and left for the next pass, and the sweep goes on to the rest
+            # instead of ending the pass with every later entry unread.
+            _warn_sweep_failure_once(
+                entry.name,
+                _describe_os_error(exc) if isinstance(exc, OSError) else str(exc),
+            )
     return removed
+
+
+#: Session ids whose removal the sweep has already reported as failing, so a
+#: workspace that keeps failing (a file another account owns) is named once for
+#: the life of the process, not on every pass, as a leftover is
+#: (``_warn_leftover_once``). A session the sweep later removes leaves the set,
+#: so a new failure of a reused id is reported again.
+_sweep_failures_warned: Set[str] = set()
+
+
+def _warn_sweep_failure_once(session_id: str, detail: str) -> None:
+    """Log once per session id that the sweep could not remove its workspace."""
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    with _leftovers_warned_lock:
+        if session_id in _sweep_failures_warned:
+            return
+        _sweep_failures_warned.add(session_id)
+    ASH_LOGGER.warning(
+        "The TTL sweep could not remove session %r (%s); its workspace stays "
+        "for the next pass. This is the only warning for it until a pass "
+        "removes it.",
+        session_id,
+        detail,
+    )
+
+
+def _forget_sweep_failure(session_id: str) -> None:
+    """A removal worked: a later failure of the same id is reported as new."""
+    with _leftovers_warned_lock:
+        _sweep_failures_warned.discard(session_id)
 
 
 def _remove_stale_leftover(root: Path, entry: Path, cutoff: float) -> None:
@@ -1847,13 +2432,55 @@ def _remove_if_still_stale(
     :func:`sweep_stale_workspaces` has already taken the presence guard once for
     the pass. A guard the filesystem refuses after that (a lock that fails
     between two workspaces) skips this removal and is reported through the
-    process-wide latch (:func:`_warn_guard_refused_once`).
+    process-wide latch (:func:`_warn_guard_refused_once`). A guard another server
+    holds for the whole bounded wait raises :class:`_PresenceLockHeld`, which the
+    sweep takes as the end of its pass; an end of this session that was refused
+    while the sweep held its change is still completed, off the sweep
+    (:func:`_complete_a_pending_end_off_the_sweep`).
     """
 
-    if _remove_stale_session_state(root, session_id, sandbox, cutoff):
-        return True
+    try:
+        if _remove_stale_session_state(root, session_id, sandbox, cutoff):
+            return True
+    except _PresenceLockHeld:
+        # An end_session refused while this sweep held the session's change is
+        # marked pending (end_session marks it before it tries the change) and
+        # would be completed by finish_ended_session below. Completing it here
+        # would take the guard with no time limit, on the sweep's thread, and
+        # undo the one-second promise this exception keeps, so it is completed
+        # on a thread of its own, which waits for the guard as the ending
+        # request would have.
+        _complete_a_pending_end_off_the_sweep(session_id)
+        raise
     finish_ended_session(session_id)
     return False
+
+
+def _complete_a_pending_end_off_the_sweep(session_id: str) -> None:
+    """Complete a pending end of ``session_id`` on a thread of its own.
+
+    For the sweep, when the presence guard another server holds ended its pass
+    before it could call :func:`finish_ended_session` for a session it had just
+    released: the end is pending in ``_ended_while_scanning``, and nothing else
+    in this process completes it before the next sweep that finds the workspace
+    stale again (a whole TTL later, if the ending request touched it). The
+    thread runs :func:`finish_ended_session`, whose ``end_session`` waits for
+    the guard for as long as the other server keeps it, as the request that
+    ended the session would have waited; the sweep itself waits for nothing. A
+    session whose end is not pending needs no thread. Daemon: a removal still
+    running when the process exits leaves what it had not removed under the
+    hidden delete name, which the TTL sweep clears.
+    """
+    with _ended_lock:
+        pending = session_id in _ended_while_scanning
+    if not pending:
+        return
+    threading.Thread(
+        target=finish_ended_session,
+        args=(session_id,),
+        name=f"ash-mcp-finish-ended-session-{session_id}",
+        daemon=True,
+    ).start()
 
 
 def _remove_stale_session_state(
@@ -1874,16 +2501,37 @@ def _remove_stale_session_state(
                 return False
             with contextlib.ExitStack() as stack:
                 try:
-                    stack.enter_context(_scan_presence_guard(root))
+                    stack.enter_context(
+                        _scan_presence_guard(root, wait=_SWEEP_LOCK_WAIT_SECONDS)
+                    )
                 except OSError as exc:
                     _warn_guard_refused_once(root, exc, "running the TTL sweep")
                     return False
                 if _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id):
                     return False
-                _remove_session_state(session_id)
+                # The age read before the guard is not the age now: a scan in
+                # another server that ended meanwhile touched the workspace and
+                # then took this guard to drop its entry (ScanPresence.__exit__,
+                # in that order), so this sweep, let in right after it, sees no
+                # entry and a fresh mtime. Re-read under the guard, where that
+                # order guarantees the touch is visible before the entry is gone.
+                if not _is_stale_workspace(sandbox, cutoff):
+                    return False
+                doomed = _set_session_state_aside(session_id, sandbox)
+                _forget_sweep_failure(session_id)
                 with contextlib.suppress(OSError):
                     (root / SCAN_PRESENCE_DIR / session_id).rmdir()
-        except OSError:
+            # The guard is released: the tree is deleted under its hidden name
+            # without holding up the other servers (_set_session_state_aside).
+            _remove_set_aside_tree(doomed)
+        except OSError as exc:
+            # The check for a scan, or the removal, failed after the guard was
+            # taken: the workspace stays for the next pass, and the failure is
+            # named rather than swallowed, because a removal that keeps failing
+            # is the one an operator has to see (a file another account owns,
+            # a filesystem error). Named once per session, not on every pass
+            # (at most every five minutes) for as long as it keeps failing.
+            _warn_sweep_failure_once(session_id, _describe_os_error(exc))
             return False
         finally:
             session.end_sweep()
@@ -1897,6 +2545,7 @@ def _remove_stale_session_state(
 __all__ = [
     "MCPSession",
     "MCPSessionRegistry",
+    "PRESENCE_LOCK_NAME",
     "PresenceLockError",
     "SESSION_SCAN_LIMIT",
     "SESSION_CHANGE_IN_PROGRESS",

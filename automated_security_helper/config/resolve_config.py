@@ -35,6 +35,8 @@ import yaml
 from automated_security_helper.config.ash_config import (
     AshConfig,
     SandboxConfig,
+    plugin_key_lookup_names,
+    reduced_plugin_name,
     sandbox_mode_in_document,
 )
 from automated_security_helper.config.plugin_section_names import (
@@ -50,6 +52,7 @@ from automated_security_helper.config.config_sources import (
     ResolvedConfigDocument,
     _resolve_dict_key,
     by_every_name,
+    check_search_directory,
     deep_merge,
     default_confinement_root,
     describe_config_path,
@@ -82,6 +85,7 @@ from automated_security_helper.config.confinement_remedy import (
     LET_THE_WALK_FINISH,
 )
 from automated_security_helper.config.operator_paths import (
+    SCANNER_RULES_OPTIONS,
     anchor_override_paths,
     anchor_relative_paths as anchor_document_paths,
     the_operators_files,
@@ -121,6 +125,7 @@ from automated_security_helper.utils.path_stat import (
     stat_named_path,
 )
 from automated_security_helper.config.environment_record import (
+    ENVIRONMENT_VALUE_SHOWN,
     WrittenKeyMapping,
     mappings_with_written_reference_keys,
 )
@@ -174,6 +179,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigInputNotPermittedError,
     ASHConfigSourceError,
+    ASHConfigUnparsedError,
     ASHConfigValidationError,
     ASHRespelledOverrideError,
 )
@@ -209,17 +215,26 @@ def find_config_file(
     Raises:
         ASHConfigInputNotPermittedError: for a file ``permit`` refuses. The
             message names it by its name in search_dir, never by what it
-            resolves to.
+            resolves to. Also, on Windows, for a ``search_dir`` that leads
+            through a network share, a device path or a link that cannot be
+            read; it is judged before any name is looked for under it.
     """
     if search_dir is None:
         search_dir = Path.cwd()
     if permit is not None:
+        # The directory itself first: the lookups below lstat a spelling through
+        # it, which follows a link among its components, so a directory that
+        # leads to a share is refused before any of them.
+        check_search_directory(Path(search_dir), permit)
         # Every name discovery looks at that is there, a link to a missing target
         # included, so the answer does not say whether the target exists.
         for candidate in discovery_candidates(Path(search_dir)):
             if not permit(candidate):
                 raise _discovered_config_not_permitted(candidate, Path(search_dir))
-    selected = discover_config_source(search_dir).selected
+    # Discovery takes the gate too: it checks each source by the path it
+    # resolves to before anything opens it, so a pyproject.toml that appears
+    # between the pass above and this read is not read for its table ungated.
+    selected = discover_config_source(search_dir, permit=permit).selected
     if selected is None:
         return None
     if permit is not None and not permit(selected.path):
@@ -262,9 +277,9 @@ def _anchored_operator_overrides(config_overrides: Sequence[str]) -> List[str]:
     if cwd is not None:
         return anchor_override_paths(config_overrides, cwd)
     needs_a_directory = [
-        str(override).partition("=")[0].strip()
+        _override_key_as_written(override)
         for override in config_overrides
-        if anchor_override_paths([override], Path(os.sep)) != [override]
+        if _needs_a_working_directory(override)
     ]
     if needs_a_directory:
         raise ASHConfigValidationError(
@@ -273,6 +288,147 @@ def _anchored_operator_overrides(config_overrides: Sequence[str]) -> List[str]:
             "and that directory is gone, so the load is refused."
         )
     return list(config_overrides)
+
+
+#: Two directories no operator ran ASH from. An override anchored at either of
+#: them comes back as written unless its value is taken from the directory it
+#: is anchored at.
+_PLACEHOLDER_ROOTS: Tuple[Path, Path] = (
+    Path(os.sep, "ash-no-working-directory-1"),
+    Path(os.sep, "ash-no-working-directory-2"),
+)
+
+
+def _needs_a_working_directory(override: str) -> bool:
+    """Whether ``anchor_override_paths`` rewrites this override by the directory
+    it is anchored at.
+
+    ``anchor_override_paths`` reads each override on its own, so one is probed
+    alone here, anchored at each placeholder root and compared with the
+    override as written. It rewrites a relative operator path only: an
+    absolute path, a ``~`` path, a URL and a value holding ``$`` come back as
+    written (``operator_paths.anchored_path``), and so does a rules option
+    (semgrep's and opengrep's ``config``) that names nothing under the
+    directory. Probed at the real root, a rules value that happened to name a
+    directory of the host (``etc``) read as anchored while one naming nothing
+    there read as written, so what was refused depended on the host's own
+    directories; under the placeholder roots every rules value names nothing,
+    the probe reads it as written, and the rules rule below decides it. The two
+    probes are compared with the written override, not with each other: a
+    value that climbs out of its root (``../bandit.yaml``) normalizes to the
+    same path under both roots and still needs the directory. A rules value
+    that is a relative path and no registry form needs the directory too
+    (``_rules_value_needs_the_directory``), ``etc`` included: under a live
+    directory the anchoring reads the disk for it, and under a gone one there
+    is no disk to read.
+    """
+    probe = [override]
+    if any(anchor_override_paths(probe, root) != probe for root in _PLACEHOLDER_ROOTS):
+        return True
+    return _rules_value_needs_the_directory(override)
+
+
+#: Rules values a grep scanner resolves without a file: the ``auto`` policy
+#: and a registry ruleset, rule or snippet (``p/ci``, ``r/<id>``, ``s/<id>``).
+_REGISTRY_RULES = re.compile(r"^(?:auto$|[prs]/)")
+
+
+def _rules_value_needs_the_directory(override: str) -> bool:
+    """Whether a ``--config-overrides`` entry sets a grep scanner's rules
+    option (``operator_paths.SCANNER_RULES_OPTIONS``: semgrep's and opengrep's
+    ``config``) to a relative path, which only the working directory places.
+
+    A rules value is a file when one is there under the directory and a
+    registry entry otherwise, so with the directory live the anchoring reads
+    the disk. With the directory gone nothing is there to read, and a relative
+    value left as written reaches the scanner, which joins it to the scanned
+    tree: the repository's file in the operator's place, the case
+    ``_anchored_operator_overrides`` refuses. The value may sit at the option's
+    own key (``scanners.semgrep.options.config=<value>``) or inside a mapping
+    set higher up (``scanners.semgrep.options={...}``, ``scanners.semgrep={...}``,
+    ``scanners={...}``): the live anchoring walks a mapping value down to the
+    option (``operator_paths.anchor_relative_paths``), so the probe here walks
+    the same way, placing the parsed value at the key's segments and reading
+    every scanner section's options for the rules option, under either
+    spelling. Read at the option's own key only, a relative file inside a
+    mapping passed as written with the directory gone. Admitted as written: a
+    registry ruleset, rule or snippet (``p/``, ``r/``, ``s/``), ``auto``, a URL,
+    an absolute or ``~`` path and a value holding ``$``, the shapes
+    ``operator_paths.anchored_path`` never rewrites; a list, which the live
+    anchoring leaves as written too (``anchored_path`` reads a string only);
+    and an append (``config+=``), whose value the live anchoring places in a
+    list.
+    """
+    key, separator, raw = override.partition("=")
+    if not separator or key.endswith("+"):
+        return False
+    segments = [segment.strip() for segment in key.split(".")]
+    if segments[0] != "scanners":
+        return False
+    scanners: Any = _parse_config_value(raw)
+    for segment in reversed(segments[1:]):
+        scanners = {segment: scanners}
+    if not isinstance(scanners, dict):
+        return False
+    for scanner_key, section in scanners.items():
+        if not isinstance(scanner_key, str) or not isinstance(section, dict):
+            continue
+        option_names = _rules_option_names(scanner_key)
+        for options in _spelled(section, "options"):
+            if not isinstance(options, dict):
+                continue
+            for option in option_names:
+                if any(
+                    _relative_rules_file(value) for value in _spelled(options, option)
+                ):
+                    return True
+    return False
+
+
+def _rules_option_names(scanner_key: str) -> List[str]:
+    """The rules options (``operator_paths.SCANNER_RULES_OPTIONS``) of the grep
+    scanner a ``scanners`` key names, as ``_``-spelled option names; empty for a
+    key naming no grep scanner. The key matches a scanner as the live anchoring
+    matches it (``operator_paths._scanner_matches``)."""
+    lookup = plugin_key_lookup_names(scanner_key)
+    return list(
+        dict.fromkeys(
+            name.replace("-", "_")
+            for scanner, rules_options in SCANNER_RULES_OPTIONS.items()
+            if scanner_key == scanner or reduced_plugin_name(scanner) in lookup
+            for name in rules_options
+        )
+    )
+
+
+def _spelled(container: Dict[str, Any], name: str) -> List[Any]:
+    """The values ``container`` holds under ``name`` spelled with ``-`` or
+    ``_``, the live anchoring's rule (``operator_paths._spellings``)."""
+    wanted = name.replace("-", "_")
+    return [
+        value
+        for key, value in container.items()
+        if isinstance(key, str) and key.replace("-", "_") == wanted
+    ]
+
+
+def _relative_rules_file(value: Any) -> bool:
+    """Whether a rules option's value is a relative path and no registry form,
+    the one shape ``operator_paths.anchored_path`` reads the disk for."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    if value.startswith("~") or "$" in value or "://" in value or "\x00" in value:
+        return False
+    if os.path.isabs(value) or value[:1] in ("/", "\\"):
+        return False
+    return _REGISTRY_RULES.match(value) is None
+
+
+def _override_key_as_written(override: str) -> str:
+    """The key of a ``--config-overrides`` entry for a refusal: ``key`` for a
+    setting override, ``key+=`` for an appending one, never the value."""
+    key = str(override).partition("=")[0].strip()
+    return f"{key}=" if key.endswith("+") else key
 
 
 def _sets_network_scanners(override: str) -> bool:
@@ -364,11 +520,64 @@ def _apply_config_override(
             current[final_key].append(parsed_value)
         ASH_LOGGER.debug(f"Appended to the list at {logged_path}", extra=NO_MARKUP)
         return resolved_keys, parsed_value, True
+    elif append_mode and current.get(final_key) is None:
+        # An append onto a list the document does not hold yet, or holds as
+        # None, starts the list: as a plain set, a scalar appended stored a
+        # bare string a list field refuses, and a list appended replaced the
+        # field's None with no word of the append.
+        current[final_key] = (
+            list(parsed_value) if isinstance(parsed_value, list) else [parsed_value]
+        )
+        ASH_LOGGER.debug(f"Appended to the list at {logged_path}", extra=NO_MARKUP)
+        return resolved_keys, parsed_value, True
     else:
         # Set the value
         current[final_key] = parsed_value
         ASH_LOGGER.debug(f"Applied a config override to {logged_path}", extra=NO_MARKUP)
         return resolved_keys, parsed_value, False
+
+
+def _parsed_list_item(item: str) -> Any:
+    """One item of a bracketed list that is not JSON (``[a, b]``,
+    ``['semgrep']``): a quoted item is its text with the quotes removed, as the
+    Python and shell spellings mean it, and an unquoted one is parsed as a
+    value. The quotes were kept before, so ``['semgrep']`` named a scanner
+    "'semgrep'" that matched nothing."""
+    if len(item) >= 2 and item[0] == item[-1] and item[0] in "'\"":
+        return item[1:-1]
+    return _parse_config_value(item)
+
+
+def _split_list_items(body: str) -> List[str]:
+    """The items of ``body``, the inside of a bracketed list that is not JSON,
+    split at the commas outside quotes and outside nested brackets or braces,
+    each stripped. A split at every comma cut a quoted item holding one in two
+    and broke a nested list (``[[a, b], [c]]``) into fragments."""
+    items: List[str] = []
+    piece: List[str] = []
+    depth = 0
+    quote: Optional[str] = None
+    for character in body:
+        if quote is not None:
+            piece.append(character)
+            if character == quote:
+                quote = None
+        elif character in "'\"":
+            quote = character
+            piece.append(character)
+        elif character in "[{":
+            depth += 1
+            piece.append(character)
+        elif character in "]}":
+            depth = max(depth - 1, 0)
+            piece.append(character)
+        elif character == "," and depth == 0:
+            items.append("".join(piece).strip())
+            piece = []
+        else:
+            piece.append(character)
+    items.append("".join(piece).strip())
+    return items
 
 
 def _parse_config_value(value: str) -> Any:
@@ -393,11 +602,14 @@ def _parse_config_value(value: str) -> Any:
             # Try to parse as JSON
             return json.loads(bracketed)
         except json.JSONDecodeError:
-            # If not valid JSON, try a simpler approach for basic lists
-            items = bracketed[1:-1].split(",")
-            return [_parse_config_value(item.strip()) for item in items if item.strip()]
+            # If not valid JSON, try a simpler approach for basic lists: the
+            # items split at the top-level commas, each parsed as a value.
+            items = _split_list_items(bracketed[1:-1])
+            return [_parsed_list_item(item) for item in items if item]
 
-    # Check for dict syntax: {key1: value1, key2: value2, ...}
+    # An object is read as JSON only: {"key": "value"}. Text in braces that is
+    # not JSON (the YAML flow form {key: value}) is kept as a string, which a
+    # typed field refuses and an untyped plugin option stores as it is.
     if bracketed.startswith("{") and bracketed.endswith("}"):
         try:
             # Try to parse as JSON
@@ -406,12 +618,14 @@ def _parse_config_value(value: str) -> Any:
             # If not valid JSON, return as string
             return value
 
-    # Handle boolean values
-    if value.lower() == "true":
+    # Handle boolean and null values, with the whitespace around them removed
+    # as a number's is: "false\r" from a CRLF file and "null " were strings.
+    word = bracketed.lower()
+    if word == "true":
         return True
-    elif value.lower() == "false":
+    elif word == "false":
         return False
-    elif value.lower() in ("null", "none"):
+    elif word in ("null", "none"):
         return None
 
     # Try numeric conversions
@@ -425,6 +639,62 @@ def _parse_config_value(value: str) -> Any:
         except ValueError:
             # Keep as string
             return value
+
+
+def _validated_with_overrides(
+    config_dict: Dict[str, Any],
+    applied: List[Tuple[List[str], Any, bool]],
+    raw_values: Sequence[str],
+) -> AshConfig:
+    """``config_dict`` validated as an AshConfig, with a string field's refusal
+    of an override typed as a number cured by the override's own text.
+
+    _parse_config_value types "007" as the int 7 and "1.10" as a float, "true"
+    as a bool and "null" as None, so an override could never set a str option
+    to such text (an account id, a tool version, the word "true"). Where the
+    model refuses such a value as not a string at the place the override
+    landed (``applied``, with the text of each override in ``raw_values``),
+    the value is set back to the text the operator wrote and the document is
+    validated once more. The retyped text is written back into ``applied``
+    too, in place: the values a section's lines hide
+    (AshConfig._override_values) are the string leaves of ``applied``, and
+    the number the parse produced is not one, so the text the model now holds
+    (an account id among the shapes) would otherwise print in clear. Any
+    other refusal, and a refusal the retyping does not cure, is raised as it
+    is.
+    """
+    try:
+        return AshConfig.model_validate(config_dict)
+    except ValidationError as error:
+        retyped = False
+        for item in error.errors():
+            if item.get("type") != "string_type":
+                continue
+            place = tuple(str(part) for part in item.get("loc", ()))
+            for index, ((segments, parsed, appended), raw) in enumerate(
+                zip(applied, raw_values)
+            ):
+                if (
+                    appended
+                    or isinstance(parsed, (str, list, dict))
+                    or tuple(segments) != place
+                ):
+                    continue
+                container: Any = config_dict
+                for segment in segments[:-1]:
+                    container = (
+                        container.get(segment) if isinstance(container, dict) else None
+                    )
+                if (
+                    isinstance(container, dict)
+                    and container.get(segments[-1]) == parsed
+                ):
+                    container[segments[-1]] = raw
+                    applied[index] = (segments, raw, appended)
+                    retyped = True
+        if not retyped:
+            raise
+        return AshConfig.model_validate(config_dict)
 
 
 def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> AshConfig:
@@ -499,11 +769,12 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
     environment_values = config_environment_values(config)
     keys: List[str] = []
     applied: List[Tuple[List[str], Any, bool]] = []
+    raw_values: List[str] = []
     for override in config_overrides:
         key_path, separator, value = override.partition("=")
         if not separator or not key_path.strip():
             raise ASHConfigValidationError(
-                f"Invalid config override: '{key_path}'. "
+                f"Invalid config override: {_override_shown(override)}. "
                 "Expected format: key.path=value"
             )
         keys.append(key_path)
@@ -531,6 +802,7 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
             applied.append(
                 _apply_config_override(config_dict, key_path, value, environment_values)
             )
+            raw_values.append(value)
         except ASHConfigValidationError:
             # Already an override refusal whose text names keys only (the
             # respelled-section refusal, resolve_override_segment).
@@ -544,7 +816,7 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
 
     # Convert back to AshConfig
     try:
-        rebuilt = AshConfig.model_validate(config_dict)
+        rebuilt = _validated_with_overrides(config_dict, applied, raw_values)
     except ValidationError as e:
         # Not chained: see ASHConfigValidationError.validation_error. Without
         # the values and keys the configuration's files read from the
@@ -752,6 +1024,81 @@ class ConfigFileRefused(ASHConfigValidationError):
         self.after_overrides = after_overrides
 
 
+def _cached_documents(in_tree: Sequence[Path], reads: Dict[Path, Any]) -> List[Any]:
+    """The documents ``reads`` holds for the files of ``in_tree``, in order.
+
+    The client-overrides sentinel (``CLIENT_OVERRIDES_SOURCE``, a relative
+    path that names no file) is skipped before any path is resolved: resolving
+    a relative path reads the working directory, and with that directory gone
+    (the deleted-cwd case the load supports) it raised FileNotFoundError, so a
+    load with a client's overrides crashed where every file of the chain was
+    fine."""
+    found: List[Any] = []
+    for path in in_tree:
+        if Path(path) == CLIENT_OVERRIDES_SOURCE:
+            continue
+        key = Path(path).resolve()
+        if key in reads:
+            found.append(reads[key])
+    return found
+
+
+def _cached_reader(
+    reads: Dict[Path, Any], texts: Dict[Path, str]
+) -> Callable[..., Any]:
+    """A config file reader over the caches ``reads`` (each file's parsed data)
+    and ``texts`` (the text it was parsed from), both keyed by resolved path.
+
+    The one reader every file of a run's configuration is read through: the
+    selected chain's (``load_config_file_for_run``) and the workspace overlay's
+    (``_load_overlay``), so a file the two chains share is parsed once, and the
+    as-written view each record is built from (environment_record_read) parses
+    the text the load read, never a second read of the file.
+    """
+
+    def read_once(path: Path, expect: Optional[FileIdentity] = None) -> Any:
+        key = Path(path).resolve()
+        if expect is not None and key in reads and key in texts:
+            # A caller vetted this file, and the cache already holds a read of
+            # it that was made without that identity (the ASH_CONFIG chain is
+            # loaded into the same cache first, and may name this very file).
+            # The cached read is used only if it is what the vetted file holds:
+            # the file is read once more, held to the identity, and the cached
+            # text must be that text. A file replaced since, or rewritten in
+            # place, is refused and not shown from a read nobody held to the
+            # check. A cached read that holds no text has none to compare, so
+            # it is not read again here: it is returned as the cache holds it,
+            # and the load refuses it for the missing text
+            # (``_file_references``), a reason that names the caller's cache and
+            # no value.
+            fresh = read_config_text(path, expect=expect)
+            if texts.get(key) != fresh:
+                raise ConfigFileChangedError(
+                    errno.ESTALE,
+                    "changed while it was being read, so it is not read",
+                    os.fspath(path),
+                )
+            return reads[key]
+        if key not in reads:
+            # ``expect`` is the identity the chain walk vetted
+            # (config_sources._read_into_state hands it to a reader that takes
+            # it); a caller that vetted nothing gets the file's identity now,
+            # and for a path that leads nowhere now, the identity no file has
+            # (never None, which would hold the read to nothing).
+            # read_config_text with an identity reads through
+            # read_config_bytes, so the ASH_CONFIG_MAX_FILE_BYTES bound, the
+            # non-blocking open and the check that the file read is the file
+            # that was vetted bind on every chain read, as they do for the
+            # stock reader.
+            if expect is None:
+                expect = identity_to_hold(path)
+            texts[key] = read_config_text(path, expect=expect)
+            reads[key] = parse_config_text(path, texts[key])
+        return reads[key]
+
+    return read_once
+
+
 def load_config_file_for_run(
     config_path: Path | str,
     reads: Optional[Dict[Path, Any]] = None,
@@ -795,45 +1142,7 @@ def load_config_file_for_run(
     if texts is None:
         texts = {}
 
-    def read_once(path: Path, expect: Optional[FileIdentity] = None) -> Any:
-        key = Path(path).resolve()
-        if expect is not None and key in reads and key in texts:
-            # A caller vetted this file, and the cache already holds a read of
-            # it that was made without that identity (the ASH_CONFIG chain is
-            # loaded into the same cache first, and may name this very file).
-            # The cached read is used only if it is what the vetted file holds:
-            # the file is read once more, held to the identity, and the cached
-            # text must be that text. A file replaced since, or rewritten in
-            # place, is refused and not shown from a read nobody held to the
-            # check. A cached read that holds no text has none to compare, so
-            # it is not read again here: it is returned as the cache holds it,
-            # and the load refuses it for the missing text
-            # (``_file_references``), a reason that names the caller's cache and
-            # no value.
-            fresh = read_config_text(path, expect=expect)
-            if texts.get(key) != fresh:
-                raise ConfigFileChangedError(
-                    errno.ESTALE,
-                    "changed while it was being read, so it is not read",
-                    os.fspath(path),
-                )
-            return reads[key]
-        if key not in reads:
-            # ``expect`` is the identity the chain walk vetted
-            # (config_sources._read_into_state hands it to a reader that takes
-            # it); a caller that vetted nothing gets the file's identity now,
-            # and for a path that leads nowhere now, the identity no file has
-            # (never None, which would hold the read to nothing).
-            # read_config_text with an identity reads through
-            # read_config_bytes, so the ASH_CONFIG_MAX_FILE_BYTES bound, the
-            # non-blocking open and the check that the file read is the file
-            # that was vetted bind on every chain read, as they do for the
-            # stock reader.
-            if expect is None:
-                expect = identity_to_hold(path)
-            texts[key] = read_config_text(path, expect=expect)
-            reads[key] = parse_config_text(path, texts[key])
-        return reads[key]
+    read_once = _cached_reader(reads, texts)
 
     # The references the load filled in from the operator's copy of a profile
     # a client patched (``fill``), each at the place it was read.
@@ -880,6 +1189,16 @@ def load_config_file_for_run(
         *filled,
         *document.displayed_environment_references,
     )
+    overlay = kwargs.get("overlay")
+    if overlay is not None:
+        # The overlay's files were merged over the document before the model
+        # was built (load_config_file), so what they read from the environment
+        # is in the configuration too, and is recorded as the chain's own reads
+        # are: the results file's record, the off-host payloads and the
+        # redaction all read these attributes, and carried the overlay's
+        # resolved values in clear while only _environment_references held
+        # its reads.
+        _record_overlay_reads(config, overlay, reads, texts)
     # The references above are the file's own document's, and the config's
     # overrides were applied before they were attached: an override that
     # replaced ash_plugin_modules with a shorter list leaves a reference
@@ -925,6 +1244,55 @@ def _written_key_mappings(
             continue
         found += mappings_with_written_reference_keys(written, (EXTENDS_KEY, PATCH_KEY))
     return tuple(found)
+
+
+def _record_overlay_reads(
+    config: AshConfig,
+    overlay: ResolvedConfigDocument,
+    reads: Dict[Path, Any],
+    texts: Dict[Path, str],
+) -> None:
+    """Record on ``config`` what the files of ``overlay`` read from the
+    environment, as ``load_config_file_for_run`` records the selected chain's
+    own reads.
+
+    A workspace's operator config (``resolve_config``'s ``overlay_config_path``)
+    is merged over each project's document before the model is built, and
+    stands alone where the project has no config file (``overlaid_fallback``),
+    so its values are in the configuration like the chain's own. The results
+    file's ``ash_config`` record and the payload an off-host reporter sends
+    (record_of_config) read ``_written_references``; the free-text redaction and
+    ``get_plugin_config``'s debug line read ``_environment_values``; the key
+    rules read ``_written_key_mappings``. Each rewrite is at the place its value
+    has in the merged configuration: a mapping key the overlay sets is the
+    merged document's key, and a list the overlay sets replaces the project's
+    whole (deep_merge), so the overlay's own indices hold. The overlay's files
+    were read into ``reads`` and ``texts`` by the chain's cached reader
+    (``_load_overlay``), so the as-written view is parsed from the text the
+    load read.
+    """
+    values, rewrites = environment_record_read(
+        overlay.chain, reads, texts, places=overlay.reference_places
+    )
+    config._environment_values = list(
+        dict.fromkeys([*config._environment_values, *values])
+    )
+    config._written_references = [
+        *config._written_references,
+        *placed_at_appends(config, rewrites),
+    ]
+    config._written_key_mappings = (
+        *tuple(config._written_key_mappings or ()),
+        *_written_key_mappings(overlay.chain, texts),
+    )
+    config._environment_references = (
+        *tuple(config._environment_references or ()),
+        *tuple(overlay.environment_references),
+    )
+    config._displayed_environment_references = (
+        *tuple(config._displayed_environment_references or ()),
+        *tuple(overlay.displayed_environment_references),
+    )
 
 
 def load_config_file(
@@ -1595,7 +1963,13 @@ def resolve_config(
     overlay: Optional[ResolvedConfigDocument] = None
     if overlay_config_path is not None:
         overlay = _load_overlay(
-            overlay_config_path, source_dir, permit_base, refuse_env, operators_files
+            overlay_config_path,
+            source_dir,
+            permit_base,
+            refuse_env,
+            operators_files,
+            reads=reads,
+            texts=texts,
         )
         if scanned_root is None:
             # With no root there is nothing to judge the overlay's files
@@ -1770,6 +2144,17 @@ def resolve_config(
     # are the operator's choice the same way a selected chain's are. The
     # no-config branch rebinds it.
     view_chain: Sequence[Path] = chain
+    # How many extends trees the view chain holds. _resolve_config lays the
+    # operator's overlay chain AFTER the selected config's (one root each), so
+    # a chain longer than the overlay's own holds two; with the fallback taken
+    # the overlay's chain is the whole chain, one root. Read as one tree, a
+    # two-root chain failed to rebuild and the operator views took nothing,
+    # the overlay's own writes included. The no-config branch rebinds it.
+    view_roots = (
+        2
+        if overlay is not None and overlay.chain and len(chain) > len(overlay.chain)
+        else 1
+    )
 
     def refuse_owned_junk(
         selected_in_tree: Sequence[Path], default_in_tree_files: Sequence[Path]
@@ -1787,7 +2172,9 @@ def resolve_config(
         Separate from the floor's computation (trusted_base_config), whose
         answer stays where it is; the answers here are discarded."""
         if chain:
-            _owned_sandbox_mode(chain, selected_in_tree, reads, environment_paths)
+            _owned_sandbox_mode(
+                chain, selected_in_tree, reads, environment_paths, roots=view_roots
+            )
         default_chain_files, _named, default_environment_paths = default_views()
         if default_chain_files:
             _owned_sandbox_mode(
@@ -1890,7 +2277,16 @@ def resolve_config(
         merged_documents[0] if merged_documents else None,
         untrusted=untrusted_config,
         overrides=list(operator_overrides),
+        reads=reads,
+        default_config=(carried_default_config[0] if carried_default_config else None),
     )
+    if overlay is not None and isinstance(overlay.data, dict):
+        # The overlay's merged document is the operator's by construction
+        # (_refuse_unless_the_operators), whatever the selected chain holds:
+        # a tool path it names is the operator's for every project, the ones
+        # with a config of their own included, which the record above judged
+        # by the selected root's name alone.
+        config._operator_paths.documents.append(overlay.data)
 
     if chain:
         if warn_pending:
@@ -1970,9 +2366,6 @@ def resolve_config(
         mixed_membership = memberships.mixed
         undecided_membership = memberships.undecided
         outside_membership = memberships.outside
-        # The files that are not the operator's, before the client's overrides
-        # are added to them below.
-        untrusted_files = list(in_tree)
         if client_supplied_overrides:
             # Named in the warnings as the source of what is confined, and
             # non-empty so the confinement steps run even over a chain that is
@@ -2020,6 +2413,7 @@ def resolve_config(
         # file when that variable names one, which can be inside the tree too.
         default_chain, ash_config_named, _ = default_views()
         view_chain = list(default_chain)
+        view_roots = 1
         judged = confined_files(default_chain, trees, ash_config_named)
         in_tree = default_in_tree = list(judged.members)
         undecided_files = list(judged.undecided)
@@ -2070,9 +2464,6 @@ def resolve_config(
         mixed_membership = memberships.mixed
         undecided_membership = memberships.undecided
         outside_membership = memberships.outside
-        # The files that are not the operator's, before the client's overrides
-        # are added to them below.
-        untrusted_files = list(in_tree)
         if client_supplied_overrides:
             # Named in the warnings as the source of what is confined.
             in_tree = [*in_tree, CLIENT_OVERRIDES_SOURCE]
@@ -2260,36 +2651,22 @@ def resolve_config(
                 # above was skipped.
                 undecided=False,
             )
-    # Client-config provenance (utils/config_trust.set_by_operator): the trusted base
-    # as resolved, before the override replays, with the files that are not
-    # the operator's and whose overrides count as the operator's.
-    if untrusted_files:
-        record_provenance(
-            config,
-            in_tree=in_tree,
-            trusted=trusted.model_copy(deep=True),
-            config_overrides=operator_overrides,
-            client_overrides=client_supplied_overrides,
-        )
-    elif client_supplied_overrides:
-        # A chain wholly the operator's own with an MCP client's overrides: no
-        # pre-override resolution is carried on this protocol, so no trusted
-        # view is recorded and set_by_operator answers False, the fail-closed
-        # side.
-        record_provenance(
-            config,
-            in_tree=[],
-            trusted=None,
-            client_overrides=client_supplied_overrides,
-        )
-    # What scanners consult before honoring an option that names code to run
-    # (utils/config_trust.py): the same trusted base, with the overrides replayed
-    # per section when a scanner asks.
+    # Provenance (utils/config_trust.set_by_operator), what scanners consult
+    # before honoring an option that names code to run: the trusted base as
+    # resolved, before the override replays, with the files that are not the
+    # operator's, the operator's own overrides (replayed per section when a
+    # scanner asks) and an MCP client's overrides kept apart. One record: a
+    # config carries one, so a later call replaced an earlier one, and the
+    # record that stood listed every override, a client's included, among the
+    # operator's, so set_by_operator took a client's value for the operator's;
+    # a record with no trusted view, meant for a client's overrides over an
+    # operator-only chain, refused the operator's own file's values instead.
     record_provenance(
         config,
         in_tree=in_tree,
         trusted=trusted.model_copy(deep=True),
-        config_overrides=config_overrides,
+        config_overrides=operator_overrides,
+        client_overrides=client_supplied_overrides,
     )
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
@@ -2386,6 +2763,10 @@ def resolve_config(
         # predicate keys the client-supplied wording of the confine steps
         # above (confinement_membership).
         untrusted=client_supplied,
+        # The other scanned roots count as scanned here as they do for the
+        # sandbox and settle steps above: a module location inside one of
+        # their trees is refused as one inside the scan root's trees is.
+        also_scanned=[Path(extra) for extra in also_scanned],
         # Only a file whose walk stopped has a source of its own here: the
         # closing sentence of a decided membership is the one this step has
         # always given.
@@ -2397,9 +2778,7 @@ def resolve_config(
     # database staleness settings, detect-secrets' scan settings,
     # honor_ignore_files and the archive extraction limits. Each replays its
     # own overrides onto the trusted base itself.
-    tier_two_documents = [
-        reads[Path(path).resolve()] for path in in_tree if Path(path).resolve() in reads
-    ]
+    tier_two_documents = _cached_documents(in_tree, reads)
     tier_two_overrides = list(operator_overrides)
     # The source is recorded on config beside the record, for
     # confine_declared_reporter_destinations, which runs once the plugin modules
@@ -2424,7 +2803,7 @@ def resolve_config(
     # and onto the recorded view below by _with_reporter_overrides, each on a
     # copy, so an override is applied once per use.
     chain_reporters = _with_operator_chain_reporters(
-        trusted, view_chain, in_tree, reads, environment_paths
+        trusted, view_chain, in_tree, reads, environment_paths, roots=view_roots
     )
     confine_reporter_destinations(
         config,
@@ -2435,6 +2814,16 @@ def resolve_config(
         in_tree_documents=tier_two_documents,
         environment_paths=environment_paths,
     )
+    # The trusted base is the operator's by definition (the ASH_CONFIG chain,
+    # the operator's own config, or the defaults), so a tool path the step
+    # below copies in from it is the operator's for path_trust.honored_path.
+    # Recorded here because the operator-paths record knows the selected
+    # chain's documents only, which are the repository's in this arm, so a
+    # path kept in another checkout was judged by the repository tier and
+    # refused. Not for a chain the caller marked untrusted, whose record stays
+    # the overrides alone.
+    if config._operator_paths is not None and not untrusted_config:
+        config._operator_paths.documents.append(trusted.model_dump())
     confine_scanner_config_files(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
     )
@@ -2480,6 +2869,7 @@ def resolve_config(
         documents=reads,
         chain=view_chain,
         remedy=tier_two_source.remedy,
+        environment_paths=environment_paths,
     )
     # The same for honor_ignore_files: a false the trusted config, or the file
     # ASH_CONFIG names beside a config of the project's own, wrote in a chain
@@ -2576,6 +2966,7 @@ def resolve_config(
         reads,
         environment_paths,
         environment_values=config_environment_values(config),
+        roots=view_roots,
     )
     if files_view is not None:
         scanner_views.append(files_view)
@@ -2604,9 +2995,18 @@ def resolve_config(
 
 #: The sandbox settings confine_sandbox_grants replaces with the trusted base's,
 #: in the dump's keys. ``mode`` is one of a few names, and is kept as it is.
+#: Every list confine_sandbox_grants puts the trusted base's value in place of
+#: (sandbox_grants.confine_sandbox_grants): the references at each take the
+#: trusted base's. With the last two missing, an in-tree file's reference at
+#: sandbox.read_path_scanners or sandbox.env_scanners kept describing a value
+#: the configuration no longer held, and the trusted value there was not
+#: redacted.
 _CONFINED_SANDBOX_SETTINGS = (
     ("sandbox", "network_scanners"),
     ("sandbox", "extra_read_paths"),
+    ("sandbox", "read_path_scanners"),
+    ("sandbox", "env_scanners"),
+    ("sandbox", "environment"),
 )
 
 
@@ -2846,34 +3246,95 @@ def _folded_onto_trusted(
     return rewritten
 
 
+def _extends_count(document: Any) -> Optional[int]:
+    """How many ``extends`` bases *document*, a chain file's own document, names:
+    0 for no key or a non-mapping document, 1 for one reference, the list's
+    length for a list, and None for a value of another shape, which the
+    resolution would have refused."""
+    from automated_security_helper.config.config_sources import EXTENDS_KEY
+
+    if not isinstance(document, dict):
+        return 0
+    refs = document.get(EXTENDS_KEY)
+    if refs is None:
+        return 0
+    if isinstance(refs, str):
+        return 1
+    if isinstance(refs, list):
+        return len(refs)
+    return None
+
+
+#: A node of a rebuilt ``extends`` tree: the file's index into the chain, and
+#: its bases' nodes.
+_ExtendsNode = Tuple[int, List[Any]]
+
+
+def _extends_forest(
+    chain: Sequence[Path], reads: Dict[Path, Any]
+) -> Tuple[List[_ExtendsNode], Optional[Path]]:
+    """The ``extends`` trees *chain* rebuilds, and the file at which the rebuild
+    failed, or None when it did not.
+
+    *chain* is post-order: each file after the subtrees of its bases, one
+    subtree per ``extends`` entry, in the entry's order. So a stack rebuilds the
+    trees: each file takes as its bases the last N subtrees, N being its own
+    ``extends`` count (*reads*, its own document; :func:`_extends_count`). The
+    stack that is left holds one node per tree, in chain order. The rebuild
+    fails at a file *reads* does not hold, or whose count is of an unreadable
+    shape or exceeds the subtrees before it; the nodes rebuilt so far are
+    returned with that file, for a caller that reports it.
+    """
+    stack: List[_ExtendsNode] = []
+    for index, file in enumerate(chain):
+        key = Path(file).resolve()
+        if key not in reads:
+            return stack, Path(file)
+        count = _extends_count(reads[key])
+        if count is None or count > len(stack):
+            return stack, Path(file)
+        bases = stack[len(stack) - count :] if count else []
+        del stack[len(stack) - count :]
+        stack.append((index, bases))
+    return stack, None
+
+
 def _operator_chain_occurrences(
     chain: Sequence[Path],
     repository_files: Sequence[Path],
     reads: Dict[Path, Any],
     environment_paths: Collection[Path],
     warn: bool = True,
+    roots: int = 1,
 ) -> List[Path]:
     """The occurrences of *chain* the operator reached, in chain order.
 
     *chain* is post-order: each file after the subtrees of its bases, one
     subtree per ``extends`` entry, in the entry's order. So a stack rebuilds the
-    tree: each file takes as its bases the last N subtrees, N being its own
-    ``extends`` count (*reads*, its own document). From the root down, a file
-    is the operator's when it is not a repository file (*repository_files*,
-    by resolved path or name) and no file above it on its branch is one.
+    tree (:func:`_extends_forest`): each file takes as its bases the last N
+    subtrees, N being its own ``extends`` count (*reads*, its own document).
+    From each root down, a file is the operator's when it is not a repository
+    file (*repository_files*, by resolved path or name) and no file above it
+    on its branch is one.
 
-    Answers [] -- nothing is the operator's -- when the tree does not rebuild:
-    a file *reads* does not hold, or counts that do not add up to one root.
-    The warning that says so names the file; one an ``extends`` entry chose
-    with a value read from the environment (*environment_paths*, by the path
-    or its resolved form) is named ``<value>`` instead, since the drift the
-    warning exists for is likeliest exactly on such a file, and its real
+    *roots* is how many trees *chain* holds, which the caller knows from how
+    it built the chain: one for a selected config's chain or an ASH_CONFIG
+    chain, two when the operator's overlay chain was appended after a selected
+    chain (``_resolve_config`` lays the overlay's files after the selected
+    config's; the overlay layers over the selected config, so its files are
+    the operator's by the same rule, walked from their own root). A chain read
+    as one tree when it held two did not rebuild, and took NOTHING as the
+    operator's, the overlay's own writes included.
+
+    Answers [] -- nothing is the operator's -- when the trees do not rebuild:
+    a file *reads* does not hold, or counts that do not add up to *roots*
+    trees. The warning that says so names the file; one an ``extends`` entry
+    chose with a value read from the environment (*environment_paths*, by the
+    path or its resolved form) is named ``<value>`` instead, since the drift
+    the warning exists for is likeliest exactly on such a file, and its real
     path is the environment's value.
     """
-    from automated_security_helper.config.config_sources import (
-        EXTENDS_KEY,
-        describe_config_path,
-    )
+    from automated_security_helper.config.config_sources import describe_config_path
     from automated_security_helper.config.environment_record import (
         ENVIRONMENT_VALUE_SHOWN,
     )
@@ -2881,18 +3342,6 @@ def _operator_chain_occurrences(
     repository = {Path(file) for file in repository_files} | {
         Path(file).resolve() for file in repository_files
     }
-
-    def base_count(document: Any) -> Optional[int]:
-        if not isinstance(document, dict):
-            return 0
-        refs = document.get(EXTENDS_KEY)
-        if refs is None:
-            return 0
-        if isinstance(refs, str):
-            return 1
-        if isinstance(refs, list):
-            return len(refs)
-        return None
 
     def not_rebuilt(file: Path) -> List[Path]:
         # By construction the chain rebuilds: *reads* holds each file's one
@@ -2924,24 +3373,15 @@ def _operator_chain_occurrences(
         )
         return []
 
-    # Each node: (index into chain, its bases' nodes).
-    stack: List[Tuple[int, List[Any]]] = []
-    for index, file in enumerate(chain):
-        key = Path(file).resolve()
-        if key not in reads:
-            return not_rebuilt(Path(file))
-        count = base_count(reads[key])
-        if count is None or count > len(stack):
-            return not_rebuilt(Path(file))
-        bases = stack[len(stack) - count :] if count else []
-        del stack[len(stack) - count :]
-        stack.append((index, bases))
-    if len(stack) != 1:
+    forest, failed_at = _extends_forest(chain, reads)
+    if failed_at is not None:
+        return not_rebuilt(failed_at)
+    if len(forest) != roots:
         return not_rebuilt(Path(chain[-1])) if chain else []
 
     owned: Set[int] = set()
 
-    def walk(node: Tuple[int, List[Any]], above_is_repository: bool) -> None:
+    def walk(node: _ExtendsNode, above_is_repository: bool) -> None:
         index, bases = node
         file = Path(chain[index])
         is_repository = (
@@ -2952,7 +3392,8 @@ def _operator_chain_occurrences(
         for base in bases:
             walk(base, is_repository)
 
-    walk(stack[0], False)
+    for tree in forest:
+        walk(tree, False)
     return [Path(chain[index]) for index in sorted(owned)]
 
 
@@ -3154,8 +3595,15 @@ def _owned_sandbox_mode(
     repository_files: Sequence[Path],
     reads: Dict[Path, Any],
     environment_paths: Collection[Path],
+    roots: int = 1,
 ) -> Optional[str]:
     """The sandbox mode the operator's own files of *chain* set, or None.
+
+    *roots* is the number of ``extends`` trees *chain* holds
+    (``_operator_chain_occurrences``): two when the operator's overlay chain
+    follows a selected chain. Each tree's root patches the running answer, so
+    the overlay's root, laid after the selected config's, patches what the
+    selected tree set, as the layering merges its document over it.
 
     Each owned occurrence contributes its EFFECTIVE write, read from the
     file's own document (*reads*), in chain order: the ``sandbox.mode`` key
@@ -3205,9 +3653,17 @@ def _owned_sandbox_mode(
     from automated_security_helper.config.config_sources import PATCH_KEY
 
     mode: Optional[str] = None
-    root = Path(chain[-1]).resolve() if chain else None
+    # The roots: the chain's last occurrence for one tree (the chain is
+    # post-order), and each tree's last occurrence when the chain holds more
+    # (the overlay's root after the selected config's). The forest is read
+    # only for more than one root; with one, the last occurrence is it.
+    tree_roots: Set[Path] = {Path(chain[-1]).resolve()} if chain else set()
+    if roots > 1:
+        forest, failed_at = _extends_forest(chain, reads)
+        if failed_at is None and len(forest) == roots:
+            tree_roots = {Path(chain[index]).resolve() for index, _ in forest}
     for file in _operator_chain_occurrences(
-        chain, repository_files, reads, environment_paths, warn=False
+        chain, repository_files, reads, environment_paths, warn=False, roots=roots
     ):
         document = reads.get(Path(file).resolve())
         if not isinstance(document, dict):
@@ -3215,11 +3671,11 @@ def _owned_sandbox_mode(
         # A BASE's effective write starts from nothing and is folded into
         # the walk's answer only when the base's own document ends up
         # carrying a mode: a base whose patch unsets its own write
-        # contributes nothing, never a clearing of a sibling's. The ROOT
-        # (the chain's last occurrence; the chain is post-order) patches the
-        # merged chain, so its walk starts from the running answer and its
-        # result is the answer, clears included.
-        at_root = root is not None and Path(file).resolve() == root
+        # contributes nothing, never a clearing of a sibling's. A ROOT
+        # (a tree's last occurrence) patches the merged chain, so its walk
+        # starts from the running answer and its result is the answer,
+        # clears included.
+        at_root = Path(file).resolve() in tree_roots
         file_mode: Optional[str] = mode if at_root else None
         sandbox = document.get("sandbox")
         if sandbox is not None and not isinstance(sandbox, dict):
@@ -3418,6 +3874,7 @@ def _with_operator_chain_reporters(
     repository_files: Sequence[Path],
     reads: Dict[Path, Any],
     environment_paths: Collection[Path],
+    roots: int = 1,
 ) -> AshConfig:
     """*trusted* with the ``reporters`` sections the operator's own chain files
     wrote merged over it, for the off-host reporter view.
@@ -3440,7 +3897,9 @@ def _with_operator_chain_reporters(
     file after its bases (``ResolvedConfigDocument.chain``), so the ``extends``
     tree is rebuilt from it and each file's own count of ``extends`` entries
     (``_operator_chain_occurrences``). A file reached on two branches is judged
-    per branch.
+    per branch. *roots* is the number of trees the chain holds: two when the
+    operator's overlay chain follows a selected chain, whose files are then
+    walked from their own root instead of failing the rebuild.
 
     An owned file's own ``patch`` operations that target ``/reporters`` are
     the operator's writes too, so they count toward this view
@@ -3505,7 +3964,7 @@ def _with_operator_chain_reporters(
 
     merged: Dict[str, Any] = {}
     for file in _operator_chain_occurrences(
-        chain, repository_files, reads, environment_paths
+        chain, repository_files, reads, environment_paths, roots=roots
     ):
         own = reads.get(Path(file).resolve())
         reporters = own.get("reporters") if isinstance(own, dict) else None
@@ -3547,9 +4006,21 @@ def _with_reporter_overrides(
     is left as written. A section no file spells, such as one the reporter
     never reads, still absorbs an override as written -- naming a section is
     the operator's own choice, and nothing here can tell a decoy from a
-    section a future plugin reads. Overrides that fail to apply for any other
-    reason are dropped with one warning, and the off-host reporters then keep
-    the base's settings, off unless the base turns them on.
+    section a future plugin reads. The overrides are applied together first;
+    when one of them does not apply to the trusted base, they are applied
+    again one reporter section at a time, all or nothing per section: a
+    section with a failing override is dropped whole, with one warning, so for
+    a section the trusted base's model declares an ``enabled=true`` never lands
+    without the destination override written beside it (which would send
+    findings to the base's or the default destination), and the other
+    sections' overrides still apply. An undeclared section has no model for an
+    override to fail against, so its overrides land as written, as said
+    above. A
+    ``reporters.<section>.enabled=<false>``, in every spelling the field reads
+    as False (``false``, ``0``, ``off``, ``no``, ``f``, ``n``), is applied
+    whatever else its section asked for: a disable fails closed both ways. For
+    a dropped section the off-host reporter keeps the base's settings, off
+    unless the base turns it on.
     """
     reporter_overrides = [
         override
@@ -3565,17 +4036,157 @@ def _with_reporter_overrides(
             # reporter on while the operator's disable lands as a new extra
             # key, so the scan refuses, as `config get` refuses the same key.
             raise
-        except ASHConfigValidationError as error:
-            # The error can quote a section key the trusted file read from the
-            # environment, so the warning is redacted with that file's values.
-            described = redact_values(str(error), config_environment_values(trusted))
+        except ASHConfigValidationError:
+            # One of them does not apply to the trusted base. They are applied
+            # again below, one reporter section at a time, so the sections
+            # whose overrides all apply still reach the view and only the
+            # section with a failing override is dropped, whole, with one
+            # warning. Together first: a set that is valid only as a whole
+            # stays whole.
+            pass
+        view = trusted.model_copy(deep=True)
+        for section_overrides in _reporter_overrides_by_section(
+            reporter_overrides, trusted
+        ):
+            try:
+                view = apply_config_overrides(view, section_overrides)
+                continue
+            except ASHRespelledOverrideError:
+                raise
+            except ASHConfigValidationError as error:
+                # All or nothing per section: an `enabled=true` that applied
+                # while the destination override beside it failed would send
+                # findings to the base's or the default destination, so every
+                # override of the section is dropped with the failing one.
+                failure = error
+            # A disable is applied whatever else the section asked for: it
+            # fails closed, and it can never send a finding anywhere. Applied
+            # before the warning, so the warning says what happened.
+            applied_disables: List[str] = []
+            for override in section_overrides:
+                if not _disables_a_reporter(override):
+                    continue
+                try:
+                    view = apply_config_overrides(view, [override])
+                except ASHRespelledOverrideError:
+                    raise
+                except ASHConfigValidationError:
+                    # The disable itself does not apply (its section is not a
+                    # mapping the trusted base knows); the warning below names
+                    # it among the section's keys.
+                    continue
+                applied_disables.append(override)
+            # The error can quote a section key the trusted file read from
+            # the environment, so the warning is redacted with that file's
+            # values; the overrides are named by key only (never a value,
+            # which can be a credential), redacted the same way.
+            values = config_environment_values(trusted)
+            described = redact_values(str(failure), values)
+            keys = ", ".join(
+                redact_values(override.partition("=")[0], values)
+                for override in section_overrides
+            )
+            kept = ""
+            if applied_disables:
+                disable_keys = ", ".join(
+                    redact_values(override.partition("=")[0], values)
+                    for override in applied_disables
+                )
+                kept = (
+                    f" except the disable '{disable_keys}', which is applied on "
+                    "its own,"
+                )
+            # An override of ``reporters`` itself puts every override in one
+            # group (_reporter_overrides_by_section), so there is no other
+            # section whose overrides still apply, and the warning says so.
+            whole_set = any(
+                len(override.partition("=")[0].removesuffix("+").strip().split(".")) < 2
+                for override in section_overrides
+            )
+            scope = (
+                "none of the reporters overrides is applied"
+                if whole_set
+                else "none of that section's overrides is applied"
+            )
+            others = (
+                ""
+                if whole_set
+                else "; the other reporters sections' overrides still apply"
+            )
             ASH_LOGGER.warning(
                 "The --config-overrides under reporters do not apply to the "
-                f"operator's own configuration ({described}), so a reporter that "
-                "sends findings off the host keeps that configuration's settings.",
+                f"operator's own configuration for '{keys}' ({described}), so "
+                f"{scope}{kept} and a reporter that sends findings off the host "
+                f"keeps that configuration's settings for it{others}.",
                 extra=NO_MARKUP,
             )
+        return view
     return trusted.model_copy(deep=True)
+
+
+def _reporter_overrides_by_section(
+    overrides: List[str], trusted: AshConfig
+) -> List[List[str]]:
+    """``overrides``, every one under ``reporters``, grouped by the reporter
+    section each lands on, in first-seen order.
+
+    The section is the key the apply resolves the override's second segment
+    to against the trusted base's own dump (``resolve_override_segment``, the
+    one resolver every override walker reads keys with), not the segment's
+    text: ``aws_security_hub`` and ``aws-security-hub`` land on one section,
+    so an enable under one spelling and a failing destination override under
+    the other are one group and fall together, as the all-or-nothing rule
+    promises. A segment that resolves to no existing key is grouped as
+    written, which is where the apply would create it. An override of
+    ``reporters`` itself (``reporters={...}``) writes every section, so when
+    one is present every override is one group and the set applies or falls
+    as a whole.
+    """
+    sections = trusted.model_dump().get("reporters")
+    current: Dict[str, Any] = sections if isinstance(sections, dict) else {}
+    values = config_environment_values(trusted)
+    groups: Dict[str, List[str]] = {}
+    for override in overrides:
+        segments = override.partition("=")[0].removesuffix("+").strip().split(".")
+        if len(segments) < 2:
+            return [list(overrides)]
+        section = resolve_override_segment(
+            current, "reporters", segments[1].strip(), values
+        )
+        groups.setdefault(section, []).append(override)
+    return list(groups.values())
+
+
+#: The strings pydantic's lax ``bool`` reads as False (pydantic 2.13.5,
+#: ``PluginConfigBase.enabled`` is a plain ``bool`` under a model with no
+#: ``strict`` setting), compared lower-cased and stripped; the ints 0 and 0.0
+#: are read as False too.
+_FALSE_SPELLINGS = frozenset({"0", "off", "f", "false", "n", "no"})
+
+
+def _disables_a_reporter(override: str) -> bool:
+    """Whether a ``reporters`` override sets one section's ``enabled`` to false:
+    ``reporters.<section>.enabled=<false>``, with either separator spelling of
+    the key and a value the model's ``enabled`` field reads as False: a parsed
+    bool False, a numeric zero, or one of the six lax-bool spellings (``false``,
+    ``0``, ``off``, ``no``, ``f``, ``n``, in any case, blanks stripped). A value
+    admitted here that the model then refuses is attempted alone by the
+    always-apply arm, fails validation there and is dropped, named among the
+    section's keys in the warning and not as an applied disable."""
+    key, separator, value = override.partition("=")
+    if not separator or key.endswith("+"):
+        return False
+    segments = [segment.strip().replace("-", "_") for segment in key.split(".")]
+    if not (
+        len(segments) == 3 and segments[0] == "reporters" and segments[2] == "enabled"
+    ):
+        return False
+    parsed = _parse_config_value(value)
+    if isinstance(parsed, bool):
+        return parsed is False
+    if isinstance(parsed, (int, float)):
+        return parsed == 0
+    return isinstance(parsed, str) and parsed.strip().lower() in _FALSE_SPELLINGS
 
 
 def _with_operator_chain_scanners(
@@ -3585,13 +4196,14 @@ def _with_operator_chain_scanners(
     reads: Dict[Path, Any],
     environment_paths: Collection[Path],
     environment_values: Sequence[str] = (),
+    roots: int = 1,
 ) -> Optional["_ScannerFileView"]:
     """The ``scanners`` sections the operator's own chain files wrote, merged
     over *view*'s, or None when those files wrote none.
 
     The scanner half of :func:`_with_operator_chain_reporters`: the same files
-    (the ones the operator reached, from each file's own document in *reads*),
-    merged in chain order. A section a file spells another way is folded onto
+    (the ones the operator reached, from each file's own document in *reads*,
+    under the same *roots*), merged in chain order. A section a file spells another way is folded onto
     the view's own spelling first (``section_fold_key``), so it lands on the
     section the scanner reads instead of beside it. What is not taken: an
     owned file's ``patch`` operations. The view then holds less than the
@@ -3614,9 +4226,16 @@ def _with_operator_chain_scanners(
     # warn=False: the reporters pass over the same chain already named a tree
     # that does not rebuild.
     for file in _operator_chain_occurrences(
-        chain, repository_files, reads, environment_paths, warn=False
+        chain, repository_files, reads, environment_paths, warn=False, roots=roots
     ):
         own = reads.get(Path(file).resolve())
+        if isinstance(own, dict):
+            # As the chain walk read the file for the configuration: each
+            # operator file's relative tool paths taken from its own directory
+            # (config/operator_paths.py). The raw parse held the path as
+            # written, which never equaled the anchored value the scanner
+            # passes, so an operator's relative tool path read as unnamed.
+            own = anchor_document_paths(own, Path(file).resolve().parent)
         scanners = own.get("scanners") if isinstance(own, dict) else None
         if not isinstance(scanners, dict):
             continue
@@ -4055,6 +4674,15 @@ def _load_operator_config(
     dropped: a silent None here would fall back to the defaults or ASH_CONFIG
     and lose the operator's sandbox-mode floor and the settings for options
     only the operator may set.
+
+    A named file whose text does not parse is refused as an unparsed config
+    naming itself (``ASHConfigUnparsedError``, in ``unparsed_config_reason``'s
+    words). The chain walk reads the root file raw, so the parser's error
+    carried no file name a caller could use: the MCP tools framed it with the
+    only path they hold, the client's delivered file, and blamed that file
+    for the operator's copy of a profile that would not parse. A base of the
+    chain is already reworded by the walk, and a file the process cannot
+    read is raised as it is, for the caller to name in its own words.
     """
     if trusted_config_path is None:
         return None
@@ -4065,13 +4693,25 @@ def _load_operator_config(
     # With its references, which the settings it confines a config's to take
     # (_take_confined_references).
     reads: Dict[Path, Any] = {}
-    document, config = load_config_file_for_run(
-        trusted_config_path,
-        reads=reads,
-        source_dir=source_dir,
-        permit_base=permit_base,
-        anchor_relative_paths=anchor_paths,
-    )
+    unparsed: Optional[str] = None
+    try:
+        document, config = load_config_file_for_run(
+            trusted_config_path,
+            reads=reads,
+            source_dir=source_dir,
+            permit_base=permit_base,
+            anchor_relative_paths=anchor_paths,
+        )
+    except (yaml.YAMLError, ValueError) as exc:
+        # ASH's own refusals and pydantic's ValidationError are ValueErrors
+        # the classifier excludes; they are re-raised as they are.
+        if not is_config_parse_error(exc):
+            raise
+        # The parser's own words can quote the file (unparsed_config_reason).
+        unparsed = unparsed_config_reason(Path(trusted_config_path), exc)
+    if unparsed is not None:
+        # Outside the handler (unparsed_config_reason).
+        raise ASHConfigUnparsedError(unparsed)
     return OperatorConfig(
         config=config,
         chain=list(document.chain),
@@ -4194,8 +4834,18 @@ def _resolve_config(
             documents_out.update(overlay.documents)
         if names_out is not None:
             names_out.update(overlay.names)
-        overlaid = AshConfig.model_validate(overlay.data, strict=True)
-        overlaid._environment_references = tuple(overlay.environment_references)
+        overlaid = AshConfig.model_validate(
+            overlay.data, strict=True, context={"strict_file_load": True}
+        )
+        # The overlay is the whole configuration here, so its environment
+        # reads are the configuration's: values, rewrites, key mappings and
+        # references, as a loaded chain's are.
+        _record_overlay_reads(
+            overlaid,
+            overlay,
+            reads if reads is not None else {},
+            texts if texts is not None else {},
+        )
         return overlaid
 
     try:
@@ -4345,9 +4995,13 @@ def _resolve_config(
             ]
             if discovery.selected is not None:
                 config_path = discovery.selected.path
-                # No caller checked a discovered file, so no identity is
-                # expected of it.
-                expect = None
+                # The identity the permit check took of the discovered file
+                # (ConfigSource.identity), so the load is held to the file the
+                # permit judged: a name made to lead elsewhere between the
+                # check and the open is refused at the open. With no permit
+                # no check was made, the identity is None, and no identity is
+                # expected of the file, as before.
+                expect = discovery.selected.identity
                 confinement_dir = source_dir
                 discovered_label = discovery.selected.label
                 ASH_LOGGER.verbose(
@@ -4503,13 +5157,10 @@ def _resolve_config(
                     documents_out.update(overlay.documents)
                 if names_out is not None:
                     names_out.update(overlay.names)
-                # What the overlay's files read from the environment joins the
-                # config's references, so the views and records hide those
-                # values too.
-                config._environment_references = (
-                    *tuple(config._environment_references or ()),
-                    *tuple(overlay.environment_references),
-                )
+                # What the overlay's files read from the environment was
+                # recorded on the config by the load (_record_overlay_reads
+                # in load_config_file_for_run): values, rewrites, key mappings
+                # and references, as the chain's own reads are.
             ASH_LOGGER.debug(f"Loaded config from file: {config_path}", extra=NO_MARKUP)
             if discovered_label is not None:
                 ASH_LOGGER.info(
@@ -4736,9 +5387,16 @@ def read_config_document(
             refuse_env=refuse_env,
             anchor_relative_paths=anchor_relative_paths,
         )
-    except (OSError, UnicodeDecodeError, yaml.YAMLError, json.JSONDecodeError) as e:
-        # json.JSONDecodeError and UnicodeDecodeError are ValueErrors, but a bare
-        # ValueError is not caught: pydantic's ValidationError is one too.
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as e:
+        # json.JSONDecodeError, UnicodeDecodeError and a YAML constructor's
+        # ValueError (!!int abc, the int digit limit) are all ValueErrors, and
+        # all parse failures (is_config_parse_error). pydantic's
+        # ValidationError is a ValueError too; the classifier excludes it, so
+        # it is re-raised as it was and never reported as a parse. A bare
+        # except on the two named types let a constructor's ValueError
+        # escape raw, with the file's text in its message.
+        if not isinstance(e, OSError) and not is_config_parse_error(e):
+            raise
         if isinstance(e, OSError) or not (unquoted or _is_a_client_file(path)):
             # A YAML parser's message quotes the file's path as given, so its
             # control characters are escaped there as describe_config_path
@@ -4774,14 +5432,30 @@ def validate_config_document(
     that holds pydantic's text.
     """
     try:
-        return AshConfig.model_validate(document.data, strict=True)
+        # The strict_file_load context, as build_config validates a document:
+        # it selects the named refusal of a typed field's environment reference
+        # (RedactedSection's validator), where pydantic's own message calls the
+        # resolved text not-an-integer and names no variable.
+        return AshConfig.model_validate(
+            document.data, strict=True, context={"strict_file_load": True}
+        )
     except ValidationError as e:
         if unquoted is None:
+            # Not pydantic's own text, which quotes every input: a mapping key
+            # the file read from the environment stands in an error's
+            # location, and a validator's message can repeat the value it
+            # refused. Each problem is given by its place and kind, redacted
+            # with what the chain read from the environment, as every other
+            # consumer of an AshConfig ValidationError gives it
+            # (describe_validation_error). Not chained: the cause would carry
+            # the text to the console, ash.log and an MCP reply.
+            described = describe_validation_error(e, document.environment_values)
             raise ASHConfigValidationError(
                 f"Configuration validation failed for "
-                f"'{describe_config_path(Path(config_path))}': {str(e)}. "
+                f"'{describe_config_path(Path(config_path))}': "
+                f"{described.rstrip('.')}. "
                 "Run 'ash config lint' to identify and fix issues."
-            ) from e
+            ) from None
         refused = _client_validation_error(config_path, e, why=unquoted)
     raise refused
 
@@ -4828,9 +5502,63 @@ def split_config_override(override: str) -> Tuple[str, str]:
     key_path, separator, value = override.partition("=")
     if not separator or not key_path.strip():
         raise ASHConfigValidationError(
-            f"Invalid config override: '{override}'. Expected format: key.path=value"
+            f"Invalid config override: {_override_shown(override)}. "
+            "Expected format: key.path=value"
         )
     return key_path, value
+
+
+#: The shape of a key path: dotted names with the separators an override key
+#: may hold, and no blank. An entry with no ``=`` that has this shape is a key
+#: typed without its value, and is quoted; anything else may be a value.
+_KEY_SHAPED_OVERRIDE = re.compile(r"^[A-Za-z0-9_.+$-]{1,80}$")
+
+#: A digit run this long inside a key-shaped entry reads as an id or a token,
+#: not a key path.
+_DIGIT_RUN = re.compile(r"[0-9]{5,}")
+
+#: A key-shaped entry longer than this is hidden whatever else it holds.
+_LONGEST_QUOTED_KEY = 32
+
+#: A key-shaped entry with no ``.`` and no ``_`` is hidden past this length: a
+#: key path that long has a dot or an underscore in it, a token does not.
+_LONGEST_QUOTED_BARE_WORD = 16
+
+
+def _token_shaped(override: str) -> bool:
+    """Whether a key-shaped entry has the shape of a secret rather than a key:
+    too long for a key path, a digit run of five or more, or a bare word (no
+    ``.`` and no ``_``) past sixteen characters. Any one hides it."""
+    if len(override) > _LONGEST_QUOTED_KEY:
+        return True
+    if _DIGIT_RUN.search(override):
+        return True
+    return (
+        "." not in override
+        and "_" not in override
+        and len(override) > _LONGEST_QUOTED_BARE_WORD
+    )
+
+
+def _override_shown(override: str) -> str:
+    """How a refusal names a malformed override entry, given whole.
+
+    An entry with an ``=`` and a blank key is named by its key part, quoted
+    (``''``): what stands before the ``=`` is never a value. An entry with no
+    ``=`` is quoted when it is key-shaped and not token-shaped, else named by
+    its length alone: override refusals name keys and never values
+    (apply_config_overrides), and an entry with no separator can be a value
+    whose key the operator forgot, a hex digest or an access-key id among
+    them. The CLI (apply_config_overrides, split_config_override) and the MCP
+    workspace tools name the entry through this one function, so the two
+    refusals read the same.
+    """
+    key_part, separator, _ = override.partition("=")
+    if separator:
+        return f"'{key_part}'"
+    if _KEY_SHAPED_OVERRIDE.match(override) and not _token_shaped(override):
+        return f"'{override}'"
+    return f"an entry of {len(override)} characters with no '=' (not shown)"
 
 
 def _is_a_client_file(path: Path | str) -> bool:
@@ -5112,6 +5840,7 @@ def confine_honor_ignore_files(
     documents: Optional[Mapping[Path, Any]] = None,
     chain: Sequence[Path] = (),
     remedy: str = KEEP_A_SETTING,
+    environment_paths: Collection[Path] = frozenset(),
 ) -> Optional[Tuple[Path, bool]]:
     """Take ``honor_ignore_files`` from the trusted base, never from an untrusted file.
 
@@ -5145,6 +5874,10 @@ def confine_honor_ignore_files(
             of these that is not in *in_tree*.
         remedy: How to keep the setting, ending the warning. ``KEEP_A_SETTING``,
             unless a file's walk stopped.
+        environment_paths: The files of the chain an ``extends`` entry chose
+            with a value read from the environment, which the warning names
+            ``<value>`` as the other confinement warnings do: the path is the
+            variable's value.
 
     Returns:
         None, or, when the operator's own file decided the value (the last file
@@ -5165,7 +5898,7 @@ def confine_honor_ignore_files(
     config.honor_ignore_files = trusted.honor_ignore_files
     if not writers:
         return None
-    files = ", ".join(describe_config_path(path) for path in writers)
+    files = ", ".join(_owned_file_shown(path, environment_paths) for path in writers)
     ASH_LOGGER.warning(
         f"Ignoring honor_ignore_files from {files}: {reason}, and whether the "
         "scanned repository's own .gitignore and .ignore files are honored is the "
@@ -5184,6 +5917,7 @@ def confine_to_trusted_base(
     in_tree: Sequence[Path],
     source: Optional[UntrustedSource] = None,
     in_tree_documents: Sequence[Any] = (),
+    also_scanned: Sequence[Path | str] = (),
 ) -> None:
     """Replace what a config that is not the operator's may not choose, in place.
 
@@ -5220,6 +5954,10 @@ def confine_to_trusted_base(
         in_tree_documents: Those files' documents as they were parsed, so the
             reporter step's warning quotes a section as they spelled it where the
             merge kept another spelling (the operator's, in workspace mode).
+        also_scanned: Other roots whose trees count as scanned for the plugin
+            module step (``resolve_config``'s ``also_scanned``): a module
+            location inside one of their trees is refused as one inside
+            ``scanned_root``'s trees is. ``ash merge`` passes none today.
     """
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
@@ -5288,6 +6026,7 @@ def confine_to_trusted_base(
         given_root_membership=False,
         undecided_membership=memberships.undecided,
         source=source,
+        also_scanned=[Path(extra) for extra in also_scanned],
     )
     confine_reporter_destinations(
         config,
@@ -5312,33 +6051,77 @@ def _operator_paths(
     *,
     untrusted: bool,
     overrides: Optional[List[str]],
+    reads: Optional[Dict[Path, Any]] = None,
+    default_config: Optional[AshConfig] = None,
 ) -> OperatorPaths:
     """Which tool paths in the config the operator named; see path_trust.
 
     The chain's merged ``document`` (or, with no config file, the default
-    config's) when every file of the chain is the operator's
+    config's: ``default_config``, the configuration the load carried out of
+    its one read of the ASH_CONFIG chain, so this record describes the files
+    that load read; without it the chain is resolved again here, a second
+    read outside the load's confinement and caches that a file changed in
+    between could skew) when every file of the chain is the operator's
     (:func:`_operator_wrote`, under every name); only the selected file's own
-    document when that file is the operator's and a base it extends is not; and
+    writes when that file is the operator's and a base it extends is not; and
     what ``overrides`` set. With no ``scan_root`` there is nothing to judge the
     files against, so only the overrides are recorded, which fails closed.
+
+    The own-writes arm takes the root's document from ``reads``, the load's
+    cache of each file's one parse, and records the merged ``document``'s
+    values at the keys the root wrote (``_own_writes``): the merged document
+    holds each relative tool path anchored and each plugin section folded as
+    the configuration holds them, where a raw re-read of the file held the
+    path as written, which never equaled the anchored value a scanner passes,
+    so an operator's relative tool path was judged repository-named.
     """
     record = OperatorPaths(overrides=parse_overrides(overrides))
     if untrusted or scan_root is None:
         return record
     if all(_operator_wrote(path, scan_root) for path in [*chain, *names]):
         if document is None:
-            document = get_default_config().model_dump()
+            if default_config is not None:
+                document = default_config.model_dump()
+            else:
+                document = get_default_config().model_dump()
         record.documents = [document]
     elif chain and all(
         _operator_wrote(path, scan_root) for path in [chain[-1], *root_names]
     ):
-        try:
-            own = read_config_file(chain[-1])
-        except Exception:  # noqa: BLE001 - the chain was read already; nothing to add
-            own = None
+        # The selected root by the name it was given, so an overlay root at
+        # the chain's end does not stand in for it.
+        own_root = Path(root_names[0] if root_names else chain[-1]).resolve()
+        own = (reads or {}).get(own_root)
+        if own is None:
+            try:
+                own = read_config_file(own_root)
+            except Exception:  # noqa: BLE001 - the chain was read already; nothing to add
+                own = None
         if isinstance(own, dict):
-            record.documents = [own]
+            own = fold_known_plugin_sections(own)
+            record.documents = [
+                _own_writes(document, own) if isinstance(document, dict) else own
+            ]
     return record
+
+
+def _own_writes(merged: Any, written: Any) -> Any:
+    """``merged``, a chain's merged document, restricted to what ``written``,
+    one file's own document, wrote: the file's keys (spelled as the merged
+    document spells them, config_sources._resolve_dict_key) with the merged
+    document's values under them, so a value the file wrote is read as the
+    configuration holds it (anchored, folded), and a key only a base wrote is
+    left out. A key the merged document lacks keeps the file's own value."""
+    if not isinstance(written, dict) or not isinstance(merged, dict):
+        return merged
+    own: Dict[Any, Any] = {}
+    for key, value in written.items():
+        target = _resolve_dict_key(merged, key) if isinstance(key, str) else key
+        if target in merged:
+            own[target] = _own_writes(merged[target], value)
+        else:
+            own[key] = value
+    return own
 
 
 def _operator_wrote(path: Path, scan_root: Path) -> bool:
@@ -5489,15 +6272,17 @@ _NARROWED_SANDBOX_SETTING = "network_scanners"
 #: rewrite to the mode already.
 _REWRITE_KEPT_SANDBOX_SETTING = "mode"
 
-#: The lists that only add access. A list the patch rewrites is kept to the entries
+#: The lists that only add access (``environment`` is one: each entry passes or sets
+#: a variable in every sandboxed scanner). A list the patch rewrites is kept to the entries
 #: that both the list the file wrote and the list the patch leaves name, so it still
 #: replaces the trusted base's list and the scan gets no path that neither names. One
 #: the file wrote and the patch removes is left out, and the trusted base's list
 #: stands. One the file did not write and the patch leaves no list in is limited to
-#: nothing, unless the patch only inserts an entry, which takes nothing from the
-#: trusted list (``_own_grants_after_patch``).
+#: the setting's own default (nothing for the three lists whose default is empty,
+#: the proxy and CA names for ``environment``), unless the patch only inserts an
+#: entry, which takes nothing from the trusted list (``_own_grants_after_patch``).
 _ADDITIVE_SANDBOX_SETTINGS = frozenset(
-    {"extra_read_paths", "read_path_scanners", "env_scanners"}
+    {"extra_read_paths", "read_path_scanners", "env_scanners", "environment"}
 )
 
 #: What a patch leaves of a list setting when it removes the setting itself.
@@ -5665,10 +6450,31 @@ def _only_inserts_into(setting: str, operations: Any) -> bool:
     )
 
 
+class _DefaultLimit(List[Any]):
+    """The limit for a grant list whose model default is not empty, which the file
+    does not write and its ``patch`` leaves without a list: the setting's own default.
+
+    A missing list is the model's default, and for ``environment`` that is the proxy
+    and CA-bundle names, not nothing. It is a class of its own so that
+    ``_warn_grant_list_limit`` can say that no list is named and the default stands,
+    which neither of its other sentences describes."""
+
+
+def _setting_default(setting: str) -> List[Any]:
+    """The list the model gives the grant list *setting* when a file writes none."""
+    default = SandboxConfig.model_fields[setting].default
+    return list(default) if isinstance(default, (list, tuple)) else []
+
+
 def _no_grants_left_by(setting: str, operations: Any) -> List[Any]:
-    """The empty limit for the grant list *setting*, which the file did not write and
-    *operations* leave without a list. It is an ``_EntryEditLimit`` when every write
-    that touches the list edits an entry of it."""
+    """The limit for the grant list *setting*, which the file did not write and
+    *operations* leave without a list: what the model gives a missing list. That is
+    the empty list for the lists whose default is empty, an ``_EntryEditLimit`` when
+    every write that touches the list edits an entry of it, and the setting's own
+    default for a list with one (``_DefaultLimit``)."""
+    default = _setting_default(setting)
+    if default:
+        return _DefaultLimit(default)
     touching = _writes_touching(setting, operations)
     if touching and all(place == "entry" for _kind, place, _steps in touching):
         return _EntryEditLimit()
@@ -5701,9 +6507,13 @@ def _own_grants_after_patch(
       a limit for ``_with_own_sandbox`` to hold to the trusted base's list. A patch
       that leaves no list there returns nothing for ``network_scanners`` and the
       base's list stands, because a missing network list is the widest. For a grant
-      list it returns the empty limit: a missing grant list is the model's empty one,
-      the narrowest, so the operator's own config ends with no entry and the scan
-      gets none of the base's. A patch that only inserts an entry into such a list
+      list it returns the model's own default: a missing grant list is the empty one
+      for ``extra_read_paths``, ``read_path_scanners`` and ``env_scanners``, the
+      narrowest, so the operator's own config ends with no entry and the scan gets
+      none of the base's; for ``environment`` it is the proxy and CA-bundle names,
+      so the scan keeps the entries of the base's list that the default names and
+      loses the others, never the proxies it was passed before the patch. A patch
+      that only inserts an entry into such a list
       (``add`` at ``/-`` or at an index) returns nothing: the entry is never adopted,
       so it takes nothing from the base's list, and the base's list stands. When the
       limit is empty because the patch removes or replaces entries of the list, it
@@ -5767,8 +6577,10 @@ def _own_grants_after_patch(
             # list there (it removes it, rewrites the section or the document
             # without it, removes or replaces an entry whose place is not known
             # here, or writes a value that is no list). The operator's own config
-            # ends with the model's empty list, the narrowest, so the scan gets
-            # none of the trusted base's entries. A missing network list is the
+            # ends with the model's default list: the empty one, the narrowest, for
+            # three of the lists, so the scan gets none of the trusted base's
+            # entries, and the proxy and CA names for `environment`. A missing
+            # network list is the
             # widest, and the base's list stands for it. A patch that only inserts
             # an entry is not among these: the entry is never adopted, so the
             # trusted list stands.
@@ -5847,7 +6659,13 @@ def _warn_grant_list_limit(
     keep a path the operator did not name. The warning says how to spell the entry.
     """
     left_out = [entry for entry in in_force if entry not in limit]
-    foreign = [entry for entry in limit if entry not in in_force]
+    # The setting's default names entries the trusted list may not hold; that is
+    # not an entry the patch wrote, so it is not a foreign one.
+    foreign = (
+        []
+        if isinstance(limit, _DefaultLimit)
+        else [entry for entry in limit if entry not in in_force]
+    )
     if not left_out and not foreign:
         return
     key = f"limit:{os.path.realpath(path)}:{setting}"
@@ -5855,14 +6673,33 @@ def _warn_grant_list_limit(
         if key in _DROPPED_OWN_SANDBOX_WARNED:
             return
         _DROPPED_OWN_SANDBOX_WARNED.add(key)
+    # The file's name is data: a newline or a control character in it must not
+    # start a line of its own, so each message is shown on one line here, once,
+    # as the other warnings that quote a file's path are.
+    if isinstance(limit, _DefaultLimit):
+        ASH_LOGGER.warning(
+            shown_on_one_line(
+                f"The patch in '{describe_config_path(path)}' leaves no list for "
+                f"{setting}, which the file does not write, so the file's own "
+                f"config ends with the setting's default list and {len(left_out)} "
+                f"of the trusted list's {_entries(len(in_force))} "
+                f"{'is' if len(left_out) == 1 else 'are'} left out. To keep the "
+                "trusted entries, write the list in the file or leave it out of "
+                "the patch."
+            ),
+            extra=NO_MARKUP,
+        )
+        return
     if isinstance(limit, _EntryEditLimit):
         # No list is named, so "the entries it names" would not describe this.
         ASH_LOGGER.warning(
-            f"The patch in '{describe_config_path(path)}' edits entries of {setting}, "
-            "a list the file does not write, so none of the trusted list's "
-            f"{_entries(len(in_force))} is kept. An entry a patch writes is never "
-            "adopted. To keep the trusted entries, write the list in the file or "
-            "leave it out of the patch.",
+            shown_on_one_line(
+                f"The patch in '{describe_config_path(path)}' edits entries of "
+                f"{setting}, a list the file does not write, so none of the "
+                f"trusted list's {_entries(len(in_force))} is kept. An entry a "
+                "patch writes is never adopted. To keep the trusted entries, "
+                "write the list in the file or leave it out of the patch."
+            ),
             extra=NO_MARKUP,
         )
         return
@@ -5880,6 +6717,8 @@ def _warn_grant_list_limit(
                 "To keep a trusted path, spell it exactly as the trusted list "
                 "does; a relative path there is already absolute."
             )
+        elif setting in _ENTRY_GRANT_SETTINGS:
+            hint = "To keep a trusted entry, write it exactly as the trusted list does."
         else:
             hint = (
                 "To keep a trusted scanner, name it exactly as the trusted list does."
@@ -5891,11 +6730,16 @@ def _warn_grant_list_limit(
         )
     else:
         text += "."
-    ASH_LOGGER.warning(text, extra=NO_MARKUP)
+    ASH_LOGGER.warning(shown_on_one_line(text), extra=NO_MARKUP)
 
 
-#: The grant lists whose entries are paths; the others hold scanner names.
+#: The grant lists whose entries are paths; the others hold scanner names, except
+#: the entry grants below.
 _PATH_GRANT_SETTINGS = frozenset({"extra_read_paths"})
+
+#: The grant lists whose entries are neither paths nor scanner names: environment
+#: variables, as ``NAME`` or ``NAME=value``.
+_ENTRY_GRANT_SETTINGS = frozenset({"environment"})
 
 
 def _entries(count: int) -> str:
@@ -6487,15 +7331,32 @@ def _load_overlay(
     permit_base: Optional[Callable[[Path], bool]],
     refuse_env: RefuseEnv,
     anchor_paths: Optional[AnchorPaths] = None,
+    reads: Optional[Dict[Path, Any]] = None,
+    texts: Optional[Dict[Path, str]] = None,
 ) -> ResolvedConfigDocument:
     """The overlay file's merged document, read as the operator's config is.
 
     Refused rather than skipped when it is missing, cannot be read, or does not
     validate on its own: the caller asked for its fields to be final, and
     dropping the file would scan with the project's values for them instead.
+
+    ``reads`` and ``texts`` are the run's caches (``load_config_file_for_run``):
+    given both, the overlay's files are read through the same cached reader as
+    the selected chain, so the record of what they read from the environment
+    (``_record_overlay_reads``) is built from the text this load read, the
+    chain walkers that rebuild the extends tree find the overlay's documents
+    in the cache, and a base both chains extend is parsed once.
     """
     path = Path(overlay_config_path)
-    if not path.is_file():
+    # os.stat, not Path.is_file: before Python 3.14 is_file raises for an error
+    # other than "not found" (a directory above that cannot be searched), a
+    # raw PermissionError in place of this refusal (check_config_path does the
+    # same). A NUL in the path is a ValueError, refused the same way.
+    try:
+        regular = stat.S_ISREG(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        regular = False
+    if not regular:
         raise ASHConfigSourceError(
             f"Config file '{describe_config_path(path)}' does not exist or is not "
             "a file."
@@ -6512,6 +7373,12 @@ def _load_overlay(
             permit_base=permit_base,
             refuse_env=refuse_env,
             anchor_relative_paths=anchor_paths,
+            reader=(
+                _cached_reader(reads, texts)
+                if reads is not None and texts is not None
+                else None
+            ),
+            texts=texts,
         )
     except ASHConfigValidationError:
         raise
@@ -6548,9 +7415,18 @@ def _refuse_unless_the_operators(
     root = overlay.chain[-1]
     reasons = []
     places: List[str] = []
+    # A base an extends entry chose with a value read from the environment is
+    # named <value>, as every other message names such a file: its path is
+    # the variable's value.
+    hidden = set(overlay.environment_paths)
     for path in others:
         reason, place = _whose_file(path, trees, overlay.names)
-        reasons.append(f"'{describe_config_path(path)}' {reason}")
+        shown = (
+            ENVIRONMENT_VALUE_SHOWN
+            if path in hidden or Path(path).resolve() in hidden
+            else f"'{describe_config_path(path)}'"
+        )
+        reasons.append(f"{shown} {reason}")
         if place not in places:
             places.append(place)
     # A file of the scanned tree is refused for the repository's tier, which the
@@ -6572,6 +7448,7 @@ def check_operator_config(
     scanned_root: Path | str,
     permit_base: Optional[Callable[[Path], bool]] = None,
     remote_client: bool = False,
+    session_id: Optional[str] = None,
 ) -> None:
     """Refuse an operator config that cannot be layered over a workspace's projects.
 
@@ -6581,12 +7458,23 @@ def check_operator_config(
     runs them once for the whole workspace, so a project with no config of its
     own, which uses the operator's file alone, is refused with the rest.
 
+    ``session_id`` is the MCP call's session, as ``env_refused_for`` takes it:
+    for a remote caller, of the profile files the server writes in the sessions'
+    ``config/`` directories only that session's own are set aside from ``!ENV``.
+    Each project's resolution judges the chain with it
+    (``resolve_config``'s ``client_config_policy.session_id``); judged without
+    it here, a non-default session's own bound profile that uses ``!ENV`` was
+    refused at planning though every project's resolution accepted it.
+
     Raises:
         ASHConfigValidationError: The config cannot be used; exit 3 in workspace
             mode.
     """
     overlay = _load_overlay(
-        operator_config_path, None, permit_base, env_refused_for(remote_client)
+        operator_config_path,
+        None,
+        permit_base,
+        env_refused_for(remote_client, session_id),
     )
     _refuse_unless_the_operators(overlay, scanned_root)
 
@@ -6599,11 +7487,21 @@ def operator_config_digest(operator_config_path: Path | str) -> str:
     the plan and the scan (another call rewriting a session's profile, an edit)
     is refused rather than scanned with settings ``--dry-run`` did not report.
     """
+    from automated_security_helper.config.config_sources import read_config_bytes
+
     path = Path(operator_config_path)
     document = resolve_config_document(path, confine_to=default_confinement_root(path))
     digest = hashlib.sha256()
     for member in document.chain:
-        data = Path(member).read_bytes()
-        digest.update(f"{Path(member).as_posix()}\0{len(data)}\0".encode("utf-8"))
+        # The bounded, non-blocking reader the loaders use (the
+        # ASH_CONFIG_MAX_FILE_BYTES bound, no FIFO wait): a plain read_bytes
+        # read without either. A file name the file system encoding cannot
+        # carry is encoded with its escapes, where "utf-8" alone raised.
+        data = read_config_bytes(Path(member))
+        digest.update(
+            f"{Path(member).as_posix()}\0{len(data)}\0".encode(
+                "utf-8", "surrogateescape"
+            )
+        )
         digest.update(data)
     return digest.hexdigest()

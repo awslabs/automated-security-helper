@@ -11,6 +11,7 @@ import subprocess
 import sys
 import types
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
@@ -18,10 +19,12 @@ from automated_security_helper.core.enums import RunMode
 from automated_security_helper.interactions.run_ash_nix import (
     ASH_IN_NIX_ENV_VAR,
     ASH_NIX_FLAKE_REF_ENV_VAR,
+    OUTER_PYTHONPATH_ENV_VAR,
     build_nix_command,
     resolve_flake_ref,
     rewrite_mode_args,
     run_ash_nix,
+    shown_flake_ref,
 )
 
 
@@ -43,16 +46,26 @@ class TestRewriteModeArgs:
             "scan",
             "--mode",
             "local",
+            "--no-show-summary",
         ]
 
     def test_equals_form_becomes_local(self):
-        assert rewrite_mode_args(["scan", "--mode=nix"]) == ["scan", "--mode=local"]
+        assert rewrite_mode_args(["scan", "--mode=nix"]) == [
+            "scan",
+            "--mode=local",
+            "--no-show-summary",
+        ]
 
     def test_absent_mode_is_appended(self):
         # Nix mode can be selected by config file, leaving no --mode in argv. Without the
         # appended flag the inner scan would read that same config, select nix again and
         # recurse.
-        assert rewrite_mode_args(["scan"]) == ["scan", "--mode", "local"]
+        assert rewrite_mode_args(["scan"]) == [
+            "scan",
+            "--mode",
+            "local",
+            "--no-show-summary",
+        ]
 
     def test_other_arguments_survive_verbatim(self):
         # This is the whole reason argv is forwarded rather than rebuilt from parsed
@@ -81,12 +94,56 @@ class TestRewriteModeArgs:
             "--scanners",
             "bandit",
             "--debug",
+            "--no-show-summary",
         ]
 
     def test_mode_value_is_not_mistaken_for_a_flag(self):
         # The two-token branch skips the token after --mode. If that skip were missing the
         # stale value would remain and the inner scan would get "--mode local nix".
         assert "nix" not in rewrite_mode_args(["scan", "--mode", "nix", "--quiet"])
+
+    def test_the_inner_scan_prints_no_summary_of_its_own(self):
+        # The outer process prints the metrics table and the exit-code legend from the
+        # results it reads back, as container mode's does; without this switch the
+        # inner scan printed both too and a nix run showed every table twice.
+        assert (
+            rewrite_mode_args(["scan", "--mode", "nix"]).count("--no-show-summary") == 1
+        )
+        # Given once already (a library caller's --no-show-summary): not doubled.
+        assert (
+            rewrite_mode_args(["scan", "--no-show-summary"]).count("--no-show-summary")
+            == 1
+        )
+        # Asked for explicitly: still the outer process's to print. The later of the
+        # two spellings wins inside the shell, so the other one is dropped.
+        rewritten = rewrite_mode_args(["scan", "--show-summary"])
+        assert "--show-summary" not in rewritten
+        assert "--no-show-summary" in rewritten
+
+    def test_arguments_after_a_double_dash_are_forwarded_verbatim(self):
+        # Everything after a bare `--` is positional, however it is spelled, so a
+        # `--mode` there is a value and is neither rewritten nor dropped.
+        assert rewrite_mode_args(["scan", "--mode", "nix", "--", "--mode", "x"]) == [
+            "scan",
+            "--mode",
+            "local",
+            "--no-show-summary",
+            "--",
+            "--mode",
+            "x",
+        ]
+
+    def test_the_local_mode_goes_before_a_double_dash(self):
+        # Appended after `--` the switch would be a positional argument, and the inner
+        # scan would inherit nix mode from the config and recurse.
+        assert rewrite_mode_args(["scan", "--", "target"]) == [
+            "scan",
+            "--mode",
+            "local",
+            "--no-show-summary",
+            "--",
+            "target",
+        ]
 
 
 @pytest.mark.unit
@@ -107,8 +164,30 @@ class TestResolveFlakeRef:
             lambda: tmp_path,
         )
         # `path:` matters: a bare path is read as a git tree, so uncommitted edits to
-        # flake.nix would be silently ignored.
-        assert resolve_flake_ref() == f"path:{tmp_path}"
+        # flake.nix would be silently ignored. The path is percent-encoded as a URL
+        # path (below); an ordinary directory name is its own encoding.
+        assert resolve_flake_ref() == "path:" + quote(str(tmp_path), safe="/")
+
+    def test_a_checkout_under_a_url_delimiter_is_percent_encoded(
+        self, monkeypatch, tmp_path
+    ):
+        # A `path:` reference is a URL to nix: `#` starts the attribute, `?` the query,
+        # and a space is no URL character, so a checkout under a directory named with
+        # any of them was misparsed and the shell never opened.
+        monkeypatch.delenv(ASH_NIX_FLAKE_REF_ENV_VAR, raising=False)
+        checkout = tmp_path / "a #1?b c"
+        checkout.mkdir()
+        (checkout / "flake.nix").write_text("{}")
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_nix._repo_flake_dir",
+            lambda: checkout,
+        )
+
+        ref = resolve_flake_ref()
+
+        assert ref.startswith("path:")
+        assert "#" not in ref and "?" not in ref and " " not in ref
+        assert ref.endswith("/a%20%231%3Fb%20c")
 
     def test_falls_back_to_the_published_repo_at_this_version(self, monkeypatch):
         monkeypatch.delenv(ASH_NIX_FLAKE_REF_ENV_VAR, raising=False)
@@ -146,6 +225,71 @@ class TestResolveFlakeRef:
         from automated_security_helper import __version__
 
         assert resolve_flake_ref().endswith(f"/v{__version__}")
+
+
+@pytest.mark.unit
+class TestShownFlakeRef:
+    """The flake reference as the INFO line and the debug command line show it."""
+
+    @pytest.mark.parametrize(
+        "ref",
+        [
+            "path:/repo",
+            "github:owner/repo/v1",
+            "git+https://host/repo?ref=main",
+            "flake-ref",
+        ],
+    )
+    def test_a_reference_without_userinfo_is_shown_as_it_is(self, ref):
+        assert shown_flake_ref(ref) == ref
+
+    def test_a_urls_userinfo_is_not_shown(self):
+        # A token an operator put in ASH_NIX_FLAKE_REF so nix can fetch the flake is a
+        # credential; the line reaches the console and ash.log in the output directory.
+        shown = shown_flake_ref("git+https://alice:token-1@host/org/repo?ref=main")
+        assert "token-1" not in shown
+        assert "alice" not in shown
+        assert shown == "git+https://<userinfo>@host/org/repo?ref=main"
+
+    def test_a_token_alone_before_the_host_is_not_shown(self):
+        assert shown_flake_ref("git+https://token-1@host/repo") == (
+            "git+https://<userinfo>@host/repo"
+        )
+
+    @pytest.mark.parametrize(
+        "ref, shown",
+        [
+            pytest.param(
+                "git+https://host/org/repo?private_token=hunter2",
+                "git+https://host/org/repo?private_token=<hidden>",
+                id="private-token",
+            ),
+            pytest.param(
+                "git+https://host/repo?ref=main&access_token=hunter2&rev=abc",
+                "git+https://host/repo?ref=main&access_token=<hidden>&rev=abc",
+                id="access-token-between-others",
+            ),
+            pytest.param(
+                "git+https://alice:hunter2@host/repo?API_KEY=hunter2",
+                "git+https://<userinfo>@host/repo?API_KEY=<hidden>",
+                id="userinfo-and-query",
+            ),
+        ],
+    )
+    def test_a_query_value_named_for_a_credential_is_not_shown(self, ref, shown):
+        # The userinfo is not the only place a URL flake reference carries a token:
+        # a git host's API takes one as a query parameter.
+        assert shown_flake_ref(ref) == shown
+        assert "hunter2" not in shown_flake_ref(ref)
+
+    def test_a_query_of_ordinary_parameters_is_shown_as_it_is(self):
+        ref = "git+https://host/repo?ref=main&rev=trunk2&dir=sub"
+        assert shown_flake_ref(ref) == ref
+
+    def test_an_at_sign_after_the_authority_is_left_alone(self):
+        # Only the authority holds userinfo; a `@` in the path or query is data.
+        ref = "github:owner/repo?ref=release@2"
+        assert shown_flake_ref(ref) == ref
 
 
 class TestBuildNixCommand:
@@ -277,6 +421,66 @@ class TestTheInnerScanImportsNothingFromTheScanDirectory:
     def test_flake_ref_is_passed_to_develop(self):
         cmd = build_nix_command("github:owner/repo/v1", ["scan"], "nix")
         assert cmd[cmd.index("develop") + 1] == "github:owner/repo/v1"
+
+
+class TestTheInnerCommandRestoresTheOperatorsPythonPath:
+    """Inside the shell PYTHONPATH is unset (flake.nix), so an ASH or a plugin module
+    importable only through the operator's PYTHONPATH could not import. The inner
+    command puts those directories back on ``sys.path``, ahead of the installed
+    packages as PYTHONPATH's are, from OUTER_PYTHONPATH_ENV_VAR."""
+
+    @pytest.mark.integration
+    def test_a_directory_the_operator_named_is_importable_again(self, tmp_path):
+        from automated_security_helper.interactions.run_ash_nix import _this_ash
+
+        marker = tmp_path / "IMPORTED"
+        _plant_ash(tmp_path / "named", marker)
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("PYTHONSAFEPATH", "PYTHONPATH")
+        }
+        env[OUTER_PYTHONPATH_ENV_VAR] = str(tmp_path / "named")
+
+        subprocess.run(
+            [*_this_ash(), "--version"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+
+        # The planted package was imported in place of the installed ASH: the named
+        # directory came first on sys.path, as a PYTHONPATH entry would.
+        assert marker.exists()
+        assert marker.read_text(encoding="utf-8") == "planted\n"
+
+    @pytest.mark.integration
+    def test_without_the_variable_the_installed_ash_runs(self, tmp_path):
+        from automated_security_helper.interactions.run_ash_nix import _this_ash
+
+        marker = tmp_path / "IMPORTED"
+        _plant_ash(tmp_path / "named", marker)
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("PYTHONSAFEPATH", "PYTHONPATH", OUTER_PYTHONPATH_ENV_VAR)
+        }
+
+        result = subprocess.run(
+            [*_this_ash(), "--version"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+
+        assert not marker.exists()
+        assert result.returncode == 0, result.stderr
 
 
 class _EnteredShell:
@@ -470,6 +674,74 @@ class TestRunAshNix:
         assert entered_shell.env["PATH"] == "/usr/bin"
         assert entered_shell.env[ASH_IN_NIX_ENV_VAR] == "1"
 
+    def test_the_flake_reference_is_logged_without_its_userinfo(
+        self, monkeypatch, capsys, entered_shell
+    ):
+        """The INFO line and the debug command line reach the console and ash.log."""
+        from automated_security_helper.interactions import run_ash_nix as module
+
+        logged = []
+        recorder = types.SimpleNamespace(
+            info=lambda message, *a, **k: logged.append(message),
+            debug=lambda message, *a, **k: logged.append(message),
+            warning=lambda message, *a, **k: logged.append(message),
+        )
+        monkeypatch.setattr(module, "ASH_LOGGER", recorder)
+        monkeypatch.delenv(ASH_IN_NIX_ENV_VAR, raising=False)
+        monkeypatch.setenv(
+            ASH_NIX_FLAKE_REF_ENV_VAR, "git+https://user:token-1@host/org/repo"
+        )
+        monkeypatch.setattr(module, "find_executable", lambda _: "/usr/bin/nix")
+
+        run_ash_nix(argv=["scan"], debug=True)
+
+        printed = capsys.readouterr().out
+        assert "token-1" not in printed, printed
+        assert "token-1" not in "\n".join(logged), logged
+        assert "git+https://<userinfo>@host/org/repo" in printed
+        assert any(
+            "Entering Nix shell from flake: git+https://<userinfo>@" in m
+            for m in logged
+        )
+        # The shell is given the reference as the operator wrote it.
+        assert "git+https://user:token-1@host/org/repo" in entered_shell.cmd
+
+    def test_the_operators_pythonpath_is_handed_to_the_inner_command(
+        self, monkeypatch, entered_shell
+    ):
+        """The flake's shell hook unsets PYTHONPATH; the inner command puts the
+        operator's own entries back from this variable (flake.nix, _this_ash)."""
+        monkeypatch.delenv(ASH_IN_NIX_ENV_VAR, raising=False)
+        monkeypatch.setenv(ASH_NIX_FLAKE_REF_ENV_VAR, "path:/repo")
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_nix.find_executable",
+            lambda _: "/usr/bin/nix",
+        )
+        entries = os.pathsep.join(["/opt/ash-src", "/opt/plugins"])
+        monkeypatch.setenv("PYTHONPATH", entries)
+
+        run_ash_nix(argv=["scan"])
+
+        assert entered_shell.env[OUTER_PYTHONPATH_ENV_VAR] == entries
+        code = entered_shell.cmd[entered_shell.cmd.index("-c") + 1]
+        assert OUTER_PYTHONPATH_ENV_VAR in code
+        assert "sys.path[:0]" in code
+        # No path of this host in the command: it is one fixed string.
+        assert "/opt/ash-src" not in code
+
+    def test_no_pythonpath_means_no_hand_over(self, monkeypatch, entered_shell):
+        monkeypatch.delenv(ASH_IN_NIX_ENV_VAR, raising=False)
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+        monkeypatch.setenv(ASH_NIX_FLAKE_REF_ENV_VAR, "path:/repo")
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_nix.find_executable",
+            lambda _: "/usr/bin/nix",
+        )
+
+        run_ash_nix(argv=["scan"])
+
+        assert OUTER_PYTHONPATH_ENV_VAR not in entered_shell.env
+
 
 @pytest.mark.integration
 class TestEnterShell:
@@ -516,3 +788,24 @@ class TestRepoFlakeDir:
         found = _repo_flake_dir()
         assert found is not None, "expected to find flake.nix at the repository root"
         assert (Path(found) / "flake.nix").is_file()
+
+    def test_a_flake_beside_site_packages_is_not_this_repository(
+        self, monkeypatch, tmp_path
+    ):
+        # In a packaged install the parents[2] arithmetic lands on the environment's
+        # site-packages directory. A flake.nix left there by something else must not
+        # replace the published, version-pinned toolchain: only a checkout, which
+        # ships pyproject.toml beside flake.nix, is this repository.
+        from automated_security_helper.interactions import run_ash_nix
+
+        site = tmp_path / "site-packages"
+        module = site / "automated_security_helper" / "interactions" / "run_ash_nix.py"
+        module.parent.mkdir(parents=True)
+        module.write_text("", encoding="utf-8")
+        (site / "flake.nix").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(run_ash_nix, "__file__", str(module))
+
+        assert run_ash_nix._repo_flake_dir() is None
+
+        (site / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+        assert run_ash_nix._repo_flake_dir() == site.resolve()

@@ -74,9 +74,13 @@ def test_checkov_scanner_uv_tool_integration(test_plugin_context):
         # those two invocations apart.
         # ``values`` is what the probe redacts from its own log lines: the values
         # the scanner's config read from the environment, none for this config.
-        mock_runner_instance.get_tool_version.assert_called_with(
-            "checkov", scanner._uv_from_spec(), values=()
-        )
+        # The probe also passes the plugin's own environment (its offline mode,
+        # the package its spec is built around, an interpreter request) as
+        # keyword arguments; those are the mixin's to add, so only the pair and
+        # the values are pinned here, not the whole keyword set.
+        probe_call = mock_runner_instance.get_tool_version.call_args
+        assert probe_call.args == ("checkov", scanner._uv_from_spec())
+        assert probe_call.kwargs["values"] == ()
 
     # Test validation with UV tool available
     with unittest.mock.patch(

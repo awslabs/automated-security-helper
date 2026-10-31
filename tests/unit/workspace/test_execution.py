@@ -31,6 +31,7 @@ from automated_security_helper.models.workspace import (
     SkippedProjectReason,
     WorkspaceExitCode,
 )
+from automated_security_helper.workspace import execution as execution_module
 from automated_security_helper.workspace.execution import (
     ProjectScanSettings,
     execute_workspace,
@@ -113,6 +114,10 @@ class FakeOrchestrator:
             raise spec["raise"]
 
         model = AshAggregatedResults()
+        # The configuration the scan ran with, as the results record it, for a
+        # test of what the recorded config decides (a scanner's own threshold).
+        if "ash_config" in spec:
+            model.ash_config = spec["ash_config"]
         model.sarif = SarifReport.model_validate(spec.get("sarif") or _sarif(count=0))
 
         # A real scan writes a scanner_results entry for every scanner it ran --
@@ -146,6 +151,40 @@ class FakeOrchestrator:
         # The per-target reports, as ScanResultProcessor serializes them, for a test
         # that needs what a report recorded beyond the row.
         model.additional_reports.update(spec.get("additional_reports") or {})
+        # The scan phase saves the per-project results file itself, before the
+        # workspace layer sees the model (ScanPhase, AshAggregatedResults.save_model).
+        # Off by default so the fixtures that assert the workspace's own write stay
+        # exact; a test about what the scan left behind turns it on.
+        if spec.get("save_results"):
+            model.save_model(self.output_dir)
+            # The report phase writes the project's own reports beside the
+            # results, and the tools write their own output under scanners/.
+            reports = self.output_dir / "reports"
+            reports.mkdir(parents=True, exist_ok=True)
+            (reports / "ash.sarif").write_text("{}\n", encoding="utf-8")
+            tools = self.output_dir / "scanners" / "bandit"
+            tools.mkdir(parents=True, exist_ok=True)
+            (tools / "raw.json").write_text("{}\n", encoding="utf-8")
+        # The SARIF report the scan's own SARIF reporter wrote, recorded on the
+        # model as ReportPhase records it (record_reports_written), for a test of
+        # what the verdict counts from. Off by default, so every other fixture's
+        # counts keep coming from the model it built.
+        if "written_sarif" in spec:
+            from automated_security_helper.utils.inner_run_outcome import (
+                record_reports_written,
+            )
+
+            reports = self.output_dir / "reports"
+            reports.mkdir(parents=True, exist_ok=True)
+            (reports / "ash.sarif").write_text(
+                json.dumps(spec["written_sarif"]), encoding="utf-8"
+            )
+            record_reports_written(model, [("ash.sarif", "sarif")])
+        # The raw values this project's own masking exposed, kept on the model as
+        # secret_masking._record keeps them, for a test of the workspace's
+        # cross-project masking.
+        if "secret_values" in spec:
+            model._secret_values = set(spec["secret_values"])
         return model
 
 
@@ -544,6 +583,58 @@ class TestPerProjectThresholds:
         entry = _run(tmp_path, plan).payload.projects[0]
         assert entry.actionable_finding_count == 1
         assert entry.ceiling_unreachable_findings == {}
+
+    def test_a_non_gating_policy_scanners_level_only_finding_is_not_disclosed(
+        self, tmp_path
+    ):
+        """The verdict's policy_scanners_gate exclusion, applied to the disclosure.
+
+        semgrep is a scanner only the workspace policy asked for, with the gate
+        off: its findings are judged at no threshold, so the ceiling never
+        claimed them. Red at the base: the executor called the counter without
+        the project's non-gating scanners, so the helper's own exclusion never
+        ran in production and semgrep's level-only finding was disclosed as one
+        the ceiling could not reach. bandit's is the control: the project's own
+        scanner, still disclosed.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0].model_copy(
+            update={"policy_scanners": ["semgrep"], "policy_scanners_gate": False}
+        )
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        plan.projects[0] = project
+        sarif = _sarif(level="error", count=2)
+        sarif["runs"][0]["results"][1]["properties"]["scanner_name"] = "semgrep"
+        FakeOrchestrator.behaviour["api"] = {"sarif": sarif}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        # Controls: semgrep's finding is present and policy-origin, and bandit's
+        # is actionable, so the missing semgrep key is the exclusion's doing.
+        assert entry.finding_count == 2
+        assert entry.policy_origin_finding_count == 1
+        assert entry.actionable_finding_count == 1
+        assert entry.ceiling_unreachable_findings == {"bandit": 1}
+
+    def test_a_gating_policy_scanners_level_only_finding_is_disclosed(self, tmp_path):
+        """The other arm: with the gate on, semgrep's finding decides the verdict,
+        so the ceiling's claim covers it and the disclosure names both scanners."""
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0].model_copy(
+            update={"policy_scanners": ["semgrep"], "policy_scanners_gate": True}
+        )
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        plan.projects[0] = project
+        sarif = _sarif(level="error", count=2)
+        sarif["runs"][0]["results"][1]["properties"]["scanner_name"] = "semgrep"
+        FakeOrchestrator.behaviour["api"] = {"sarif": sarif}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        assert entry.actionable_finding_count == 2
+        assert entry.ceiling_unreachable_findings == {"bandit": 1, "semgrep": 1}
 
     def test_the_aggregate_exit_code_reflects_the_strictest_failing_project(
         self, tmp_path
@@ -971,8 +1062,11 @@ class TestScannerReasonsInTheWorkspace:
     output-formats.md says its ``scanner_results`` carry the same two fields. So a
     rolled-up SKIPPED or MISSING row names, for each project at that status, the
     project and its reason: ``<project>: <reason>``, joined with ``; `` in
-    workspace-file order. Each project's entry in the ``workspace`` block keeps its
-    own reasons in ``scanner_reasons``.
+    workspace-file order. Each project's own reasons travel in-process on its
+    ``WorkspaceProjectResult.scanner_reasons``, the map the rollup reads; the
+    written ``workspace`` block does not carry that map (the field is excluded
+    from the dump, since the rolled-up row is the public surface), so the tests
+    read it from the run's payload and check the written entry omits it.
     """
 
     def test_each_project_entry_keeps_its_scanners_reasons(self, tmp_path):
@@ -985,13 +1079,16 @@ class TestScannerReasonsInTheWorkspace:
                 "grype": _skipped("excluded from this run (--exclude-scanners)"),
             },
         }
-        _run(tmp_path, plan)
+        outcome = _run(tmp_path, plan)
 
-        project = _written(tmp_path)["workspace"]["projects"][0]
-        assert project.get("scanner_reasons") == {
+        entry = outcome.payload.projects[0]
+        assert entry.scanner_reasons == {
             "cfn-nag": "its tool cfn_nag_scan was not found on PATH",
             "grype": "excluded from this run (--exclude-scanners)",
-        }, project
+        }, entry
+        # The map is in-process only; the written entry omits it by design.
+        project = _written(tmp_path)["workspace"]["projects"][0]
+        assert "scanner_reasons" not in project, project
 
     def test_an_error_row_lists_the_error_its_report_recorded(self, tmp_path):
         """An ERROR scanner says why, from the first error its reports recorded.
@@ -1025,11 +1122,12 @@ class TestScannerReasonsInTheWorkspace:
                 "grype": {"source": {"scanner_name": "grype", "status": "ERROR"}},
             },
         }
-        _run(tmp_path, plan)
+        outcome = _run(tmp_path, plan)
 
         written = _written(tmp_path)
-        project = written["workspace"]["projects"][0]
-        assert project.get("scanner_reasons") == {"bandit": constructor_error}, project
+        entry = outcome.payload.projects[0]
+        assert entry.scanner_reasons == {"bandit": constructor_error}, entry
+        assert "scanner_reasons" not in written["workspace"]["projects"][0]
         # The rollup keeps its reason fields for SKIPPED and MISSING rows.
         row = written["scanner_results"]["bandit"]
         assert row["status"] == "ERROR", row
@@ -1064,10 +1162,12 @@ class TestScannerReasonsInTheWorkspace:
                 }
             },
         }
-        _run(tmp_path, plan)
+        outcome = _run(tmp_path, plan)
 
+        entry = outcome.payload.projects[0]
+        assert entry.scanner_reasons == {"bandit": message}, entry
         project = _written(tmp_path)["workspace"]["projects"][0]
-        assert project.get("scanner_reasons") == {"bandit": message}, project
+        assert "scanner_reasons" not in project, project
 
     def test_a_listed_error_carries_no_environment_value(self, tmp_path, monkeypatch):
         """Listed redacted with the project config's environment values.
@@ -1106,12 +1206,15 @@ class TestScannerReasonsInTheWorkspace:
                 }
             },
         }
-        _run(tmp_path, plan)
+        outcome = _run(tmp_path, plan)
 
-        project = _written(tmp_path)["workspace"]["projects"][0]
-        reason = (project.get("scanner_reasons") or {}).get("bandit", "")
-        assert "could not load" in reason, project
+        entry = outcome.payload.projects[0]
+        reason = (entry.scanner_reasons or {}).get("bandit", "")
+        assert "could not load" in reason, entry
         assert "ENVCANARY-listed-error" not in reason, reason
+        # Nothing written carries the value either: the per-project map is not
+        # dumped, and the rollup names no reason for an ERROR row.
+        assert "ENVCANARY-listed-error" not in json.dumps(_written(tmp_path))
 
     def test_a_rolled_up_missing_row_names_each_project_and_its_reason(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
@@ -1136,7 +1239,7 @@ class TestScannerReasonsInTheWorkspace:
         """MISSING in one project and SKIPPED in another rolls up MISSING.
 
         The SKIPPED project's reason is not a reason the scanner is MISSING, so
-        it is not on the row; it stays on that project's own entry.
+        it is not on the row; it stays on that project's own in-process entry.
         """
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
         FakeOrchestrator.behaviour["api"] = {
@@ -1149,17 +1252,18 @@ class TestScannerReasonsInTheWorkspace:
             "sarif": _sarif(count=0),
             "scanner_results": {"grype": _missing("no grype on PATH")},
         }
-        _run(tmp_path, plan)
+        outcome = _run(tmp_path, plan)
 
         written = _written(tmp_path)
         row = written["scanner_results"]["grype"]
         assert row["status"] == "MISSING", row
         assert row.get("missing_reason") == "web: no grype on PATH", row
         assert row.get("skipped_reason") is None, row
-        api = written["workspace"]["projects"][0]
-        assert api.get("scanner_reasons") == {
+        api = next(p for p in outcome.payload.projects if p.project == "api")
+        assert api.scanner_reasons == {
             "grype": "excluded from this run (--exclude-scanners)"
         }, api
+        assert "scanner_reasons" not in written["workspace"]["projects"][0]
 
     def test_a_rolled_up_skipped_row_names_each_project_and_its_reason(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
@@ -1476,7 +1580,9 @@ class TestFailureHandling:
         assert PROJECT_TIMEOUT.is_integer(), PROJECT_TIMEOUT
         assert f"'{int(PROJECT_TIMEOUT)}' s project_timeout" in error, error
 
-    def test_the_timeout_bounds_wall_clock_when_the_bound_is_smaller(self, tmp_path):
+    def test_the_timeout_bounds_wall_clock_when_the_bound_is_smaller(
+        self, tmp_path, monkeypatch
+    ):
         """The defect: a queued project was never given a deadline.
 
         The deadline check skipped any project with no start time, which is
@@ -1489,7 +1595,18 @@ class TestFailureHandling:
         The wedge here releases on an event rather than sleeping, so the test
         asserts the workspace returned while the worker was still running --
         which is the whole property -- without depending on a sleep duration.
+
+        The bound allows for the one grace the pool gives every abandoned
+        worker's stop after the loop (``_ABANDONED_STOP_GRACE_SECONDS``), paid
+        on this path too so a worker that comes back inside it brings the
+        secret values its findings exposed into the cross-project masking set.
+        That wait is bounded and part of the contract; the open-ended wait on a
+        held slot is the defect this test pins. The grace is set small here, so
+        the bound is a fixed number that does not grow with the production
+        constant and the run does not wait out the whole production grace.
         """
+        grace = 0.3
+        monkeypatch.setattr(execution_module, "_ABANDONED_STOP_GRACE_SECONDS", grace)
         _, plan = _make_workspace(
             tmp_path,
             ("wedged", "MEDIUM"),
@@ -1507,7 +1624,11 @@ class TestFailureHandling:
         finally:
             release.set()
 
-        assert elapsed < 5.0, f"took {elapsed:.1f}s; the budget was 0.2s"
+        bound = PROJECT_TIMEOUT + grace + 2.0
+        assert elapsed < bound, (
+            f"took {elapsed:.1f}s; the project_timeout was {PROJECT_TIMEOUT}s plus "
+            f"the {grace}s grace, bound {bound}s"
+        )
         statuses = {p.project: p.status for p in outcome.payload.projects}
         assert statuses == {
             "wedged": ProjectRunStatus.FAILED,

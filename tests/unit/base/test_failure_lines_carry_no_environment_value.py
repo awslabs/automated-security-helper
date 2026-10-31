@@ -88,6 +88,23 @@ def logged():
         ASH_LOGGER.setLevel(level)
 
 
+def _config_dumps(lines):
+    """The pre-scan's two config dumps among the logged lines.
+
+    The plugin log writes each message after a tab, and wraps it in an empty
+    ``[none][/none]`` pair that keeps the console from reading the text as markup.
+    The pair is not part of what a dump says, so it is taken out before the dump's
+    own opening words are compared.
+    """
+
+    def body(line):
+        return line.split("\t", 1)[-1].replace("[none][/none]", "")
+
+    return [
+        line for line in lines if body(line).startswith(("self.config: ", "config: "))
+    ]
+
+
 def test_timeout_record_carries_no_environment_value(tmp_path, logged):
     """The limit is a short number, so it has to be its own quoted token."""
     scanner = _scanner(_context(tmp_path, ["67"]))
@@ -1127,10 +1144,21 @@ def test_empty_results_warning_carries_no_environment_value(tmp_path, logged, wh
         value = "C:\\Users\\ENVCANARY-winpath\\settings.yaml"
     scanner = _scanner(_context(tmp_path, [value]), execute_scan=_execute_writing(""))
     target = _populated_target(tmp_path)
-    scanner.errors = [f"cannot read {value}"]
+
+    def _tool_ran_and_said_so(*_args, **_kwargs):
+        # The tool's line reaches the error lines while the run is under way,
+        # after scan() has started them afresh for this target, so it is
+        # recorded here and not seeded before the scan. The response carries
+        # the code of a run that ended: a response without one leaves the
+        # target with no exit code, and the scan refuses it before it reads
+        # the results file, never reaching the empty-results warning.
+        scanner.errors.append(f"cannot read {value}")
+        return {"returncode": 0}
 
     with (
-        patch.object(type(scanner), "_run_subprocess", return_value={}),
+        patch.object(
+            type(scanner), "_run_subprocess", side_effect=_tool_ran_and_said_so
+        ),
         pytest.raises(ScannerError, match="nothing to grade") as refused,
     ):
         scanner.scan(target=target, target_type="source")
@@ -2281,9 +2309,7 @@ def test_pre_scan_dumps_show_a_value_from_the_environment_as_written(
 
     assert scanner._pre_scan(target=target, target_type="source", config=scanner.config)
 
-    dumps = [
-        line for line in logged if "\tself.config: " in line or "\tconfig: " in line
-    ]
+    dumps = _config_dumps(logged)
     assert len(dumps) == 2, logged
     for line in dumps:
         assert "${ASH_SPELLED_LIMIT}" in line, line
@@ -2317,9 +2343,7 @@ def test_a_hook_answering_no_set_skips_the_dumps_instead_of_printing_clear(
             target=target, target_type="source", config=scanner.config
         )
 
-    dumps = [
-        line for line in logged if "\tself.config: " in line or "\tconfig: " in line
-    ]
+    dumps = _config_dumps(logged)
     assert dumps == [], dumps
 
 
@@ -2437,9 +2461,7 @@ def test_pre_scan_dumps_show_a_large_whole_value_as_written(
 
     assert scanner._pre_scan(target=target, target_type="source", config=scanner.config)
 
-    dumps = [
-        line for line in logged if "\tself.config: " in line or "\tconfig: " in line
-    ]
+    dumps = _config_dumps(logged)
     assert len(dumps) == 2, logged
     for line in dumps:
         assert "${ASH_SPELLED_LIMIT}" in line, line
@@ -2540,7 +2562,7 @@ def test_the_read_edge_trim_stays_fast_on_junk_runs():
         value = "JUNKSECRET-776611"
         # A read-sized run of replacement characters, as the whole tail and
         # mid-text (mid-text junk is never walked; only the tail is).
-        fffd = "�" * (_STDERR_LOG_READ_LIMIT - 1000)
+        fffd = chr(0xFFFD) * (_STDERR_LOG_READ_LIMIT - 1000)
         assert trimmed_at_read_edge("a" * 1000 + fffd, [value]) == "a" * 1000
         assert trimmed_at_read_edge("a" * 500 + fffd + "b", [value]).endswith("b")
         # A read filled with color codes, as the tail and before a fragment.
@@ -2670,6 +2692,7 @@ def test_the_carried_log_trims_a_cut_inside_a_glued_input(tmp_path):
     value = "qz4b"
     context = _context(tmp_path, [value])
     scanner = _scanner(context)
+    scanner.use_uv_tool = True
     scanner._uv_run_inputs_for_records = lambda: ("bandit[sarifqz4b]==1.0",)
     log = tmp_path / "Tool.stderr.log"
     head = "bandit[sarifqz4b"
@@ -2698,6 +2721,7 @@ def test_the_carried_log_trims_a_cut_inside_an_inputs_wheel_spelling(tmp_path):
     context = _context(tmp_path, [value])
     scanner = _scanner(context)
     scanner.command = "checkov"
+    scanner.use_uv_tool = True
     scanner._uv_run_inputs_for_records = lambda: ("pkg.aqz4bb==1.0",)
     log = tmp_path / "Tool.stderr.log"
     head = "pkg_aqz4b"

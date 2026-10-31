@@ -35,8 +35,10 @@ unprepared reporter a shape it has never seen and trusts it. ``UNSUPPORTED`` was
 rejected because it would fail an entire workspace run for any external plugin.
 """
 
+import os
 import threading
 from abc import abstractmethod
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -44,6 +46,7 @@ from typing import (
     Annotated,
     Any,
     ClassVar,
+    Collection,
     Generic,
     Iterable,
     Optional,
@@ -56,6 +59,7 @@ from typing_extensions import Self
 
 from pydantic import (
     Field,
+    ValidationError,
     ValidationInfo,
     ValidatorFunctionWrapHandler,
     field_validator,
@@ -76,6 +80,7 @@ from automated_security_helper.base.plugin_config import (
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.redacted_model import without_env_scalars
 
 
 class ReporterWorkspaceBehaviour(str, Enum):
@@ -140,15 +145,21 @@ class ReporterPluginConfigBase(PluginConfigBase):
         """The report is written to ``ash.<extension>`` in the reports directory.
 
         So the value is a filename suffix, from every source: one with a path
-        separator, ``..`` or NUL is replaced by the reporter's default, with one
-        warning naming the key. Declared here so it covers every reporter's
-        ``extension``, including those that redeclare the field.
+        separator, a colon, ``..`` or NUL is replaced by the reporter's default,
+        with one warning naming the key. Declared here so it covers every
+        reporter's ``extension``, including those that redeclare the field.
         """
         value = handler(value)
         if value is None or is_filename_suffix(value):
             return value
-        name = (info.data or {}).get("name") or cls.__name__
-        key = f"reporters.{name}.extension"
+        name = (info.data or {}).get("name")
+        # A section validated against this generic class has no name, and the
+        # class name is no key of any config, so it is not put in the key's place.
+        key = (
+            f"reporters.{name}.extension"
+            if name
+            else "the extension of a reporters section"
+        )
         # The key and the rule, not the value: a value can be one read from the
         # environment, and the warning goes to the console and ash.log.
         _warn_once(
@@ -156,15 +167,26 @@ class ReporterPluginConfigBase(PluginConfigBase):
             str(value),
             f"Ignoring {key}: the value is not a filename suffix such as 'json'. "
             "The report is written to ash.<extension> in the reports directory, so "
-            "it cannot contain '/', '\\', '..' or NUL. Using the default instead.",
+            "it cannot contain '/', '\\', ':', '..' or NUL. Using the default "
+            "instead.",
         )
         raise PydanticUseDefault from None
 
 
 def is_filename_suffix(value: object) -> bool:
-    """Whether ``value`` can follow ``ash.`` in a file name without leaving its directory."""
-    return isinstance(value, str) and not any(
-        part in value for part in ("/", "\\", "..", "\x00")
+    """Whether ``value`` can follow ``ash.`` in a file name without leaving its directory.
+
+    The file-name rule is ``is_report_file_name``'s, asked of ``ash.<value>``, so
+    the two cannot drift apart: a colon (on NTFS ``ash.json:stream`` is a stream
+    of the file ``ash.json``, another reporter's) was missing from a second
+    copy of it once. A ``..`` is refused as well.
+    """
+    from automated_security_helper.utils.report_path_links import is_report_file_name
+
+    return (
+        isinstance(value, str)
+        and ".." not in value
+        and is_report_file_name(f"ash.{value}")
     )
 
 
@@ -175,17 +197,28 @@ def confined_report_path(report_dir: Path, filename: str) -> Optional[Path]:
     directory is refused, whatever produced the name. So is any name while
     ``report_dir`` itself is a symlink or a directory junction, which it can
     become after the run's own check (utils/report_path_links.py), so each write
-    checks it again.
+    checks it again. So is a name that is not one file name by the rule the run's
+    own check applies (``is_report_file_name``): one holding a colon, which on
+    NTFS names a stream of another file, or a NUL, which no file system takes.
     """
-    from automated_security_helper.utils.report_path_links import link_kind
+    from automated_security_helper.utils.report_path_links import (
+        is_report_file_name,
+        link_kind,
+    )
 
+    # Refused by name: whether resolve() raises on a NUL in the directory, and
+    # as which error, is the Python version's to decide.
+    if "\x00" in str(report_dir):
+        return None
     if link_kind(Path(report_dir)) is not None:
+        return None
+    if not is_report_file_name(filename):
         return None
     target = Path(report_dir) / filename
     try:
         if target.resolve().parent != Path(report_dir).resolve():
             return None
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):
         return None
     return target
 
@@ -199,16 +232,39 @@ def write_report_file(report_dir: Path, filename: str, content: str) -> Optional
     that calls this declares the names in ``companion_file_names``, so that a link
     already at one of them, or a name that is not a file in ``report_dir``, refuses
     the run before any reporter writes. A link that is at the name by the time of
-    the write is refused and the refusal raised (``fs_guard.OutputLinkRefused``), as
-    for any other output file, rather than skipped with a warning.
+    the write, or that ``report_dir`` itself has become, is refused and the refusal
+    raised (``fs_guard.OutputLinkRefused``, or ``OutputDirLinkRefused`` for a
+    directory junction), as for any other output file, rather than skipped with a
+    warning. The write itself opens ``report_dir`` without following a link, so
+    nothing swapped in after those checks is written through.
+
+    An ``OSError`` from the write (a read-only directory, a directory at the name)
+    is logged and answered with None. Any other failure, such as content that
+    cannot be encoded as UTF-8, is raised for the caller to record against the
+    reporter.
     """
     from automated_security_helper.utils.atomic_write import write_text_atomically
     from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+    from automated_security_helper.utils.report_path_links import (
+        is_report_file_name,
+        link_kind,
+    )
     from automated_security_helper.utils.sandbox.fs_guard import OutputLinkRefused
 
-    named = Path(report_dir) / filename
-    if Path(filename).name == filename and named.is_symlink():
-        raise OutputLinkRefused(named, named)
+    directory = Path(report_dir)
+    named = directory / filename
+    links = [directory]
+    # The run's own name rule, not a path-shape test: a name holding a NUL would
+    # reach ``link_kind``'s lstat, which raises ValueError before
+    # ``confined_report_path`` can refuse the name.
+    if is_report_file_name(filename):
+        links.append(named)
+    for link in links:
+        kind = link_kind(link)
+        if kind == "a symlink":
+            raise OutputLinkRefused(named, link)
+        if kind is not None:
+            raise OutputDirLinkRefused(f"{link.as_posix()} is {kind}")
     target = confined_report_path(report_dir, filename)
     if target is None:
         ASH_LOGGER.warning(
@@ -216,7 +272,7 @@ def write_report_file(report_dir: Path, filename: str, content: str) -> Optional
         )
         return None
     try:
-        write_text_atomically(target, content)
+        write_text_atomically(target, content, root=directory)
     except OutputDirLinkRefused:
         raise
     except OSError as error:
@@ -276,12 +332,30 @@ def reporter_file_name(instance: object) -> str:
 def reporter_companion_file_names(instance: object) -> Tuple[str, ...]:
     """The files this reporter writes itself in the reports directory, from its declaration.
 
-    See ``ReporterPluginBase.companion_file_names``. Only strings are kept.
+    See ``ReporterPluginBase.companion_file_names``. Only file names are kept: a
+    string, or a path-like object written as its string. A declaration that
+    answers one string names that one file, not one file per character, and one
+    that answers None names none. A declaration that raises propagates, and the
+    caller decides what follows. The pre-write checks cannot vouch for the files
+    of a reporter whose files are unknown, so ``ReportPhase`` logs the error and
+    leaves that reporter out; the run goes on with the others. Nothing here
+    refuses the run.
     """
     declared = getattr(instance, "companion_file_names", None)
     if not callable(declared):
         return ()
-    return tuple(name for name in declared() if isinstance(name, str))
+    answer = declared()
+    if answer is None:
+        return ()
+    if isinstance(answer, (str, os.PathLike)):
+        answer = (answer,)
+    names = []
+    for name in answer:
+        if isinstance(name, os.PathLike):
+            name = os.fspath(name)
+        if isinstance(name, str):
+            names.append(name)
+    return tuple(names)
 
 
 def reporter_file_names(instance: object) -> Tuple[str, ...]:
@@ -296,7 +370,7 @@ def reporter_file_names(instance: object) -> Tuple[str, ...]:
 
 
 def reporter_matches_requested_formats(
-    instance: "ReporterPluginBase", output_formats: "Iterable[object]"
+    instance: "ReporterPluginBase", output_formats: "Collection[object]"
 ) -> bool:
     """Whether ``--output-formats`` selected this reporter.
 
@@ -328,13 +402,38 @@ def reporter_matches_requested_formats(
         output_formats: What the operator asked for. Accepts ``ExportFormat``
             members as well as plain strings, because ``ScanExecutionEngine``
             threads the enum through unconverted while the CLI paths convert to
-            ``.value`` first. Normalised here so neither caller has to.
+            ``.value`` first. Normalised here so neither caller has to. A
+            collection that can be read again for the next reporter (a list or a
+            tuple), not an iterator: an iterator is always truthy, so an empty
+            one would read as a request for nothing, and a full one is spent by
+            the first reporter asked about it, so every later reporter would be
+            matched against an empty request. One string names one format, not
+            one format per character.
 
     Returns:
         ``True`` if this reporter should run. An empty request means every
         reporter runs -- an operator who passed no ``--output-formats`` asked for
         the configured default set, not for nothing.
+
+    Raises:
+        TypeError: ``output_formats`` is an iterator, or bytes.
     """
+    if isinstance(output_formats, Iterator):
+        raise TypeError(
+            "output_formats must be a collection such as a list or a tuple, not "
+            f"an iterator ({type(output_formats).__name__}), which only the first "
+            "reporter asked about could read."
+        )
+    if isinstance(output_formats, (bytes, bytearray)):
+        raise TypeError(
+            "output_formats must be a collection of format names, not "
+            f"{type(output_formats).__name__}."
+        )
+    if isinstance(output_formats, str):
+        # A string is a collection of its characters: read as one, "markdown"
+        # asked for "m", "a", "r" and the rest, and every reporter was dropped.
+        # An empty string is still an empty request.
+        output_formats = (output_formats,) if output_formats else ()
     if not output_formats:
         return True
     requested = {str(getattr(fmt, "value", fmt)) for fmt in output_formats}
@@ -360,11 +459,13 @@ def off_host_reporter_refused(reporter_class: type, plugin_config: object) -> bo
     )
 
 
-#: Config keys of the off-host reporters already named by
+#: ``(config key, cause)`` pairs of the off-host reporters already named by
 #: :func:`warn_off_host_section_without_enabled` in this process. A run reads a
 #: reporter's section more than once (each workspace project's report phase reads
-#: the same one), and one section should produce one warning.
-_UNENABLED_SECTIONS_WARNED: Set[str] = set()
+#: the same one), and one section should produce one warning. The cause is part of
+#: the key: a section with no ``enabled`` and a section with a non-bool one are
+#: different problems with different fixes.
+_UNENABLED_SECTIONS_WARNED: Set[Tuple[str, str]] = set()
 _UNENABLED_SECTIONS_LOCK = threading.Lock()
 
 
@@ -376,6 +477,24 @@ def reset_unenabled_off_host_section_warnings() -> None:
 
 def _sets_something(value: object) -> bool:
     return value not in (None, "", {}, [])
+
+
+def enabled_value_kind(value: object) -> str:
+    """How a warning names the type a section set ``enabled`` to.
+
+    ``null`` for None, otherwise the type's name with its article: ``a str``,
+    ``an int``. The value is never named, since a config file can read it from
+    the environment, and the resolver's marker class is looked through
+    (:func:`without_env_scalars`), so a string read from the environment is
+    ``a str`` and not the marker's own name. Every warning that names the type
+    calls this, so the wording cannot drift between them.
+    """
+    value = without_env_scalars(value)
+    if value is None:
+        return "null"
+    type_name = type(value).__name__
+    article = "an" if type_name[:1].lower() in "aeiou" else "a"
+    return f"{article} {type_name}"
 
 
 def warn_off_host_section_without_enabled(
@@ -399,23 +518,47 @@ def warn_off_host_section_without_enabled(
     """
     if getattr(reporter_class, "sends_off_host", False) is not True:
         return
-    if not isinstance(plugin_config, dict) or "enabled" in plugin_config:
-        return
-    if not any(_sets_something(value) for value in plugin_config.values()):
+    if not isinstance(plugin_config, dict):
         return
     key = plugin_config_key(reporter_class)
-    with _UNENABLED_SECTIONS_LOCK:
-        if key in _UNENABLED_SECTIONS_WARNED:
+    if "enabled" in plugin_config:
+        # A section that sets 'enabled' to anything but a bool (the string
+        # "true", 1, "yes") is refused by off_host_reporter_refused, which
+        # admits only the boolean true. Left silent, `ash merge` and the
+        # workspace report step dropped a reporter the operator had tried to
+        # turn on with no message. The value's TYPE is named, never the
+        # value: a config file can read it from the environment.
+        value = plugin_config["enabled"]
+        if isinstance(value, bool):
             return
-        _UNENABLED_SECTIONS_WARNED.add(key)
-    ASH_LOGGER.warning(
-        f"Reporter '{key}' sends findings off the host and is disabled by default. "
-        "Its config section sets options but not 'enabled': it does not set "
-        "enabled: true, so it does not run. "
-        f"To run it, set reporters.{key}.enabled: true in the operator's config, or "
-        f"pass --config-overrides reporters.{key}.enabled=true.",
-        extra=NO_MARKUP,
-    )
+        kind = enabled_value_kind(value)
+        cause = "not-a-bool"
+        message = (
+            f"Reporter '{key}' sends findings off the host and is not run: its "
+            f"config section sets enabled to {kind}, and only the boolean true "
+            f"turns it on (reporters.{key}.enabled). To run it, set "
+            f"reporters.{key}.enabled: true in the operator's config, or pass "
+            f"--config-overrides reporters.{key}.enabled=true."
+        )
+    else:
+        if not any(_sets_something(value) for value in plugin_config.values()):
+            return
+        cause = "no-enabled"
+        message = (
+            f"Reporter '{key}' sends findings off the host and is disabled by "
+            "default. Its config section sets options but not 'enabled': it does "
+            "not set enabled: true, so it does not run. "
+            f"To run it, set reporters.{key}.enabled: true in the operator's "
+            f"config, or pass --config-overrides reporters.{key}.enabled=true."
+        )
+    # Once per (reporter, cause): a config that first leaves 'enabled' out and
+    # later sets it to a non-bool is a different problem with a different fix, and
+    # the second message must not be swallowed by the first.
+    with _UNENABLED_SECTIONS_LOCK:
+        if (key, cause) in _UNENABLED_SECTIONS_WARNED:
+            return
+        _UNENABLED_SECTIONS_WARNED.add((key, cause))
+    ASH_LOGGER.warning(message, extra=NO_MARKUP)
 
 
 def reporter_classes_for_run(
@@ -451,6 +594,14 @@ def reporter_classes_for_run(
     return list(
         manager.plugin_modules("reporter", filter_callback=plugins_of(plugin_modules))
     )
+
+
+def _as_given(value: Any, outer_location: Any = None) -> Any:
+    """The handler ``configure`` passes where the field validator is passed pydantic's.
+
+    The value a plugin's own model already holds needs no second pass.
+    """
+    return value
 
 
 class ReporterPluginBase(PluginBase, Generic[T]):
@@ -495,20 +646,67 @@ class ReporterPluginBase(PluginBase, Generic[T]):
     #: after the plugin modules are imported and before any reporter is built.
     destination_options: ClassVar[Tuple[str, ...]] = ()
 
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Read a ``sends_off_host`` that is not a bool as the bool it is truthy as.
+
+        Every test of it, here and in the config trust and merge code, is
+        ``is True``, so a reporter declaring ``sends_off_host = 1`` or ``"yes"``
+        was run as a local one, without ``enabled: true``, and its destination
+        options were not confined. Declared as the bool at class creation, the
+        declaration is read the same way at every one of those sites. Read off
+        the class, not its ``__dict__``: a plain mixin's ``sends_off_host = 1``
+        is inherited, and is converted here and set on this class.
+
+        A declaration that cannot be read off the class (a ``property``, which
+        the class returns as the property object) is truthy, so it reads as
+        ``True``: a reporter whose answer is not known before it is built is
+        run as one that sends findings off the host, which needs ``enabled:
+        true``, never as a local one.
+        """
+        super().__pydantic_init_subclass__(**kwargs)
+        declared = getattr(cls, "sends_off_host", False)
+        if not isinstance(declared, bool):
+            cls.sends_off_host = bool(declared)
+
     @field_validator("config", mode="wrap")
     @classmethod
     def _config_is_validated_by_the_declared_model(
-        cls, value: Any, handler: ValidatorFunctionWrapHandler
+        cls, value: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
     ) -> Any:
         """A reporter that declares a config model is configured by that model.
 
         A section it refuses, such as an AWS reporter's ``max_delay`` over its
         60-second cap, is a ValidationError: ``ReportPhase`` and the workspace
         report step log it, with the option and the limit, and go on without this
-        reporter. See ``plugin_config.config_validated_by_declared_model``.
+        reporter. The declared model validates under the validation context the
+        field was given. See ``plugin_config.config_validated_by_declared_model``.
         """
         return config_validated_by_declared_model(
-            cls, ReporterPluginConfigBase, value, handler
+            cls, ReporterPluginConfigBase, value, handler, info
+        )
+
+    @classmethod
+    def _declared_config_model(cls) -> Optional[type[ReporterPluginConfigBase]]:
+        """The config model this reporter class declares, or None.
+
+        Read from the class itself: a class taken from a value (``type(self)``)
+        handed to a call is what the shown-text guard refuses in the package.
+        """
+        return declared_config_model(cls)
+
+    @classmethod
+    def _validated_by_declared_model(
+        cls, config: Any, handler: ValidatorFunctionWrapHandler
+    ) -> Any:
+        """``config`` validated by the model this reporter class declares.
+
+        The class is the caller here for the same reason as above. Named
+        without a ``_config`` prefix: ``configure`` calls it, and the public
+        ``config`` field is the only ``config`` attribute its source names.
+        """
+        return config_validated_by_declared_model(
+            cls, ReporterPluginConfigBase, config, handler
         )
 
     @model_validator(mode="after")
@@ -518,14 +716,55 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         if self.context is None:
             raise ScannerError(f"No context provided for {self.__class__.__name__}!")
         ASH_LOGGER.trace(f"Using provided context for {self.__class__.__name__}")
+        if self.config is None:
+            # A reporter built with no config section runs on the defaults its
+            # declared model states: its enabled default, its name and its
+            # extension. Left None, the enabled filter was skipped, the report
+            # was written as the base's "ash.txt", and the reporter could not be
+            # selected by name. A reporter that declares no model keeps None.
+            # So does one whose model has a required field: it states no default
+            # to run on, and building it with no config used to be allowed, so
+            # the refusal does not fail its construction (the section is checked
+            # where one is given, by ``configure`` and the ``config`` field).
+            declared = self._declared_config_model()
+            if declared is not None:
+                try:
+                    self.config = declared()
+                except ValidationError:
+                    ASH_LOGGER.debug(
+                        f"{self.__class__.__name__} declares a config model with a "
+                        "required field, so it is built with no config",
+                        extra=NO_MARKUP,
+                    )
+                except Exception as error:
+                    # Pydantic wraps only ValueError and AssertionError from a
+                    # validator. A default factory or validator that reads the
+                    # environment or a file can raise another kind (OSError,
+                    # TypeError, KeyError), and building a reporter with no
+                    # section must not fail on it any more than on a required
+                    # field. Only the exception's type is logged: its text can
+                    # carry a value the operator's environment supplied.
+                    ASH_LOGGER.debug(
+                        f"{self.__class__.__name__}'s config model could not state "
+                        f"its defaults ({type(error).__name__}), so it is built "
+                        "with no config",
+                        extra=NO_MARKUP,
+                    )
         return self
 
     def configure(
         self,
         config: ReporterPluginConfigBase | None = None,
     ) -> None:
-        """Configure the reporter with provided configuration."""
+        """Configure the reporter with provided configuration.
+
+        The config is held to the reporter's declared model as the ``config``
+        field holds one given at construction: a section it refuses is a
+        ValidationError, and one of another class is read through the declared
+        model. Assignment alone is not validated here.
+        """
         if config:
+            config = self._validated_by_declared_model(config, _as_given)
             self.config = config
 
     def companion_file_names(self) -> Tuple[str, ...]:

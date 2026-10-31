@@ -23,7 +23,7 @@ ash-scan:
   stage: test
   image: python:3.12
   variables:
-    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+    INSTALL_SPEC: "automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1"
   before_script:
     - apt-get update && apt-get install -y --no-install-recommends nodejs npm ruby ruby-dev libyaml-dev
     - python -m venv /opt/ash

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import json
 import logging
+import os
 import re
 import shlex
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -8,6 +9,7 @@ from automated_security_helper.base.plugin_base import (
     PluginBase,
     read_log_bounded,
     shown_excerpt,
+    worse_exit_code,
 )
 from automated_security_helper.base.plugin_config import (
     PluginConfigBase,
@@ -31,6 +33,7 @@ from automated_security_helper.utils.error_text import (
     error_text,
     shown_tool_stderr,
     text_without_values,
+    timeout_limit_token,
     traceback_text,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, delivers
@@ -46,7 +49,13 @@ from automated_security_helper.utils.subprocess_utils import (
     path_independent_dirs,
 )
 
-from pydantic import Field, PrivateAttr, ValidatorFunctionWrapHandler, field_validator
+from pydantic import (
+    Field,
+    PrivateAttr,
+    ValidationInfo,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+)
 from typing import (
     Annotated,
     Any,
@@ -67,7 +76,9 @@ from abc import abstractmethod
 # Pattern for valid CLI flag keys: one or two leading dashes followed by
 # a letter, then alphanumerics/underscores/hyphens. Optionally followed by
 # '=' and a value (e.g., --exclude="path1,path2" or --skip-path=".venv/").
-_VALID_FLAG_KEY_PATTERN = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*(=.*)?$")
+# Anchored with \Z: "$" also matches just before a trailing newline, which
+# would let a key ending in one through to the tool's command line.
+_VALID_FLAG_KEY_PATTERN = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*(=.*)?\Z")
 from pathlib import Path
 from automated_security_helper.utils.output_excerpt import head_and_tail
 
@@ -77,34 +88,50 @@ from automated_security_helper.utils.output_excerpt import head_and_tail
 _STDERR_EXCERPT_LIMIT = 2000
 #: The largest results file a rejected run's notifications are read from.
 _NOTIFICATIONS_READ_LIMIT = 5 * 1024 * 1024
+#: The most of a tool's results file the template scan reads (``_read_results_file``);
+#: a larger one is refused with its size rather than read without bound.
+_RESULTS_FILE_READ_LIMIT = 1 << 30
 
 
-def _error_notifications(results_file: Path) -> str:
+class _AshInvocation(Invocation):
+    """The invocation record ASH writes first in ``runs[0].invocations``.
+
+    It has every field of :class:`Invocation` and writes the same SARIF. It is a
+    class of its own so that ``_inject_invocation``, run again on the same
+    report, can tell its own earlier record from an invocation the tool wrote:
+    the record's ``executionSuccessful`` is ASH's outcome, and reading it as the
+    tool's would hand ASH's earlier answer back as the tool's. The private flag
+    keeps what the tool itself said about the invocation this record replaced,
+    which no longer exists in the list; a private attribute is not part of the
+    written SARIF.
+    """
+
+    _tool_said_unsuccessful: bool = PrivateAttr(default=False)
+
+
+def _error_notifications(results_file: Path, values: Iterable[str] = ()) -> str:
     """The text of the error-level toolExecutionNotifications in a SARIF file.
 
     For a rejected run, to say why it failed; nothing read here is graded. Best
     effort: a file that is missing, not a regular file, larger than
-    _NOTIFICATIONS_READ_LIMIT or not SARIF gives "". Opened without following a
-    link at its name. Truncated to _STDERR_EXCERPT_LIMIT, as stderr is.
+    _NOTIFICATIONS_READ_LIMIT or not SARIF gives "". Read under fs_guard's
+    reader semantics (``read_bytes_at_most``): no link is followed at the name,
+    a FIFO left there cannot block the open, anything but a regular file is
+    refused, and the read stops one byte past the limit however the file grows.
+    JSON nested deeper than the interpreter allows is not SARIF either. The
+    text is the tool's own, so a configured value it
+    echoes (a path it could not read, say) is redacted with *values*, the same
+    values the stderr excerpt is redacted with, BEFORE the cut to
+    _STDERR_EXCERPT_LIMIT: a cut first could leave half a value in the clear.
     """
-    import os
-    import stat
+    from automated_security_helper.utils.sandbox.fs_guard import read_bytes_at_most
 
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     try:
-        fd = os.open(results_file, flags)
-    except OSError:
-        return ""
-    try:
-        with os.fdopen(fd, "rb") as handle:
-            status = os.fstat(handle.fileno())
-            if (
-                not stat.S_ISREG(status.st_mode)
-                or status.st_size > _NOTIFICATIONS_READ_LIMIT
-            ):
-                return ""
-            data = json.loads(handle.read().decode("utf-8", errors="replace"))
-    except (OSError, ValueError):
+        raw = read_bytes_at_most(results_file, _NOTIFICATIONS_READ_LIMIT + 1)
+        if len(raw) > _NOTIFICATIONS_READ_LIMIT:
+            return ""
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except (OSError, ValueError, RecursionError):
         return ""
 
     def items(value):
@@ -127,7 +154,7 @@ def _error_notifications(results_file: Path) -> str:
                 text = message.get("text") if isinstance(message, dict) else None
                 if isinstance(text, str) and text.strip():
                     texts.append(text.strip())
-    joined = " | ".join(texts)
+    joined = text_without_values(" | ".join(texts), values)
     if len(joined) > _STDERR_EXCERPT_LIMIT:
         joined = joined[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
     return joined
@@ -334,6 +361,17 @@ def _generic_missing_dependency_reason(plugin: "ScannerPluginBase") -> str:
         and plugin.command
         and find_executable(plugin.command) is None
     ):
+        if getattr(plugin, "use_uv_tool", False):
+            from automated_security_helper.utils.uv_tool_runner import find_uv_or_none
+
+            if find_uv_or_none() is None:
+                # The tool runs through uv, so its absence from PATH is not
+                # the cause: uv itself is what is missing.
+                return (
+                    f"its tool {plugin.command} runs through uv, and uv was "
+                    "not found; install uv or exclude "
+                    f"{name} with --exclude-scanners"
+                )
         searched = ", ".join(
             directory.as_posix() for directory in path_independent_dirs()
         )
@@ -389,14 +427,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
     A FIELD RATHER THAN AN EXCEPTION, AND THAT IS THE WHOLE POINT. Construction
     runs ``_process_config_options`` from ``model_post_init``, so a subclass that
-    raised there destroyed its own instance. ``ScanPhase`` creates every scanner
-    inside a ``try/except Exception`` that logs one line and does not append to
-    ``scanner_instances`` -- and both hooks the repository built for "cannot run
-    here", ``validate_plugin_dependencies`` and ``unsupported_platform_reason``,
-    are consulted only on entries in that list. So a scanner that refused at
-    construction did not land as MISSING or SKIPPED; it left the run entirely,
-    with the five status counters summing correctly over the scanners that
-    remained. A consumer could not tell that scan from a complete one.
+    raised there produced no instance. ``ScanPhase`` creates every scanner inside
+    a ``try/except Exception`` and records one that did not construct as an ERROR
+    row ("could not be constructed, so it did not run"), or as SKIPPED when the
+    operator did not select it, so the scan is not mistaken for a complete one.
+    That row says the scanner was reached and gave no result and carries no
+    remediation: the instance is not in ``scanner_instances``, and both hooks the
+    repository built for "cannot run here", ``validate_plugin_dependencies`` and
+    ``unsupported_platform_reason``, are consulted only on entries in that list.
+    So a scanner that raised at construction could never land as MISSING.
 
     Recording the reason instead keeps the instance, which is what lets the
     existing MISSING path do its job. It carries the remediation text, so the
@@ -482,17 +521,18 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     @field_validator("config", mode="wrap")
     @classmethod
     def _config_is_validated_by_the_declared_model(
-        cls, value: Any, handler: ValidatorFunctionWrapHandler
+        cls, value: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
     ) -> Any:
         """A scanner that declares a config model is configured by that model.
 
         A section it refuses, such as an opengrep ``sha256`` that is not a
         digest, is a ValidationError, which ``ScanPhase`` records as that
         scanner's ERROR, naming the option, before it goes on with the others.
-        See ``plugin_config.config_validated_by_declared_model``.
+        The declared model validates under the validation context the field was
+        given. See ``plugin_config.config_validated_by_declared_model``.
         """
         return config_validated_by_declared_model(
-            cls, ScannerPluginConfigBase, value, handler
+            cls, ScannerPluginConfigBase, value, handler, info
         )
 
     def model_post_init(self, context):
@@ -815,8 +855,23 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     "Keys must match pattern: -<letter> or --<letter>[alphanumeric_-]*"
                 )
                 continue
+            # An extra arg's value may be a number or a bool (ToolExtraArg),
+            # and a spawn takes text only: handed over as it was, the tool
+            # "could not start". A number is spelled as text. A bool is the
+            # switch's own state, not a word: True is the flag alone and False
+            # leaves it out. Spelled as a word after the key, a store_true flag
+            # would run ON for "false" and leave the word behind as a stray
+            # positional, which bandit reads as a target. A tool whose flag
+            # takes the word "true" or "false" is given that word as text.
+            value = tool_extra_arg.value
+            if value is False:
+                continue
             args.append(tool_extra_arg.key)
-            args.append(tool_extra_arg.value)
+            if value is True:
+                value = None
+            elif value is not None and not isinstance(value, str):
+                value = str(value)
+            args.append(value)
 
         args.extend(
             [
@@ -919,7 +974,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if config is not None:
             if hasattr(config, "model_dump") and callable(config.model_dump):
                 config = config.model_dump(by_alias=True)
-            self.config = self.config.__class__.model_validate(config)
+            # A config that says what this one already says is not swapped in:
+            # building it again from its dump makes every nested entry a new
+            # object (an entry that carries an identity the dump does not write
+            # got a new one on each scan) and drops the private state the first
+            # build recorded. Only a config that differs replaces it.
+            if config != self.config.model_dump(by_alias=True):
+                self.config = self.config.__class__.model_validate(config)
         self._plugin_log(
             f"config setting: {self._setting_names(config)}",
             target_type=target_type,
@@ -993,12 +1054,45 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         ``SPAWN_FAILURE_RETURNCODE`` (127) never does, even for a scanner that
         lists it: it is what ASH reports for a command the OS could not start,
         and a tool that never ran found nothing.
+
+        The rule is :meth:`_code_is_accepted`'s, the one the fold of several
+        runs' codes ranks by too, so a scanner that changes it changes both.
         """
+        return self._code_is_accepted(self.exit_code, success_codes)
+
+    def _worse_exit_code(self, current: int | None, new: int) -> int:
+        """The worse of two runs' exit codes, by this scanner's accepted set.
+
+        The base keeps the larger code, which is right only while the accepted
+        codes are the small ones: for a set such as grype's ``{0, 2}`` an error
+        code of 1 from one run was hidden behind an accepted 2 from another,
+        and the accumulated code then read as a completed scan. A code outside
+        ``success_exit_codes`` (``SPAWN_FAILURE_RETURNCODE`` always is) ranks
+        above an accepted one. Between two codes of the same rank, and for a
+        signal death (a negative code), a missing code or a 0, the larger code
+        is kept as ``worse_exit_code`` keeps it.
+        """
+        if current is None or current <= 0 or new <= 0:
+            return worse_exit_code(current, new)
+        accepted_now = self._code_is_accepted(current)
+        accepted_new = self._code_is_accepted(new)
+        if accepted_now == accepted_new:
+            return worse_exit_code(current, new)
+        return current if accepted_new else new
+
+    def _code_is_accepted(
+        self, code: Optional[int], success_codes: Optional[Set[int]] = None
+    ) -> bool:
+        """Whether *code* is one this scanner accepts: in *success_codes* (the
+        class's ``success_exit_codes`` when none are given), and never the
+        spawn-failure code. The one rule behind :meth:`_exit_code_accepted`, which
+        applies it to the current code, and :meth:`_worse_exit_code`, which
+        applies it to two."""
         if success_codes is None:
             success_codes = self.success_exit_codes
-        if self.exit_code == SPAWN_FAILURE_RETURNCODE:
+        if code == SPAWN_FAILURE_RETURNCODE:
             return False
-        return self.exit_code in success_codes
+        return code in success_codes
 
     def _sarif_execution_successful(self) -> bool:
         """SARIF ``executionSuccessful`` under the graded rule: the counter rule
@@ -1030,7 +1124,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         own verdict: cfn_nag accepts any non-negative violation count, which
         admits every judged code. The flag is the judgment, so no band is
         consulted for it. A never-started run (``spawn_failed``) is covered
-        by its code instead: 127 is refused by the base and every override.
+        by its code where the band refuses 127 (the base's accepted set,
+        npm_audit's 0-31), and by the recorded spawn failure
+        (``scan_spawn_failure``) where the band admits it: cfn_nag's count
+        can be 127, so its override reads that marker before the code.
         """
         failed = getattr(self, "targets_failed", 0) or 0
         if failed:
@@ -1110,8 +1207,20 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         if self._exit_code_accepted():
             return
+        # A cancelled run or a rejected result carries a code ASH chose for it
+        # (130, 125), not one the tool returned: saying the tool exited with it
+        # would name a code the tool never produced.
+        kept = self.scan_kept_flag
+        ash_judged = {
+            "cancelled": "was cancelled while its tool ran",
+            "result_rejected": "returned a result ASH rejected",
+        }.get(kept[0] if kept is not None else "")
+        if ash_judged is not None:
+            origin = f"its run {ash_judged}, so ASH recorded exit code {self.exit_code}"
+        else:
+            origin = f"its tool exited with code {self.exit_code}"
         rejected = _RejectedResultError(
-            f"its tool exited with code {self.exit_code}, which this scanner "
+            f"{origin}, which this scanner "
             "does not accept as a completed run, so its results file is not graded"
         )
         if results_file is None:
@@ -1182,18 +1291,73 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             command_line, recorded_arguments = redacted_command_record(
                 final_args, redact_values
             )
+        # What the tool's own invocations said is carried into ASH's: the
+        # toolExecutionNotifications (semgrep reports a rule file it cannot read
+        # there, and run_ash_scan's unevaluated-rules gate reads them) and an
+        # executionSuccessful the tool set to false. Replacing the list outright
+        # discarded both, so a run the tool itself called unsuccessful read as a
+        # complete one with no notifications.
+        #
+        # Only the invocation ASH's record REPLACES gives up its notifications and
+        # its outcome to it. The tool's later invocations stay in the list below
+        # as they are, notifications included; copying theirs into ASH's record
+        # as well reported each of them twice.
+        #
+        # Run again on the same report, ASH's own earlier record is first in the
+        # list. It is not the tool's: its executionSuccessful is ASH's outcome, so
+        # it is left out of what the tool said. It stands in for the invocation it
+        # replaced, so its notifications are what is carried on, and the tool's
+        # own outcome on that invocation is read from the flag it kept.
+        existing_invocations = list(sarif_report.runs[0].invocations or [])
+        earlier_ash_record = (
+            existing_invocations[0]
+            if existing_invocations
+            and isinstance(existing_invocations[0], _AshInvocation)
+            else None
+        )
+        if earlier_ash_record is not None:
+            tool_own_invocations = existing_invocations[1:]
+            replaced = earlier_ash_record
+            tool_said_unsuccessful = earlier_ash_record._tool_said_unsuccessful
+        else:
+            tool_own_invocations = existing_invocations
+            replaced = existing_invocations[0] if existing_invocations else None
+            tool_said_unsuccessful = False
+        tool_notifications: List[Any] = list(
+            getattr(replaced, "toolExecutionNotifications", None) or []
+        )
+        for own in tool_own_invocations:
+            if getattr(own, "executionSuccessful", None) is False:
+                tool_said_unsuccessful = True
+        if tool_notifications and "toolExecutionNotifications" not in extras:
+            extras = {**extras, "toolExecutionNotifications": tool_notifications}
+        ash_record = _AshInvocation(  # type: ignore[call-arg]
+            commandLine=command_line,
+            arguments=recorded_arguments,
+            startTimeUtc=self.start_time,
+            endTimeUtc=self.end_time,
+            # The graded rule, not the exit code alone: a scanner that
+            # counted a failed target, or whose run was ended early or whose
+            # output ASH could not record, reported executionSuccessful
+            # true whenever its tool's code was an accepted one, and the
+            # unevaluated-rules gate read that as a complete run.
+            executionSuccessful=(
+                self._exit_code_accepted(success_codes)
+                and self._sarif_execution_successful()
+                and not tool_said_unsuccessful
+            ),
+            exitCode=self.exit_code,
+            exitCodeDescription="\n".join(self.errors) if self.errors else "",
+            workingDirectory=working_dir,
+            **extras,
+        )
+        ash_record._tool_said_unsuccessful = tool_said_unsuccessful
         sarif_report.runs[0].invocations = [
-            Invocation(  # type: ignore[call-arg]
-                commandLine=command_line,
-                arguments=recorded_arguments,
-                startTimeUtc=self.start_time,
-                endTimeUtc=self.end_time,
-                executionSuccessful=self._exit_code_accepted(success_codes),
-                exitCode=self.exit_code,
-                exitCodeDescription="\n".join(self.errors) if self.errors else "",
-                workingDirectory=working_dir,
-                **extras,
-            )
+            ash_record,
+            # Whatever the tool recorded after its first invocation stays, after
+            # ASH's own: the list was replaced outright before, which dropped
+            # every further invocation a tool wrote.
+            *existing_invocations[1:],
         ]
         # Mirror the un-migrated scanner pattern: attach per-result and
         # tool-driver scanner_details so downstream consumers (and the
@@ -1250,8 +1414,22 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         Subclasses may override to add their own empty-file detection or
         alternative parsing, but must preserve the missing-file raise.
         """
-        with open(results_file, mode="r", encoding="utf-8") as fh:
-            content = fh.read()
+        # Under fs_guard's reader semantics (``read_bytes_at_most``): no link is
+        # followed at the name, a FIFO left there cannot block the open or the
+        # read, anything but a regular file is refused with OSError, and the read
+        # is bounded. A plain open followed a link to any file on the host and
+        # blocked ASH for good on a FIFO a scanner's process left at the name.
+        from automated_security_helper.utils.sandbox.fs_guard import (
+            read_bytes_at_most,
+        )
+
+        data = read_bytes_at_most(results_file, _RESULTS_FILE_READ_LIMIT + 1)
+        if len(data) > _RESULTS_FILE_READ_LIMIT:
+            raise ScannerError(
+                f"its results file is larger than {_RESULTS_FILE_READ_LIMIT} bytes, "
+                "the most this scanner reads, so it is not graded"
+            )
+        content = data.decode("utf-8")
         if not content or content.strip() == "":
             return None
         return json.loads(content)
@@ -1264,6 +1442,18 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         them to scan (measured), and grype's and opengrep's SARIF writers always add
         one, so an empty file is not a clean scan. A scanner whose tool really does
         write an empty file for a clean scan overrides this to return a report.
+
+        A report an override returns has to hold at least one SARIF run, as a
+        report the tool wrote does: one with none is refused with a "no SARIF
+        run" error of its own, since it grades nothing. A clean scan is a run
+        with no results.
+
+        ``scan()`` finishes the report the hook returns as it finishes one the
+        tool wrote: it adds the invocation record (timing, exit code, command)
+        and then runs ``_post_process_sarif`` on it. A hook returns the report
+        bare and does neither itself; ``_inject_invocation`` tolerates a second
+        call on one report, but a ``_post_process_sarif`` may not. No built-in
+        scanner overrides this hook.
         """
         raise ScannerError("its results file is empty, so there is nothing to grade")
 
@@ -1376,7 +1566,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 scanned_files=scan_set_of(context),
                 workspace_output_dir=getattr(context, "workspace_output_dir", None),
             )
-        except (OSError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError) as unreadable:
+            # Best effort, so the scan goes on without the exclusions -- but not
+            # silently: a TypeError here is a programming error, and an empty
+            # answer would let the tool read ASH's own output back in with
+            # nothing in the log to say so. Only the error's type is logged; its
+            # text can quote a path.
+            self._plugin_log(
+                "ASH's output directories could not be worked out for this scan "
+                f"({type(unreadable).__name__}); the tool is not told to skip them.",
+                level=logging.WARNING,
+            )
             return []
         return output_dirs_inside(dirs, target)
 
@@ -1421,7 +1621,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         Subclasses with bespoke logic (file-iteration, Python-API scanners) should
         override this method directly and leave _execute_scan unimplemented, and
-        start it with the same ``exit_code`` reset as this one.
+        start it with the same ``exit_code`` reset as this one, and with
+        ``_reset_errors()`` where this one clears the error lines: the record of
+        which of them are ASH's own notes is cleared with them.
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
@@ -1431,8 +1633,24 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # returned, so without this a target that returns before its tool runs (an
         # empty tree, missing dependencies) reports the previous target's code.
         self.exit_code = 0
+        # The timing too: the instance's times belong to the last target it
+        # scanned. An empty tree is timed from its own _post_scan, and a
+        # failure before the tool ran must not read as ending when the previous
+        # target did (a negative duration).
+        self.start_time = None
+        self.end_time = None
+        # The tool lines too: _process_command_response appends every run's
+        # stdout and stderr to these, and the executor records them, and the
+        # failure message quotes them, as THIS target's. Carried over, a failed
+        # converted-target run's record led with the source target's lines, and
+        # the quoted stderr described the wrong run.
+        self.output = []
+        # The record of which of the error lines are ASH's own goes with them.
+        self._reset_errors()
 
-        if not target.exists() or not any(target.iterdir()):
+        # Only a directory can be empty: listing a file target raised
+        # NotADirectoryError out of scan(), and a file is something to scan.
+        if not target.exists() or (target.is_dir() and not any(target.iterdir())):
             self._plugin_log(
                 f"Target directory {target} is empty or doesn't exist. Skipping scan.",
                 target_type=target_type,
@@ -1442,11 +1660,21 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             self._post_scan(target=target, target_type=target_type)
             return True
 
-        validated = self._pre_scan(
-            target=target,
-            target_type=target_type,
-            config=config,
-        )
+        try:
+            validated = self._pre_scan(
+                target=target,
+                target_type=target_type,
+                config=config,
+            )
+        except BaseException:
+            # _pre_scan starts the timing and then does the work that can
+            # raise (the results directory, the dependency check). The raise
+            # leaves this method before the try below, so the end is set here:
+            # left None, the executor would pair this target's start with no
+            # end, or with the previous target's.
+            if self.end_time is None:
+                self.end_time = datetime.now(timezone.utc)
+            raise
         if not validated:
             self._post_scan(target=target, target_type=target_type)
             return False
@@ -1483,11 +1711,16 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # was the only scanner that timed out cleanly, because it carried its
             # own copy of this option and enforced it in its own scan override.
             effective_timeout = self._effective_scan_timeout()
+            # Everything the call needs is worked out before the tool counts as
+            # started: a raise from the results path or the overridable cwd
+            # hook is a failure before the tool, not a run that ended.
+            results_dir = results_file.parent
+            tool_cwd = self._subprocess_cwd(results_dir)
             tool_started = True
             response = self._run_subprocess(
                 command=final_args,
-                results_dir=results_file.parent,
-                cwd=self._subprocess_cwd(results_file.parent),
+                results_dir=results_dir,
+                cwd=tool_cwd,
                 env=subprocess_env,
                 timeout=effective_timeout,
             )
@@ -1510,11 +1743,24 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 # _run_subprocess recorded a stop that failed on
                 # scan_could_not_stop, and a message saying the tool is gone
                 # would be the one wrong thing to tell the operator then.
-                limit = self._timeout_limit_token(effective_timeout)
                 if self.scan_could_not_stop is not None:
                     ending = f"{COULD_NOT_STOP_ENDING}. It produced no"
                 else:
                     ending = f"{WAS_KILLED_ENDING}, so it produced no"
+                # The ONE guarded read of the values hook for this message (the
+                # rule of _values_to_redact): a hook that raised or gave no
+                # usable answer must not replace the timeout as the scan's
+                # error, and cannot be trusted to hide the limit or the
+                # option's name, so a value-free note takes their place.
+                read = guarded_values_read(self)
+                if read.values is None:
+                    raise ScannerError(
+                        f"{self.__class__.__name__} timed out{ending} results "
+                        "file. The limit is not shown: the plugin's values hook "
+                        f"{read.failure()}. Raise the scanner's scan_timeout "
+                        "option if this target legitimately needs longer."
+                    )
+                limit = timeout_limit_token(effective_timeout, read.values)
                 raise ScannerError(
                     text_without_values(
                         f"{self.__class__.__name__} timed out after "
@@ -1522,7 +1768,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                         f"results file. Raise scanners.{getattr(self.config, 'name', '<scanner>')}"
                         ".options.scan_timeout if this target legitimately needs "
                         "longer, or set it to null to leave this scanner unbounded.",
-                        self._values_to_redact(),
+                        read.values,
                     )
                 )
 
@@ -1553,10 +1799,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # results file may be complete, but the run is not graded on it.
             if isinstance(response, dict) and response.get("post_run_error"):
                 raise ScannerError(
-                    text_without_values(
+                    self._text_without_hooked_values(
                         f"{self.__class__.__name__} ran, but ASH could not record "
                         f"the scanner's output: {response.get('error')}",
-                        self._values_to_redact(),
+                        f"{self.__class__.__name__} ran, but ASH could not record "
+                        "the scanner's output",
                     )
                 )
 
@@ -1564,10 +1811,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # whatever results file it left is not the whole scan.
             if isinstance(response, dict) and response.get("signaled"):
                 raise ScannerError(
-                    text_without_values(
+                    self._text_without_hooked_values(
                         f"{self.__class__.__name__} did not finish: "
                         f"{response.get('error')}",
-                        self._values_to_redact(),
+                        f"{self.__class__.__name__} did not finish",
                     )
                 )
 
@@ -1590,9 +1837,28 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 # Redacted: the tool's stderr can name a path or option the
                 # config read from the environment, and ash.log keeps this line.
                 ASH_LOGGER.warning(
-                    text_without_values(error_msg, self._values_to_redact())
+                    self._text_without_hooked_values(
+                        error_msg,
+                        f"{self.__class__.__name__} results file is empty "
+                        f"(exit code: {self.exit_code})",
+                    )
                 )
-                return self._handle_empty_results()
+                report = self._handle_empty_results()
+                if not isinstance(report, SarifReport):
+                    return report
+                # A report the scanner's hook answers for an empty file is
+                # finished as a tool-written one is: it is checked for a run,
+                # gets the invocation record (timing, exit code, command) and
+                # the scanner's own adjustments.
+                if not report.runs:
+                    # The results file was empty, so this is not the file's
+                    # doing: the scanner's own hook answered with no run.
+                    raise ScannerError(
+                        "the report its empty-results hook returned holds no "
+                        "SARIF run, so there is nothing to grade"
+                    )
+                self._inject_invocation(report, final_args, target)
+                return self._post_process_sarif(report, final_args, target)
 
             try:
                 sarif_report: SarifReport = SarifReport.model_validate(raw)
@@ -1616,9 +1882,56 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return self._post_process_sarif(sarif_report, final_args, target)
 
         except Exception as e:
+            # A failure before _post_scan ran (the arguments, the spawn) ends
+            # this target's timing here; left unset, the executor would pair
+            # this target's start with no end, or with the previous one's.
+            if self.end_time is None:
+                self.end_time = datetime.now(timezone.utc)
             raise ScannerError(
                 self._describe_scan_failure(e, results_file, tool_started=tool_started)
             )
+
+    def _text_without_hooked_values(self, text: str, withheld: str) -> str:
+        """*text* with the plugin's values hidden, read through the one guarded
+        read of the overridable values hook (``_values_to_redact``'s rule).
+
+        A hook that raised or gave no usable answer leaves nothing to hide the
+        values with, and an empty value set would print them: *withheld*, the
+        part of the message that carries none of the run's text, is returned
+        with a note saying why instead, and the hook's own failure never
+        replaces the error being reported.
+
+        A uv run's text goes through the full uv layer
+        (``shown_uv_output``, with the run's plugin-built inputs, unbounded):
+        uv respells what it quotes ("9.9.9-RC777" prints as "9.9.9rc777") and
+        the plain layer matches a value only as written. A raise from that
+        layer (its setup or the shower) leaves the text out, as a failing
+        values hook does, and does not fall back to the plain layer, which
+        would print what uv respelled; *withheld* still says what happened,
+        and the raise does not replace the error being reported either.
+        """
+        read = guarded_values_read(self)
+        if read.values is None:
+            return (
+                f"{withheld} (text not shown: the plugin's values hook "
+                f"{read.failure()})"
+            )
+        if getattr(self, "use_uv_tool", False):
+            try:
+                from automated_security_helper.utils.uv_tool_runner import (
+                    shown_uv_output,
+                )
+
+                return shown_uv_output(
+                    text,
+                    read.values,
+                    plugin_inputs=self._uv_run_inputs_for_records(),
+                    tool_name=self.command,
+                    limit=None,
+                )
+            except Exception:  # noqa: BLE001 -- the error being reported outranks it
+                return f"{withheld} (text not shown: the uv redaction layer failed)"
+        return text_without_values(text, read.values)
 
     def _config_as_written(self, dumped: Any) -> Any:
         """``dumped``, a dump of this scanner's config, as its section was written.
@@ -1673,7 +1986,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         -- ``_process_command_response`` only populates that from a RETURNED
         stderr, and only 3 of the 8 call sites ask for one. So this reads the log
         file when ``self.errors`` is empty, which is the common case rather than
-        the exotic one.
+        the exotic one. It reads it too when ``self.errors`` holds nothing but
+        ASH's own notes (``_plugin_log``: a timeout notice): those say what ASH
+        did, not what the tool wrote, and are kept in the message ahead of the
+        log's text. The offline explainer is not one of them: it quotes the log
+        itself ("uv said: ..."), so it stands in for the log and the log is not
+        read beside it.
 
         Why the exit code needs a verdict, not just a value
         --------------------------------------------------
@@ -1730,19 +2048,56 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             )
             detail += f" (exit code {self.exit_code}: {verdict})"
 
+        # Cut once, at the end, by head_and_tail: the tool says why it failed
+        # in its LAST lines, and a cut to the first 2000 characters here
+        # dropped them before the head-and-tail excerpt ran, so the excerpt's
+        # tail was this cut's marker and its omitted count was wrong. The
+        # errors lines are redacted again here, before the cut: the run's own
+        # lines were redacted at insertion, but a line _plugin_log stored
+        # (stored as written) was not, and the executor's later redaction
+        # cannot match a value this cut split. The log-excerpt branch below
+        # does its own bounded cut inside the shared helper.
         stderr_text = "\n".join(self.errors).strip()
-        # The errors lines were redacted at insertion, so this cut cannot
-        # split a live value; the log-excerpt branch below does its own
-        # bounded cut inside the shared helper.
-        if len(stderr_text) > _STDERR_EXCERPT_LIMIT:
-            stderr_text = stderr_text[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
+        # ``errors`` also holds the notes ASH's own ``_plugin_log`` put there
+        # (a timeout notice, say), which are not what the tool wrote: when they
+        # are all it holds, the tool's stderr log is still unread, and is read
+        # below beside them. The offline explainer is not one of them. The uv
+        # layer takes its line out of the notes because it quotes the log
+        # itself, so it counts as the tool's text here and the log is not read
+        # beside it (the docstring above says the same).
+        tool_said_nothing = not "\n".join(self._tool_error_lines()).strip()
+        values_were_read = False
+        read_values: Optional[Tuple[str, ...]] = None
+        stderr_withheld = False
+        if stderr_text:
+            values_were_read, read_values = True, guarded_values(self)
+            if read_values is not None:
+                stderr_text = text_without_values(stderr_text, read_values)
+            else:
+                # The hook raised or gave no usable answer, so nothing here can
+                # hide the values the lines hold. They are not shown: the log
+                # branch below names the stderr log, as it does when it meets
+                # the same hook, and the closing branches say so when it cannot.
+                stderr_text = ""
+                stderr_withheld = True
+        # ASH's notes, kept in the message whatever the log read does.
+        notes_text = stderr_text if tool_said_nothing else ""
+        notes_part = (
+            f". Stderr: {head_and_tail(notes_text, _STDERR_EXCERPT_LIMIT)}"
+            if notes_text
+            else ""
+        )
         log_path = None
         if results_file is not None:
             log_path = (
                 Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
             )
 
-        if not stderr_text and log_path is not None and not rejected:
+        # _values_to_redact is read at most ONCE per failure: the stderr block
+        # reads it when it quotes the log, and the notification block below
+        # reuses that read instead of asking the hook a second time.
+        log_unreadable = False
+        if (not stderr_text or notes_text) and log_path is not None and not rejected:
             # The log keeps the tool's text verbatim, so a quoted env-read
             # value sits in it in clear. The whole pipeline -- the bounded
             # read with its edge trim, redaction BEFORE the cut, the cut,
@@ -1765,12 +2120,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # path -- never the raw log, which would print the env-read
             # values the redaction hides.
             trim_inputs: Tuple[str, ...] = ()
-            guarded = guarded_values(self)
+            # Not asked a second time when ASH's notes were redacted above.
+            guarded = read_values if values_were_read else guarded_values(self)
+            values_were_read, read_values = True, guarded
             if guarded is None:
                 # The hook raised or gave no usable answer BEFORE the log was
                 # read, so nothing here knows whether stderr was captured:
                 # the text claims only what it can.
-                detail += f". Stderr could not be shown; see {log_path.as_posix()}"
+                detail += (
+                    f"{notes_part}. Stderr could not be shown; see "
+                    f"{log_path.as_posix()}"
+                )
                 return detail
             values: Tuple[str, ...] = guarded
             try:
@@ -1804,29 +2164,55 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 # Raised BEFORE the log was read, so nothing here knows
                 # whether stderr was captured: the text claims only what it
                 # can.
-                detail += f". Stderr could not be shown; see {log_path.as_posix()}"
+                detail += (
+                    f"{notes_part}. Stderr could not be shown; see "
+                    f"{log_path.as_posix()}"
+                )
                 return detail
+            # The excerpt helper keeps the first `keep` characters, so a keep of
+            # the excerpt limit here was a head-only cut BEFORE the head-and-tail
+            # cut below, and the tool's last lines were gone before the cut that
+            # was meant to keep them. The helper is given the whole bounded read
+            # to redact and mark; head_and_tail makes the one cut, at the end.
+            read_bound = _STDERR_EXCERPT_LIMIT * 32
             try:
                 raw_log, read_cut = read_log_bounded(
-                    log_path, _STDERR_EXCERPT_LIMIT * 32, values, trim_inputs
+                    log_path, read_bound, values, trim_inputs
                 )
             except Exception:  # noqa: BLE001 -- reading the log is best-effort
                 raw_log, read_cut = "", False
+                # A log that is there and could not be read (a link or a
+                # FIFO at the name, a permission) is not a log with nothing in
+                # it; one the tool never wrote is told apart below.
+                log_unreadable = os.path.lexists(log_path)
             if raw_log or read_cut:
                 try:
-                    stderr_text = shown_excerpt(
-                        raw_log, read_cut, log_path, _STDERR_EXCERPT_LIMIT, _show
+                    excerpt = shown_excerpt(
+                        raw_log, read_cut, log_path, read_bound, _show
                     )
                 except Exception:  # noqa: BLE001 -- see the comment above
                     detail += (
-                        ". Stderr was captured but could not be shown; "
-                        f"see {log_path.as_posix()}"
+                        f"{notes_part}. Stderr was captured but could not be "
+                        f"shown; see {log_path.as_posix()}"
                     )
                     return detail
+                # ASH's notes first, then the tool's text from the log.
+                stderr_text = "\n".join(part for part in (notes_text, excerpt) if part)
 
         if stderr_text:
             stderr_text = head_and_tail(stderr_text, _STDERR_EXCERPT_LIMIT)
             detail += f". Stderr: {stderr_text}"
+            if log_unreadable and log_path is not None:
+                # Only ASH's notes are shown, and the log that holds the tool's
+                # text is there but could not be read: say so after them.
+                detail += (
+                    ". The tool's stderr log could not be read; see "
+                    f"{log_path.as_posix()}"
+                )
+        elif stderr_withheld:
+            detail += ". Stderr could not be shown"
+            if log_path is not None:
+                detail += f"; see {log_path.as_posix()}"
         elif rejected and log_path is not None:
             # Names the log rather than quoting it: the result was refused, so
             # its outputs were not opened.
@@ -1834,6 +2220,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 ". Stderr not read: ASH refused this result, so its outputs "
                 f"(the stderr log at {log_path.as_posix()}) were not read"
             )
+        elif log_unreadable and log_path is not None:
+            detail += f". Stderr could not be read; see {log_path.as_posix()}"
         elif log_path is not None:
             detail += f". No stderr captured; checked {log_path.as_posix()}"
             if not log_path.exists():
@@ -1846,7 +2234,19 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # error-level SARIF notification and writes nothing on stderr.
         if not accepted and results_file is not None:
             results_path = Path(results_file)
-            reported = _error_notifications(results_path)
+            # The notifications are quoted only with the values to hide in
+            # hand: a hook that raised or gave no usable answer leaves the
+            # text unquoted and the file named below. (On the non-rejected
+            # path such a hook already returned above with the stderr log
+            # named; this read is the rejected path's, and the one read for
+            # a failure whose stderr block did not need the hook.)
+            if not values_were_read:
+                read_values = guarded_values(self)
+            reported = (
+                _error_notifications(results_path, read_values)
+                if read_values is not None
+                else ""
+            )
             if reported:
                 detail += f". {results_path.as_posix()} reports: {reported}"
             elif not stderr_text:
@@ -1864,6 +2264,23 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     ### Methods that require implementation by plugins.
     def validate_plugin(self) -> bool:
         """Validate scanner configuration and requirements."""
+        # A reason recorded while the scanner was built outranks any probe of
+        # the tool, as in validate_plugin_dependencies: a tool that is present
+        # does not make a scanner that refused to run satisfied.
+        if self.dependency_unavailable_reason:
+            # Redacted like every other place the reason is shown: it can name a
+            # path or option the config read from the environment, and the line
+            # is logged and kept in ``errors``, which the failure message and the
+            # results file quote.
+            self._plugin_log(
+                self._text_without_hooked_values(
+                    self.dependency_unavailable_reason,
+                    f"{self.__class__.__name__} is unavailable",
+                ),
+                level=logging.ERROR,
+            )
+            self.dependencies_satisfied = False
+            return False
         # Use enhanced validation that includes pre-installed tool detection
         validation_result = self._validate_tool_availability_with_pre_installed()
 
@@ -1888,7 +2305,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # Provide helpful offline mode message if applicable
             if self._is_offline_mode() and self.use_uv_tool:
                 self._plugin_log(
-                    f"Offline mode is enabled (ASH_OFFLINE=true) but tool '{self.command}' is not available. "
+                    f"Offline mode is enabled (ASH_OFFLINE, or this scanner's own options.offline) but tool '{self.command}' is not available. "
                     f"In offline mode, tools must be pre-installed. Please install '{self.command}' manually or disable offline mode.",
                     level=logging.ERROR,
                 )
@@ -1934,23 +2351,39 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 **kwargs,
             )
         except Exception as e:
-            # Include stack trace for debugging
-            stack_trace = traceback_text()
+            # The ONE guarded read of the values hook for this handler (the
+            # rule of _values_to_redact), as _run_subprocess's handler reads it:
+            # the exception can quote a value the config read from the
+            # environment (a ScannerError carries the runner's text), and the
+            # log, the stack trace and the response are all sinks. Without the
+            # values only the exception's class is shown.
+            read = guarded_values_read(self)
+            if read.values is None:
+                shown_error = (
+                    f"{type(e).__name__} (text not shown: the plugin's values "
+                    f"hook {read.failure()})"
+                )
+                stack_trace = "(stack trace not shown: the plugin's values hook failed)"
+            else:
+                shown_error = error_text(e, read.values)
+                stack_trace = traceback_text(e, values=read.values)
 
-            error_msg = f"{self.__class__.__name__} scanner failed: {error_text(e)}"
+            error_msg = f"{self.__class__.__name__} scanner failed: {shown_error}"
             ASH_LOGGER.error(error_msg)
             ASH_LOGGER.debug(f"Stack trace for scanner failure:\n{stack_trace}")
 
-            # Add error to scanner's error list
+            # The response lists this failure once, ahead of the lines the run
+            # recorded; the failure is then added to the scanner's error list.
+            errors = [error_msg, *self.errors]
             self.errors.append(error_msg)
 
             # Return structured error response
             return {
                 "scanner": self.__class__.__name__,
-                "error": error_text(e),
+                "error": shown_error,
                 "status": "failed",
                 "findings": [],
-                "errors": [error_msg, *self.errors],
+                "errors": errors,
                 "output": self.output,
                 "stack_trace": stack_trace,
             }

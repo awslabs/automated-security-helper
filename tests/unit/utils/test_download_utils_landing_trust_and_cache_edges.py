@@ -1,0 +1,1069 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Downloads land only what was verified, trust only what they examined, and keep
+the cache when the failure is local.
+
+Properties of ``utils/download_utils.py`` that nothing else pins:
+
+- a URL with a scheme other than https is refused before the destination
+  directory is created, and a download redirected off https is refused before
+  a byte is taken;
+- a certificate that does not verify is not retried, while a TLS error past the
+  connection and a socket error naming the network are;
+- the backoff is bounded for any attempt number, so a large attempt budget does
+  not replace the download error with an OverflowError;
+- the installed name comes from the URL's path, decoded, and a URL that names a
+  directory is refused where the URL is named;
+- a download that fails leaves no temporary file behind;
+- ``download_file`` lands data at 0o644 unless the caller names a mode (0o755
+  for a program it will run), and the pinned-tool install never reopens the
+  landed binary by name to set its mode;
+- the post-rename digest is read on the landed file itself, so a link swapped in
+  at the target is refused;
+- ``make_executable`` sets the mode on the file it opened, never on a link's
+  target;
+- ``unquarantine_macos_binary`` names the file alone and reports a non-zero exit;
+- a receipt level that is a link, or cannot be examined, is untrusted, and the
+  receipt store is never written through a link;
+- an installed binary whose bytes still match its receipt but lost its execute bit
+  gets the bit back, set on the one descriptor its digest was read from, and one
+  with a second name is reinstalled rather than repaired;
+- a FIFO at the install, staging, cache or receipt path is refused without
+  blocking, and a test of that never hangs the worker that runs it;
+- archive members are matched on either separator and a zip symlink entry is not
+  an executable;
+- a relative tool download cache is not used; a directory at an asset's name is
+  discarded; a staging-side failure, the one a close raises included, keeps the
+  cache entry;
+- the install command carries an absent rename as an empty argument, keeps a
+  POSIX backslash, and refuses a digest that is not plain hex;
+- opengrep on Windows arm64 gets the x86-64 build Windows on ARM runs under
+  emulation, said once, instead of a refusal.
+"""
+
+from __future__ import annotations
+
+import errno
+import hashlib
+import io
+import logging
+import os
+import ssl
+import stat
+import sys
+import tempfile
+import threading
+import urllib.error
+import zipfile
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
+from automated_security_helper.utils import download_utils as du
+
+pytestmark = pytest.mark.unit
+
+POSIX_ONLY = pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX modes and symlinks"
+)
+
+DIGEST_A = "a" * 64
+
+
+class _Body(io.BytesIO):
+    """A response stand-in: a body, and the URL it says it was read from."""
+
+    def __init__(self, payload: bytes, landed_at=None):
+        super().__init__(payload)
+        self._landed_at = landed_at
+        # _copy_whole_body reads the response headers for Content-Length; a
+        # stand-in without them raised AttributeError at the copy.
+        self.headers: dict = {}
+        # How many bytes the code under test took from the body.
+        self.bytes_read = 0
+
+    def read(self, size=-1):
+        data = super().read(size)
+        self.bytes_read += len(data)
+        return data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.close()
+        return False
+
+    def geturl(self):
+        return self._landed_at
+
+
+def _fetch(monkeypatch, payload: bytes, landed_at=None):
+    monkeypatch.setattr(
+        du.urllib.request,
+        "urlopen",
+        lambda url, timeout=None: _Body(payload, landed_at or url),
+    )
+
+
+def _single_attempt(monkeypatch):
+    monkeypatch.setenv("ASH_DOWNLOAD_MAX_ATTEMPTS", "1")
+    monkeypatch.setattr(du.time, "sleep", lambda _s: None)
+
+
+def _no_request(monkeypatch):
+    """Fail the test if the code under test opens a URL: a refusal that moved to
+    after the request made real requests, with real backoff sleeps."""
+
+    def refuse(*args, **kwargs):
+        pytest.fail("a request was made where the URL has to be refused first")
+
+    monkeypatch.setattr(du.urllib.request, "urlopen", refuse)
+
+
+class _ResetAfterFirstChunk(_Body):
+    """A body the peer resets after the first read, with the temporary files
+    that existed at that moment recorded: the failure happens mid-transfer."""
+
+    def __init__(self, payload: bytes, landed_at=None, watch: tuple = ()):
+        super().__init__(payload, landed_at)
+        self._reads = 0
+        self._watch = watch
+        self.files_during: list = []
+
+    def read(self, size=-1):
+        self._reads += 1
+        if self._reads > 1:
+            self.files_during = [
+                entry
+                for directory in self._watch
+                if directory.is_dir()
+                for entry in directory.iterdir()
+            ]
+            raise ConnectionResetError(errno.ECONNRESET, "Connection reset by peer")
+        return super().read(size)
+
+
+def _bounded(call, fifo: Path, seconds: float = 5.0) -> dict:
+    """Run ``call`` on a daemon thread and return ``{"value": ...}`` or
+    ``{"error": ...}``. A call that blocks opening the FIFO is the failure these
+    tests pin, and run on the worker itself it hung the worker until the runner's
+    timeout: here the join gives up after ``seconds``, a non-blocking write-open
+    releases the reader, and the test fails instead of hanging."""
+    outcome: dict = {}
+
+    def run() -> None:
+        try:
+            outcome["value"] = call()
+        except BaseException as exc:  # noqa: BLE001 - handed back to the test
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        try:
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+        thread.join(seconds)
+        pytest.fail(f"the call blocked for more than {seconds} s on {fifo}")
+    return outcome
+
+
+# --- the URL, before anything is made -----------------------------------------
+
+
+def test_a_refused_scheme_creates_no_destination_directory(monkeypatch, tmp_path):
+    _no_request(monkeypatch)
+    destination = tmp_path / "never-made"
+    with pytest.raises(ValueError):
+        du.download_file("http://example.com/tool", destination)
+    assert not destination.exists()
+
+
+def test_a_download_redirected_off_https_is_refused_before_it_lands(
+    monkeypatch, tmp_path
+):
+    _single_attempt(monkeypatch)
+    body = _Body(b"payload", "http://mirror.example.com/tool")
+    monkeypatch.setattr(du.urllib.request, "urlopen", lambda url, timeout=None: body)
+    with pytest.raises(ValueError) as raised:
+        du.download_file("https://example.com/tool", tmp_path)
+    assert "http://mirror.example.com/tool" in str(raised.value)
+    # Refused before a byte was taken from the response, not after the copy.
+    assert body.bytes_read == 0
+    assert not (tmp_path / "tool").exists()
+
+
+def test_a_response_landing_on_https_is_taken(monkeypatch, tmp_path):
+    _fetch(monkeypatch, b"payload", landed_at="https://cdn.example.com/tool")
+    landed = du.download_file("https://example.com/tool", tmp_path)
+    assert landed.read_bytes() == b"payload"
+
+
+# --- which failures are worth a retry ----------------------------------------
+
+
+def test_a_certificate_failure_is_not_transient():
+    reason = ssl.SSLCertVerificationError("certificate verify failed")
+    assert du._is_transient_download_error(urllib.error.URLError(reason)) is False
+    assert du._is_transient_download_error(reason) is False
+    # The control: a refused connection wrapped the same way still is.
+    assert du._is_transient_download_error(
+        urllib.error.URLError(ConnectionRefusedError())
+    )
+
+
+def test_a_tls_error_past_the_connection_and_a_network_errno_are_transient():
+    assert du._is_transient_download_error(ssl.SSLError("unexpected eof"))
+    unreachable = OSError(errno.EHOSTUNREACH, "No route to host")
+    assert du._is_transient_download_error(unreachable)
+    # The control: an errno that names the local disk is not.
+    assert not du._is_transient_download_error(OSError(errno.ENOSPC, "full"))
+
+
+def test_the_backoff_is_bounded_for_any_attempt_number():
+    assert du._retry_delay(1, 5.0) == 5.0
+    assert du._retry_delay(2, 5.0) == 10.0
+    assert du._retry_delay(2000, 5.0) == du._DOWNLOAD_MAX_DELAY
+
+
+# --- the installed name --------------------------------------------------------
+
+
+def test_the_installed_name_is_the_decoded_last_path_segment():
+    assert du._url_basename("https://x.example/v1/tool%2Bextra?sig=1#top") == (
+        "tool+extra"
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://x.example/releases/",
+        "https://x.example/releases/..",
+        "https://x.example",
+    ],
+)
+def test_a_url_naming_a_directory_is_refused_where_the_url_is_named(
+    url, monkeypatch, tmp_path
+):
+    _no_request(monkeypatch)
+    with pytest.raises(ValueError) as raised:
+        du.download_file(url, tmp_path / "dest")
+    assert "rename_to" in str(raised.value)
+    assert not (tmp_path / "dest").exists()
+
+
+_WINDOWS_MISREAD_NAMES = [
+    "tool.exe:payload",
+    "tool.exe%3Apayload",
+    "NUL",
+    "con.txt",
+    "Aux.tar.gz",
+    "COM1",
+    "lpt9.log",
+    "name.",
+    "name%20",
+]
+
+
+@pytest.mark.parametrize("name", _WINDOWS_MISREAD_NAMES)
+def test_a_name_windows_misreads_is_refused_where_the_url_is_named(
+    name, patch_module_os
+):
+    """On Windows ``tool.exe:payload`` writes an alternate data stream of
+    ``tool.exe``, ``NUL`` and ``con.txt`` open devices, and a trailing dot or space
+    is dropped, so the installed file is not the one that was checked. All refused
+    with the ``rename_to`` remedy."""
+    patch_module_os(du, name="nt")
+    with pytest.raises(ValueError, match="rename_to"):
+        du._url_basename(f"https://x.example/releases/{name}")
+
+
+@pytest.mark.parametrize(
+    "name", ["tool-1.0.tar.gz", "tool.exe", "console.txt", "COM10", "nulled", "a.b"]
+)
+def test_control_an_ordinary_name_is_kept_on_windows(name, patch_module_os):
+    patch_module_os(du, name="nt")
+    assert du._url_basename(f"https://x.example/releases/{name}") == name
+
+
+@pytest.mark.parametrize("name", ["NUL", "con.txt", "name."])
+def test_control_the_windows_only_refusals_leave_a_posix_name_alone(
+    name, patch_module_os
+):
+    """The same names are ordinary file names where the platform keeps them."""
+    patch_module_os(du, name="posix")
+    assert du._url_basename(f"https://x.example/releases/{name}") == name
+
+
+# --- the temporary file ---------------------------------------------------------
+
+
+def test_a_failed_download_leaves_no_temporary_file(monkeypatch, tmp_path):
+    _single_attempt(monkeypatch)
+    temp_root = tmp_path / "tmp"
+    temp_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))
+
+    def failing(url, timeout=None):
+        raise urllib.error.HTTPError(url, 404, "gone", None, None)
+
+    monkeypatch.setattr(du.urllib.request, "urlopen", failing)
+    with pytest.raises(urllib.error.HTTPError):
+        du.download_file("https://example.com/tool", tmp_path / "dest")
+    assert list(temp_root.iterdir()) == []
+
+
+def test_a_connection_reset_after_the_first_chunk_leaves_nothing_behind(
+    monkeypatch, tmp_path
+):
+    """The failure the test above has before any byte is taken leaves nothing to
+    clean; this one comes after the first chunk, with a partial file on disk."""
+    _single_attempt(monkeypatch)
+    temp_root = tmp_path / "tmp"
+    temp_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))
+    destination = tmp_path / "dest"
+    body = _ResetAfterFirstChunk(b"the first chunk", watch=(temp_root, destination))
+    monkeypatch.setattr(du.urllib.request, "urlopen", lambda url, timeout=None: body)
+    with pytest.raises(ConnectionResetError):
+        du.download_file("https://example.com/tool", destination)
+    # The control: a partial file did exist when the connection dropped, so the
+    # empty directories below are a cleanup and not a transfer that never began.
+    assert body.files_during, "no temporary file existed mid-transfer"
+    assert list(temp_root.iterdir()) == []
+    assert not destination.exists() or list(destination.iterdir()) == []
+
+
+# --- what lands, and with which mode -------------------------------------------
+
+
+@POSIX_ONLY
+def test_download_file_lands_data_without_the_execute_bit(monkeypatch, tmp_path):
+    """The public helper's default is least privilege: what it fetches is data (a
+    rules bundle, a release archive), and a caller that names no mode gets 0o644,
+    where every download used to land executable whatever it was."""
+    _fetch(monkeypatch, b"rules: []\n")
+    landed = du.download_file("https://example.com/rules.yaml", tmp_path)
+    assert stat.S_IMODE(landed.stat().st_mode) == 0o644
+
+
+@POSIX_ONLY
+def test_download_file_lands_a_program_executable_when_the_caller_says_so(
+    monkeypatch, tmp_path
+):
+    """The public helper's data default is least privilege; a plugin that fetches
+    a program it will run passes ``mode=0o755`` and gets the bit on the staged file,
+    the way the helper landed every download before the default changed."""
+    _fetch(monkeypatch, b"#!/bin/sh\nexit 0\n")
+    landed = du.download_file("https://example.com/tool", tmp_path, mode=0o755)
+    assert stat.S_IMODE(landed.stat().st_mode) == 0o755
+
+
+@POSIX_ONLY
+def test_install_binary_from_url_lands_an_executable(monkeypatch, tmp_path):
+    payload = b"#!/bin/sh\nexit 0\n"
+    _fetch(monkeypatch, payload)
+    installed = du.install_binary_from_url(
+        "https://example.com/tool",
+        tmp_path / "bin",
+        expected_sha256=hashlib.sha256(payload).hexdigest(),
+    )
+    assert stat.S_IMODE(installed.stat().st_mode) == 0o755
+
+
+@POSIX_ONLY
+def test_install_binary_from_url_lands_the_mode_on_the_staged_file(
+    monkeypatch, tmp_path
+):
+    """The execute bit is set on the staged file's own descriptor before the
+    rename, as the pinned-tool install sets it: no by-name make_executable after
+    the landing, which reopened the file by name and, bailing, left a 0o644 binary
+    behind a successful receipt."""
+
+    def never(path):
+        raise AssertionError(f"make_executable reopened {path} by name")
+
+    monkeypatch.setattr(du, "make_executable", never)
+    payload = b"#!/bin/sh\nexit 0\n"
+    _fetch(monkeypatch, payload)
+    installed = du.install_binary_from_url(
+        "https://example.com/tool",
+        tmp_path / "bin",
+        expected_sha256=hashlib.sha256(payload).hexdigest(),
+    )
+    assert stat.S_IMODE(installed.stat().st_mode) == 0o755
+
+
+@POSIX_ONLY
+def test_a_link_swapped_in_at_the_target_after_the_rename_is_refused(
+    patch_module_os, tmp_path
+):
+    payload = b"the verified bytes"
+    staging = tmp_path / "staging"
+    staging.write_bytes(payload)
+    target = tmp_path / "tool"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.write_bytes(payload)
+    real_replace = os.replace
+
+    def replace_then_swap(src, dst, *args, **kwargs):
+        real_replace(src, dst, *args, **kwargs)
+        os.unlink(dst)
+        os.symlink(elsewhere, dst)
+
+    patch_module_os(du, replace=replace_then_swap)
+    with pytest.raises(ToolDownloadIntegrityError):
+        du._finalize_staged(
+            staging, target, hashlib.sha256(payload).hexdigest(), mode=0o755
+        )
+    assert not target.exists() and not target.is_symlink()
+    # The target of the planted link is untouched.
+    assert elsewhere.read_bytes() == payload
+
+
+@POSIX_ONLY
+def test_a_staging_file_that_cannot_be_made_removes_the_source(tmp_path):
+    source = tmp_path / "verified"
+    source.write_bytes(b"x")
+    # A plain file where the destination directory would be made: the staging
+    # file's directory cannot be created, so no staging file is.
+    (tmp_path / "blocked").write_bytes(b"")
+    target = tmp_path / "blocked" / "tool"
+    # The source's real digest: a made-up one would fail on the digest and never
+    # reach the staging directory this test is about.
+    with pytest.raises(OSError):
+        du._replace_atomically(
+            source,
+            target,
+            expected_sha256=hashlib.sha256(b"x").hexdigest(),
+            mode=0o755,
+        )
+    assert not source.exists()
+    assert (tmp_path / "blocked").is_file()
+
+
+@POSIX_ONLY
+def test_make_executable_sets_the_mode_on_the_file_it_opened(tmp_path):
+    plain = tmp_path / "plain"
+    plain.write_bytes(b"x")
+    plain.chmod(0o644)
+    du.make_executable(plain)
+    assert stat.S_IMODE(plain.stat().st_mode) == 0o755
+
+
+@POSIX_ONLY
+def test_make_executable_never_follows_a_link_swapped_in_after_the_check(
+    monkeypatch, tmp_path, caplog
+):
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"x")
+    victim.chmod(0o644)
+    link = tmp_path / "link"
+    link.write_bytes(b"y")
+
+    def swap_then_answer(_self):
+        # The is_symlink check reads a plain file; the link is planted after it.
+        link.unlink()
+        os.symlink(victim, link)
+        return False
+
+    monkeypatch.setattr(Path, "is_symlink", swap_then_answer)
+    with caplog.at_level(logging.WARNING):
+        du.make_executable(link)
+    assert stat.S_IMODE(victim.stat().st_mode) == 0o644
+    assert "symlink" in caplog.text
+
+
+def test_unquarantine_names_the_file_alone_and_reports_a_nonzero_exit(
+    monkeypatch, caplog
+):
+    seen = {}
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        return SimpleNamespace(
+            returncode=1, stdout="", stderr="Operation not permitted"
+        )
+
+    monkeypatch.setattr(du.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(du, "run_command", fake_run)
+    target = Path("/opt/ash/bin/tool")
+    with caplog.at_level(logging.WARNING):
+        du.unquarantine_macos_binary(target)
+    assert "-r" not in seen["args"]
+    # str(target), not the literal: the path's spelling is the host's
+    # (backslashes on Windows, where the faked Darwin call still runs).
+    assert seen["args"][-1] == str(target)
+    assert "exited 1" in caplog.text and "Operation not permitted" in caplog.text
+
+
+def test_a_file_with_no_quarantine_attribute_is_not_a_failed_unquarantine(
+    monkeypatch, caplog
+):
+    """A file the downloader wrote carries no quarantine attribute, so
+    ``xattr -d`` exits 1 with "No such xattr": nothing to remove, no warning."""
+
+    def fake_run(args, **kwargs):
+        return SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="/opt/ash/bin/tool: No such xattr: com.apple.quarantine",
+        )
+
+    monkeypatch.setattr(du.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(du, "run_command", fake_run)
+    with caplog.at_level(logging.DEBUG):
+        du.unquarantine_macos_binary(Path("/opt/ash/bin/tool"))
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == [], [r.getMessage() for r in warnings]
+    assert "carries no quarantine attribute" in caplog.text
+
+
+# --- the receipt store -----------------------------------------------------------
+
+
+@POSIX_ONLY
+def test_a_receipt_level_that_is_a_link_or_unexaminable_is_untrusted(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir(mode=0o700)
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    assert "symbolic link" in (du._untrusted_reason(link) or "")
+    assert "cannot be examined" in (du._untrusted_reason(tmp_path / "gone") or "")
+    # The control: the real 0o700 directory of this user is trusted.
+    assert du._untrusted_reason(real) is None
+
+
+@POSIX_ONLY
+def test_the_receipt_store_is_not_written_through_a_link(receipt_home, tmp_path):
+    root = du.receipt_root()
+    root.parent.mkdir(parents=True, exist_ok=True)
+    elsewhere = tmp_path / "elsewhere"
+    # mkdir's mode is masked by the umask; the mode the assertion below reads back
+    # is set outright.
+    elsewhere.mkdir()
+    elsewhere.chmod(0o755)
+    root.symlink_to(elsewhere)
+    with pytest.raises(OSError):
+        du._private_dir(root / "key")
+    assert stat.S_IMODE(elsewhere.stat().st_mode) == 0o755
+    assert not (elsewhere / "key").exists()
+
+
+@POSIX_ONLY
+def test_a_link_swapped_into_the_receipt_store_after_the_check_is_not_chmodded(
+    receipt_home, tmp_path, monkeypatch
+):
+    """The mode is set on a descriptor opened with O_NOFOLLOW, so a link swapped
+    in between the ``is_symlink`` check and the chmod is refused, not followed: by
+    name, the chmod made the link's target 0o700."""
+    root = du.receipt_root()
+    root.parent.mkdir(parents=True, exist_ok=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    elsewhere.chmod(0o755)
+    # The level exists before the call, so the swap below has a directory to
+    # replace; a missing level made the rmdir fail and the test pass on that.
+    root.mkdir(exist_ok=True)
+    real_is_symlink = Path.is_symlink
+    swapped: list = []
+
+    def swap_then_answer(self):
+        answer = real_is_symlink(self)
+        if self == root and not answer and not swapped:
+            self.rmdir()
+            self.symlink_to(elsewhere)
+            swapped.append(self)
+            return False
+        return answer
+
+    monkeypatch.setattr(Path, "is_symlink", swap_then_answer)
+    with pytest.raises(OSError) as raised:
+        du._private_dir(root / "key")
+    # The swap happened, and it is the no-follow open that refused it.
+    assert swapped == [root]
+    assert raised.value.errno == errno.ELOOP
+    assert raised.value.__cause__ is not None
+    assert stat.S_IMODE(elsewhere.stat().st_mode) == 0o755
+
+
+@POSIX_ONLY
+def test_a_receipt_that_is_a_link_is_not_read(receipt_home, tmp_path):
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    written = du.write_receipt(destination, "tool", {"url": "u", "sha256": DIGEST_A})
+    assert written is not None
+    # The control: the receipt as written is read, so the None below is the link
+    # refused and not a store this test could never read.
+    assert du.read_receipt(destination, "tool") is not None
+    elsewhere = tmp_path / "forged.json"
+    elsewhere.write_text('{"url": "u", "sha256": "%s"}' % DIGEST_A)
+    elsewhere.chmod(0o600)
+    written.unlink()
+    written.symlink_to(elsewhere)
+    assert du.read_receipt(destination, "tool") is None
+
+
+@POSIX_ONLY
+def test_a_verified_binary_that_lost_its_execute_bit_gets_it_back(
+    receipt_home, tmp_path, caplog
+):
+    """The bytes still match the receipt, so the install is kept and the mode
+    put back, rather than the file downloaded again."""
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    payload = b"binary"
+    digest = hashlib.sha256(payload).hexdigest()
+    target = destination / "tool"
+    target.write_bytes(payload)
+    target.chmod(0o755)
+    du.write_receipt(
+        destination,
+        "tool",
+        {"url": "https://x.example/tool", "sha256": digest, "installed_sha256": digest},
+    )
+    assert du._already_installed(destination, "tool", "https://x.example/tool", digest)
+    target.chmod(0o644)
+    with caplog.at_level(logging.WARNING):
+        assert du._already_installed(
+            destination, "tool", "https://x.example/tool", digest
+        )
+    assert "not executable" in caplog.text
+    assert stat.S_IMODE(target.stat().st_mode) & 0o111 == 0o111
+    # The control: bytes that no longer match the receipt are not repaired.
+    target.write_bytes(b"other")
+    target.chmod(0o644)
+    assert not du._already_installed(
+        destination, "tool", "https://x.example/tool", digest
+    )
+    assert stat.S_IMODE(target.stat().st_mode) & 0o111 == 0
+
+
+@POSIX_ONLY
+def test_a_present_tool_is_executable_only_when_the_kernel_says_so(
+    tmp_path, monkeypatch
+):
+    """``_executable_by_caller`` asks the kernel (ACLs, a noexec mount, root's
+    rule) and requires an execute bit on the descriptor's stat; a reimplementation
+    from the mode bits alone said "executable" where the kernel refused to run the
+    file, so the install was skipped for a copy that could not run."""
+    binary = tmp_path / "tool"
+    binary.write_bytes(b"binary")
+    binary.chmod(0o755)
+    info = os.stat(binary)
+    assert du._executable_by_caller(binary, info) is True
+    monkeypatch.setattr(du.os, "access", lambda path, mode: False)
+    assert du._executable_by_caller(binary, info) is False
+    # The control the other way: the kernel's yes does not make a file with no
+    # execute bit an installed tool.
+    monkeypatch.setattr(du.os, "access", lambda path, mode: True)
+    binary.chmod(0o644)
+    assert du._executable_by_caller(binary, os.stat(binary)) is False
+
+
+class _RecordingOs:
+    """The ``os`` module as the download module sees it, with the calls that open
+    the installed file or set a mode recorded; everything else is the real one."""
+
+    def __init__(self):
+        self.opens: list = []
+        self.fchmods: list = []
+        self.path_chmods: list = []
+
+    def open(self, path, flags, *args, **kwargs):
+        fd = os.open(path, flags, *args, **kwargs)
+        self.opens.append((os.fspath(path), flags, fd))
+        return fd
+
+    def fchmod(self, fd, mode):
+        self.fchmods.append((fd, mode))
+        return os.fchmod(fd, mode)
+
+    def chmod(self, *args, **kwargs):
+        self.path_chmods.append(args)
+        return os.chmod(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+@POSIX_ONLY
+def test_the_repair_hashes_and_sets_the_mode_on_one_descriptor(
+    receipt_home, tmp_path, monkeypatch
+):
+    """The digest and the mode are read and set through ONE open of the file
+    (O_NOFOLLOW), never through a second path lookup: the install directory may
+    be writable by others, and a file swapped in between a path-based hash and a
+    path-based chmod would have had its mode set on bytes nobody hashed."""
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    payload = b"binary"
+    digest = hashlib.sha256(payload).hexdigest()
+    target = destination / "tool"
+    target.write_bytes(payload)
+    target.chmod(0o644)
+    du.write_receipt(
+        destination,
+        "tool",
+        {"url": "https://x.example/tool", "sha256": digest, "installed_sha256": digest},
+    )
+    recording = _RecordingOs()
+    monkeypatch.setattr(du, "os", recording)
+
+    def never(*args, **kwargs):
+        raise AssertionError("a path-based read or chmod of the installed file")
+
+    monkeypatch.setattr(du, "sha256_file", never)
+    monkeypatch.setattr(du, "make_executable", never)
+    assert du._already_installed(destination, "tool", "https://x.example/tool", digest)
+    opens = [entry for entry in recording.opens if entry[0] == str(target)]
+    assert len(opens) == 1, recording.opens
+    assert opens[0][1] & os.O_NOFOLLOW, opens[0]
+    assert [fd for fd, _mode in recording.fchmods] == [opens[0][2]], recording.fchmods
+    assert recording.path_chmods == []
+    assert stat.S_IMODE(target.stat().st_mode) & 0o111 == 0o111
+
+
+@POSIX_ONLY
+def test_the_repair_opens_the_installed_file_once_by_any_route(receipt_home, tmp_path):
+    """The recording ``os`` above sees only opens made through ``du.os``; a
+    ``Path.open``, ``open()`` or ``io.open`` of the installed file would pass it
+    unseen. The interpreter's own audit event sees every route."""
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    payload = b"binary"
+    digest = hashlib.sha256(payload).hexdigest()
+    target = destination / "tool"
+    target.write_bytes(payload)
+    target.chmod(0o644)
+    du.write_receipt(
+        destination,
+        "tool",
+        {"url": "https://x.example/tool", "sha256": digest, "installed_sha256": digest},
+    )
+    watched = os.fspath(target)
+    seen: list = []
+    listening = True
+
+    def hook(event, args):
+        # Audit hooks cannot be removed: this one goes quiet when the test ends.
+        if listening and event == "open":
+            try:
+                opened = os.fspath(args[0])
+            except TypeError:
+                return
+            if opened == watched:
+                seen.append(args[1:])
+
+    sys.addaudithook(hook)
+    try:
+        assert du._already_installed(
+            destination, "tool", "https://x.example/tool", digest
+        )
+    finally:
+        listening = False
+    assert len(seen) == 1, seen
+
+
+@POSIX_ONLY
+def test_a_file_with_a_second_name_is_reinstalled_not_repaired(
+    receipt_home, tmp_path, caplog
+):
+    """A hard link shares its mode with its other name, so the repair would
+    change a file outside the install directory; the install replaces the name
+    instead."""
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    payload = b"binary"
+    digest = hashlib.sha256(payload).hexdigest()
+    target = destination / "tool"
+    target.write_bytes(payload)
+    target.chmod(0o644)
+    os.link(target, tmp_path / "other-name")
+    du.write_receipt(
+        destination,
+        "tool",
+        {"url": "https://x.example/tool", "sha256": digest, "installed_sha256": digest},
+    )
+    with caplog.at_level(logging.WARNING):
+        assert not du._already_installed(
+            destination, "tool", "https://x.example/tool", digest
+        )
+    assert "another name" in caplog.text
+    assert stat.S_IMODE((tmp_path / "other-name").stat().st_mode) & 0o111 == 0
+    # The control: with the other name gone, the same file is repaired.
+    (tmp_path / "other-name").unlink()
+    assert du._already_installed(destination, "tool", "https://x.example/tool", digest)
+    assert stat.S_IMODE(target.stat().st_mode) & 0o111 == 0o111
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs os.mkfifo")
+def test_a_fifo_at_the_install_path_is_refused_without_blocking(
+    receipt_home, tmp_path, caplog
+):
+    """A FIFO planted at the install path, in a directory other users can write,
+    must be refused by the regular-file check; an open that followed the FIFO's
+    own rules would block there, with no writer ever coming, and the check would
+    never return."""
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    payload = b"binary"
+    digest = hashlib.sha256(payload).hexdigest()
+    fifo = destination / "tool"
+    os.mkfifo(fifo)
+    du.write_receipt(
+        destination,
+        "tool",
+        {"url": "https://x.example/tool", "sha256": digest, "installed_sha256": digest},
+    )
+    with caplog.at_level(logging.WARNING):
+        outcome = _bounded(
+            lambda: du._already_installed(
+                destination, "tool", "https://x.example/tool", digest
+            ),
+            fifo,
+        )
+    assert "error" not in outcome, outcome
+    assert not outcome["value"]
+    assert "not a regular file" in caplog.text
+    # The control: the same path holding a regular file with those bytes is
+    # installed.
+    (destination / "tool").unlink()
+    (destination / "tool").write_bytes(payload)
+    (destination / "tool").chmod(0o755)
+    assert du._already_installed(destination, "tool", "https://x.example/tool", digest)
+
+
+@POSIX_ONLY
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs os.mkfifo")
+def test_a_fifo_renamed_over_the_staging_name_is_refused_without_blocking(
+    tmp_path,
+):
+    """The staging file is created with O_EXCL, which stops a plant but not a
+    rename over its name in a directory other users can write. A FIFO renamed
+    there must be refused by the regular-file check on the open descriptor; an
+    open that honored the FIFO would block with no writer ever coming."""
+    staging = tmp_path / ".tool.staged.ash-partial"
+    os.mkfifo(staging)
+    target = tmp_path / "tool"
+    outcome = _bounded(
+        lambda: du._finalize_staged(staging, target, DIGEST_A, mode=0o755), staging
+    )
+    assert isinstance(outcome.get("error"), ToolDownloadIntegrityError), outcome
+    assert "not a regular file" in str(outcome["error"])
+    assert not target.exists()
+
+
+@POSIX_ONLY
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs os.mkfifo")
+def test_make_executable_refuses_a_fifo_without_blocking(tmp_path, caplog):
+    fifo = tmp_path / "tool"
+    os.mkfifo(fifo, 0o600)
+    with caplog.at_level(logging.WARNING):
+        outcome = _bounded(lambda: du.make_executable(fifo), fifo)
+    assert "error" not in outcome, outcome
+    assert "not a regular file" in caplog.text
+    # No execute bit was set on it.
+    assert stat.S_IMODE(os.stat(fifo).st_mode) & 0o111 == 0
+
+
+@POSIX_ONLY
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs os.mkfifo")
+def test_a_fifo_swapped_in_at_the_receipt_path_is_not_read(
+    receipt_home, tmp_path, monkeypatch, caplog
+):
+    """``read_receipt`` asks ``is_file`` by path first, so a FIFO that sits there
+    is already treated as absent; the one swapped in after that answer reaches
+    the open, which must not block on it."""
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    written = du.write_receipt(destination, "tool", {"url": "u", "sha256": DIGEST_A})
+    assert written is not None
+    written.unlink()
+    os.mkfifo(written, 0o600)
+    real_is_file = Path.is_file
+
+    def answer_present(self):
+        return True if self == written else real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", answer_present)
+    with caplog.at_level(logging.WARNING):
+        outcome = _bounded(lambda: du.read_receipt(destination, "tool"), written)
+    assert outcome == {"value": None}
+    assert "is not a file" in caplog.text
+
+
+# --- archive members ---------------------------------------------------------------
+
+
+def test_archive_members_are_matched_on_either_separator():
+    assert du._archive_basename("dist\\bin\\tool.exe") == "tool.exe"
+    assert du._archive_basename("dist/bin/tool") == "tool"
+
+
+def test_a_zip_symlink_entry_is_not_a_regular_file():
+    link = zipfile.ZipInfo("tool")
+    link.external_attr = (stat.S_IFLNK | 0o777) << 16
+    regular = zipfile.ZipInfo("tool")
+    regular.external_attr = (stat.S_IFREG | 0o755) << 16
+    unknown = zipfile.ZipInfo("tool")  # made on a platform storing no mode
+    assert not du._zip_entry_is_a_regular_file(link)
+    assert du._zip_entry_is_a_regular_file(regular)
+    assert du._zip_entry_is_a_regular_file(unknown)
+
+
+# --- the tool download cache -----------------------------------------------------------
+
+
+def test_a_relative_cache_is_not_used_and_says_so_once(monkeypatch, caplog):
+    monkeypatch.setenv(du._TOOL_DOWNLOAD_CACHE_ENV, "relative/cache")
+    # A fresh set for this test, restored after it: discarding one key from the
+    # module's set left the rest of the process's record in place and put the
+    # key back only on the next warning.
+    monkeypatch.setattr(du, "_warned_relative_cache", set())
+    with caplog.at_level(logging.WARNING):
+        assert du._tool_download_cache() is None
+        assert du._tool_download_cache() is None
+    assert caplog.text.count("not an absolute path") == 1
+
+
+def test_a_directory_at_an_assets_name_is_discarded(monkeypatch, tmp_path, caplog):
+    cache = tmp_path / "cache"
+    (cache / "asset.tar.gz").mkdir(parents=True)
+    (cache / "asset.tar.gz" / "junk").write_bytes(b"x")
+    monkeypatch.setenv(du._TOOL_DOWNLOAD_CACHE_ENV, str(cache))
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    with caplog.at_level(logging.WARNING):
+        assert du._restore_cached_asset("asset.tar.gz", DIGEST_A, staging) is None
+    assert not (cache / "asset.tar.gz").exists()
+
+
+def test_a_staging_side_failure_keeps_the_cache_entry(monkeypatch, tmp_path, caplog):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    payload = b"the asset"
+    (cache / "asset.tar.gz").write_bytes(payload)
+    monkeypatch.setenv(du._TOOL_DOWNLOAD_CACHE_ENV, str(cache))
+    staging = tmp_path / "no-such-staging-dir"
+    with caplog.at_level(logging.WARNING):
+        restored = du._restore_cached_asset(
+            "asset.tar.gz", hashlib.sha256(payload).hexdigest(), staging
+        )
+    assert restored is None
+    assert (cache / "asset.tar.gz").read_bytes() == payload
+    assert "cache entry is kept" in caplog.text
+
+
+def test_a_staging_copy_that_fails_at_its_close_keeps_the_cache_entry(
+    monkeypatch, tmp_path, caplog
+):
+    """The error a buffered write defers to the close (ENOSPC on the last chunk,
+    EDQUOT or EIO on a quota or network TMPDIR) is a staging-side failure: the entry
+    is kept and the caller downloads. It used to escape the function uncaught."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    payload = b"the asset"
+    (cache / "asset.tar.gz").write_bytes(payload)
+    monkeypatch.setenv(du._TOOL_DOWNLOAD_CACHE_ENV, str(cache))
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    real_open = open
+
+    class _FailsAtClose:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def write(self, data):
+            return self._inner.write(data)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._inner.close()
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    def opened(path, mode="r", *args, **kwargs):
+        handle = real_open(path, mode, *args, **kwargs)
+        return _FailsAtClose(handle) if mode == "wb" else handle
+
+    monkeypatch.setattr(du, "open", opened, raising=False)
+    with caplog.at_level(logging.WARNING):
+        restored = du._restore_cached_asset(
+            "asset.tar.gz", hashlib.sha256(payload).hexdigest(), staging
+        )
+    assert restored is None
+    assert (cache / "asset.tar.gz").read_bytes() == payload
+    assert "No space left on device" in caplog.text
+    assert "cache entry is kept" in caplog.text
+
+
+# --- the install commands ----------------------------------------------------------------
+
+
+def test_an_absent_rename_travels_as_an_empty_argument():
+    cmd = du.create_url_download_command(
+        url="https://example.com/tool", rename_to=None, expected_sha256=DIGEST_A
+    )
+    assert cmd.args[-1] == ""
+    assert "sys.argv[4] or None" in cmd.args[2]
+
+
+@pytest.mark.parametrize(
+    "digest",
+    [
+        "0x" + "a" * 62,
+        "a" * 63 + " ",
+        "+" + "a" * 63,
+        "a_" + "a" * 62,
+        # A trailing newline: ``$`` in a regex matches before it, ``\Z`` does not.
+        "a" * 64 + "\n",
+        # Arabic-Indic digits: ``int(c, 16)`` and ``str.isdigit`` take them, hex does not.
+        "٣" * 64,
+        "a" * 63 + "٣",
+    ],
+)
+def test_a_digest_that_is_not_plain_hex_is_refused(digest):
+    with pytest.raises(ValueError):
+        du.create_url_download_command(
+            url="https://example.com/tool", expected_sha256=digest
+        )
+
+
+@POSIX_ONLY
+def test_a_backslash_in_a_posix_destination_is_kept(monkeypatch):
+    # Only the module's own view of ``os`` is replaced: ``du.os`` is the real
+    # ``os`` module, and setting ``os.name`` on it changed how pathlib and the rest
+    # of the process read every path until the test ended.
+    monkeypatch.setattr(du, "os", SimpleNamespace(name="posix"))
+    assert du._destination_text(Path("/opt/odd\\name")) == "/opt/odd\\name"
+    monkeypatch.setattr(du, "os", SimpleNamespace(name="nt"))
+    assert du._destination_text("C:\\ash\\bin") == "C:/ash/bin"
+
+
+def test_opengrep_on_windows_arm64_gets_the_x86_64_build_it_runs_under_emulation(
+    caplog,
+):
+    """opengrep has no Windows arm64 build, and Windows 11 on ARM runs x86-64
+    executables under emulation: the arm64 request gets that build, with a line
+    saying so. A ValueError here failed a working install at scanner construction."""
+    with caplog.at_level(logging.INFO):
+        url = du.get_opengrep_url("windows", "arm64")
+    assert url.endswith("opengrep_windows_x86.exe")
+    notes = [r for r in caplog.records if "emulation" in r.getMessage()]
+    assert len(notes) == 1, [r.getMessage() for r in caplog.records]
+    # The control: the one Windows build it has, asked for by its own name, needs
+    # no note, so the count stays at one.
+    with caplog.at_level(logging.INFO):
+        assert du.get_opengrep_url("windows", "amd64") == url
+    assert len([r for r in caplog.records if "emulation" in r.getMessage()]) == 1
+    with pytest.raises(ValueError):
+        du.get_opengrep_url("windows", "mips")

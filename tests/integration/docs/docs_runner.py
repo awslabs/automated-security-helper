@@ -42,7 +42,6 @@ where a doc's commands are trusted, as CI does.
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import shutil
 import signal
@@ -53,6 +52,8 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from tests.utils.runner_state import developer_environment_record
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OUTPUT_TAIL_LINES = 25
@@ -172,33 +173,40 @@ SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
 
 
 #: The variables tests/conftest.py moves into a private directory for the whole pytest
-#: run, and records (those that were set) as JSON in ASH_TEST_PRE_SESSION_HOME.
+#: run, or removes for it, and records (those that were set) as JSON in
+#: ASH_TEST_DEVELOPER_HOME. The record also holds the other uv directory variables;
+#: only the two that name uv's tool bin directory are restored here, because those
+#: are the ones _uv_tool_bin_dir and the ``uv tool dir --bin`` child read.
 _MOVED_BY_THE_TEST_SESSION = (
     "HOME",
     "USERPROFILE",
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     "XDG_STATE_HOME",
+    "UV_TOOL_BIN_DIR",
+    "XDG_BIN_HOME",
 )
 
 
 def invoking_user_environment() -> dict[str, str]:
-    """This process's environment, with the home variables the test session moved put back.
+    """This process's environment, with the variables the test session moved put back.
 
     tests/conftest.py points HOME, USERPROFILE and three XDG directories at a private
     directory before collection, so Path.home() here is that directory, which holds
-    no tool. ``ash dependencies install`` ran as the invoking user, outside the test
-    session, and put its tools under that user's home. The values the session replaced
-    are in ASH_TEST_PRE_SESSION_HOME, and a variable that was unset is absent from it.
-    Without the record (this module run outside that conftest) nothing was moved and
-    the environment is returned as it is.
+    no tool. It also removes uv's directory variables for the whole session. ``ash
+    dependencies install`` ran as the invoking user, outside the test session, and put
+    its tools under that user's home, or under the directory the user's
+    UV_TOOL_BIN_DIR or XDG_BIN_HOME names. The values the session replaced or removed
+    are the ``env`` part of the JSON in ASH_TEST_DEVELOPER_HOME (read by
+    developer_environment_record), and a variable that was unset is absent from it.
+    A variable absent from the record is removed from the copy, which is also what
+    the session did, so a value the process holds now is not trusted. Without the
+    record (this module run outside that conftest) nothing was moved and the
+    environment is returned as it is.
     """
     env = dict(os.environ)
-    try:
-        recorded = json.loads(os.environ.get("ASH_TEST_PRE_SESSION_HOME") or "{}")
-    except ValueError:
-        recorded = {}
-    if isinstance(recorded, dict) and recorded:
+    recorded = developer_environment_record()
+    if recorded:
         for name in _MOVED_BY_THE_TEST_SESSION:
             value = recorded.get(name)
             if value:
@@ -206,6 +214,28 @@ def invoking_user_environment() -> dict[str, str]:
             else:
                 env.pop(name, None)
     return env
+
+
+def _uv_tool_bin_dir(user_env: dict[str, str], home: Path) -> Path:
+    """uv's tool bin directory for ``user_env``, resolved the way ``uv tool dir --bin``
+    resolves it: UV_TOOL_BIN_DIR, else XDG_BIN_HOME, else ``home``/.local/bin.
+
+    Read from the environment, not from uv, so the directory is known where the
+    pytest process cannot run uv at all: a runner that installs the tools with a uv
+    on its own PATH and then runs pytest from a virtual environment that has no uv
+    beside its interpreter and no uv on the process's PATH.
+    """
+    for name in ("UV_TOOL_BIN_DIR", "XDG_BIN_HOME"):
+        value = user_env.get(name)
+        if value:
+            return Path(value)
+    return home / ".local" / "bin"
+
+
+def _uv_executable() -> str | None:
+    """uv beside this interpreter, else uv on PATH; None when neither is there."""
+    beside = shutil.which("uv", path=str(Path(sys.executable).parent))
+    return beside or shutil.which("uv")
 
 
 def ash_tool_dirs() -> list[Path]:
@@ -220,13 +250,18 @@ def ash_tool_dirs() -> list[Path]:
     finds any tool on PATH. "The invoking user's" means the home the user had before
     the test session moved it (invoking_user_environment): in the pytest process
     Path.home() is the session's private home, where nothing is installed.
+
+    uv's directory is resolved from that environment first (_uv_tool_bin_dir), so it
+    is found with no uv reachable from this process; when uv is reachable it is also
+    asked, as a further source, since a uv configured through its own settings files
+    can answer another directory. Duplicates are dropped, in first-seen order.
     """
     user_env = invoking_user_environment()
     from_env = user_env.get("ASH_BIN_PATH")
     home = Path(user_env["HOME"]) if user_env.get("HOME") else Path.home()
     dirs = [Path(from_env) if from_env else home / ".ash" / "bin"]
-    uv = Path(sys.executable).parent / "uv"
-    uv_path = str(uv) if uv.is_file() else shutil.which("uv")
+    dirs.append(_uv_tool_bin_dir(user_env, home))
+    uv_path = _uv_executable()
     if uv_path:
         try:
             answer = subprocess.run(

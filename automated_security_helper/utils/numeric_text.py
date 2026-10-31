@@ -32,12 +32,18 @@ _DOTTED_VERSION = re.compile(r"[+-]?\d+(?:\.\d+)+")
 
 
 def purely_numeric(value: str) -> bool:
-    """Digits with at most one dot: "0", "0.50", "4000".
+    """ASCII digits with at most one dot: "0", "0.50", "4000".
 
     The one definition of this boundary: a change here moves the validator's
     derived-spelling rule and the Bedrock knob exclusion together. The
-    Bedrock site layers one leading sign on top at its own call."""
-    return value.replace(".", "", 1).isdigit()
+    Bedrock site layers one leading sign on top at its own call.
+
+    ASCII decimal digits only. ``str.isdigit`` is wider: a superscript, a
+    circled digit and another script's digits all pass it, while ``int()`` and
+    ``float()`` refuse the first two, so a knob value spelled with one read as a
+    bare number here and as a non-number everywhere else."""
+    digits = value.replace(".", "", 1)
+    return digits.isascii() and digits.isdecimal()
 
 
 def number_bounded_form(form: str) -> bool:

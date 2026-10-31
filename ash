@@ -2,13 +2,23 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Resolve the absolute path of the parent of the script directory (ASH repo root)
-export ASH_ROOT_DIR="$(cd -- "$(dirname -- "$0")"; pwd)"
-export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
+# ASH_ROOT_DIR, the directory holding this script (the ASH repo root), is resolved
+# below, once the helpers it needs are defined (resolve_file): a symlinked ./ash is
+# followed to the script file, so the Dockerfile and the build context are the
+# checkout's and not the link's directory, and a directory that cannot be entered is
+# a refusal rather than the working directory. The cd that resolves it runs with
+# CDPATH unset (resolve_dir): with one exported, cd searches its entries for a
+# relative directory whose first component is not "." or ".." and prints the
+# directory it went to, so a script invoked as `<checkout>/ash` from a directory that
+# CDPATH also names (a projects directory, say) found the checkout through that entry
+# and printed it, and ASH_ROOT_DIR held its path twice, on two lines. `./ash` and
+# `ash` give "." and are never searched.
 
 # Set local variables
 SOURCE_DIR=""
-OUTPUT_DIR=".ash/ash_output"
+# Empty until the source directory is resolved: the default is .ash/ash_output inside
+# the scanned directory, as `ash scan` defaults it, not under the working directory.
+OUTPUT_DIR=""
 CONTAINER_UID_SPECIFIED="NO"
 CONTAINER_GID_SPECIFIED="NO"
 DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS:-}"
@@ -28,10 +38,12 @@ INSTALL_ASH_REVISION="LOCAL"
 # A refusal is this script declining its own arguments or environment, before anything
 # is built or run. Every wrapper (this one, utils/ash_helpers.sh and Invoke-ASH) exits 3
 # for one, except the usage errors `ash` itself refuses with 5, which exit 5 with its
-# text: an explicit --sandbox (refuse_sandbox_unless_off below), a --source-dir that
-# names no directory to scan, and an --output-dir that is a file, cannot be made,
-# cannot be entered or cannot be written (refuse_usage). A failed build or run is not
-# a refusal: it keeps its own status.
+# text: an explicit --sandbox (refuse_sandbox_unless_off below), one of this script's
+# own value options given with no value (require_value; the CLI exits 5 for an option
+# that requires an argument and got none), a --source-dir that names no directory to
+# scan, and an --output-dir that is a file, cannot be made, cannot be entered or
+# cannot be written (refuse_usage). A failed build or run is not a refusal: it keeps
+# its own status.
 WRAPPER_REFUSAL_EXIT=3
 USAGE_ERROR_EXIT=5
 refuse() {
@@ -113,7 +125,27 @@ has_format_character() (
 # option included, and $3 the value.
 require_value() {
   if [[ "$2" -lt 2 || -z "${3//[[:space:]]/}" ]]; then
-    refuse "$1 needs a value."
+    refuse_usage "$1 needs a value."
+  fi
+}
+
+# The value of one of this script's own value options, in OWN_VALUE, from either
+# spelling: `--opt=value`, the value after the first "=", or `--opt value`, the next
+# word. OWN_SHIFT is how many words past the option the caller shifts: 0 for the
+# first spelling, 1 for the second. $1 is the word as typed, $2 the count of arguments
+# left, the option included, and $3 the next word. Before this, only the spaced form
+# was this script's: `--source-dir=X`, `--oci-runner=X`, `--build-target=ci` and the
+# others fell through to the scan inside the container, which took the directory or
+# ignored the option, while this script built and ran with its defaults.
+own_value() {
+  if [[ "$1" == *=* ]]; then
+    OWN_VALUE="${1#*=}"
+    OWN_SHIFT=0
+    require_value "${1%%=*}" 2 "${OWN_VALUE}"
+  else
+    require_value "$1" "$2" "$3"
+    OWN_VALUE="$3"
+    OWN_SHIFT=1
   fi
 }
 
@@ -284,6 +316,14 @@ require_mountable() {
 # tests/unit/test_sandbox_refused_by_every_container_entrypoint.py checks both
 # lists against the real commands and options.
 ASH_SUBCOMMANDS="scan build-image report merge mcp get-genai-guide config dependencies inspect plugin"
+# The subcommands whose own -o is NOT the container runtime: get-genai-guide's -o is
+# its --output, config's its --output-dir. After one of these, -o is the
+# subcommand's and is forwarded. After scan, whose -o is the CLI's own alias of
+# --oci-runner, after build-image, and after every other subcommand, -o is still
+# this script's runner, as it is with no subcommand: `./ash scan -o podman` picks
+# podman. Forwarding -o after every subcommand sent `scan -o podman` into the
+# container while this script picked the first runner on PATH.
+ASH_DASH_O_IS_THE_SUBCOMMANDS="get-genai-guide config"
 # The root ash options that take a value. A value can be a subcommand's name
 # (`--phases report`, `--phases inspect`), so the token after one of these is
 # the option's value, not the subcommand.
@@ -363,12 +403,32 @@ resolve_file() {
         path="${OUTPUT_KEPT}/${target}"
         ;;
     esac
+    # A target ending in '/' names a directory through the link, and [ -L ] on
+    # "link/" follows the link and is false, so the loop stopped at a path that is
+    # still a link and the walk went on from its name. The trailing slashes are
+    # dropped (the root's own stays) so the link itself is tested next time around.
+    while [[ "${path}" == */ && "${path}" != / ]]; do
+      path="${path%/}"
+    done
   done
   kept_output dirname -- "${path}" || return 1
   resolve_dir "${OUTPUT_KEPT}" -P || return 1
   kept_output basename -- "${path}" || return 1
   RESOLVED_FILE="${RESOLVED_DIR}/${OUTPUT_KEPT}"
 }
+
+# The ASH repo root: the directory holding this script, every symlink followed
+# (resolve_file), with a trailing line feed in its name kept. It was
+# `$(cd "$(dirname "$0")"; pwd)`: the directory of the path the script was started
+# by, so a symlinked ./ash built from the link's directory with the wrong Dockerfile;
+# a cd that failed fell back to the working directory, as the ';' let it; and the
+# substitution dropped a trailing line feed. CDPATH never applies: resolve_dir
+# clears it for its cd.
+if ! resolve_file "$0"; then
+  refuse "The directory holding this script, $(shown "$0"), cannot be entered, so the ASH repo root (the Dockerfile and the build context) cannot be found."
+fi
+export ASH_ROOT_DIR="${RESOLVED_FILE%/*}"
+export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
 
 # Whether the absolute name $1 is the scanned tree's (TREES, set where this is
 # called). The absolute, uncollapsed spelling is walked one component at a
@@ -803,8 +863,15 @@ carry_config_file() {
       # quoted key holding a backslash, which may spell the name with an
       # escape.
       flat="$(tr '\r\n' '  ' < "${real}")"
-      if printf '%s' "${flat}" | grep -Eq '(^|[[:space:]{,])["'"'"']?extends["'"'"']?[[:space:]]*[:=]' \
-        || grep -Eq '"[^"]*\\[^"]*"[[:space:]]*:' -- "${real}"; then
+      # A byte order mark at the start is dropped, so a key right after it is seen
+      # at the start of the text; a dotted TOML key (ash.extends) has a '.' before
+      # the key, so '.' is in the class; and the escaped-key test runs over the
+      # flattened text too, with '=' as well as ':', so a TOML key spelled with an
+      # escape and an escaped JSON key whose ':' is on the next line are refused as
+      # the plain spellings are.
+      flat="${flat#$'\xef\xbb\xbf'}"
+      if printf '%s' "${flat}" | grep -Eq '(^|[[:space:].{,])["'"'"']?extends["'"'"']?[[:space:]]*[:=]' \
+        || printf '%s' "${flat}" | grep -Eq '"[^"]*\\[^"]*"[[:space:]]*[:=]'; then
         refuse "The ${label} '$(shown "${given}")' is outside the source directory and has an extends entry. ./ash mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory."
       fi
       kept_output basename -- "${real}"
@@ -865,25 +932,79 @@ CONFIG_GIVEN="NO"
 CONFIG_PATH=""
 CONFIG_INLINE="NO"
 INNER_VALUE_PENDING="NO"
+# YES once a word naming an ash subcommand has been read (forward_word, below): -v
+# before any subcommand is this script's --version, -v after one is the subcommand's
+# --verbose. SUBCOMMAND_WORD is the first such word: -o after get-genai-guide or
+# config is that subcommand's own option (ASH_DASH_O_IS_THE_SUBCOMMANDS), -o after
+# scan or any other subcommand is this script's runner.
+SUBCOMMAND_SEEN="NO"
+SUBCOMMAND_WORD=""
+
+# Forward word $1 to the scan, as the argument loop's fall-through does: appended to
+# ASH_ARGS, with the loop remembering whether it was a value-taking inner option (the
+# next word is then its value, not an option of this script's), a clustered short
+# option ending in one, or a subcommand's name.
+forward_word() {
+  if [[ "${INNER_VALUE_PENDING}" = "YES" ]]; then
+    INNER_VALUE_PENDING="NO"
+  elif [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" $1 "* ]]; then
+    INNER_VALUE_PENDING="YES"
+  elif [[ " ${ASH_SUBCOMMANDS} " == *" $1 "* ]]; then
+    if [[ "${SUBCOMMAND_SEEN}" = "NO" ]]; then
+      SUBCOMMAND_WORD="$1"
+    fi
+    SUBCOMMAND_SEEN="YES"
+  elif [[ "$1" == -[!-]?* ]]; then
+    # Clustered short options, as click reads them: the first letter that
+    # takes a value takes the rest of the word, or the next word when it
+    # is last.
+    for ((INNER_LETTER = 1; INNER_LETTER < ${#1}; INNER_LETTER++)); do
+      if [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" -${1:INNER_LETTER:1} "* ]]; then
+        if ((INNER_LETTER + 1 == ${#1})); then
+          INNER_VALUE_PENDING="YES"
+        fi
+        break
+      fi
+    done
+  fi
+  ASH_ARGS="${ASH_ARGS} $1"
+}
+
+# True when a -o word at this point in the line is the subcommand's, not this
+# script's runner: it is the value of a value-taking inner option that is still
+# open, or it follows a subcommand whose own -o is not the runner
+# (ASH_DASH_O_IS_THE_SUBCOMMANDS). After scan, build-image or any other subcommand,
+# and with no subcommand, -o is this script's --oci-runner.
+dash_o_is_the_subcommands() {
+  if [[ "${INNER_VALUE_PENDING}" = "YES" ]]; then
+    return 0
+  fi
+  [[ "${SUBCOMMAND_SEEN}" = "YES" && " ${ASH_DASH_O_IS_THE_SUBCOMMANDS} " == *" ${SUBCOMMAND_WORD} "* ]]
+}
+
 while (("$#")); do
+  # Each of this script's own value options takes both spellings, `--opt value` and
+  # `--opt=value`, and its short form takes the value spaced or attached (`-o podman`,
+  # `-opodman`), as the CLI inside does; --oci and --runner are the CLI's own aliases
+  # of --oci-runner, so they name this script's runner too.
   case $1 in
-    --source-dir)
-      require_value "$1" "$#" "${2-}"
-      shift
-      SOURCE_DIR="$1"
+    --source-dir | --source-dir=*)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      SOURCE_DIR="${OWN_VALUE}"
       ;;
-    --output-dir)
-      require_value "$1" "$#" "${2-}"
-      shift
-      OUTPUT_DIR="$1"
+    --output-dir | --output-dir=*)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      OUTPUT_DIR="${OWN_VALUE}"
       ;;
     --offline)
       OFFLINE="YES"
       ;;
-    --offline-semgrep-rulesets)
-      require_value "$1" "$#" "${2-}"
-      shift
-      OFFLINE_SEMGREP_RULESETS="$1"
+    --offline-semgrep-rulesets | --offline-semgrep-rulesets=*)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      OFFLINE_SEMGREP_RULESETS="${OWN_VALUE}"
       OFFLINE="YES"
       ;;
     --force)
@@ -893,22 +1014,66 @@ while (("$#")); do
       DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS} -q"
       QUIET_ARG="--quiet"
       ;;
-    --oci-runner | -o)
-      require_value "$1" "$#" "${2-}"
-      shift
-      OCI_RUNNER="$1"
+    --oci-runner | --oci-runner=* | --oci | --oci=* | --runner | --runner=*)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      OCI_RUNNER="${OWN_VALUE}"
       ;;
-    --container-uid | -u)
-      require_value "$1" "$#" "${2-}"
-      shift
+    -o)
+      # -o is this script's --oci-runner with no subcommand and after scan or
+      # build-image (the CLI's scan defines -o as its own alias of --oci-runner, so
+      # `./ash scan -o podman` picks podman here). It is the subcommand's own after
+      # get-genai-guide (`./ash get-genai-guide -o guide.md` writes the guide there;
+      # read as the runner, it ran a command named guide.md) and after config (its
+      # --output-dir), and as the value of a value-taking inner option it is that
+      # option's value.
+      if dash_o_is_the_subcommands; then
+        forward_word "$1"
+      else
+        own_value "$1" "$#" "${2-}"
+        shift "${OWN_SHIFT}"
+        OCI_RUNNER="${OWN_VALUE}"
+      fi
+      ;;
+    --container-uid | --container-uid=* | -u)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
       CONTAINER_UID_SPECIFIED="YES"
-      CONTAINER_UID="$1"
+      CONTAINER_UID="${OWN_VALUE}"
       ;;
-    --container-gid | -g)
-      require_value "$1" "$#" "${2-}"
-      shift
+    --container-gid | --container-gid=* | -g)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
       CONTAINER_GID_SPECIFIED="YES"
-      CONTAINER_GID="$1"
+      CONTAINER_GID="${OWN_VALUE}"
+      ;;
+    # The short forms with the value attached, `-opodman`, `-u1000`, `-g1000`, as click
+    # reads them. Before this they fell through to the scan inside the container, so
+    # the scan got a runner, UID or GID word it has no use for while this script built
+    # and ran with its defaults. A blank attached value is refused as a missing one.
+    -o?*)
+      # The attached spelling follows the spaced -o above: this script's runner with
+      # no subcommand and after scan or build-image, the subcommand's own after
+      # get-genai-guide or config (`./ash get-genai-guide -oguide.md` writes the guide
+      # to guide.md), and the value of a pending inner option when one is open. -u?*
+      # and -g?* below take no such guard because their spaced forms take none: the
+      # script owns the container UID and GID in every position.
+      if dash_o_is_the_subcommands; then
+        forward_word "$1"
+      else
+        require_value "-o" 2 "${1:2}"
+        OCI_RUNNER="${1:2}"
+      fi
+      ;;
+    -u?*)
+      require_value "-u" 2 "${1:2}"
+      CONTAINER_UID_SPECIFIED="YES"
+      CONTAINER_UID="${1:2}"
+      ;;
+    -g?*)
+      require_value "-g" 2 "${1:2}"
+      CONTAINER_GID_SPECIFIED="YES"
+      CONTAINER_GID="${1:2}"
       ;;
     --no-build)
       NO_BUILD="YES"
@@ -919,23 +1084,44 @@ while (("$#")); do
     --debug|-d)
       DEBUG="YES"
       ;;
-    --build-target)
-      require_value "$1" "$#" "${2-}"
-      shift
-      TARGET_STAGE="$1"
+    --build-target | --build-target=*)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      TARGET_STAGE="${OWN_VALUE}"
       ;;
-    --ash-revision | -rev)
-      require_value "$1" "$#" "${2-}"
-      shift
-      INSTALL_ASH_REVISION="$1"
+    --ash-revision | --ash-revision=* | -rev)
+      own_value "$1" "$#" "${2-}"
+      shift "${OWN_SHIFT}"
+      INSTALL_ASH_REVISION="${OWN_VALUE}"
       ;;
+    # --help and --version run the CLI on the host from this script's own directory,
+    # not the caller's: `python -m` puts the working directory first on sys.path, so
+    # run from a scanned checkout it would import that checkout's package under the
+    # CLI's name. From ASH_ROOT_DIR the module is this repository's own.
+    #
+    # -v before any subcommand is this script's --version, as it always was:
+    # `./ash -v` prints the version and exits, so a habit or a health check never
+    # builds an image. After a subcommand it is that command's --verbose, which the
+    # CLI inside defines on ash, scan and report: `./ash scan -v` scans, verbosely,
+    # where it once printed a version and exited.
+    #
+    # Either exits with the CLI's own status: an `exit 0` after it reported success
+    # when the host python could not run the CLI at all.
     --help | -h)
-      python -m automated_security_helper.cli.main --help
-      exit 0
+      (CDPATH="" cd -- "${ASH_ROOT_DIR}" && python -m automated_security_helper.cli.main --help)
+      exit "$?"
       ;;
-    --version | -v)
-      python -m automated_security_helper.cli.main --version
-      exit 0
+    --version)
+      (CDPATH="" cd -- "${ASH_ROOT_DIR}" && python -m automated_security_helper.cli.main --version)
+      exit "$?"
+      ;;
+    -v)
+      if [[ "${SUBCOMMAND_SEEN}" = "YES" ]]; then
+        ASH_ARGS="${ASH_ARGS} $1"
+      else
+        (CDPATH="" cd -- "${ASH_ROOT_DIR}" && python -m automated_security_helper.cli.main --version)
+        exit "$?"
+      fi
       ;;
     --no-color | -c)
       COLOR_OUTPUT="false"
@@ -977,24 +1163,8 @@ while (("$#")); do
       # Everything else is ash's, --format included: scan reads it as its output
       # formats and report as the report format, so `./ash report --format text`
       # prints text.
-      if [[ "${INNER_VALUE_PENDING}" = "YES" ]]; then
-        INNER_VALUE_PENDING="NO"
-      elif [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" $1 "* ]]; then
-        INNER_VALUE_PENDING="YES"
-      elif [[ "$1" == -[!-]?* ]]; then
-        # Clustered short options, as click reads them: the first letter that
-        # takes a value takes the rest of the word, or the next word when it
-        # is last.
-        for ((INNER_LETTER = 1; INNER_LETTER < ${#1}; INNER_LETTER++)); do
-          if [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" -${1:INNER_LETTER:1} "* ]]; then
-            if ((INNER_LETTER + 1 == ${#1})); then
-              INNER_VALUE_PENDING="YES"
-            fi
-            break
-          fi
-        done
-      fi
-      ASH_ARGS="${ASH_ARGS} $1"
+      forward_word "$1"
+      ;;
   esac
   shift
 done
@@ -1059,8 +1229,24 @@ case "${TARGET_STAGE}" in
 esac
 
 # The build reads stage names in any case, so --build-target NON-ROOT is non-root:
-# lower-cased once, here, so every check below and the image tag see that name.
-TARGET_STAGE="$(printf '%s' "${TARGET_STAGE}" | tr '[:upper:]' '[:lower:]')"
+# lower-cased once, here, so every check below and the image tag see that name. A
+# name with no upper-case letter, the default non-root among them, is its own
+# lower-case and needs no tool, as `--sandbox off` needs none (refuse_sandbox_unless_off):
+# lower-casing every run through tr made a run with tr off PATH a refusal for a
+# stage it never had to change. A name with an upper-case letter goes through tr;
+# a tr that fails or is missing leaves nothing, and an empty stage made the default
+# image name 'automated-security-helper:', which the name check let through; so an
+# empty result is a refusal. The class is spelled out, as the check above spells
+# its own, so the match is the same in every locale.
+case "${TARGET_STAGE}" in
+  *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*)
+    TARGET_STAGE_LOWER="$(printf '%s' "${TARGET_STAGE}" | tr '[:upper:]' '[:lower:]')"
+    if [[ -z "${TARGET_STAGE_LOWER}" ]]; then
+      refuse "--build-target $(shown "${TARGET_STAGE}") could not be lower-cased: tr failed or is not on PATH, so the image stage to build is unknown. Install coreutils (tr) and run again."
+    fi
+    TARGET_STAGE="${TARGET_STAGE_LOWER}"
+    ;;
+esac
 
 export ASH_IMAGE_NAME=${ASH_IMAGE_NAME:-"automated-security-helper:${TARGET_STAGE}"}
 
@@ -1111,6 +1297,19 @@ if [[ "${NO_RUN}" = "NO" ]]; then
   # protections below compare against it, so a link to the source counts.
   resolve_dir "${SOURCE_DIR}" -P
   SOURCE_PHYSICAL="${RESOLVED_DIR}"
+  # The default output directory is inside the scanned directory, where `ash scan`
+  # defaults it (source_dir/.ash/ash_output). Taken from the working directory, as it
+  # was, `./ash --source-dir sub` run from a checkout root wrote its reports beside the
+  # working directory, and a `.ash` link the repository commits at that root stood
+  # outside the linked-output rule below, which covers links below the source: the
+  # reports went where the link points.
+  # A refusal of the default names --output-dir as the way to write elsewhere; one
+  # of a directory the operator chose does not, as the choice is theirs already.
+  OUTPUT_HINT=""
+  if [ -z "${OUTPUT_DIR}" ]; then
+    OUTPUT_DIR="${SOURCE_DIR%/}/.ash/ash_output"
+    OUTPUT_HINT="; the default is inside the scanned directory, pass --output-dir to write elsewhere"
+  fi
   # The refusal gives mkdir's reason (the text after its last ": ", such as "Not a
   # directory") but not mkdir's line, which quotes the path in its own way: GNU mkdir
   # escapes control characters, and others need not.
@@ -1137,7 +1336,7 @@ if [[ "${NO_RUN}" = "NO" ]]; then
   # line, which quotes the path in its own way: GNU mkdir escapes control
   # characters, and others need not.
   if [[ -e "${OUTPUT_PATH}" && ! -d "${OUTPUT_PATH}" ]]; then
-    refuse_usage "Output directory is not a directory: $(shown "${OUTPUT_DIR}")"
+    refuse_usage "Output directory is not a directory: $(shown "${OUTPUT_DIR}")${OUTPUT_HINT}"
   fi
   # /out is mounted read-write and /src read-only: an output directory that is the
   # source directory or above it would hold the source tree, writable, at /out.
@@ -1147,7 +1346,7 @@ if [[ "${NO_RUN}" = "NO" ]]; then
     OUTPUT_PHYSICAL="${RESOLVED_DIR}"
     case "${SOURCE_PHYSICAL%/}/" in
       "${OUTPUT_PHYSICAL%/}"/*)
-        refuse "The output directory '$(shown "${OUTPUT_PATH}")' is the source directory '$(shown "${SOURCE_DIR}")' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it."
+        refuse "The output directory '$(shown "${OUTPUT_PATH}")' is the source directory '$(shown "${SOURCE_DIR}")' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it${OUTPUT_HINT}."
         ;;
     esac
   fi
@@ -1161,6 +1360,26 @@ if [[ "${NO_RUN}" = "NO" ]]; then
   # because creating it through a linked `.ash` already writes where the link points;
   # so --no-run would be refused as well, but it creates nothing and never reaches
   # here. `ash --mode container` and Invoke-ASH apply the same rule.
+  # Whether path $1 stands below the source directory: by name, under the source as
+  # given or under its physical path, or by place, when the directory that holds it
+  # resolves, every link followed, to the source or a directory under it. The name
+  # test alone decided by spelling: with the working directory itself a link to the
+  # source, an output path spelled through it (`.ash/ash_output` from there) named
+  # the source under a third name, and the committed `.ash` link it reached was
+  # followed. RESOLVED_DIR is left as it was found.
+  below_the_source() {
+    local parent="${1%/*}" resolved_before="${RESOLVED_DIR-}" below=1
+    case "$1" in
+      "${SOURCE_DIR%/}"/* | "${SOURCE_PHYSICAL%/}"/*) return 0 ;;
+    esac
+    if resolve_dir "${parent:-/}" -P; then
+      case "${RESOLVED_DIR%/}/" in
+        "${SOURCE_PHYSICAL%/}"/*) below=0 ;;
+      esac
+    fi
+    RESOLVED_DIR="${resolved_before}"
+    return "${below}"
+  }
   refuse_linked_output_dir() {
     local spelled="$1" rest part current="" link=""
     case "${spelled}" in
@@ -1176,20 +1395,34 @@ if [[ "${NO_RUN}" = "NO" ]]; then
         ..) current="${current%/*}"; continue ;;
       esac
       current="${current}/${part}"
-      case "${current}" in
-        "${SOURCE_DIR%/}"/* | "${SOURCE_PHYSICAL%/}"/*)
-          if [ -L "${current}" ]; then link="${current}"; break; fi
-          ;;
-      esac
+      if [ -L "${current}" ] && below_the_source "${current}"; then
+        link="${current}"
+        break
+      fi
     done
     if [ -z "${link}" ] && [ -n "${current}" ] && [ -L "${current}" ]; then
       link="${current}"
     fi
     if [ -n "${link}" ]; then
-      refuse "Refusing the output directory '$(shown "$1")': the output directory path '$(shown "${link}")' is a symlink. Container mode mounts the output directory read-write at /out, so the scan inside the container would write through the link. Use a directory that is not a symlink and is not reached through one below the source directory."
+      refuse "Refusing the output directory '$(shown "$1")': the output directory path '$(shown "${link}")' is a symlink. Container mode mounts the output directory read-write at /out, so the scan inside the container would write through the link. Use a directory that is not a symlink and is not reached through one below the source directory${OUTPUT_HINT}."
     fi
   }
   refuse_linked_output_dir "${OUTPUT_DIR}"
+fi
+
+# Make the output directory and check that it takes a file, then set OUTPUT_DIR to
+# its resolved path. Called once, here, right after the path checks above and before
+# the container runtime is looked for, so that a missing --output-dir is made,
+# parents and all, and one that cannot be made, entered or written is refused with 5
+# in `ash scan`'s words whether or not a runtime follows
+# (tests/unit/cli/test_directory_refusals_agree.py pins both on a PATH with no
+# runtime); a --no-run has no output to make. The order matters: made any later,
+# after the runtime lookup, those refusals would stand behind "Unable to resolve an
+# OCI_RUNNER" and the directory would be left unmade on a host with no runtime.
+create_output_dir() {
+  if [[ "${NO_RUN}" != "NO" ]]; then
+    return 0
+  fi
   OUTPUT_EXISTED=NO
   if [[ -d "${OUTPUT_PATH}" ]]; then
     OUTPUT_EXISTED=YES
@@ -1197,11 +1430,11 @@ if [[ "${NO_RUN}" = "NO" ]]; then
   MKDIR_ERROR="$(mkdir -p -- "${OUTPUT_PATH}" 2>&1 >/dev/null)"
   if ! resolve_dir "${OUTPUT_PATH}"; then
     if [[ -d "${OUTPUT_PATH}" ]]; then
-      refuse_usage "Output directory cannot be entered: $(shown "${OUTPUT_DIR}")"
+      refuse_usage "Output directory cannot be entered: $(shown "${OUTPUT_DIR}")${OUTPUT_HINT}"
     fi
     MKDIR_REASON="${MKDIR_ERROR##*: }"
     MKDIR_REASON="${MKDIR_REASON//[![:print:]]/}"
-    refuse_usage "Output directory cannot be created: $(shown "${OUTPUT_DIR}") (${MKDIR_REASON:-mkdir did not make it})"
+    refuse_usage "Output directory cannot be created: $(shown "${OUTPUT_DIR}") (${MKDIR_REASON:-mkdir did not make it})${OUTPUT_HINT}"
   fi
   # One that was there already must take a file, as the scan writes them: one is
   # made under a name of its own with O_EXCL (bash's noclobber) and removed. -w is
@@ -1214,12 +1447,13 @@ if [[ "${NO_RUN}" = "NO" ]]; then
     else
       WRITE_REASON="${WRITE_ERROR##*: }"
       WRITE_REASON="${WRITE_REASON//[![:print:]]/}"
-      refuse_usage "Output directory cannot be written: $(shown "${OUTPUT_DIR}") (${WRITE_REASON:-a file could not be made there})"
+      refuse_usage "Output directory cannot be written: $(shown "${OUTPUT_DIR}") (${WRITE_REASON:-a file could not be made there})${OUTPUT_HINT}"
     fi
   fi
   require_mountable --output-dir "${OUTPUT_DIR}" "${RESOLVED_DIR}"
   OUTPUT_DIR="${RESOLVED_DIR}"
-fi
+}
+create_output_dir
 
 # The config the scan reads: --config in the arguments, and the file the host's
 # ASH_CONFIG names, which a local scan reads as its base whatever names the
@@ -1255,6 +1489,58 @@ CONFIG_RUN_ARGS=()
 CONFIG_PROVENANCE_ARGS=()
 detect_subcommand
 if [[ "${NO_RUN}" = "NO" && ( -z "${SUBCOMMAND}" || "${SUBCOMMAND}" = "scan" ) ]]; then
+  # Where the last --config stands among the words the scan is given, in CONFIG_AT
+  # (-1 for none): the position the operator chose is kept when the host path is
+  # replaced below, and a later --config still wins as click reads a repeated option.
+  # The walk skips the values of value-taking options, as the subcommand detector
+  # does, so --config as another option's value is not the option.
+  CONFIG_AT=-1
+  CFG_SKIP="NO"
+  for ((CFG_I = 0; CFG_I < ${#ASH_ARG_WORDS[@]}; CFG_I++)); do
+    CFG_WORD="${ASH_ARG_WORDS[CFG_I]}"
+    if [[ "${CFG_SKIP}" = "YES" ]]; then
+      CFG_SKIP="NO"
+      continue
+    fi
+    case "${CFG_WORD}" in
+      --config)
+        CONFIG_AT=${CFG_I}
+        CFG_SKIP="YES"
+        ;;
+      --config=*)
+        CONFIG_AT=${CFG_I}
+        ;;
+      -[!-]?*)
+        for ((CFG_LETTER = 1; CFG_LETTER < ${#CFG_WORD}; CFG_LETTER++)); do
+          if [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" -${CFG_WORD:CFG_LETTER:1} "* ]]; then
+            if ((CFG_LETTER + 1 == ${#CFG_WORD})); then
+              CFG_SKIP="YES"
+            fi
+            break
+          fi
+        done
+        ;;
+      *)
+        if [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" ${CFG_WORD} "* ]]; then
+          CFG_SKIP="YES"
+        fi
+        ;;
+    esac
+  done
+  # A --config that reached this script inside one quoted argument ("--config
+  # path") was split into those words above and never read by the argument loop,
+  # so the host path went to the scan as given, with no mount and no mark. Found
+  # among the words, it is this script's --config as a separate one is.
+  if [[ "${CONFIG_GIVEN}" = "NO" && "${CONFIG_AT}" -ge 0 ]]; then
+    CONFIG_GIVEN="YES"
+    if [[ "${ASH_ARG_WORDS[CONFIG_AT]}" == --config=* ]]; then
+      CONFIG_INLINE="YES"
+      CONFIG_PATH="${ASH_ARG_WORDS[CONFIG_AT]#--config=}"
+    else
+      CONFIG_INLINE="NO"
+      CONFIG_PATH="${ASH_ARG_WORDS[CONFIG_AT + 1]:-}"
+    fi
+  fi
   if [[ "${CONFIG_GIVEN}" = "YES" || -n "${ASH_CONFIG:-}" ]]; then
     # The scanned tree, as a local scan defines it: the outermost directory at
     # or above the source dir holding a .git entry, under its logical and
@@ -1288,47 +1574,11 @@ if [[ "${NO_RUN}" = "NO" && ( -z "${SUBCOMMAND}" || "${SUBCOMMAND}" = "scan" ) ]
     if [[ "${CARRIED_ELSEWHERE}" = "YES" ]]; then
       CONFIG_PROVENANCE_ARGS+=(--config-file-from-another-checkout "${CARRIED_INNER}")
     fi
-    # Replace the host path's words with the container path, in place, so the
-    # position the operator chose is kept and a later --config still wins as
-    # click reads a repeated option. The argument loop recorded the value
+    # Replace the host path's words with the container path, in place, at the
+    # position CONFIG_AT found above. The argument loop recorded the value
     # whole, while ASH_ARG_WORDS holds it split, so the replaced span is the
     # value's own word count -- and the container path goes in as ONE word, so
     # a mounted file whose name holds spaces reaches the scan inside whole.
-    # The walk skips the values of value-taking options, as the subcommand
-    # detector does, so --config as another option's value is not the option.
-    CONFIG_AT=-1
-    CFG_SKIP="NO"
-    for ((CFG_I = 0; CFG_I < ${#ASH_ARG_WORDS[@]}; CFG_I++)); do
-      CFG_WORD="${ASH_ARG_WORDS[CFG_I]}"
-      if [[ "${CFG_SKIP}" = "YES" ]]; then
-        CFG_SKIP="NO"
-        continue
-      fi
-      case "${CFG_WORD}" in
-        --config)
-          CONFIG_AT=${CFG_I}
-          CFG_SKIP="YES"
-          ;;
-        --config=*)
-          CONFIG_AT=${CFG_I}
-          ;;
-        -[!-]?*)
-          for ((CFG_LETTER = 1; CFG_LETTER < ${#CFG_WORD}; CFG_LETTER++)); do
-            if [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" -${CFG_WORD:CFG_LETTER:1} "* ]]; then
-              if ((CFG_LETTER + 1 == ${#CFG_WORD})); then
-                CFG_SKIP="YES"
-              fi
-              break
-            fi
-          done
-          ;;
-        *)
-          if [[ " ${ASH_ROOT_VALUE_OPTIONS} " == *" ${CFG_WORD} "* ]]; then
-            CFG_SKIP="YES"
-          fi
-          ;;
-      esac
-    done
     if [[ "${CONFIG_INLINE}" = "YES" ]]; then
       # The inline word was split like any other, so a value with spaces
       # occupies several words; all of them are replaced.
@@ -1388,8 +1638,8 @@ for id_flag in UID GID; do
   id_given="CONTAINER_${id_flag}_SPECIFIED"
   id_value="CONTAINER_${id_flag}"
   if [[ "${!id_given}" = "YES" && ! "${!id_value}" =~ ^[0-9]+$ ]]; then
-    echo "ERROR: Container ${id_flag} must be a numeric value: '${!id_value}'." >&2
-    exit 3
+    # The value is shown as every other refusal shows one, not written raw.
+    refuse "Container ${id_flag} must be a numeric value: '$(shown "${!id_value}")'."
   fi
 done
 
@@ -1435,13 +1685,26 @@ elif [[ -z "${RESOLVED_OCI_RUNNER//[[:space:]]/}" ]]; then
     refuse "Unable to resolve an OCI_RUNNER: none of finch, docker, nerdctl or podman is on PATH. Install one, or set OCI_RUNNER or pass --oci-runner."
 # else, build and run the image
 else
-    # The runtime's own name, before any wrapper is prefixed, for the few decisions that
-    # differ by runtime.
-    OCI_RUNNER_NAME="$(basename "${RESOLVED_OCI_RUNNER}")"
+    # The runner's words, one argument each. A runner found on PATH is one word, so a
+    # runtime installed under a directory with a space in its name (Program Files
+    # under Git Bash) runs: expanded unquoted in a string, it was split there. One the
+    # operator gave (OCI_RUNNER, --oci-runner) is split on whitespace, as it was, so
+    # it can carry arguments of its own.
+    if [[ -n "${OCI_RUNNER:-}" ]]; then
+        read -r -d '' -a RUNNER_WORDS <<< "${OCI_RUNNER}"
+    else
+        RUNNER_WORDS=("${RESOLVED_OCI_RUNNER}")
+    fi
+    # The runtime's own name, before any wrapper is prefixed and without the runner's
+    # own arguments (the basename of the whole string never matched nerdctl or finch
+    # for a runner given with arguments), for the few decisions that differ by runtime.
+    OCI_RUNNER_NAME="$(basename "${RUNNER_WORDS[0]}")"
     # OCI_RUNNER_WRAPPER prefixes all OCI commands (like RUSTC_WRAPPER for cargo)
     # Example: OCI_RUNNER_WRAPPER=sudo makes all finch/docker calls use sudo
     if [[ -n "${OCI_RUNNER_WRAPPER:-}" ]]; then
         RESOLVED_OCI_RUNNER="${OCI_RUNNER_WRAPPER} ${RESOLVED_OCI_RUNNER}"
+        read -r -d '' -a WRAPPER_WORDS <<< "${OCI_RUNNER_WRAPPER}"
+        RUNNER_WORDS=("${WRAPPER_WORDS[@]}" "${RUNNER_WORDS[@]}")
     fi
     # Under a runner that reads workflow commands from the job's output (GitHub
     # Actions, Azure Pipelines, TeamCity), ash checks a terminal's lines too, but
@@ -1468,24 +1731,41 @@ else
         fi
       done
     fi
-    if [[ "${DEBUG}" = "YES" ]]; then
-      set -x
-    fi
-    echo "Resolved OCI_RUNNER to: $(shown "${RESOLVED_OCI_RUNNER}")"
+    # Under --debug, the build and the run commands are traced shown (trace_command),
+    # as set -x would print them but with each caller value shown rather than written
+    # to the terminal raw: set -x traced the build line and every $(shown ...) call
+    # with the raw values (--ash-revision, the runner, a layout directory), against
+    # shown()'s own rule.
+    trace_command() {
+      local word trace="+"
+      if [[ "${DEBUG}" != "YES" ]]; then
+        return 0
+      fi
+      for word in "$@"; do
+        trace+=" $(shown "${word}")"
+      done
+      printf '%s\n' "${trace}" >&2
+    }
+    # This script's own status lines, here and below, go to stderr, and so does the
+    # build's output (the image ID under --quiet included): stdout is the container's
+    # alone, so `./ash report --format json > file` writes the report and nothing
+    # else into the file. Written to stdout, they stood at the top of it.
+    echo "Resolved OCI_RUNNER to: $(shown "${RESOLVED_OCI_RUNNER}")" >&2
 
     # Build the image if the --no-build flag is not set
     if [ "${NO_BUILD}" = "NO" ]; then
-      CONTAINER_UID_OPTION=""
-      CONTAINER_GID_OPTION=""
+      # The UID and GID build arguments, one word each: the given --container-uid
+      # and --container-gid, else the caller's.
+      CONTAINER_ID_OPTIONS=()
       if [[ ${CONTAINER_UID_SPECIFIED} = "YES" ]]; then
-        CONTAINER_UID_OPTION="--build-arg UID=${CONTAINER_UID}" # set the UID build-arg if --container-uid is specified
+        CONTAINER_ID_OPTIONS+=(--build-arg "UID=${CONTAINER_UID}")
       elif [[ "${HOST_UID}" != "" ]]; then
-        CONTAINER_UID_OPTION="--build-arg UID=${HOST_UID}" # set the UID build-arg to the caller's UID if --container-uid is not specified
+        CONTAINER_ID_OPTIONS+=(--build-arg "UID=${HOST_UID}")
       fi
       if [[ ${CONTAINER_GID_SPECIFIED} = "YES" ]]; then
-        CONTAINER_GID_OPTION="--build-arg GID=${CONTAINER_GID}" # set the GID build-arg if --container-gid is specified
+        CONTAINER_ID_OPTIONS+=(--build-arg "GID=${CONTAINER_GID}")
       elif [[ "${HOST_GID}" != "" ]]; then
-        CONTAINER_GID_OPTION="--build-arg GID=${HOST_GID}" # set the GID build-arg to the caller's GID if --container-uid is not specified
+        CONTAINER_ID_OPTIONS+=(--build-arg "GID=${HOST_GID}")
       fi
       # ASH_BASE_IMAGE_OVERRIDE redirects `FROM ${BASE_IMAGE}` at whichever registry actually
       # served the base image. .github/actions/prepull-base-image sets it when ECR Public
@@ -1511,26 +1791,29 @@ else
       # as a build context, spelled without the digest because nerdctl reads the image from
       # index.json and treats the rest of the value as the path, plus --pull=false, which nerdctl
       # maps to image-resolve-mode=local. See .github/actions/prepull-base-image for the rest.
-      BASE_IMAGE_OPTION=""
+      # An array, one argument per word: the layout directory is a path the action
+      # computed, and unquoted in a string it was split on its spaces and globbed,
+      # so a directory with a space in its name reached the build as two options.
+      BASE_IMAGE_OPTIONS=()
       if [[ -n "${ASH_BASE_OCI_LAYOUT:-}" ]]; then
         if [[ ! "${ASH_BASE_OCI_LAYOUT}" =~ ^(.+)@(sha256:[0-9a-f]{64})$ ]]; then
           refuse "ASH_BASE_OCI_LAYOUT is '$(shown "${ASH_BASE_OCI_LAYOUT}")', which is not <layout dir>@sha256:<64 hex>. Unset it to build from the Dockerfile's own base image reference."
         fi
         case "${OCI_RUNNER_NAME}" in
           nerdctl | finch)
-            BASE_IMAGE_OPTION="--build-context ash-base-image=oci-layout://${BASH_REMATCH[1]} --build-arg BASE_IMAGE=ash-base-image --pull=false"
-            echo "Base image taken from the verified OCI layout named by ASH_BASE_OCI_LAYOUT, with no registry call."
+            BASE_IMAGE_OPTIONS=(--build-context "ash-base-image=oci-layout://${BASH_REMATCH[1]}" --build-arg BASE_IMAGE=ash-base-image --pull=false)
+            echo "Base image taken from the verified OCI layout named by ASH_BASE_OCI_LAYOUT, with no registry call." >&2
             ;;
           *)
-            echo "Base image expected in $(shown "${OCI_RUNNER_NAME}")'s local store, placed there from the verified OCI layout named by ASH_BASE_OCI_LAYOUT."
+            echo "Base image expected in $(shown "${OCI_RUNNER_NAME}")'s local store, placed there from the verified OCI layout named by ASH_BASE_OCI_LAYOUT." >&2
             ;;
         esac
       elif [[ -n "${ASH_BASE_IMAGE_OVERRIDE:-}" ]]; then
         case "${ASH_BASE_IMAGE_OVERRIDE}" in
           -* | *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:/@-]*) refuse "ASH_BASE_IMAGE_OVERRIDE '$(shown "${ASH_BASE_IMAGE_OVERRIDE}")' starts with '-' or holds a character other than A-Z, a-z, 0-9 and . _ : / @ -, which no image reference does. Name an image reference with only those characters, or unset it to build from the Dockerfile's own base image reference." ;;
         esac
-        BASE_IMAGE_OPTION="--build-arg BASE_IMAGE=${ASH_BASE_IMAGE_OVERRIDE}"
-        echo "Base image redirected to $(shown "${ASH_BASE_IMAGE_OVERRIDE}") by ASH_BASE_IMAGE_OVERRIDE."
+        BASE_IMAGE_OPTIONS=(--build-arg "BASE_IMAGE=${ASH_BASE_IMAGE_OVERRIDE}")
+        echo "Base image redirected to $(shown "${ASH_BASE_IMAGE_OVERRIDE}") by ASH_BASE_IMAGE_OVERRIDE." >&2
       fi
       # A new BUILD_DATE_EPOCH re-runs the Dockerfile's core stage from its apt-get
       # upgrade step down, offline download included (see ARG BUILD_DATE_EPOCH there).
@@ -1538,20 +1821,26 @@ else
       # cache, and OS packages and offline databases are at most a day old.
       NOW_EPOCH="$(date +%s)"
       BUILD_DATE_EPOCH=$((NOW_EPOCH - NOW_EPOCH % 86400))
-      echo "Building image $(shown "${ASH_IMAGE_NAME}") -- this may take a few minutes during the first build..."
-      ${RESOLVED_OCI_RUNNER} build \
-        ${CONTAINER_UID_OPTION} \
-        ${CONTAINER_GID_OPTION} \
-        ${BASE_IMAGE_OPTION} \
-        --tag "${ASH_IMAGE_NAME}" \
-        --target "${TARGET_STAGE}" \
-        --file "${ASH_ROOT_DIR}/Dockerfile" \
-        --build-arg OFFLINE="${OFFLINE}" \
-        --build-arg INSTALL_ASH_REVISION="${INSTALL_ASH_REVISION}" \
-        --build-arg OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}" \
-        --build-arg BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}" \
-        ${DOCKER_EXTRA_ARGS} \
-        "${ASH_ROOT_DIR}"
+      echo "Building image $(shown "${ASH_IMAGE_NAME}") -- this may take a few minutes during the first build..." >&2
+      # DOCKER_EXTRA_ARGS is this script's own (--no-cache, -q) and the caller's
+      # environment, split on whitespace as it was.
+      read -r -d '' -a EXTRA_BUILD_ARGS <<< "${DOCKER_EXTRA_ARGS}"
+      BUILD_COMMAND=(
+        "${RUNNER_WORDS[@]}" build
+          "${CONTAINER_ID_OPTIONS[@]}"
+          "${BASE_IMAGE_OPTIONS[@]}"
+          --tag "${ASH_IMAGE_NAME}"
+          --target "${TARGET_STAGE}"
+          --file "${ASH_ROOT_DIR}/Dockerfile"
+          --build-arg "OFFLINE=${OFFLINE}"
+          --build-arg "INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}"
+          --build-arg "OFFLINE_SEMGREP_RULESETS=${OFFLINE_SEMGREP_RULESETS}"
+          --build-arg "BUILD_DATE_EPOCH=${BUILD_DATE_EPOCH}"
+          "${EXTRA_BUILD_ARGS[@]}"
+          "${ASH_ROOT_DIR}"
+      )
+      trace_command "${BUILD_COMMAND[@]}"
+      "${BUILD_COMMAND[@]}" >&2
       BUILD_RC=$?
 
       # Captured on the line above, before anything else can overwrite $?.
@@ -1582,6 +1871,41 @@ else
       fi
       if [[ "${COLOR_OUTPUT}" = "true" ]] && [ -t 1 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -t"
+      fi
+      # The container's stdin is kept open (-i) only for a run that reads it. The
+      # subcommands that read stdin are ASH_READS_STDIN: mcp, whose default stdio
+      # transport is driven by the client over stdin; inspect, the Textual app, which
+      # reads keys; and config, whose init and fix steps prompt for answers. Any
+      # subcommand reads stdin when given `--cli-json-input -`, which takes its
+      # parameters as a JSON document from stdin. Without -i none of them got any
+      # input. No other run reads stdin, and -i on one makes the container consume
+      # the caller's input: `while read d; do ./ash --source-dir "$d"; done
+      # < dirs.txt` ended after one directory, a job script fed to bash on stdin lost
+      # the commands after ./ash, and `./ash scan &` from an interactive shell had the
+      # runner read the terminal and stopped on SIGTTIN. SUBCOMMAND is the first of
+      # ash's words that names a subcommand (detect_subcommand, above). The list
+      # must name the subcommands that read stdin;
+      # tests/unit/test_ash_bash_entrypoint_subcommand_args.py checks it against the
+      # CLI's own readers.
+      ASH_READS_STDIN="config inspect mcp"
+      KEEP_STDIN="NO"
+      if [[ -n "${SUBCOMMAND}" && " ${ASH_READS_STDIN} " == *" ${SUBCOMMAND} "* ]]; then
+        KEEP_STDIN="YES"
+      fi
+      for ((STDIN_WORD_AT = 0; STDIN_WORD_AT < ${#ASH_ARG_WORDS[@]}; STDIN_WORD_AT++)); do
+        case "${ASH_ARG_WORDS[STDIN_WORD_AT]}" in
+          --cli-json-input)
+            if [[ "${ASH_ARG_WORDS[STDIN_WORD_AT + 1]:-}" = "-" ]]; then
+              KEEP_STDIN="YES"
+            fi
+            ;;
+          --cli-json-input=-)
+            KEEP_STDIN="YES"
+            ;;
+        esac
+      done
+      if [[ "${KEEP_STDIN}" = "YES" ]]; then
+        DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -i"
       fi
       # --quiet and --no-color are this script's options as well as ash's, and they
       # are handed on to ash in front of its arguments. ash passes an option given
@@ -1629,14 +1953,23 @@ else
       ASH_RUN_WORDS=("${ASH_ARG_WORDS[@]}")
       if [[ -z "${SUBCOMMAND}" || " ${ASH_TAKES_SANDBOX} " == *" ${SUBCOMMAND} "* ]]; then
         SANDBOX_OFF_AT=$((SUBCOMMAND_AT + 1))
+        # --offline is this script's option too, read by the argument loop and not
+        # forwarded: it cut the container's network and set the image's build
+        # argument, but told the scan nothing, so with --no-build and an image built
+        # online the scan ran in online mode with no network. The scan's own
+        # --offline rides the same splice.
+        SCAN_MODE_ARGS=(--sandbox off)
+        if [[ "${OFFLINE}" = "YES" ]]; then
+          SCAN_MODE_ARGS+=(--offline)
+        fi
         ASH_RUN_WORDS=(
           "${ASH_ARG_WORDS[@]:0:SANDBOX_OFF_AT}"
-          --sandbox off
+          "${SCAN_MODE_ARGS[@]}"
           "${CONFIG_PROVENANCE_ARGS[@]}"
           "${ASH_ARG_WORDS[@]:SANDBOX_OFF_AT}"
         )
       fi
-      echo "Running ASH scan using built image..."
+      echo "Running ASH scan using built image..." >&2
       # The mounted paths go in through ASH_SOURCE_DIR and ASH_OUTPUT_DIR rather than
       # as --source-dir/--output-dir in front of the arguments. A subcommand in the
       # arguments (`./ash report`) would otherwise be refused, because ash passes an
@@ -1646,15 +1979,14 @@ else
       # The image name is quoted, here and in the build, as is the build target that
       # names its default: either is the caller's value, and unquoted, a value with
       # spaces gave the runner options of its own (`-e ASH_CONFIG=...`) or gave the
-      # scan in the image words the --sandbox refusal never saw. The runner and
-      # DOCKER_RUN_EXTRA_ARGS stay unquoted: the runner can carry its
-      # OCI_RUNNER_WRAPPER prefix, and the extra args are this script's own.
-      # Under --debug this line is traced as shown, and not by set -x: through a
-      # wrapper it carries the runner markers' values, and set -x writes a control
-      # in one to the terminal raw. The words are the same either way.
-      { set +x; } 2>/dev/null
+      # scan in the image words the --sandbox refusal never saw. The runner is
+      # RUNNER_WORDS, one argument each (its OCI_RUNNER_WRAPPER prefix split as
+      # before; a runner found on PATH whole); DOCKER_RUN_EXTRA_ARGS stays unquoted,
+      # as the extra args are this script's own. Under --debug this line is traced
+      # shown (trace_command): through a wrapper it carries the runner markers'
+      # values, and set -x wrote a control in one to the terminal raw.
       RUN_COMMAND=(
-        ${RESOLVED_OCI_RUNNER} run
+        "${RUNNER_WORDS[@]}" run
           --rm
           -e "ASH_ACTUAL_SOURCE_DIR=${SOURCE_DIR}"
           -e "ASH_ACTUAL_OUTPUT_DIR=${OUTPUT_DIR}"
@@ -1671,18 +2003,9 @@ else
               ${ASH_FLAG_ARGS}
               "${ASH_RUN_WORDS[@]}"
       )
-      if [[ "${DEBUG}" = "YES" ]]; then
-        RUN_TRACE="+"
-        for RUN_WORD in "${RUN_COMMAND[@]}"; do
-          RUN_TRACE+=" $(shown "${RUN_WORD}")"
-        done
-        printf '%s\n' "${RUN_TRACE}" >&2
-      fi
+      trace_command "${RUN_COMMAND[@]}"
       "${RUN_COMMAND[@]}"
       RC=$?
-    fi
-    if [[ "${DEBUG}" = "YES" ]]; then
-      set +x
     fi
     exit ${RC}
 fi

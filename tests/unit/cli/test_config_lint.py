@@ -34,6 +34,14 @@ def _option_default(segment: str, section: str, field_name: str):
     return options_class.model_fields[field_name].default
 
 
+# The two tool_version defaults these tests write as "the option's own default":
+# read from the options models, so the next default bump does not turn them into
+# pins the operator wrote by hand (which lint --fix keeps) and fail three tests
+# in confusing ways.
+BANDIT_TOOL_VERSION = _option_default("scanners", "bandit", "tool_version")
+JUPYTER_TOOL_VERSION = _option_default("converters", "jupyter", "tool_version")
+
+
 def _a_value_other_than(default):
     """A value of the default's kind that is not the default: a pin."""
     if isinstance(default, int):
@@ -87,7 +95,7 @@ def config_with_internal_fields(tmp_path):
                 "enabled": True,
                 "name": "bandit",
                 "extension": "json",
-                "tool_version": ">=1.7.0,<2.0.0",
+                "tool_version": BANDIT_TOOL_VERSION,
             },
         },
         "reporters": {
@@ -101,7 +109,7 @@ def config_with_internal_fields(tmp_path):
             "jupyter": {
                 "enabled": True,
                 "name": "jupyter",
-                "tool_version": ">=7.16.0,<8.0.0",
+                "tool_version": JUPYTER_TOOL_VERSION,
                 "install_timeout": 300,
             },
         },
@@ -407,11 +415,11 @@ scanners:
     # option's own default, and a value an operator wrote beside `enabled` by
     # hand.
     OPTION_NAMED_FIELDS = [
-        ("scanners", "bandit", "tool_version", ">=1.7.0,<2.0.0", "==1.7.5"),
+        ("scanners", "bandit", "tool_version", BANDIT_TOOL_VERSION, "==1.7.5"),
         ("scanners", "bandit", "install_timeout", 300, 900),
         ("scanners", "checkov", "tool_version", None, "==3.2.250"),
         ("scanners", "semgrep", "tool_version", None, "==1.50.0"),
-        ("converters", "jupyter", "tool_version", ">=7.16.0,<8.0.0", "==7.16.4"),
+        ("converters", "jupyter", "tool_version", JUPYTER_TOOL_VERSION, "==7.16.4"),
         # Loaded from ash_plugin_modules, so lint cannot read its options.
         ("scanners", "ferret-scan", "tool_version", None, "==1.2.3"),
     ]
@@ -701,7 +709,7 @@ scanners:
 
     @pytest.mark.parametrize(
         "base_field,base_value",
-        [("install_timeout", 901), ("tool_version", ">=1.7.0,<2.0.0")],
+        [("install_timeout", 901), ("tool_version", BANDIT_TOOL_VERSION)],
         ids=["another-field", "the-same-field"],
     )
     def test_a_base_field_beside_a_fixable_one_stays_an_issue(
@@ -721,7 +729,7 @@ scanners:
         config_path = tmp_path / ".ash.yaml"
         config_path.write_text(
             "extends: base.yaml\nproject_name: demo\n"
-            "scanners:\n  bandit:\n    tool_version: '>=1.7.0,<2.0.0'\n",
+            f"scanners:\n  bandit:\n    tool_version: '{BANDIT_TOOL_VERSION}'\n",
             encoding="utf-8",
         )
 
@@ -755,7 +763,7 @@ scanners:
             "scanners:\n"
             "  bandit:\n"
             # The options' defaults, which --fix may remove.
-            "    tool_version: '>=1.7.0,<2.0.0'\n"
+            f"    tool_version: '{BANDIT_TOOL_VERSION}'\n"
             "    severity_threshold: HIGH\n"
             "    install_timeout: 300\n"
             "  cdk_nag:\n"
@@ -1105,12 +1113,14 @@ scanners:
         assert "gitlab-cyclonedx" in legacy_issues[0].message
 
     def test_lint_detects_legacy_canonical_collision(self, tmp_path):
-        """When BOTH legacy and canonical forms are present, say which one counts.
+        """When BOTH legacy and canonical forms are present, say what a scan does.
 
-        A scan accepts the file and reads the canonical form, so this is a
-        warning (lint gives the scan's verdict), and it names the form a scan
-        reads. The fixer must still refuse to touch the file in this case (data
-        loss otherwise), so the issue is not fixable.
+        A scan accepts the file and merges the two sections key by key, the
+        canonical form winning where both set a key (here ``severity_threshold``
+        is set only under ``cdk_nag``, so it still applies), so this is a
+        warning (lint gives the scan's verdict), and the message says the two
+        are merged and which spelling wins. The fixer must still refuse to touch
+        the file in this case (data loss otherwise), so the issue is not fixable.
         """
         config_path = tmp_path / ".ash" / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1133,7 +1143,8 @@ scanners:
         ]
         assert len(conflict_issues) == 1
         assert conflict_issues[0].severity == LintSeverity.WARNING
-        assert "a scan reads 'cdk-nag'" in conflict_issues[0].message
+        assert "a scan merges them key by key" in conflict_issues[0].message
+        assert "'cdk-nag' wins" in conflict_issues[0].message
         assert conflict_issues[0].fixable is False
         assert "cdk_nag" in conflict_issues[0].message
         assert "cdk-nag" in conflict_issues[0].message
@@ -1262,7 +1273,8 @@ class TestConfigLintCLI:
             ["lint", "--config", str(config_path), "--fix", "--non-interactive"],
         )
         assert result.exit_code == 0, result.output
-        assert "a scan reads 'npm-audit'" in result.output
+        assert "a scan merges them key by key" in result.output
+        assert "'npm-audit' wins" in result.output
         assert (
             "name" not in yaml.safe_load(config_path.read_text())["scanners"]["bandit"]
         )
@@ -1353,6 +1365,59 @@ class TestConfigLintCLI:
         suppressions = active_data["global_settings"]["suppressions"]
         assert len(suppressions) == 1
         assert suppressions[0]["path"] == "src/still_needed.py"
+
+    def test_lint_fix_unused_says_when_the_list_cannot_be_edited(
+        self, cli_runner, tmp_path
+    ):
+        """A repeated suppressions key: lint lists the unused entries, and the
+        fixer, which cannot tell the two lists apart, says so and leaves the
+        file unchanged, instead of printing that there was nothing to comment
+        out (exit 1, since the operator asked for an edit that could not be
+        made)."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True)
+        config_text = (
+            "project_name: demo\n"
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    - path: src/x.py\n"
+            "      rule_id: B101\n"
+            "      reason: shadowed\n"
+            "  suppressions:\n"
+            "    - path: src/a.py\n"
+            "      rule_id: B101\n"
+            "      reason: one\n"
+        )
+        config_path.write_text(config_text, encoding="utf-8")
+        reports = tmp_path / ".ash" / "ash_output" / "reports"
+        reports.mkdir(parents=True)
+        (reports / "ash.unused-suppressions.json").write_text(
+            json.dumps(
+                {
+                    "unused_suppressions": [
+                        {"path": "src/a.py", "rule_id": "B101", "reason": "one"}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = cli_runner.invoke(
+            config_app,
+            [
+                "lint",
+                "--config",
+                str(config_path),
+                "--fix-unused",
+                "--non-interactive",
+            ],
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "could not be commented out" in result.output
+        assert "written more than once" in result.output
+        assert "No unused suppressions to comment out" not in result.output
+        assert config_path.read_text(encoding="utf-8") == config_text
 
     def test_lint_non_interactive_no_prompts(
         self, cli_runner, config_with_internal_fields
@@ -1621,26 +1686,6 @@ def test_fix_unused_does_not_count_a_dash_inside_a_reason_as_an_entry(
     assert kept.reason.splitlines() == ["first line", item, "last line"]
 
 
-@pytest.mark.parametrize(
-    "stripped, starts",
-    [
-        ("- path: a", True),
-        ("-", True),
-        # A dash with only blanks after it, a tab among them (which PyYAML
-        # refuses, and a loader that accepts it reads as `-`).
-        ("-\t", True),
-        ("-  ", True),
-        ("-x", False),
-        ("--", False),
-        ("# - path: a", False),
-    ],
-)
-def test_what_starts_a_list_item(stripped, starts):
-    from automated_security_helper.config.config_linter import _starts_list_item
-
-    assert _starts_list_item(stripped) is starts
-
-
 def test_fix_refuses_a_file_with_environment_references(tmp_path):
     """ConfigLinter.fix itself refuses, not only the command that calls it."""
     config_path = tmp_path / ".ash.yaml"
@@ -1700,9 +1745,20 @@ def test_fix_unused_help_says_which_files_it_leaves_alone():
 )
 def test_the_toml_refusal_says_what_each_flag_rewrites(tmp_path, flags):
     """The refusal said "--fix and --fix-unused rewrite YAML and JSON", but
-    --fix-unused refuses JSON too."""
+    --fix-unused refuses JSON too. The file holds something --fix would rewrite
+    (a suppression with line_start and no line_end): --fix refuses a TOML file
+    only when it has a fix to make, since a clean one passes."""
     config_path = tmp_path / ".ashrc.toml"
-    config_path.write_text('project_name = "t"\n', encoding="utf-8")
+    config_path.write_text(
+        'project_name = "t"\n'
+        "\n"
+        "[[global_settings.suppressions]]\n"
+        'rule_id = "B101"\n'
+        'path = "a.py"\n'
+        "line_start = 3\n"
+        'reason = "r"\n',
+        encoding="utf-8",
+    )
 
     result = CliRunner().invoke(
         config_app,
@@ -1715,3 +1771,113 @@ def test_the_toml_refusal_says_what_each_flag_rewrites(tmp_path, flags):
     assert "--fix-unused rewrite YAML and JSON" not in flat, flat
     assert "--fix rewrites YAML and JSON config files" in flat, flat
     assert "--fix-unused YAML ones only" in flat, flat
+
+
+def test_lint_fix_passes_a_clean_toml_file_without_the_refusal(tmp_path):
+    """The documented pre-commit invocation, ``lint --fix -y`` on a TOML config
+    with nothing to fix, exits 0 and prints no rewrite refusal. The test above
+    swapped its clean file for one with a fix to make; without this one a
+    regression here would break TOML users' pre-commit hooks with no test red."""
+    config_path = tmp_path / ".ashrc.toml"
+    config_path.write_text('project_name = "t"\n', encoding="utf-8")
+
+    result = CliRunner().invoke(
+        config_app,
+        ["lint", "--config", str(config_path), "--fix", "-y"],
+        env={"COLUMNS": "400"},
+    )
+
+    assert result.exit_code == 0, result.output
+    flat = " ".join(result.output.split())
+    assert "rewrites YAML and JSON config files" not in flat, flat
+
+
+def _a_scanned_tree_with_a_report(tmp_path: Path, extension: str) -> Path:
+    """A scanned tree whose last scan wrote the unused-suppressions report under
+    ``reports/ash.<extension>``, listing the one entry the configs below hold."""
+    root = tmp_path / "root"
+    reports = root / ".ash" / "ash_output" / "reports"
+    reports.mkdir(parents=True)
+    (reports / f"ash.{extension}").write_text(
+        json.dumps({"unused_suppressions": [{"path": "src/a.py", "rule_id": "B101"}]}),
+        encoding="utf-8",
+    )
+    return root
+
+
+_SUPPRESSION_LINES = (
+    "global_settings:\n  suppressions:\n    - path: src/a.py\n      rule_id: B101\n"
+    "      reason: once\n"
+)
+
+
+def test_lint_source_dir_finds_the_report_under_the_configured_extension(tmp_path):
+    """Red at the base: with --config outside the scanned tree, the --source-dir
+    check looked for the report under the default name alone, so a scan
+    configured with ``extension`` wrote a report the lint never pointed at, and
+    --fix-unused commented nothing out."""
+    root = _a_scanned_tree_with_a_report(tmp_path, "alt.json")
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    config_path = conf / "ash.yaml"
+    config_path.write_text(
+        "project_name: demo\n"
+        "reporters:\n  unused-suppressions:\n    extension: alt.json\n"
+        + _SUPPRESSION_LINES,
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        config_app,
+        [
+            "lint",
+            "--config",
+            str(config_path),
+            "--source-dir",
+            str(root),
+            "--fix-unused",
+            "--non-interactive",
+        ],
+        env={"COLUMNS": "400"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "No unused suppressions report found" not in result.output, result.output
+    assert "# [ash-lint" in config_path.read_text(encoding="utf-8")
+
+
+def test_lint_source_dir_finds_the_report_named_by_an_extends_base(tmp_path):
+    """Red at the base: the report's name was read from the checked file's own
+    data, so an ``extension`` set in the ``extends`` base (what the scan, which
+    reads the merged configuration, wrote the report under) was never looked
+    for, by the --source-dir check or by the fixer."""
+    root = _a_scanned_tree_with_a_report(tmp_path, "from-base.json")
+    conf = tmp_path / "conf"
+    conf.mkdir()
+    (conf / "base.yaml").write_text(
+        "reporters:\n  unused-suppressions:\n    extension: from-base.json\n",
+        encoding="utf-8",
+    )
+    config_path = conf / "ash.yaml"
+    config_path.write_text(
+        "extends: base.yaml\nproject_name: demo\n" + _SUPPRESSION_LINES,
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        config_app,
+        [
+            "lint",
+            "--config",
+            str(config_path),
+            "--source-dir",
+            str(root),
+            "--fix-unused",
+            "--non-interactive",
+        ],
+        env={"COLUMNS": "400"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "No unused suppressions report found" not in result.output, result.output
+    assert "# [ash-lint" in config_path.read_text(encoding="utf-8")

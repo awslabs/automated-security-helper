@@ -4,7 +4,10 @@
 """Reporter for identifying unused suppressions."""
 
 import json
+import re
 from typing import Literal, TYPE_CHECKING, Any, ClassVar, Dict, List, Tuple
+
+from pydantic import PrivateAttr, ValidationInfo, field_validator
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -14,16 +17,25 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
-from automated_security_helper.models.workspace import is_workspace_scan
+from automated_security_helper.models.workspace import (
+    ProjectRunStatus,
+    is_workspace_scan,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.models.core import (
     PACKAGE_SUPPRESSION_FIELDS,
     AshSuppression,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.unknown_keys import tolerated_notes
 from automated_security_helper.utils.suppression_matcher import (
     recorded_suppressions,
     written_suppression_id,
 )
+
+
+#: The values of ``output_format``.
+_OUTPUT_FORMATS = ("json", "markdown", "both")
 
 
 def _one_line(text: str | None) -> str:
@@ -43,13 +55,59 @@ def _one_line(text: str | None) -> str:
     str.split() with no argument splits on newlines, carriage returns and tabs,
     so this handles a CRLF config as well as a YAML block scalar.
     """
-    return " ".join((text or "").split())
+    return " ".join(str(text or "").split())
+
+
+def _code_span(value: Any) -> str:
+    """``value`` as an inline code span on one line.
+
+    A field the config wrote is interpolated as it is, and one that holds a
+    newline ends its bullet, and one that holds a backtick ends its span. The
+    value is flattened (``_one_line``) and fenced with more backticks than it
+    contains in a row, padded by a space when it starts or ends with one.
+    """
+    text = _one_line(None if value is None else str(value))
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
 
 
 class UnusedSuppressionsReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Unused Suppressions reporter."""
 
     output_format: str = "both"  # "json", "markdown", or "both"
+
+    @field_validator("output_format", mode="before")
+    @classmethod
+    def _output_format_is_one_of_the_three(
+        cls, value: Any, info: ValidationInfo
+    ) -> Any:
+        """Read the case of the name away, and refuse any other.
+
+        ``report`` took every value but ``both`` and ``markdown`` for ``json``,
+        so ``md``, ``Both`` and ``MARKDOWN`` were silently the JSON-only report.
+        The message names the allowed values and not the one given: it can be a
+        value read from the environment.
+
+        The config a results file recorded is read again by every reader of the
+        file (``ash report``, ``--existing-results``, ``ash merge``), and a scan
+        by an earlier version may have run with a value this refuses. Refusing it
+        there would lose the results of a scan nobody is about to run again, so
+        under the stored-config tolerance (``utils/unknown_keys``) the value is
+        read as the earlier version read it, ``json``, and a note says so
+        without naming the value.
+        """
+        if isinstance(value, str) and value.strip().lower() in _OUTPUT_FORMATS:
+            return value.strip().lower()
+        notes = tolerated_notes(info)
+        if notes is not None:
+            notes.append(
+                "an unreadable output_format of the unused-suppressions reporter "
+                "was read as json"
+            )
+            return "json"
+        raise ValueError("output_format must be one of: json, markdown, both")
 
 
 class UnusedSuppressionsReporterConfig(ReporterPluginConfigBase):
@@ -96,11 +154,83 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
     #: The markdown copy written beside the JSON report when ``output_format`` is
     #: ``both``.
     MARKDOWN_FILE_NAME: ClassVar[str] = "ash.unused-suppressions.md"
+    #: The extension the report is written under when ``output_format`` is
+    #: ``markdown``: the report text is markdown, so the file is named as such.
+    #: Left as the JSON extension, the markdown landed in
+    #: ``ash.unused-suppressions.json``, which ``ash config lint --fix-unused``
+    #: then read as JSON.
+    MARKDOWN_EXTENSION: ClassVar[str] = "unused-suppressions.md"
+
+    #: What the report says in place of its counts when the scan ran with
+    #: ``--ignore-suppressions``. No suppression was matched against a finding
+    #: on such a run, so ``used_suppressions`` is empty by construction and
+    #: every configured entry would read as unused. Reported as unused, each
+    #: would then be commented out by ``ash config lint --fix-unused``, which
+    #: reads this file.
+    NOT_EVALUATED: ClassVar[str] = (
+        "The scan ran with --ignore-suppressions, so no suppression was matched "
+        "against a finding and this report says nothing about which are unused. "
+        "Run a scan without --ignore-suppressions to evaluate them."
+    )
+
+    #: The ``.json`` file name the markdown-under-a-json-name warning was last
+    #: given for. The name is settled twice for a reporter that is built and then
+    #: configured (``model_post_init`` and ``configure``), and the same warning
+    #: was logged by each.
+    _json_name_warned_for: str | None = PrivateAttr(default=None)
 
     def model_post_init(self, context):
         if self.config is None:
             self.config = UnusedSuppressionsReporterConfig()
+        self._name_the_report_file_by_its_format()
         return super().model_post_init(context)
+
+    def configure(self, config=None) -> None:
+        super().configure(config)
+        self._name_the_report_file_by_its_format()
+
+    def _name_the_report_file_by_its_format(self) -> None:
+        """Under ``output_format: markdown`` the report is markdown, so it is
+        written under MARKDOWN_EXTENSION, not the JSON one.
+
+        An extension the operator chose is kept, where chosen means a value
+        other than the class default. The first form of this test asked whether
+        the field was SET (``model_fields_set``), and the real run never met
+        it: the report phase builds a reporter from ``get_plugin_config``,
+        which is a full dump of the section, so ``extension`` arrived with the
+        default's value, counted as set, and the markdown landed back in
+        ``ash.unused-suppressions.json``. An operator who wrote the default's
+        own value under ``markdown`` gets the markdown name too. The change
+        lands on a copy of the config, so the object the caller handed in (the
+        AshConfig's own reporter section, say) is not changed under it.
+        """
+        if isinstance(self.config, dict):
+            self.config = UnusedSuppressionsReporterConfig.model_validate(self.config)
+        output_format = getattr(
+            getattr(self.config, "options", None), "output_format", "both"
+        )
+        default_extension = UnusedSuppressionsReporterConfig.model_fields[
+            "extension"
+        ].default
+        if output_format == "markdown" and self.config.extension == default_extension:
+            self.config = self.config.model_copy(
+                update={"extension": self.MARKDOWN_EXTENSION}
+            )
+        elif output_format == "markdown" and self.config.extension.lower().endswith(
+            ".json"
+        ):
+            # Kept, as the operator's choice, but said: the text written under it
+            # is markdown, and `ash config lint --fix-unused` reads a file of
+            # this name as JSON. Once for a name: the reporter settles its name
+            # when it is built and again when it is configured.
+            if self._json_name_warned_for != self.config.extension:
+                self._json_name_warned_for = self.config.extension
+                ASH_LOGGER.warning(
+                    "The unused-suppressions reporter writes markdown "
+                    "(output_format: markdown) under a file name that ends in "
+                    ".json; tools that read the report by its name will read "
+                    "markdown as JSON."
+                )
 
     def companion_file_names(self) -> Tuple[str, ...]:
         """The markdown copy, when ``output_format`` is ``both`` (the default)."""
@@ -118,8 +248,30 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         if isinstance(self.config, dict):
             self.config = UnusedSuppressionsReporterConfig.model_validate(self.config)
 
-        # Get all configured suppressions
-        all_suppressions = self.context.config.global_settings.suppressions or []
+        # The configured suppressions this report is about. In workspace mode
+        # those are the workspace-level ones, of which this phase has none (see
+        # the class docstring): the context's config is the invoking config,
+        # whose suppressions were matched inside each project's own scan and
+        # are reported there. Subtracting the unified file's empty
+        # used_suppressions from that config listed every one of them unused.
+        workspace = is_workspace_scan(model)
+        if workspace:
+            all_suppressions: List[AshSuppression] = []
+        else:
+            all_suppressions = self.context.config.global_settings.suppressions or []
+
+        # Under --ignore-suppressions nothing was matched, so the subtraction
+        # below has no meaning: the report says so instead of listing every
+        # entry as unused (NOT_EVALUATED). The flag is read from this run's
+        # context and from the results' own metadata (`suppressions_ignored`,
+        # for a scan that recorded it), so a results file re-rendered by a
+        # later `ash report`, whose context carries no such flag, reads the
+        # same way once the scan records it.
+        suppressions_ignored = bool(
+            getattr(self.context, "ignore_suppressions", False)
+        ) or bool(
+            getattr(getattr(model, "metadata", None), "suppressions_ignored", False)
+        )
 
         # Get used suppressions from the model
         used_suppressions = getattr(model, "used_suppressions", set())
@@ -146,6 +298,8 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         used_ids = set(used_suppressions)
         unused_suppressions = []
         for suppression in all_suppressions:
+            if suppressions_ignored:
+                break
             if written[id(suppression)] in used_ids:
                 continue
             if suppression.id in used_ids and suppression.id not in written_ids:
@@ -156,11 +310,19 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         # not the recorded ids, so the three numbers always add up: an id that
         # matches no configured entry (one from a config edited since, say) is
         # counted nowhere, where counting the ids read "total 3, used 1,
-        # unused 3".
+        # unused 3". When suppressions were ignored both counts are 0 and
+        # "evaluated" says why they add up to nothing: a reader that checks
+        # neither key comments nothing out, where "every one unused" would have
+        # had it comment out every entry.
+        used_count = (
+            0
+            if suppressions_ignored
+            else len(all_suppressions) - len(unused_suppressions)
+        )
         report_data: Dict[str, Any] = {
             "summary": {
                 "total_suppressions": len(all_suppressions),
-                "used_suppressions": len(all_suppressions) - len(unused_suppressions),
+                "used_suppressions": used_count,
                 "unused_suppressions": len(unused_suppressions),
             },
             "unused_suppressions": [
@@ -168,6 +330,33 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 for s in unused_suppressions
             ],
         }
+        if suppressions_ignored:
+            report_data["summary"]["evaluated"] = False
+            report_data["not_evaluated"] = self.NOT_EVALUATED
+
+        # A suppression is matched against the findings a scanner reports. A
+        # scanner that did not run (its tool missing, an error, or excluded for
+        # this run) reported none, so a suppression for one of its findings
+        # could not be matched and reads as unused here although it is in
+        # force. The report names those scanners so the "remove it" reading
+        # is qualified; a suppression carries no scanner name, so it cannot
+        # say which entries are affected. A scanner that found nothing to scan,
+        # or that the configuration turns off, is not named: a later scan of the
+        # same tree leaves it out the same way (see _scanners_not_run). Not in
+        # workspace mode: this report
+        # then covers no suppression (the list above is empty), and each
+        # project's own report carries the caveat for that project's scan.
+        scanners_not_run = [] if workspace else self._scanners_not_run(model)
+        if scanners_not_run and not suppressions_ignored:
+            report_data["scanners_not_run"] = scanners_not_run
+            report_data["scope_caveat"] = (
+                "These scanners did not run on this scan: "
+                + ", ".join(scanners_not_run)
+                + ". A suppression for a finding one of them would report could "
+                "not be matched and may be listed as unused although it is in "
+                "force; keep such entries until a scan with the scanner enabled "
+                "evaluates them."
+            )
 
         # In workspace mode the scope has to be stated, because the numbers above
         # are honest only about workspace-level suppressions. Read as a merge,
@@ -176,8 +365,8 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         # unused", and the per-project answers live in the per-project reports.
         # Leaving that implicit would let an operator conclude their per-project
         # suppressions are all in use on the strength of no evidence at all.
-        if is_workspace_scan(model):
-            workspace = model.workspace
+        if workspace:
+            workspace_results = model.workspace
             report_data["scope"] = "workspace"
             report_data["scope_detail"] = (
                 "Counts cover workspace-level suppressions only. Each project's "
@@ -185,6 +374,8 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 "against that project's own config, and are reported under "
                 "per_project_reports."
             )
+            # Only a project that completed wrote a report. A skipped or failed
+            # one has no file at the path, which a listing here would name.
             report_data["per_project_reports"] = [
                 {
                     "project": project.project,
@@ -192,7 +383,8 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                         f"{project.output_path}/reports/ash.{self.config.extension}"
                     ),
                 }
-                for project in workspace.projects
+                for project in workspace_results.projects
+                if project.status == ProjectRunStatus.COMPLETED
             ]
 
         # Check if we should generate both formats
@@ -215,7 +407,17 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
 
                 report_dir = Path(self.context.output_dir) / "reports"
                 report_dir.mkdir(parents=True, exist_ok=True)
-                write_report_file(report_dir, self.MARKDOWN_FILE_NAME, markdown_output)
+                markdown_path = write_report_file(
+                    report_dir, self.MARKDOWN_FILE_NAME, markdown_output
+                )
+                if markdown_path is None:
+                    # write_report_file has said why. What it cannot say is that
+                    # a copy an earlier scan left there is not this scan's.
+                    ASH_LOGGER.warning(
+                        f"The markdown copy of the unused-suppressions report was "
+                        f"not written, so {self.MARKDOWN_FILE_NAME} in "
+                        f"{report_dir}, if one is there, is from an earlier scan."
+                    )
 
             # Return JSON as the primary output
             return json_output
@@ -225,6 +427,60 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             )
         else:
             return json.dumps(report_data, indent=2, default=str)
+
+    @staticmethod
+    def _scanners_not_run(model: "AshAggregatedResults") -> List[str]:
+        """The scanners that did not run when a full scan of this configuration
+        would have run them: status MISSING or ERROR, a dependency not
+        satisfied, or excluded for this run. Sorted by name; empty when every
+        recorded scanner ran or was left out for a reason a later scan shares.
+
+        Two kinds of row are not listed, because a later scan of the same tree
+        and configuration leaves the scanner out the same way, so a suppression
+        for its findings is unused in the same sense as any other:
+
+        - a SKIPPED scanner that was not excluded: it looked and found nothing
+          to scan (no lockfile for npm-audit, no template for cdk-nag), so it
+          had no finding to match;
+        - an excluded scanner whose recorded reason says the configuration
+          disabled it (``enabled: false``).
+
+        An exclusion that is the operator's choice for this run alone (a
+        ``--scanners`` or ``--exclude-scanners`` selection, a shard split,
+        ``--python-only``) stays listed: the next full scan runs the scanner.
+        So does an excluded row with no recorded reason, since the cause is then
+        unknown.
+        """
+        from automated_security_helper.core.enums import ScannerStatus
+
+        not_run = []
+        for name, info in (getattr(model, "scanner_results", None) or {}).items():
+            status = getattr(info, "status", None)
+            if status in (ScannerStatus.MISSING, ScannerStatus.ERROR) or not getattr(
+                info, "dependencies_satisfied", True
+            ):
+                not_run.append(str(name))
+            elif getattr(info, "excluded", False) and not (
+                UnusedSuppressionsReporter._disabled_by_configuration(info)
+            ):
+                not_run.append(str(name))
+        return sorted(not_run)
+
+    #: What the scan phase and the executor write into ``skipped_reason`` for a
+    #: scanner the configuration turns off. An unrecognized wording reads as an
+    #: exclusion for this run, which is the side that comments nothing out.
+    CONFIG_DISABLED_REASON: ClassVar[str] = "disabled in the configuration"
+
+    @staticmethod
+    def _disabled_by_configuration(info: Any) -> bool:
+        """Whether *info*'s recorded reason says the configuration disabled the
+        scanner (alone or beside a selection for this run: a full scan of the
+        same configuration leaves it out too)."""
+        reason = getattr(info, "skipped_reason", None)
+        return (
+            isinstance(reason, str)
+            and UnusedSuppressionsReporter.CONFIG_DISABLED_REASON in reason
+        )
 
     @staticmethod
     def _suppression_to_dict(
@@ -291,11 +547,34 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         lines.append(f"- **Unused Suppressions**: {summary['unused_suppressions']}")
         lines.append("")
 
-        # Status indicator
-        if summary["unused_suppressions"] == 0:
+        # Status indicator. A report that evaluated nothing says so in place of
+        # a judgment, and a workspace-level report names its scope before its
+        # counts: "all suppressions are being used" read over a workspace
+        # would mean every project's, which this report cannot know.
+        if report_data.get("not_evaluated"):
+            lines.append(
+                f"⚠️  **Suppressions were not evaluated**: {report_data['not_evaluated']}"
+            )
+            lines.append("")
+        elif report_data.get("scope") == "workspace":
+            lines.append(f"**Scope**: {report_data.get('scope_detail', '')}")
+            lines.append("")
+            if summary["unused_suppressions"] == 0:
+                lines.append("✅ **No workspace-level suppression is unused.**")
+                lines.append("")
+        elif summary["total_suppressions"] == 0:
+            # Nothing is configured, so nothing is "being used".
+            lines.append("**No suppressions are configured.**")
+            lines.append("")
+        elif summary["unused_suppressions"] == 0:
             lines.append("✅ **All suppressions are being used!**")
             lines.append("")
-        else:
+        if report_data.get("scope_caveat"):
+            lines.append(
+                f"⚠️  **Scanners that did not run**: {report_data['scope_caveat']}"
+            )
+            lines.append("")
+        if summary["unused_suppressions"] != 0:
             percentage = (
                 (summary["unused_suppressions"] / summary["total_suppressions"] * 100)
                 if summary["total_suppressions"] > 0
@@ -319,9 +598,9 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 shown = UnusedSuppressionsReporter._suppression_to_dict(
                     suppression, (recorded or {}).get(id(suppression))
                 )
-                lines.append(f"### {i}. {shown['path']}")
+                lines.append(f"### {i}. {_one_line(shown['path'])}")
                 lines.append("")
-                lines.append(f"- **Rule ID**: `{shown['rule_id'] or 'Any'}`")
+                lines.append(f"- **Rule ID**: {_code_span(shown['rule_id'] or 'Any')}")
 
                 if suppression.line_start is not None:
                     if (
@@ -343,12 +622,12 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                     ("symbol", "Symbol"),
                 ):
                     if field in shown:
-                        lines.append(f"- **{label}**: `{shown[field]}`")
+                        lines.append(f"- **{label}**: {_code_span(shown[field])}")
 
                 lines.append(f"- **Reason**: {_one_line(shown['reason'])}")
 
                 if suppression.expiration:
-                    lines.append(f"- **Expiration**: {shown['expiration']}")
+                    lines.append(f"- **Expiration**: {_one_line(shown['expiration'])}")
 
                 lines.append("")
 
@@ -369,6 +648,27 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             lines.append(
                 "4. **Still needed**: Verify the suppression is correctly configured"
             )
+            lines.append("")
+        elif report_data.get("not_evaluated"):
+            lines.append("## Details")
+            lines.append("")
+            lines.append(
+                "No suppression was evaluated on this run, so none is listed here "
+                "as unused."
+            )
+            lines.append("")
+        elif report_data.get("scope") == "workspace":
+            lines.append("## Details")
+            lines.append("")
+            lines.append(
+                "No workspace-level suppression is unused. Each project's own "
+                "suppressions are reported in that project's report."
+            )
+            lines.append("")
+        elif summary["total_suppressions"] == 0:
+            lines.append("## Details")
+            lines.append("")
+            lines.append("No suppressions are configured, so none can be unused.")
             lines.append("")
         else:
             lines.append("## Details")

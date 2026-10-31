@@ -213,6 +213,42 @@ it needs.
   `AUTH`, `CREDENTIAL`, `API_KEY` or `SESSION`, and any value carrying
   `user:password@` in a URL, is dropped unless the scanner names that exact variable
   (snyk-code names `SNYK_TOKEN`). Cloud credentials and tokens are not passed in.
+- The proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and the
+  lowercase forms) and the certificate settings (`SSL_CERT_FILE`, `SSL_CERT_DIR`,
+  `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`) are the default of
+  one environment list, `sandbox.environment`, which has the shape of a
+  docker-compose `environment` list: a name passes the value ASH has, and
+  `NAME=value` sets it. Every backend reads the same list, and a list you write
+  replaces the default one, as a compose list replaces an image's (see
+  [Pass other variables](#environment)). A proxy setting is passed only to a scanner
+  that has a network. A name the rule above drops, `TMPDIR`, `TEMP` and `TMP` (each
+  backend gives a scanner a private temporary directory of its own, so a listed value
+  would only point it elsewhere), `HOME` (the sandbox sets it to the scanner's private
+  home, so an entry would do nothing) and ASH's own run id are refused with the name,
+  so the list is not a channel for secrets. A `NAME=value` entry whose value carries
+  `user:password@` in a URL is refused with the variable named and no value shown,
+  because the sandbox would drop it from every scanner and the entry would do
+  nothing. A variable the list passes by name is held to the same rule when ASH is
+  started with such a value: it is dropped without a message.
+- A certificate setting you made is readable inside the sandbox, on every backend,
+  where bwrap, firejail and Landlock hide the home directory, for a scanner that has
+  a network (a scanner with none never verifies a peer, so it is granted no read,
+  and the variables are still passed): the files that
+  `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS`
+  name, read-only, and each directory `SSL_CERT_DIR` names. The grant is for the value
+  ASH started with (or one the list sets), never for a value that appears later in
+  the environment. A `SSL_CERT_DIR` entry that is a home directory or holds one is
+  not granted, with a warning, because it would show far more than the certificates.
+  So is an entry that the backend cannot write in its options (a path with `~` or `*`
+  under firejail, or a control character under sandbox-exec): it is passed through
+  but not granted, with a warning, and the scan goes on.
+  A setting written through a symlink that sits inside your home directory
+  (`~/.config/corp/ca.pem` pointing at `/etc/ssl/certs/corp.pem`) is readable under
+  bwrap, which recreates the link inside the sandbox. Firejail cannot recreate a
+  link: it grants the file the link points to, warns once, and the written path stays
+  unreadable. Point the setting at the file itself there. Under firejail a file in a
+  `HOME` that differs from the passwd entry's home stays unreadable too, because the
+  sandbox hides that whole directory; keep the bundle outside it.
 - No local IPC endpoint is reachable, with or without a network: not the Docker or
   Podman socket, the session bus, `$SSH_AUTH_SOCK`, the journal, nor a socket in a
   directory the sandbox mounts, such as the Nix daemon's under `/nix`. On Linux every
@@ -398,10 +434,48 @@ sandbox:
   extra_read_paths: [/opt/company-ca]
 ```
 
+#### Pass other variables {#environment}
+
+`sandbox.environment` lists the variables every sandboxed scanner is passed besides
+its fixed baseline (`PATH`, the locale and terminal settings, a few tool homes such as
+`JAVA_HOME` and `VIRTUAL_ENV`, and the `ASH_`, `UV_`, `LC_` and `PYTHON` families;
+the [scanner reference](../reference/scanners.md) names them all). It is written as a
+docker-compose `environment` list:
+`NAME` passes the value ASH has, `NAME=value` sets one, and a name listed twice takes
+its last entry.
+
+```yaml
+sandbox:
+  mode: bwrap
+  environment:
+    - HTTPS_PROXY
+    - NO_PROXY
+    - SSL_CERT_FILE
+    - MY_TOOL_HOME=/opt/company/tool
+```
+
+The default list is the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
+`NO_PROXY` and the lowercase forms) and the certificate variables (`SSL_CERT_FILE`,
+`SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`). A list
+you write replaces it, as a compose list replaces an image's: the list above passes
+four variables and drops every other proxy and certificate variable, so write each
+one you still want. To change it for one run, pass
+`--config-overrides 'sandbox.environment=[HTTPS_PROXY,SSL_CERT_FILE,MY_VAR]'`; there
+is no separate flag.
+
+A `NAME=value` entry sets a variable in every sandboxed scanner, `LD_PRELOAD` and
+`NODE_OPTIONS` included, so the setting grants access like the others below and
+follows the same rule about who may set it. A name that marks a credential, `TMPDIR`,
+`TEMP`, `TMP`, `HOME`, ASH's own run id and a `NAME=value` entry whose value is a URL
+with a user name and password (a proxy such as `http://user:password@proxy:3128`)
+are refused when the config is read, with the variable named and no value shown. A
+scanner that needs a credential is granted it with `sandbox.env_scanners` and its own
+variable names instead.
+
 #### Who may grant
 
-Four settings grant access: `network_scanners`, `extra_read_paths`, and the two
-below that let a scanner have what its own options ask for. A config file the
+Five settings grant access: `network_scanners`, `extra_read_paths`, `environment`,
+and the two below that let a scanner have what its own options ask for. A config file the
 scanned repository could have written can't grant any of them. That means a config
 file inside any git checkout, where a directory at or above the file, by its own path
 or its resolved path, holds a `.git` entry (a directory, or the file a submodule or
@@ -416,7 +490,7 @@ name gets none, so a repository can keep its own scan offline with
 `network_scanners: []`.
 
 When any file the config was built from can't grant (the discovered `.ash/.ash.yaml`,
-a `--config` path, an `extends` base, or the file `ASH_CONFIG` names), the four
+a `--config` path, an `extends` base, or the file `ASH_CONFIG` names), the five
 settings are taken from the files that can: in workspace mode the operator's
 default config (under the MCP server, the session's bound profile), else
 `ASH_CONFIG`'s file, else the defaults, plus `--config-overrides`. A file that can
@@ -593,7 +667,8 @@ Out of scope:
   fails naming the link. snyk-code tests a copy of the scan set.
 - Plugin modules. A config file can list `ash_plugin_modules`, which ASH imports into
   its own process, so they run unsandboxed. From a config file inside the scanned
-  tree, only installed modules outside the tree are imported (see
+  tree, only installed modules outside the tree and outside every git checkout are
+  imported (see
   [What each tier may set](../concepts/trust-model.md#what-each-tier-may-set)),
   but an installed package still runs with ASH's access. The sandbox doesn't change
   this; review the plugin modules a repository's config names before you scan it.

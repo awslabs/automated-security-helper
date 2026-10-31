@@ -22,6 +22,7 @@ OSError at the plain runner (``_run_plain``), before it started any child, or at
 """
 
 import errno
+import logging
 import subprocess
 import sys
 from pathlib import Path
@@ -489,9 +490,11 @@ def test_handling_that_raises_keeps_the_responses_flag(
 #: The calls after the uv launch that the cells make raise, once: the three in
 #: _try_uv_tool_execution's try, and the recorders _run_subprocess calls on the
 #: uv result. (There is no _record_result_rejected or _record_cancelled here.)
+#: The offline-resolve explainer is not among them: the mixin guards it on its
+#: own (uv_tool_mixin.py, around the explainer call), so a raise inside it does
+#: not grade the run, and the test after this table pins that.
 AFTER_THE_UV_LAUNCH = {
     "process_command_response": ("_process_command_response", None),
-    "explain_offline_resolve_failure": ("_explain_offline_resolve_failure", None),
     "completion_plugin_log": (
         "_plugin_log",
         lambda message, *args, **kwargs: str(message).startswith(
@@ -531,6 +534,47 @@ def test_handling_that_raises_after_a_uv_launch_runs_nothing_again(
     assert scanner.scan_spawn_failure is None or flag == "spawn_failed", (
         scanner.scan_spawn_failure
     )
+
+
+@pytest.mark.unit
+def test_a_raising_offline_explainer_leaves_the_response_alone(tmp_path, monkeypatch):
+    """The offline-resolve explainer is best-effort text about a run that was
+    already processed. A raise inside it used to fall into the mixin's handler and
+    grade the run post_run_error; the mixin now guards it on its own, logs the
+    failure at DEBUG, and leaves the run's real result as it was."""
+    launches = _Launches("none")
+    scanner = _scanner_on(tmp_path, monkeypatch, "uv", launches)
+    monkeypatch.setattr(
+        _Handled,
+        "_explain_offline_resolve_failure",
+        _raises_once(_Handled._explain_offline_resolve_failure),
+    )
+    logged: list = []
+    original_log = _Handled._plugin_log
+
+    def recording_log(self, message, *args, **kwargs):
+        logged.append((str(message), kwargs.get("level")))
+        return original_log(self, message, *args, **kwargs)
+
+    monkeypatch.setattr(_Handled, "_plugin_log", recording_log)
+
+    response = scanner._run_subprocess(
+        command=["tool", "scan"], results_dir=tmp_path / "results"
+    )
+
+    assert (launches.uv, launches.direct) == (1, 0), (launches.uv, launches.direct)
+    assert not any(response.get(flag) is True for flag in _ERROR_FLAGS), response
+    assert response["returncode"] == _FLAGGED["none"][0], response
+    assert not scanner.scan_post_run_error, "the explainer's raise graded the run"
+    guard_lines = [
+        (message, level)
+        for message, level in logged
+        if message.startswith("The offline-resolve explainer could not run")
+    ]
+    assert len(guard_lines) == 1, logged
+    message, level = guard_lines[0]
+    assert level == logging.DEBUG, guard_lines
+    assert "the handler broke" in message, message
 
 
 def _uv_scanner_whose_run_returns(tmp_path, monkeypatch, result) -> _Handled:
@@ -1176,10 +1220,11 @@ def test_a_probes_start_before_the_launch_does_not_grade_the_launch(
 
     monkeypatch.setattr(UVToolRunner, "uv_availability", really_probed)
 
-    def requirement_check_breaks(spec, naming="a tool requirement"):
-        # The real checked_requirement's signature (spec, naming=...): run_tool
-        # passes naming positionally, and a stub narrower than the real
-        # callable raises TypeError instead of this cell's own reason.
+    def requirement_check_breaks(spec, naming="a tool requirement", **kwargs):
+        # The real checked_requirement's signature (spec, naming=..., *,
+        # package=...): run_tool passes naming positionally and the package by
+        # keyword, and a stub narrower than the real callable raises TypeError
+        # instead of this test's own reason.
         raise RuntimeError("a pre-launch step broke")
 
     monkeypatch.setattr(runner_module, "checked_requirement", requirement_check_breaks)

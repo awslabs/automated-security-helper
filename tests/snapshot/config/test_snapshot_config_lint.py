@@ -183,7 +183,11 @@ def test_fixtures_exercise_every_lint_category(project_dir, snapshot):
     }
 
     seen = {issue.category for r in results.values() for issue in r.issues}
-    missing = sorted(c.value for c in set(LintCategory) - seen)
+    # OTHER is the category of a validator warning in words lint has no category
+    # for; no config file written for a snapshot reads as one, so its unit test
+    # (tests/unit/config/test_config_linter_low_severity_fixes.py) builds the check
+    # by hand.
+    missing = sorted(c.value for c in set(LintCategory) - seen - {LintCategory.OTHER})
     assert not missing, (
         f"No fixture triggers {missing}. Add one to this module so the new rule's "
         "output is snapshotted."

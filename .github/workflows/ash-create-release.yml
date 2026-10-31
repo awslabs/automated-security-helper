@@ -363,8 +363,13 @@ jobs:
           BRANCH="release/v${NEW_VERSION}"
           git checkout -b "$BRANCH"
           git add -A
+          # The regenerated JSON schemas are golden files for the snapshot-trailers
+          # job, which requires a Snapshot-Update trailer on the commit that changes
+          # them. Every bump changes AshAggregatedResults.json, because it carries the
+          # package version as a default, so the trailer belongs on this commit.
           git commit -m "chore(release): ${OLD_VERSION} -> ${NEW_VERSION}" \
-                     -m "Triggered-by: @${ACTOR} via workflow_dispatch"
+                     -m "Triggered-by: @${ACTOR} via workflow_dispatch" \
+                     --trailer "Snapshot-Update: the release bump regenerates the version string in the aggregated results schema"
           git push -u origin "$BRANCH"
 
           BODY="Automated release PR. Merging this will trigger tag creation and GitHub Release publishing."

@@ -5,10 +5,25 @@
   "runs[].results[].level": {
     "bandit": true
   },
+  "runs[].results[].message": {
+    "bandit": true
+  },
   "runs[].results[].message.text": {
     "bandit": true
   },
+  "runs[].results[].locations": {
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation": {
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.artifactLocation": {
+    "bandit": true
+  },
   "runs[].results[].locations[].physicalLocation.artifactLocation.uri": {
+    "bandit": true
+  },
+  "runs[].results[].locations[].physicalLocation.region": {
     "bandit": true
   },
   "runs[].results[].locations[].physicalLocation.region.startLine": {
@@ -17,7 +32,13 @@
   "runs[].results[].locations[].physicalLocation.region.endLine": {
     "bandit": true
   },
+  "runs[].results[].locations[].physicalLocation.region.snippet": {
+    "bandit": true
+  },
   "runs[].results[].locations[].physicalLocation.region.snippet.text": {
+    "bandit": true
+  },
+  "runs[].results[].fingerprints": {
     "bandit": true
   },
   "runs[].results[].fingerprints.bandit/v1": {

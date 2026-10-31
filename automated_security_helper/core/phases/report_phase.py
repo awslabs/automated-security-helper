@@ -1,12 +1,26 @@
 """Implementation of the Report phase."""
 
+import os
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, cast
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    cast,
+)
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     confined_report_path,
+    enabled_value_kind,
     off_host_reporter_refused,
     reporter_companion_file_names,
     reporter_file_name,
@@ -69,6 +83,19 @@ FORMAT_REPORTER_NOT_PYTHON = "reporter-non-python-excluded"
 #: that asking for one produces nothing.
 FORMAT_NO_REPORTER = "no-reporter"
 
+#: A reporter for this format exists but could not be created, so there is no
+#: instance to ask why it is not run. Its own cause, because telling the
+#: operator that no reporter has the format (and to load a plugin module they
+#: have already loaded) sent them away from the "Error creating reporter" line
+#: that names the real problem.
+FORMAT_REPORTER_FAILED = "reporter-failed-to-build"
+
+#: The reporter exists and is enabled, but it could not name the files it writes,
+#: so the phase left it out before any reporter ran. Its own cause: the line the
+#: phase logged for it names the reporter and says why, and sending the operator
+#: to credentials and a network (the dependency reason) was the wrong place.
+FORMAT_REPORTER_FILES_UNNAMED = "reporter-files-unnamed"
+
 #: What to tell the operator for each cause, and where to send them. Keyed by
 #: reason so that adding a reason without a message is a ``KeyError`` at the point
 #: of logging rather than a diagnosis that silently prints nothing -- the failure
@@ -77,7 +104,19 @@ _FORMAT_REASON_MESSAGES = {
     FORMAT_REPORTER_DISABLED: (
         "its reporter is disabled in the configuration. Set "
         "'reporters.{fmt}.enabled: true' in the ASH config, or pass "
-        "--config-overrides reporters.{fmt}.enabled=true, to get this report."
+        "--config-overrides reporters.{fmt}.enabled=true, to get this report. "
+        "A reporter that sends findings off the host is turned on only by the "
+        "operator's own config or by --config-overrides: a config file inside "
+        "the scanned repository does not count."
+    ),
+    FORMAT_REPORTER_FAILED: (
+        "its reporter could not be created. The 'Error creating reporter' line "
+        "above names the reporter and says why."
+    ),
+    FORMAT_REPORTER_FILES_UNNAMED: (
+        "its reporter could not name the files it writes, so it was not run. The "
+        "'is not run: it could not name the files it writes' line above names the "
+        "reporter and says why."
     ),
     FORMAT_REPORTER_DEPENDENCIES: (
         "its reporter's dependencies are not satisfied. It is enabled, but its "
@@ -99,8 +138,42 @@ _FORMAT_REASON_MESSAGES = {
 }
 
 
-def _excluded_reporter_reason(instance: object, python_only: bool) -> str:
+def _entries_under(directory: Path) -> Optional[set[Path]]:
+    """Every path under ``directory``, files and directories, as a set, or None
+    when the listing did not complete.
+
+    For the report phase's cancel cleanup: what the reports directory held
+    before the reporters ran, and what it holds after. An absent directory is
+    an empty set. A listing that raised part way (``exists`` or the walk) is
+    None, never a partial set: the cleanup removes what appeared since the
+    baseline, and a partial baseline would make pre-existing entries (an
+    earlier run's reports kept by ``--use-existing``) look new and be removed.
+    ``rglob`` does not descend into a linked directory, so nothing outside the
+    directory is ever listed, or later removed.
+    """
+    entries: set[Path] = set()
+    try:
+        if not directory.exists():
+            return entries
+        for path in directory.rglob("*"):
+            entries.add(path)
+    except OSError as e:
+        ASH_LOGGER.debug(f"Could not finish listing {directory}: {e}")
+        return None
+    return entries
+
+
+def _excluded_reporter_reason(
+    instance: object, python_only: bool, off_host_refused: bool = False
+) -> str:
     """Why ``filter_enabled_plugins`` dropped this reporter.
+
+    *off_host_refused*: the phase held this reporter back before the filter
+    because it sends findings off the host and its section does not set
+    ``enabled: true``. It never reached the filter, and when its config could
+    not be set disabled (``_disable``) it still reads as enabled, so without
+    this it fell through to the dependency reason, which sent the operator to
+    credentials instead of to the setting that turns it on.
 
     Determined by elimination rather than by re-running the checks, and the order
     matters. ``validate_plugin_dependencies`` performs IO for some reporters --
@@ -117,7 +190,12 @@ def _excluded_reporter_reason(instance: object, python_only: bool) -> str:
     thing to tell an operator about a check that blew up.
     """
     config = getattr(instance, "config", None)
-    if config is not None and getattr(config, "enabled", True) is False:
+    if off_host_refused:
+        return FORMAT_REPORTER_DISABLED
+    # Any falsy value, as filter_enabled_plugins drops on (``not enabled``), and
+    # not only an explicit False: a plugin config that allows None or 0 for the
+    # flag was dropped as disabled and reported as having unsatisfied dependencies.
+    if config is not None and not getattr(config, "enabled", True):
         return FORMAT_REPORTER_DISABLED
     if python_only:
         try:
@@ -141,6 +219,9 @@ def unsatisfied_output_formats(
     selected_instances: Sequence[object],
     all_instances: Sequence[object],
     python_based_plugins_only: bool = False,
+    off_host_refused: Collection[int] = (),
+    failed_to_build: Collection[str] = (),
+    files_unnamed: Collection[int] = (),
 ) -> Dict[str, str]:
     """Requested formats that will produce no report, and why.
 
@@ -172,9 +253,15 @@ def unsatisfied_output_formats(
         python_based_plugins_only: Whether ``--python-based-plugins-only`` was
             passed. Needed to tell a reporter excluded by that flag from one whose
             dependencies are genuinely unsatisfied.
+        off_host_refused: ``id()`` of each instance the phase held back because it
+            sends findings off the host and its section does not enable it.
+        failed_to_build: The names of the reporters that could not be created, so
+            a requested format of one is told apart from a format no reporter has.
+        files_unnamed: ``id()`` of each enabled instance the phase left out because
+            it could not name the files it writes.
 
     Returns:
-        Format name -> the reason it will produce nothing, one of the four
+        Format name -> the reason it will produce nothing, one of the
         ``FORMAT_*`` constants. Empty when every requested format will be produced,
         which is the normal case.
     """
@@ -200,11 +287,16 @@ def unsatisfied_output_formats(
         if fmt in selected_names:
             continue
         instance = known_by_name.get(fmt)
-        unsatisfied[fmt] = (
-            _excluded_reporter_reason(instance, python_based_plugins_only)
-            if instance is not None
-            else FORMAT_NO_REPORTER
-        )
+        if instance is not None and id(instance) in files_unnamed:
+            unsatisfied[fmt] = FORMAT_REPORTER_FILES_UNNAMED
+        elif instance is not None:
+            unsatisfied[fmt] = _excluded_reporter_reason(
+                instance, python_based_plugins_only, id(instance) in off_host_refused
+            )
+        elif fmt in failed_to_build:
+            unsatisfied[fmt] = FORMAT_REPORTER_FAILED
+        else:
+            unsatisfied[fmt] = FORMAT_NO_REPORTER
     return unsatisfied
 
 
@@ -270,7 +362,7 @@ def _warn_if_configured_but_not_enabled(
     # The value's type, never the value: a config file can read it from the
     # environment.
     value = plugin_config["enabled"]
-    kind = "null" if value is None else f"a {type(value).__name__}"
+    kind = enabled_value_kind(value)
     ASH_LOGGER.warning(
         f"Reporter '{name}' sends findings off the host and is not run: its config "
         f"section sets enabled to {kind}, and only the boolean true turns it on "
@@ -324,6 +416,63 @@ class ReportPhase(EnginePhase):
         """Return the name of this phase."""
         return "report"
 
+    def _reporters_that_name_their_files(self, reporters: List[object]) -> List[object]:
+        """*reporters* without the ones whose file names cannot be read.
+
+        A reporter declares the files it writes (``companion_file_names``), and
+        the phase reads every declaration before any reporter runs. That method
+        is plugin code: one that raises aborted the phase before a single report
+        was written. The reporter is logged and left out instead.
+        """
+        values = config_environment_values(getattr(self.plugin_context, "config", None))
+        kept: List[object] = []
+        for plugin_instance in reporters:
+            try:
+                reporter_file_names(plugin_instance)
+            except Exception as e:  # noqa: BLE001 -- plugin-supplied declaration
+                ASH_LOGGER.error(
+                    f"Reporter {type(plugin_instance).__name__} is not run: it could "
+                    f"not name the files it writes: {error_text(e, values)}",
+                    extra=NO_MARKUP,
+                )
+                continue
+            kept.append(plugin_instance)
+        return kept
+
+    @staticmethod
+    def _warn_if_an_earlier_report_remains(
+        report_dir: Path,
+        plugin_instance: object,
+        display_name: str,
+        written: Collection[str] = (),
+    ) -> None:
+        """Say so when a reporter wrote nothing and an earlier run's file is there.
+
+        A reporter that raised, returned None or returned an empty report wrote
+        no file, and ``reports/`` can still hold the file an earlier run of it
+        wrote (a report over existing results keeps the directory). That file is
+        not this run's report, and nothing else said so. It is left in place: it
+        may be the only copy. Never raises.
+
+        *written* names the report files this run has written. A reporter that
+        raised after its own file was written (in the progress update that follows
+        the write, say) left this run's file there, and it is not from an earlier
+        run.
+        """
+        try:
+            file_name = reporter_file_name(plugin_instance)
+            if file_name in written:
+                return
+            earlier = confined_report_path(report_dir, file_name)
+            if earlier is not None and os.path.lexists(earlier):
+                ASH_LOGGER.warning(
+                    f"Reporter {display_name} wrote no report this run; "
+                    f"{earlier.name} in {report_dir} is from an earlier run.",
+                    extra=NO_MARKUP,
+                )
+        except Exception as e:  # noqa: BLE001 -- a notice must not fail the phase
+            ASH_LOGGER.debug(f"Could not look for an earlier report: {e}")
+
     def _execute_phase(
         self,
         report_dir: Path,
@@ -338,11 +487,15 @@ class ReportPhase(EnginePhase):
         each reporter and before writing what one returned, and a cancel that
         stops it removes every report it had written: the engine checks only
         between phases, so a cancel_scan landing here let every reporter write,
-        and a scan with no previous results set aside kept those reports. Only
-        the files this phase wrote, by path, are removed, and the reports
-        directory with them if this phase created it and nothing else is in it.
-        The previous results, where they were set aside, are put back by
-        whoever settles them (core/previous_results.py).
+        and a scan with no previous results set aside kept those reports. The
+        files this phase wrote, by path, are removed, and so is every other
+        entry that appeared under the reports directory while it ran (a
+        reporter's own companion files and directories), compared against a
+        listing taken before the reporters ran; when that listing did not
+        complete, only the files this phase wrote go. The reports directory
+        goes with them if this phase created it and nothing else is in it. The
+        previous results, where they were set aside, are put back by whoever
+        settles them (core/previous_results.py).
 
         Args:
             report_dir(Path): The directory to save reports to.
@@ -350,7 +503,17 @@ class ReportPhase(EnginePhase):
             **kwargs: Additional arguments
         """
         self._written_reports: List[Path] = []
+        # What the reporters that send findings off the host left in the reports
+        # directory. Not removed by a cancel: what they sent has left the host,
+        # and these files are the local record of it.
+        self._off_host_records: Set[Path] = set()
         created_report_dir = not report_dir.exists()
+        # What the reports directory held before any reporter ran. A reporter
+        # can write a file of its own beside the one this phase writes for it
+        # (the unused-suppressions reporter's markdown), under a name this phase
+        # never learns, so by-path removal of what it wrote left those behind
+        # and, with them, the directory. Everything new is removed instead.
+        self._report_dir_before = _entries_under(report_dir)
         try:
             return self._write_reports(
                 report_dir=report_dir,
@@ -364,7 +527,9 @@ class ReportPhase(EnginePhase):
             raise
 
     def _remove_written_reports(self, report_dir: Path, created: bool) -> None:
-        """Remove the reports this phase wrote. Never raises: a cancel is propagating."""
+        """Remove the reports this phase wrote, and every other entry that appeared
+        under the reports directory while it ran. Never raises: a cancel is
+        propagating."""
         for path in self._written_reports:
             try:
                 path.unlink(missing_ok=True)
@@ -372,15 +537,54 @@ class ReportPhase(EnginePhase):
                 ASH_LOGGER.error(
                     f"Could not remove {path}, written before the scan was cancelled: {e}"
                 )
+        # A reporter's own companion files, and any directory it made. Files
+        # first, then directories deepest first, so each is empty when its turn
+        # comes. A link is removed as a link, never followed. Only against a
+        # baseline that completed: with none (the before-listing raised, or a
+        # caller ran this without taking one) nothing new can be told from
+        # what was there, and pre-existing entries stay. The files the
+        # off-host reporters left are the record of what they sent, and stay.
+        kept: set[Path] = getattr(self, "_off_host_records", set())
+        before = getattr(self, "_report_dir_before", None)
+        after = _entries_under(report_dir) if before is not None else None
+        appeared = (
+            [path for path in after if path not in before and path not in kept]
+            if after is not None
+            else []
+        )
+        if before is None:
+            ASH_LOGGER.debug(
+                f"The listing of {report_dir} before the reporters ran did not "
+                f"complete; only the reports this phase wrote are removed"
+            )
+        for path in sorted(appeared, key=lambda p: len(p.parts), reverse=True):
+            try:
+                if path.is_dir() and not path.is_symlink():
+                    path.rmdir()
+                else:
+                    path.unlink(missing_ok=True)
+            except OSError as e:
+                ASH_LOGGER.error(
+                    f"Could not remove {path}, written by a reporter before the scan "
+                    f"was cancelled: {e}"
+                )
         if created:
             try:
                 report_dir.rmdir()
             except OSError:
                 pass  # not empty, or already gone: left as it is
-        if self._written_reports:
+        if self._written_reports or appeared:
             ASH_LOGGER.info(
                 f"The scan was cancelled during the report phase; removed the "
-                f"{len(self._written_reports)} report(s) it had written"
+                f"{len(self._written_reports)} report(s) it had written and "
+                f"{len(appeared)} other entr{'y' if len(appeared) == 1 else 'ies'} "
+                f"that appeared under {report_dir} while it ran"
+            )
+        if kept:
+            ASH_LOGGER.info(
+                f"Kept {len(kept)} file(s) from the reporters that send findings "
+                "off the host: what they sent had already left, and these are the "
+                "record of it"
             )
 
     def _write_reports(
@@ -434,6 +638,9 @@ class ReportPhase(EnginePhase):
         # disabled, not missing. Only an instance whose config cannot be set
         # disabled is held back here instead.
         off_host_refused = set()
+        # The names of the reporters that could not be created, so a requested
+        # format of one is not diagnosed as a format no reporter has.
+        failed_to_build: Set[str] = set()
         for plugin_class in reporter_classes:
             try:
                 # An off-host reporter's section comes from the operator's
@@ -467,6 +674,10 @@ class ReportPhase(EnginePhase):
                     f"{error_text(e, config_environment_values(getattr(self.plugin_context, 'config', None)))}",
                     extra=NO_MARKUP,
                 )
+                try:
+                    failed_to_build.add(plugin_config_key(plugin_class))
+                except Exception:  # noqa: BLE001 -- a class with no readable name
+                    pass
                 continue
             all_reporter_instances.append(plugin_instance)
             if refused:
@@ -514,6 +725,18 @@ class ReportPhase(EnginePhase):
             plugin_context=self.plugin_context,
             python_only=python_based_plugins_only,
         )
+        # Every file name a reporter declares is read below, for the link and
+        # collision checks, before any reporter runs. One whose declaration raises
+        # is left out here, with its own error, so it cannot abort the phase and
+        # take every other report with it.
+        named_reporters = self._reporters_that_name_their_files(enabled_reporters)
+        kept_ids = {id(plugin_instance) for plugin_instance in named_reporters}
+        files_unnamed = {
+            id(plugin_instance)
+            for plugin_instance in enabled_reporters
+            if id(plugin_instance) not in kept_ids
+        }
+        enabled_reporters = named_reporters
         enabled_reporter_names = [
             _display_name(plugin_instance) for plugin_instance in enabled_reporters
         ]
@@ -532,6 +755,9 @@ class ReportPhase(EnginePhase):
                 selected_instances=enabled_reporters,
                 all_instances=all_reporter_instances,
                 python_based_plugins_only=python_based_plugins_only,
+                off_host_refused=off_host_refused,
+                failed_to_build=failed_to_build,
+                files_unnamed=files_unnamed,
             )
         )
 
@@ -610,8 +836,25 @@ class ReportPhase(EnginePhase):
                 # ScanCancelled is a BaseException and must not be logged as
                 # this reporter's failure.
                 raise_if_cancelled()
+                # Bound before the try, not inside it. The handler below reads
+                # all three: unbound on the first reporter (add_task raised),
+                # they made the handler die with a NameError and take every
+                # remaining reporter with it; left from the previous iteration,
+                # they blamed and repainted the wrong reporter.
+                plugin_name = plugin_instance.__class__.__name__
+                # The configured name if it has one, else the class name: a
+                # config whose name is None named the reporter 'None' in the
+                # logs, the progress rows and the events.
+                display_name = _display_name(plugin_instance)
+                # A reporter that sends findings off the host has sent them by the
+                # time report() returns, so a cancel seen then does not discard the
+                # record of it (see below).
+                sends_off_host = (
+                    getattr(plugin_instance, "sends_off_host", False) is True
+                )
+                entries_before = _entries_under(report_dir) if sends_off_host else None
+                reporter_task = None
                 try:
-                    plugin_name = plugin_instance.__class__.__name__
                     ASH_LOGGER.debug(f"Initializing reporter: {plugin_name}")
 
                     # Create a task for this reporter
@@ -622,13 +865,6 @@ class ReportPhase(EnginePhase):
                         description=f"Starting reporter: {escape_markup(plugin_name)}",
                         total=100,
                     )
-
-                    # Use the configured name if available
-                    display_name = plugin_name
-                    if hasattr(plugin_instance, "config") and hasattr(
-                        plugin_instance.config, "name"
-                    ):
-                        display_name = plugin_instance.config.name
 
                     # Update reporter task to 50%
                     self.progress_display.update_task(
@@ -659,8 +895,22 @@ class ReportPhase(EnginePhase):
                         )
 
                     report_result = plugin_instance.report(aggregated_results)
-                    # Cancelled while the reporter built its report: not written.
-                    raise_if_cancelled()
+                    if sends_off_host:
+                        # What an off-host reporter wrote while it ran is the local
+                        # record of what it sent. A cancel stops the next reporter,
+                        # and removes the reports of the local ones, but not these:
+                        # the upload cannot be taken back, and removing the record
+                        # of it hid that it happened. A listing that did not
+                        # complete (None) tells nothing new from what was there, so
+                        # only the report file recorded below is kept.
+                        entries_after = _entries_under(report_dir)
+                        if entries_before is not None and entries_after is not None:
+                            self._off_host_records.update(
+                                entries_after - entries_before
+                            )
+                    else:
+                        # Cancelled while the reporter built its report: not written.
+                        raise_if_cancelled()
 
                     if report_result:
                         ASH_LOGGER.debug(f"Reporter {display_name} returned a report")
@@ -684,7 +934,10 @@ class ReportPhase(EnginePhase):
                         # (an MCP client, or the integration fixture) could read it
                         # empty or half-written. See utils/atomic_write.py.
                         write_text_atomically(output_file, report_result)
-                        self._written_reports.append(output_file)
+                        if sends_off_host:
+                            self._off_host_records.add(output_file)
+                        else:
+                            self._written_reports.append(output_file)
 
                         results.append(report_result)
                         written_files.append(
@@ -745,6 +998,9 @@ class ReportPhase(EnginePhase):
                             "artefact -- no file was written for it."
                         )
                         ASH_LOGGER.error(error_msg)
+                        self._warn_if_an_earlier_report_remains(
+                            report_dir, plugin_instance, display_name
+                        )
 
                         # Marked the way the exception handler below marks its own
                         # failures, deliberately: the two are the same outcome seen
@@ -791,6 +1047,9 @@ class ReportPhase(EnginePhase):
                             f"Reporter {display_name} returned an empty report; "
                             "no file was written for it."
                         )
+                        self._warn_if_an_earlier_report_remains(
+                            report_dir, plugin_instance, display_name
+                        )
 
                         # Update reporter task to 100%
                         self.progress_display.update_task(
@@ -832,8 +1091,41 @@ class ReportPhase(EnginePhase):
                         "Reporter exception traceback: "
                         f"{traceback_text(values=environment_values)}"
                     )
+                    self._warn_if_an_earlier_report_remains(
+                        report_dir,
+                        plugin_instance,
+                        display_name,
+                        [name for name, _format in written_files],
+                    )
 
-                    # Update reporter task to show error
+                    # The same ERROR event the None-returning arm sends: a reporter
+                    # that raised got REPORT_START and then nothing, so a
+                    # subscriber could not tell it failed from one still running.
+                    try:
+                        from automated_security_helper.plugins.events import (
+                            AshEventType,
+                        )
+
+                        self.notify_event(
+                            AshEventType.ERROR,
+                            message=f"Error in reporter {plugin_name}: {described}",
+                            reporter=display_name,
+                            reporter_class=plugin_instance.__class__.__name__,
+                            phase="report",
+                        )
+                    except Exception as event_error:
+                        ASH_LOGGER.error(
+                            f"Failed to notify reporter error event: "
+                            f"{error_text(event_error, environment_values)}"
+                        )
+
+                    # Update reporter task to show error. Unconditional, as the
+                    # three sibling arms are: update_task tolerates a None task
+                    # id (add_task returns None when the display is off, and
+                    # None is what reporter_task holds when add_task itself
+                    # raised), and a caller that records descriptions through
+                    # update_task (a test, a wrapped display) must see the
+                    # failure whether or not a display is showing.
                     self.progress_display.update_task(
                         phase=ExecutionPhase.REPORT,
                         task_id=reporter_task,
@@ -845,6 +1137,13 @@ class ReportPhase(EnginePhase):
                     )
         else:
             ASH_LOGGER.warning("No enabled reporters found matching requested formats")
+
+        # A cancel that landed after the last reporter's write (while its
+        # REPORT_COMPLETE handlers ran, or while an off-host reporter's was kept
+        # past its report) is seen here: the loop checks only before a reporter, so
+        # the phase ended as if it had finished and the scan ended cancelled with
+        # every report kept.
+        raise_if_cancelled()
 
         # Update progress
         self.progress_display.update_task(
@@ -861,6 +1160,16 @@ class ReportPhase(EnginePhase):
         # wrote: --use-existing keeps reports/, so with no SARIF reporter selected
         # the ash.sarif there is an earlier run's, and another reporter's extension
         # can name that file (utils/inner_run_outcome.py).
+        #
+        # record_reports_written adds to a record an earlier ReportPhase of this
+        # same process left on the model, and replaces any other. `ash merge`
+        # runs two phases on one results model: the local reporters, then the
+        # off-host ones, and the second's record used to replace the first's, so
+        # the SARIF the first wrote was no longer recorded and the exit code fell
+        # back to the in-memory metrics. A record that carries another process's
+        # token, or none, is not this run's and is not carried over: its files
+        # are not passed back in here, so a loader that did not strip the run
+        # records cannot make an earlier run's report this run's.
         record_reports_written(aggregated_results, written_files)
 
         return aggregated_results

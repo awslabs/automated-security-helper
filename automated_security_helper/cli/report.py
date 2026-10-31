@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import re
 import stat
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ import yaml
 from rich.highlighter import JSONHighlighter
 from rich.markdown import Markdown
 
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     off_host_reporter_refused,
@@ -76,7 +78,7 @@ from automated_security_helper.utils.command_safe_stream import (
 from automated_security_helper.utils.console import ash_console
 from automated_security_helper.utils.error_text import error_text, traceback_text
 from automated_security_helper.utils.log import escape_markup as escape
-from automated_security_helper.utils.log import NO_MARKUP, get_logger
+from automated_security_helper.utils.log import get_logger
 from automated_security_helper.utils.output_dir_links import (
     OutputDirLinkRefused,
     refuse_linked_output_dir,
@@ -118,8 +120,100 @@ JSON_STDOUT_FORMATS = frozenset(
         "s3",
         "sarif",
         "spdx",
+        # JSON by default and under output_format json; markdown under
+        # output_format markdown, which _is_json_document tells apart by the
+        # content, so the markdown is never broken with JSON's escapes.
+        "unused-suppressions",
     }
 )
+
+
+def _is_json_document(content: str) -> bool:
+    """Whether *content*, a report of a JSON format, is a JSON document.
+
+    By its first character: a reporter of a JSON format may write something
+    else (unused-suppressions writes markdown under its ``output_format:
+    markdown``; a plugin reporter may return text). Such a report is written as
+    text, not broken with JSON's escapes or parsed for the pretty printing,
+    which failed it on a terminal and passed it to a pipe.
+    """
+    return content.lstrip()[:1] in ("{", "[")
+
+
+# The JSON formats whose reporter also writes a text document by design
+# (unused-suppressions under output_format markdown): for these a report that is
+# not JSON is the report, not the reporter's error text, when the reporter's
+# configuration asks for the text document, so the JSON check the command makes
+# before writing (report_command) is skipped then (_report_is_json). Under any
+# other setting the report is a JSON document and is checked as one.
+TEXT_OR_JSON_FORMATS = frozenset({"unused-suppressions"})
+
+
+def _report_is_json(report_format: str, reporter_plugin: object) -> bool:
+    """Whether the reporter's report is a JSON document, by what it was built to write.
+
+    A JSON format is, unless its reporter also writes a text document by design
+    (TEXT_OR_JSON_FORMATS) and its configuration asks for that: unused-suppressions
+    under ``output_format: markdown``. The content's first character does not
+    decide it. Markdown can begin with ``[``, a link reference, and was refused as
+    a JSON document that did not parse; JSON-mode error text does not begin with
+    ``{`` and was written as the report, with exit 0.
+    """
+    name = report_format.lower()
+    if name not in JSON_STDOUT_FORMATS:
+        return False
+    if name in TEXT_OR_JSON_FORMATS:
+        options = getattr(getattr(reporter_plugin, "config", None), "options", None)
+        return getattr(options, "output_format", "both") != "markdown"
+    return True
+
+
+# What _write_report is given when its caller has not parsed the report.
+_NOT_PARSED = object()
+
+
+def _stdout_is_terminal() -> bool:
+    """Whether stdout is an interactive terminal, which is the one place
+    ``_write_report`` indents a JSON report from the parsed document."""
+    return bool(getattr(sys.stdout, "isatty", lambda: False)())
+
+
+# The longest content of a JSON format that failed the JSON check the error
+# quotes. A reporter's error text in the report's place is one short line, and
+# the line is the reason. Anything longer, on more than one line, or shaped like a
+# JSON document (a truncated or malformed one, minified on one line) is a report
+# that holds finding snippets, which can hold detected secrets, and the error goes
+# to stderr, the CI log, where an operator who redirected stdout to a file kept
+# the report out. Such content is described, by its decode error and its length,
+# as this file describes the pydantic errors it refuses to quote the input of.
+_QUOTED_REASON_CHARS = 200
+
+
+def _non_json_report_text(content: str, error: ValueError) -> str:
+    """What the error says about *content*, which failed ``json.loads``.
+
+    A short one-line text that does not start as a JSON document is the reason
+    and is returned as it is. Everything else is described: a reporter's error
+    text never starts with ``{`` or ``[``, so content that does is a document
+    that failed to parse, and quoting its first 200 characters would quote the
+    findings in them. A reporter that returned nothing, or only white space, has
+    no reason to quote; the text says so, where the error would end in a colon
+    with nothing after it.
+    """
+    reason = content.strip()
+    if not reason:
+        return "the reporter returned no text"
+    if (
+        len(reason) <= _QUOTED_REASON_CHARS
+        and "\n" not in reason
+        and "\r" not in reason
+        and not _is_json_document(reason)
+    ):
+        return reason
+    return (
+        f"{error_text(error)}; the {len(content)} characters it returned are not shown"
+    )
+
 
 # Reporters whose output is Markdown, rendered with rich's Markdown on an
 # interactive terminal.
@@ -200,6 +294,107 @@ def _print_error(template: str, *values: object) -> None:
     console.print(template, highlight=False)
 
 
+def _print_debug_trace(error: BaseException) -> None:
+    """With ``--debug``, the frames of *error* on stderr, after its one-line error.
+
+    Each pydantic error in the chain is described, not quoted, and the
+    exception's text is shown the way _print_error shows it.
+    """
+    ash_console(stderr=True, soft_wrap=True, markup=False).print(
+        shown_not_obeyed(traceback_text(error))
+    )
+
+
+def _exists(path: Path) -> bool:
+    """Whether *path* exists, with a path the user may not reach read as present.
+
+    For a path under a directory the user cannot search, ``Path.exists`` raises
+    PermissionError below Python 3.14 and answers False from 3.14 on; the command
+    ended in a traceback on the one and read the path as absent on the other,
+    where it refuses a missing file with its own words. Read as absent, such a
+    path gave the wrong answer twice: a ``--config`` under a directory the user
+    cannot search was refused as "not found", and a results file there was
+    skipped for a stale one in a later place, which was then reported on with no
+    warning. So the path is read with ``os.stat``, whose PermissionError is the
+    same on every version. Read as present, the open that follows refuses it with
+    the real cause, through the paths that already handle an OSError (exit 3 for
+    the configuration, exit 1 for the results). Any other OSError (a name too
+    long, a component that is a file) reads as absent: the open would say the
+    same, and the refusal for a missing file names the path. So does a name with
+    a null byte, which ``os.stat`` refuses with a ValueError where
+    ``Path.exists`` answered False: a ``--cli-json-input`` document can carry
+    one, and the check is not the place for a traceback.
+    """
+    return _presence(path) is not False
+
+
+def _presence(path: Path) -> Optional[bool]:
+    """Whether *path* exists: True, False, or None when it cannot be told.
+
+    None is a path the user may not reach (``os.stat`` raised PermissionError),
+    which ``_exists`` reads as present. A search for one file among several places
+    reads it as unknown instead: counting it as a file found made a directory
+    the user cannot search a second results file, and refused a command whose
+    other place holds the one file there is. Every other failure reads as
+    absent, as ``_exists`` says.
+    """
+    try:
+        os.stat(path)
+    except PermissionError:
+        return None
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _working_directory() -> Path:
+    """The working directory, or the usage-error refusal when it is gone.
+
+    ``Path.cwd()`` raises FileNotFoundError once the directory the command was
+    started in was deleted or unmounted; the config loader handles that case and
+    this command ended in a traceback.
+    """
+    try:
+        return Path.cwd()
+    except OSError as e:
+        _print_refusal(
+            "[red]Error: the working directory cannot be read ({}); it was deleted or "
+            "unmounted. Change to a directory that exists and run the command "
+            "again.[/red]",
+            error_text(e),
+        )
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+
+
+def _named_config_files(config: Optional[str]) -> List[str]:
+    """The config files this run reads by name: ``--config``'s, and ASH_CONFIG's
+    when the variable names another file.
+
+    The defaults a scan starts from are the file ASH_CONFIG names
+    (default_config.get_default_config), so with ``--config`` given as well both
+    files are read; the off-host confinement and its warning named only the
+    ``--config`` file, so a setting the ASH_CONFIG file wrote was neither held nor
+    named.
+    """
+    named = [config] if config is not None else []
+    from_environment = os.environ.get("ASH_CONFIG", "").strip()
+    if from_environment and from_environment not in named:
+        named.append(from_environment)
+    return named
+
+
+def _refused_config_name(config: Optional[str]) -> str:
+    """The file a read or parse refusal names: ``--config``'s, else the ASH_CONFIG
+    file the defaults are read from, else the configuration itself.
+
+    With no ``--config`` the refusals printed the option's value, the text
+    "None" ("could not read None").
+    """
+    if config is not None:
+        return config
+    return os.environ.get("ASH_CONFIG", "").strip() or "the configuration file"
+
+
 def _source_of_named_config(ash_config: AshConfig, named_file: str) -> UntrustedSource:
     """Why ``named_file``, the config file this command was given, is not the operator's.
 
@@ -232,15 +427,33 @@ def _is_a_regular_file(stream: TextIO) -> bool:
         return False
 
 
+# A line feed that no carriage return precedes: the line end _write_report_data
+# writes as os.linesep. The line feed of a CRLF is left with its carriage return.
+_BARE_LINE_FEED = re.compile(r"(?<!\r)\n")
+
+
 def _write_report_data(content: str, stream: TextIO) -> None:
     """*content* to *stream* as the report phase writes it to reports/.
 
-    UTF-8, with each line feed written as os.linesep, as utils/atomic_write's
+    UTF-8, with each line end written as os.linesep, as utils/atomic_write's
     write_text_atomically writes it, whatever the stream's own encoding and newline
     handling are; a character UTF-8 cannot encode is written as a backslash escape
     rather than failing the command. To the byte buffer under the stream, so a
     stream that checks what it is given for CI commands is written past. A stream
     with no byte buffer under it is written as text.
+
+    The bytes equal the file in reports/ for every line end but one: a CRLF the
+    report already holds. ``write_text_atomically`` opens the file with
+    ``newline=None``, so on Windows it writes that CRLF as CR CR LF, while this
+    keeps it as CRLF (see below). On Linux and macOS the two are the same bytes.
+
+    A line end the report already writes as CRLF (CSV rows) is kept as it is:
+    only a line feed with no carriage return before it is written as os.linesep.
+    Replacing every line feed turned a CRLF into CR CR LF on Windows, a blank
+    line per row, and folding CRLF to LF before the replacement rewrote CSV rows
+    as LF wherever os.linesep is LF, so `ash report --format csv > out.csv` on
+    Linux or macOS wrote rows the reporter had not written, and a CRLF inside a
+    quoted field (a multi-line snippet) was changed with them.
     """
     stream.flush()
     binary = getattr(stream, "buffer", None)
@@ -248,7 +461,8 @@ def _write_report_data(content: str, stream: TextIO) -> None:
         stream.write(content)
         stream.flush()
         return
-    binary.write(content.replace("\n", os.linesep).encode("utf-8", "backslashreplace"))
+    data = _BARE_LINE_FEED.sub(os.linesep, content)
+    binary.write(data.encode("utf-8", "backslashreplace"))
     binary.flush()
 
 
@@ -288,13 +502,25 @@ def _write_report_checked(content: str, stream: TextIO) -> None:
 
 
 def _write_report(
-    content: str, report_format: str, *, pretty: bool, stream: Optional[TextIO] = None
+    content: str,
+    report_format: str,
+    *,
+    pretty: bool,
+    stream: Optional[TextIO] = None,
+    is_json: Optional[bool] = None,
+    parsed: object = _NOT_PARSED,
 ) -> None:
     """Write a rendered report to *stream* (stdout by default).
 
+    ``is_json`` says whether the report is a JSON document, where the caller
+    knows (``_report_is_json``); left None, the content's first character
+    decides. ``parsed`` is the document the caller already parsed from *content*,
+    so the terminal's indenting does not parse a large report again.
+
     To a regular file (``ash report --format sarif > ash.sarif``) the report is
     the reporter's output, with the bytes the report phase writes to reports/
-    (_write_report_data), so the file is a SARIF file. It is not byte for byte the
+    (_write_report_data; a CRLF the report holds is the one line end that differs
+    from that file on Windows), so the file is a SARIF file. It is not byte for byte the
     file the scan wrote: a report rendered again from the saved results can
     differ (SARIF carries fields the saved results default, and CSV, HTML and
     Markdown are stamped with the time they are rendered). A CI runner reads a
@@ -337,7 +563,8 @@ def _write_report(
     # not a terminal is never pretty.
     terminal = bool(getattr(stream, "isatty", lambda: False)())
     pretty = pretty and terminal
-    is_json = fmt in JSON_STDOUT_FORMATS
+    if is_json is None:
+        is_json = fmt in JSON_STDOUT_FORMATS and _is_json_document(content)
     # Through the console's CI-command check, unless the stream checks already.
     report_console = ash_console(
         file=stream, check_commands=not isinstance(stream, CommandSafeStream)
@@ -346,19 +573,23 @@ def _write_report(
         # Indented as rich's print_json indents, then escaped as JSON text, so
         # what reaches the terminal is still the report's document. Escaping the
         # strings one by one in the parsed data would change what they hold and
-        # could merge two keys into one.
-        text = JSONHighlighter()(
-            json_commands_broken(
-                _shown_not_obeyed(
-                    json.dumps(json.loads(content), indent=2, ensure_ascii=False),
-                    json_text=True,
-                )
+        # could merge two keys into one. A document that does not parse is
+        # written as the reporter wrote it, below, as it is to a pipe: the
+        # pretty printing is a rendering, never a check a terminal alone fails.
+        try:
+            if parsed is _NOT_PARSED:
+                parsed = json.loads(content)
+            document = json.dumps(parsed, indent=2, ensure_ascii=False)
+        except ValueError:
+            document = None
+        if document is not None:
+            text = JSONHighlighter()(
+                json_commands_broken(_shown_not_obeyed(document, json_text=True))
             )
-        )
-        text.no_wrap = True
-        text.overflow = None
-        report_console.print(text, soft_wrap=True)
-        return
+            text.no_wrap = True
+            text.overflow = None
+            report_console.print(text, soft_wrap=True)
+            return
     # rich's Markdown shows "\\" as "\", which would undo the doubling that keeps
     # an escape's text apart from an escaped control, so a report that holds
     # either is written as the escaped text, unrendered.
@@ -492,9 +723,10 @@ def report_command(
     # directory a scan writes to, so only its own results file is read: the
     # candidates below, joined onto it, were .ash/ash_output/.ash/ash_output/...
     # and .ash/ash_output/ash_output/..., which no scan writes.
+    cwd = _working_directory()
     results_file = None
     if output_dir is None:
-        output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
+        output_dir = cwd.joinpath(".ash", "ash_output").as_posix()
         output_dir_path = Path(output_dir)
         results_file_paths = [output_dir_path.joinpath("ash_aggregated_results.json")]
     else:
@@ -506,26 +738,67 @@ def report_command(
             output_dir_path.joinpath("ash_output", "ash_aggregated_results.json"),
             output_dir_path.joinpath("ash_aggregated_results.json"),
         ]
+    # Every place that holds one, not the first: an --output-dir whose three
+    # searched places hold two results files (a scan run from the directory and
+    # another run with --output-dir pointing at it) is ambiguous, and reporting
+    # on the first found read as a report on the other. The refusal is below,
+    # after the configuration and the format are checked, with the other usage
+    # errors; results_file stays the first found for the checks between.
+    # A place the user cannot search is neither found nor absent: it is not a
+    # second results file, and it is not skipped either. When nothing else is
+    # found the first such place is read, so the open that follows says why it
+    # cannot be (exit 1). When a results file is found elsewhere, the places are
+    # ranked as listed: one that cannot be searched below the file found is said
+    # to be unsearched below, and the report is made on the file found; one that
+    # ranks above it may hold the scan this command is meant to report on, and
+    # reporting on the lower file instead would be a stale report with exit 0, so
+    # it is refused below.
+    presences = [(path, _presence(path)) for path in results_file_paths]
+    found_results_files = [path for path, found in presences if found]
+    unsearched_results_paths = [path for path, found in presences if found is None]
+    if found_results_files:
+        results_file = found_results_files[0]
+    elif unsearched_results_paths:
+        results_file = unsearched_results_paths[0]
+    # The output directory is the one the results were read from. --output-dir
+    # may name the scanned repository's root (the first candidate reads
+    # <dir>/.ash/ash_output/); the plugin context, the work directory and the
+    # reports/ checks below then used <dir> itself, so a reporter that writes
+    # files of its own wrote them into <dir>/reports, inside the scanned tree,
+    # while the scan had written them under <dir>/.ash/ash_output/reports.
+    if results_file is not None:
+        output_dir_path = results_file.parent
     # Reporters write into reports/ here without the scan's clean-up first, so a
     # link at the output directory or reports/ is refused as a scan refuses it.
     try:
-        refuse_linked_output_dir(Path.cwd(), output_dir_path)
+        refuse_linked_output_dir(cwd, output_dir_path)
+        # That guard examines the components below the working directory only.
+        # With --output-dir outside it, the directory as given and its .ash sit
+        # above the resolved directory and below nothing the guard roots at, so
+        # a link at either was written through; as the output directory itself
+        # the given directory was refused. Guard from its parent down as well.
+        # abspath, not Path.absolute(): pathlib's parent of a path that ends in
+        # ".." drops the ".." instead of stepping up, so "--output-dir .." would
+        # root this guard at the working directory and miss its parent's .ash.
+        refuse_linked_output_dir(
+            Path(os.path.abspath(output_dir)).parent, output_dir_path
+        )
     except OutputDirLinkRefused as refusal:
-        # The message names the output directory as given: on one line.
+        # The message names the output directory, built from the path as given:
+        # on one line.
         _print_refusal("[red]{}[/red]", refusal)
         # 3, as a scan exits for the same refusal (OUTPUT_DIR_REFUSED_EXIT_CODE).
         raise typer.Exit(3)
-    for poss_result_file in results_file_paths:
-        if poss_result_file.exists():
-            results_file = poss_result_file
-            break
 
     # A named file that does not exist is refused, as the config commands and a
     # scan refuse it: rendering with the defaults instead used settings the
     # operator did not choose, and the command then exited 1 for another reason.
     # ASH_CONFIG is this option's environment variable; a value it gave is
     # refused in the words a scan uses for ASH_CONFIG (get_default_config).
-    if config is not None and not Path(config).exists():
+    # Read once: a second exists() for the load below let a file removed
+    # between the two render the report under the defaults in silence.
+    named = config is not None and _exists(Path(config))
+    if config is not None and not named:
         if config == os.environ.get("ASH_CONFIG"):
             from automated_security_helper.config.default_config import (
                 get_default_config,
@@ -545,7 +818,7 @@ def report_command(
     # Load the ASH configuration. A named file that exists must load: falling
     # back to the defaults for one that does not parse rendered the reports
     # with settings it does not hold (other reporters, other masking).
-    named = config is not None and Path(config).exists()
+    refused_name = _refused_config_name(config)
     try:
         # A config file is judged against the repository the results came from
         # as well as the working directory: run from elsewhere, a --config inside
@@ -565,12 +838,18 @@ def report_command(
         # in a git checkout or under the working directory (a scanned directory
         # beside this one). It does not choose whether a reporter sends findings
         # off the host, or where: those come from --config-overrides.
-        named_file = config or os.environ.get("ASH_CONFIG")
+        # Both files this run reads by name: --config's and, when the variable
+        # names another, ASH_CONFIG's, which the defaults are read from. The
+        # first named is the one the warning describes.
+        named_files = _named_config_files(config)
         named_source = IN_TREE_OR_DELIVERED
-        if named_file:
-            named_source = _source_of_named_config(ash_config, named_file)
+        if named_files:
+            named_source = _source_of_named_config(ash_config, named_files[0])
             confine_off_host_reporters_to_overrides(
-                ash_config, [Path(named_file)], config_overrides, named_source
+                ash_config,
+                [Path(named_file) for named_file in named_files],
+                config_overrides,
+                named_source,
             )
     except ASHConfigValidationError as e:
         _print_refusal("[red]Invalid configuration: {}[/red]", e)
@@ -584,7 +863,7 @@ def report_command(
         # parse arm: an OSError here is never a parse.
         _print_refusal(
             "[red]Invalid configuration: could not read {}: {}[/red]",
-            config,
+            refused_name,
             error_text(e),
         )
         raise typer.Exit(3)
@@ -600,7 +879,9 @@ def report_command(
             error_text(e), [Path(config)] if config is not None else []
         )
         _print_refusal(
-            "[red]Invalid configuration: {} does not parse: {}[/red]", config, first
+            "[red]Invalid configuration: {} does not parse: {}[/red]",
+            refused_name,
+            first,
         )
         for line in rest:
             _print_refusal("[red]{}[/red]", line)
@@ -608,7 +889,7 @@ def report_command(
 
     # Create plugin context
     plugin_context = PluginContext(
-        source_dir=Path.cwd(),
+        source_dir=cwd,
         output_dir=output_dir_path,
         work_dir=output_dir_path.joinpath("work"),
         config=ash_config,
@@ -697,54 +978,63 @@ def report_command(
     confine_declared_reporter_destinations(
         ash_config, reporter_plugins, source=named_source
     )
-    reporter_plugin = None
     reporter_class = None
 
+    # By the name each reporter class declares (plugin_config_key), without
+    # building it: a reporter whose default construction raised was passed over
+    # and the --format reported as not found, with the cause at debug. ASCII case
+    # only, as every other comparison of a plugin's name: the format is looked
+    # up as that plugin's config key below.
     for plugin_class in reporter_plugins:
-        try:
-            plugin_instance = plugin_class(
-                context=plugin_context,
-            )
+        if ascii_lower(plugin_config_key(plugin_class)) == ascii_lower(report_format):
+            ASH_LOGGER.info(f"Found reporter plugin {plugin_class.__name__}")
+            reporter_class = plugin_class
+            break
 
-            if hasattr(plugin_instance, "config") and hasattr(
-                plugin_instance.config, "name"
-            ):
-                # ASCII case only, as every other comparison of a plugin's name:
-                # the format is looked up as that plugin's config key below.
-                if ascii_lower(plugin_instance.config.name) == ascii_lower(
-                    report_format
-                ):
-                    ASH_LOGGER.info(f"Found reporter plugin {plugin_class.__name__}")
-                    reporter_plugin = plugin_instance
-                    reporter_class = plugin_class
-                    break
-        except Exception as e:
-            ASH_LOGGER.debug(
-                f"Error initializing reporter plugin {plugin_class.__name__}: "
-                f"{error_text(e)}",
-                extra=NO_MARKUP,
-            )
-
-    if reporter_plugin is None:
+    if reporter_class is None:
         _print_error("[red]Error: Reporter plugin '{}' not found.[/red]", report_format)
         _print_error("[yellow]Available reporter formats:[/yellow]")
         for plugin_class in reporter_plugins:
-            try:
-                plugin_instance = plugin_class(context=plugin_context)
-                if hasattr(plugin_instance, "config") and hasattr(
-                    plugin_instance.config, "name"
-                ):
-                    _print_error("  - {}", plugin_instance.config.name)
-            except Exception as e:
-                ASH_LOGGER.trace(error_text(e), extra=NO_MARKUP)
+            _print_error("  - {}", plugin_config_key(plugin_class))
         # A --format no reporter answers to is a mistyped argument, so it exits with
         # the usage-error code rather than 1, which reports a failed run.
         raise typer.Exit(ASH_EXIT_USAGE_ERROR)
 
-    # The order is configuration (exit 3), then the reporter (an unknown --format
-    # is the command line's mistake whatever is on disk), then the results (exit 1,
-    # a state problem), and nothing is created on the way: `ash report` in an
+    # The order is configuration (exit 3), then the reporter's name (an unknown
+    # --format is the command line's mistake whatever is on disk, exit 5), then
+    # the results (exit 1, a state problem), then the reporter itself, built once
+    # from its section below; nothing is created on the way: `ash report` in an
     # empty directory leaves no .ash/ash_output behind.
+    if len(found_results_files) > 1:
+        # A usage error, as the docs say (how-to/read-results.md, exit-codes.md):
+        # the operator names the directory that holds the one to report on, and
+        # nothing is reported on or created meanwhile.
+        listed = ", ".join(path.as_posix() for path in found_results_files)
+        _print_refusal(
+            "[red]More than one scan results file found: {}. Point --output-dir "
+            "at the directory that holds the one to report on.[/red]",
+            listed,
+        )
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+    if found_results_files:
+        outranking = [
+            path
+            for path in unsearched_results_paths
+            if results_file_paths.index(path)
+            < results_file_paths.index(found_results_files[0])
+        ]
+        if outranking:
+            # A usage error, like the refusal above: the operator makes the
+            # directory searchable, or names the one that holds the results.
+            _print_refusal(
+                "[red]Error: {} cannot be searched, and a scan results file there, "
+                "if one exists, ranks above {}, which would otherwise be reported "
+                "on. Make the directory searchable, or point --output-dir at the "
+                "directory that holds the one to report on.[/red]",
+                ", ".join(path.as_posix() for path in outranking),
+                found_results_files[0].as_posix(),
+            )
+            raise typer.Exit(ASH_EXIT_USAGE_ERROR)
     if results_file is None:
         searched = ", ".join(path.as_posix() for path in results_file_paths)
         missing = (
@@ -756,6 +1046,13 @@ def report_command(
             searched,
         )
         raise typer.Exit(1)
+    if found_results_files and unsearched_results_paths:
+        _print_refusal(
+            "[yellow]Warning: {} cannot be searched, so a scan results file there, "
+            "if one exists, is not reported on. Reporting on {}.[/yellow]",
+            ", ".join(path.as_posix() for path in unsearched_results_paths),
+            results_file.as_posix(),
+        )
 
     # Load the results file
     #
@@ -821,7 +1118,7 @@ def report_command(
     # already the confined section: the refusal and the reporter both use it.
     plugin_config = reporter_section(ash_config, reporter_class)
     if off_host_reporter_refused(reporter_class, plugin_config):
-        name = reporter_plugin.config.name
+        name = plugin_config_key(reporter_class)
         _print_error(
             "[red]Error: reporter '{}' sends findings off the host and is not "
             "enabled. ash report takes whether it runs, and where it sends, from "
@@ -832,20 +1129,39 @@ def report_command(
         )
         raise typer.Exit(1)
 
-    # Generate the report
+    # The reporter is built once: from its section when the configuration has one
+    # (reporter_section returns the section as get_plugin_config gives it, a plain
+    # dict; constructing the reporter with it lets the plugin validate it into its
+    # own config model, as the report phase of a scan does
+    # (core/phases/report_phase.py), where assigning the dict to reporter.config
+    # left a dict that every reporter reads attributes of), and from its defaults
+    # otherwise. It used to be built twice, first from its defaults before the
+    # results were read: a reporter whose default build raises (a required option,
+    # a client made from the defaults) but whose configured build works failed the
+    # run with "could not be built", and an off-host reporter's __init__ ran before
+    # the refusal above.
     try:
-        if plugin_config is not None and reporter_class is not None:
-            # reporter_section returns the section as get_plugin_config gives it,
-            # a plain dict. Assigning that to reporter.config left a dict where
-            # every reporter reads attributes, so `self.config.options...` raised
-            # AttributeError (junitxml: 'dict' object has no attribute 'options')
-            # and the command exited 1. Constructing the reporter with it lets the
-            # plugin validate it into its own config model, which is what the
-            # report phase of a scan does (core/phases/report_phase.py).
+        if plugin_config is not None:
             reporter_plugin = reporter_class(
                 context=plugin_context,
                 config=plugin_config,
             )
+        else:
+            reporter_plugin = reporter_class(context=plugin_context)
+    except Exception as e:
+        # The reporter exists and cannot be built: a failed run, with its cause,
+        # not a mistyped --format.
+        _print_error(
+            "[red]Error: reporter '{}' could not be built: {}[/red]",
+            report_format,
+            e,
+        )
+        if debug:
+            _print_debug_trace(e)
+        raise typer.Exit(1)
+
+    # Generate the report
+    try:
         # The report goes to stdout, but a reporter that writes files of its own
         # writes them to the reports directory. A name among them that is not a file
         # there, or a link at one of them, refuses the command before the reporter
@@ -871,11 +1187,65 @@ def report_command(
                 report_format,
             )
             raise typer.Exit(1)
-        _write_report(
-            report_content,
-            report_format,
-            pretty=(color and not os.environ.get("NO_COLOR")),
-        )
+        report_is_json = _report_is_json(report_format, reporter_plugin)
+        parsed_report: object = _NOT_PARSED
+        if report_is_json:
+            # A reporter whose report is a JSON document may return its error
+            # text in its place when it could not produce one (the cloudwatch-logs
+            # reporter did, after a publish that failed its retries), and the
+            # command took any text as a report: off a terminal the text went to
+            # stdout as the document and the exit was 0, and on a terminal the
+            # json.loads in _write_report failed, so a decode error stood in
+            # for the reporter's reason. The text is the reason, so it is the
+            # error, and the exit says the report was not produced. Content that
+            # is long, on more than one line, or shaped like a JSON document is a
+            # report, not a reason, and is described, not quoted
+            # (_non_json_report_text). The document is parsed here once and handed
+            # to _write_report, which indents it on a terminal.
+            try:
+                parsed_report = json.loads(report_content)
+            except ValueError as exc:
+                _print_error(
+                    "[red]Error: reporter '{}' did not produce a JSON document: "
+                    "{}[/red]",
+                    report_format,
+                    _non_json_report_text(report_content, exc),
+                )
+                raise typer.Exit(1)
+        pretty_output = bool(color and not os.environ.get("NO_COLOR"))
+        if not (pretty_output and _stdout_is_terminal()):
+            # Only the indenting on an interactive terminal reads the document.
+            # Elsewhere the parsed tree of a report of tens of megabytes would
+            # stay alive beside the report text, and the encoded bytes, for the
+            # whole write; the check above is all it was parsed for.
+            parsed_report = _NOT_PARSED
+        try:
+            _write_report(
+                report_content,
+                report_format,
+                pretty=pretty_output,
+                is_json=report_is_json,
+                parsed=parsed_report,
+            )
+        except BrokenPipeError:
+            # The reader closed stdout (`ash report | head`): the report was
+            # rendered, nobody is reading, and nothing is wrong with it. No
+            # error line, and stdout is pointed at the null device so the
+            # interpreter's own flush at exit does not report the pipe again;
+            # the descriptor opened for it is closed once dup2 has copied it.
+            # Exit 1, as Python's own guidance for a closed pipe: the output did
+            # not all arrive. Only the write is read this way: a BrokenPipeError
+            # from inside a reporter (a subprocess pipe, a socket the remote end
+            # closed) is a failed run, reported by the handler below.
+            try:
+                devnull = os.open(os.devnull, os.O_WRONLY)
+                try:
+                    os.dup2(devnull, sys.stdout.fileno())
+                finally:
+                    os.close(devnull)
+            except (OSError, ValueError, AttributeError):
+                pass
+            raise typer.Exit(1)
     except typer.Exit:
         # click.exceptions.Exit subclasses RuntimeError, so the handler below
         # would otherwise catch the deliberate exit above and relabel it
@@ -884,9 +1254,5 @@ def report_command(
     except Exception as e:
         _print_error("[red]Error generating report: {}[/red]", e)
         if debug:
-            # The frames, with each pydantic error described, not quoted, and the
-            # exception's text again, so shown the way _print_error shows it.
-            ash_console(stderr=True, soft_wrap=True, markup=False).print(
-                shown_not_obeyed(traceback_text(e))
-            )
+            _print_debug_trace(e)
         raise typer.Exit(1)

@@ -315,15 +315,22 @@ class TestParseResponse:
 
     def test_exit_19_with_results_is_a_completed_run(self):
         failure, report = CfnGuardScanner._parse_response(
-            {"returncode": 19, "stdout": self._stdout(), "stderr": ""}
+            {"returncode": 19, "stdout": self._stdout(), "stderr": ""}, values=()
         )
         assert failure is None and report.runs[0].results
 
     def test_exit_0_with_no_results_is_a_completed_run(self):
         failure, report = CfnGuardScanner._parse_response(
-            {"returncode": 0, "stdout": self._stdout(CAPTURED_COMPLIANT), "stderr": ""}
+            {"returncode": 0, "stdout": self._stdout(CAPTURED_COMPLIANT), "stderr": ""},
+            values=(),
         )
         assert failure is None and not report.runs[0].results
+
+    def test_the_redaction_values_are_required(self):
+        """A default of "redact nothing" let a caller that forgot the values print
+        the stderr unredacted; the parameter is keyword-only with no default."""
+        with pytest.raises(TypeError):
+            CfnGuardScanner._parse_response({"returncode": 0, "stdout": "{}"})  # type: ignore[call-arg]
 
     @pytest.mark.parametrize(
         "response, reason",
@@ -344,14 +351,40 @@ class TestParseResponse:
         ],
     )
     def test_failures_are_named(self, response, reason):
-        failure, report = CfnGuardScanner._parse_response(response)
+        failure, report = CfnGuardScanner._parse_response(response, values=())
         assert report is None and reason in failure
 
     def test_a_failing_exit_with_no_results_is_not_read_as_clean(self):
         failure, _ = CfnGuardScanner._parse_response(
-            {"returncode": 19, "stdout": self._stdout(CAPTURED_COMPLIANT), "stderr": ""}
+            {
+                "returncode": 19,
+                "stdout": self._stdout(CAPTURED_COMPLIANT),
+                "stderr": "",
+            },
+            values=(),
         )
         assert "no results" in failure
+
+    def test_a_failing_exits_stderr_is_redacted_before_it_is_cut(self):
+        """The value straddles the excerpt's cut (the first quarter of 500 characters
+        ends inside it), so a redaction of the excerpt would see neither half of it;
+        redacting the whole text first leaves nothing of it in the message."""
+        value = "probe-value-that-must-not-print"
+        stderr = "a" * 110 + value + "b" * 600
+        failure, report = CfnGuardScanner._parse_response(
+            {"returncode": 1, "stdout": "", "stderr": stderr}, values=(value,)
+        )
+        assert report is None and "cfn-guard exited 1" in failure
+        assert value not in failure
+        assert "probe-value" not in failure and "not-print" not in failure
+
+    def test_unreadable_redaction_values_withhold_the_stderr(self):
+        failure, _ = CfnGuardScanner._parse_response(
+            {"returncode": 1, "stdout": "", "stderr": "secret-looking text"},
+            values=None,
+        )
+        assert "secret-looking" not in failure
+        assert "withheld" in failure
 
 
 class TestRuleSelection:
@@ -755,7 +788,14 @@ class TestDependencies:
         ):
             assert scanner.validate_plugin_dependencies() is False
         assert "rules are not installed" in scanner.dependency_unavailable_reason
-        assert scanner.dependency_unavailable_reason in scanner.errors
+        # Recorded once, as the ERROR log's line (the plugin's name prefixed);
+        # a separate append of the bare reason recorded every reason twice.
+        recorded = [
+            line
+            for line in scanner.errors
+            if scanner.dependency_unavailable_reason in line
+        ]
+        assert len(recorded) == 1
 
     def test_install_commands_install_the_binary_then_the_rules(self, repo):
         commands = _scanner(repo).custom_install_commands
@@ -951,11 +991,215 @@ class TestScan:
         report = self._run(scanner, fake)
         assert scanner.targets_attempted == 2
         assert scanner.targets_failed == 1
-        assert any(
-            "templates/compliant.yaml: cfn-guard exited 255" in e
+        # Recorded once: the ERROR log puts the line in self.errors, and at an
+        # earlier tip an append beside it recorded the template twice in the
+        # invocation's exitCodeDescription.
+        recorded = [
+            e
             for e in scanner.errors
-        )
+            if "templates/compliant.yaml: cfn-guard exited 255" in e
+        ]
+        assert len(recorded) == 1, scanner.errors
         assert _observed(report.runs[0].results) == EXPECTED_INSECURE
+
+    def test_a_failing_templates_stderr_is_redacted_with_the_scanners_values(
+        self, repo, rules_root
+    ):
+        """At the base the excerpt was cut unredacted, so the head of a value that
+        straddled the cut reached ``self.errors``."""
+        _fake_bundle(rules_root)
+        value = "probe-value-that-must-not-print"
+
+        def fake(command, **kwargs):
+            return {
+                "returncode": 255,
+                "stdout": "",
+                "stderr": "a" * 110 + value + "b" * 600,
+            }
+
+        scanner = _scanner(repo)
+        with patch.object(CfnGuardScanner, "_values_to_redact", return_value=(value,)):
+            self._run(scanner, fake)
+        joined = "\n".join(scanner.errors)
+        assert "cfn-guard exited 255" in joined
+        assert "probe-value" not in joined and "not-print" not in joined
+
+    def test_errors_are_reset_for_each_scan_call(self, repo, rules_root):
+        """At the base the converted target's invocation record (built from
+        self.errors) repeated the source target's lines."""
+        _fake_bundle(rules_root)
+
+        def fake(command, **kwargs):
+            return {"returncode": 255, "stdout": "", "stderr": "Parser Error"}
+
+        scanner = _scanner(repo)
+        self._run(scanner, fake)
+        assert any("cfn-guard exited 255" in e for e in scanner.errors)
+        stale = list(scanner.errors)
+
+        def clean(command, **kwargs):
+            return {
+                "returncode": 19,
+                "stdout": CAPTURED_INSECURE.read_text(),
+                "stderr": "",
+            }
+
+        self._run(scanner, clean)
+        assert not any(e in scanner.errors for e in stale), scanner.errors
+
+    def test_errors_are_reset_before_the_empty_target_return(self, repo, rules_root):
+        """At the previous tip the reset sat below the empty-target, pre-scan and
+        dependency returns, so a source scan's lines were still in self.errors
+        when the converted target was empty, the shape the reset was added for."""
+        _fake_bundle(rules_root)
+        empty = repo.parent / "converted-empty"
+        empty.mkdir()
+        scanner = _scanner(repo)
+        scanner.errors = ["the source target's line"]
+        with patch.object(
+            CfnGuardScanner, "validate_plugin_dependencies", return_value=True
+        ):
+            scanner.scan(target=empty, target_type="converted")
+        assert "the source target's line" not in scanner.errors, scanner.errors
+
+    def test_a_dependency_recorded_unavailable_before_the_scan_keeps_its_line(
+        self, repo, rules_root
+    ):
+        """The reset at the top keeps the one line that explains why the scan
+        below does not start; a stale line from another target is still dropped."""
+        _fake_bundle(rules_root)
+        scanner = _scanner(repo)
+        scanner.dependency_unavailable_reason = "cfn-guard was recorded missing"
+        scanner.errors = ["the source target's line", "cfn-guard was recorded missing"]
+        with patch.object(
+            CfnGuardScanner, "validate_plugin_dependencies", return_value=False
+        ):
+            scanner.scan(target=repo, target_type="source")
+        assert "the source target's line" not in scanner.errors, scanner.errors
+        assert "cfn-guard was recorded missing" in scanner.errors, scanner.errors
+
+    def test_after_a_timeout_the_remaining_templates_are_not_started(
+        self, repo, rules_root
+    ):
+        """The executor discards the scan after a recorded timeout, so each further
+        template would spend a fresh full scan_timeout for nothing; at the base
+        every remaining template was still started."""
+        _fake_bundle(rules_root)
+        calls = []
+
+        def timing_out(command, **kwargs):
+            calls.append(list(command))
+            return {"returncode": None, "stdout": "", "stderr": "", "timed_out": True}
+
+        scanner = _scanner(repo)
+        self._run(scanner, timing_out)
+        assert len(calls) == 1, "every template after the timeout was still started"
+        assert scanner.targets_attempted == 2
+        assert scanner.targets_failed == 2
+        assert any("timed out" in e for e in scanner.errors)
+        # One line per template that was not started: the ERROR log already puts
+        # the line in self.errors, so an append beside it recorded each twice in
+        # the invocation's exitCodeDescription.
+        not_started = [e for e in scanner.errors if "not started" in e]
+        assert len(not_started) == 1, scanner.errors
+
+    def test_every_template_the_tool_never_evaluated_is_recorded_by_name(
+        self, repo, rules_root
+    ):
+        """The one that timed out and the one not started after it are both
+        targets the tool never evaluated, and the run's error record names each
+        such target from this list. At the previous tip only a candidate ASH could
+        not read was recorded on it; a template whose own invocation failed, or
+        was never started, was counted as failed and named in the scanner's line
+        but was absent from the run's record, where cfn-nag names its own."""
+        _fake_bundle(rules_root)
+
+        def timing_out(command, **kwargs):
+            return {"returncode": None, "stdout": "", "stderr": "", "timed_out": True}
+
+        scanner = _scanner(repo)
+        self._run(scanner, timing_out)
+        assert scanner.targets_failed == 2
+        assert sorted(scanner.unevaluated_targets) == [
+            "templates/compliant.yaml",
+            "templates/insecure.yaml",
+        ], scanner.unevaluated_targets
+
+    def test_an_unreadable_candidate_is_a_target_that_was_not_evaluated(
+        self, repo, rules_root
+    ):
+        """A non-UTF-8 candidate: with the tool absent the check reads MISSING; at
+        the base, with the tool present, it was a WARNING and nothing more."""
+        _fake_bundle(rules_root)
+        (repo / "templates" / "latin.yaml").write_bytes(b"Resources:\n  caf\xe9: {}\n")
+
+        def fake(command, **kwargs):
+            return {
+                "returncode": 19,
+                "stdout": CAPTURED_INSECURE.read_text(),
+                "stderr": "",
+            }
+
+        scanner = _scanner(repo)
+        self._run(scanner, fake)
+        assert scanner.targets_attempted == 3
+        assert scanner.targets_failed == 1
+        assert any("could not be read" in e for e in scanner.errors), scanner.errors
+
+    def test_a_utf16_template_without_a_byte_order_mark_is_a_failed_target(
+        self, repo, rules_root
+    ):
+        """Written without a mark, a UTF-16 template decodes as UTF-8 without an
+        error and reaches the parsers NUL-interleaved. At the previous tip it was
+        named as a template that could not be parsed, a WARNING counted as nothing;
+        it is a template ASH could not decode, so a failed target named in the
+        error record, as its marked twin is."""
+        _fake_bundle(rules_root)
+        (repo / "templates" / "stack.json").write_bytes(
+            '{"Resources": {"T": {"Type": "AWS::SNS::Topic"}}}'.encode("utf-16-le")
+        )
+
+        def fake(command, **kwargs):
+            return {
+                "returncode": 19,
+                "stdout": CAPTURED_INSECURE.read_text(),
+                "stderr": "",
+            }
+
+        scanner = _scanner(repo)
+        self._run(scanner, fake)
+        assert scanner.targets_attempted == 3
+        assert scanner.targets_failed == 1
+        named = [
+            e for e in scanner.errors if "did not evaluate" in e and "stack.json" in e
+        ]
+        assert len(named) == 1, scanner.errors
+        assert "UTF-16 text without a byte-order mark" in named[0]
+        assert not any("Skipped" in e and "stack.json" in e for e in scanner.errors)
+
+    def test_a_non_utf8_candidate_with_no_template_in_it_is_skipped(
+        self, repo, rules_root
+    ):
+        """At the previous tip this file was a failed target with no structure read,
+        so one Latin-1 locale file in a repository reported ERROR from every
+        CloudFormation scanner. Its text, decoded as well as it can be, is not a
+        template, so it is skipped and named, as cfn-nag skips it."""
+        _fake_bundle(rules_root)
+        (repo / "templates" / "latin.yaml").write_bytes(b"greeting: caf\xe9\n")
+
+        def fake(command, **kwargs):
+            return {
+                "returncode": 19,
+                "stdout": CAPTURED_INSECURE.read_text(),
+                "stderr": "",
+            }
+
+        scanner = _scanner(repo)
+        self._run(scanner, fake)
+        assert scanner.targets_attempted == 2
+        assert scanner.targets_failed == 0
+        skipped = [e for e in scanner.errors if "Skipped" in e and "latin.yaml" in e]
+        assert len(skipped) == 1 and "not UTF-8" in skipped[0], scanner.errors
 
     def test_rules_removed_between_validation_and_scan_raise(self, repo, rules_root):
         scanner = _scanner(repo)

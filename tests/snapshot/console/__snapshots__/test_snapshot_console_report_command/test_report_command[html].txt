@@ -325,7 +325,7 @@ td:first-child { font-weight: 550; }
     <section class="overview" aria-labelledby="report-title">
       <h1 id="report-title">ASH</h1>
       <p class="report-context">Scanned 15 Jan 2026 at 12:00 UTC <span aria-hidden="true">·</span> ASH <ASH_VERSION></p>
-      <div class="outcome outcome--warning">
+      <div class="outcome outcome--danger">
         <div class="outcome__inner">
         <div class="outcome-mark" aria-hidden="true">!</div>
         <div><h2>Scan incomplete</h2><p>4 actionable findings. Some inputs or scanners were not evaluated.</p><p class="next-step"><strong>Next:</strong> Review findings, resolve coverage gaps, and scan again.</p></div>
@@ -335,7 +335,7 @@ td:first-child { font-weight: 550; }
         <div><dl><dt>Actionable findings</dt><dd class="metric-accent">4<span class="metric-description">At or above scanner thresholds</span></dd></dl></div>
         <div><dl><dt>Below threshold</dt><dd>7<span class="metric-description">Active findings for context</span></dd></dl></div>
         <div><dl><dt>Suppressed</dt><dd>3<span class="metric-description">Excluded from actionable counts</span></dd></dl></div>
-        <div><dl><dt>Scanners completed</dt><dd>5<span> / 9</span><span class="metric-description">2 disabled · 2 unavailable</span></dd></dl></div>
+        <div><dl><dt>Scanners completed</dt><dd>5<span> / 9</span><span class="metric-description">2 skipped · 2 unavailable</span></dd></dl></div>
       </div>
       <div class="severity-strip" aria-label="Active findings by severity"><span class="severity-critical"><strong>1</strong> Critical</span><span class="severity-high"><strong>2</strong> High</span><span class="severity-medium"><strong>2</strong> Medium</span><span class="severity-low"><strong>3</strong> Low</span><span class="severity-info"><strong>3</strong> Info</span></div>
       <div class="notice"><h3>Incomplete coverage</h3><p>The findings reported are real, but the set is known to be partial.</p><ul><li><strong>cdk-nag</strong>: evaluated 6 of 10 target(s); 4 could not be evaluated.</li></ul></div><div class="notice"><h3>Scanners needing attention</h3><p>grype, npm-audit. Check their dependencies and execution logs, then scan again.</p></div>
@@ -351,9 +351,9 @@ td:first-child { font-weight: 550; }
       <div class="section-heading"><h2 id="findings-title">Findings</h2><p>Sorted by severity</p></div>
       <div class="finding-controls js-only">
         <div class="search-control"><label for="finding-search">Search findings</label><input id="finding-search" type="search" placeholder="Rule, file, message, or scanner…" autocomplete="off"></div>
-        <div><label for="finding-scope">Show</label><select id="finding-scope"><option value="actionable">Actionable</option><option value="active">All active</option><option value="suppressed">Suppressed</option><option value="all">All findings</option></select></div>
+        <div><label for="finding-scope">Show</label><select id="finding-scope"><option value="actionable">Actionable</option><option value="policy-not-gating">Not gating</option><option value="active">All active</option><option value="suppressed">Suppressed</option><option value="all">All findings</option></select></div>
         <div><label for="finding-severity">Severity</label><select id="finding-severity"><option value="all">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option><option value="unknown">Unknown</option></select></div>
-        <div><label for="finding-scanner">Scanner</label><select id="finding-scanner"><option value="all">All scanners</option><option value="bandit">bandit</option><option value="checkov">checkov</option><option value="opengrep">opengrep</option><option value="semgrep">semgrep</option></select></div>
+        <div><label for="finding-scanner">Scanner</label><select id="finding-scanner"><option value="">All scanners</option><option value="bandit">bandit</option><option value="checkov">checkov</option><option value="opengrep">opengrep</option><option value="semgrep">semgrep</option></select></div>
         <button type="button" id="reset-filters" class="quiet-button">Reset</button>
       </div>
       <p id="finding-count" class="result-count" role="status" aria-live="polite">14 findings in this report</p>
@@ -442,7 +442,7 @@ td:first-child { font-weight: 550; }
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td>250ms</td>
+                <td>N/A</td>
                 <td class="status-passed">0</td>
                 <td class="status-skipped">SKIPPED</td>
                 <td>MEDIUM (global)</td>
@@ -456,7 +456,7 @@ td:first-child { font-weight: 550; }
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td>&lt;1ms</td>
+                <td>N/A</td>
                 <td class="status-passed">0</td>
                 <td class="status-missing">MISSING</td>
                 <td>MEDIUM (global)</td>
@@ -512,13 +512,13 @@ td:first-child { font-weight: 550; }
                 <td>0</td>
                 <td>0</td>
                 <td>0</td>
-                <td>&lt;1ms</td>
+                <td>N/A</td>
                 <td class="status-passed">0</td>
                 <td class="status-skipped">SKIPPED</td>
                 <td>MEDIUM (global)</td>
             </tr>
             </table></div>
-      <details class="reference"><summary>How to read scanner results</summary><p><strong>Actionable</strong> means a finding meets or exceeds its scanner's configured threshold. Suppressed findings do not contribute to this count.</p><p><strong>PASSED</strong> has no actionable findings. <strong>FAILED</strong> exceeds the threshold. <strong>MISSING</strong> needs dependencies. <strong>SKIPPED</strong> is disabled. <strong>ERROR</strong> could not complete. Coverage notices above explain partial results.</p><p>Threshold sources: <code>global</code> settings, scanner <code>config</code>, or the <code>scanner</code> default.</p></details>
+      <details class="reference"><summary>How to read scanner results</summary><p><strong>Actionable</strong> means a finding meets or exceeds its scanner's configured threshold. Suppressed findings do not contribute to this count.</p><p><strong>PASSED</strong> has no actionable findings. <strong>FAILED</strong> exceeds the threshold. <strong>MISSING</strong> needs dependencies. <strong>SKIPPED</strong> did not run (disabled, or nothing to scan). <strong>ERROR</strong> could not complete. Coverage notices above explain partial results.</p><p>Threshold sources: <code>global</code> settings, scanner <code>config</code>, or the <code>scanner</code> default.</p></details>
       <div class="hotspots"><h3>Top 2 hotspots</h3><p>Files with the most actionable findings.</p><div class="table-scroll" role="region" aria-label="Top hotspots" tabindex="0">
         <table>
             <tr>
@@ -561,7 +561,7 @@ td:first-child { font-weight: 550; }
             </div>
 
             <div class="metadata-item">
-                <strong>summary_stats:</strong> {&#x27;severity_counts&#x27;: {&#x27;suppressed&#x27;: 6, &#x27;critical&#x27;: 1, &#x27;high&#x27;: 2, &#x27;medium&#x27;: 2, &#x27;low&#x27;: 3, &#x27;info&#x27;: 3}, &#x27;start&#x27;: None, &#x27;end&#x27;: None, &#x27;duration&#x27;: 0.0, &#x27;total&#x27;: 11, &#x27;actionable&#x27;: 4, &#x27;passed&#x27;: 3, &#x27;failed&#x27;: 2, &#x27;missing&#x27;: 1, &#x27;skipped&#x27;: 2, &#x27;error&#x27;: 1}
+                <strong>summary_stats:</strong> {&#x27;severity_counts&#x27;: {&#x27;suppressed&#x27;: 3, &#x27;critical&#x27;: 1, &#x27;high&#x27;: 2, &#x27;medium&#x27;: 2, &#x27;low&#x27;: 3, &#x27;info&#x27;: 3}, &#x27;start&#x27;: None, &#x27;end&#x27;: None, &#x27;duration&#x27;: 0.0, &#x27;total&#x27;: 11, &#x27;actionable&#x27;: 4, &#x27;passed&#x27;: 3, &#x27;failed&#x27;: 2, &#x27;missing&#x27;: 1, &#x27;skipped&#x27;: 2, &#x27;error&#x27;: 1}
             </div>
 
             <div class="metadata-item">
@@ -607,11 +607,13 @@ td:first-child { font-weight: 550; }
     themeButton.textContent = theme === "dark" ? "Light theme" : "Dark theme";
     themeButton.setAttribute("aria-label", `Switch to ${theme === "dark" ? "light" : "dark"} theme`);
   };
+  const preferredTheme = () =>
+    window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   try {
-    setTheme(localStorage.getItem("ash-report-theme") ||
-      (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
+    const stored = localStorage.getItem("ash-report-theme");
+    setTheme(stored === "light" || stored === "dark" ? stored : preferredTheme());
   } catch (_) {
-    setTheme(window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    setTheme(preferredTheme());
   }
   themeButton.addEventListener("click", () => {
     const theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -627,17 +629,29 @@ td:first-child { font-weight: 550; }
   const empty = document.getElementById("empty-findings");
   document.querySelector(".finding-controls").hidden = cards.length === 0;
   count.hidden = cards.length === 0;
-  const searchable = new Map(cards.map((card) => [card, card.textContent.toLocaleLowerCase()]));
+  // Search the finding's own text: the title, scanner, rule, location and body,
+  // not the buttons and labels around them ("Copy", "Finding details").
+  const searchText = (card) => {
+    const clone = card.cloneNode(true);
+    clone.querySelectorAll("button, summary, strong, .pill, .finding-status").forEach((node) => node.remove());
+    return [...clone.querySelectorAll("h3, .finding-scanner, .finding-meta code, .finding-body > *")]
+      .map((node) => node.textContent).join("\n").toLocaleLowerCase();
+  };
+  const searchable = new Map(cards.map((card) => [card, searchText(card)]));
   const filter = () => {
     const query = search.value.trim().toLocaleLowerCase();
     let shown = 0;
     for (const card of cards) {
       const status = card.dataset.status;
+      // A finding the project's outcome left out (a workspace policy scanner
+      // whose policy does not gate) is shown by the default view, whatever its
+      // severity: it is reported, not set aside as below the threshold.
       const matchesScope = scope.value === "all" || status === scope.value ||
+        (scope.value === "actionable" && status === "policy-not-gating") ||
         (scope.value === "active" && status !== "suppressed");
       const matches = matchesScope &&
         (severity.value === "all" || card.dataset.severity === severity.value) &&
-        (scanner.value === "all" || card.dataset.scanner === scanner.value) &&
+        (scanner.value === "" || card.dataset.scanner === scanner.value) &&
         (!query || searchable.get(card).includes(query));
       card.hidden = !matches;
       if (matches) shown += 1;
@@ -649,7 +663,7 @@ td:first-child { font-weight: 550; }
     search.value = "";
     scope.value = showAll ? "all" : "actionable";
     severity.value = "all";
-    scanner.value = "all";
+    scanner.value = "";
     filter();
     search.focus();
   };

@@ -16,25 +16,42 @@ from pathlib import Path
 # The A001 on the body WAS fixed: reassigning the parameter was never part of any
 # contract, and the reassignment also changed the bound type (str -> Path)
 # midway, which is worth removing on its own.
-def get_shortest_name(input: str | Path):  # noqa: A002
+#
+# `cwd` names the directory the answer is relative to. It defaults to the working
+# directory of the calling process. A caller that computes names for another process,
+# such as the cdk-nag worker child naming templates against its parent's directory,
+# passes that directory: a relative input and the existence check are then resolved
+# against it too, so the answer does not depend on where the caller happens to be
+# running (or on whether it can enter that directory at all).
+def get_shortest_name(input: str | Path, cwd: str | Path | None = None):  # noqa: A002
     if input == ".":
         # Just return the input, it's already referencing the relative path to CWD
         return input
     in_path = Path(input)
-    if not in_path.exists():
-        # Just return the input, not an existing Path
-        return input
-    cwd = Path.cwd()
-    input_posix = in_path.absolute().as_posix()
-    cwd_posix = cwd.absolute().as_posix()
+    # `cwd` is expected to be absolute. A relative one is made absolute against the
+    # calling process's directory, not against the process the name is computed for.
+    base = None if cwd is None else Path(cwd).absolute()
+    probe = in_path if base is None or in_path.is_absolute() else base / in_path
+    if not probe.exists():
+        # Not an existing path: returned as given, as text. Callers put the result
+        # in str-typed SARIF fields (artifactLocation.uri, working_directory), and a
+        # Path handed back unchanged reached them as a Path.
+        return input if isinstance(input, str) else input.as_posix()
+    if base is None:
+        base = Path.cwd().absolute()
+    absolute = probe.absolute()
     # Annotated because the two branches bind different types: relative_to() gives a
     # Path, while `input` is still str | Path. Without this mypy infers Path from the
     # first branch and rejects the second -- the union is the honest type here, and
     # Path() accepts either.
     shortest: str | Path
-    if input_posix.startswith(cwd_posix) and input_posix != cwd_posix:
-        # If input starts with the cwd, use the relative path
-        shortest = in_path.absolute().relative_to(cwd)
+    # Compared by path components, not by text: with the cwd /work/app, the input
+    # /work/app-src/f starts with the cwd's text but is not below it, and
+    # relative_to() then raised ValueError out of every scanner and converter that
+    # names a file this way.
+    if absolute != base and absolute.is_relative_to(base):
+        # If input is below the cwd, use the relative path
+        shortest = absolute.relative_to(base)
     else:
         shortest = input
     return Path(shortest).as_posix()
@@ -54,8 +71,10 @@ def home_as_tilde(text: str) -> str:
     not-found reason writes ``as_posix()`` paths; a drive-letter home is matched
     without regard to case. Only a whole path is replaced: it must start the text or
     follow whitespace or one of ``,;:(='"`[<{`` and end the text or be followed by a
-    separator, whitespace or one of ``,;:)'"`]>}``, so ``/home/a`` is left alone
-    inside ``/home/ab``, ``/srv/home/a``, ``//home/a`` and ``file:///home/a``. A
+    separator, whitespace, one of ``,;:)'"`]>}``, or a period that ends a sentence
+    (one followed by whitespace or the end of the text), so ``/home/a`` is left alone
+    inside ``/home/ab``, ``/home/a.bak``, ``/srv/home/a``, ``//home/a`` and
+    ``file:///home/a`` and is rewritten in ``looked under /home/a.``. A
     name that goes on with one of those characters is rewritten too, though it is
     not under the home directory: ``/home/a]x/y`` becomes ``~]x/y`` and
     ``/opt/a[/home/a/x`` becomes ``/opt/a[~/x``. This text is for display, and such
@@ -91,7 +110,9 @@ def home_as_tilde(text: str) -> str:
         if windows:
             forms.add(stripped.replace("\\", "/"))
     before = r"(?<![^\s,;:(='\"`\[<{])"
-    after = r"(?![^/\\\s,;:)'\"`\]>}])"
+    # A period is a boundary only when it ends a sentence: `/home/a.bak` names a
+    # sibling directory, `/home/a.` ends a reason.
+    after = r"(?:(?![^/\\\s,;:)'\"`\]>}])|(?=\.(?:\s|$)))"
     for form in sorted(forms, key=len, reverse=True):
         flags = re.IGNORECASE if drive.match(form) else 0
         text = re.sub(before + re.escape(form) + after, "~", text, flags=flags)

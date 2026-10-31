@@ -29,14 +29,13 @@ from automated_security_helper.cli.merge import (
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
-from tests.unit.cli import test_merge
 from tests.unit.cli.test_merge import SCANNERS, as_loaded, build_shard
 from tests.unit.core.phases.test_scan_phase_sharding import _make_scanner_class
 
 pytestmark = pytest.mark.unit
 
-# The fixture itself, so this file and test_merge.py capture warnings the same way.
-capture = test_merge.capture
+# The ``capture`` fixture comes from tests/unit/conftest.py by name, so this file
+# and test_merge.py capture warnings the same way.
 
 
 def _phase(tmp_path, index):

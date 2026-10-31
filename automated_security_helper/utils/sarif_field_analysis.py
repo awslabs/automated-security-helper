@@ -1,5 +1,5 @@
 import csv
-import glob
+import fnmatch
 import json
 import os
 from pathlib import Path
@@ -10,8 +10,13 @@ from rich.table import Table
 
 from automated_security_helper.utils.console import ash_console
 from automated_security_helper.utils.log import escape_markup
+from automated_security_helper.utils.sandbox.fs_guard import (
+    open_for_read,
+    open_for_write,
+)
 
 from automated_security_helper.utils.meta_analysis.reporting import (
+    AGGREGATE_SCANNER_NAMES,
     generate_html_report,
 )
 from automated_security_helper.utils.meta_analysis.field_mapping import (
@@ -91,38 +96,145 @@ def _flatten_object(
                 result[new_prefix] = True
                 continue
 
-            if isinstance(value, (dict, list)):
+            # Every field is recorded under its own path, a container as well as
+            # a scalar, so its loss in aggregation is reported and one field has
+            # one name: an empty ``locations`` and a filled one are both
+            # ``...locations``. A container recorded only when empty read as
+            # missing when aggregation filled it (or dropped it empty), though
+            # the field was there on both sides. A non-empty container is then
+            # walked for the fields it holds. (An empty container and a list of
+            # scalars used to fall through both branches and were never
+            # recorded; a list of scalars is also recorded as ``name[]``, below.)
+            result[new_prefix] = True
+            if isinstance(value, (dict, list)) and value:
                 _flatten_object(value, new_prefix, result, excluded_result)
+    elif isinstance(obj, list):
+        # For lists, use [] notation instead of specific indices. Every element
+        # is walked: the paths carry no index, so the fields of every element
+        # fold into one set, and a field that only a later element holds (a
+        # second location's region, a fix's description) used to be missed when
+        # only the first element was read as representative.
+        new_prefix = f"{prefix}[]" if not prefix.endswith("[]") else prefix
+        for item in obj:
+            if isinstance(item, (dict, list)):
+                _flatten_object(item, new_prefix, result, excluded_result)
             else:
                 result[new_prefix] = True
-    elif isinstance(obj, list):
-        # For lists, use [] notation instead of specific indices
-        if obj and len(obj) > 0:
-            # Process the first item as representative
-            new_prefix = f"{prefix}[]" if not prefix.endswith("[]") else prefix
-            _flatten_object(obj[0], new_prefix, result, excluded_result)
 
 
-def get_scanner_name_from_path(file_path: str) -> str:
+def get_scanner_name_from_path(file_path: str, root: str | None = None) -> str:
     """
     Extract scanner name from file path.
 
+    With *root*, the output directory the file was found under, the scanner is
+    the directory right below ``<root>/scanners``: ASH's layout is
+    ``<output dir>/scanners/<scanner>/...``, and a ``scanners`` directory deeper
+    (a scanner that mirrors a scanned tree) is that scanner's own output and does
+    not rename the file. A file elsewhere below *root* (``reports/ash.sarif``) is
+    named by its stem. This is the rule ``analyze_sarif_fields`` names every
+    file by. Without *root* the path is read as a whole, and the scanner is the
+    directory under its LAST ``scanners`` component.
+
     Args:
         file_path: Path to the SARIF file
+        root: The directory the analysis searched, or None
 
     Returns:
         str: The scanner name
     """
+    if root is not None:
+        try:
+            below_root = Path(file_path).relative_to(root).parts
+        except ValueError:
+            below_root = None
+        if below_root is not None:
+            if len(below_root) > 2 and below_root[0] == "scanners":
+                return below_root[1]
+            return Path(file_path).stem
+
     path_parts = Path(file_path).parts
 
-    # Check if the file is in the scanners directory
+    # The scanner is the directory under the LAST "scanners" component: ASH's
+    # layout is <output dir>/scanners/<scanner>/..., and an output directory that
+    # itself sits under an ancestor named "scanners" put every file, the
+    # aggregate included, under that ancestor's child's name.
     if "scanners" in path_parts:
-        scanners_index = path_parts.index("scanners")
+        scanners_index = len(path_parts) - 1 - path_parts[::-1].index("scanners")
         if len(path_parts) > scanners_index + 1:
             return path_parts[scanners_index + 1]
 
     # If not in scanners directory, use the filename without extension
     return Path(file_path).stem
+
+
+def _is_derived_report(file_path: str) -> bool:
+    """Whether a file in ``reports/`` is a reporter's rendering of the aggregate
+    rather than the aggregate itself: ``ash.ghas.sarif`` beside ``ash.sarif``.
+
+    Named by its stem, such a file was analyzed as a scanner called ``ash.ghas``
+    and its fields, derived from the aggregate, were judged against the aggregate.
+    """
+    stem = Path(file_path).stem
+    return any(stem.startswith(f"{name}.") for name in AGGREGATE_SCANNER_NAMES)
+
+
+def _find_sarif_files(
+    sarif_dir: str,
+    top: str,
+    recursive: bool,
+    unreadable: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """The ``*.sarif`` files below ``sarif_dir/top`` and the links not followed.
+
+    The tree is walked without following a symbolic link, so a link in the scan
+    output tree (a leftover of a sandboxed scanner) neither leads the analysis out
+    of the output directory nor, when it points at an ancestor, makes the walk
+    loop until the path is too long: ``glob.glob(recursive=True)`` follows a linked
+    directory and the result was filtered afterwards. A linked directory is
+    returned among the links, and *top* itself when it is one. A linked file is
+    returned among the files: it is read under the guard, which refuses it, so it
+    fails the run as an unreadable file does.
+
+    A name that starts with a dot is left out, as ``glob`` leaves it out, and the
+    files come back sorted: directory order varies by filesystem.
+
+    A directory the walk could not list (permission denied) is skipped by
+    ``os.walk`` without a word unless it is given an ``onerror``, so its files
+    were left out and the run could exit 0 over a partial tree. Each such
+    directory is appended to *unreadable* when a list is given. A directory that
+    does not exist is not one: a scan without ``reports/`` has none to read.
+    """
+    start = os.path.join(sarif_dir, top)
+    if os.path.islink(start):
+        return [], [start]
+    files: list[str] = []
+    links: list[str] = []
+
+    def _note_unreadable(error: OSError) -> None:
+        if unreadable is None or isinstance(
+            error, (FileNotFoundError, NotADirectoryError)
+        ):
+            return
+        unreadable.append(str(error.filename or start))
+
+    for current, dirnames, filenames in os.walk(
+        start, followlinks=False, onerror=_note_unreadable
+    ):
+        dirnames[:] = sorted(name for name in dirnames if not name.startswith("."))
+        if recursive:
+            links.extend(
+                os.path.join(current, name)
+                for name in dirnames
+                if os.path.islink(os.path.join(current, name))
+            )
+        else:
+            dirnames[:] = []
+        files.extend(
+            os.path.join(current, name)
+            for name in filenames
+            if not name.startswith(".") and fnmatch.fnmatch(name, "*.sarif")
+        )
+    return sorted(files), sorted(links)
 
 
 def analyze_sarif_fields(
@@ -168,21 +280,31 @@ def analyze_sarif_fields(
     results_dict: Dict[str, Dict[str, bool]] = {}
     excluded_dict: Dict[str, Dict[str, bool]] = {}  # For tracking excluded fields
 
-    # Define the search patterns in the specified order. The directory is escaped,
-    # so its own name is not read as a pattern: one named with "[ab]" or "*"
-    # found a sibling's files and not its own.
-    searched_dir = glob.escape(str(sarif_dir))
-    search_patterns = [
-        os.path.join(searched_dir, "reports", "*.sarif"),
-        os.path.join(searched_dir, "scanners", "**", "*.sarif"),
-    ]
-
-    # Find all SARIF files in the specified patterns
-    all_sarif_files = []
-    for pattern in search_patterns:
-        # glob returns directory order, which varies by filesystem; sort so the
-        # JSON and CSV outputs list fields and scanners in the same order everywhere.
-        all_sarif_files.extend(sorted(glob.glob(pattern, recursive=True)))
+    # Find all SARIF files, in the specified order: reports/, then scanners/ at
+    # any depth. The directory is walked, not matched as a pattern, so its own name
+    # is not read as one: a directory named with "[ab]" or "*" found a sibling's
+    # files and not its own. Each list is sorted so the JSON and CSV outputs list
+    # fields and scanners in the same order everywhere. A symbolic link is
+    # reported and never entered; it counts against the run, as a linked file does.
+    all_sarif_files: list[str] = []
+    linked_paths: list[str] = []
+    unreadable_dirs: list[str] = []
+    for top, recursive in (("reports", False), ("scanners", True)):
+        found_files, found_links = _find_sarif_files(
+            str(sarif_dir), top, recursive, unreadable_dirs
+        )
+        all_sarif_files.extend(found_files)
+        linked_paths.extend(found_links)
+    for linked in linked_paths:
+        console.print(
+            f"Skipping [cyan]{escape_markup(linked)}[/cyan]: a symbolic link, "
+            "not followed"
+        )
+    for unread in unreadable_dirs:
+        console.print(
+            f"Skipping [cyan]{escape_markup(unread)}[/cyan]: a directory that "
+            "could not be read"
+        )
 
     if not all_sarif_files:
         console.print(
@@ -192,32 +314,74 @@ def analyze_sarif_fields(
 
     console.print(f"Found [bold green]{len(all_sarif_files)}[/bold green] SARIF files")
 
-    # Process files in the specified order
+    # Process files in the specified order. A file is sorted by the component
+    # directly under the searched directory, not by any component of its whole
+    # path: with an output directory under an ancestor named "scanners" or
+    # "reports", every file matched both lists.
+    def _relative_parts(file_path: str) -> tuple[str, ...]:
+        try:
+            return Path(file_path).relative_to(sarif_dir).parts
+        except ValueError:
+            return Path(file_path).parts
+
     sarif_files = []
 
-    # First, process files in reports directory
-    reports_files = [f for f in all_sarif_files if "reports" in Path(f).parts]
+    # First, process files in reports directory. A reporter's rendering of the
+    # aggregate kept there (ash.ghas.sarif) is not a scanner's report and is not
+    # the aggregate, so it is left out.
+    reports_files = []
+    for found in all_sarif_files:
+        if _relative_parts(found)[0] != "reports":
+            continue
+        if _is_derived_report(found):
+            console.print(
+                f"Skipping [cyan]{escape_markup(found)}[/cyan]: a report derived "
+                "from the aggregate, not a scanner's"
+            )
+            continue
+        reports_files.append(found)
     sarif_files.extend(reports_files)
 
     # Then, process files in scanners directory
-    scanners_files = [f for f in all_sarif_files if "scanners" in Path(f).parts]
+    scanners_files = [f for f in all_sarif_files if _relative_parts(f)[0] == "scanners"]
     sarif_files.extend(scanners_files)
+
+    # Files that could not be loaded. Their errors are printed as they happen, and
+    # the run fails at the end: a run that read none of its inputs used to exit 0
+    # with empty outputs, which reads as a clean analysis.
+    failed_files: list[str] = []
+
+    # Whether an aggregate report was READ, which is not whether it contributed a
+    # field: an aggregate that parsed and holds no results names no field, so it
+    # never appears among the scanners below, and reading that as "no aggregate
+    # was analyzed" turned the worst outcome of aggregation (every result lost)
+    # into a warning and exit 0.
+    aggregate_loaded = False
 
     # Process each SARIF file
     with console.status("[bold green]Analyzing SARIF files..."):
         for file_path in sarif_files:
             console.print(f"Analyzing [cyan]{escape_markup(file_path)}[/cyan]")
 
-            # Get scanner name from file path
-            scanner_name = get_scanner_name_from_path(file_path)
+            # Get scanner name from the file's path below the searched directory
+            # (get_scanner_name_from_path with the root): the component right
+            # after the FIRST "scanners", since anything deeper is the scanner's
+            # own output and a "scanners" directory in it (a scanner that mirrors
+            # a scanned tree) must not rename the file.
+            scanner_name = get_scanner_name_from_path(file_path, root=str(sarif_dir))
 
             try:
-                # Load the SARIF file
-                with open(file_path, mode="r", encoding="utf-8") as f:
-                    sarif_data = json.load(f)
+                # Load the SARIF file. Read under the guard, as every read of a
+                # scanner's results directory is: a leftover process a sandboxed
+                # scanner started may have replaced a file there with a link to
+                # one of the host's files, or with a FIFO that blocks the open.
+                with open_for_read(file_path) as f:
+                    sarif_data = json.loads(f.read().decode("utf-8"))
 
                 # Flatten the SARIF results - now returns both included and excluded fields
                 included_fields, excluded_fields = flatten_sarif_results(sarif_data)
+                if scanner_name in AGGREGATE_SCANNER_NAMES:
+                    aggregate_loaded = True
 
                 # Update the results dictionary with included fields
                 for field_name in included_fields:
@@ -238,27 +402,28 @@ def analyze_sarif_fields(
                         excluded_dict[field_name][scanner_name] = True
 
             except Exception as e:
+                failed_files.append(file_path)
                 console.print(
                     f"[bold red]Error processing {escape_markup(file_path)}: "
                     f"{escape_markup(str(e))}[/bold red]"
                 )
 
     # The inspect phase writes these below the output directory: never through a
-    # link there (fs_guard).
-    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
-
+    # link there (fs_guard). The CLI registers no writable root, so each write
+    # names the directory it writes in; without that the guard was a plain open()
+    # and followed a link at the output path.
     # Write JSON output for included fields
     json_path = os.path.join(output_dir, "sarif_fields.json")
-    with open_for_write(json_path) as f:
-        json.dump(results_dict, f, indent=2)
+    with open_for_write(json_path, root=output_dir) as included_json:
+        json.dump(results_dict, included_json, indent=2)
     console.print(
         f"Wrote included fields JSON to [cyan]{escape_markup(json_path)}[/cyan]"
     )
 
     # Write JSON output for excluded fields
     excluded_json_path = os.path.join(output_dir, "sarif_excluded_fields.json")
-    with open_for_write(excluded_json_path) as f:
-        json.dump(excluded_dict, f, indent=2)
+    with open_for_write(excluded_json_path, root=output_dir) as excluded_json:
+        json.dump(excluded_dict, excluded_json, indent=2)
     console.print(
         "Wrote excluded fields JSON to "
         f"[cyan]{escape_markup(excluded_json_path)}[/cyan]"
@@ -268,8 +433,10 @@ def analyze_sarif_fields(
     csv_path = os.path.join(output_dir, "sarif_fields.csv")
     # UTF-8, as the JSON files are: a field name can hold any character, and the
     # locale's encoding (ASCII under the C locale) cannot write every one.
-    with open_for_write(csv_path, encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
+    with open_for_write(
+        csv_path, encoding="utf-8", newline="", root=output_dir
+    ) as included_csv:
+        writer = csv.writer(included_csv)
         writer.writerow(["field", "scanners"])
 
         for field_name, scanners in sorted(results_dict.items()):
@@ -280,8 +447,10 @@ def analyze_sarif_fields(
 
     # Write CSV output for excluded fields
     excluded_csv_path = os.path.join(output_dir, "sarif_excluded_fields.csv")
-    with open_for_write(excluded_csv_path, encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
+    with open_for_write(
+        excluded_csv_path, encoding="utf-8", newline="", root=output_dir
+    ) as excluded_csv:
+        writer = csv.writer(excluded_csv)
         writer.writerow(["field", "scanners", "reason"])
 
         for field_name, scanners in sorted(excluded_dict.items()):
@@ -291,6 +460,9 @@ def analyze_sarif_fields(
         f"Wrote excluded fields CSV to [cyan]{escape_markup(excluded_csv_path)}[/cyan]"
     )
 
+    def _in_aggregate(scanners: Dict[str, bool]) -> bool:
+        return any(name in scanners for name in AGGREGATE_SCANNER_NAMES)
+
     # Generate HTML report
     # Convert results_dict to the format expected by generate_html_report
     field_presence = {}
@@ -298,7 +470,7 @@ def analyze_sarif_fields(
         field_presence[field_name] = {
             "type": ["unknown"],  # We don't have type information
             "scanners": sorted(scanners.keys()),
-            "in_aggregate": "ash-aggregated" in scanners or "ash" in scanners,
+            "in_aggregate": _in_aggregate(scanners),
             "intentionally_excluded": False,
         }
 
@@ -307,13 +479,16 @@ def analyze_sarif_fields(
         field_presence[field_name] = {
             "type": ["unknown"],
             "scanners": sorted(scanners.keys()),
-            "in_aggregate": "ash-aggregated" in scanners or "ash" in scanners,
+            "in_aggregate": _in_aggregate(scanners),
             "intentionally_excluded": True,
         }
 
-    # Create validation results structure for HTML report
+    # Create validation results structure for HTML report. The counts here are
+    # field paths, and the report labels them so (``unit``); they were shown as
+    # "Total Findings".
     validation_results = {
         "summary": {
+            "unit": "fields",
             "total_findings": len(field_presence),
             "matched_findings": sum(
                 1 for info in field_presence.values() if info["in_aggregate"]
@@ -333,6 +508,16 @@ def analyze_sarif_fields(
     for scanners in excluded_dict.values():
         all_scanners.update(scanners.keys())
 
+    # The aggregate is a scanner in the tables above and is not one in the counts
+    # below: a field only one scanner emits and the aggregate preserves is still
+    # that scanner's alone, and "used by all scanners" means every scanner that
+    # contributed an included field.
+    aggregate_scanners = set(AGGREGATE_SCANNER_NAMES)
+    contributing_scanners = set()
+    for scanners in results_dict.values():
+        contributing_scanners.update(scanners.keys())
+    contributing_scanners -= aggregate_scanners
+
     # Sorted: all_scanners is a set, and this loop's order becomes the order of
     # the scanner sections in the HTML report.
     for scanner in sorted(all_scanners):
@@ -347,13 +532,18 @@ def analyze_sarif_fields(
             1 for field in scanner_fields if field_presence[field]["in_aggregate"]
         )
 
-        # Calculate match rate
+        # Calculate match rate. With no aggregate read there is nothing a field
+        # could be matched against: no rate, which the report shows as n/a (a 0
+        # read as every field lost).
         match_rate = matched_fields / total_fields if total_fields > 0 else 0
+        if not aggregate_loaded:
+            match_rate = None
 
         # Add to validation results
         validation_results["match_statistics"][scanner] = {
             "total_results": total_fields,
             "matched_results": matched_fields,
+            "match_rate": match_rate,
             "field_preservation_rate": match_rate,
             "critical_fields_missing": 0,
             "important_fields_missing": 0,
@@ -367,9 +557,16 @@ def analyze_sarif_fields(
             "informational": [],
         }
 
-    # Generate HTML report
+    # Generate HTML report; its JQ examples name the directory analyzed here.
     html_report_path = os.path.join(output_dir, "sarif_validation_report.html")
-    generate_html_report(validation_results, html_report_path, field_presence)
+    generate_html_report(
+        validation_results,
+        html_report_path,
+        field_presence,
+        root=output_dir,
+        sarif_dir=str(sarif_dir),
+        aggregate_analyzed=aggregate_loaded,
+    )
     console.print(
         f"Wrote HTML report to [cyan]{escape_markup(html_report_path)}[/cyan]"
     )
@@ -383,17 +580,24 @@ def analyze_sarif_fields(
     table.add_row("Total unique fields (excluded)", str(len(excluded_dict)))
     table.add_row("Total unique scanners", str(len(all_scanners)))
 
-    # Find fields used by all scanners
+    # Find fields used by all scanners: every scanner that contributed an
+    # included field, the aggregate not among them. The count compared against
+    # every scanner seen, so one with only excluded fields, or the aggregate
+    # itself, made the row read 0.
     fields_in_all_scanners = [
         field
         for field, scanners in results_dict.items()
-        if len(scanners) == len(all_scanners)
+        if contributing_scanners
+        and contributing_scanners <= (set(scanners.keys()) - aggregate_scanners)
     ]
     table.add_row("Fields used by all scanners", str(len(fields_in_all_scanners)))
 
-    # Find fields used by only one scanner
+    # Find fields used by only one scanner, the aggregate not counted as one: a
+    # field one scanner emits and the aggregate preserves was never unique.
     fields_in_one_scanner = [
-        field for field, scanners in results_dict.items() if len(scanners) == 1
+        field
+        for field, scanners in results_dict.items()
+        if len(set(scanners.keys()) - aggregate_scanners) == 1
     ]
     table.add_row("Fields used by only one scanner", str(len(fields_in_one_scanner)))
 
@@ -409,7 +613,6 @@ def analyze_sarif_fields(
     scanner_table.add_column("% in Aggregate", style="magenta")
 
     # Calculate statistics for each scanner
-    aggregate_scanners = ["ash", "ash-aggregated"]
     has_unexpected_missing_fields = False
 
     for scanner in sorted(all_scanners):
@@ -429,11 +632,12 @@ def analyze_sarif_fields(
         ]
         excluded_count = len(excluded_scanner_fields)
 
-        # Count unique fields (fields that only this scanner has)
+        # Count unique fields (fields that only this scanner has). The aggregate
+        # is not another scanner: it carries the field because this one did.
         unique_fields = [
             field
             for field in scanner_fields
-            if sum(1 for s in results_dict[field].keys() if s != scanner) == 0
+            if not (set(results_dict[field].keys()) - aggregate_scanners - {scanner})
         ]
         unique_count = len(unique_fields)
 
@@ -447,8 +651,11 @@ def analyze_sarif_fields(
         ]
         missing_count = len(missing_from_aggregate)
 
-        # Track if there are any unexpected missing fields
-        if missing_count > 0:
+        # Track if there are any unexpected missing fields. With no aggregate
+        # analyzed there is nothing to be missing from: every scanner field read
+        # as unexpectedly missing when reports/ held no aggregate, or when it
+        # could not be read, and the run failed with a judgment about fields.
+        if missing_count > 0 and aggregate_loaded:
             has_unexpected_missing_fields = True
 
         # Share of this scanner's included fields that reach the aggregate.
@@ -464,24 +671,62 @@ def analyze_sarif_fields(
             (in_aggregate_count / total_fields * 100) if total_fields > 0 else 0
         )
 
-        # Add row to table
+        # Add row to table. With no aggregate read, no field was checked against
+        # one: the two columns that say so are n/a, not a count of every field
+        # missing and 0.0% of them present.
         scanner_table.add_row(
             escape_markup(scanner),
             str(total_fields),
             str(unique_count),
-            str(missing_count),
+            str(missing_count) if aggregate_loaded else "n/a",
             str(excluded_count),
-            f"{in_aggregate_pct:.1f}%",
+            f"{in_aggregate_pct:.1f}%" if aggregate_loaded else "n/a",
         )
 
     # Print the scanner statistics table
     console.print(scanner_table)
 
-    # Exit with non-zero code if there are unexpected missing fields
+    if not aggregate_loaded:
+        console.print(
+            "[bold yellow]WARNING: no aggregate report (reports/ash.sarif) was "
+            "analyzed, so no field was checked against the aggregate[/bold yellow]"
+        )
+
+    # Both reasons to fail are printed before the one exit: a run with missing
+    # fields AND unreadable files used to exit on the first and never say that
+    # part of its input was not read at all.
     if has_unexpected_missing_fields:
         console.print(
             "[bold red]WARNING: Some fields are unexpectedly missing from the aggregate report[/bold red]"
         )
+
+    # A file that could not be read is not part of the analysis above, so its
+    # fields are neither counted nor compared; the outputs are written, and the
+    # run fails so the gap is not read as a clean result.
+    if failed_files:
+        console.print(
+            f"[bold red]WARNING: {len(failed_files)} of {len(sarif_files)} SARIF "
+            "file(s) could not be read and are not part of this analysis[/bold red]"
+        )
+
+    # A linked directory is not part of the analysis either, for the same reason:
+    # a linked file already fails the run as an unreadable one.
+    if linked_paths:
+        console.print(
+            f"[bold red]WARNING: {len(linked_paths)} symbolic link(s) in the output "
+            "tree were not followed and are not part of this analysis[/bold red]"
+        )
+
+    # A directory that could not be listed holds files nobody read, so it fails
+    # the run like a link not followed does.
+    if unreadable_dirs:
+        console.print(
+            f"[bold red]WARNING: {len(unreadable_dirs)} director(y/ies) in the "
+            "output tree could not be read and are not part of this "
+            "analysis[/bold red]"
+        )
+
+    if has_unexpected_missing_fields or failed_files or linked_paths or unreadable_dirs:
         raise typer.Exit(code=1)
 
     return results_dict

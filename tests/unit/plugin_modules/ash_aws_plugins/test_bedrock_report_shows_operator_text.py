@@ -15,21 +15,20 @@ so no request leaves the process.
 import json
 import re
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from markdown_it import MarkdownIt
 
 import automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter as bsr_module
-from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
-    BedrockSummaryReporter,
-)
 from automated_security_helper.config.ash_config import AshConfig
+from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
+    make_reporter,
+)
 
 pytestmark = pytest.mark.unit
 
 AshConfig.model_rebuild()
-BedrockSummaryReporter.model_rebuild()
 
 RLO = chr(0x202E)
 NEL = chr(0x85)
@@ -209,11 +208,9 @@ def _make_reporter(mock_context, monkeypatch, model_text):
     session = MagicMock()
     session.client.return_value = runtime
     monkeypatch.setattr(bsr_module.boto3, "Session", MagicMock(return_value=session))
-    with patch("boto3.Session"):
-        r = BedrockSummaryReporter(context=mock_context)
-    r.config.options.output_markdown = False
-    r.config.options.include_code_snippets = True
-    return r
+    return make_reporter(
+        mock_context, output_markdown=False, include_code_snippets=True
+    )
 
 
 @pytest.fixture

@@ -419,11 +419,14 @@ class TestScanWorkflowIntegration:
     async def test_error_handling_invalid_output_directory(
         self, test_directory, tmp_path
     ):
-        """Test error handling when the output directory disappears mid-scan.
+        """Test the poll of a scan whose output directory disappears.
 
-        register_scan validates the output directory up front, so the directory
-        has to exist to register and is removed afterwards. Registering against a
-        path that never existed only ever tested register_scan's own validation.
+        The directory exists when the scan registers and is removed afterwards.
+        A directory that is not there, whether never created or removed since,
+        is not an error of the poll: the entry's own status is the answer, with
+        nothing read from files, so a scan that failed after its directory went
+        stays readable by polling. A directory that cannot be a scan's at all is
+        refused at registration instead.
         """
         registry = get_scan_registry()
 
@@ -438,10 +441,12 @@ class TestScanWorkflowIntegration:
         output_dir.rmdir()
 
         result = await check_scan_progress(scan_id)
-        assert result["success"] is False
-        assert "Directory not found" in result["error"]
-        assert result["error_category"] == "file_not_found"
-        assert result["context"]["scan_id"] == scan_id
+        assert result["success"] is True
+        assert result["scan_id"] == scan_id
+        assert result["status"] == MCScanStatus.PENDING.value
+        assert result["is_complete"] is False
+        assert result["scanners"] == {}
+        assert result["total_scanners"] == 0
 
         # Clean up the scan
         await cleanup_scan_resources(scan_id)
@@ -706,10 +711,11 @@ class TestScanWorkflowIntegration:
         assert progress_info["is_complete"] is True
         assert set(progress_info["scanners_completed"]) == {"scanner1", "scanner2"}
         # findings_count on the completed branch counts SARIF results, and this
-        # document carries no SARIF. The per-scanner counts are in
-        # findings_summary, which is read verbatim from metadata.summary_stats.
+        # document carries no SARIF. The counts are in summary_stats, which is
+        # metadata.summary_stats as recorded; findings_summary has the severity
+        # buckets, in the shape the running view has.
         assert progress_info["findings_count"] == 0
-        assert progress_info["findings_summary"]["actionable"] == 3
+        assert progress_info["summary_stats"]["actionable"] == 3
         assert progress_info["findings_summary"]["critical"] == 1
 
         # Clean up the scan
@@ -936,9 +942,26 @@ class TestScanWorkflowIntegration:
         ):
             cleanup_result = await cleanup_scan_resources(scan_id, remove_output=True)
 
-            # The cleanup should still succeed for the registry part
-            assert cleanup_result["success"] is True
-            assert cleanup_result["removed_from_registry"] is True
+            # A delete the system refused keeps the scan in the registry: the
+            # entry is what still names the output directory, so the cleanup
+            # can be retried once the permission problem is fixed. Removing
+            # the entry anyway reported success and left the directory with
+            # nothing pointing at it.
+            assert cleanup_result["success"] is False
+            assert cleanup_result["removed_from_registry"] is False
             assert cleanup_result["removed_output"] is False
             assert "output_dir_error" in cleanup_result
             assert "Permission denied" in cleanup_result["output_dir_error"]
+            assert registry.get_scan(scan_id) is not None
+
+        # The retry the kept entry is for: the same request, once the permission
+        # problem is gone, removes the output and the entry. Made without
+        # remove_output=True it never retried the delete it was kept for, so
+        # the directory the first call could not remove was left on disk and
+        # the test read "retry works" from the registry part alone.
+        retry = await cleanup_scan_resources(scan_id, remove_output=True)
+        assert retry["success"] is True
+        assert retry["removed_output"] is True
+        assert retry["removed_from_registry"] is True
+        assert not output_directory.exists()
+        assert registry.get_scan(scan_id) is None

@@ -18,11 +18,14 @@ shared words of ``unparsed_config_reason``: ``<file> could not be parsed
 (ComposerError at line N, column M)``. That gives the parser's type and where
 it stopped, and quotes none of the file (not the alias, not a value), because
 the parser's own message can quote a line of it. The reader cells pin those
-words and that nothing of the file is quoted. The two readers that show a
-document as written, not as a run reads it (``get_config(raw=True)`` and the
-suppression save), read with ``NoRecursiveAliasLoader``, which refuses an alias
-inside its own node only; their cells pin that, and that the config load of the
-same file still refuses it.
+words and that nothing of the file is quoted. ``get_config(raw=True)`` shows a
+document as written, not as a run reads it, and reads with
+``NoRecursiveAliasLoader``, which refuses an alias inside its own node only; its
+test pins that, and that the config load of the same file still refuses it. The
+suppression save also reads the file as written, to find where the entry goes,
+but its loader refuses every alias as the shared loaders do, so an aliased file
+is refused in the save's left-unchanged words with its bytes kept; its test pins
+that.
 
 One test per reader, plus a static check that every YAML load in the package
 goes through the shared loaders (``load_config_yaml`` and ``load_yaml_config``),
@@ -48,7 +51,6 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.exceptions import ASHConfigSourceError
-from automated_security_helper.utils.yaml_aliases import NoRecursiveAliasLoader
 
 pytestmark = pytest.mark.unit
 
@@ -186,12 +188,12 @@ class TestEveryReaderRefusesAnAlias:
         assert path.read_text(encoding="utf-8") == ALIASED
 
     def test_saving_a_suppression_into_the_file(self, tmp_path, monkeypatch):
-        """The save edits the file's text, and reads it with the as-written
-        loader (``NoRecursiveAliasLoader``) to find where the entry goes, so a
-        shared alias is not its refusal: the entry goes in and the alias is left
-        as the file wrote it. The refusal is the config load's, and the saved
-        file is still refused there, so a scan never runs on it. (An alias
-        inside its own node is the save's refusal; see
+        """The save edits the file's text, and reads it with its as-written
+        loader to find where the entry goes; that loader refuses every alias as
+        the shared loaders do, so a shared alias is the save's refusal too: in
+        the save's left-unchanged words, with the parse refusal's shape, the
+        file's bytes kept, and the config load of the same file refused as
+        before. (A recursive alias takes the same refusal; see
         ``test_a_cyclic_yaml_config_is_refused_by_name.py``.)"""
         from automated_security_helper.config.ash_config import (
             add_suppression_to_config,
@@ -200,15 +202,16 @@ class TestEveryReaderRefusesAnAlias:
 
         monkeypatch.delenv("ASH_CONFIG", raising=False)
         path = _write(tmp_path / ".ash.yaml", ALIASED)
+        before = path.read_bytes()
 
-        saved = add_suppression_to_config(
-            path, AshSuppression(rule_id="B101", path="x.py", reason="r")
-        )
+        with pytest.raises(ValueError) as refused:
+            add_suppression_to_config(
+                path, AshSuppression(rule_id="B101", path="x.py", reason="r")
+            )
 
-        assert saved is True
-        text = path.read_text(encoding="utf-8")
-        assert "ignore_paths: [*name]" in text, text
-        assert "B101" in text, text
+        _assert_refused_at_parse(str(refused.value))
+        assert str(refused.value).endswith(f"{path} is unchanged"), refused.value
+        assert path.read_bytes() == before
         with pytest.raises(ASHConfigSourceError) as excinfo:
             resolve_config(config_path=path, source_dir=tmp_path)
         _assert_refused_at_parse(str(excinfo.value))
@@ -382,10 +385,9 @@ NOT_ASH_CONFIGURATION = {
 #: ASH configuration read with a loader of ASH's own that is not one of the two
 #: shared loaders, by file and loader class. ``_KeepsEnvReferences`` reads a
 #: config file the suppression save edits as text, to find where the entry goes,
-#: and keeps an ``!ENV`` scalar as its own text; it refuses an alias inside its
-#: own node (``NoRecursiveAliasLoader``) and nothing else, because the save
-#: leaves the file's text as it was. The config load of the saved file refuses
-#: every alias (``test_saving_a_suppression_into_the_file``). A direct PyYAML
+#: and keeps an ``!ENV`` scalar as its own text; it refuses every alias as the
+#: shared loaders do (``_NoAliasSafeLoader``), so an aliased file is refused
+#: unchanged (``test_saving_a_suppression_into_the_file``). A direct PyYAML
 #: load anywhere else in that file is still an offender.
 AS_WRITTEN_LOADERS = {"config/ash_config.py": "_KeepsEnvReferences"}
 
@@ -543,10 +545,13 @@ class TestEveryYamlLoadUsesTheSharedLoaders:
             assert loader in {named for _, _, named in yaml_loads_in(source)}, relative
 
     def test_the_as_written_loader_is_a_safe_loader(self):
+        """A SafeLoader that refuses every alias in the shared loaders' words."""
         loader = getattr(ash_config, AS_WRITTEN_LOADERS["config/ash_config.py"])
 
         assert issubclass(loader, yaml.SafeLoader)
-        assert issubclass(loader, NoRecursiveAliasLoader)
+        with pytest.raises(yaml.composer.ComposerError) as excinfo:
+            yaml.load(ALIASED, Loader=loader)  # nosec B506 - a SafeLoader
+        _assert_names_the_alias(str(excinfo.value))
         with pytest.raises(yaml.constructor.ConstructorError):
             yaml.load(  # nosec B506 - a SafeLoader, which refuses a python tag
                 "x: !!python/object/apply:os.getcwd []\n", Loader=loader

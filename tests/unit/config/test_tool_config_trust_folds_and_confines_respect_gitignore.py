@@ -1,0 +1,246 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The scanner config confinement replays overrides folded, and confines respect_gitignore.
+
+Three behaviors of ``config/tool_config_trust.py``:
+
+* ferret-scan's ``respect_gitignore`` has the tool skip the files the scanned
+  tree's own ``.gitignore`` names, so a repository's config could choose which
+  of its files the scan reads. It is an operator's choice like ``profile``: a
+  repository config's value gives way to the trusted value (off: the scanner's
+  own default, since the trusted base pins nothing for a plugin section) and is
+  named in the warning, under any spelling of the section.
+* The scanner overrides are replayed onto the trusted base folded onto its own
+  section spellings (``resolve_config._folded_onto_trusted``): when the
+  repository's in-tree config spells an undeclared plugin section one way and
+  the operator's file another, the scan's own apply makes the operator type
+  the repository's spelling, and a raw replay refused that spelling, so no
+  spelling passed both applications and the scan could not run.
+* ``tool_version`` chooses which release of a tool ASH installs, so it is the
+  operator's: the trusted base's pin is restored into a plugin section the
+  repository wrote, under whatever spelling, whether the section omits the
+  option, has no options mapping, leaves it empty, or is absent; a section whose
+  options value is not a mapping is left as written and named in a warning.
+
+The log records are read through the config conftest's ``ash_log`` fixture.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import pytest
+
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.tool_config_trust import confine_tool_versions
+from tests.utils.helpers import mark_git_checkout
+
+pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _no_operator_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+
+
+PLUGIN = "my-plugin-scanner"
+#: The operator's spelling of the plugin's section, and a repository's respelling
+#: of it, which the lookup folds onto the same plugin.
+SPELLINGS = (PLUGIN, "MyPluginScanner")
+
+
+def _trusted_pin() -> AshConfig:
+    return AshConfig.model_validate(
+        {"scanners": {PLUGIN: {"options": {"tool_version": "==1.2.3"}}}}
+    )
+
+
+def _pin_of(config: AshConfig) -> object:
+    section = config.get_plugin_config("scanner", PLUGIN) or {}
+    return (section.get("options") or {}).get("tool_version")
+
+
+def test_the_operators_pin_is_restored_when_the_section_omits_it(tmp_path):
+    """A plugin section's dict holds only what was written; a repository
+    config that leaves tool_version out left the plugin on its default
+    constraint in place of the operator's pin."""
+    config = AshConfig.model_validate({"scanners": {PLUGIN: {"options": {}}}})
+
+    confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+
+    assert _pin_of(config) == "==1.2.3"
+
+
+@pytest.mark.parametrize("spelling", SPELLINGS)
+def test_the_operators_pin_is_restored_when_the_section_has_no_options(
+    tmp_path, spelling
+):
+    """The pin lands in the section as the repository spelled it, the one the
+    plugin reads, under the operator's spelling and a respelling alike."""
+    config = AshConfig.model_validate({"scanners": {spelling: {"enabled": True}}})
+
+    confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+
+    extra = config.scanners.model_extra or {}
+    assert extra[spelling]["options"]["tool_version"] == "==1.2.3", extra
+    assert _pin_of(config) == "==1.2.3"
+
+
+@pytest.mark.parametrize("spelling", SPELLINGS)
+def test_the_operators_pin_is_restored_when_options_is_left_empty(tmp_path, spelling):
+    """``options:`` with nothing under it reads as None: no mapping for the pin
+    to land in, and no warning either, since nothing was written there. A
+    mapping is made for it, as for a section with no options key."""
+    config = AshConfig.model_validate({"scanners": {spelling: {"options": None}}})
+
+    confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+
+    extra = config.scanners.model_extra or {}
+    assert extra[spelling]["options"]["tool_version"] == "==1.2.3", extra
+    assert _pin_of(config) == "==1.2.3"
+
+
+@pytest.mark.parametrize("spelling", SPELLINGS)
+def test_a_non_mapping_options_value_is_named_in_a_warning_and_left(
+    tmp_path, ash_log, spelling
+):
+    """A plugin section whose ``options`` is not a mapping cannot hold the pin.
+    The value is left as written for the plugin to refuse, and a warning names
+    the section, as the repository spelled it, and the pin, so the omission is
+    not silent.
+
+    The warning quotes the repository's key, so it is shown once, whole: the
+    record's message is the ShownText the call site made, with no arguments
+    left to fill in, and the console passes it through as it is. A message
+    that embedded a shown key in a plain f-string would be a plain str, shown
+    a second time by the console with the backslash of every escape doubled.
+    """
+    from automated_security_helper.utils.log import console_text
+    from automated_security_helper.utils.terminal_text import ShownText
+
+    config = AshConfig.model_validate({"scanners": {spelling: {"options": "oops"}}})
+
+    confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+
+    section = (config.scanners.model_extra or {})[spelling]
+    assert section.get("options") == "oops", section
+    records = [
+        r
+        for r in ash_log
+        if r.levelno == logging.WARNING
+        and f"scanners.{spelling}.options is not a mapping" in r.getMessage()
+        and "tool_version" in r.getMessage()
+    ]
+    assert len(records) == 1, [r.getMessage() for r in ash_log]
+    record = records[0]
+    assert isinstance(record.msg, ShownText) and not record.args, record.msg
+    assert console_text(record, record.getMessage()) == record.msg
+
+
+def test_the_operators_pin_is_restored_when_the_section_is_absent(tmp_path):
+    config = AshConfig.model_validate({"project_name": "repo"})
+
+    confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+
+    assert _pin_of(config) == "==1.2.3"
+
+
+@pytest.mark.parametrize("spelling", ["MyPluginScanner", "my_plugin_scanner"])
+def test_a_respelled_section_takes_the_pin_and_no_second_section_is_made(
+    tmp_path, spelling
+):
+    """The repository spells the plugin's section another way than the
+    operator's file. The section is the plugin's under either spelling (the
+    lookup folds case and separators), so the pin lands in the section the
+    plugin reads; a second section spelled the operator's way, holding only
+    the pin, was made beside it and is not."""
+    config = AshConfig.model_validate({"scanners": {spelling: {"options": {}}}})
+
+    confine_tool_versions(config, _trusted_pin(), [], [tmp_path / ".ash.yaml"])
+
+    extra = config.scanners.model_extra or {}
+    assert list(extra) == [spelling], extra
+    assert extra[spelling]["options"]["tool_version"] == "==1.2.3"
+    assert _pin_of(config) == "==1.2.3"
+
+
+def _checkout(tmp_path: Path, repo_text: str) -> Path:
+    checkout = tmp_path / "checkout"
+    mark_git_checkout(checkout)
+    (checkout / ".ash").mkdir()
+    (checkout / ".ash" / ".ash.yaml").write_text(repo_text, encoding="utf-8")
+    return checkout
+
+
+@pytest.mark.parametrize("spelling", ["ferret-scan", "ferret_scan", "FerretScan"])
+@pytest.mark.parametrize("written", ["true", '"yes"', "1"])
+def test_a_repository_configs_respect_gitignore_is_the_operators_choice(
+    tmp_path, ash_log, spelling, written
+):
+    """The repository's value is dropped and named in the warning, under any
+    spelling of the section the lookup reads as ferret-scan's, and for any
+    value that is not the default: a boolean, text, a number.
+
+    ferret-scan is a plugin section, a plain dict holding only what a file
+    wrote, and the trusted base (the defaults, no operator config) pins
+    nothing for it, so the confinement removes the written key and the
+    scanner reads its own default, off (``SCANNER_CONFIG_CHOICE_OPTIONS``).
+    """
+    checkout = _checkout(
+        tmp_path,
+        f"project_name: repo\nscanners:\n  {spelling}:\n    options:\n"
+        f"      respect_gitignore: {written}\n",
+    )
+
+    config = resolve_config(source_dir=checkout)
+
+    section = config.get_plugin_config("scanner", "ferret-scan") or {}
+    options = section.get("options", {})
+    assert options.get("respect_gitignore", False) is False, options
+    warnings = [
+        r.getMessage()
+        for r in ash_log
+        if r.levelno == logging.WARNING
+        and f"scanners.{spelling}.options.respect_gitignore" in r.getMessage()
+    ]
+    assert warnings, [r.getMessage() for r in ash_log if r.levelno == logging.WARNING]
+
+
+def test_the_repositorys_spelling_of_a_plugin_section_replays_onto_the_trusted_base(
+    tmp_path,
+):
+    """The lockout shape: the repository spells the undeclared section
+    ``MyPluginScanner``, the operator's file ``my-plugin-scanner``, and the
+    override is typed the way the scan's own apply demands (the repository's).
+    The confinement's replay onto the trusted base folds it onto the operator's
+    key instead of refusing it, so the scan resolves and the override lands.
+
+    The override sets ``tool_version``, which the confinement replaces with the
+    trusted base's: the final pin is the override's only when the replay folded
+    it onto the operator's key, where a raw replay refused it or left the
+    operator's own pin to win."""
+    checkout = _checkout(
+        tmp_path,
+        "project_name: repo\nscanners:\n  MyPluginScanner:\n    options:\n"
+        "      timeout: 1\n",
+    )
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(
+        "project_name: op\nscanners:\n  my-plugin-scanner:\n    options:\n"
+        '      tool_version: "==1.2.3"\n',
+        encoding="utf-8",
+    )
+
+    config = resolve_config(
+        source_dir=checkout,
+        trusted_config_path=operator,
+        config_overrides=["scanners.MyPluginScanner.options.tool_version===2.0.0"],
+    )
+
+    extra = config.scanners.model_extra or {}
+    assert extra["MyPluginScanner"]["options"]["tool_version"] == "==2.0.0"
+    assert _pin_of(config) == "==2.0.0"

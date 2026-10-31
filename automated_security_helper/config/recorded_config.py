@@ -9,9 +9,10 @@ the file wrote it (config_validator.record_of_config). A command that reads the
 record (``ash merge``, ``ash report``, the outer process of a container or Nix
 scan, ``ash scan --existing-results``) does not read the environment again. A
 reference is a string, though, and a fixed-choice field such as
-``severity_threshold`` cannot hold one, so the record is read with that field's
-default (AshAggregatedResults.validate_ash_config), and the field is listed on
-the configuration as unreadable.
+``severity_threshold``, or a number field such as a scanner's timeout, cannot
+hold one, so the record is read with that field's default
+(AshAggregatedResults.validate_ash_config), and the field is listed on the
+configuration as unreadable.
 
 A command that acts on such a field takes its value from its own configuration
 (take_own_values). ``ash merge`` and ``ash report`` refuse, exit 3, when their
@@ -79,17 +80,31 @@ def _data_path(data: Any, loc: Sequence[Any], value: Any) -> Optional[List[Any]]
 #: (ash_config._export_format_name), as a value error at the entry.
 _CHOICE_REFUSALS = frozenset({"literal_error", "enum"})
 
+#: The refusals of a number field given text it cannot parse, or a value of
+#: another type: pydantic's int and float error types.
+_NUMBER_REFUSALS = frozenset(
+    {"int_parsing", "float_parsing", "int_type", "float_type", "int_from_float"}
+)
+
 
 def _a_choice_refused(item: Any) -> bool:
-    """Whether a pydantic error is a fixed-choice field refusing its input.
+    """Whether a pydantic error is a fixed-choice or a number field refusing
+    its input.
 
-    Only such a field cannot hold a reference and still has a default that
-    stands for "not given". A true/false or a number field refuses a reference
-    as it refuses any other wrong value: read as its default (``True``, ``3``),
-    it would act on a value the scan never had.
+    Such a field cannot hold a reference and still has a default that stands
+    for "not given". The record writes the reference in a number field's place
+    too (config_validator.record_of_config, so the number the scan read from
+    the environment is never written in clear), so a record whose scan read a
+    timeout or a limit from the environment refused as a whole: every results
+    file of such a scan was unreadable. Read as its default and listed as
+    unreadable, the field is handled as ``severity_threshold`` is: ``ash
+    merge`` and ``ash report`` refuse unless the operator supplies it, and the
+    outer process of a container or Nix scan takes its own value
+    (take_own_values). A true/false field is not admitted: it has no parse
+    error of its own kind here, and its default is one of its two values.
     """
     kind = item.get("type")
-    if kind in _CHOICE_REFUSALS:
+    if kind in _CHOICE_REFUSALS or kind in _NUMBER_REFUSALS:
         return True
     loc = tuple(item.get("loc", ()))
     return kind == "value_error" and loc[:1] == ("output_formats",)
@@ -100,7 +115,7 @@ def without_unreadable_references(
 ) -> Tuple[Any, List[UnreadableReference]]:
     """``data`` without each field whose refusal is a reference it cannot hold.
 
-    Only a fixed-choice field (_a_choice_refused). All or nothing: when any
+    Only a fixed-choice or a number field (_a_choice_refused). All or nothing: when any
     refusal in ``error`` is not of a reference in such a field, returns
     ``data`` and no fields, and the caller raises ``error``. A reference in a
     list (a fixed-choice item of a scanner's ``additional_formats``, an
@@ -118,8 +133,19 @@ def without_unreadable_references(
         path = _data_path(data, item.get("loc", ()), value)
         if path is None:
             return data, []
-        while path and isinstance(path[-1], int):
-            path = path[:-1]
+        # A reference anywhere inside a list takes the whole list out: the
+        # field is the list's key, at the first index on the path. Cutting
+        # only trailing indices kept a fixed-choice field INSIDE a list item
+        # (content_db_staleness_overrides[i].policy) as a dotted path through
+        # the index, which the pop below cannot walk, so the record reported
+        # the field handled and removed nothing, and the whole recorded
+        # config stayed unreadable.
+        for position, segment in enumerate(path):
+            if isinstance(segment, int):
+                path = path[:position]
+                break
+        if not path:
+            return data, []
         field = ".".join(str(segment) for segment in path)
         if field not in {known for known, _ in found}:
             found.append((field, value))
@@ -425,13 +451,21 @@ def take_own_values(
             _set_value(record, segments, value)
             # When the operator's own value was read from the environment, the
             # record keeps its reference too (config_validator.record_of_config).
+            # The value is the whole field, so every reference written inside
+            # it is carried: a list field written entry by entry has one at each
+            # entry's index, and matching the field's path alone carried none.
+            field_path = [_normalized(segment) for segment in segments]
             for rewrite in getattr(own, "_written_references", None) or []:
-                if rewrite.kind == "value" and [
-                    _normalized(str(segment)) for segment in rewrite.path
-                ] == [_normalized(segment) for segment in segments]:
+                written_path = [_normalized(str(segment)) for segment in rewrite.path]
+                if (
+                    rewrite.kind == "value"
+                    and written_path[: len(field_path)] == field_path
+                ):
                     record._written_references = [
                         *(getattr(record, "_written_references", None) or []),
-                        rewrite._replace(path=tuple(segments)),
+                        rewrite._replace(
+                            path=(*segments, *rewrite.path[len(segments) :])
+                        ),
                     ]
     if missing and refuse_unless_supplied is not None:
         named = "; ".join(

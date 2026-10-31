@@ -418,14 +418,14 @@ def test_an_operator_config_extends_error_hides_the_value(project, monkeypatch):
     from automated_security_helper.config.resolve_config import resolve_config
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
-    monkeypatch.setenv("ASH_TEST_OPSECRET", "SECRETOPZQ.yaml")
+    monkeypatch.setenv("ASH_TEST_OPBASE", "SECRETOPZQ.yaml")
     repo = project / "repo"
     repo.mkdir()
     (repo / ".ashrc.yaml").write_text("project_name: demo\n", encoding="utf-8")
     operator = project / "operator" / "ash.yaml"
     operator.parent.mkdir()
     operator.write_text(
-        "extends: ${ASH_TEST_OPSECRET:base.yaml}\nproject_name: op\n",
+        "extends: ${ASH_TEST_OPBASE:base.yaml}\nproject_name: op\n",
         encoding="utf-8",
     )
 
@@ -730,11 +730,11 @@ OPERATOR_SECRET = "SECRETOPZQ.yaml"
 
 def _operator_config(project: Path, monkeypatch) -> Path:
     """ASH_CONFIG names a file whose base is named by an environment variable."""
-    monkeypatch.setenv("ASH_TEST_OPSECRET", OPERATOR_SECRET)
+    monkeypatch.setenv("ASH_TEST_OPBASE", OPERATOR_SECRET)
     operator = project / "operator" / "ash.yaml"
     operator.parent.mkdir()
     operator.write_text(
-        "extends: ${ASH_TEST_OPSECRET:base.yaml}\nproject_name: op\n",
+        "extends: ${ASH_TEST_OPBASE:base.yaml}\nproject_name: op\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("ASH_CONFIG", str(operator))
@@ -821,12 +821,12 @@ def test_an_ash_config_file_model_error_is_hidden(
     from automated_security_helper.config.resolve_config import resolve_config
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
-    monkeypatch.setenv("ASH_TEST_OPSECRET", "SECRETOPZQ")
+    monkeypatch.setenv("ASH_TEST_OPBASE", "SECRETOPZQ")
     monkeypatch.setenv(PROBE, PROBE_VALUE)
     operator = project / "operator" / "ash.yaml"
     operator.parent.mkdir()
     operator.write_text(
-        "project_name: op\nfail_on_findings: ${ASH_TEST_OPSECRET:true}\n"
+        "project_name: op\nfail_on_findings: ${ASH_TEST_OPBASE:true}\n"
         f"global_settings:\n  ${{{PROBE}:k}}: 1\n",
         encoding="utf-8",
     )

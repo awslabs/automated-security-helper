@@ -22,7 +22,8 @@
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
       "copyrightText": "NOASSERTION",
-      "primaryPackagePurpose": "SOURCE"
+      "primaryPackagePurpose": "SOURCE",
+      "comment": "No SBOM scanner produced an inventory for this scan (the scanner was missing, skipped or failed), so the packages this document would CONTAIN are unknown. An empty package list here is not a statement that the project has no dependencies."
     }
   ],
   "relationships": [

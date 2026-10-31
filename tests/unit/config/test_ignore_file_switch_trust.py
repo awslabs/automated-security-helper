@@ -35,6 +35,7 @@ from automated_security_helper.config.runtime_patch import (
     check_runtime_ops,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from tests.unit.config._client_policy_helpers import narrow_client_rules
 
 pytestmark = pytest.mark.unit
 
@@ -177,11 +178,36 @@ class TestARepositoryOrClientConfigCannotSetTheSwitch:
         assert CONFIG_KEY in str(refused.value)
         assert "uploaded.yaml" in str(refused.value)
 
+    def test_a_config_an_mcp_client_supplied_under_a_policy_without_the_key(
+        self, tmp_path
+    ):
+        """The switch is in the default denied_paths only, so an operator profile
+        with ``replace_default_denied_paths: true`` and a list that leaves it out
+        lets the upload past the refusal. The fallback then stands alone: the
+        upload's value is replaced by the trusted one, with the warning naming
+        the key and the file."""
+        source = _repo(tmp_path)
+        uploaded = _outside(tmp_path, _yaml(False), name="uploaded.yaml")
+
+        config, warnings = _warnings_while(
+            resolve_config,
+            config_path=uploaded,
+            source_dir=source,
+            untrusted_config=True,
+            client_config_policy=narrow_client_rules(),
+        )
+
+        assert honors_ignore_files(config) is True
+        (warning,) = [w for w in warnings if CONFIG_KEY in w]
+        assert "uploaded.yaml" in warning, warning
+
 
 class TestTheWarningSaysWhoWroteTheFile:
-    """An MCP client's upload is not in the scanned tree; the refusal must not say it is."""
+    """An MCP client's upload is not in the scanned tree; neither the refusal
+    nor the fallback's warning may say it is."""
 
     def test_an_upload_is_named_as_the_clients(self, tmp_path):
+        """The refusal under the default denied_paths."""
         from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
         source = _repo(tmp_path)
@@ -192,6 +218,24 @@ class TestTheWarningSaysWhoWroteTheFile:
             )
         assert "MCP client" in str(refused.value), refused.value
         assert "inside a git checkout" not in str(refused.value), refused.value
+
+    def test_an_uploads_fallback_warning_names_the_client(self, tmp_path):
+        """The fallback's warning, reached under a policy whose list leaves the
+        key out: it gives the client's reason, not the in-tree one."""
+        source = _repo(tmp_path)
+        uploaded = _outside(tmp_path, _yaml(False), name="uploaded.yaml")
+
+        _config, warnings = _warnings_while(
+            resolve_config,
+            config_path=uploaded,
+            source_dir=source,
+            untrusted_config=True,
+            client_config_policy=narrow_client_rules(),
+        )
+
+        (warning,) = [w for w in warnings if CONFIG_KEY in w]
+        assert "MCP client" in warning, warning
+        assert "inside a git checkout or the scanned directory" not in warning, warning
 
     def test_an_in_tree_file_is_named_as_the_repositorys(self, tmp_path):
         source = _repo(tmp_path, _yaml(False))

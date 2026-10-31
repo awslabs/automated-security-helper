@@ -27,7 +27,7 @@ Project: ASH · Scan executed: 2026-01-15T12:00:00+00:00
 
 **Actionable** counts findings at or above each scanner's threshold.
 
-**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = disabled; ERROR = execution error.
+**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = did not run (disabled, or nothing to scan); ERROR = execution error.
 
 **Threshold** shows the minimum severity and its source: `global`, `config`, or `scanner`.
 
@@ -115,10 +115,10 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePubli
 - Location: templates/insecure.yaml:9
 
 Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPublicBuckets\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
-    Guard Rule Set: wa-Security-Pillar
-    Controls: SEC-3.7,SEC-5.3,SEC-8.4
-    Violation: S3 Bucket Public Access controls need to be restricted.
-    Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.
+&nbsp;&nbsp;&nbsp;&nbsp;Guard Rule Set: wa-Security-Pillar
+&nbsp;&nbsp;&nbsp;&nbsp;Controls: SEC-3.7,SEC-5.3,SEC-8.4
+&nbsp;&nbsp;&nbsp;&nbsp;Violation: S3 Bucket Public Access controls need to be restricted.
+&nbsp;&nbsp;&nbsp;&nbsp;Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.
 
 </details>
 
@@ -133,10 +133,10 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPub
 - Location: templates/insecure.yaml:9
 
 Check was not compliant as property \[LoggingConfiguration\] is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
-    Guard Rule Set: wa-Security-Pillar
-    Controls: SEC-4.2
-    Violation: S3 Bucket Logging needs to be configured to enable logging.
-    Fix: Set the S3 Bucket property LoggingConfiguration to start logging into S3 bucket.
+&nbsp;&nbsp;&nbsp;&nbsp;Guard Rule Set: wa-Security-Pillar
+&nbsp;&nbsp;&nbsp;&nbsp;Controls: SEC-4.2
+&nbsp;&nbsp;&nbsp;&nbsp;Violation: S3 Bucket Logging needs to be configured to enable logging.
+&nbsp;&nbsp;&nbsp;&nbsp;Fix: Set the S3 Bucket property LoggingConfiguration to start logging into S3 bucket.
 
 </details>
 
@@ -207,10 +207,10 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePubli
 - Location: templates/insecure.yaml:9
 
 Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPublicBuckets\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
-    Guard Rule Set: wa-Security-Pillar
-    Controls: SEC-3.7,SEC-5.3,SEC-8.4
-    Violation: S3 Bucket Public Write Access controls need to be restricted.
-    Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.
+&nbsp;&nbsp;&nbsp;&nbsp;Guard Rule Set: wa-Security-Pillar
+&nbsp;&nbsp;&nbsp;&nbsp;Controls: SEC-3.7,SEC-5.3,SEC-8.4
+&nbsp;&nbsp;&nbsp;&nbsp;Violation: S3 Bucket Public Write Access controls need to be restricted.
+&nbsp;&nbsp;&nbsp;&nbsp;Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.
 
 </details>
 
@@ -281,10 +281,10 @@ Check was not compliant as property \[PublicAccessBlockConfiguration.IgnorePubli
 - Location: templates/insecure.yaml:9
 
 Check was not compliant as property \[PublicAccessBlockConfiguration.RestrictPublicBuckets\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
-    Guard Rule Set: wa-Security-Pillar
-    Controls: SEC-3.7,SEC-5.3,SEC-8.4
-    Violation: S3 Bucket Public Write Access controls need to be restricted.
-    Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.
+&nbsp;&nbsp;&nbsp;&nbsp;Guard Rule Set: wa-Security-Pillar
+&nbsp;&nbsp;&nbsp;&nbsp;Controls: SEC-3.7,SEC-5.3,SEC-8.4
+&nbsp;&nbsp;&nbsp;&nbsp;Violation: S3 Bucket Public Write Access controls need to be restricted.
+&nbsp;&nbsp;&nbsp;&nbsp;Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.
 
 </details>
 
@@ -313,10 +313,10 @@ Check was not compliant as property \[BucketEncryption\] is missing. Value trave
 - Location: templates/insecure.yaml:9
 
 Check was not compliant as property \[BucketEncryption.ServerSideEncryptionConfiguration\[\*\].ServerSideEncryptionByDefault.SSEAlgorithm\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
-    Guard Rule Set: wa-Security-Pillar
-    Controls: SEC-8.3
-    Violation: S3 Bucket must enable server-side encryption.
-    Fix: Set the S3 Bucket property BucketEncryption.ServerSideEncryptionConfiguration.ServerSideEncryptionByDefault.SSEAlgorithm to either "aws:kms" or "AES256"
+&nbsp;&nbsp;&nbsp;&nbsp;Guard Rule Set: wa-Security-Pillar
+&nbsp;&nbsp;&nbsp;&nbsp;Controls: SEC-8.3
+&nbsp;&nbsp;&nbsp;&nbsp;Violation: S3 Bucket must enable server-side encryption.
+&nbsp;&nbsp;&nbsp;&nbsp;Fix: Set the S3 Bucket property BucketEncryption.ServerSideEncryptionConfiguration.ServerSideEncryptionByDefault.SSEAlgorithm to either "aws:kms" or "AES256"
 
 </details>
 
@@ -345,10 +345,10 @@ Check was not compliant as property \[VersioningConfiguration\] is missing. Valu
 - Location: templates/insecure.yaml:9
 
 Check was not compliant as property \[VersioningConfiguration.Status\] to compare from is missing. Value traversed to \[Path=/Resources/OpenBucket/Properties\[L:9,C:6\] Value=\{"BucketNam":"misspelled-on-purpose"\}\].
-    Guard Rule Set: wa-Security-Pillar
-    Controls: SEC-8.4
-    Violation: S3 Bucket Versioning must be enabled.
-    Fix: Set the S3 Bucket property VersioningConfiguration.Status to 'Enabled' .
+&nbsp;&nbsp;&nbsp;&nbsp;Guard Rule Set: wa-Security-Pillar
+&nbsp;&nbsp;&nbsp;&nbsp;Controls: SEC-8.4
+&nbsp;&nbsp;&nbsp;&nbsp;Violation: S3 Bucket Versioning must be enabled.
+&nbsp;&nbsp;&nbsp;&nbsp;Fix: Set the S3 Bucket property VersioningConfiguration.Status to 'Enabled' .
 
 </details>
 

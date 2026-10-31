@@ -31,9 +31,11 @@ import pytest
 from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
 from automated_security_helper.utils.download_utils import (
     _DOWNLOAD_MAX_DELAY,
+    _DOWNLOAD_SOCKET_TIMEOUT_SECONDS,
     _download_retry_policy,
     _is_transient_download_error,
     download_file,
+    download_wait_bound_seconds,
 )
 
 pytestmark = pytest.mark.unit
@@ -44,7 +46,16 @@ URL = "https://example.invalid/tool/tool.tar.gz"
 
 
 class _FakeResponse(io.BytesIO):
-    """urlopen returns a context manager; BytesIO alone is not one."""
+    """urlopen returns a context manager; BytesIO alone is not one.
+
+    It also carries the headers the body copy reads: ``_copy_whole_body`` checks
+    the bytes it copied against ``Content-Length``, so the stand-in declares its
+    own length (the real response's shape) instead of raising AttributeError.
+    """
+
+    def __init__(self, payload: bytes = b""):
+        super().__init__(payload)
+        self.headers = {"Content-Length": str(len(payload))}
 
     def __enter__(self):
         return self
@@ -144,7 +155,13 @@ class TestTransientFailuresAreRetried:
 
 
 class _TruncatedResponse(io.BytesIO):
-    """Yields some bytes, then raises, like a connection dropped mid-body."""
+    """Yields some bytes, then raises, like a connection dropped mid-body.
+
+    No Content-Length: the drop is the raise below, not a short body, and the
+    body copy reads the headers only once a read returns empty.
+    """
+
+    headers: dict = {}
 
     def __enter__(self):
         return self
@@ -297,3 +314,35 @@ class TestRetryPolicy:
         ]
         assert delays == [5.0, 10.0, 20.0, 40.0, 60.0, 60.0]
         assert all(d <= _DOWNLOAD_MAX_DELAY for d in delays)
+
+
+class TestTheWaitBound:
+    """``download_wait_bound_seconds``: what a lock around a download waits for."""
+
+    def test_the_default_policy_is_five_stalls_and_the_backoff_between_them(
+        self, monkeypatch
+    ):
+        monkeypatch.delenv("ASH_DOWNLOAD_MAX_ATTEMPTS", raising=False)
+        monkeypatch.delenv("ASH_DOWNLOAD_RETRY_DELAY", raising=False)
+        # Five attempts of one socket timeout each, and the 5 + 10 + 20 + 40
+        # second backoff between them.
+        assert (
+            download_wait_bound_seconds() == 5 * _DOWNLOAD_SOCKET_TIMEOUT_SECONDS + 75.0
+        )
+
+    def test_the_bound_grows_with_the_attempt_budget(self, monkeypatch):
+        """An operator who raises the attempts raises what a waiter must allow a
+        healthy downloader: past the lock's default, which is what the bound is
+        for."""
+        monkeypatch.setenv("ASH_DOWNLOAD_MAX_ATTEMPTS", "200")
+        monkeypatch.delenv("ASH_DOWNLOAD_RETRY_DELAY", raising=False)
+        bound = download_wait_bound_seconds()
+        assert bound >= 200 * _DOWNLOAD_SOCKET_TIMEOUT_SECONDS
+        # 199 gaps, all but the first four at the 60 s cap.
+        assert bound == 200 * _DOWNLOAD_SOCKET_TIMEOUT_SECONDS + 75.0 + 195 * 60.0
+
+    def test_a_huge_attempt_budget_is_summed_in_constant_time(self, monkeypatch):
+        monkeypatch.setenv("ASH_DOWNLOAD_MAX_ATTEMPTS", str(10**9))
+        monkeypatch.setenv("ASH_DOWNLOAD_RETRY_DELAY", "0")
+        # No backoff at a zero delay, and no loop of a billion steps.
+        assert download_wait_bound_seconds() == 10**9 * _DOWNLOAD_SOCKET_TIMEOUT_SECONDS

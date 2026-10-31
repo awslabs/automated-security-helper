@@ -62,7 +62,8 @@ def _exits(code: int):
     """A snyk run that exits ``code`` and writes no SARIF, as snyk does on 2 and 3."""
 
     def _side_effect(self, command, **kwargs):
-        self.exit_code = max(self.exit_code, code)
+        # scan() holds no exit code until snyk returns one, as the template does.
+        self.exit_code = max(self.exit_code or 0, code)
         return {"stdout": "", "stderr": "", "returncode": code}
 
     return _side_effect

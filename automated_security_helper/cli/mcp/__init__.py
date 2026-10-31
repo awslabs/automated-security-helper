@@ -1200,6 +1200,10 @@ def _run_uvicorn(
 ) -> None:
     """Run an ASGI app via uvicorn, blocking until shutdown.
 
+    Raises ``RuntimeError`` when uvicorn returns without the server having
+    started and no signal stopped it, which is how a failed application
+    startup ends; the failure itself is in the log.
+
     ``listen_socket`` is an already bound socket to serve on instead of binding
     ``host`` and ``port`` (see :func:`_bind_listen_socket`). Once the server
     listens on it, the line that names its address is logged as uvicorn logs it
@@ -1264,6 +1268,16 @@ def _run_uvicorn(
     put_sighup_back = _ask_server_to_stop_on_sighup(server)
     try:
         server.run(sockets=None if listen_socket is None else [listen_socket])
+        if not server.started and _stop_signal is None:
+            # uvicorn returns from run() when the app's lifespan startup fails,
+            # having logged the failure itself, and the process then exited 0
+            # as if it had served and been asked to stop. Nothing listened. A
+            # server stopped by a signal before it started is not this: the
+            # signal's own exit status applies.
+            raise RuntimeError(
+                "the MCP server did not start: its application failed during "
+                "startup (see the log above)"
+            )
     finally:
         _stop_signal = None
         put_sighup_back()

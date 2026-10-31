@@ -162,6 +162,9 @@ class _FakeServer:
         self.should_exit = False
         self.force_exit = False
         self.ran = False
+        # uvicorn's startup sets this before run() serves; the runner reads a
+        # server that returned without it as a failed start.
+        self.started = False
 
     def handle_exit(self, sig, frame) -> None:
         if self.should_exit and sig == signal.SIGINT:
@@ -171,6 +174,7 @@ class _FakeServer:
 
     def run(self, sockets=None) -> None:
         self.ran = True
+        self.started = True
         handler = signal.getsignal(signal.SIGHUP)
         if callable(handler):
             handler(signal.SIGHUP, None)

@@ -120,8 +120,12 @@ def load_internal_plugins(record: Optional[PluginLoadRecord] = None):
 
     for module_name in internal_modules:
         try:
-            # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
-            module = importlib.import_module(module_name)
+            # Inside the manager's declaring window: a handler the package's
+            # decorators subscribe while it imports is recorded as the
+            # package's, not as the program's.
+            with ash_plugin_manager.declaring_import(module_name):
+                # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
+                module = importlib.import_module(module_name)
             ASH_LOGGER.debug(f"Loaded internal plugin module: {module_name}")
 
             # Before the lists are read: a group lost to the order the process
@@ -163,10 +167,18 @@ def load_internal_plugins(record: Optional[PluginLoadRecord] = None):
                 )
                 for event_type, handlers in module.ASH_EVENT_HANDLERS.items():
                     for callback in handlers:
+                        # Named never-raising: a handler without __name__ (a
+                        # functools.partial) made this line raise AttributeError,
+                        # which the ImportError-only arm below did not catch, so
+                        # the whole built-in load crashed with the handlers before
+                        # it subscribed and those after it not.
                         ASH_LOGGER.debug(
-                            f"Registering event callback {callback.__name__} for {event_type}"
+                            "Registering event callback "
+                            f"{callback_display_name(callback)} for {event_type}"
                         )
-                        ash_plugin_manager.subscribe(event_type, callback)
+                        ash_plugin_manager.subscribe(
+                            event_type, callback, declared_by=module_name
+                        )
 
             # Per-group import failures the package isolated for us.
             #
@@ -185,18 +197,23 @@ def load_internal_plugins(record: Optional[PluginLoadRecord] = None):
                     f"it declares are not registered and will not run: {error}"
                 )
 
-        except ImportError as e:
-            # Reached only when `ash_builtin` itself is unimportable -- its own
-            # per-group isolation handles a single group failing. Recorded so the
-            # total loss reaches the same reader as a partial one; nothing else in
-            # the run can distinguish "no plugins configured" from "the plugin
-            # package did not load".
+        except Exception as e:  # noqa: BLE001 -- one recorded path for every loss
+            # Reached when `ash_builtin` itself is unimportable (its own
+            # per-group isolation handles a single group failing), and when
+            # reading its declarations or subscribing its handlers raises
+            # anything else: not only ImportError, because a non-ImportError
+            # here crashed the run unrecorded, with the handlers before the
+            # failing one subscribed and those after it not. Recorded so the
+            # loss reaches the same reader as a partial one; nothing else in the
+            # run can distinguish "no plugins configured" from "the plugin
+            # package did not load". A BaseException (a Ctrl-C, SystemExit)
+            # still propagates.
             record[module_name] = PluginLoadFailure(
                 recorded=f"{type(e).__name__}: {e}", kind=type(e).__name__
             )
             ASH_LOGGER.error(
-                f"Failed to import internal module {module_name}, so no built-in "
-                f"plugins are registered: {e}"
+                f"Failed to load internal module {module_name}, so the built-in "
+                f"plugins it declares are not registered: {type(e).__name__}: {e}"
             )
 
     return loaded_plugins
@@ -316,7 +333,11 @@ def _namespace_package_refusal(module_path: str) -> Optional[str]:
     for depth in range(1, len(parts) + 1):
         try:
             spec = _spec_without_importing(".".join(parts[:depth]), spec)
-        except (ImportError, ValueError):
+        except Exception:  # noqa: BLE001 -- a finder that raises leaves the name to the import
+            # Not only ImportError and ValueError: a meta-path or path-entry
+            # finder is third-party code and can raise anything, and a name whose
+            # lookup raised crashed the refusal step instead of being left to the
+            # import, whose own failure names the real problem.
             return None
         if spec is None:
             return None
@@ -361,21 +382,43 @@ def _bound_in(module_name: str) -> List[Any]:
     return list(vars(module).values())
 
 
+def _listed(value: Any) -> List[Any]:
+    """The entries of a declared list, in the shapes the loader accepts.
+
+    ``load_additional_plugin_modules`` takes any iterable that is not a ``str``
+    or ``bytes`` for ``ASH_CONVERTERS``, ``ASH_SCANNERS``, ``ASH_REPORTERS`` and
+    for each value of ``ASH_EVENT_HANDLERS``: a set, a dict view or a generator
+    as well as a list or tuple. The scan filter reads the same shapes, so a
+    plugin declared through any of them is selected the way it was loaded. A
+    generator is read once by the loader, so one read here finds nothing in
+    it; that is the declaring module's shape, not a selection rule.
+    """
+    if isinstance(value, (str, bytes)) or not isinstance(
+        value, collections.abc.Iterable
+    ):
+        return []
+    try:
+        return list(value)
+    except Exception:  # noqa: BLE001 -- a declaration that cannot be read declares nothing here
+        return []
+
+
 def _declared_by(module_name: str) -> List[Any]:
-    """The plugins and event handlers an imported module declares; imports nothing."""
+    """The plugins and event handlers an imported module declares; imports nothing.
+
+    Reads every declaration shape the loader accepts (``_listed``), and any
+    mapping for ``ASH_EVENT_HANDLERS``, as the loader iterates its ``items()``.
+    """
     module = sys.modules.get(module_name)
     declared: List[Any] = []
     if module is None:
         return declared
     for attr in ("ASH_CONVERTERS", "ASH_SCANNERS", "ASH_REPORTERS"):
-        value = getattr(module, attr, None)
-        if isinstance(value, (list, tuple)):
-            declared.extend(value)
+        declared.extend(_listed(getattr(module, attr, None)))
     handlers = getattr(module, "ASH_EVENT_HANDLERS", None)
-    if isinstance(handlers, dict):
+    if isinstance(handlers, collections.abc.Mapping):
         for callbacks in handlers.values():
-            if isinstance(callbacks, (list, tuple)):
-                declared.extend(callbacks)
+            declared.extend(_listed(callbacks))
     return declared
 
 
@@ -401,9 +444,26 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
     the same name and module is not selected.
 
     Call it after the modules are imported; it reads their namespaces from
-    ``sys.modules`` and imports nothing.
+    ``sys.modules`` and imports nothing. ``plugin_modules`` takes the entries
+    ``load_additional_plugin_modules`` takes, comma lists included, split the
+    same way: a caller passing raw config entries (the workspace's report step)
+    got a filter that selected nothing for a comma-joined entry.
+
+    A plugin or handler is judged by the module its function or class was
+    defined in, read never-raising (``callable_module``): a ``functools.partial``
+    is judged by the function it wraps, since the partial itself reports
+    ``functools`` as its module, and a callable whose ``__module__`` read raises
+    or is not a ``str`` is judged by identity alone. Subscriptions are
+    process-wide, so a filter that raised on one odd callback would break every
+    scoped notify of its event, in other runs' scans too.
     """
-    modules = frozenset(name for name in plugin_modules if name)
+    # Imported here: plugin_module_trust imports config modules that import the
+    # plugin packages, which import this module.
+    from automated_security_helper.config.plugin_module_trust import (
+        split_plugin_modules,
+    )
+
+    modules = frozenset(split_plugin_modules(plugin_modules))
     # Keyed by id for identity matching; the values keep each object alive while
     # the filter exists, so no key can be reused by another object.
     selected: Dict[int, Any] = {}
@@ -412,7 +472,7 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
             selected[id(obj)] = obj
 
     def admits(plugin: Any) -> bool:
-        module = getattr(plugin, "__module__", None) or ""
+        module = callable_module(plugin) or ""
         if _is_builtin_plugin_module(module):
             return True
         if module in modules:
@@ -422,7 +482,9 @@ def scan_plugin_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
     return admits
 
 
-def scan_handler_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
+def scan_handler_filter(
+    plugin_modules: Iterable[str], *, manager: Any = None
+) -> Callable[[Any], bool]:
     """Which event handlers a scan naming *plugin_modules* notifies.
 
     The handlers :func:`scan_plugin_filter` selects, plus every handler defined
@@ -430,14 +492,76 @@ def scan_handler_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
     subscribed with ``ash_plugin_manager.subscribe``. That handler belongs to the
     program rather than to a plugin module, so it is notified in each scan the
     program runs. A handler defined in a plugin module (one inside the namespace)
-    that the scan does not name is not notified.
+    that the scan does not name is not notified, whoever subscribed it: a
+    subscribe with no declarer outside the loader's import window (a plugin
+    submodule subscribing when something other than the loader imports it) does
+    not make a namespace-defined handler the program's.
+
+    Where a handler was defined is read by ``callable_module``: a
+    ``functools.partial`` by the function it wraps (the partial's own module is
+    ``functools``, outside the namespace, which admitted every partial a plugin
+    module declared into every later scan of the process), and a callable whose
+    module cannot be read is left out rather than raising. A handler that a
+    plugin module declared through ``ASH_EVENT_HANDLERS`` (``manager``'s
+    ``handler_declared_by``, the process-wide manager by default) belongs to
+    that module wherever its function was defined, so one defined in a helper
+    library outside the namespace is notified only by a scan naming the
+    declaring module, never as the program's.
+
+    Handlers, unlike plugin classes, are also admitted from a module BELOW a
+    named module: a package whose ``__init__`` imports a submodule that
+    subscribes its handlers with the ``event_subscriber`` decorator declares
+    nothing and binds nothing by name, and the engine's phases notified such
+    handlers through ``plugins_of`` before they took this filter. A class
+    defined only in a submodule stays unselected (:func:`scan_plugin_filter`):
+    whether it is registered depends on what else the process imported, which
+    is not true of a handler the package's own import subscribed.
     """
-    plugins = scan_plugin_filter(plugin_modules)
+    from automated_security_helper.config.plugin_module_trust import (
+        split_plugin_modules,
+    )
+
+    # Split as scan_plugin_filter splits, so a comma-joined config entry names
+    # the same modules for the submodule arm below as for the class filter.
+    names = frozenset(split_plugin_modules(plugin_modules))
+    plugins = scan_plugin_filter(names)
+    registry = manager if manager is not None else ash_plugin_manager
 
     def admits(callback: Any) -> bool:
         if plugins(callback):
             return True
-        return not _is_allowed_module_path(getattr(callback, "__module__", None) or "")
+        module = callable_module(callback)
+        if module is not None and any(
+            module == name or module.startswith(name + ".") for name in names
+        ):
+            return True
+        declarers, program = registry.handler_owners(callback)
+        if module is None:
+            # Where it was defined cannot be read: left out whoever subscribed
+            # it, as before the owners record existed.
+            return False
+        inside_namespace = _is_allowed_module_path(module)
+        if program and not inside_namespace:
+            # The program running the scan subscribed it itself (a subscribe
+            # with no declarer outside any loader import window) and defined it
+            # in its own code: notified in every scan the program runs, whatever
+            # plugin modules also list it. A callable defined INSIDE the plugin
+            # namespace is that package's whoever subscribed it: a plugin's
+            # submodule subscribing at import, outside the loader's window,
+            # must not make its handler the program's, so the namespace rule
+            # below decides for it.
+            return True
+        if declarers:
+            # Owned by plugin modules only: by the module that listed it or
+            # whose import subscribed it, even when the declaration can no
+            # longer be re-read (a one-shot iterator the loader consumed), so
+            # the record decides, not the re-read. ASH's own package counts as
+            # named, as scan_plugin_filter counts it.
+            return any(
+                owner in names or _is_builtin_plugin_module(owner)
+                for owner in declarers
+            )
+        return not inside_namespace
 
     return admits
 
@@ -764,6 +888,12 @@ def _masked_module_forms(module_path: str) -> Tuple[str, ...]:
                 continue
             if suffix in _ASH_PUBLIC_MODULE_WORDS:
                 continue
+            # The same exemption the run loop applies: a suffix contained in a
+            # word the load's own frames print is never a needle, so it must not
+            # count as hidden either, or the leaf's file spellings were added for
+            # a segment no form hides.
+            if any(suffix in word for word in _ASH_LOAD_PRINTED_WORDS):
+                continue
             last_hidden = True
         # The ".py" and "__pycache__" ".cpython" file spellings cover the LAST
         # segment only: a package's frame prints "<seg>/__init__.py", which a
@@ -922,7 +1052,11 @@ def refuse_plugin_modules_outside_namespace(
     (:func:`_module_path_refusal`), and a namespace package
     (:func:`_namespace_package_refusal`). Checked before any of them is imported,
     so a refused name runs no code and an accepted name beside it is not imported
-    either. Empty entries (a trailing comma) name nothing and are ignored.
+    either. Entries are split on commas as every loader splits them
+    (``split_plugin_modules``), so a raw config entry naming two modules is two
+    names here too and not one misnamed path; empty entries (a trailing comma)
+    name nothing and are ignored, and a name repeated across entries is named
+    once.
 
     ``shown`` maps a name to how the message names it, for a name a config read
     from the environment; any other name is named as it is. Callers build it
@@ -937,7 +1071,26 @@ def refuse_plugin_modules_outside_namespace(
     misnamed: List[str] = []
     namespace_packages: List[str] = []
     refused_entries: List[str] = []
-    for name in dict.fromkeys(plugin_modules):
+    # Split on commas as the loaders do (split_plugin_modules), but NOT
+    # stripped: a name padded with whitespace is a misspelling this check
+    # exists to refuse, and the loaders' strip would have cleaned it into a
+    # valid one. A value that is not a list is read as one entry, as there.
+    entries: Iterable[object]
+    if plugin_modules is None:
+        entries = ()
+    elif isinstance(plugin_modules, (list, tuple, set, frozenset)):
+        entries = plugin_modules
+    else:
+        entries = (plugin_modules,)
+    pieces = [
+        piece
+        for entry in entries
+        for piece in (entry.split(",") if isinstance(entry, str) else (entry,))
+    ]
+    # Deduplicated after the split, in first-seen order, so a name repeated
+    # across entries is named once in the refusal (the dict.fromkeys the loop
+    # ran over before the split did this for whole entries).
+    for name in dict.fromkeys(pieces):
         if not name:
             continue
         label = labels.get(name, name)
@@ -1057,6 +1210,17 @@ def load_additional_plugin_modules(
     masked_scope = masked_module_scope(labels)
     shown_values = (*values, *masked_scope)
 
+    # What the whole load imported, for the register arm's eviction: an entry's
+    # refused module can have been imported by an EARLIER entry of this load (a
+    # sibling that imports it), and an eviction scoped to the entry's own window
+    # then left the refused module in sys.modules, so a long-lived process kept
+    # re-refusing it from the stale module after the operator fixed the file.
+    load_modules_before = set(sys.modules)
+    # The modules this load refused, as owners: a later entry that is one of
+    # them or a submodule of one would import the evicted package again and
+    # re-run its decorators, undoing the refusal within the same load.
+    refused_roots: List[str] = []
+
     for module_path in unique:
         label = labels.get(module_path, module_path)
         # Validate module path matches expected namespace patterns
@@ -1064,6 +1228,31 @@ def load_additional_plugin_modules(
             ASH_LOGGER.warning(
                 f"Skipping module with unexpected namespace: {label}. "
                 f"{_namespace_rule()}"
+            )
+            continue
+
+        refused_owner = next(
+            (root for root in refused_roots if _module_within(module_path, root)),
+            None,
+        )
+        if refused_owner is not None:
+            # Recorded under this entry too, so the refusal names every entry
+            # the operator wrote, and never imported: the refused package would
+            # run again.
+            earlier = record.get(refused_owner) or next(
+                (
+                    failure
+                    for recorded_name, failure in record.items()
+                    if _module_within(recorded_name, refused_owner)
+                ),
+                None,
+            )
+            if earlier is not None:
+                record.setdefault(module_path, earlier)
+            ASH_LOGGER.warning(
+                f"Not importing plugin module {label}: {labels.get(refused_owner, refused_owner)} "
+                "was refused earlier in this load, and importing a module inside "
+                "it would run the refused package again"
             )
             continue
 
@@ -1078,8 +1267,14 @@ def load_additional_plugin_modules(
             ASH_LOGGER.info(f"Importing additional plugin module: {label}")
             # The import runs the module's decorators, and the plugin manager
             # prints the module path they register under: those lines hide
-            # every masked module of this load while it runs.
-            with masked_module_names(masked_scope):
+            # every masked module of this load while it runs. The declaring
+            # window makes a handler a decorator subscribes here this module's,
+            # not the program's (the ASH_EVENT_HANDLERS loop below records the
+            # same owner for the listed ones).
+            with (
+                ash_plugin_manager.declaring_import(module_path),
+                masked_module_names(masked_scope),
+            ):
                 # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
                 module = importlib.import_module(module_path)
             # The import itself should trigger plugin registration
@@ -1115,9 +1310,14 @@ def load_additional_plugin_modules(
                 if prefix not in modules_before and prefix not in sys.modules:
                     owner = prefix
                     break
+            # Over a snapshot of the keys: another thread importing while this
+            # handler runs resizes sys.modules, and a comprehension iterating
+            # the live dict raised "dictionary changed size during iteration"
+            # from inside the except handler, skipping the record, the undo and
+            # the refusal below.
             for added in [
                 key
-                for key in sys.modules
+                for key in list(sys.modules)
                 if key not in modules_before
                 and (key == owner or key.startswith(owner + "."))
             ]:
@@ -1144,6 +1344,7 @@ def load_additional_plugin_modules(
                 recorded=f"{type(e).__name__}: {error_text(e)}",
                 kind=type(e).__name__,
             )
+            refused_roots.append(owner)
             ASH_LOGGER.warning(
                 f"Failed to import plugin module {label}: "
                 f"{shown_import_failure(e, module_path, label)}"
@@ -1191,7 +1392,34 @@ def load_additional_plugin_modules(
                             f"{attribute} must be an iterable of plugins, "
                             f"not {type(declared).__name__}"
                         )
-                    found[group].extend(declared)
+                    # A mapping is iterable too, over its KEYS: a dict of
+                    # plugins would hand its string keys to the callers as
+                    # plugin classes, which crashes the scanner inventory.
+                    if isinstance(declared, collections.abc.Mapping):
+                        raise TypeError(
+                            f"{attribute} must be an iterable of plugins, not a "
+                            f"{type(declared).__name__}, whose iteration yields "
+                            "its keys"
+                        )
+                    items = list(declared)
+                    # The container was checked; its entries were not, so a
+                    # list of NAMES reached the callers as plugin classes too.
+                    # A plugin class is callable; a str or any other
+                    # non-callable entry is refused with the mapping.
+                    for item in items:
+                        if isinstance(item, (str, bytes)) or not callable(item):
+                            raise TypeError(
+                                f"{attribute} holds an entry that is not a plugin "
+                                f"class: {type(item).__name__}"
+                            )
+                    # An iterator (a generator) is consumed by the read above,
+                    # and the module keeps the exhausted object: every later
+                    # reader of the cached module (the scan filter, the
+                    # inventory, a reload) found no plugins in it. The module's
+                    # attribute is rebound to what was read.
+                    if isinstance(declared, collections.abc.Iterator):
+                        setattr(module, attribute, items)
+                    found[group].extend(items)
 
             # Register event handlers from external modules
             if hasattr(module, "ASH_EVENT_HANDLERS"):
@@ -1229,7 +1457,12 @@ def load_additional_plugin_modules(
                     ASH_LOGGER.debug(
                         f"Registering event callback {display} for {event_type}"
                     )
-                    ash_plugin_manager.subscribe(event_type, callback)
+                    # Declared by this module: the scan handler filter admits
+                    # it for scans that name this module, wherever its
+                    # function was defined, and for no other scan.
+                    ash_plugin_manager.subscribe(
+                        event_type, callback, declared_by=module_path
+                    )
         except Exception as e:  # noqa: BLE001 -- one path for every registration failure
             # The module imported; the loss is in reading or registering what
             # it declares. Recorded apart (stage), so the refusal does not say
@@ -1250,10 +1483,14 @@ def load_additional_plugin_modules(
             # class objects), a module another thread imported in the same
             # window is not this import's to remove, and a module some earlier
             # import loaded stays as it was.
+            # The window is the whole LOAD's, not this entry's: an earlier
+            # entry of this load (a sibling that imports this module) can be
+            # what first imported it, and evicting only this entry's own
+            # imports left the refused module in sys.modules.
             for added in [
                 key
-                for key in sys.modules
-                if key not in modules_before
+                for key in list(sys.modules)
+                if key not in load_modules_before
                 and (key == module_path or key.startswith(module_path + "."))
             ]:
                 sys.modules.pop(added, None)
@@ -1273,6 +1510,7 @@ def load_additional_plugin_modules(
                 kind=type(e).__name__,
                 stage="register",
             )
+            refused_roots.append(module_path)
             ASH_LOGGER.warning(
                 f"Failed to register plugin module {label}: "
                 f"{shown_import_failure(e, module_path, label)}"
@@ -1490,7 +1728,7 @@ def _unfindable_level(module_path: str) -> Optional[str]:
         parent = spec
         try:
             spec = _spec_without_importing(prefix, spec)
-        except (ImportError, ValueError):
+        except Exception:  # noqa: BLE001 -- a finder that raises leaves the name to the import
             return None
         if spec is None:
             # find_spec returns None for a missing name; PathFinder for a
@@ -1749,30 +1987,46 @@ def plugins_of(plugin_modules: Iterable[object]) -> Callable[[Any], bool]:
     credentials, or the vendored scanners ``list_scanners`` loads.
 
     The filter keeps a class or handler defined in ASH's built-in plugin package
-    or in one of ``plugin_modules`` (or a module below one of them), and one that
+    or in one of ``plugin_modules`` (or a module below one of them), one that
     one of them exports by name, for a package that re-exports plugins defined
-    elsewhere. ``plugin_modules`` takes the same entries
-    ``load_additional_plugin_modules`` does, comma lists included.
+    elsewhere, and one that one of them lists in its ``ASH_CONVERTERS``,
+    ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_EVENT_HANDLERS``, for a module
+    that declares a handler defined elsewhere without binding it by name.
+    ``plugin_modules`` takes the same entries ``load_additional_plugin_modules``
+    does, comma lists included.
     """
     from automated_security_helper.config.plugin_module_trust import (
         split_plugin_modules,
     )
 
     roots = (INTERNAL_PLUGIN_PACKAGE, *split_plugin_modules(plugin_modules))
-    exported = {
-        id(value)
-        for root in roots
-        if (module := sys.modules.get(root)) is not None
-        for value in vars(module).values()
-        if isinstance(value, (type, types.FunctionType))
-    }
+    # Keyed by id for identity matching; the values keep each object alive
+    # while the filter exists, so no key can be reused by another object (the
+    # shape scan_plugin_filter uses): a listed entry a custom iterable built
+    # could otherwise be freed and its id handed to an unrelated callable. The
+    # namespace is read through _bound_in, one list() over the live dict in C,
+    # where a comprehension over vars(module).values() raised "dictionary
+    # changed size during iteration" when another thread imported a submodule
+    # into the package meanwhile.
+    exported: Dict[int, Any] = {}
+    for root in roots:
+        for value in _bound_in(root):
+            if isinstance(value, (type, types.FunctionType)):
+                exported[id(value)] = value
+        for value in _declared_by(root):
+            exported[id(value)] = value
 
     def belongs(plugin: Any) -> bool:
+        # The object as listed or exported first, a functools.partial included:
+        # a declared partial is the listed object itself, and unwrapping it
+        # before the identity check would compare its function instead.
+        if exported.get(id(plugin)) is plugin:
+            return True
         # A functools.partial reports functools as its module; its function is
         # what was defined somewhere.
         while isinstance(plugin, functools.partial):
             plugin = plugin.func
-        if id(plugin) in exported:
+        if exported.get(id(plugin)) is plugin:
             return True
         # callable_module is never-raising, like callback_display_name: the
         # loader accepts callables whose attribute reads raise or hold odd

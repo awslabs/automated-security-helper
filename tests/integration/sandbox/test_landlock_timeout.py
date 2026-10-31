@@ -251,8 +251,12 @@ def test_the_reaper_sees_the_whole_tree_not_only_direct_children():
     )
     try:
         time.sleep(1)
-        direct = landlock_exec._children()
         everything = landlock_exec._descendants()
+        # This process's own children: the descendants whose parent it is, read
+        # from each one's stat, not by repeating the walk's first level.
+        direct = [
+            pid for pid in everything if landlock_exec._parent_pid(pid) == os.getpid()
+        ]
         assert tree.pid in direct
         assert len(everything) >= 3, everything
         assert set(direct) < set(everything)

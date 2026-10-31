@@ -1,11 +1,11 @@
 # ASH security scan report
 
-> [!WARNING]
+> [!CAUTION]
 > **Scan incomplete**
 >
-> 3 actionable findings. Some inputs or scanners were not evaluated.
+> 2 actionable findings. Some inputs or scanners were not evaluated.
 >
-> **3 actionable** · 0 below threshold · 0 suppressed · 3/4 scanners completed
+> **2 actionable** · 1 below threshold · 0 suppressed · 3/4 scanners completed
 >
 > Next action: Review findings, resolve coverage gaps, and scan again.
 
@@ -19,7 +19,10 @@ Each project is scanned independently and judged against its own threshold, so a
 | --- | --- | ---: | ---: | --- | --- |
 | snapshot-api (api) | COMPLETED | 1 | 1 | MEDIUM | FAILED (incomplete) |
 | snapshot-web (web) | COMPLETED | 2 | 1 | HIGH | FAILED |
-| docs | SKIPPED | 0 | 0 | n/a | SKIPPED (error) |
+| docs | SKIPPED | n/a | n/a | n/a | SKIPPED (error) |
+
+- **snapshot-api (api)**: did not complete: npm-audit
+- **docs**: 'docs' does not exist as a directory at '<REPO>/tests/test/_data/snapshot/_fixture/workspace/docs'
 
 ## Summary
 
@@ -39,7 +42,7 @@ Each project is scanned independently and judged against its own threshold, so a
 
 **Actionable** counts findings at or above each scanner's threshold.
 
-**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = disabled; ERROR = execution error.
+**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = did not run (disabled, or nothing to scan); ERROR = execution error.
 
 **Threshold** shows the minimum severity and its source: `global`, `config`, or `scanner`.
 
@@ -55,12 +58,12 @@ Files with the most actionable findings.
 
 | Finding count | File location |
 | ---: | --- |
-| 2 | main.tf |
 | 1 | app.py |
+| 1 | main.tf |
 
 ## Detailed findings
 
-Showing 3 of 3 actionable findings, highest severity first.
+Showing 2 of 2 actionable findings, highest severity first.
 
 <details>
 <summary>1. HIGH · B602 · app.py:7</summary>
@@ -87,20 +90,6 @@ subprocess call with shell=True identified, security issue.
 - Location: main.tf:1-4
 
 S3 Bucket has an ACL defined which allows public READ access.
-
-</details>
-
-<details>
-<summary>3. MEDIUM · terraform.aws.best-practice.s3-bucket-name-hardcoded · main.tf:2</summary>
-
-### Finding 3: terraform.aws.best-practice.s3-bucket-name-hardcoded
-
-- Severity: MEDIUM
-- Scanner: semgrep
-- Rule ID: terraform.aws.best-practice.s3-bucket-name-hardcoded
-- Location: main.tf:2
-
-Bucket name is hardcoded; derive it from a variable.
 
 </details>
 

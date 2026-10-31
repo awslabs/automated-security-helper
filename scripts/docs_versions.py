@@ -612,14 +612,28 @@ def pinned_pages(repo: Path, site: SiteConfig) -> tuple[Any, list[str]]:
     return manager, urls
 
 
+_CODE_TAG = re.compile(r"</?code\b[^>]*>")
 _TABLE = re.compile(r"<table\b.*?</table>", re.DOTALL)
 _TEXT_SAMPLE = re.compile(
     r'<div class="language-text\b[^"]*"[^>]*>.*?</div>', re.DOTALL
 )
+_CODE_BLOCK_END = re.compile(r"</pre\s*>")
+#: The line page_text puts after every code block. Two blocks with nothing between
+#: them are separated by blank lines only, and the entry walk of
+#: scripts/version_template_manager.py crosses blank lines (a YAML entry may hold
+#: them), so without a line of text at indent 0 the last entry of one block would
+#: take in the indented first lines of the next.
+CODE_BLOCK_END = "(end of code block)"
 
 
 def page_text(content: bytes, *, commands_only: bool = False) -> str:
     """A built page as a reader sees it: no tags, so a highlighted token is whole.
+
+    A code element starts and ends a line, so two spans of one sentence do not run
+    together: the pin readers of scripts/version_template_manager.py end a command at
+    a line break, and an inline span written with backticks in the source has none
+    left once its tags are gone. A line of text, CODE_BLOCK_END, follows every code
+    block, so an entry that ends one block does not reach the lines of the next.
 
     With commands_only, without its tables and `text` samples: a template may name the
     current release there with {{RELEASE}} (scripts/docs_checks.py
@@ -630,7 +644,61 @@ def page_text(content: bytes, *, commands_only: bool = False) -> str:
     markup = content.decode("utf-8", "replace")
     if commands_only:
         markup = _TEXT_SAMPLE.sub("", _TABLE.sub("", markup))
+    markup = _CODE_BLOCK_END.sub(f"</pre>\n{CODE_BLOCK_END}\n", markup)
+    markup = _CODE_TAG.sub("\n", markup)
     return html.unescape(re.sub(r"<[^>]+>", "", markup))
+
+
+#: Pins of other projects that a version-pinned page keeps as written. Each entry is a
+#: text found in the entry or command that holds the pin, not only on its own line: a
+#: block-style pre-commit entry is its `- repo:` line through its last key, and a
+#: `\`-continued clone is all its lines (see _entry_around in
+#: scripts/version_template_manager.py). So the project's URL excuses a `rev:` that sits
+#: on the line below it, and a bare tag would excuse every pin of that tag, ASH's
+#: included, so name the project: an entry holds a `/` and no version, and
+#: tests/unit/test_docs_versions.py checks every entry here for both. An entry that
+#: names this repository is never excused, whatever an allowance says. The pin readers
+#: count only the pins of this repository, so a pin they reject is either one of these
+#: or a pin of this repository in a shape scripts/version_template_manager.py does not
+#: know, which no template or check would ever move. None exists today.
+KNOWN_THIRD_PARTY_PINS: tuple[str, ...] = ()
+
+
+def unrecognized_pin_problems(
+    manager: Any,
+    text: str,
+    where: str,
+    allowed: tuple[str, ...] | None = None,
+) -> list[str]:
+    """One problem per pin in text that the manager's ASH patterns reject.
+
+    Reading only what the patterns anchor on this repository would also hide a stale
+    pin of this repository in a shape they miss (a `rev:` before its `repo:`, a
+    flow-style entry, a clone of a URL held in a variable); the pages would render it
+    stale on every build and pass the pins check. So a rejected pin fails the check
+    unless the entry or command holding it names an entry of allowed
+    (KNOWN_THIRD_PARTY_PINS), and an entry that names this repository is never
+    excused: its pin is ASH's, whatever the allowance says.
+    """
+    if allowed is None:
+        allowed = KNOWN_THIRD_PARTY_PINS
+    problems = []
+    for pin in manager.unrecognized_pins(text):
+        named = any(entry in pin.entry for entry in allowed)
+        if named and not manager.names_this_repository(pin.entry):
+            continue
+        refused = (
+            "; its entry names this repository, which no allowance excuses"
+            if named
+            else ""
+        )
+        problems.append(
+            f"{where} has a {pin.form} pin of {pin.version} that no pattern of "
+            f"ASH_PIN_PATTERNS accepts: {pin.line!r}; if it is another project's, add it "
+            "to KNOWN_THIRD_PARTY_PINS in scripts/docs_versions.py, otherwise add its "
+            f"shape to scripts/version_template_manager.py{refused}"
+        )
+    return problems
 
 
 def _read_branch(repo: Path, branch: str) -> dict[str, tuple[str, bytes]]:
@@ -855,7 +923,9 @@ def check_published(
             if built is None:
                 problems.append(f"{directory}/ has no page {url}")
                 continue
-            pins |= manager.release_pins(page_text(built[1]))
+            text = page_text(built[1])
+            pins |= manager.release_pins(text)
+            problems += unrecognized_pin_problems(manager, text, f"{directory}/{url}")
         if urls and pins != wanted:
             problems.append(
                 f"the version-pinned pages of {directory}/ pin {sorted(pins)}, not "
@@ -871,6 +941,7 @@ def check_published(
             continue
         commands = page_text(built[1], commands_only=True)
         main_pins |= manager.release_pins(commands)
+        problems += unrecognized_pin_problems(manager, commands, f"{DEV_VERSION}/{url}")
         for form in manager.forms_pinning_a_release(
             page_text(release[1], commands_only=True)
         ):

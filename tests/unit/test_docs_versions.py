@@ -24,12 +24,14 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from markdown_it import MarkdownIt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "docs_versions.py"
@@ -405,6 +407,16 @@ DEFECTS = [
         ),
     ),
     (
+        # YAML keys come in any order; the pin readers anchor a rev: on the repo: line
+        # above it, so this stale-able pin is one no reader counts.
+        "a pin in a shape no pattern knows",
+        {
+            "install_template": INSTALL_TEMPLATE
+            + f"\n```yaml\n- rev: v{{{{VERSION}}}}\n  repo: {REPO_URL}\n```\n"
+        },
+        f"{PINNED_URL}/ has a rev: pin of",
+    ),
+    (
         "the branch renderer leaves the tag lookup",
         {
             "manager": _patched(
@@ -685,6 +697,573 @@ def test_the_template_uses_every_install_form():
     rendered = _manager().render(INSTALL_TEMPLATE, "1.2.3")
     used = _manager().forms_pinning_a_release(rendered)
     assert used == [form for form, *_ in _install_forms()], used
+
+
+OTHER_PROJECT_URL = "https://github.com/example/other-project"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "html",
+    [
+        # Two spans of one sentence: this repository's clone, then another project's.
+        (
+            f"<p>Clone <code>git clone {REPO_URL}.git</code> and "
+            f"<code>git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git</code>.</p>"
+        ),
+        # This repository's URL as visible link text, then another project's span.
+        (
+            f'<p><a href="{REPO_URL}">{REPO_URL}</a>, then '
+            f"<code>git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git</code></p>"
+        ),
+        # Another project's span, then this repository's URL as link text.
+        (
+            f"<p><code>git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git</code>, "
+            f'then see <a href="{REPO_URL}">{REPO_URL}</a></p>'
+        ),
+    ],
+)
+def test_the_readers_see_no_pin_across_two_code_spans(html):
+    """Red before: page_text deleted every tag and put nothing in its place, so the
+    spans ran together on one line and another project's --branch tag was read as
+    this repository's pin (a release build failed pins != wanted)."""
+    text = dv.page_text(html.encode())
+    assert _manager().release_pins(text) == set(), text
+    assert _manager().forms_pinning_a_release(text) == [], text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "form, text",
+    [
+        ("rev:", f"- rev: v3.3.0\n  repo: {REPO_URL}\n"),
+        ("rev:", f"- {{repo: {REPO_URL}, rev: v3.3.0}}\n"),
+        ("--branch", 'git clone --branch v3.3.0 "$ASH_REPO_URL"\n'),
+        # A quoted value and a key with two blanks: spellings the anchors do not read.
+        ("rev:", f'- repo: {REPO_URL}\n  rev: "v3.3.0"\n'),
+        ("ash-version:", "with:\n  ash-version:  v3.3.0\n"),
+    ],
+    ids=[
+        "rev-before-repo",
+        "flow-style",
+        "url-in-a-variable",
+        "rev-quoted",
+        "ash-version-two-spaces",
+    ],
+)
+def test_a_pin_in_a_shape_no_pattern_knows_fails_the_check(form, text):
+    """Red before: the readers counted only the anchored shapes and said nothing about
+    the rest, so a stale pin of this repository in one of these shapes stayed in its
+    template, rendered stale on every build, and passed both pin checks."""
+    manager = _manager()
+    assert manager.release_pins(text) == set()
+    problems = dv.unrecognized_pin_problems(manager, text, "1.2.3/page/")
+    assert len(problems) == 1, problems
+    assert problems[0].startswith(f"1.2.3/page/ has a {form} pin of 3.3.0 "), problems
+    assert "KNOWN_THIRD_PARTY_PINS" in problems[0]
+
+
+@pytest.mark.unit
+def test_a_third_party_pin_passes_only_when_its_line_is_allowed():
+    manager = _manager()
+    text = f"git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git\n"
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    allowed = (OTHER_PROJECT_URL.rsplit("/", 1)[1],)
+    assert dv.unrecognized_pin_problems(manager, text, "page/", allowed) == []
+    # An allowance names one project; it excuses no other line.
+    other = "- rev: v3.3.0\n  repo: " + REPO_URL + "\n"
+    assert len(dv.unrecognized_pin_problems(manager, other, "page/", allowed)) == 1
+
+
+# Another project's pins, each written so that its name is NOT on the line of the pin.
+THIRD_PARTY_ENTRIES = {
+    "a block-style rev: under its repo:": (
+        f"repos:\n  - repo: {OTHER_PROJECT_URL}\n    rev: v4.6.0\n    hooks:\n"
+        "      - id: check-yaml\n"
+    ),
+    "a rev: written before its repo:": f"- rev: v4.6.0\n  repo: {OTHER_PROJECT_URL}\n",
+    "a clone continued over lines": (
+        f"git clone \\\n  --branch v2.0.0 \\\n  {OTHER_PROJECT_URL}.git\n"
+    ),
+    # The shapes pre-commit and the anchored pattern admit: keys in any order, blank
+    # lines between them, a list under a sibling key.
+    "a rev: below blank lines under its repo:": (
+        f"repos:\n  - repo: {OTHER_PROJECT_URL}\n\n    rev: v4.6.0\n"
+    ),
+    "a rev: written before blank lines and its repo:": (
+        f"- rev: v4.6.0\n\n  repo: {OTHER_PROJECT_URL}\n"
+    ),
+    "a rev: below a list under a sibling key": (
+        f"repos:\n  - repo: {OTHER_PROJECT_URL}\n    hooks:\n      - id: x\n"
+        "    rev: v4.6.0\n"
+    ),
+    "a rev: below a list and a blank line": (
+        f"repos:\n  - repo: {OTHER_PROJECT_URL}\n    hooks:\n      - id: x\n\n"
+        "    rev: v4.6.0\n"
+    ),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text", list(THIRD_PARTY_ENTRIES.values()), ids=list(THIRD_PARTY_ENTRIES)
+)
+def test_an_allowance_names_the_project_of_the_whole_entry(text):
+    """Red before: the allowance was matched against the one line that holds the tag,
+    which is `rev: v4.6.0` or `--branch v2.0.0` with no project on it, so the only
+    entry that could excuse the pin was the bare tag, and that excuses every pin of
+    that tag on every page, this repository's included."""
+    manager = _manager()
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    allowed = ("example/other-project",)
+    assert dv.unrecognized_pin_problems(manager, text, "page/", allowed) == []
+
+
+@pytest.mark.unit
+def test_an_allowance_does_not_excuse_the_next_entry():
+    """The control: the entry that holds the allowance's project is excused and the
+    entry beside it, in the same list, is not."""
+    manager = _manager()
+    text = (
+        f"- repo: {OTHER_PROJECT_URL}\n"
+        "  rev: v4.6.0\n"
+        "- rev: v3.3.0\n"
+        f"  repo: {REPO_URL}\n"
+    )
+    problems = dv.unrecognized_pin_problems(
+        manager, text, "page/", ("example/other-project",)
+    )
+    assert len(problems) == 1, problems
+    assert "pin of 3.3.0" in problems[0], problems
+
+
+@pytest.mark.unit
+def test_an_allowance_does_not_excuse_the_next_entry_across_a_blank_line():
+    """The control for the blank lines an entry crosses: the entry ends where the next
+    one starts, blank line or not."""
+    manager = _manager()
+    text = (
+        f"- repo: {OTHER_PROJECT_URL}\n"
+        "  rev: v4.6.0\n"
+        "\n"
+        "- rev: v3.3.0\n"
+        f"  repo: {REPO_URL}\n"
+    )
+    problems = dv.unrecognized_pin_problems(
+        manager, text, "page/", ("example/other-project",)
+    )
+    assert len(problems) == 1, problems
+    assert "pin of 3.3.0" in problems[0], problems
+
+
+# A clone of another project and a clone of this repository, in one command line or in
+# one backslash-continued command, in each order. The pin is this repository's, with its
+# URL held in a variable so that no anchor reads it: only the safety net lists it.
+OTHER_CLONE = f"git clone {OTHER_PROJECT_URL}.git"
+ASH_CLONE = 'git clone --branch v3.3.0 "$ASH_REPO_URL"'
+CHAINED_CLONES = {
+    "continued after another project's clone": f"{OTHER_CLONE} && \\\n  {ASH_CLONE}\n",
+    "continued before another project's clone": f"{ASH_CLONE} && \\\n  {OTHER_CLONE}\n",
+    "continued after a semicolon": f"{OTHER_CLONE}; \\\n  {ASH_CLONE}\n",
+    "on one line after &&": f"{OTHER_CLONE} && {ASH_CLONE}\n",
+    "on one line after ||": f"{OTHER_CLONE} || {ASH_CLONE}\n",
+    "on one line before a pipe": f"{ASH_CLONE} | tee clone.log; {OTHER_CLONE}\n",
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text", list(CHAINED_CLONES.values()), ids=list(CHAINED_CLONES)
+)
+def test_an_allowance_does_not_excuse_the_next_command_of_a_chain(text):
+    """Red before: a command continued with a backslash was one entry from its first
+    line to its last, and a command line was one entry whole, so the project named in
+    one clone excused the pin of the other, and a stale pin of this repository passed
+    the check that exists to catch it."""
+    manager = _manager()
+    problems = dv.unrecognized_pin_problems(
+        manager, text, "page/", ("example/other-project",)
+    )
+    assert len(problems) == 1, problems
+    assert "pin of 3.3.0" in problems[0], problems
+
+
+# The same two clones as the lines of a script under a list item that opens a block
+# scalar. The newline is the separator there, and the only separator character before
+# the pin is the `|` of the block indicator.
+BLOCK_SCRIPT_CLONES = {
+    "a keyed item, the other clone first": (
+        f"- run: |\n    {OTHER_CLONE}\n    {ASH_CLONE}\n"
+    ),
+    "a keyed item, the other clone last": (
+        f"- run: |\n    {ASH_CLONE}\n    {OTHER_CLONE}\n"
+    ),
+    "a keyed item, a stripping indicator": (
+        f"- run: |-\n    {OTHER_CLONE}\n    {ASH_CLONE}\n"
+    ),
+    "a folded item": f"- run: >\n    {OTHER_CLONE}\n    {ASH_CLONE}\n",
+    "an item that is the script": f"- |\n    {OTHER_CLONE}\n    {ASH_CLONE}\n",
+    "a step with a name first": (
+        f"- name: Install\n  run: |\n    {OTHER_CLONE}\n    {ASH_CLONE}\n"
+    ),
+    "a continued clone after another project's": (
+        f"- run: |\n    {OTHER_CLONE}\n    {ASH_CLONE} \\\n      --depth 1\n"
+    ),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text", list(BLOCK_SCRIPT_CLONES.values()), ids=list(BLOCK_SCRIPT_CLONES)
+)
+def test_an_allowance_does_not_excuse_the_next_line_of_a_block_script(text):
+    """Red before: the entry of a pin under `- run: |` was the dash line and every
+    script line below it, the only separator character before the pin was the `|` of
+    the block indicator, so the project cloned on one line excused the pin of the
+    clone on the next."""
+    manager = _manager()
+    problems = dv.unrecognized_pin_problems(
+        manager, text, "page/", ("example/other-project",)
+    )
+    assert len(problems) == 1, problems
+    assert "pin of 3.3.0" in problems[0], problems
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"- run: |\n    git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git\n",
+        f"- run: |\n    {ASH_CLONE}\n    git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git\n",
+        f"- run: |\n    git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git \\\n"
+        "      --depth 1\n",
+    ],
+    ids=["one line", "after a line of this repository", "a continued clone"],
+)
+def test_an_allowance_still_excuses_the_pin_of_its_own_line_in_a_block_script(text):
+    """The control: the line that holds the pin and the allowed project is excused."""
+    manager = _manager()
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) >= 1
+    allowed = ("example/other-project",)
+    problems = dv.unrecognized_pin_problems(manager, text, "page/", allowed)
+    assert [p for p in problems if "pin of 2.0.0" in p] == [], problems
+
+
+@pytest.mark.unit
+def test_a_pre_commit_entry_with_a_block_scalar_key_is_still_one_entry():
+    """The control: only a block scalar on the dash line makes the lines below it a
+    script. A block scalar under a later key leaves the item one entry, so the
+    `repo:` line above the pin still names the project. The `|` of that later key
+    is a command break like any other, so the key comes after the pin: a pin below
+    the indicator is cut away from the `repo:` line and is reported, which fails
+    closed."""
+    manager = _manager()
+    text = (
+        f"- repo: {OTHER_PROJECT_URL}\n  rev: v4.6.0\n  note: |\n    kept as written\n"
+    )
+    allowed = ("example/other-project",)
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    assert dv.unrecognized_pin_problems(manager, text, "page/", allowed) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git && \\\n  git clone {REPO_URL}.git\n",
+        f"git clone {REPO_URL}.git && \\\n  git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git\n",
+    ],
+    ids=["the allowed project first", "the allowed project last"],
+)
+def test_an_allowance_still_excuses_the_pin_of_its_own_command_in_a_chain(text):
+    """The control: cutting the entry at the separators narrows it to the command that
+    holds the pin, which is the one that names the allowed project."""
+    manager = _manager()
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    allowed = ("example/other-project",)
+    assert dv.unrecognized_pin_problems(manager, text, "page/", allowed) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text, allowed",
+    [
+        # A bare tag matches ASH's own entry as well as the other project's.
+        (f"- rev: v3.3.0\n  repo: {REPO_URL}\n", ("rev: v3.3.0",)),
+        (f"- rev: v3.3.0\n  repo: {REPO_URL}\n", ("v3.3.0",)),
+        (f"- {{repo: {REPO_URL}, rev: v3.3.0}}\n", ("v3.3.0",)),
+        # This repository's own URL as an allowance.
+        (f"- rev: v3.3.0\n  repo: {REPO_URL}\n", (REPO_URL,)),
+        (f"git clone --branch  v3.3.0 {REPO_URL}.git\n", (REPO_URL,)),
+        (f"git clone --branch  v3.3.0 {REPO_URL}.git\n", ("v3.3.0",)),
+    ],
+    ids=[
+        "a-prefix-and-a-tag",
+        "a-tag",
+        "a-tag-in-a-flow-entry",
+        "this-repository-s-url",
+        "this-repository-s-url-in-a-clone",
+        "a-tag-in-a-clone",
+    ],
+)
+def test_an_allowance_never_excuses_an_entry_that_names_this_repository(text, allowed):
+    """Red before: an allowance that matched the entry excused it, so a bare tag, or
+    this repository's own URL, added to KNOWN_THIRD_PARTY_PINS passed the stale pin of
+    this repository that the check exists to catch."""
+    manager = _manager()
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    problems = dv.unrecognized_pin_problems(manager, text, "page/", allowed)
+    assert len(problems) == 1, problems
+    assert "names this repository" in problems[0], problems
+
+
+def _allowance_problems(manager, allowed):
+    """What is wrong with each allowance: it must name a project, not a pin or ASH."""
+    problems = []
+    for entry in allowed:
+        if "/" not in entry:
+            problems.append(f"{entry!r} has no `/`, so it names no project")
+        if manager.unrecognized_pins(entry) or manager.release_pins(entry):
+            problems.append(f"{entry!r} is a prefix and a version, not a project")
+        if manager.names_this_repository(entry):
+            problems.append(f"{entry!r} names this repository")
+    return problems
+
+
+@pytest.mark.unit
+def test_every_known_third_party_pin_names_a_project():
+    """Each allowance names the project whose pin it keeps, with a `/` and without a
+    version or this repository: a bare tag would match every pin of that tag."""
+    assert _allowance_problems(_manager(), dv.KNOWN_THIRD_PARTY_PINS) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "rev: v3.3.0",
+        "v3.3.0",
+        "--branch v3.3.0",
+        "other-project",
+        "example/other-project@v2.0.0",
+        REPO_URL,
+    ],
+    ids=[
+        "prefix-and-tag",
+        "tag",
+        "flag-and-tag",
+        "no-slash",
+        "pinned",
+        "this-repository",
+    ],
+)
+def test_an_allowance_that_names_no_project_is_found(entry):
+    """The control for the test above: it can fail, on each way an allowance goes wrong."""
+    assert _allowance_problems(_manager(), (entry,)) != []
+
+
+@pytest.mark.unit
+def test_an_allowance_that_names_a_project_is_not_found():
+    assert _allowance_problems(_manager(), ("example/other-project",)) == []
+
+
+@pytest.mark.unit
+def test_a_recognized_pin_is_not_reported():
+    """The control: every form's own pin, and the ellipsis prose, are counted, not listed."""
+    manager = _manager()
+    text = manager.render(INSTALL_TEMPLATE, "1.2.3") + "\nuses: ...@v1.2.3\n"
+    assert dv.unrecognized_pin_problems(manager, text, "page/") == []
+    assert manager.release_pins(text) == {"1.2.3"}
+
+
+REAL_TARGETS = _manager().target_files
+
+
+def _real_template(target: str) -> str:
+    path = REPO_ROOT / (target + ".template")
+    assert path.is_file(), f"{target} is a target file with no template: {path}"
+    return path.read_text(encoding="utf-8")
+
+
+# The docs_dir of mkdocs.yml. install_refs.py renders only the target files under it
+# (README.md and the like are not on the site), and pinned_pages selects the same.
+DOCS_DIR = "docs/content"
+SITE_TARGETS = [
+    target for target in REAL_TARGETS if Path(target).is_relative_to(DOCS_DIR)
+]
+
+_MARKDOWN = MarkdownIt("commonmark").enable("table")
+_TEXT_FENCE = re.compile(
+    r'<pre><code class="language-text">(.*?)</code></pre>', re.DOTALL
+)
+
+
+def _built_text(markdown: str, *, commands_only: bool) -> str:
+    """A rendered page as check_published reads it: Markdown to HTML, then page_text.
+
+    The site converts Markdown with Python-Markdown and Material's highlighter; this
+    uses markdown-it-py, which every install has, and gives the same elements the
+    check reads: a list item is an `li` and not a `- ` line, an inline span is a
+    `code` element of its own, and a table is a `table`. The highlighter wraps a
+    `text` sample in the `div` that page_text drops for main, so the sample is
+    wrapped the same way here.
+    """
+    html = _MARKDOWN.render(markdown)
+    html = _TEXT_FENCE.sub(r'<div class="language-text highlight">\1</div>', html)
+    return dv.page_text(html.encode(), commands_only=commands_only)
+
+
+@pytest.mark.unit
+def test_the_docs_dir_named_here_is_the_sites():
+    text = (REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+    match = re.search(r"^docs_dir:\s*[\"']?([^\"'\s#]+)", text, re.MULTILINE)
+    assert match and match.group(1) == DOCS_DIR, match
+
+
+@pytest.mark.unit
+def test_the_site_targets_leave_out_the_pages_the_build_skips():
+    """README.md and the example's README are version-pinned and have templates, but
+    the build never renders them, so the check never reads them."""
+    assert set(REAL_TARGETS) - set(SITE_TARGETS) == {
+        "README.md",
+        "examples/streamlit_ui/README.md",
+    }, SITE_TARGETS
+
+
+@pytest.mark.unit
+def test_the_built_text_is_what_the_check_reads():
+    """Red before: the test below read the Markdown, where a bullet is a `- ` line the
+    entry walk takes for a YAML list entry and an inline span shares a line with the
+    text around it; the build reads neither."""
+    markdown = (
+        "- a bullet\n\n"
+        "Run `git clone --branch v2.0.0 example.git` and see [docs](https://x.test/a).\n"
+    )
+    text = _built_text(markdown, commands_only=False)
+    assert "- a bullet" not in text, text
+    assert "\ngit clone --branch v2.0.0 example.git\n" in text, text
+
+
+@pytest.mark.unit
+def test_the_built_text_puts_a_line_of_text_after_every_code_block():
+    """Red before: two code blocks with no text between them came out separated by
+    blank lines only, and the entry walk crosses blank lines."""
+    markdown = "```yaml\nfirst: 1\n```\n\n```yaml\nsecond: 2\n```\n"
+    lines = _built_text(markdown, commands_only=False).splitlines()
+    assert lines.count(dv.CODE_BLOCK_END) == 2, lines
+    assert lines.index("first: 1") < lines.index(dv.CODE_BLOCK_END), lines
+    assert lines.index(dv.CODE_BLOCK_END) < lines.index("second: 2"), lines
+
+
+# An ASH pin whose entry does not name this repository, at the end or the start of one
+# code block, and another project's entry at the start or the end of the block beside
+# it. Nothing is written between the two blocks, and the second block is indented
+# deeper than the first (or the first shallower than the second), as a `repos:` list
+# shown on its own is.
+ADJACENT_BLOCKS = {
+    "the pin ends a block, the other project starts the next": (
+        "```yaml\n- {repo: $ASH_REPO, rev: v3.3.0}\n```\n\n"
+        f"```yaml\n  - repo: {OTHER_PROJECT_URL}\n    rev: v4.6.0\n```\n"
+    ),
+    "the other project ends a block, the pin starts the next": (
+        f"```yaml\n- repo: {OTHER_PROJECT_URL}\n```\n\n"
+        '```yaml\n  repo: "$ASH_REPO"\n  rev: v3.3.0\n```\n'
+    ),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "markdown", list(ADJACENT_BLOCKS.values()), ids=list(ADJACENT_BLOCKS)
+)
+def test_an_allowance_does_not_excuse_a_pin_in_the_next_code_block(markdown):
+    """Red before: the blank lines between two blocks were crossed like the blank lines
+    inside an entry, so an entry that ended one block took in the indented lines of
+    the next, and the project named there excused a stale pin of this repository."""
+    manager = _manager()
+    text = _built_text(markdown, commands_only=False)
+    problems = dv.unrecognized_pin_problems(
+        manager, text, "page/", ("example/other-project",)
+    )
+    assert len(problems) == 1, problems
+    assert "pin of 3.3.0" in problems[0], problems
+
+
+@pytest.mark.unit
+def test_an_allowance_still_excuses_a_pin_below_a_blank_line_in_one_code_block():
+    """The control: a blank line inside one block is inside the entry."""
+    manager = _manager()
+    markdown = f"```yaml\n- repo: {OTHER_PROJECT_URL}\n\n  rev: v4.6.0\n```\n"
+    text = _built_text(markdown, commands_only=False)
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    allowed = ("example/other-project",)
+    assert dv.unrecognized_pin_problems(manager, text, "page/", allowed) == []
+
+
+@pytest.mark.unit
+def test_the_built_text_of_main_drops_a_text_sample():
+    markdown = "```text\nrev: v3.3.0\n```\n\n```bash\nrun it\n```\n"
+    assert "v3.3.0" in _built_text(markdown, commands_only=False)
+    assert "v3.3.0" not in _built_text(markdown, commands_only=True)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("target", SITE_TARGETS)
+def test_no_real_page_holds_a_pin_the_check_would_reject(target):
+    """The check fails the docs build on a pin that no pattern accepts, and every
+    other test feeds it a hand-written string. Render each real template the way the
+    site is built, for a release and for main, and read it the way check_published
+    does (the page as a reader sees it, commands only for main), and require that
+    nothing is rejected: a third-party tag or an install form the patterns do not know
+    would otherwise fail the first build after the check landed, with no allowance to
+    name it. Only the pages the build renders: see SITE_TARGETS."""
+    manager = _manager()
+    template = _real_template(target)
+    release = _built_text(manager.render(template, "3.4.0"), commands_only=False)
+    main = _built_text(
+        manager.render_for_branch(template, "main", "3.4.0"), commands_only=True
+    )
+    assert dv.unrecognized_pin_problems(manager, release, f"3.4.0/{target}") == []
+    assert dv.unrecognized_pin_problems(manager, main, f"main/{target}") == []
+    assert manager.release_pins(release) <= {"3.4.0"}
+
+
+@pytest.mark.unit
+def test_the_real_templates_hold_pins_and_the_check_can_fail_on_them():
+    """The control for the test above: it read pins (a zero over no pins would pass
+    anything), and the same check does reject a planted pin in the same text. The
+    plant is a fenced block at the top of the page, so it reads as a code element
+    whatever the page ends with."""
+    manager = _manager()
+    rendered = {
+        target: manager.render(_real_template(target), "3.4.0")
+        for target in SITE_TARGETS
+    }
+    pinned = [
+        target
+        for target, text in rendered.items()
+        if manager.release_pins(_built_text(text, commands_only=False))
+    ]
+    assert len(pinned) > len(SITE_TARGETS) // 2, pinned
+    for target in pinned:
+        plant = f"```yaml\n- rev: v9.9.9\n  repo: {REPO_URL}\n```\n\n"
+        planted = _built_text(plant + rendered[target], commands_only=False)
+        problems = dv.unrecognized_pin_problems(manager, planted, target)
+        assert len(problems) == 1, (target, problems)
+
+
+@pytest.mark.unit
+def test_the_readers_still_see_a_pin_inside_one_code_span():
+    """The control: this repository's clone in one span, in a block and inline."""
+    inline = f"<p>Run <code>git clone --branch v3.4.0 {REPO_URL}.git</code> first.</p>"
+    block = (
+        f"<pre><span></span><code>git clone --branch v3.4.0 {REPO_URL}.git\n"
+        "</code></pre>"
+    )
+    for html in (inline, block):
+        text = dv.page_text(html.encode())
+        assert _manager().release_pins(text) == {"3.4.0"}, text
+        assert _manager().forms_pinning_a_release(text) == ["--branch"], text
 
 
 @pytest.mark.integration

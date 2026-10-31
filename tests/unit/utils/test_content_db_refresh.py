@@ -36,21 +36,15 @@ from automated_security_helper.utils.sandbox.scope import (
     active_scope,
     sandbox_scope,
 )
+from tests.utils.content_db_opt_out_env import TOOL_UPDATE_OPT_OUT_ENV
 from tests.utils.helpers import importing_this_checkout
-
-
-#: trivy's own opt-outs of its database updates, which the refresh honors; cleared
-#: so a developer's shell cannot change what these tests see.
-_TRIVY_UPDATE_ENV = (
-    "TRIVY_SKIP_DB_UPDATE",
-    "TRIVY_SKIP_UPDATE",
-    "TRIVY_SKIP_JAVA_DB_UPDATE",
-)
 
 
 @pytest.fixture(autouse=True)
 def _fresh_memo(monkeypatch):
-    for name in _TRIVY_UPDATE_ENV:
+    # The tools' own database update settings, cleared so a developer's or a CI
+    # shell's cannot change what these tests see (tests/utils/content_db_opt_out_env).
+    for name in TOOL_UPDATE_OPT_OUT_ENV:
         monkeypatch.delenv(name, raising=False)
     refresh.forget_prepared()
     yield
@@ -225,17 +219,41 @@ def test_trivy_takes_the_operators_config_when_given_one(recorder, tmp_path):
 
 
 @pytest.mark.unit
-def test_grype_takes_no_config_file(recorder, tmp_path):
-    with pytest.raises(ValueError):
-        refresh.prepare_content_db(
-            "grype",
-            tmp_path,
-            offline=False,
-            **_where(tmp_path),
-            executable="grype",
-            config_file=tmp_path / "x.yaml",
-        )
-    assert recorder.calls == []
+def test_grype_takes_the_operators_config_when_given_one(recorder, tmp_path):
+    """A database mirror in the operator's grype config applies to the update too.
+
+    The caller establishes that the file is the operator's and outside the scanned
+    tree (the grype scanner passes one only then); given one, the update runs with
+    it, and given none, with the empty config, never with a file from the tree.
+    """
+    operator = tmp_path / "operator" / "grype.yaml"
+    operator.parent.mkdir()
+    operator.write_text("db:\n  update-url: https://mirror.example/grype-db\n")
+    refresh.prepare_content_db(
+        "grype",
+        tmp_path / "grype",
+        offline=False,
+        **_where(tmp_path),
+        executable="grype",
+        config_file=operator,
+    )
+    (call,) = recorder.calls
+    assert Path(call.argv[call.argv.index("-c") + 1]) == operator.absolute()
+    assert "mirror.example" in call.config_text
+    assert call.cwd != operator.parent
+    assert operator.is_file()
+    refresh.forget_prepared()
+    recorder.calls.clear()
+    refresh.prepare_content_db(
+        "grype",
+        tmp_path / "grype",
+        offline=False,
+        **_where(tmp_path),
+        executable="grype",
+    )
+    (call,) = recorder.calls
+    assert Path(call.argv[call.argv.index("-c") + 1]) != operator.absolute()
+    assert call.config_text == ""
 
 
 @pytest.mark.unit
@@ -826,10 +844,15 @@ class TestScannersUseThePreparedDatabase:
         # and its skip flags for trivy and trivy-repo alike.
         from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 
+        # The stand-in answers as a completed run: the scanner grades the exit
+        # code before it reads anything else, and a response with no code is
+        # refused as a tool that never ran.
         monkeypatch.setattr(
             ScannerPluginBase,
             "_run_subprocess",
-            lambda self, command, **kwargs: commands.append(list(command)) or {},
+            lambda self, command, **kwargs: (
+                commands.append(list(command)) or {"returncode": 0}
+            ),
         )
         target = tmp_path / "repo"
         target.mkdir()
@@ -935,10 +958,14 @@ def _trivy_scanner(context, monkeypatch):
         lambda *args, **kwargs: None,
     )
     commands = []
+    # A completed run, as above: a response with no exit code is refused as a
+    # tool that never ran.
     monkeypatch.setattr(
         ScannerPluginBase,
         "_run_subprocess",
-        lambda self, command, **kwargs: commands.append(list(command)) or {},
+        lambda self, command, **kwargs: (
+            commands.append(list(command)) or {"returncode": 0}
+        ),
     )
     return scanner, commands
 

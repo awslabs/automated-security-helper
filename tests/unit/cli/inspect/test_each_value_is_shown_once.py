@@ -28,6 +28,7 @@ import logging
 from contextlib import contextmanager
 
 import pytest
+import typer
 from rich.console import Console
 
 from automated_security_helper.cli.inspect import inspect_findings_app as tui
@@ -44,6 +45,10 @@ pytestmark = pytest.mark.unit
 VALUE = "p\x1bcq out\\x64\\Release"
 ONCE = controls_shown(VALUE)
 TWICE = controls_shown(ONCE)
+# A file value a suppression can name: the dialog refuses to save one whose path
+# holds a backslash (no suppression path names such a file alone), so the test that
+# reaches the writer gives its finding a file with the ESC but with slashes.
+SAVABLE_FILE = "p\x1bcq out/x64/Release"
 SCREEN = (220, 60)
 
 
@@ -97,6 +102,22 @@ def _assert_once(
 async def _settle(pilot, turns: int = 6) -> None:
     for _ in range(turns):
         await pilot.pause()
+
+
+def _logged(record: logging.LogRecord) -> str:
+    """The record's message as it was logged, which is what the log files write.
+
+    On a Windows console or CI runner the log module's filter rewrites a record's
+    text in ASCII for the console, the raw escape in a value shown as its text,
+    and keeps the message and arguments as logged on the record for the file
+    sinks (``_ash_unfiltered``). A test that asks what the log got reads those,
+    as the files do; ``getMessage()`` alone read the console form there.
+    """
+    unfiltered = getattr(record, "_ash_unfiltered", None)
+    if unfiltered is None:
+        return record.getMessage()
+    msg, args = unfiltered
+    return str(msg) % args if args else str(msg)
 
 
 @contextmanager
@@ -157,15 +178,20 @@ async def test_the_suppress_dialog_and_a_failed_save(tmp_path, monkeypatch):
         raise RuntimeError(f"cannot write {VALUE}")
 
     monkeypatch.setattr(tui, "add_suppression_to_config", refuse)
-    app = tui.FindingsExplorerApp([_finding()], config_path=tmp_path / ".ash.yaml")
+    # The dialog saves only a suppression that names its finding, so the file is
+    # one a suppression path can name (SAVABLE_FILE); the writer is then reached.
+    finding = _finding(file=f"file {SAVABLE_FILE}")
+    app = tui.FindingsExplorerApp([finding], config_path=tmp_path / ".ash.yaml")
     with _records() as records:
         async with app.run_test(size=SCREEN, notifications=True) as pilot:
             await _settle(pilot)
-            await app.push_screen(tui.SuppressDialog(_finding()))
+            await app.push_screen(tui.SuppressDialog(finding))
             await _settle(pilot)
             # The dialog names the finding without label prefixes: the values
-            # themselves ("rule {VALUE}", "file {VALUE}") are shown once.
-            _assert_once(_drawn(app), "rule", "file")
+            # themselves ("rule {VALUE}", "file {SAVABLE_FILE}") are shown once.
+            drawn = _drawn(app)
+            _assert_once(drawn, "rule")
+            _assert_once(drawn, "file", value=SAVABLE_FILE)
 
             app.screen.query_one("#reason_input", Input).value = "because"
             app.screen.query_one("#btn_suppress", Button).press()
@@ -181,7 +207,7 @@ async def test_the_suppress_dialog_and_a_failed_save(tmp_path, monkeypatch):
 
     # The log gets the raw value, which its sink shows once.
     (error,) = [r for r in records if r.levelno == logging.ERROR]
-    assert f"cannot write {VALUE}" in error.getMessage(), error.getMessage()
+    assert f"cannot write {VALUE}" in _logged(error), _logged(error)
 
 
 @pytest.mark.asyncio
@@ -215,7 +241,7 @@ def test_a_refused_source_read_logs_the_raw_name(tmp_path):
         finding["file"] = "src/link.py"
         assert tui._source_excerpt(finding, tmp_path) is None
 
-    messages = [r.getMessage() for r in records]
+    messages = [_logged(r) for r in records]
     assert any(VALUE in message for message in messages), messages
     assert not any(ONCE in message for message in messages), messages
 
@@ -228,9 +254,12 @@ def test_a_load_error_is_shown_once_on_the_console(tmp_path, monkeypatch, capsys
         raise ValueError(f"bad report {VALUE}")
 
     monkeypatch.setattr(tui.AshAggregatedResults, "load_model", refuse)
-    tui.findings_command(
-        output_dir=tmp_path, report_file="report.json", config=tmp_path / ".a.yaml"
-    )
+    # A report that does not load leaves nothing to show, so the command exits 1
+    # after it prints the error.
+    with pytest.raises(typer.Exit):
+        tui.findings_command(
+            output_dir=tmp_path, report_file="report.json", config=tmp_path / ".a.yaml"
+        )
 
     captured = capsys.readouterr()
     printed = captured.out + captured.err
@@ -266,9 +295,10 @@ def test_a_load_error_hides_a_value_a_complete_code_splits(
         raise error
 
     monkeypatch.setattr(tui.AshAggregatedResults, "load_model", refuse)
-    tui.findings_command(
-        output_dir=tmp_path, report_file="report.json", config=tmp_path / ".a.yaml"
-    )
+    with pytest.raises(typer.Exit):
+        tui.findings_command(
+            output_dir=tmp_path, report_file="report.json", config=tmp_path / ".a.yaml"
+        )
 
     captured = capsys.readouterr()
     printed = captured.out + captured.err

@@ -549,7 +549,10 @@ def pytest_configure(config):
         "markers", "unit: Unit tests that test individual components in isolation"
     )
     config.addinivalue_line(
-        "markers", "integration: Integration tests that test component interactions"
+        "markers",
+        "integration: Tests of one component with a real dependency: the test starts a "
+        "process (a child Python, git, the ash CLI, a real tool), opens a socket or "
+        "runs git on any path (tests/NAMING_CONVENTIONS.md)",
     )
     config.addinivalue_line(
         "markers",
@@ -1177,7 +1180,15 @@ def _ci_runner_unselected(item, config) -> bool:
 #: thing the tryfirst hook below does, so it sees every collected item before -k, -m or
 #: any deselection removes one.
 #:
-#: tests/unit/test_every_test_carries_one_tier_marker.py pins this check.
+#: A second refusal, for a test marked both ``unit`` and ``slow``. The unit CI job runs
+#: ``-m unit`` with neither ``--run-integration`` nor ``--run-slow``, so the ``--run-slow``
+#: skip below would skip such a test there, and ``-m integration`` and ``-m e2e`` do not
+#: select it. It would run in no CI job while every job stayed green. It is a usage
+#: error for the same reason as the first: the loss is silent. A slow test belongs to the
+#: integration tier, which runs with ``--run-slow``. This one keys on the markers too,
+#: although the ``--run-slow`` skip also matches a keyword named ``slow``.
+#:
+#: tests/unit/test_every_test_carries_one_tier_marker.py pins both checks.
 _TEST_TIERS = ("unit", "integration", "e2e")
 
 #: How many offenders the refusal names. The count it prints is always the whole count.
@@ -1212,12 +1223,40 @@ def _tier_refusal_message(offenders: List[Tuple[str, List[str]]]) -> str:
     )
 
 
+def _unit_items_marked_slow(items) -> List[str]:
+    """Node ids of the items that carry both the ``unit`` and the ``slow`` marker."""
+    return [
+        item.nodeid
+        for item in items
+        if item.get_closest_marker("unit") is not None
+        and item.get_closest_marker("slow") is not None
+    ]
+
+
+def _unit_slow_refusal_message(nodeids: List[str]) -> str:
+    """The usage error's text for unit tests that are also slow: count, rule, ids."""
+    listed = nodeids[:_TIER_REFUSAL_LISTED]
+    unlisted = len(nodeids) - len(listed)
+    if unlisted:
+        listed.append(f"... and {unlisted} more")
+    return (
+        f"{len(nodeids)} unit test(s) also carry the slow marker: the unit tier runs "
+        "without --run-slow, so such a test would run in no CI job; mark it "
+        "integration (which runs with --run-slow) or drop slow; "
+        "see tests/NAMING_CONVENTIONS.md\n" + "\n".join(listed)
+    )
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
     """Modify the collected test items based on command-line options."""
     untiered = _items_without_one_tier(items)
     if untiered:
         raise pytest.UsageError(_tier_refusal_message(untiered))
+
+    unit_and_slow = _unit_items_marked_slow(items)
+    if unit_and_slow:
+        raise pytest.UsageError(_unit_slow_refusal_message(unit_and_slow))
 
     deselected = [
         item
@@ -2824,6 +2863,10 @@ _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ksh", "mksh"})
 _SHELL_OPTIONS_WITH_A_VALUE = frozenset(
     {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
 )
+#: Short option letters whose value is the next argument wherever they sit in a
+#: cluster: ``bash -euo pipefail -c STRING`` runs STRING, with pipefail the value of
+#: the o inside ``-euo``, and ``bash -co pipefail STRING`` does too.
+_SHELL_CLUSTER_LETTERS_WITH_A_VALUE = frozenset("oO")
 #: Long shell options that take no value. Any other might take one, and then where
 #: the options end is unknown.
 _SHELL_LONG_FLAGS = frozenset(
@@ -2956,7 +2999,11 @@ def _shell_command_string(argv: List[str]) -> Tuple[Optional[int], bool]:
 
     The index is None without -c. The options do not read when one is a long option the
     guard does not know: it might take a value, and then STRING could be anywhere. A
-    lone ``-`` ends the options as ``--`` does, so ``sh -c - STRING`` runs STRING.
+    lone ``-`` ends the options as ``--`` does, so ``sh -c - STRING`` runs STRING. An
+    o or O inside a short cluster takes the next argument as its value, as the whole
+    word ``-o`` does, so ``bash -euo pipefail -c STRING`` and ``bash -co pipefail
+    STRING`` both run STRING; read without that, pipefail was where the options
+    ended, and STRING was never read.
     """
     given_c = False
     index = 1
@@ -2972,8 +3019,11 @@ def _shell_command_string(argv: List[str]) -> Tuple[Optional[int], bool]:
                 return None, False
             index += 1
         elif len(arg) > 1 and arg[0] in "-+":
-            given_c = given_c or "c" in arg[1:]
-            index += 1
+            flags = arg[1:]
+            given_c = given_c or "c" in flags
+            index += 1 + sum(
+                flags.count(letter) for letter in _SHELL_CLUSTER_LETTERS_WITH_A_VALUE
+            )
         else:
             break
     return (index if given_c and index < len(argv) else None), True
@@ -3508,7 +3558,9 @@ def _shell_reads_stdin(argv: List[str]) -> bool:
     """Whether ``sh [OPTION]...`` reads its commands from standard input: it is given
     no -c and no script file, or -s. The guard cannot read those commands. A lone
     ``-`` ends the options as ``--`` does (bash, dash and POSIX sh), so ``sh -``
-    reads standard input too."""
+    reads standard input too, and so does ``sh -euo pipefail``: the o inside the
+    cluster takes pipefail as its value (_SHELL_CLUSTER_LETTERS_WITH_A_VALUE), which
+    leaves no script file."""
     index = 1
     while index < len(argv):
         arg = argv[index]
@@ -3525,7 +3577,9 @@ def _shell_reads_stdin(argv: List[str]) -> bool:
                 return False
             if arg[0] == "-" and "s" in flags:
                 return True
-            index += 1
+            index += 1 + sum(
+                flags.count(letter) for letter in _SHELL_CLUSTER_LETTERS_WITH_A_VALUE
+            )
         else:
             break
     return index >= len(argv)

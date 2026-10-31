@@ -14,12 +14,16 @@ rather than by the module under test.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import importlib.util
 import json
 import os
+import socket
+import ssl
 import urllib.error
 import zipfile
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -30,6 +34,7 @@ from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
 from automated_security_helper.utils import rules_bundles
 from automated_security_helper.utils.rules_bundles import (
     MANIFEST_NAME,
+    RULES_DIR_ENV,
     RulesBundleUnavailable,
     contents_digest,
     extract_bundle,
@@ -93,7 +98,11 @@ def bundle_zip(tmp_path) -> tuple:
 
 
 def _fake_download(archive: Path, calls: list):
-    def download_file(url, destination, rename_to=None, expected_sha256=None):
+    # ``mode`` as the real helper takes it: the bundle is data, and the caller
+    # says so; the stand-in lands bytes and reads nothing from it.
+    def download_file(
+        url, destination, rename_to=None, expected_sha256=None, *, mode=None
+    ):
         calls.append((url, expected_sha256))
         target = Path(destination) / (rename_to or url.rsplit("/", 1)[-1])
         target.write_bytes(archive.read_bytes())
@@ -106,11 +115,31 @@ def _fake_download(archive: Path, calls: list):
 
 
 def _offline(calls: list):
-    def download_file(url, destination, rename_to=None, expected_sha256=None):
+    def download_file(
+        url, destination, rename_to=None, expected_sha256=None, *, mode=None
+    ):
         calls.append((url, expected_sha256))
         raise urllib.error.URLError("[Errno 101] Network is unreachable")
 
     return download_file
+
+
+def test_the_bundle_is_fetched_as_data(tmp_path, bundle_zip):
+    """The rules bundle is data, not a program: the installer asks the download
+    helper for the data mode, whatever the helper's default is."""
+    archive, bundle = bundle_zip
+    calls: list = []
+    modes: list = []
+    landing = _fake_download(archive, calls)
+
+    def download_file(
+        url, destination, rename_to=None, expected_sha256=None, *, mode=None
+    ):
+        modes.append(mode)
+        return landing(url, destination, rename_to, expected_sha256)
+
+    _install(tmp_path, bundle, archive, calls, download=download_file)
+    assert modes == [0o644]
 
 
 def _install(tmp_path, bundle, archive, calls, download=None, **kwargs):
@@ -127,8 +156,23 @@ def _install(tmp_path, bundle, archive, calls, download=None, **kwargs):
         return install_rules_bundle(bundle.name, root=tmp_path / "rules", **kwargs)
 
 
+# The install serializes on this file in the rules root and leaves it there:
+# a lock file removed after its release would let a waiter that had already
+# opened it run beside the next taker. It is the one entry an install, finished
+# or refused, may leave behind, so the listings below leave it out.
+INSTALL_LOCK = ".ash-rules-install.lock"
+
+
+def _contents(rules: Path) -> list:
+    return sorted(p.name for p in rules.iterdir() if p.name != INSTALL_LOCK)
+
+
 def _leftovers(rules: Path) -> list:
-    return [p.name for p in rules.iterdir() if p.name.startswith(".ash-rules")]
+    return [
+        p.name
+        for p in rules.iterdir()
+        if p.name.startswith(".ash-rules") and p.name != INSTALL_LOCK
+    ]
 
 
 def _tree(directory: Path) -> dict:
@@ -283,7 +327,7 @@ class TestInstall:
         wrong = replace(bundle, sha256="0" * 64)
         with pytest.raises(ToolDownloadIntegrityError):
             _install(tmp_path, wrong, archive, [])
-        assert list((tmp_path / "rules").iterdir()) == []
+        assert _contents(tmp_path / "rules") == []
 
     def test_a_second_install_does_not_download(self, tmp_path, bundle_zip):
         archive, bundle = bundle_zip
@@ -329,7 +373,7 @@ class TestTheInstallerChecksItsOwnExtraction:
         bundle = _pinned(archive)
         with pytest.raises(ToolDownloadIntegrityError, match="pinned contents"):
             _install(tmp_path, bundle, archive, [])
-        assert list((tmp_path / "rules").iterdir()) == []
+        assert _contents(tmp_path / "rules") == []
 
     def test_a_changed_rule_file_leaves_the_installed_bundle_alone(
         self, tmp_path, bundle_zip
@@ -379,7 +423,7 @@ class TestOffline:
         message = str(refused.value)
         assert "are not installed" in message and "does not exist" in message
         assert "network access" in message and "ASH container image" in message
-        assert list((tmp_path / "rules").iterdir()) == []
+        assert _contents(tmp_path / "rules") == []
 
     def test_a_pinned_bundle_needs_no_network(self, tmp_path, bundle_zip):
         archive, bundle = bundle_zip
@@ -387,6 +431,242 @@ class TestOffline:
         calls = []
         assert _install(tmp_path, bundle, archive, calls, download=_offline(calls))
         assert calls == [] and (final / "wa-Security-Pillar.guard").is_file()
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ssl.SSLEOFError(8, "EOF occurred in violation of protocol"),
+            ssl.SSLError(1, "tlsv1 alert internal error"),
+            socket.gaierror(-2, "Name or service not known"),
+            ConnectionResetError(104, "Connection reset by peer"),
+            TimeoutError("timed out"),
+        ],
+        ids=["tls eof", "tls alert", "name resolution", "reset", "timeout"],
+    )
+    def test_a_failure_on_the_wire_is_the_networks(self, tmp_path, bundle_zip, error):
+        """A TLS error raised while the body downloads, or a name that does not
+        resolve, is an OSError but neither a URLError nor a ConnectionError; it
+        was told as a local failure, with the free-space remedy."""
+        archive, bundle = bundle_zip
+
+        # ``mode`` as the real helper takes it, so the stand-in is called the way
+        # the installer calls the helper and raises the wire error it is given.
+        def dropped(
+            url, destination, rename_to=None, expected_sha256=None, *, mode=None
+        ):
+            raise error
+
+        with pytest.raises(RulesBundleUnavailable) as refused:
+            _install(tmp_path, bundle, archive, [], download=dropped)
+        message = str(refused.value)
+        assert "network access" in message and "ASH container image" in message
+        assert "free space" not in message, message
+        assert rules_bundles._is_network_failure(error) is True
+
+    def test_a_local_failure_writing_the_archive_is_not_the_networks(self):
+        """The control: a full disk or a refused write is still local."""
+        for error in (
+            PermissionError(errno.EACCES, "Permission denied"),
+            OSError(errno.ENOSPC, "No space left on device"),
+        ):
+            assert rules_bundles._is_network_failure(error) is False, error
+
+
+class _OsWithoutRename:
+    """The module's ``os`` with ``replace`` refusing, and nothing else changed.
+
+    Bound onto the module under test only, so the interpreter's own ``os``
+    (and every other module's) keeps working while the test runs.
+    """
+
+    def __init__(self, error: OSError):
+        self._error = error
+
+    def replace(self, src, dst):
+        raise self._error
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+class _OsRefusingTheRenameInto(_OsWithoutRename):
+    """``replace`` refuses only a rename whose destination is ``final``: the
+    move-aside of the old bundle succeeds, the rename of the new one fails, and
+    the move back (destination ``final`` again) is let through so the recovery
+    can be read; every other rename is the real one."""
+
+    def __init__(self, final: Path, error: OSError):
+        super().__init__(error)
+        self._final = Path(final)
+        self._refused = False
+
+    def replace(self, src, dst):
+        if Path(dst) == self._final and not self._refused:
+            self._refused = True
+            raise self._error
+        return os.replace(src, dst)
+
+
+class TestALocalFailureIsTheDocumentedRefusal:
+    """Every local failure of the install is a RulesBundleUnavailable naming the
+    remedy, as the docstring promises: the lock take and the two renames used
+    to let the raw OSError out, past the conversion the mkdir and mkdtemp had."""
+
+    @contextmanager
+    def _refused_lock(self, path, *, timeout=None):
+        raise PermissionError(errno.EACCES, "Permission denied", str(path))
+        yield  # pragma: no cover - the generator shape contextmanager needs
+
+    def test_a_lock_that_cannot_be_opened(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        with (
+            patch(
+                "automated_security_helper.utils.file_lock.exclusive_lock",
+                self._refused_lock,
+            ),
+            pytest.raises(RulesBundleUnavailable) as refused,
+        ):
+            _install(tmp_path, bundle, archive, [])
+        message = str(refused.value)
+        assert "install lock" in message and "could not be opened" in message
+        assert RULES_DIR_ENV in message and "Permission denied" in message
+        assert isinstance(refused.value.__cause__, PermissionError)
+        assert _contents(tmp_path / "rules") == []
+
+    def test_a_lock_held_too_long_names_the_other_install(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+
+        @contextmanager
+        def held_elsewhere(path, *, timeout=None):
+            raise TimeoutError(f"the lock on {path} was held for 30 seconds")
+            yield  # pragma: no cover
+
+        with (
+            patch(
+                "automated_security_helper.utils.file_lock.exclusive_lock",
+                held_elsewhere,
+            ),
+            pytest.raises(RulesBundleUnavailable, match="another ASH process"),
+        ):
+            _install(tmp_path, bundle, archive, [])
+        assert _contents(tmp_path / "rules") == []
+
+    def test_the_real_wait_on_a_held_lock_ends_in_the_shape_the_installer_reads(
+        self, tmp_path, bundle_zip
+    ):
+        """The control for the stubbed cases around it. The installer tells a held
+        lock from a kernel timeout by the TimeoutError's missing errno, so this
+        runs file_lock's own wait against a lock really held on another
+        descriptor and reads what the installer does with what it raises."""
+        fcntl = pytest.importorskip("fcntl")
+        from automated_security_helper.utils import file_lock
+
+        archive, bundle = bundle_zip
+        rules = tmp_path / "rules"
+        rules.mkdir()
+        real = file_lock.exclusive_lock
+        holder = os.open(rules / INSTALL_LOCK, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            with (
+                patch(
+                    "automated_security_helper.utils.file_lock.exclusive_lock",
+                    lambda path, *, timeout=None: real(path, timeout=0.2),
+                ),
+                pytest.raises(
+                    RulesBundleUnavailable, match="another ASH process"
+                ) as refused,
+            ):
+                _install(tmp_path, bundle, archive, [])
+        finally:
+            os.close(holder)
+        cause = refused.value.__cause__
+        assert isinstance(cause, TimeoutError) and cause.errno is None, repr(cause)
+        assert _contents(rules) == []
+
+    def test_a_kernel_timeout_opening_the_lock_is_not_another_install(
+        self, tmp_path, bundle_zip
+    ):
+        """An open on a hung network mount raises TimeoutError WITH errno
+        ETIMEDOUT; file_lock's own wait raises one with no errno. Only the
+        latter means another ASH process holds the lock, so the kernel's reads
+        as the lock file that could not be opened, with the reachability remedy."""
+        archive, bundle = bundle_zip
+
+        @contextmanager
+        def hung_mount(path, *, timeout=None):
+            raise TimeoutError(errno.ETIMEDOUT, "Connection timed out", str(path))
+            yield  # pragma: no cover
+
+        with (
+            patch(
+                "automated_security_helper.utils.file_lock.exclusive_lock",
+                hung_mount,
+            ),
+            pytest.raises(RulesBundleUnavailable) as refused,
+        ):
+            _install(tmp_path, bundle, archive, [])
+        message = str(refused.value)
+        assert "could not be opened" in message, message
+        assert "another ASH process" not in message, message
+        assert _contents(tmp_path / "rules") == []
+
+    def test_a_rename_into_place_that_fails(self, tmp_path, bundle_zip, monkeypatch):
+        archive, bundle = bundle_zip
+        monkeypatch.setattr(
+            rules_bundles,
+            "os",
+            _OsWithoutRename(PermissionError(errno.EACCES, "Permission denied")),
+        )
+        with pytest.raises(RulesBundleUnavailable) as refused:
+            _install(tmp_path, bundle, archive, [])
+        message = str(refused.value)
+        assert "could not be moved into place" in message, message
+        assert RULES_DIR_ENV in message
+        assert _contents(tmp_path / "rules") == [], "the staging is cleaned up"
+
+    def test_a_bundle_in_place_that_cannot_be_moved_aside(
+        self, tmp_path, bundle_zip, monkeypatch
+    ):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        before = _tree(final)
+        monkeypatch.setattr(
+            rules_bundles,
+            "os",
+            _OsWithoutRename(PermissionError(errno.EACCES, "Permission denied")),
+        )
+        with pytest.raises(RulesBundleUnavailable) as refused:
+            _install(tmp_path, bundle, archive, [], force=True)
+        message = str(refused.value)
+        assert "could not be moved aside" in message, message
+        assert _tree(final) == before, "the rules in place are left as they were"
+        assert _leftovers(tmp_path / "rules") == []
+
+    def test_a_failed_rename_into_place_puts_the_old_rules_back(
+        self, tmp_path, bundle_zip, monkeypatch
+    ):
+        """The move-aside succeeds and the rename of the new bundle into place
+        fails: the old bundle was already removed, so a rules root with no
+        bundle under the final name was left where the docstring promised the
+        rules in place would stay. The aside is kept until the new bundle is in
+        place and moved back on a failed rename."""
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        before = _tree(final)
+        monkeypatch.setattr(
+            rules_bundles,
+            "os",
+            _OsRefusingTheRenameInto(final, PermissionError(errno.EACCES, "denied")),
+        )
+        with pytest.raises(RulesBundleUnavailable) as refused:
+            _install(tmp_path, bundle, archive, [], force=True)
+        message = str(refused.value)
+        assert "could not be moved into place" in message, message
+        assert "were moved back" in message, message
+        assert final.is_dir(), "the final name holds a bundle again"
+        assert _tree(final) == before, "the rules in place are the old ones"
+        assert _leftovers(tmp_path / "rules") == []
 
 
 class TestVerify:
@@ -606,6 +886,28 @@ class TestRefusedArchiveEntriesInBothInstallers:
     def test_the_script_refuses_an_unsafe_member_name(self, tmp_path):
         archive = _zip(tmp_path / "b.zip", {"output/bad name.guard": "x"})
         with zipfile.ZipFile(archive) as z, pytest.raises(SystemExit, match="unsafe"):
+            _script()._bundle_members(z, REAL)
+
+    def test_two_names_that_differ_only_in_case_are_refused_by_both(self, tmp_path):
+        # A case-insensitive filesystem (macOS, Windows) would write the second over
+        # the first, so extract_bundle folds case before it compares names. The image's
+        # script has to refuse the same archive, or the two installers disagree about
+        # which archives are acceptable.
+        archive = _zip(
+            tmp_path / "b.zip",
+            {
+                "output/Rules.guard": "rule A { }\n",
+                "output/rules.guard": "rule B { }\n",
+            },
+        )
+        staging = tmp_path / "s"
+        staging.mkdir()
+        with pytest.raises(ToolDownloadIntegrityError, match="two members"):
+            extract_bundle(archive, REAL, staging)
+        with (
+            zipfile.ZipFile(archive) as z,
+            pytest.raises(SystemExit, match="two members"),
+        ):
             _script()._bundle_members(z, REAL)
 
     def test_the_total_size_cap_is_enforced_on_bytes_read(self, tmp_path, monkeypatch):

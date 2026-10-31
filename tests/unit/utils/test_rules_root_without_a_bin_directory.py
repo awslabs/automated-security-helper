@@ -198,7 +198,11 @@ class TestCfnGuardScanner:
         reason = scanner.dependency_unavailable_reason
         assert RULES_DIR_ENV in reason
         assert "ASH_BIN_PATH" in reason
-        assert reason in scanner.errors
+        # Recorded once, by the ERROR log line the base class appends to
+        # self.errors with its "(cfn-guard) " prefix; the bare element this test
+        # looked for was the second record an earlier tip appended beside it.
+        recorded = [e for e in scanner.errors if reason in e]
+        assert len(recorded) == 1, scanner.errors
 
     def test_selecting_the_rules_raises_the_bundle_error(self, no_rules_directory):
         scanner = _scanner(no_rules_directory)

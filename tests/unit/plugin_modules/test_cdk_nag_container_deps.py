@@ -45,11 +45,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
     _cdk_extra_requirements_from_metadata,
 )
 
+pytestmark = pytest.mark.unit
+
 # The packages the "cdk" extra actually exists to install. Names only -- the
 # version bounds are asserted against metadata in TestCdkExtraResolution rather
 # than duplicated here, so bumping a bound does not require editing this file.
-pytestmark = pytest.mark.unit
-
 _REAL_CDK_PACKAGES = ("aws-cdk-lib", "cdk-nag", "constructs")
 
 
@@ -696,6 +696,14 @@ class TestCdkExtraResolution:
         code. Falling back installs pins that may lag pyproject.toml by a bound,
         which is loud, recoverable, and separately guarded by
         ``test_fallback_matches_installed_metadata``.
+
+        The declared requirements are stubbed at ``_requirements_declared``, the
+        seam the reader goes through for a located name: it reads the
+        requirements off the distribution object that ships this module and
+        falls back to ``requires(name)`` only when no object of that name is
+        found. Stubbing ``requires`` alone no longer reaches the read where ASH
+        itself is installed (CI, a venue): the real distribution is located, its
+        real ``cdk`` extra is read, and the fallback never runs.
         """
         with patch.object(
             ash_install_module,
@@ -703,7 +711,9 @@ class TestCdkExtraResolution:
             return_value={"automated_security_helper": ["automated-security-helper"]},
         ):
             with patch.object(
-                ash_install_module, "requires", return_value=["requests>=2.28.0"]
+                ash_install_module,
+                "_requirements_declared",
+                return_value=[["requests>=2.28.0"]],
             ):
                 assert _cdk_extra_requirements() == _CDK_EXTRA_FALLBACK_REQUIREMENTS
 

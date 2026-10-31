@@ -33,8 +33,21 @@ import re
 import threading
 from typing import Any, Callable, TextIO
 
-#: A terminal sequence: Rich's color codes, a cursor move.
-_CSI = r"\x1b\[[0-9;?]*[ -/]*[@-~]"
+#: A CSI terminal sequence (Rich's color codes, a cursor move), in the full
+#: ECMA-48 grammar utils/error_text.py's CSI_CODES reads: parameter bytes
+#: "0"-"?" (colon-form SGR and private modes included), intermediate bytes
+#: " "-"/", one final byte "@"-"~". The same set on both sides, so a sequence
+#: error_text strips before a runner reads the line is one this check skips too.
+_CSI = r"\x1b\[[0-?]*[ -/]*[@-~]"
+
+#: An OSC sequence (a terminal hyperlink, a title), ended by BEL, ESC-backslash
+#: or U+009C; its body excludes all three so an unterminated one swallows
+#: nothing. A runner that drops terminal sequences before it reads a line
+#: drops these as well as color codes.
+_OSC = r"\x1b\][^\x1b\x07\x9c]*(?:\x07|\x1b\\|\x9c)"
+
+#: Any terminal sequence a runner drops before it reads a command.
+_TERMINAL_SEQUENCE = rf"(?:{_CSI}|{_OSC})"
 
 #: What a runner skips at a line start before it reads a command: whitespace other
 #: than a line break, and terminal sequences. Also a byte the checked buffer could
@@ -42,19 +55,26 @@ _CSI = r"\x1b\[[0-9;?]*[ -/]*[@-~]"
 #: whose bytes reach the buffer in two writes is checked in two parts, and its
 #: first part, emitted alone, must not end the lead, so such a byte leads the
 #: line too, which errs on the side of breaking a command.
-_LINE_LEAD = re.compile(rf"(?:[^\S\r\n]|{_CSI}|[\udc80-\udcff])*")
+_LINE_LEAD = re.compile(rf"(?:[^\S\r\n]|{_TERMINAL_SEQUENCE}|[\udc80-\udcff])*")
 
 #: The first character of a line start's command prefix, "::", with any terminal
 #: sequences between its two characters: Rich's highlighter colors parts of a
 #: word, and a runner that drops color codes before it reads the line reads the
 #: prefix whole. A line-start "##" with no name and "[" after it, a Markdown
 #: heading's, is no command.
-_LINE_START_PREFIX = re.compile(rf"(:)(?=(?:{_CSI})*:)")
+_LINE_START_PREFIX = re.compile(rf"(:)(?=(?:{_TERMINAL_SEQUENCE})*:)")
 
 #: The first "#" of "##" followed by a name and "[" anywhere in a line ("##[cmd]",
 #: "##vso["), with terminal sequences allowed anywhere in it, as the highlighter
 #: puts a code before a "[" it colors on its own: "##vso\x1b[0m\x1b[32m[".
-_NAMED_HASH_COMMAND = re.compile(rf"(\\*)#(?=(?:{_CSI})*#(?:[A-Za-z]|{_CSI})*\[)")
+#: The backslashes before the "#" are taken only from the start of their run
+#: (the lookbehind): a match attempted from inside a run reads the same "#"
+#: the attempt from its start read, so it can add nothing, and without the
+#: lookbehind a line holding a long run of backslashes and no command was
+#: scanned once per backslash, each scan walking the rest of the run.
+_NAMED_HASH_COMMAND = re.compile(
+    rf"(?<!\\)(\\*)#(?=(?:{_TERMINAL_SEQUENCE})*#(?:[A-Za-z]|{_TERMINAL_SEQUENCE})*\[)"
+)
 
 #: What a line start's command prefix has its first character written as.
 _LINE_START_ESCAPES = {":": "\\x3a"}
@@ -110,6 +130,32 @@ def _is_terminal(stream: Any) -> bool:
 
 def _under_a_command_reading_runner() -> bool:
     return any(os.environ.get(name) for name in COMMAND_READING_RUNNERS)
+
+
+class _NullStream:
+    """Where a wrap writes when its target is None.
+
+    sys.stdout and sys.stderr are None in a process started with no standard
+    streams (pythonw, a service with its descriptors closed). Rich's Console
+    discards its output then (its NULL_FILE); a wrap whose target lookup
+    returns None discards the same way instead of raising AttributeError from
+    None's missing ``write``.
+    """
+
+    encoding = "utf-8"
+    closed = False
+
+    def write(self, text: str) -> int:
+        return len(text)
+
+    def flush(self) -> None:
+        return None
+
+    def isatty(self) -> bool:
+        return False
+
+
+_NULL_STREAM = _NullStream()
 
 
 class CommandSafeStream:
@@ -168,6 +214,10 @@ class CommandSafeStream:
     @property
     def target(self) -> TextIO:
         target = self._target()
+        if target is None:
+            # A process with no standard stream: the writes are discarded, as
+            # Rich discards them, rather than raised from None.
+            return _NULL_STREAM
         return getattr(target, "rich_proxied_file", target)
 
     @property
@@ -194,18 +244,64 @@ class CommandSafeStream:
                 # the outer text instead of ahead of it or inside it.
                 self._pending.append(text)
                 return len(text)
-            if self._checked_buffer is not None:
-                # Bytes a buffer write left held land first, where they were
-                # written, not after this text.
-                self._checked_buffer._emit_held()
             self._mid_write = True
+            # Bytes a buffer write left held land first, where they were
+            # written, not after this text. Then a write deferred after the
+            # last drain's final empty check, before _mid_write was cleared,
+            # and still in _pending with no write under way to drain it: it
+            # was made before this text, and left to the drain below it would
+            # have landed after it. Their errors are held, not raised here:
+            # raised from the same try as this text's write, an error of the
+            # held bytes or of a stranded item lost the caller's own text,
+            # which on a checked wrap (sys.stderr in MCP server mode) is every
+            # message. The text lands, then the first held error.
+            stranded = self._land_ahead()
             try:
                 written = self._write_text(text)
             except BaseException:
                 self._end_write(failed=True)
                 raise
             self._end_write(failed=False)
+            if stranded is not None:
+                raise stranded
             return written
+
+    def _land_ahead(self) -> BaseException | None:
+        """Land what a write has to land ahead of its own text: the bytes a
+        buffer write left held, then the writes stranded in _pending. Returns
+        the first error either raised instead of raising it, so the write that
+        found them can still land its own text. Run with _mid_write set, under
+        the lock."""
+        held: BaseException | None = None
+        if self._checked_buffer is not None:
+            try:
+                self._checked_buffer._emit_tail()
+            except BaseException as exc:
+                held = exc
+        stranded = self._land_stranded()
+        return held if held is not None else stranded
+
+    def _land_stranded(self) -> BaseException | None:
+        """Drain the writes stranded in _pending ahead of a new write, returning
+        the first error one of them raised instead of raising it, so the write
+        that found them can still land its own text. Run with _mid_write set,
+        under the lock."""
+        try:
+            self._drain_pending()
+        except BaseException as exc:
+            return exc
+        return None
+
+    def writelines(self, lines: Any) -> None:
+        """Each line through ``write``, under one hold of the lock.
+
+        Defined here rather than left to ``__getattr__``: forwarded, the
+        target's own writelines wrote the lines past the check and left this
+        wrap's line state where the last ``write`` had put it.
+        """
+        with self._lock:
+            for line in lines:
+                self.write(line)
 
     def _write_text(self, text: str) -> int:
         """Check *text* from the line state and write it, committing the state
@@ -214,7 +310,13 @@ class CommandSafeStream:
         target = self.target
         if self._passes_as_is():
             written = target.write(text)
-            self._at_line_start = text.endswith(("\n", "\r"))
+            # The line state follows the checked model (_safe), not
+            # text.endswith(...): whitespace or a color code after a line
+            # break still starts the line, so a later checked write of this
+            # wrap (the target lookup can answer another stream) reads the
+            # state the check would have left. Read alone: the checked text
+            # itself is not written here.
+            self._at_line_start = self._line_state_after(text, self._at_line_start)
             return written
         safe, at_line_start = self._safe(text, self._at_line_start)
         target.write(safe)
@@ -228,17 +330,42 @@ class CommandSafeStream:
         and drained by this same loop. An item whose write raises does not
         strand the items after it: the drain goes on, and the first such
         error is raised once the list is empty. Stranded items would land
-        after some later write's text, or never."""
-        error: Exception | None = None
+        after some later write's text, or never. A KeyboardInterrupt raised
+        while an item lands is held the same way: the items after it still
+        land, and it is raised once the list is empty."""
+        error: BaseException | None = None
+        if self._checked_buffer is not None and any(
+            isinstance(item, str) for item in self._pending
+        ):
+            # Bytes a buffer write left held land first, where they were
+            # written, as write() has them land before its own text: once, at
+            # the start, ahead of every deferred item. Emitted only right
+            # before the first deferred TEXT item, the tail landed after the
+            # deferred BYTE items before it (b"caf\xc3" then [b"B2", "T"] wrote
+            # caf, B2, \xc3, T), neither where it was written nor joined to the
+            # rest of its character. A batch of byte items alone leaves the tail
+            # held for the next write, which joins it to the rest of its
+            # character. The emit is inside the hold-first-error scheme like
+            # every item: a tail write that raised, outside it, left every
+            # pending item stranded.
+            try:
+                self._checked_buffer._emit_tail()
+            except BaseException as exc:
+                error = exc
         while self._pending:
             item = self._pending.pop(0)
             try:
                 if isinstance(item, str):
+                    if self._checked_buffer is not None:
+                        # A text item deferred while this drain ran, after a
+                        # byte item landed: the tail is already out (above), so
+                        # this is a no-op unless a write since then held one.
+                        self._checked_buffer._emit_tail()
                     self._write_text(item)
                 elif self._checked_buffer is not None:
                     # Bytes defer only through the wrap's own buffer view.
                     self._checked_buffer._write_bytes(item, deferred=True)
-            except Exception as exc:
+            except BaseException as exc:
                 if error is None:
                     error = exc
         if error is not None:
@@ -279,19 +406,54 @@ class CommandSafeStream:
             pieces[index] = piece
         return "".join(pieces), at_line_start
 
+    @staticmethod
+    def _line_state_after(text: str, at_line_start: bool) -> bool:
+        """Whether the next text starts a line once *text* has been written: the
+        state :meth:`_safe` would leave, read without building the checked text.
+
+        For a write that passes as is (no runner reads this stream), only the
+        state is needed, and ``_safe`` was run whole to read its second value.
+        The answer is the same: a line break puts the following piece at a line
+        start, and a piece with anything past its lead (whitespace, terminal
+        sequences, escaped bytes) ends one. The hash-command substitution is
+        applied to the last piece first, as ``_safe`` applies it: a terminal
+        sequence whose intermediate bytes are ``##`` and whose final byte is
+        ``[`` is lead unbroken and text once its first ``#`` is escaped, so the
+        raw piece and the checked piece disagree on where the lead ends. The
+        colon escape puts non-lead text in the place of one non-lead character
+        past the lead, so it cannot move the answer.
+        """
+        pieces = _LINE_BREAK.split(text)
+        if len(pieces) > 1:
+            at_line_start = True
+        last = _NAMED_HASH_COMMAND.sub(_hash_command_broken, pieces[-1])
+        if at_line_start:
+            lead_match = _LINE_LEAD.match(last)
+            lead = lead_match.end() if lead_match else 0
+            if lead < len(last):
+                at_line_start = False
+        return at_line_start
+
     def retargeted(self, replace: Callable[[TextIO], TextIO]) -> "CommandSafeStream":
         """A new wrap, with this wrap's buffer rule, of what *replace* makes of
         this wrap's target (utils/log.py's Windows UTF-8 fallback, whose
         replacement detaches the stream it is given).
 
-        Under this wrap's lock: bytes a buffer write left held are written to
-        the old target first, so they are not dropped with it, and no write of
-        this wrap can land between that and the replacement. This wrap is not
-        usable after a *replace* that detached its target.
+        Under this wrap's lock: bytes a buffer write left held, and a write
+        stranded in _pending after the last drain (see ``write``), are written
+        to the old target first, so they are not dropped with it, and no write
+        of this wrap can land between that and the replacement. This wrap is
+        not usable after a *replace* that detached its target.
         """
         with self._lock:
             if self._checked_buffer is not None:
+                # _emit_held drains the stranded writes too.
                 self._checked_buffer._emit_held()
+            elif self._pending and not self._mid_write:
+                # As flush() lands a stranded write: left in the old wrap, it
+                # went with it.
+                self._mid_write = True
+                self._end_write(failed=False)
             new_target = replace(self.target)
         return CommandSafeStream(
             lambda: new_target, check_buffer=self._checked_buffer is not None
@@ -303,12 +465,33 @@ class CommandSafeStream:
                 # A flush right before an exit (os._exit after a stop) is the
                 # last chance for bytes a buffer write left held.
                 self._checked_buffer._emit_held()
+            elif self._pending and not self._mid_write:
+                # A write stranded in _pending after the last drain (see
+                # write()) lands on the flush too, so a flush right before an
+                # exit does not drop it.
+                self._mid_write = True
+                self._end_write(failed=False)
             flush = getattr(self.target, "flush", None)
             if flush is not None:
                 flush()
 
     def fileno(self) -> int:
         return self.target.fileno()
+
+    def __copy__(self) -> "CommandSafeStream":
+        """A fresh wrap of the same target, with the same buffer rule.
+
+        A shallow copy shared this wrap's lock, its list of deferred writes and
+        its checked buffer view (whose owner stayed this wrap), while text written
+        through the copy used the copy's own line state: two line models over one
+        stream, and a write on the copy drained items this wrap had deferred in
+        the middle of its own write, the order deferral exists to keep. A new wrap
+        has a line state, a lock and a pending list of its own, as a second wrap
+        of one stream always has.
+        """
+        return CommandSafeStream(
+            self._target, check_buffer=self._checked_buffer is not None
+        )
 
     @property
     def encoding(self) -> str:
@@ -319,7 +502,18 @@ class CommandSafeStream:
         # ``rich_proxied_file`` to find the real file under Live's redirect, and
         # would then write past the check. This stream does that lookup itself,
         # in ``target``.
-        if name.startswith("rich_"):
+        #
+        # Nor a private name: ``target`` reads ``self._target``, so on an
+        # instance that has no ``__dict__`` yet (copy.copy builds one and
+        # looks its attributes up before it fills them in) the lookup of
+        # ``_target`` came back here, read ``target`` again, and recursed
+        # until RecursionError. A private attribute is this wrap's own, never
+        # forwarded. Nor ``target`` itself: it is a property of this class,
+        # so a lookup of it reaches here only when the property raised
+        # AttributeError (``_target`` not set yet, on that same half-made
+        # instance), and reading ``self.target`` to forward it would recurse
+        # the same way.
+        if name == "target" or name.startswith(("rich_", "_")):
             raise AttributeError(name)
         return getattr(self.target, name)
 
@@ -367,12 +561,17 @@ class CommandSafeBuffer(io.BufferedIOBase):
                 owner._pending.append(given)
                 return len(given)
             owner._mid_write = True
+            # As in CommandSafeStream.write: a write stranded in _pending after
+            # the last drain lands first, and its error waits for these bytes.
+            stranded = owner._land_stranded()
             try:
                 written = self._write_bytes(given)
             except BaseException:
                 owner._end_write(failed=True)
                 raise
             owner._end_write(failed=False)
+            if stranded is not None:
+                raise stranded
             return written
 
     def _write_bytes(self, given: bytes, deferred: bool = False) -> int:
@@ -389,8 +588,18 @@ class CommandSafeBuffer(io.BufferedIOBase):
             flush_text()
         target = self._target_buffer()
         if owner._passes_as_is():
+            # The bytes an earlier checked write left held (an incomplete
+            # character's start) land first, where they were written, as their
+            # own bytes; left in the decoder they landed after these bytes, or
+            # never. The line state follows the checked model (_safe) over the
+            # decoded text, as the text side's pass-as-is path does.
+            tail = self._decoder.decode(b"", True)
+            self._decoder.reset()
+            if tail:
+                target.write(_encoded(tail))
             written = target.write(given)
-            owner._at_line_start = given.endswith((b"\n", b"\r"))
+            text = tail + codecs.decode(given, "utf-8", "surrogateescape")
+            owner._at_line_start = owner._line_state_after(text, owner._at_line_start)
             return written
         if deferred:
             # A deferred byte write, drained after the write it interrupted:
@@ -425,16 +634,24 @@ class CommandSafeBuffer(io.BufferedIOBase):
             return
         owner._mid_write = True
         try:
-            tail = self._decoder.decode(b"", True)
-            self._decoder.reset()
-            if tail:
-                safe, at_line_start = owner._safe(tail, owner._at_line_start)
-                self._target_buffer().write(_encoded(safe))
-                owner._at_line_start = at_line_start
+            self._emit_tail()
         except BaseException:
             owner._end_write(failed=True)
             raise
         owner._end_write(failed=False)
+
+    def _emit_tail(self) -> None:
+        """Write the held tail, checked from the line state, with _mid_write
+        already set and under the owner's lock: the body of :meth:`_emit_held`,
+        also run by the owner's drain before a deferred text item lands, so
+        the tail of the byte write that deferred it lands ahead of it."""
+        owner = self._owner
+        tail = self._decoder.decode(b"", True)
+        self._decoder.reset()
+        if tail:
+            safe, at_line_start = owner._safe(tail, owner._at_line_start)
+            self._target_buffer().write(_encoded(safe))
+            owner._at_line_start = at_line_start
 
     def flush(self) -> None:
         # Quiet on a target that is closed or detached, not on a closed view:
@@ -477,6 +694,9 @@ class CommandSafeBuffer(io.BufferedIOBase):
         return self._owner.isatty()
 
     def __getattr__(self, name: str) -> Any:
-        if name.startswith("rich_"):
+        # ``raw`` is the real buffer's unchecked writer: forwarded, it gave a
+        # caller of the checked view a byte path past the check. A private
+        # name is this view's own (see CommandSafeStream.__getattr__).
+        if name.startswith(("rich_", "_")) or name == "raw":
             raise AttributeError(name)
         return getattr(self._target_buffer(), name)

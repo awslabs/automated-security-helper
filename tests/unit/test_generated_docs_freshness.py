@@ -1759,7 +1759,14 @@ def _mcp_reference_module():
 
 
 def _progress_keys() -> set[str]:
-    """The keys of the get_scan_progress response that carries the most of them."""
+    """The keys of the widest get_scan_progress ANSWER the server returns.
+
+    The tool's refusals (a scan id never issued, a session that cannot read the
+    scan) are response dicts too, and each carries an exit code, an error
+    category, a context and the operation, so a refusal can hold more keys than
+    the answer itself. The answer is the shape that carries ``is_complete``;
+    the widest dict of that shape is the one the page's example is held to.
+    """
     import importlib.util
 
     sys.path.insert(0, str(SCRIPTS))
@@ -1771,7 +1778,13 @@ def _progress_keys() -> set[str]:
     assert spec is not None and spec.origin
     contracts = _mcp_contract.tool_contracts(Path(spec.origin).resolve().parent)
     response = contracts["get_scan_progress"].response
-    return max(({key for key, _ in each.keys} for each in response.dicts()), key=len)
+    answers = [
+        {key for key, _ in each.keys}
+        for each in response.dicts()
+        if any(key == "is_complete" for key, _ in each.keys)
+    ]
+    assert answers, "no get_scan_progress response dict carries is_complete"
+    return max(answers, key=len)
 
 
 @pytest.mark.unit

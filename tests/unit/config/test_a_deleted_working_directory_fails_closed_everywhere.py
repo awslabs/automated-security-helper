@@ -35,6 +35,31 @@ pytestmark = pytest.mark.unit
 
 AshConfig.model_rebuild()
 
+# The rule the module-location checks below cite, quoted once from the trust
+# model's ``ash_plugin_modules`` row (docs/content/concepts/trust-model.md, the
+# "What each tier may set" table). The docstrings name this constant instead
+# of a line number, which moves with every edit of that page.
+_CHECKOUT_RULE = (
+    "Only ASH's own plugin modules and modules installed outside every git "
+    "checkout and the scanned directory. A third-party package in a virtual "
+    "environment inside a checkout counts as inside it."
+)
+
+
+def test_the_quoted_checkout_rule_is_the_trust_models_own_sentence():
+    """The docstrings below quote the rule rather than cite a line number, and a
+    copied sentence goes stale as silently as a number moves, so the page is
+    read: the sentence is still there, in the ``ash_plugin_modules`` row."""
+    page = (
+        Path(__file__).resolve().parents[3]
+        / "docs"
+        / "content"
+        / "concepts"
+        / "trust-model.md"
+    )
+
+    assert _CHECKOUT_RULE in page.read_text(encoding="utf-8"), page
+
 
 def test_no_scan_root_is_no_scanned_tree():
     """The premise the no-root branch rests on, measured: scanned_trees(None)
@@ -845,8 +870,8 @@ def _foreign_checkout_module(tmp_path, monkeypatch, name):
 def _checkout_refusal(checkout, name):
     """The entry a scan of a tree gives a module installed in a git checkout
     other than the scanned one: the module's file, then the checkout that
-    holds it. The rule is the one docs/content/docs/configuration-guide.md:1036
-    states for ``ash_plugin_modules``."""
+    holds it. The rule is the trust model's ``ash_plugin_modules`` row
+    (``_CHECKOUT_RULE``)."""
     module_file = checkout / f"{name}.py"
     return (
         f"'{name}' (it is at {module_file.as_posix()}, and it is inside the git "
@@ -882,12 +907,10 @@ def test_a_foreign_checkout_module_is_refused_with_a_given_root(tmp_path, monkey
     installed in any git checkout, not only one inside the scanned tree, so an
     upload naming a module importable from a checkout OUTSIDE the upload's
     root is refused, and the refusal names the module and the checkout that
-    holds it. That is the rule of docs/content/docs/configuration-guide.md:1036:
-    "A virtualenv inside a git checkout counts as inside it, so a module
-    installed there is skipped too". The module is named inside the plugin
-    namespace: the confinement keeps a name outside it whatever its location,
-    so only an in-namespace name makes this a test of the location judgment.
-    The control below keeps a module outside every checkout."""
+    holds it. That is the trust model's ``ash_plugin_modules`` row
+    (``_CHECKOUT_RULE``: a package in a virtual environment inside a checkout
+    counts as inside it). The control below keeps a module outside every
+    checkout."""
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -918,9 +941,12 @@ def test_control_a_module_outside_every_checkout_is_kept_with_a_given_root(
     """The contrast that keeps the refusal cell above observable: the same
     construction and upload shape, naming a module installed outside every git
     checkout, is not refused, and the module is kept. The scan's rule refuses a
-    location inside a checkout (docs/content/docs/configuration-guide.md:1036),
-    not an installed module as such. The module is named inside the plugin
-    namespace, so the confinement judges where it resolves."""
+    location inside a checkout (``_CHECKOUT_RULE``), not an installed module as
+    such. The module is named inside the plugin namespace, so the confinement
+    judges where it resolves: the confinement keeps a name outside the
+    namespace whatever its location, so only an in-namespace name makes this
+    pair (the refusal above and this control) a test of the location
+    judgment."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     name = "zz9_outside_ctrl_mod_ash_plugins"
     _module_outside_every_checkout(tmp_path, monkeypatch, name)
@@ -959,11 +985,10 @@ def test_a_rooted_drop_is_worded_by_the_rule_that_made_it(tmp_path, monkeypatch)
     """A rooted load words each refusal by the rule that made it: a client
     upload's in-root module by the tree rule, and a module installed in a
     checkout outside the root by the checkout rule, naming the module's file
-    and the checkout that holds it. A scan of a tree refuses both
-    (docs/content/docs/configuration-guide.md:1036: "A virtualenv inside a git
-    checkout counts as inside it, so a module installed there is skipped
-    too"). The refusal never uses 'every checkout', the sentence of a load with
-    no root, which would claim a rule the given root does not apply."""
+    and the checkout that holds it. A scan of a tree refuses both (the trust
+    model's ``ash_plugin_modules`` row, ``_CHECKOUT_RULE``). The refusal never
+    uses 'every checkout', the sentence of a load with no root, which would
+    claim a rule the given root does not apply."""
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -1053,10 +1078,9 @@ def test_a_given_root_judges_client_modules_as_a_scan_of_it_would(
     the whole-load refusal that names the gone working directory is only for
     client content with no root at all, which the client-refusal cells above
     pin. A scan of a tree also refuses a module installed in a git checkout, a
-    virtualenv inside one included
-    (docs/content/docs/configuration-guide.md:1036), so the installed module
-    here is a stand-in placed where no checkout holds it, and the cell holds
-    wherever the interpreter's own virtualenv lives."""
+    virtualenv inside one included (``_CHECKOUT_RULE``), so the installed
+    module here is a stand-in placed where no checkout holds it, and the check
+    holds wherever the interpreter's own virtualenv lives."""
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -1088,10 +1112,10 @@ def test_a_given_root_judges_client_modules_as_a_scan_of_it_would(
     message = str(refused.value)
     assert f"{upload.name} came from an MCP client" in message, message
     assert "ash_plugin_modules" in message, message
-    # The in-root module is refused by the root's tree rule. The module
-    # installed outside the root and outside every checkout is not named, and
-    # the reason never claims the every-checkout rule, which the unnamed
-    # module disproves.
+    # Three checks: the in-root module is named with the scanned-tree reason;
+    # the module installed outside the root and outside every checkout is not
+    # named; and the text never says 'every checkout', the wording of a load
+    # with no root.
     assert "'zz_delivered_mod' (it resolves inside the scanned tree)" in message, (
         message
     )

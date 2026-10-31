@@ -40,8 +40,9 @@ pytestmark = pytest.mark.unit
 
 AshConfig.model_rebuild()
 
-#: The four grant lists a config file can write, and the one list that still
-#: restricts when it comes from a file that may not grant.
+#: The grant lists a config file can write (the environment list among them, a
+#: marker label and never a real library), and the one list that still restricts
+#: when it comes from a file that may not grant.
 GRANTS = {
     "project_name": "operator",
     "sandbox": {
@@ -49,6 +50,7 @@ GRANTS = {
         "network_scanners": ["grype"],
         "read_path_scanners": ["zizmor"],
         "env_scanners": ["zizmor"],
+        "environment": ["LD_PRELOAD=MARKER-not-a-real-library"],
     },
 }
 
@@ -96,6 +98,8 @@ def test_a_root_whose_walk_did_not_finish_keeps_no_sandbox_grant_of_its_own(
     assert list(sandbox.extra_read_paths) == []
     assert list(sandbox.read_path_scanners) == []
     assert list(sandbox.env_scanners) == []
+    # The environment list is taken away too, and the default list stands.
+    assert list(sandbox.environment) == list(AshConfig().sandbox.environment)
     # What only restricts stays: the written list still narrows the network.
     assert sandbox.network_limit == ["grype"]
 
@@ -191,3 +195,4 @@ def test_control_the_same_root_with_its_walk_finished_keeps_its_grants(
     assert list(sandbox.extra_read_paths) == ["/data"]
     assert list(sandbox.read_path_scanners) == ["zizmor"]
     assert list(sandbox.env_scanners) == ["zizmor"]
+    assert list(sandbox.environment) == ["LD_PRELOAD=MARKER-not-a-real-library"]

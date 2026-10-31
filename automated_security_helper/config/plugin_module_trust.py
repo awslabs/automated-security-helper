@@ -1,15 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Which ``ash_plugin_modules`` entries a config file in the scanned tree may add.
+"""Which ``ash_plugin_modules`` entries a config file in the scanned tree or any
+git checkout may add.
 
 ASH imports every module ``ash_plugin_modules`` names into its own process. When the
-config was built from a file inside the scanned tree (``config/sandbox_grants.py``
-decides that), the entries it adds beyond the trusted list (the defaults, an
-operator config outside the tree, and ``--config-overrides``) are kept only if
-they name an installed module: one that ``importlib.util.find_spec`` locates
-outside the scanned tree and outside every git checkout (a virtualenv inside a
-checkout counts as inside it). An entry that is not importable, or whose spec
+config was built from a file inside the scanned tree or any git checkout
+(``config/sandbox_grants.py`` decides that), the entries it adds beyond the trusted
+list (the defaults, an operator config outside every checkout, and
+``--config-overrides``) are kept only if they name an installed module: one that ``importlib.util.find_spec``
+locates outside the scanned tree and outside every git checkout (a virtualenv inside
+a checkout counts as inside it). An entry that is not importable, or whose spec
 points into the tree or a checkout, is dropped with one warning naming
 ``ash_plugin_modules``. An entry
 outside the plugin namespace is kept, unimported, so the scan refuses it with exit
@@ -28,8 +29,9 @@ data to a remote service with the operator's credentials: ``ash_aws_plugins``'
 reporters send findings, from the ASH process and outside the scanner sandbox, and
 ``ash_snyk_plugins``' scanner sends the scanned source to Snyk with the operator's
 Snyk token. Their plugins are enabled by default, so naming the package is enough
-to send the data. An in-tree file's entry naming one of them, or a module inside
-one, is kept only when the trusted list names it or its package.
+to send the data. The entry of a file in the scanned tree or any git checkout that
+names one of them, or a module inside one, is kept only when the trusted list names
+it or its package.
 
 Each level of a dotted name is located without importing its parent packages
 (``_spec_without_importing``), so checking a name runs no code.
@@ -122,6 +124,7 @@ from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.sandbox_grants import WalkJudgment
     from automated_security_helper.plugins.loader import PluginModuleError
 
 
@@ -153,9 +156,16 @@ OFF_HOST_PLUGIN_PACKAGES: Tuple[str, ...] = tuple(OFF_HOST_PLUGIN_SENDS)
 
 
 def off_host_package(name: str) -> Optional[str]:
-    """The package of ``OFF_HOST_PLUGIN_PACKAGES`` that ``name`` is or is inside, or None."""
+    """The package of ``OFF_HOST_PLUGIN_PACKAGES`` that ``name`` is or is inside, or None.
+
+    Compared without regard to case: an import on a case-insensitive file system
+    with ``PYTHONCASEOK`` set loads the package's files under a differently
+    cased module name, and that name is still the off-host package.
+    """
+    folded = name.casefold()
     for package in OFF_HOST_PLUGIN_PACKAGES:
-        if name == package or name.startswith(package + "."):
+        lowered = package.casefold()
+        if folded == lowered or folded.startswith(lowered + "."):
             return package
     return None
 
@@ -301,8 +311,84 @@ def _own_package_dir() -> Optional[Path]:
     return Path(origin).resolve().parent if origin else None
 
 
+def _imported_package_dir() -> Optional[Path]:
+    """ASH's package directory under the name Python imported it through.
+
+    ``_own_package_dir`` resolves links, but the interpreter reaches every
+    module of an install whose package directory is itself a link
+    (``flit install --symlink``, a hand-made link, a symlink forest) through
+    that link, so a location sits under the link and never under the resolved
+    directory. Not resolved here, and spelled the way ``_as_named`` spells a
+    location, so the two compare.
+    """
+    import automated_security_helper
+    from automated_security_helper.config.sandbox_grants import _as_named
+
+    origin = getattr(automated_security_helper, "__file__", None)
+    return _as_named(Path(origin).parent) if origin else None
+
+
+def _location_is_own(location: Path, own: Path, *, as_named: bool) -> bool:
+    """Whether a module *location* sits inside ASH's own package directory *own*.
+
+    The one place the own-module test is written, so the two callers cannot
+    drift in what they call a location of the package. It always asks where
+    the location resolves (``is_within``). With ``as_named`` it also asks
+    whether the location sits there under the name its entry gave, which a link
+    the scanned repository placed does not: such a link resolves into the
+    package but is named in the repository. That holds for a link to a
+    subdirectory and for a link to the package directory itself.
+
+    ``refusal_reason`` passes ``as_named=True``: its exemption is for code the
+    entry reaches as the installed package, never for a repository's link to
+    it. ``_is_ash_own_module`` passes ``as_named=False``: it runs only where no
+    tree is known (the fail-closed client refusal), keeps the resolved-only
+    test it has always used, and so behaves as before.
+    """
+    if not is_within(location, own):
+        return False
+    if not as_named:
+        return True
+    from automated_security_helper.config.sandbox_grants import (
+        _as_named,
+        _link_state,
+    )
+
+    # The closest unresolved parent that is the package directory decides, and
+    # it must be the directory itself. ``_named_within`` answers "is the package
+    # one of the location's parents", which a link to the whole package
+    # directory also satisfies (the check follows links), so an alias placed in
+    # a repository would read as the package. An exemption has to fail the other
+    # way: a link standing for the package is not the package. A link is what
+    # ``_link_state`` calls one: a symlink, or on Windows a junction, which
+    # ``Path.is_symlink`` does not see. A parent that cannot be examined is not
+    # shown to be the directory itself, so it is not exempt either. The one
+    # link that is the package is the path the running interpreter imported it
+    # through (``_imported_package_dir``): code it already runs from there is
+    # the package, not an alias a repository placed.
+    named = _as_named(location)
+    imported = _imported_package_dir()
+    for candidate in (named, *named.parents):
+        try:
+            if candidate.samefile(own):
+                state = _link_state(candidate)
+                return state is False or (state is True and candidate == imported)
+        except OSError:
+            continue
+    return False
+
+
 def _spec_locations(spec: ModuleSpec) -> List[Path]:
-    locations = [Path(p) for p in (spec.submodule_search_locations or [])]
+    locations: List[Path] = []
+    for entry in spec.submodule_search_locations or []:
+        location = Path(entry)
+        # A relative entry that names nothing on disk is a path hook's marker
+        # string (an editable install's finder uses one), not a place a module
+        # file lives; judged as a path it would be read against the working
+        # directory.
+        if not location.is_absolute() and not location.exists():
+            continue
+        locations.append(location)
     if spec.has_location and spec.origin:
         locations.append(Path(spec.origin))
     return locations
@@ -314,13 +400,24 @@ def _spec_without_importing(
     """The spec for ``name``, found without running any package's ``__init__``.
 
     A top-level name, or one whose parent is already imported, goes through
-    ``importlib.util.find_spec``, which then imports nothing. Otherwise the
+    ``importlib.util.find_spec``, which then imports nothing; a child of an
+    imported parent that is a plain module, not a package, has no spec. Otherwise the
     parent's spec gives the directories to search, and :func:`_find_spec_in` looks there
     directly. A package that adds to its ``__path__`` when imported, or a submodule
     only a custom finder can see, is then reported as not importable, which
     refuses it.
     """
     parent_name = name.rpartition(".")[0]
+    if (
+        parent_name in sys.modules
+        and name not in sys.modules
+        and not hasattr(sys.modules[parent_name], "__path__")
+    ):
+        # An imported parent that is a plain module has no ``__path__``, so
+        # ``find_spec`` would raise for the child. Answer as the not-yet-imported
+        # plain parent below does, so a name is judged the same whether or not
+        # the process has imported its parent.
+        return None
     if not parent_name or parent_name in sys.modules:
         return importlib.util.find_spec(name)
     if parent is None or not parent.submodule_search_locations:
@@ -364,8 +461,9 @@ def _is_ash_own_module(name: str) -> bool:
     Such a module is ASH's own code, which is already running, so even the
     fail-closed client refusal keeps it -- the exemption the module docstring
     states, located the way ``refusal_reason`` locates specs (importing
-    nothing). An unimportable name, or one with any location outside the
-    package, is not ASH's own.
+    nothing). An unimportable name, one with any location outside the
+    package, and one whose spec has no location at some level (a built-in or
+    frozen module, or one a finder serves without a file) is not ASH's own.
     """
     own = _own_package_dir()
     if own is None:
@@ -376,13 +474,34 @@ def _is_ash_own_module(name: str) -> bool:
         prefix = ".".join(parts[:depth])
         try:
             spec = _spec_without_importing(prefix, spec)
-        except (ImportError, ValueError):
+        except Exception:  # noqa: BLE001 -- a finder that fails has not located it
             spec = None
         if spec is None:
             return False
-        if not all(is_within(location, own) for location in _spec_locations(spec)):
+        locations = _spec_locations(spec)
+        if not locations or not all(
+            _location_is_own(location, own, as_named=False) for location in locations
+        ):
             return False
     return True
+
+
+def _judged_against_trees(
+    location: Path, scanned_root: Optional[Path], also_scanned: Sequence[Path]
+) -> "WalkJudgment":
+    """``scanned_tree_judgment`` of ``location`` against the scan root and every
+    ``also_scanned`` root, the first True verdict winning (an undecided True is
+    kept only when no root decides it)."""
+    judgment = scanned_tree_judgment(location, scanned_root)
+    if judgment.verdict and judgment.decided:
+        return judgment
+    for extra in also_scanned:
+        other = scanned_tree_judgment(location, extra)
+        if other.verdict and other.decided:
+            return other
+        if other.verdict and not judgment.verdict:
+            judgment = other
+    return judgment
 
 
 def refusal_reason(
@@ -390,8 +509,15 @@ def refusal_reason(
     scanned_root: Optional[Path],
     any_checkout: bool = False,
     root_judged: bool = False,
+    also_scanned: Sequence[Path] = (),
+    invalidate_caches: bool = True,
 ) -> Optional[str]:
-    """Why ``name`` may not be imported for a config in the scanned tree, or None.
+    """Why ``name`` may not be imported for a config in the scanned tree or any git
+    checkout, or None.
+
+    ``invalidate_caches`` drops the import system's caches before the lookup.
+    A caller that judges a list of names drops them once itself and passes
+    False, instead of once per name.
 
     Imports nothing that is not already imported, so a refused name runs no code.
     A None ``scanned_root`` (no scanned tree) leaves the membership test its
@@ -406,7 +532,24 @@ def refusal_reason(
     which such a load declared it does not have. For a scan of a tree (a root,
     neither ``root_judged`` nor ``any_checkout``), a location inside any other
     checkout is refused too, with the reason ``scanned_tree_reason`` gives.
+    ``also_scanned`` are the other roots whose trees the load counts as
+    scanned (``resolve_config``'s ``also_scanned``, the results' repository
+    for ``ash report``); a location inside one of their trees is refused as a
+    location inside the scan root's is.
+
+    ASH's own package is exempt: code inside the running package is already
+    running. The exemption holds for a location that sits inside the package
+    AS NAMED (``_named_within``), not merely one that resolves there: an entry
+    whose spec sits in the scanned tree and reaches the installed package
+    through a link the repository placed is judged by where it sits, under the
+    module name the tree gave it.
     """
+    # The scan's loader drops the import system's caches before it imports
+    # (plugins.loader), so a long-lived process (the MCP server) finds a module
+    # installed since the process started. This lookup does the same, or it
+    # would refuse a module the scan then imports.
+    if invalidate_caches:
+        importlib.invalidate_caches()
     own = _own_package_dir()
     parts = name.split(".")
     spec: Optional[ModuleSpec] = None
@@ -414,14 +557,23 @@ def refusal_reason(
         prefix = ".".join(parts[:depth])
         try:
             spec = _spec_without_importing(prefix, spec)
-        except (ImportError, ValueError):
+        except Exception:  # noqa: BLE001 -- a finder that fails has not located it
             spec = None
         if spec is None:
             return "it is not importable from the installed environment"
-        for location in _spec_locations(spec):
-            if own is not None and is_within(location, own):
+        locations = _spec_locations(spec)
+        if not locations:
+            # Nothing to judge: a module with no file location (built in,
+            # frozen, or served by a finder) cannot be shown to sit outside
+            # the scanned tree, so it is refused rather than kept unjudged.
+            return (
+                "it has no file location to check, and a module that cannot "
+                "be placed is refused"
+            )
+        for location in locations:
+            if own is not None and _location_is_own(location, own, as_named=True):
                 continue
-            tree_judgment = scanned_tree_judgment(location, scanned_root)
+            tree_judgment = _judged_against_trees(location, scanned_root, also_scanned)
             if tree_judgment.verdict:
                 if not tree_judgment.decided:
                     # The fail-closed answer of a walk that never finished:
@@ -442,8 +594,17 @@ def refusal_reason(
                         "decided (the walk of its location stopped before "
                         "the end), and an undecided location is refused"
                     )
+                if tree_judgment.client_delivered:
+                    # True here came from the client-supplied arm: the location
+                    # sits in no tree the walk found, so no tree is named.
+                    return "it is a file an MCP client delivered"
                 if root_judged:
                     return "it resolves inside the given root's trees"
+                if any_checkout:
+                    # No root at all: the decision came from a mark the host set
+                    # or from a file a client delivered, and the load declared
+                    # it has no scanned tree to name.
+                    return "it resolves inside a tree the scanned party controls"
                 return "it resolves inside the scanned tree"
             if any_checkout:
                 judgment = checkout_judgment(location)
@@ -556,6 +717,7 @@ def confine_plugin_modules(
     undecided_membership: bool,
     outside_membership: bool = False,
     source: Optional[UntrustedSource] = None,
+    also_scanned: Sequence[Path] = (),
 ) -> None:
     """Drop the entries of ``config.ash_plugin_modules`` an in-tree file may not add.
 
@@ -568,6 +730,10 @@ def confine_plugin_modules(
             trusted list, the same way the sandbox overrides are.
         scanned_root: The scan root; the trees it is checked against are
             ``path_trust.in_scanned_tree``'s.
+        also_scanned: Other roots whose trees the load counts as scanned
+            (``resolve_config``'s ``also_scanned``: the results' repository for
+            ``ash report``). A module location inside one of their trees is
+            refused as one inside the scan root's trees is.
         in_tree: The config files inside the tree, named in the warning.
         environment_paths: Those of them the environment chose, named
             ``<value>`` (``sandbox_grants.described``).
@@ -672,14 +838,31 @@ def confine_plugin_modules(
     # load declared it does not have. Loop-invariant -- no entry changes it,
     # so it is computed once, not per name.
     root_judged = no_scanned_tree and (not rootless or given_root_membership)
+    rootless_checked = False
     if untrusted and rootless:
         # ASH's own modules keep the module docstring's exemption even here:
         # code inside the running package is already running, so refusing it
         # protects nothing, and the defaults name such modules routinely.
+        # The off-host packages are ASH's own modules too, but the own-module
+        # exemption never covers them: a client's config may not add a package
+        # that sends findings off the host unless the trusted list names it,
+        # the same exception the judged path applies below. A name outside the
+        # plugin namespace is refused without being located: locating it asks
+        # every meta-path finder about a name the scan never imports.
         outside = [
             f"'{shown.get(name, name)}'"
             for name in split_plugin_modules(getattr(config, "ash_plugin_modules", []))
-            if name not in trusted_names and not _is_ash_own_module(name)
+            if name not in trusted_names
+            and (
+                not _is_allowed_module_path(name)
+                or not _is_ash_own_module(name)
+                # A name under an off-host package the trusted list names is
+                # kept, as the judged path below keeps it.
+                or (
+                    (package := off_host_package(name)) is not None
+                    and package not in trusted_names
+                )
+            )
         ]
         if outside:
             from automated_security_helper.core.exceptions import (
@@ -701,11 +884,22 @@ def confine_plugin_modules(
                 "--ash-plugin-modules, --config-overrides or a config "
                 "file of the operator's."
             )
-        return
+        if named_modules_only:
+            return
+        # Every name passed, so none is judged again below. The list goes on to
+        # the carry of the operator's off-host packages, which a config that
+        # leaves them out may not turn off with no working directory either.
+        rootless_checked = True
     original_entries = list(getattr(config, "ash_plugin_modules", []) or [])
-    kept: List[str] = []
+    listed = split_plugin_modules(getattr(config, "ash_plugin_modules", []))
+    kept: List[str] = list(listed) if rootless_checked else []
     refused: List[str] = []
-    for name in split_plugin_modules(getattr(config, "ash_plugin_modules", [])):
+    # Once for the whole list: every name below is judged against the same
+    # import state, and the lookup of each would drop the caches again.
+    to_judge = [] if rootless_checked else listed
+    if not rootless_checked:
+        importlib.invalidate_caches()
+    for name in to_judge:
         # Kept for the scan's namespace refusal, which imports nothing and
         # refuses the scan with exit 3.
         if not _is_allowed_module_path(name):
@@ -731,11 +925,40 @@ def confine_plugin_modules(
             scanned_root,
             any_checkout=rootless,
             root_judged=root_judged,
+            also_scanned=also_scanned,
+            invalidate_caches=False,
         )
         if reason is None:
             kept.append(name)
         else:
             refused.append(f"'{shown.get(name, name)}' ({reason})")
+    # The operator's off-host plugin packages stay loaded whatever the config's
+    # own list says: a config the operator did not write may not turn off the
+    # operator's off-host reporters (config/reporter_trust.py), and a list that
+    # leaves their package out would, since a reporter whose module is not
+    # imported never runs. Their references come with them, so an entry the
+    # operator's file read from the environment stays named as it wrote it.
+    carried: List[str] = []
+    if not named_modules_only:
+        carried = [
+            name
+            for name in trusted_list
+            if off_host_package(name) is not None and name not in kept
+        ]
+        if carried:
+            kept.extend(carried)
+            trusted_shown = config_module_names(trusted_config)
+            ASH_LOGGER.warning(
+                shown_on_one_line(
+                    "Keeping the operator's off-host plugin modules "
+                    f"{', '.join(repr(trusted_shown.get(name, name)) for name in carried)}, "
+                    "which the configuration's own ash_plugin_modules leaves out: a "
+                    "configuration the operator did not write may not turn off the "
+                    "reporters that send findings off the host, and a list without "
+                    "their package would."
+                ),
+                extra=NO_MARKUP,
+            )
     if named_modules_only:
         # The merge loads the operator's modules, not the shards': the trusted
         # list, after any entry outside the namespace kept above for the refusal.
@@ -743,14 +966,19 @@ def confine_plugin_modules(
         # swapped, as in the drop path below.
         outside_names = [name for name in kept if not _is_allowed_module_path(name)]
         loaded = list(dict.fromkeys(outside_names + trusted_list))
+        # The trusted references are planned before anything is assigned: a
+        # trusted reference past the end of the trusted list refuses the carry,
+        # and a refusal after the swap left the config with the new list and
+        # none of the references that belong to it.
+        carried_references = _carried_module_references(trusted_config, loaded)
         if loaded != split_plugin_modules(getattr(config, "ash_plugin_modules", [])):
             reindex_plugin_module_references(config, original_entries, loaded)
             config.ash_plugin_modules = loaded
         # The entries are now the operator's, so the record and the import
         # log name each as the operator's file wrote it: its references
-        # come with them (_carry_trusted_module_references).
-        _carry_trusted_module_references(config, trusted_config, loaded)
-    if not refused:
+        # come with them (_carried_module_references).
+        _apply_carried_module_references(config, carried_references)
+    if not refused and not carried:
         return
     if not named_modules_only:
         # The list's environment references move WITH the kept entries: a drop
@@ -761,8 +989,19 @@ def confine_plugin_modules(
         # the list is swapped: it checks every reference first and changes nothing
         # when it refuses, so a refusal leaves the list and the references as they
         # were instead of the new list beside the old indices.
+        # The trusted references are planned first, for the reason the merge
+        # branch above gives: a refusal must come before the swap.
+        carried_references = (
+            _carried_module_references(trusted_config, kept, only=carried)
+            if carried
+            else None
+        )
         reindex_plugin_module_references(config, original_entries, kept)
         config.ash_plugin_modules = kept
+        if carried_references is not None:
+            _apply_carried_module_references(config, carried_references)
+    if not refused:
+        return
     # The names and paths are the repository's: the whole message is shown, once
     # and on one line, and not read as markup. A repr of a name would write its
     # controls as escapes the sinks then showed again.
@@ -864,10 +1103,16 @@ def confine_plugin_modules(
     )
 
 
-def _carry_trusted_module_references(
-    config: "AshConfig", trusted_config: "AshConfig", loaded: Sequence[str]
-) -> None:
-    """Carry the trusted base's ``ash_plugin_modules`` references onto ``config``.
+def _carried_module_references(
+    trusted_config: "AshConfig",
+    loaded: Sequence[str],
+    *,
+    only: Optional[Collection[str]] = None,
+) -> Dict[str, Any]:
+    """The trusted base's ``ash_plugin_modules`` references, moved to ``loaded``'s indices.
+
+    Reads the trusted config alone and changes nothing, so it can run before the
+    caller assigns anything: a refusal raises here, ahead of every assignment.
 
     With ``named_modules_only`` the list becomes the trusted base's, and the
     merge imports and records those entries: one the operator's file read from
@@ -875,52 +1120,129 @@ def _carry_trusted_module_references(
     (``config_module_names``) and written as the file wrote it in the merged
     results (``config_validator.record_of_config``), as a shard records its
     own. The references sit on the trusted config at the indices of ITS list,
-    so each is moved to the index its name holds in ``loaded``; an entry of
-    several comma-joined names gets one per kept piece, re-resolved to the
-    piece, as ``reindex_plugin_module_references`` does. The three lists move
-    together. References into other config places are not the list's and stay
-    where they are: ``cli/merge.py`` carries those at the write.
+    so each is moved to the index its name holds in ``loaded``, under the one
+    rule ``reindex_plugin_module_references`` applies to its own list
+    (``_remapped_module_reference_lists``): an entry of several comma-joined
+    names gets one per kept piece, re-resolved to the piece; a name two trusted
+    entries both hold is carried ONCE, from the first of them that a reference
+    names (else the first of them), so the record never holds two rewrites at
+    one index and a literal spelling before the read one does not swallow the
+    read one's reference; and a trusted reference
+    recorded at or past the end of the trusted list refuses the carry
+    (PluginModuleReferenceError, ``config`` unchanged), as the reindex refuses
+    it, because such a reference describes no entry and dropping or keeping it
+    are the two harms that docstring names. The three lists move together.
+    References into other config places are not the list's and stay where they
+    are: ``cli/merge.py`` carries those at the write.
+
+    ``only`` restricts the carry to the named pieces: the confinement carries
+    the operator's off-host packages into a list the config itself wrote, and
+    the config's own entries keep the references the load recorded for them.
     """
     entries = list(getattr(trusted_config, "ash_plugin_modules", None) or [])
-    new_index = {name: i for i, name in enumerate(loaded)}
-    for attribute in (
-        "_environment_references",
-        "_displayed_environment_references",
-        "_written_references",
-    ):
-        carried: List[Any] = []
-        for reference in getattr(trusted_config, attribute, None) or ():
-            path = tuple(reference.path)
-            if not (
-                len(path) >= 2
-                and path[0] == "ash_plugin_modules"
-                and isinstance(path[1], int)
-                and path[1] < len(entries)
-            ):
-                continue
-            entry = entries[path[1]]
-            pieces = split_plugin_modules([entry])
-            for piece in pieces:
-                index = new_index.get(piece)
-                if index is None:
-                    continue
-                new_path = ("ash_plugin_modules", index) + path[2:]
-                if attribute == "_written_references":
-                    moved = reference._replace(path=new_path)
-                    if pieces != [entry]:
-                        moved = moved._replace(resolved=piece, environment_part=piece)
-                else:
-                    moved = reference.moved_to_unknown_list(new_path)
-                    if pieces != [entry]:
-                        moved = replace(moved, resolved=piece, value=piece)
-                carried.append(moved)
-        if not carried:
+    new_index = {
+        name: i for i, name in enumerate(loaded) if only is None or name in only
+    }
+    sources = {
+        attribute: tuple(
+            reference
+            for reference in (getattr(trusted_config, attribute, None) or ())
+            if _names_a_plugin_module_entry(reference)
+        )
+        for attribute in _MODULE_REFERENCE_LISTS
+    }
+    referenced = {
+        tuple(reference.path)[1]
+        for references in sources.values()
+        for reference in references
+    }
+    # The entry a duplicated name is carried from: the first entry a reference
+    # names, else the first entry. The reindex keeps the first entry outright
+    # because its references were recorded against that very list; here the
+    # references are the trusted base's and a literal spelling may come first.
+    owner: Dict[str, int] = {}
+    pieces_of: Dict[int, List[str]] = {}
+    respelled: Dict[int, bool] = {}
+    for old, entry in enumerate(entries):
+        pieces = split_plugin_modules([entry])
+        pieces_of[old] = pieces
+        respelled[old] = pieces != [entry]
+        for piece in pieces:
+            holder = owner.get(piece)
+            if holder is None or (old in referenced and holder not in referenced):
+                owner[piece] = old
+    new_indices: Dict[int, List[int]] = {}
+    for old, pieces in pieces_of.items():
+        mine: List[int] = []
+        for piece in dict.fromkeys(pieces):
+            if owner[piece] == old and piece in new_index:
+                mine.append(new_index[piece])
+        new_indices[old] = mine
+    carried = _remapped_module_reference_lists(
+        sources,
+        new_indices,
+        lambda old, index: loaded[index] if respelled[old] else None,
+        described_entries=len(entries),
+    )
+    return carried
+
+
+def _apply_carried_module_references(
+    config: "AshConfig", carried: Dict[str, Any]
+) -> None:
+    """Append the references :func:`_carried_module_references` planned to ``config``."""
+    for attribute, moved in carried.items():
+        if not moved:
             continue
         held = getattr(config, attribute, None) or ()
         if attribute == "_written_references":
-            setattr(config, attribute, [*held, *carried])
+            setattr(config, attribute, [*held, *moved])
         else:
-            setattr(config, attribute, (*tuple(held), *carried))
+            setattr(config, attribute, (*tuple(held), *moved))
+
+
+def _carry_trusted_module_references(
+    config: "AshConfig",
+    trusted_config: "AshConfig",
+    loaded: Sequence[str],
+    *,
+    only: Optional[Collection[str]] = None,
+) -> None:
+    """Carry the trusted base's ``ash_plugin_modules`` references onto ``config``.
+
+    The plan (:func:`_carried_module_references`) is built whole before any list
+    on ``config`` is assigned, so a refusal leaves ``config`` as it was. A caller
+    that also swaps the list builds the plan first itself, so a refusal leaves
+    the list as it was too.
+    """
+    _apply_carried_module_references(
+        config, _carried_module_references(trusted_config, loaded, only=only)
+    )
+
+
+_MODULE_REFERENCE_LISTS = (
+    "_environment_references",
+    "_displayed_environment_references",
+    "_written_references",
+)
+
+
+def _names_a_plugin_module_entry(reference: Any) -> bool:
+    """Whether ``reference`` points into the ``ash_plugin_modules`` list."""
+    path = tuple(reference.path)
+    return (
+        len(path) >= 2 and path[0] == "ash_plugin_modules" and isinstance(path[1], int)
+    )
+
+
+def _referenced_module_entries(owner: Any) -> FrozenSet[int]:
+    """The ``ash_plugin_modules`` indices that ``owner``'s reference lists name."""
+    return frozenset(
+        tuple(reference.path)[1]
+        for attribute in _MODULE_REFERENCE_LISTS
+        for reference in (getattr(owner, attribute, None) or ())
+        if _names_a_plugin_module_entry(reference)
+    )
 
 
 def reindex_plugin_module_references(
@@ -962,6 +1284,7 @@ def reindex_plugin_module_references(
     text in the piece's place.
     """
     new_index = {name: i for i, name in enumerate(kept)}
+    referenced = _referenced_module_entries(config)
     seen: set[str] = set()
     new_indices: Dict[int, List[int]] = {}
     respelled: Dict[int, bool] = {}
@@ -977,7 +1300,12 @@ def reindex_plugin_module_references(
         for piece in pieces:
             if piece in seen:
                 continue
-            seen.add(piece)
+            # Only an entry that carries a reference claims its piece: a plain
+            # entry that repeats the name earlier must not take the place of
+            # the environment-read entry that follows it, or that entry's
+            # reference is dropped and the name is shown in clear.
+            if old in referenced:
+                seen.add(piece)
             if piece in new_index:
                 mine.append(new_index[piece])
         new_indices[old] = mine
@@ -1033,23 +1361,48 @@ def _remap_module_reference_lists(
     piece text a moved reference of a multi-piece entry re-resolves to, or
     None to keep the reference's own text. References into other config
     places are not the remap's and stay as they are.
+
+    The rebuild itself is ``_remapped_module_reference_lists``, which the
+    trusted-base carry (``_carry_trusted_module_references``) also applies to
+    the trusted config's lists, so the two movers share one rule.
+    """
+    sources = {
+        attribute: tuple(getattr(config, attribute, None) or ())
+        for attribute in _MODULE_REFERENCE_LISTS
+    }
+    moved_lists = _remapped_module_reference_lists(
+        sources, new_indices, piece_at, described_entries=described_entries
+    )
+    for attribute, rebuilt_list in moved_lists.items():
+        setattr(config, attribute, rebuilt_list)
+
+
+def _remapped_module_reference_lists(
+    sources: Mapping[str, Sequence[Any]],
+    new_indices: Mapping[int, Sequence[int]],
+    piece_at: Callable[[int, int], Optional[str]],
+    *,
+    described_entries: "Union[int, Literal['all']]",
+) -> Dict[str, Any]:
+    """Rebuild the reference lists in ``sources`` under the remap rule.
+
+    ``sources`` maps each of the three list names to the references it holds
+    now (``_remap_module_reference_lists`` passes a config's own lists; the
+    carry passes the trusted base's ``ash_plugin_modules`` references). The
+    result maps each NON-EMPTY source list to its rebuilt form: a tuple for
+    the two display lists, a list for the rewrites. Nothing is assigned here,
+    so a refusal leaves every caller's config exactly as it was. The rule is
+    ``_remap_module_reference_lists``'s docstring.
     """
     if described_entries != "all":
         # The whole check runs before any list is rebuilt, so a refusal
         # leaves the config exactly as it was: a half-moved config (displays
         # rebuilt, rewrites untouched) would be a state nothing documents.
-        for attribute in (
-            "_environment_references",
-            "_displayed_environment_references",
-            "_written_references",
-        ):
-            for reference in getattr(config, attribute, None) or ():
+        for attribute in _MODULE_REFERENCE_LISTS:
+            for reference in sources.get(attribute, None) or ():
                 path = tuple(reference.path)
-                if (
-                    len(path) >= 2
-                    and path[0] == "ash_plugin_modules"
-                    and isinstance(path[1], int)
-                    and path[1] >= described_entries
+                if _names_a_plugin_module_entry(reference) and (
+                    path[1] >= described_entries
                 ):
                     raise PluginModuleReferenceError(
                         f"ash_plugin_modules reference at index {path[1]} is "
@@ -1063,19 +1416,15 @@ def _remap_module_reference_lists(
     # together or not at all.
     moved_lists: Dict[str, Any] = {}
     for attribute in ("_environment_references", "_displayed_environment_references"):
-        references = tuple(getattr(config, attribute, ()) or ())
+        references = tuple(sources.get(attribute) or ())
         if not references:
             continue
         rebuilt = []
         for reference in references:
-            path = tuple(reference.path)
-            if not (
-                len(path) >= 2
-                and path[0] == "ash_plugin_modules"
-                and isinstance(path[1], int)
-            ):
+            if not _names_a_plugin_module_entry(reference):
                 rebuilt.append(reference)
                 continue
+            path = tuple(reference.path)
             old = path[1]
             for index in new_indices.get(old, ()):
                 moved = reference.moved_to_unknown_list(
@@ -1086,18 +1435,14 @@ def _remap_module_reference_lists(
                     moved = replace(moved, resolved=piece, value=piece)
                 rebuilt.append(moved)
         moved_lists[attribute] = tuple(rebuilt)
-    rewrites = list(getattr(config, "_written_references", None) or [])
+    rewrites = list(sources.get("_written_references") or [])
     if rewrites:
         rebuilt_rewrites = []
         for rewrite in rewrites:
-            path = tuple(rewrite.path)
-            if not (
-                len(path) >= 2
-                and path[0] == "ash_plugin_modules"
-                and isinstance(path[1], int)
-            ):
+            if not _names_a_plugin_module_entry(rewrite):
                 rebuilt_rewrites.append(rewrite)
                 continue
+            path = tuple(rewrite.path)
             old = path[1]
             if old not in new_indices:
                 # A dropped entry: its rewrite leaves with it (see the
@@ -1111,8 +1456,7 @@ def _remap_module_reference_lists(
                     moved = moved._replace(resolved=piece, environment_part=piece)
                 rebuilt_rewrites.append(moved)
         moved_lists["_written_references"] = rebuilt_rewrites
-    for attribute, rebuilt_list in moved_lists.items():
-        setattr(config, attribute, rebuilt_list)
+    return moved_lists
 
 
 def drop_plugin_module_references_past_the_list(
@@ -1257,7 +1601,10 @@ def replace_plugin_module_list(
 
     The old list is read from the config itself, so the index map cannot be
     derived from an edited list. An index outside the current list or named
-    twice raises ValueError before the list is assigned.
+    twice raises ValueError before the list is assigned. A ValueError from the
+    move (its check that each moved reference still describes the entry at its
+    new position) puts the previous list back before it propagates, so the
+    list and the references are left as they were.
     ``move_plugin_module_references`` stays public as the lower-level function
     this one calls with the map it builds.
     """
@@ -1275,10 +1622,15 @@ def replace_plugin_module_list(
                 "index would collapse to one map row with no error"
             )
         stated.add(index)
+    previous = config.ash_plugin_modules
     config.ash_plugin_modules = [old[i] for i in kept_old_indices] + list(added)
-    move_plugin_module_references(
-        config, {old_index: new for new, old_index in enumerate(kept_old_indices)}
-    )
+    try:
+        move_plugin_module_references(
+            config, {old_index: new for new, old_index in enumerate(kept_old_indices)}
+        )
+    except ValueError:
+        config.ash_plugin_modules = previous
+        raise
 
 
 def refuse_plugin_modules_a_scan_refuses(
@@ -1398,11 +1750,11 @@ def plugin_modules_by_trust(
     The operator's are ``operator_modules`` (``--ash-plugin-modules`` and
     ``ASH_PLUGIN_MODULES``) and the config's ``ash_plugin_modules`` entries that
     its recorded trusted list names: the defaults, an operator config outside
-    the tree, and ``--config-overrides``. A config with no trusted list recorded
-    was built only from the operator's files, so all of its entries are the
-    operator's. The rest came from a config file inside the scanned tree or one
-    an MCP client delivered, and passed ``confine_plugin_modules``. A module both
-    name is the operator's.
+    every checkout, and ``--config-overrides``. A config with no trusted list
+    recorded was built only from the operator's files, so all of its entries are
+    the operator's. The rest came from a config file inside the scanned tree or
+    any other git checkout, or one an MCP client delivered, and passed
+    ``confine_plugin_modules``. A module both name is the operator's.
 
     ``ScanExecutionEngine`` imports the second list inside
     ``ash_plugin_manager.untrusted_import``, so a later scan in the process that
@@ -1449,6 +1801,30 @@ def _off_host_bases(cls: type) -> Dict[str, type]:
     return bases
 
 
+def _off_host_classes_trusted(cls: type, trusted: Sequence[str]) -> bool:
+    """Whether every off-host class of ``cls.__mro__`` is covered by ``trusted``.
+
+    An off-host class is covered when a trusted name is its defining module or a
+    package around it, or when it is a base of a covered class (a trusted
+    module's class carries what it derives from). Every such class has to be
+    covered, not only the first one per package: a class that mixes in a second
+    class from another module of the same package sends what that class sends.
+    """
+    mro = getattr(cls, "__mro__", (cls,))
+    off_host = [
+        base
+        for base in mro
+        if off_host_package(getattr(base, "__module__", "") or "") is not None
+    ]
+    covered = {
+        id(inherited)
+        for base in off_host
+        if any(_within(getattr(base, "__module__", "") or "", name) for name in trusted)
+        for inherited in getattr(base, "__mro__", (base,))
+    }
+    return all(id(base) in covered for base in off_host)
+
+
 def drop_untrusted_off_host_plugins(
     config: Optional["AshConfig"],
     plugins: Mapping[str, Sequence[type]],
@@ -1461,9 +1837,10 @@ def drop_untrusted_off_host_plugins(
     config's ``_trusted_plugin_modules`` and ``operator_modules``) is that module
     or a package around it, or is an imported module that lists the class in its
     ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_CONVERTERS``. A class defined
-    elsewhere that derives from such a class (``_off_host_bases``) is kept under
-    the same terms, or when a trusted name is the base's defining module or a
-    package around it, for the base of each off-host package it derives from.
+    elsewhere that derives from such a class is kept under the same terms, or
+    when a trusted name is the defining module, or a package around it, of
+    every off-host class it derives from (``_off_host_classes_trusted``; a base
+    of a trusted module's class is covered with it).
     Every other class is kept. For a config ``resolve_config`` recorded no trusted
     list on, every file it was built from is the operator's, so its own
     ``ash_plugin_modules`` are the trusted names. The classes a scan is offered
@@ -1508,10 +1885,7 @@ def drop_untrusted_off_host_plugins(
                 not bases
                 or any(_within(module, name) for name in trusted)
                 or any(cls is entry for entry in listed)
-                or all(
-                    any(_within(base.__module__, name) for name in trusted)
-                    for base in bases.values()
-                )
+                or _off_host_classes_trusted(cls, trusted)
             ):
                 kept.append(cls)
                 continue

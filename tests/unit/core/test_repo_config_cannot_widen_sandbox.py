@@ -8,6 +8,7 @@ scanner would get, so a grant that survives anywhere between the file and the
 policy fails here. See config/sandbox_grants.py.
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from automated_security_helper.config.resolve_config import (
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.sandbox.policy import (
+    DEFAULT_ENVIRONMENT,
     SandboxRequirements,
     build_scanner_policy,
 )
@@ -140,6 +142,103 @@ def test_grants_from_command_line_overrides_are_kept(tmp_path):
     assert sandbox.network_scanners == ["grype"]
     assert sandbox.extra_read_paths == ["/opt/ca"]
     assert _network(sandbox, "grype", False, tmp_path) is True
+
+
+#: A repository config that tries to set variables in every sandboxed scanner. The
+#: values are markers: the entries are read, never run.
+ENVIRONMENT_CONFIG = """project_name: scanned
+sandbox:
+  mode: bwrap
+  environment:
+    - LD_PRELOAD=MARKER-not-a-real-library
+    - NODE_OPTIONS=MARKER-not-a-real-option
+"""
+
+
+def _passed(sandbox, tmp_path: Path, caller=None) -> dict:
+    """The environment a networked scanner would get under *sandbox*: the policy the
+    settings build, applied to the *caller*'s variables."""
+    results = tmp_path / "results"
+    results.mkdir(exist_ok=True)
+    policy = build_scanner_policy(
+        "checkov",
+        SandboxRequirements(network=True),
+        argv0="/bin/true",
+        source_dir=tmp_path,
+        output_dir=tmp_path,
+        results_dir=results,
+        scan_target=None,
+        cwd=None,
+        offline=False,
+        network_scanners=sandbox.network_scanners,
+        extra_read_paths=sandbox.extra_read_paths,
+        network_limit=sandbox.network_limit,
+        environment=sandbox.environment,
+    )
+    return policy.filter_env(caller or {})
+
+
+def test_an_environment_list_from_a_discovered_config_in_the_tree_is_ignored(
+    tmp_path, caplog
+):
+    """``LD_PRELOAD`` and ``NODE_OPTIONS`` in a scanner's environment run code in it,
+    so a config the scanned repository wrote must not set them."""
+    with caplog.at_level(logging.WARNING):
+        sandbox = resolve_config(source_dir=_repo(tmp_path, ENVIRONMENT_CONFIG)).sandbox
+
+    assert sandbox.environment == list(DEFAULT_ENVIRONMENT)
+    passed = _passed(sandbox, tmp_path, {"HTTP_PROXY": "http://proxy:3128"})
+    assert "LD_PRELOAD" not in passed
+    assert "NODE_OPTIONS" not in passed
+    # The default list still flows: the refusal drops the entries, not the setting.
+    assert passed["HTTP_PROXY"] == "http://proxy:3128"
+    named = set().union(*(_ignored_keys(r.getMessage()) for r in caplog.records))
+    assert "sandbox.environment" in named, caplog.text
+    # The warning names the setting, not what the repository wrote in it.
+    assert "MARKER" not in caplog.text
+
+
+def test_an_environment_list_from_an_explicit_config_in_the_tree_is_ignored(tmp_path):
+    source = tmp_path / "repo"
+    source.mkdir()
+    config = source / "ash.yaml"
+    config.write_text(ENVIRONMENT_CONFIG)
+
+    sandbox = resolve_config(config_path=config, source_dir=source).sandbox
+
+    assert sandbox.environment == list(DEFAULT_ENVIRONMENT)
+    assert "LD_PRELOAD" not in _passed(sandbox, tmp_path)
+
+
+def test_control_an_environment_list_from_a_config_outside_the_tree_is_kept(tmp_path):
+    """The same file outside every checkout is the operator's, and its entries reach
+    the scanner, so the refusals above are the confinement and not a dead path."""
+    source = tmp_path / "repo"
+    source.mkdir()
+    config = tmp_path / "trusted.yaml"
+    config.write_text(ENVIRONMENT_CONFIG)
+
+    sandbox = resolve_config(config_path=config, source_dir=source).sandbox
+
+    assert sandbox.environment == [
+        "LD_PRELOAD=MARKER-not-a-real-library",
+        "NODE_OPTIONS=MARKER-not-a-real-option",
+    ]
+    passed = _passed(sandbox, tmp_path)
+    assert passed["LD_PRELOAD"] == "MARKER-not-a-real-library"
+    assert passed["NODE_OPTIONS"] == "MARKER-not-a-real-option"
+
+
+def test_control_an_environment_list_from_command_line_overrides_is_kept(tmp_path):
+    sandbox = resolve_config(
+        source_dir=_repo(tmp_path, ENVIRONMENT_CONFIG),
+        config_overrides=["sandbox.environment=[MY_VAR]"],
+    ).sandbox
+
+    assert sandbox.environment == ["MY_VAR"]
+    passed = _passed(sandbox, tmp_path, {"MY_VAR": "mine", "LD_PRELOAD": "caller"})
+    assert passed["MY_VAR"] == "mine"
+    assert "LD_PRELOAD" not in passed
 
 
 def test_an_append_override_does_not_keep_the_repositorys_entries(tmp_path):
@@ -601,11 +700,19 @@ def test_a_settings_derived_network_need_is_granted_when_trusted_config_names_it
     )
 
 
-def test_detect_secrets_verification_from_the_repository_gets_no_network(tmp_path):
+def test_detect_secrets_verification_from_the_repository_gets_no_network(
+    tmp_path, monkeypatch
+):
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
         DetectSecretsScanner,
     )
+
+    # The later step asks for a network, which holds only online: offline mode
+    # removes the verification filter whatever its source, so a run with
+    # ASH_OFFLINE set (an offline-built image) would fail it for a reason
+    # unrelated to the sandbox rule under test.
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
 
     source = _repo(
         tmp_path,
@@ -643,25 +750,106 @@ def test_detect_secrets_verification_from_the_repository_gets_no_network(tmp_pat
     requirements = scanner.sandbox_requirements
     assert requirements.network is False
     assert requirements.network_requires_grant is True
+
+    # The other file a repository writes that carries the filter: its own
+    # `.secrets.baseline`, which `detect-secrets scan` writes the filter into.
+    # A repository whose config names no scan_settings gets its plugins and
+    # filters from that baseline. The scanner judges them as the repository's
+    # (the file is inside the scanned tree) and drops the verification filter,
+    # so it still asks for no network. Every step below reads the scanner's own
+    # answer; none hand-writes what it "would have" asked for.
+    with_baseline = _repo(
+        tmp_path / "baseline_case", "project_name: x\nsandbox:\n  mode: bwrap\n"
+    )
+    baseline = with_baseline / ".secrets.baseline"
+    baseline.write_text(
+        '{"results": {}, "plugins_used": [{"name": "AWSKeyDetector"}],'
+        ' "filters_used": [{"path":'
+        ' "detect_secrets.filters.common.is_ignored_due_to_verification_policies",'
+        ' "min_level": 2}]}'
+    )
+    config = resolve_config(source_dir=with_baseline)
+    scanner = DetectSecretsScanner(
+        context=PluginContext(
+            source_dir=with_baseline,
+            output_dir=with_baseline / "out",
+            work_dir=with_baseline / "out" / "work",
+            config=config,
+        ),
+        config=config.get_plugin_config(
+            plugin_type="scanner", plugin_name="detect-secrets"
+        ),
+    )
+    assert scanner._baseline_in_use()
+    # The baseline's settings were read (its plugin is the scanner's), and its
+    # verification filter was the one entry refused.
+    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+        "AWSKeyDetector"
+    ]
+    assert not any(
+        "verification" in str(item.path)
+        for item in scanner.config.options.scan_settings.filters_used
+    )
+    assert scanner.sandbox_requirements.network is False
+
+    # When the scanner does ask (the operator's own baseline, outside the tree,
+    # names the filter, and the sandbox is told to read it), the ask is a real
+    # one from the scanner, and bwrap still grants nothing: the repository's
+    # config cannot name detect-secrets in network_scanners (it is dropped by
+    # resolve_config, so the policy sees None), and a need declared with
+    # network_requires_grant gets a network only from an operator's grant.
+    operators = tmp_path / "operator.baseline"
+    operators.write_text(baseline.read_text())
+    repository_asks = _repo(
+        tmp_path / "second",
+        "project_name: x\nsandbox:\n  mode: bwrap\n  network_scanners: [detect-secrets]\n",
+    )
+    reading = [
+        "sandbox.mode=bwrap",
+        "sandbox.read_path_scanners=[detect-secrets]",
+        f"sandbox.extra_read_paths=[{tmp_path.as_posix()}]",
+    ]
+    verifying = _detect_secrets(repository_asks, reading, operators)
+    assert verifying._baseline_in_use()
+    asked = verifying.sandbox_requirements
+    assert asked.network is True
+    assert asked.network_requires_grant is True
+    sandbox = verifying.context.config.sandbox
+    assert sandbox.network_scanners is None
     results = tmp_path / "results"
     results.mkdir()
-    # What the scanner asked for before the repository's filter was refused.
-    asked = SandboxRequirements(network=True, network_requires_grant=True)
     policy = build_scanner_policy(
         "detect-secrets",
         asked,
         argv0="/bin/true",
-        source_dir=source,
+        source_dir=repository_asks,
         output_dir=tmp_path,
         results_dir=results,
         scan_target=None,
         cwd=None,
         offline=False,
-        network_scanners=config.sandbox.network_scanners,
-        extra_read_paths=config.sandbox.extra_read_paths,
-        network_limit=config.sandbox.network_limit,
+        network_scanners=sandbox.network_scanners,
+        extra_read_paths=sandbox.extra_read_paths,
+        network_limit=sandbox.network_limit,
     )
     assert policy.network is False
+    # Control: the same ask under the operator's own grant is honored, so the
+    # refusal above is the missing grant, not an ask the policy never reads.
+    granted = build_scanner_policy(
+        "detect-secrets",
+        asked,
+        argv0="/bin/true",
+        source_dir=repository_asks,
+        output_dir=tmp_path,
+        results_dir=results,
+        scan_target=None,
+        cwd=None,
+        offline=False,
+        network_scanners=["detect-secrets"],
+        extra_read_paths=sandbox.extra_read_paths,
+        network_limit=sandbox.network_limit,
+    )
+    assert granted.network is True
 
 
 def test_only_sandbox_overrides_are_replayed_onto_the_trusted_defaults(

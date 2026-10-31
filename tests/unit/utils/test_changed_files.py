@@ -6,17 +6,20 @@
 import logging
 import os
 import subprocess  # nosec B404
+import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 
+from automated_security_helper.utils import get_scan_set
 from automated_security_helper.utils.get_scan_set import get_changed_files
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.changed_files import (
     filter_results_to_changed_files,
 )
+from automated_security_helper.utils.finding_identity import CONVERTED_PATH_PROPERTY
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -24,6 +27,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Message1,
     PhysicalLocation,
     PhysicalLocation2,
+    PropertyBag,
     Region,
     Result,
     Run,
@@ -46,10 +50,11 @@ def _resolved_git(monkeypatch):
 
 
 def _diff_argv(base_ref: str) -> list[str]:
-    """The diff get_changed_files runs: NUL-separated names, none quoted, with
-    git_argv's options ahead of it and a trailing "--" so git reads the range
-    only as revisions (a working-tree file named like the range is not taken
-    in its place when the base ref is missing)."""
+    """The diff get_changed_files runs: NUL-separated names, none quoted, named
+    from the repository root whatever diff.relative says, with git_argv's options
+    ahead of it and a trailing "--" so git reads the range only as revisions (a
+    working-tree file named like the range is not taken in its place when the
+    base ref is missing)."""
     return [
         "git",
         "-c",
@@ -58,6 +63,8 @@ def _diff_argv(base_ref: str) -> list[str]:
         "core.hooksPath=/dev/null",
         "-c",
         "core.quotepath=false",
+        "-c",
+        "diff.relative=false",
         "diff",
         "--name-only",
         "-z",
@@ -446,3 +453,516 @@ class TestFilterResultsToChangedFiles:
     def test_none_results_returns_none(self):
         out = filter_results_to_changed_files(None, set(), Path("/tmp"))  # nosec B108
         assert out is None
+
+
+def _converted_result(uri: str, converted_path: str) -> Result:
+    """A result a scanner reported in a converted file, marked as the scanner
+    executor marks it (``mark_converted_results``): the ``converted_path`` property
+    holds the file's path relative to the converted root."""
+    result = _make_result(uri)
+    result.properties = PropertyBag()
+    setattr(result.properties, CONVERTED_PATH_PROPERTY, converted_path)
+    return result
+
+
+@pytest.mark.unit
+class TestFindingsInConvertedFiles:
+    """A finding in a converted file is placed by the source the converter read.
+
+    The converted file sits in the output directory, so its own path is never in
+    the changed set; before this every such finding was dropped, including those
+    from a notebook or archive that was in the diff, and nothing said so.
+    """
+
+    def test_a_converted_finding_whose_source_changed_is_kept(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "nb" / "analysis.ipynb").resolve()}
+        converted = tmp_path / "out" / "work" / "jupyter" / "analysis-converted.py"
+        results = _make_results_with_sarif(
+            [_converted_result(str(converted), "jupyter/analysis-converted.py")]
+        )
+
+        filtered = filter_results_to_changed_files(
+            results,
+            changed,
+            source_dir,
+            converted_sources={"jupyter/analysis-converted.py": "nb/analysis.ipynb"},
+        )
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    def test_a_converted_finding_whose_source_did_not_change_is_dropped(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        converted = tmp_path / "out" / "work" / "jupyter" / "analysis-converted.py"
+        results = _make_results_with_sarif(
+            [_converted_result(str(converted), "jupyter/analysis-converted.py")]
+        )
+
+        filtered = filter_results_to_changed_files(
+            results,
+            changed,
+            source_dir,
+            converted_sources={"jupyter/analysis-converted.py": "nb/analysis.ipynb"},
+        )
+
+        assert filtered.sarif.runs[0].results == []
+
+    def test_a_converted_finding_with_no_known_source_is_kept_and_said(
+        self, tmp_path, ash_warnings
+    ):
+        """Dropping it hid a finding whose notebook may have been in the diff."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        converted = tmp_path / "out" / "work" / "jupyter" / "analysis-converted.py"
+        results = _make_results_with_sarif(
+            [_converted_result(str(converted), "jupyter/analysis-converted.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+        assert any(
+            "1 finding(s) located in converted files" in message
+            for message in ash_warnings()
+        ), ash_warnings()
+
+    def test_a_finding_in_an_extracted_member_is_placed_by_its_archive(self, tmp_path):
+        """The archive converter records its extraction directory once, with a
+        trailing slash, for every member below it; a member's finding is placed by
+        the archive, which is what the diff can name."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        member = tmp_path / "out" / "work" / "archive" / "lib__bundle__zip" / "m.js"
+        results = _make_results_with_sarif(
+            [_converted_result(str(member), "archive/lib__bundle__zip/m.js")]
+        )
+        mapping = {"archive/lib__bundle__zip/": "lib/bundle.zip"}
+
+        unchanged = filter_results_to_changed_files(
+            results,
+            {(source_dir / "other.py").resolve()},
+            source_dir,
+            converted_sources=mapping,
+        )
+        assert unchanged.sarif.runs[0].results == []
+
+        results = _make_results_with_sarif(
+            [_converted_result(str(member), "archive/lib__bundle__zip/m.js")]
+        )
+        changed = filter_results_to_changed_files(
+            results,
+            {(source_dir / "lib" / "bundle.zip").resolve()},
+            source_dir,
+            converted_sources=mapping,
+        )
+        assert len(changed.sarif.runs[0].results) == 1
+
+    def test_a_files_own_entry_wins_over_its_directorys(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        member = tmp_path / "out" / "work" / "archive" / "a__zip" / "m.js"
+        results = _make_results_with_sarif(
+            [_converted_result(str(member), "archive/a__zip/m.js")]
+        )
+
+        filtered = filter_results_to_changed_files(
+            results,
+            {(source_dir / "own.js").resolve()},
+            source_dir,
+            converted_sources={
+                "archive/a__zip/": "a.zip",
+                "archive/a__zip/m.js": "own.js",
+            },
+        )
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+
+@pytest.mark.unit
+class TestLocationReadings:
+    """A URI is read as written and percent-decoded, and one that names no file
+    places the finding nowhere rather than failing the scan."""
+
+    def test_a_percent_encoded_uri_matches_the_file_it_names(self, tmp_path):
+        """checkov writes ``out(1)/x.tf`` as ``out%281%29/x.tf``."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "out(1)" / "x.tf").resolve()}
+        results = _make_results_with_sarif([_make_result("out%281%29/x.tf")])
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    def test_a_uri_spelled_with_a_literal_percent_still_matches(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "100%25" / "x.tf").resolve()}
+        results = _make_results_with_sarif([_make_result("100%25/x.tf")])
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="a Windows file name can hold a lone surrogate, so it resolves",
+    )
+    def test_a_uri_the_filesystem_cannot_name_keeps_the_finding(self, tmp_path):
+        """A record-form ``\\ud800`` reads back as a surrogate no POSIX name holds:
+        resolving it raised UnicodeEncodeError out of the filter and failed the
+        scanner whose SARIF named it."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        results = _make_results_with_sarif([_make_result("odd\\ud800name.py")])
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    def test_a_uri_holding_an_encoded_nul_keeps_the_finding(self, tmp_path):
+        """``%00`` decodes to a NUL no path holds; the literal reading is a name."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "a%00b.py").resolve()}
+        results = _make_results_with_sarif([_make_result("a%00b.py")])
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="a Windows file name is UTF-16; the byte-wise percent form is POSIX's",
+    )
+    def test_a_percent_encoded_non_utf8_name_matches_the_file_it_names(self, tmp_path):
+        """``Path.as_uri()`` spells a latin-1 ``secr\\xe9t.py`` as ``secr%E9t.py``;
+        decoded with ``replace`` that became ``secr\\ufffdt.py``, a name no file has,
+        so the finding was dropped though the file had changed."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        name = os.fsdecode(b"secr\xe9t.py")
+        changed = {(source_dir / name).resolve()}
+        results = _make_results_with_sarif(
+            [_make_result("secr%E9t.py"), _make_result("other.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        uris = [
+            result.locations[0].physicalLocation.root.artifactLocation.uri
+            for result in filtered.sarif.runs[0].results
+        ]
+        assert uris == ["secr%E9t.py"]
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="a Windows file name is UTF-16; the byte-wise percent form is POSIX's",
+    )
+    def test_a_percent_encoded_name_is_also_read_in_the_filesystem_encoding(
+        self, tmp_path, monkeypatch
+    ):
+        """On a host whose filesystem encoding is latin-1, git and the changed set
+        name the file ``secrét.py`` (U+00E9) while ``Path.as_uri()`` spelled the
+        byte as ``secr%E9t.py``; decoding it as UTF-8 with surrogateescape gave a
+        surrogate that names no file there, so the finding was still dropped. The
+        bytes are read through the codec git's names are decoded with too, here
+        stood in by latin-1."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        name = "secrét.py"
+        changed = {(source_dir / name).resolve()}
+        monkeypatch.setattr(
+            get_scan_set, "_git_output_codec", lambda: ("latin-1", "strict")
+        )
+        results = _make_results_with_sarif(
+            [_make_result("secr%E9t.py"), _make_result("other.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        uris = [
+            result.locations[0].physicalLocation.root.artifactLocation.uri
+            for result in filtered.sarif.runs[0].results
+        ]
+        assert uris == ["secr%E9t.py"]
+
+    def test_a_utf8_name_on_a_latin1_host_matches_the_changed_set(
+        self, tmp_path, monkeypatch
+    ):
+        """``secr%C3%A9t.py`` is valid UTF-8, so it decodes to ``secrét.py`` with no
+        surrogate. On a host whose filesystem encoding is latin-1 the same file's
+        bytes are named ``secrÃ©t.py`` by git and so by the changed set, and a
+        re-read limited to readings that hold a surrogate never produced that
+        spelling: the finding of a changed file was dropped."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "secrÃ©t.py").resolve()}
+        monkeypatch.setattr(
+            get_scan_set, "_git_output_codec", lambda: ("latin-1", "strict")
+        )
+        results = _make_results_with_sarif(
+            [_make_result("secr%C3%A9t.py"), _make_result("other.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        uris = [
+            result.locations[0].physicalLocation.root.artifactLocation.uri
+            for result in filtered.sarif.runs[0].results
+        ]
+        assert uris == ["secr%C3%A9t.py"]
+
+    def test_a_utf8_name_on_a_utf8_host_gains_no_spelling(self, tmp_path, monkeypatch):
+        """Control for the test above: with a UTF-8 codec a UTF-8 name reads back as
+        itself, so the re-read adds nothing and a finding that names no changed
+        file stays dropped."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        monkeypatch.setattr(
+            get_scan_set, "_git_output_codec", lambda: ("utf-8", "surrogateescape")
+        )
+        results = _make_results_with_sarif(
+            [_make_result("secr%C3%A9t.py"), _make_result("other.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        uris = [
+            result.locations[0].physicalLocation.root.artifactLocation.uri
+            for result in filtered.sarif.runs[0].results
+        ]
+        assert uris == ["other.py"]
+
+    def test_a_byte_the_filesystem_encoding_refuses_adds_no_spelling(
+        self, tmp_path, monkeypatch
+    ):
+        """Windows decodes git's names as UTF-8 with ``surrogatepass``, which refuses
+        a byte that is not UTF-8, so the filesystem spelling of ``secr%E9t.py``
+        raised ``UnicodeDecodeError`` out of the filter and failed the scan. Such a
+        reading adds no spelling: the finding is placed by its other readings, and
+        here it names no changed file, so it is dropped while the rest go on."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        monkeypatch.setattr(
+            get_scan_set, "_git_output_codec", lambda: ("utf-8", "surrogatepass")
+        )
+        results = _make_results_with_sarif(
+            [_make_result("secr%E9t.py"), _make_result("other.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        uris = [
+            result.locations[0].physicalLocation.root.artifactLocation.uri
+            for result in filtered.sarif.runs[0].results
+        ]
+        assert uris == ["other.py"]
+
+
+@pytest.mark.unit
+class TestTheKeptCountIsSaidOnce:
+    """The scan execution engine narrows the one result model after the scan phase
+    and again at the report phase; a kept converted finding survives both passes,
+    so the "Kept N finding(s) located in converted files" count was said twice."""
+
+    def test_the_kept_count_is_said_once_for_one_result_model(
+        self, tmp_path, ash_warnings
+    ):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        converted = tmp_path / "out" / "work" / "jupyter" / "analysis-converted.py"
+        results = _make_results_with_sarif(
+            [_converted_result(str(converted), "jupyter/analysis-converted.py")]
+        )
+
+        filter_results_to_changed_files(results, changed, source_dir)
+        filter_results_to_changed_files(results, changed, source_dir)
+
+        said = [m for m in ash_warnings() if "located in converted files" in m]
+        assert len(said) == 1, ash_warnings()
+
+    def test_a_different_model_is_told_on_its_own(self, tmp_path, ash_warnings):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        converted = tmp_path / "out" / "work" / "jupyter" / "analysis-converted.py"
+        for _ in range(2):
+            results = _make_results_with_sarif(
+                [_converted_result(str(converted), "jupyter/analysis-converted.py")]
+            )
+            filter_results_to_changed_files(results, changed, source_dir)
+
+        said = [m for m in ash_warnings() if "located in converted files" in m]
+        assert len(said) == 2, ash_warnings()
+
+
+@pytest.mark.unit
+class TestFileUriForms:
+    """A ``file://`` URI is reduced to its path as the SARIF reader reduces it: no
+    host segment, no slash before a drive letter, percent-decoded."""
+
+    def test_a_file_uri_with_a_host_names_the_path_after_the_host(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        target = (source_dir / "a.py").resolve()
+        uri = target.as_uri().replace("file://", "file://localhost", 1)
+        results = _make_results_with_sarif([_make_result(uri)])
+
+        filtered = filter_results_to_changed_files(results, {target}, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    def test_a_file_uri_drops_the_slash_before_a_drive_letter(self):
+        from automated_security_helper.utils.changed_files import _location_readings
+
+        assert _location_readings("file:///C:/proj/a.py") == ["C:/proj/a.py"]
+        assert _location_readings("file:///srv/proj/a.py") == ["/srv/proj/a.py"]
+
+    def test_a_relative_file_uri_is_also_read_with_its_first_segment_as_a_directory(
+        self, tmp_path
+    ):
+        """``file://lib/helper.js`` is what some scanners write for a path relative to
+        the scan root. Read only as a host and a path it named ``/helper.js``, and the
+        finding in ``lib/helper.js`` was dropped though that file had changed."""
+        from automated_security_helper.utils.changed_files import _location_readings
+
+        assert _location_readings("file://lib/helper.js") == [
+            "/helper.js",
+            "lib/helper.js",
+        ]
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "lib" / "helper.js").resolve()}
+        other = {(source_dir / "lib" / "other.js").resolve()}
+
+        kept = filter_results_to_changed_files(
+            _make_results_with_sarif([_make_result("file://lib/helper.js")]),
+            changed,
+            source_dir,
+        )
+        dropped = filter_results_to_changed_files(
+            _make_results_with_sarif([_make_result("file://lib/helper.js")]),
+            other,
+            source_dir,
+        )
+
+        assert len(kept.sarif.runs[0].results) == 1
+        assert len(dropped.sarif.runs[0].results) == 0
+
+    @pytest.mark.parametrize("uri", ["file://[locale]/page.tsx", "file://a]b/x.py"])
+    def test_a_bracket_in_the_first_segment_is_not_a_malformed_host(
+        self, tmp_path, uri
+    ):
+        """A URL parser reads such a segment as an IPv6 host and raises, and one
+        location raising out of the filter fails the scan. The segment is split off
+        by hand, and read as a host and as a directory."""
+        from automated_security_helper.utils.changed_files import _location_readings
+
+        readings = _location_readings(uri)
+        assert uri[len("file://") :] in readings
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / uri[len("file://") :]).resolve()}
+
+        kept = filter_results_to_changed_files(
+            _make_results_with_sarif([_make_result(uri)]), changed, source_dir
+        )
+
+        assert len(kept.sarif.runs[0].results) == 1
+
+    @pytest.mark.parametrize("mark", ["#", "?"])
+    def test_a_hash_or_question_mark_in_a_name_is_not_cut_off(self, tmp_path, mark):
+        """A fragment or query is not part of the path, and the reduction cuts there;
+        but ``My#Proj/a.cs`` is a name, so the whole path is read as well."""
+        from automated_security_helper.utils.changed_files import _location_readings
+
+        if mark == "?" and sys.platform == "win32":
+            pytest.skip("a question mark cannot be part of a Windows file name")
+        source_dir = tmp_path / "repo"
+        target = source_dir / f"My{mark}Proj" / "a.cs"
+        target.parent.mkdir(parents=True)
+        target.write_text("x\n", encoding="utf-8")
+        # Not Path.as_uri(), which percent-encodes the mark and defeats the test. The
+        # path in URI form: forward slashes, and a slash before a drive letter.
+        posix = target.resolve().as_posix()
+        uri = "file://" + ("" if posix.startswith("/") else "/") + posix
+
+        readings = _location_readings(uri)
+        kept = filter_results_to_changed_files(
+            _make_results_with_sarif([_make_result(uri)]),
+            {target.resolve()},
+            source_dir,
+        )
+
+        assert posix in readings
+        assert posix.split(mark)[0] in readings
+        assert len(kept.sarif.runs[0].results) == 1
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "file:///C:/proj/src/config.py",
+            "file:///srv/my%20proj/src/a.py",
+            "file://hostname/project/app.py",
+            "file:///C:/My%20Proj/src/a.py",
+            "file://[locale]/page.tsx",
+            "file://a]b/x.py",
+        ],
+    )
+    def test_the_reduction_agrees_with_the_sarif_readers(self, uri):
+        """One reduction in two places drifts; this keeps them together. Both split
+        the URI on its own slash and neither parses it, so a bracket in the first
+        segment is a host to both and raises in neither."""
+        from urllib.parse import unquote
+
+        from automated_security_helper.utils.changed_files import _file_uri_path
+        from automated_security_helper.utils.sarif_utils import _file_uri_to_path_text
+
+        assert unquote(_file_uri_path(uri), errors="surrogateescape") == (
+            _file_uri_to_path_text(uri)
+        )
+
+    @pytest.mark.parametrize(
+        "uri", ["file:///repo/My#Proj/a.cs", "file:///repo/My?Proj/a.cs"]
+    )
+    def test_a_name_with_a_mark_is_read_whole_by_both(self, uri):
+        """The one place the two differ on purpose: the sarif reader keeps a ``#`` or
+        ``?`` in the name, and this one cuts there for the reduction and reads the
+        whole path as well, so the reading the sarif reader gives is among them."""
+        from automated_security_helper.utils.changed_files import _location_readings
+        from automated_security_helper.utils.sarif_utils import _file_uri_to_path_text
+
+        assert _file_uri_to_path_text(uri) in _location_readings(uri)
+
+    @pytest.mark.parametrize("uri", ["", "file://"])
+    def test_a_uri_naming_no_file_keeps_the_finding(self, tmp_path, uri):
+        """Read as a path it was the source directory itself, which is in the changed
+        set only when every file is; the filter's own rule keeps a result it cannot
+        place."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "other.py").resolve()}
+        results = _make_results_with_sarif([_make_result(uri)])
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert len(filtered.sarif.runs[0].results) == 1
+
+
+@pytest.mark.unit
+class TestTheKeptConvertedCountSaid:
+    def test_it_is_a_declared_private_attribute_and_not_a_field(self):
+        """The count already said lives on the model so the two passes of the filter
+        say it once. Undeclared, pydantic would keep it in the instance dict beside
+        the fields, where a copy carries it and an older pydantic compares it."""
+        assert "_changed_files_kept_said" in AshAggregatedResults.__private_attributes__
+        assert "_changed_files_kept_said" not in AshAggregatedResults.model_fields

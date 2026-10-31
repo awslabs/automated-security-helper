@@ -45,7 +45,13 @@ from tests.unit.test_committed_output_when_git_cannot_answer import (
     _no_orchestrator,
 )
 
-pytestmark = pytest.mark.unit
+# Marked per test. A test is unit only if it never calls _cli AND hands _mcp an
+# `ended` exit: that pair replaces run_ash_scan with a raise and stays in-process.
+# Any other test is integration, whichever of the two paths it also takes: a call
+# of _cli, or of _mcp with no `ended`, hands run_ash_scan a scan, and the scan path
+# starts scanners on any outcome the refusal or the patched orchestrator leaves
+# open; _repo and _broken_repo also run git in a child process. A test that calls
+# _cli and also hands _mcp an `ended` exit is therefore integration.
 
 #: Rich markup, a terminal control and a CI command, in text the scan quotes.
 #: The control is a lone ESC plus "c" (reset), not a complete CSI or OSC
@@ -142,6 +148,7 @@ def _reason(progress: Dict[str, Any], code: int) -> str:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_a_config_that_does_not_validate(tree, registry, monkeypatch, capsys) -> None:
     config = tree["source"] / "bad.ash.yaml"
     config.write_text("global_settings:\n  severity_threshold: LOUD\n", "utf-8")
@@ -163,6 +170,7 @@ def test_a_config_that_does_not_validate(tree, registry, monkeypatch, capsys) ->
     assert f"ERROR (3) {_flat(reason)}" in printed, (reason, printed)
 
 
+@pytest.mark.integration
 def test_an_exception_during_the_scan(tree, registry, monkeypatch, capsys) -> None:
     def _broken(cls, **_kwargs: Any) -> None:
         raise RuntimeError(QUOTED)
@@ -190,6 +198,9 @@ def test_an_exception_during_the_scan(tree, registry, monkeypatch, capsys) -> No
 # ---------------------------------------------------------------------------
 
 
+# integration: _repo and _broken_repo build the repository with git init and git add
+# in a child process.
+@pytest.mark.integration
 @pytest.mark.parametrize("make", [_repo, _broken_repo], ids=["committed", "unknown"])
 def test_files_in_the_way_of_the_output(
     make, tmp_path, registry, monkeypatch, capsys
@@ -206,6 +217,7 @@ def test_files_in_the_way_of_the_output(
     assert f"ERROR (3) {_flat(reason)}" in printed, (reason, printed)
 
 
+@pytest.mark.integration
 def test_a_scanner_selection_that_names_nothing(
     tree, registry, monkeypatch, capsys
 ) -> None:
@@ -255,6 +267,7 @@ def _a_report_that_will_not_go(output: Path, monkeypatch) -> None:
     monkeypatch.setattr(run_module.shutil, "rmtree", _refuses)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "arrange",
     [_held_previous_results_that_will_not_go, _a_report_that_will_not_go],
@@ -286,6 +299,7 @@ def test_previous_output_a_container_or_nix_scan_cannot_remove(
     assert _reason(progress, 1) == shown_on_one_line(logged)
 
 
+@pytest.mark.unit
 def test_restored_results_a_container_scan_will_not_read_back(
     tree, registry, monkeypatch
 ) -> None:
@@ -308,6 +322,7 @@ def test_restored_results_a_container_scan_will_not_read_back(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_a_bare_exit_keeps_its_code_with_no_reason(tree, registry, monkeypatch):
     progress = _mcp(
         registry, tree["source"], tree["output"], monkeypatch, SystemExit(4)
@@ -319,6 +334,7 @@ def test_a_bare_exit_keeps_its_code_with_no_reason(tree, registry, monkeypatch):
     assert progress["exit_code_meaning"] == ASH_EXIT_CODES[4], progress
 
 
+@pytest.mark.integration
 def test_a_reason_over_several_lines_reaches_the_client_on_one(
     tree, registry, monkeypatch, capsys
 ) -> None:
@@ -334,6 +350,7 @@ def test_a_reason_over_several_lines_reaches_the_client_on_one(
     assert _reason(progress, 1).endswith("first line\\x0asecond line\\x09and a tab")
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "ended",
     [run_module.ScanRefusedExit(1, QUOTED), RuntimeError(QUOTED)],
@@ -356,6 +373,7 @@ def test_the_runner_logs_the_reason_shown_once(
     assert "\\x1bc" in shown and "\\\\x1b" not in shown, shown
 
 
+@pytest.mark.unit
 def test_an_error_raised_out_of_the_scan_carries_exit_code_1(
     tree, registry, monkeypatch
 ) -> None:
@@ -375,6 +393,7 @@ def test_an_error_raised_out_of_the_scan_carries_exit_code_1(
     ), progress
 
 
+@pytest.mark.unit
 def test_control_a_scan_that_exits_0_has_no_exit_code(tree, registry, monkeypatch):
     progress = _mcp(
         registry, tree["source"], tree["output"], monkeypatch, SystemExit(0)

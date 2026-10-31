@@ -480,7 +480,12 @@ class TestHostCachesAreNotWrittenInPlace:
         plan.run_cleanup()
         assert not private.parent.exists()
 
-    def test_bwrap_keeps_its_throwaway_overlay(self, layout, cache):
+    def test_bwrap_keeps_its_throwaway_overlay(self, layout, cache, monkeypatch):
+        # The plan probes the cache's filesystem with the real bwrap once per
+        # filesystem (_overlay_over); on a host without bwrap that probe reads as a
+        # refusal and the cache is mounted read-only, which is not what this test
+        # measures. The probe is answered here, so the test reads the plan's shape.
+        monkeypatch.setattr(backends_module, "_probe_run", lambda argv, env=None: None)
         plan = self._plan("bwrap", layout, overlay=True)
         real = _as_argv(cache)
         i = plan.argv.index("--overlay-src")
@@ -3536,30 +3541,43 @@ def test_the_uv_dispatch_sets_the_record_context_around_the_run(tmp_path):
             )
             return {"returncode": 0, "stdout": "", "stderr": ""}
 
-    fake = SimpleNamespace(
-        command="stub-tool",
-        use_uv_tool=True,
-        _values_to_redact=lambda: ("1.8",),
-        _uv_run_inputs_for_records=lambda: ("stub-tool==1.8",),
-        _get_tool_package_extras=lambda: None,
-        _get_tool_version_constraint=lambda: "==1.8",
-        _plugin_log=lambda *a, **k: None,
-        _uv_run_failure=None,
-        _uv_response=lambda result, results_dir: result,
-        # The dispatch also reads the interpreter request (empty when unset)
-        # and, in its error arms, the after-the-start response (None when the
-        # launch started no child).
-        _uv_python_kwargs=dict,
-        _uv_failure_after_the_start=lambda *a, **k: None,
-    )
+    class _Plugin(UVToolMixin):
+        """Overrides only what a plugin supplies; the dispatch's own helpers (the
+        stderr log identity, the interpreter request, the after-the-start
+        response, the --with dependencies and the redacted error text) are the
+        mixin's, so a change to one of their signatures reaches this test."""
+
+        command = "stub-tool"
+        use_uv_tool = True
+        # The package that provides the command (None: the command's own name).
+        uv_tool_package_name = None
+
+        def _is_offline_mode(self):
+            return False
+
+        def _values_to_redact(self):
+            return ("1.8",)
+
+        def _uv_run_inputs_for_records(self):
+            return ("stub-tool==1.8",)
+
+        def _get_tool_package_extras(self):
+            return None
+
+        def _get_tool_version_constraint(self):
+            return "==1.8"
+
+        def _plugin_log(self, *args, **kwargs):
+            return None
+
+        def _uv_response(self, result, results_dir, **kwargs):
+            return result
 
     with mock_patch(
         "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
         return_value=_Runner(),
     ):
-        result = UVToolMixin._try_uv_tool_execution(
-            fake, ["stub-tool", "-r", "src"], tmp_path
-        )
+        result = _Plugin()._try_uv_tool_execution(["stub-tool", "-r", "src"], tmp_path)
 
     assert result is not None and result.get("returncode") == 0, result
     assert seen, "the fake runner never logged"
@@ -3637,7 +3655,8 @@ def test_a_sweep_failure_warning_hides_an_env_read_value(tmp_path, monkeypatch, 
     """The could-not-remove warning names the entry, the root and the OS
     error, and any of them can hold an env-read value (a tool names files
     after options it was given). The record is redacted with the sweep's
-    values before it is logged."""
+    values before it is logged, and the refusal the sweep raises at its end
+    for the entry it could not remove repeats the logged line, nothing more."""
     import logging
 
     from automated_security_helper.utils.sandbox import fs_guard
@@ -3653,7 +3672,8 @@ def test_a_sweep_failure_warning_hides_an_env_read_value(tmp_path, monkeypatch, 
     monkeypatch.setattr(fs_guard.os, "unlink", _refuse)
 
     with caplog.at_level(logging.WARNING, logger="ash"):
-        fs_guard.sweep_writable([root], (value,))
+        with pytest.raises(OSError) as refused:
+            fs_guard.sweep_writable([root], (value,))
 
     lines = [
         record.getMessage()
@@ -3662,16 +3682,24 @@ def test_a_sweep_failure_warning_hides_an_env_read_value(tmp_path, monkeypatch, 
     ]
     assert lines, [record.getMessage() for record in caplog.records]
     assert not any(value in line for line in lines), lines
+    assert value not in str(refused.value), str(refused.value)
+    # The refusal is chained to nothing: a traceback or a logged exception of it
+    # prints its cause and its context too, and either would quote the OS error.
+    assert refused.value.__cause__ is None
+    assert refused.value.__context__ is None
 
 
 def _sweep_notes_after_a_spawn(tmp_path, monkeypatch, caplog, hook):
     """Build a scope for a plugin whose values hook is ``hook``, plan a spawn
     inside it, and run the plan's sweep over a results directory that holds a
     special file named after the value, whose removal fails. Returns the
-    sweep's could-not-remove notes and the results directory.
+    sweep's could-not-remove notes, the refusal it raised at its end among
+    them, and the results directory.
 
     The sweep runs from the plan's cleanup, so the scope's values are its
-    only redaction source."""
+    only redaction source. A removal that fails is a refusal the sweep raises
+    once it has finished (the plan's run_cleanup records it, best effort); the
+    step is called directly here, so the raise reaches the test."""
     import logging
 
     from automated_security_helper.utils.sandbox import fs_guard
@@ -3703,7 +3731,8 @@ def _sweep_notes_after_a_spawn(tmp_path, monkeypatch, caplog, hook):
         plan = prepare_spawn(["/usr/bin/true"], {"PATH": "/usr/bin"}, None)
     assert plan is not None
     with caplog.at_level(logging.WARNING, logger="ash"):
-        plan.cleanup[0]()
+        with pytest.raises(OSError) as refused:
+            plan.cleanup[0]()
 
     notes = [
         record.getMessage()
@@ -3711,6 +3740,11 @@ def _sweep_notes_after_a_spawn(tmp_path, monkeypatch, caplog, hook):
         if "Could not remove" in record.getMessage()
     ]
     assert notes, [record.getMessage() for record in caplog.records]
+    notes.append(str(refused.value))
+    # What a traceback or a logged exception of the refusal would print besides
+    # its own text: its cause and its context, which are none.
+    assert refused.value.__cause__ is None
+    assert refused.value.__context__ is None
     return notes, results
 
 
@@ -3927,8 +3961,16 @@ def test_a_raising_redaction_returns_a_value_free_note(monkeypatch):
 def test_a_raising_redaction_does_not_stop_the_symlink_sweep(tmp_path, monkeypatch):
     """fs_guard's sweep records a removal failure from inside its except
     block. A raise from the redaction there stopped the os.fwalk sweep
-    partway: symlinks after that point stayed, and the error escaped
-    sweep_writable into the executor's post-scan sweep."""
+    partway: symlinks after that point stayed, and the redactor's error
+    escaped sweep_writable into the executor's post-scan sweep.
+
+    The sweep still refuses the entry it could not remove, once, after it has
+    walked everything else: the raise read here is that refusal (an OSError),
+    never the redactor's RuntimeError, and the link after the failed one is
+    gone before it is raised. Whichever link the walk reaches first is the one
+    whose removal fails, so the check does not depend on the order the
+    directory lists its entries in: a sweep that stopped at the failure would
+    leave both links, whichever came first."""
     from automated_security_helper.utils.sandbox import fs_guard
     from automated_security_helper.utils.sandbox import scope as scope_module
 
@@ -3938,9 +3980,11 @@ def test_a_raising_redaction_does_not_stop_the_symlink_sweep(tmp_path, monkeypat
     (root / "zzz-link").symlink_to(tmp_path)
 
     real_unlink = os.unlink
+    failed: list = []
 
     def failing_unlink(name, *args, **kwargs):
-        if "aaa-link" in str(name):
+        if not failed and "-link" in str(name):
+            failed.append(Path(str(name)).name)
             raise OSError("the first removal fails")
         return real_unlink(name, *args, **kwargs)
 
@@ -3951,13 +3995,18 @@ def test_a_raising_redaction_does_not_stop_the_symlink_sweep(tmp_path, monkeypat
 
     monkeypatch.setattr(scope_module, "active_scope", raising)
 
-    removed = fs_guard.sweep_writable([root], ("EDGESECRET-9912",))
+    with pytest.raises(OSError):
+        fs_guard.sweep_writable([root], ("EDGESECRET-9912",))
 
-    assert removed == 1, "the sweep must go on past the recorded failure"
     # os.path.lexists, not Path.exists(follow_symlinks=False): the keyword
     # arrived in Python 3.12 and CI's 3.10 leg raises TypeError on it.
-    assert not os.path.lexists(root / "zzz-link"), (
-        "the symlink after the failed one must still be removed"
+    assert len(failed) == 1, failed
+    remaining = [
+        name for name in ("aaa-link", "zzz-link") if os.path.lexists(root / name)
+    ]
+    assert remaining == failed, (
+        "the entry whose removal failed is what the refusal is about, and the "
+        "other link must still be removed"
     )
 
 

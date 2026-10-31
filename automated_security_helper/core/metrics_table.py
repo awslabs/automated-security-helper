@@ -1,5 +1,6 @@
 """Module for generating metrics tables for ASH scan results."""
 
+import os
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
@@ -8,7 +9,6 @@ from rich.panel import Panel
 
 from automated_security_helper.config.environment_record import reads_as_reference
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.core.unified_metrics import (
     coverage_shortfalls,
     get_unified_scanner_metrics,
@@ -24,8 +24,10 @@ from automated_security_helper.utils.log import escape_markup as escape
 import platform
 
 
-#: The help panel printed above the metrics table. Its threshold sources are the two
-#: ScannerStatisticsCalculator.get_scanner_threshold_info produces.
+#: The help panel printed above the metrics table. Its threshold sources are the
+#: three ScannerStatisticsCalculator.get_scanner_threshold_info produces, and its
+#: SKIPPED line names both facts the status carries (an excluded scanner, and one
+#: that evaluated nothing: ScanResultsContainer.determine_status).
 METRICS_HELP_TEXT = (
     "How to read this table:\n"
     "- [bold]*Severity levels*[/bold]:\n"
@@ -41,11 +43,11 @@ METRICS_HELP_TEXT = (
     "  - [bold green]PASSED[/bold green] = No findings at or above threshold\n"
     "  - [bold red]FAILED[/bold red] = Findings at or above threshold\n"
     "  - [bold yellow]MISSING[/bold yellow] = Required dependencies not available\n"
-    "  - [bold blue]SKIPPED[/bold blue] = Scanner explicitly disabled\n"
+    "  - [bold blue]SKIPPED[/bold blue] = Scanner left out of the run, or it ran and found nothing it scans\n"
     "  - [bold red]ERROR[/bold red] = Scanner execution error\n"
     "- [bold]*Threshold (Thresh)*[/bold]: The minimum severity level that will cause a scanner to fail\n"
     "  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL\n"
-    "  - Source: (g)lobal = global_settings or the default, (c)onfig = the scanner's own options\n"
+    "  - Source: (g)lobal = global_settings or the default, (c)onfig = the scanner's own options, (u)navailable = the results record no configuration, so the default applies\n"
     "  - ENV = (narrow terminal) read from an environment reference; the wide table and reports show the reference instead\n"
     "  - REF = (narrow terminal) a reference ASH did not read in this run (read back from a results file, quoted, or a name ASH refuses to read); the wide table shows it as written\n"
     "  - Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure\n"
@@ -150,16 +152,21 @@ def generate_metrics_table_from_unified_data(
                 threshold_display = "MED"
             else:
                 threshold_display = metrics.threshold[:4].upper()
-            threshold_location = metrics.threshold_source[
-                0
-            ].lower()  # First char of the source: (g)lobal or (c)onfig
+            # First char of the source: (g)lobal, (c)onfig or (u)navailable; a
+            # source with no text gets no letter rather than an IndexError.
+            threshold_location = (metrics.threshold_source or "?")[0].lower()
+            # Shown, not obeyed, like every other results-file value in the
+            # table: a Text entry is not markup, but a terminal control in the
+            # recorded threshold still reached the terminal as written.
             threshold_text = Text(
-                f"{threshold_display} ({threshold_location})", style="cyan"
+                shown_not_obeyed(f"{threshold_display} ({threshold_location})"),
+                style="cyan",
             )
         else:
             # Full format for larger terminals
             threshold_text = Text(
-                f"{metrics.threshold} ({metrics.threshold_source})", style="cyan"
+                shown_not_obeyed(f"{metrics.threshold} ({metrics.threshold_source})"),
+                style="cyan",
             )
 
         # Format the result status based on terminal width
@@ -276,13 +283,19 @@ def print_coverage_shortfalls(
 def not_scanned_line(scanner_name: str, path: str, reason: str) -> str:
     """The console line for one input a scanner did not scan, as Rich markup.
 
-    The path is the scanned repository's: its control characters (a terminal escape
-    sequence, a newline) are escaped before its markup is. Shared by the
-    single-directory table and the workspace summary, so both print it one way.
+    The path is the scanned repository's: escape_markup shows its control
+    characters as escapes and neutralizes its markup in one pass, and with
+    ``one_line`` it writes a newline, a tab or a carriage return as an escape too
+    (``\\x0a``, the console's spelling), so the path cannot start a line of its
+    own. Escaping the controls first and then the markup showed them twice: the
+    written ``\\x1b`` read as an escape to show, and its backslash was doubled, so
+    an ESC in a path printed the same as a literal ``\\x1b`` in a name does.
+    Shared by the single-directory table and the workspace summary, so both print
+    it one way.
     """
     return (
         f"[bold yellow]Not scanned:[/bold yellow] {escape(scanner_name)} did not "
-        f"scan {escape(escape_controls(path))}: {escape(reason)}"
+        f"scan {escape(path, one_line=True)}: {escape(reason)}"
     )
 
 
@@ -368,11 +381,19 @@ def display_metrics_table(
     """
     try:
         # Create a console with Windows-safe settings
+        # The console reads no environment variable of the process (COLUMNS,
+        # LINES, TERM and the rest would change the table's geometry) except
+        # NO_COLOR, the one convention the rest of the scan output honors: with
+        # an empty environment the table was printed in color under NO_COLOR
+        # while every other line obeyed it.
+        environ = {}
+        if os.environ.get("NO_COLOR"):
+            environ["NO_COLOR"] = os.environ["NO_COLOR"]
         console_kwargs = {
             "force_terminal": use_color,
             "legacy_windows": platform.system().lower() == "windows",
             "safe_box": platform.system().lower() == "windows",
-            "_environ": {},  # Prevent environment variable issues
+            "_environ": environ,
         }
 
         # Set color system based on platform and color preference
@@ -419,13 +440,6 @@ def display_metrics_table(
             console.print()
             console.print(table)
             console.print()
-            # After the table, so the counts sit next to the status they qualify. Inside the same
-            # guarded block because it writes to the same console: a closed stdout has to be
-            # handled identically for both, and a shortfall notice is not worth failing a scan.
-            print_coverage_shortfalls(asharp_model, console)
-            print_inputs_not_scanned(asharp_model, console)
-            print_stale_content_databases(asharp_model, console)
-            print_converter_refusals(asharp_model, console)
         except (ValueError, OSError, BrokenPipeError) as io_error:
             # stdout/stderr may be closed (e.g., in MCP server context)
             # Log the error but don't fail the scan
@@ -433,6 +447,42 @@ def display_metrics_table(
             ASH_LOGGER.info(
                 "Scan completed successfully. Results written to output files."
             )
+        else:
+            # After the table, so the counts sit next to the status they qualify.
+            # Each notice in its own guard: one printer that raises on what the
+            # results hold (a ValueError from a shape it cannot read) no longer
+            # stops every later notice, and is logged as its own failure rather
+            # than as a console write that failed. A closed stdout fails them
+            # all alike, and a notice is not worth failing a scan.
+            for printer in (
+                print_coverage_shortfalls,
+                print_inputs_not_scanned,
+                print_stale_content_databases,
+                print_converter_refusals,
+            ):
+                try:
+                    printer(asharp_model, console)
+                except (OSError, BrokenPipeError) as io_error:
+                    ASH_LOGGER.warning(
+                        f"Could not write a notice to the console: {io_error}"
+                    )
+                    break
+                except Exception as notice_error:
+                    # A closed stream raises ValueError, not OSError, and fails
+                    # every later notice alike: said once, as the others are.
+                    if isinstance(notice_error, ValueError) and "closed file" in str(
+                        notice_error
+                    ):
+                        ASH_LOGGER.warning(
+                            f"Could not write a notice to the console: {notice_error}"
+                        )
+                        break
+                    # The raw text: the console handler shows every record once
+                    # (utils/log.py console_text), so a value shown here was
+                    # shown twice and its escapes printed doubled.
+                    ASH_LOGGER.warning(
+                        f"Could not print the {printer.__name__} notice: {notice_error}"
+                    )
 
     except Exception as e:
         ASH_LOGGER.error(f"Error displaying metrics table: {e}")

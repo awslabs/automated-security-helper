@@ -324,7 +324,15 @@ def test_a_semgrepignore_is_not_honored_and_the_defaults_are_kept(
     assert set(SEMGREP_DEFAULT_IGNORES) <= set(excluded)
 
 
-def test_an_unhonored_semgrepignore_is_noted_in_the_results(tmp_path: Path) -> None:
+def _semgrepignore_notes(tmp_path: Path, *, enabled: bool) -> List[str]:
+    """The ``.semgrepignore`` notes a semgrep scanner records while its command is built.
+
+    The scanner is enabled or disabled explicitly: ``SemgrepScannerConfig``'s
+    default is False on Windows, where semgrep publishes no build, and the note
+    is recorded only for an enabled scanner (a disabled one runs neither tool,
+    so it leaves nothing unhonored), so a test of the note cannot rest on the
+    default.
+    """
     from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
         SemgrepScanner,
         SemgrepScannerConfig,
@@ -332,13 +340,23 @@ def test_an_unhonored_semgrepignore_is_noted_in_the_results(tmp_path: Path) -> N
 
     context = _context(tmp_path)
     (Path(context.source_dir) / ".semgrepignore").write_text("hidden/\n", "utf-8")
-    scanner = SemgrepScanner(context=context, config=SemgrepScannerConfig())
+    scanner = SemgrepScanner(
+        context=context, config=SemgrepScannerConfig(enabled=enabled)
+    )
     scanner._resolve_arguments(
         target=Path(context.source_dir), results_file=tmp_path / "r.sarif"
     )
-    (note,) = [w for w in context.config._resolution_warnings if ".semgrepignore" in w]
+    return [w for w in context.config._resolution_warnings if ".semgrepignore" in w]
+
+
+def test_an_unhonored_semgrepignore_is_noted_in_the_results(tmp_path: Path) -> None:
+    (note,) = _semgrepignore_notes(tmp_path, enabled=True)
     assert "was not honored" in note
     assert "global_settings.ignore_paths" in note
+
+
+def test_a_disabled_scanner_records_no_semgrepignore_note(tmp_path: Path) -> None:
+    assert _semgrepignore_notes(tmp_path, enabled=False) == []
 
 
 #: Options naming a file a tool reads, which config/path_trust.py refuses inside
@@ -454,38 +472,32 @@ def test_a_repositorys_config_does_not_choose_opengreps_patterns(
     assert _option(chosen, "opengrep", "patterns") == ["Y_9q"]
 
 
-def test_patterns_mode_keeps_the_semgrepignore_flag_and_the_exclusions(
+def test_patterns_mode_is_refused_whatever_else_the_section_sets(
     tmp_path: Path,
 ) -> None:
-    from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
-        SEMGREP_DEFAULT_IGNORES,
-    )
+    """A section that sets ``patterns`` is refused while the scanner is built.
+
+    opengrep runs a ``--pattern`` search only with a language, which no option of
+    this scanner supplies, so no command is built for it: the refusal names the
+    missing language option. The other settings of the section, an operator's
+    ``exclude`` here, do not change that.
+    """
+    from automated_security_helper.core.exceptions import ScannerError
     from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
         OpengrepScanner,
         OpengrepScannerConfig,
     )
 
     context = _context(tmp_path)
-    scanner = OpengrepScanner(
-        context=context,
-        config=OpengrepScannerConfig.model_validate(
-            {"options": {"patterns": ["X_9q"], "exclude": ["operator-dir"]}}
-        ),
-    )
-    argv = [
-        str(a)
-        for a in scanner._resolve_arguments(
-            target=Path(context.source_dir), results_file=tmp_path / "r.json"
+    with pytest.raises(ScannerError) as refused:
+        OpengrepScanner(
+            context=context,
+            config=OpengrepScannerConfig.model_validate(
+                {"options": {"patterns": ["X_9q"], "exclude": ["operator-dir"]}}
+            ),
         )
-    ]
-    assert "--x-ignore-semgrepignore-files" in argv
-    assert set(SEMGREP_DEFAULT_IGNORES) | {"operator-dir"} <= set(
-        _values_after(argv, "--exclude")
-    )
-    assert _values_after(argv, "--pattern") == ["X_9q"]
-    assert "--json" in argv
-    for flag in ("--config", "--sarif", "--metrics"):
-        assert flag not in argv, argv
+    assert "--lang" in str(refused.value)
+    assert "scanners.opengrep.options.patterns" in str(refused.value)
 
 
 @pytest.mark.parametrize("scanner", ["opengrep", "semgrep"])

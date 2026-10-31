@@ -105,7 +105,7 @@ and desynchronizes the two implementations.
 <!-- doctest: options of=cloudformation:deploy/cdk/templates -->
 | Parameter | Default | Notes |
 | --- | --- | --- |
-| `AshVersion` | `v3.7.0` | Git ref fetched and built: a tag, a branch, or a full commit SHA. Not a PyPI version. The release these files belong to; see [Which `AshVersion` to use](../README.md#which-ashversion-to-use). |
+| `AshVersion` | `v3.7.1` | Git ref fetched and built: a tag, a branch, or a full commit SHA. Not a PyPI version. The release these files belong to; see [Which `AshVersion` to use](../README.md#which-ashversion-to-use). |
 | `AshImageTag` | empty | ECR tag the **workload** pulls. Empty tracks the moving tag. Not offered by `AshImagePipeline`, which runs no workload. See below. |
 | `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. |
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |
@@ -279,10 +279,16 @@ stack. Nothing is reachable except `bedrock-agentcore:InvokeAgentRuntime`, and t
 container's filesystem starts with no source in it. **You send the tree over the
 protocol.** Three MCP tools do that:
 
-- `set_source_git(url, ref?, ssh_key_id?, depth?)` — the runtime clones a
-  repository itself. It needs egress to your git host, which `PUBLIC` network mode
-  provides for a public one; a private host needs a VPC-mode runtime this stack
-  does not configure.
+- `set_source_git(url, ref?, depth?)` — the runtime clones a repository itself,
+  over `https` or `ssh`, with no credentials of its own: every `ssh_key_id` is
+  refused with `error_type: ssh_key_not_registered`, because the server registers
+  no SSH keys and never accepts a private key over MCP, so a repository that needs
+  one cannot be delivered this way. The host has to be listed in
+  `ASH_MCP_GIT_ALLOWED_HOSTS` in the container's environment, which this stack
+  does not set, so the tool clones from nowhere until you add that variable. It
+  also needs egress to your git host, which `PUBLIC` network mode provides for a
+  public one; a private host needs a VPC-mode runtime this stack does not
+  configure.
 - `set_source_zip_chunk` / `set_source_zip_finalize` — you upload a zipped working
   tree in chunks of at most 1 MiB and finalize it with its sha256. Nothing outside
   the runtime has to be reachable, which makes this the path that works from a
@@ -292,9 +298,10 @@ protocol.** Three MCP tools do that:
 These tools need an `AshVersion` whose ASH has them; no release up to v3.7.1 does.
 Everything below about delivered trees assumes such an `AshVersion`.
 
-Then call `run_ash_scan` with `source_dir` set to the path the delivery tool
-returned. Scanning writes an output tree inside the target directory, so the target
-has to be writable — a delivered tree is, because the runtime created it.
+Then call `run_ash_scan`, in the same session, with `source_dir` set to the path the
+delivery tool returned, or with no `source_dir` (see the session-id note below).
+Scanning writes an output tree inside the target directory, so the target has to be
+writable — a delivered tree is, because the runtime created it.
 
 Sizing follows from the upload limits rather than from AgentCore: 100 MiB zipped,
 500 MiB extracted, 50000 files. A repository past those has to arrive by
@@ -306,14 +313,13 @@ Two consequences worth knowing before you deploy:
   **refused** with `error_type: no_source_delivered`, naming the delivery tools to
   call, rather than scanning the container's working directory, which holds none
   of your code.
-- **On this target, pass `source_dir` explicitly.** `set_source_zip_finalize` and
-  `set_source_git` both return the path they wrote to. Capture it and hand it back
-  to `run_ash_scan(source_dir=...)` rather than relying on the no-argument form.
-
-  The no-argument form finds the delivered tree by session id, and the session id
-  comes from the `Mcp-Session-Id` request header. That is dependable on stdio and
-  on Fargate. On AgentCore it is not established, and the reason is worth stating
-  rather than glossing:
+- **On this target, the session id has to be the same for the delivery and the
+  scan.** A delivered tree belongs to the session that delivered it: the
+  no-argument `run_ash_scan` form finds it by session id, and a `source_dir` is
+  checked against the calling session's own workspace. The session id comes from
+  the `Mcp-Session-Id` request header. That is dependable on stdio and on Fargate.
+  On AgentCore it is not established, and the reason is worth stating rather than
+  glossing:
 
   The [protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp-protocol-contract.html)
   says the platform generates the header, includes it in the request to your
@@ -327,18 +333,24 @@ Two consequences worth knowing before you deploy:
 
   What has not been measured is what the *container* sees per request. So whether
   the header ASH reads is stable across two calls in one AgentCore session is an
-  open question. If it is stable, the no-argument form works. If the platform
-  rotates it per request, the upload lands under one session directory and the scan
-  looks under another.
+  open question. If it is stable, the no-argument form works, and so does passing
+  back the `source_dir` the delivery tool returned. If the platform rotates it per
+  request, the upload lands under one session directory and the scan looks under
+  another.
 
   That case is **refused, not guessed at**: the scan sees that some other session
   holds a delivered tree while yours does not, and returns
-  `error_type: session_source_mismatch` saying the id is probably not stable and
-  to pass `source_dir` instead. It reports the *count* of other delivering
-  sessions, never their ids or paths, so the diagnostic does not disclose one
-  caller's session to another. Passing `source_dir` explicitly sidesteps the
-  question entirely, which is why it remains the recommendation — but if you
-  forget, you get a specific error rather than a scan of the wrong tree.
+  `error_type: session_source_mismatch` saying the id is probably not stable. It
+  reports the *count* of other delivering sessions, never their ids or paths, so
+  the diagnostic does not disclose one caller's session to another. Passing the
+  returned `source_dir` back is not a way around it: a `source_dir` inside another
+  session's workspace is refused by design, with
+  `error_type: scan_target_not_permitted`, whatever `ASH_MCP_ALLOWED_ROOTS` allows,
+  because one session never reads what another delivered. A tree delivered under
+  one session id cannot be scanned under another. The remedies are a transport
+  whose session id stays the same from the delivery to the scan — a stateful
+  server, which issues the id itself (see the caveat on stateful mode above) — or
+  delivering the tree again in the session the scan runs in.
 
   **You can settle it in two calls.** Every tool that resolves a session echoes the
   id it resolved back in its response, so no log dive or image change is needed:
@@ -349,15 +361,16 @@ Two consequences worth knowing before you deploy:
   clear_source()  -> {"success": true, "session_id": "..."}
   ```
 
-  Equal ids mean the header is stable and the no-argument `run_ash_scan` form is
-  safe on this target. Different ids mean it rotates, and passing `source_dir`
-  explicitly is mandatory rather than merely advisable. `clear_source` is the safe
+  Equal ids mean the header is stable, and both the no-argument `run_ash_scan`
+  form and the returned `source_dir` work on this target. Different ids mean it
+  rotates, and no `source_dir` makes a tree delivered under one id scannable
+  under another; use one of the two remedies above. `clear_source` is the safe
   probe because it is idempotent and a session that delivered nothing still
   succeeds. If you run this, please record the result here.
 
-  Passing it explicitly is permitted on this stack because
-  `ASH_MCP_ALLOWED_ROOTS` is unset (see below), so the workspace path is not
-  refused. If you do set an allowlist, include the workspace root you configure.
+  `ASH_MCP_ALLOWED_ROOTS` is unset on this stack (see below), so a `source_dir`
+  inside the calling session's own workspace is not refused by that allowlist.
+  The refusal of another session's workspace does not depend on it.
 
 Neither `ASH_MCP_WORKSPACE_ROOT` nor `ASH_MCP_ALLOWED_ROOTS` is set by this stack.
 The workspace therefore lands under `$HOME/.cache/ash-mcp/<session-id>/`, which is

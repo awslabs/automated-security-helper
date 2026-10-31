@@ -48,8 +48,9 @@ next image build then fails with ``Version '...' for '...' was not found``. This
 script reads those pins from the Dockerfile and looks each one up in the package
 indexes apt reads in the image, for amd64 and arm64: the base image's Debian suite
 with its ``-updates`` and ``-security`` suites (the codename comes from the
-``BASE_IMAGE`` tag), and the NodeSource repository for the ``NODE_MAJOR`` the
-Dockerfile configures. Each pin is reported as
+``BASE_IMAGE`` tag), and the NodeSource repository for the major the Dockerfile
+configures, in ``NODE_MAJOR`` or in a ``node_<major>.x`` or ``setup_<major>.x`` URL.
+Each pin is reported as
 
 * ``current``: the version apt would choose today;
 * ``outdated``: still installable, but a newer version is published, typically a
@@ -58,7 +59,35 @@ Dockerfile configures. Each pin is reported as
   broken. Always exits 1, and the report names the version to pin instead.
 
 An ``apt-get install`` of a package with no ``=version`` is refused (exit 2) rather
-than skipped, and so is one package pinned to two versions in different stages.
+than skipped, and so is one package pinned to two versions in different stages. The
+install is found in a ``RUN`` of any case, whether written in shell form, as an exec
+form array or as a here-document, and whether spelled ``apt-get`` or ``apt``. The body
+of a here-document that a copying command writes to a file (``cat > setup.sh <<'EOF'``)
+is read too, because the file may be run later in the build: an unpinned package in it
+is refused and a pinned one is looked up. Only a positional parameter in it (``"$@"``,
+``$1``, ``${2}``), which is whatever the script's caller passes, is not a package; a
+named variable (``$PKGS``) or a command substitution (``$(cat list)``) is refused as it
+is in a plain ``RUN``, because the packages it names cannot be looked up, and so is a
+pin whose version is an expansion (``jq=${JQ_VERSION}``), which is refused as a version
+this check cannot read. A body is a file's content only when the command it is given to
+is a copier (``cat``, ``tee``, ``install`` or ``cp`` of ``/dev/stdin``, ``dd``) and
+every command it is piped on to is a copier that writes a file; a body given to any
+other command, ``xargs apt-get install -y <<'EOF' > log`` among them, is that command's
+input, so its words are read as part of the ``RUN``. Such a body is read as a file only
+when its marker is quoted (``<<'EOF'``);
+an unquoted marker has the build shell expand the body first, so it is read as the
+``RUN`` text it becomes. Every file body is read as shell, whatever the file is. A body
+that is not a script, a motd or a README that mentions ``apt-get install``, is skipped
+by putting ``# apt-pin-check: skip`` on a line of its own directly above its ``RUN``
+(blank lines and other comments between them are allowed). An option that takes its
+value as a separate word (``-t suite``, ``-o Name=value``) and a redirection are not
+packages. An install that xargs runs on words it reads from a here-document, a file
+(``< list``, ``-a list``), a here-string or a pipe is refused, because those words are
+not arguments of the install in the Dockerfile; packages written as arguments of the
+install (``xargs apt-get install -y curl=1.2``) are read like any other. A Dockerfile
+that configures NodeSource without a major this script can
+read, or with two different majors, is refused too, because the nodejs pin would be
+looked up in Debian's own nodejs or in the wrong NodeSource index.
 
 What was rejected
 -----------------
@@ -84,7 +113,10 @@ Known limitations
   the report and does not fail. The apt pin gives only major.minor, so the image's
   Ruby is compared as major.minor.0, and a release needing a later patch of the same
   minor is not counted. A Ruby pin or a required Ruby version this script cannot read
-  is refused (exit 2), not guessed at.
+  is refused (exit 2), not guessed at. A release's required RubyGems version is compared
+  with ``IMAGE_RUBYGEMS``, the RubyGems the Debian Ruby package bundles. The Dockerfile
+  does not pin it, so the number is the upstream one for that Ruby and a test ties it to
+  the Dockerfile's ``ruby=`` pin; Debian's own build was not read.
 * A pin newer than upstream's latest is reported as ``ahead`` and does not fail.
   That happens when a release is yanked or demoted after it was pinned, and it is a
   reason to look, not something this script can decide.
@@ -102,6 +134,11 @@ Known limitations
   what apt would find, so a dependency of a pinned package that no longer resolves
   is not caught here. Debian versions are ordered by dpkg's rules (epoch, then
   upstream version, then revision, with ``~`` sorting before everything).
+* A positional parameter in a script the Dockerfile writes to a file
+  (``apt-get install -y "$@"``) is skipped: it is whatever the script's caller passes,
+  and the caller's own install is checked where the caller is. A script whose caller is
+  outside the Dockerfile, run with packages from a build argument or a mounted file,
+  installs packages this check never reads.
 
 Usage::
 
@@ -158,7 +195,10 @@ RELEASE_BINARY = "release-binary"  # TOOL_VERSIONS: one release asset per platfo
 UV_TOOL = "uv-tool"  # THIRD_PARTY_LICENSES with a distribution: a PyPI release
 RULES_BUNDLE = "rules-bundle"  # RULES_BUNDLES: one release archive of rule files
 GEM = "gem"  # GEM_PINS: a RubyGems release
-PIN_KINDS = (RELEASE_BINARY, UV_TOOL, RULES_BUNDLE, GEM)
+# THIRD_PARTY_LICENSES with bundled_in: a library another pinned wheel carries, whose
+# version is that wheel's. Listed and held, never looked up (see BUNDLED below).
+BUNDLED_LIBRARY = "bundled-library"
+PIN_KINDS = (RELEASE_BINARY, UV_TOOL, RULES_BUNDLE, GEM, BUNDLED_LIBRARY)
 
 # The gem CFN_NAG_GEM_VERSION is the version of; see assets/Gemfile.
 CFN_NAG_GEM = "cfn-nag"
@@ -276,6 +316,19 @@ def _github_project(url: str, where: str) -> str:
     return f"{parts[0]}/{parts[1]}"
 
 
+def _license_project(tool: str, entry: Any) -> str:
+    """``owner/repo`` of a license entry's repository, or a refusal naming the entry.
+
+    The bump steps name a ``gh api repos/<owner>/<repo>/commits/<tag>`` lookup for
+    every pin that has a license entry, so a repository on another host has to be
+    refused when the pins are read, not when the report is rendered the week the tool
+    falls behind.
+    """
+    return _github_project(
+        entry.repository, f"THIRD_PARTY_LICENSES[{tool!r}].repository"
+    )
+
+
 def enumerate_pins(pins: Any) -> list[Pin]:
     """Every pin ``pins`` carries, one per tool, sorted by tool name.
 
@@ -289,6 +342,8 @@ def enumerate_pins(pins: Any) -> list[Pin]:
     licenses: dict[str, Any] = pins.THIRD_PARTY_LICENSES
     bundles: dict[str, Any] = getattr(pins, "RULES_BUNDLES", {})
     release_urls: dict[str, str] = getattr(pins, "_RELEASE_BASE_URLS", {})
+    # A gem's license entry is read with its gem pin, below, not as a download pin.
+    gems = frozenset(GEM_PINS)
 
     result: list[Pin] = []
     for tool in sorted(set(tool_versions) | set(licenses) | set(bundles)):
@@ -309,6 +364,7 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                     f"{tool} is both a download pin in {downloads[0]} and a uv-tool "
                     f"pin (distribution {entry.distribution!r}); pick one."
                 )
+            _license_project(tool, entry)
             result.append(
                 Pin(
                     tool=tool,
@@ -357,8 +413,11 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                     ecosystem=BUNDLED,
                     project=entry.bundled_in,
                     pinned_in=("THIRD_PARTY_LICENSES (bundled)",),
+                    kind=BUNDLED_LIBRARY,
                 )
             )
+            continue
+        elif tool in gems:
             continue
         else:
             # Only a license entry names it, so the version a bump changes is kept
@@ -378,6 +437,7 @@ def enumerate_pins(pins: Any) -> list[Pin]:
                     f"{tool} is {version} in {pinned_in[0]} and {entry.version} in "
                     f"THIRD_PARTY_LICENSES; a version bump is half-applied."
                 )
+            _license_project(tool, entry)
 
         result.append(
             Pin(
@@ -392,17 +452,31 @@ def enumerate_pins(pins: Any) -> list[Pin]:
 
     for gem, name in GEM_PINS.items():
         gem_version = getattr(pins, name, None)
-        if gem_version is not None:
-            result.append(
-                Pin(
-                    tool=gem,
-                    version=gem_version,
-                    ecosystem=RUBYGEMS,
-                    project=gem,
-                    pinned_in=(name,),
-                    kind=GEM,
-                )
+        if not isinstance(gem_version, str) or not gem_version:
+            raise PinEnumerationError(
+                f"{PINS_FILE} has no version string named {name}, so the {gem} gem "
+                "pin would go unchecked. Teach GEM_PINS the new name, or restore it."
             )
+        gem_pinned_in = [name]
+        gem_entry = licenses.get(gem)
+        if gem_entry is not None:
+            _license_project(gem, gem_entry)
+            if gem_entry.version.removeprefix("v") != gem_version.removeprefix("v"):
+                raise PinEnumerationError(
+                    f"{gem} is {gem_version} in {name} and {gem_entry.version} in "
+                    f"THIRD_PARTY_LICENSES; a version bump is half-applied."
+                )
+            gem_pinned_in.append("THIRD_PARTY_LICENSES")
+        result.append(
+            Pin(
+                tool=gem,
+                version=gem_version,
+                ecosystem=RUBYGEMS,
+                project=gem,
+                pinned_in=tuple(gem_pinned_in),
+                kind=GEM,
+            )
+        )
 
     return sorted(result, key=lambda p: p.tool)
 
@@ -413,18 +487,28 @@ def enumerate_pins(pins: Any) -> list[Pin]:
 
 # An optional "<project>-" prefix: libssh2 and OpenSSL tag their releases
 # "libssh2-1.11.1" and "openssl-3.3.3", and their license entries record the tag.
-_VERSION_RE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9]*-)?v?(\d+(?:\.\d+)*)(.*)$")
+# What follows the numbers is limited to the characters release versions are spelled
+# with. A latest release is copied into the bump steps, which a person pastes into a
+# shell and the job summary renders, so a tag that carries anything else (a quote, a
+# ``$(...)``, a space, markup) is refused as not a version, not accepted as a suffix.
+_VERSION_RE = re.compile(
+    r"^(?:[A-Za-z][A-Za-z0-9]*-)?v?(\d+(?:\.\d+)*)([A-Za-z0-9._+-]*)$"
+)
 
 
 def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
     """A sortable key for a release version, numeric part compared as numbers.
 
     ``v0.69.10`` sorts after ``v0.69.9``, ``1.2`` equals ``1.2.0``, and a final
-    release sorts after any pre-release of the same numbers. Build metadata after
-    ``+`` is ignored, as SemVer says it must be.
+    release sorts after any pre-release of the same numbers. A PEP 440
+    post-release (``1.2.3.post1``, also spelled ``rev`` or ``r``) sorts after
+    the final release it follows: read as a pre-release, a PyPI post-release
+    was reported as ``ahead`` of the pin for the same numbers instead of
+    ``outdated``. Build metadata after ``+`` is ignored, as SemVer says it must be.
 
     Raises:
-        ValueError: for a string with no leading numeric version.
+        ValueError: for a string with no leading numeric version, or with a
+            character after it that no release version is spelled with.
     """
     match = _VERSION_RE.match(text.strip())
     if match is None:
@@ -433,7 +517,15 @@ def parse_version(text: str) -> tuple[tuple[int, ...], tuple[int, str]]:
     while len(release) > 1 and release[-1] == 0:
         release = release[:-1]
     suffix = match.group(2).split("+", 1)[0].lstrip("-.")
-    return release, ((1, "") if not suffix else (0, suffix))
+    if not suffix:
+        return release, (1, "")
+    if _POST_RELEASE_RE.match(suffix):
+        return release, (2, suffix)
+    return release, (0, suffix)
+
+
+# PEP 440's post-release spellings, after the separator is stripped.
+_POST_RELEASE_RE = re.compile(r"^(?:post|rev|r)\d*$", re.IGNORECASE)
 
 
 def compare(pinned: str, latest: str) -> str:
@@ -650,15 +742,39 @@ def ruby_admits(requirement: object, ruby: tuple[int, int]) -> bool:
         ValueError: for a requirement this cannot read. A release whose Ruby cannot be
             judged is refused, not guessed at.
     """
+    return _requirement_admits(requirement, ruby, "Ruby")
+
+
+def rubygems_admits(
+    requirement: object, rubygems: tuple[int, ...] | None = None
+) -> bool:
+    """Whether a release's required RubyGems version admits the image's RubyGems.
+
+    ``requirement`` is the release's ``rubygems_version`` from RubyGems, in the grammar
+    of ``ruby_admits``; None or empty means no requirement. ``rubygems`` defaults to
+    ``IMAGE_RUBYGEMS``.
+
+    Raises:
+        ValueError: for a requirement this cannot read.
+    """
+    return _requirement_admits(
+        requirement, IMAGE_RUBYGEMS if rubygems is None else rubygems, "RubyGems"
+    )
+
+
+def _requirement_admits(
+    requirement: object, version: tuple[int, ...], what: str
+) -> bool:
+    """Whether a requirement in RubyGems' grammar admits ``version``; ``what`` names it."""
     if requirement is None or requirement == "":
         return True
     if not isinstance(requirement, str):
-        raise ValueError(f"cannot read the required Ruby version {requirement!r}")
-    have = _trimmed(ruby)
+        raise ValueError(f"cannot read the required {what} version {requirement!r}")
+    have = _trimmed(version)
     for clause in requirement.split(","):
         match = _REQUIREMENT_CLAUSE.match(clause)
         if match is None:
-            raise ValueError(f"cannot read the required Ruby version {requirement!r}")
+            raise ValueError(f"cannot read the required {what} version {requirement!r}")
         operator = match.group(1) or "="
         segments = [int(part) for part in match.group(2).split(".")]
         want = _trimmed(segments)
@@ -682,19 +798,42 @@ def ruby_admits(requirement: object, ruby: tuple[int, int]) -> bool:
     return True
 
 
+def _unmet_requirements(
+    release: dict[str, Any], ruby: tuple[int, int], rubygems: tuple[int, ...] | None
+) -> list[str]:
+    """What a release needs that the image does not have, as note text; [] if nothing."""
+    unmet = []
+    if not ruby_admits(release.get("ruby_version"), ruby):
+        unmet.append(
+            f"Ruby {release.get('ruby_version')} and the image installs Ruby "
+            f"{ruby[0]}.{ruby[1]}"
+        )
+    if not rubygems_admits(release.get("rubygems_version"), rubygems):
+        have = ".".join(str(n) for n in (rubygems or IMAGE_RUBYGEMS))
+        unmet.append(
+            f"RubyGems {release.get('rubygems_version')} and the image installs "
+            f"RubyGems {have}"
+        )
+    return unmet
+
+
 def newest_installable(
-    releases: Any, ruby: tuple[int, int], pinned: str
+    releases: Any,
+    ruby: tuple[int, int],
+    pinned: str,
+    rubygems: tuple[int, ...] | None = None,
 ) -> tuple[str, str]:
     """(the release a gem pin is compared with, a note about a newer one or "").
 
     The newest final release for the ``ruby`` platform whose required Ruby version
-    admits ``ruby``. Releases no newer than ``pinned`` are not judged: when none newer
-    is installable, the pin is compared with itself. When the newest release needs a
-    newer Ruby, the note says so and names it.
+    admits ``ruby`` and whose required RubyGems version admits ``rubygems`` (default
+    ``IMAGE_RUBYGEMS``). Releases no newer than ``pinned`` are not judged: when none
+    newer is installable, the pin is compared with itself. When the newest release
+    needs a newer Ruby or RubyGems, the note says so and names it.
 
     Raises:
         ValueError: for an answer that is not a list of releases, a release with no
-            version number, or a required Ruby version that cannot be read.
+            version number, or a required Ruby or RubyGems version that cannot be read.
     """
     if not isinstance(releases, list):
         raise ValueError(f"RubyGems answered {type(releases).__name__}, not a list")
@@ -715,15 +854,15 @@ def newest_installable(
     for release in finals:
         if parse_version(release["number"]) <= pin_key:
             break
-        if ruby_admits(release.get("ruby_version"), ruby):
+        if not _unmet_requirements(release, ruby, rubygems):
             target = release["number"]
             break
     note = ""
     if parse_version(newest["number"]) > parse_version(target):
+        needs = " and ".join(_unmet_requirements(newest, ruby, rubygems))
         note = (
-            f"{newest['number']} is the newest release, but it needs Ruby "
-            f"{newest.get('ruby_version')} and the image installs Ruby "
-            f"{ruby[0]}.{ruby[1]}; {target} is the newest release the image can run"
+            f"{newest['number']} is the newest release, but it needs {needs}; "
+            f"{target} is the newest release the image can run"
         )
     return target, note
 
@@ -753,7 +892,11 @@ def check(
     for pin in pins:
         note = ""
         if pin.ecosystem == BUNDLED:
-            results.append(Result(pin, None, "held", f"version set by {pin.project}"))
+            # The reason goes in ``note``, which the report prints for every result
+            # that has one; ``detail`` is printed only for lookup failures.
+            results.append(
+                Result(pin, None, "held", note=f"version set by {pin.project}")
+            )
             continue
         try:
             answer = fetchers[pin.ecosystem](pin.project)
@@ -808,11 +951,28 @@ def _dockerfile_args(tool: str, dockerfile: Path) -> list[str]:
     ]
 
 
+def _spelled_like(current: str, latest: str) -> str:
+    """``latest`` in the spelling of ``current``: with the leading ``v`` it has.
+
+    A uv-tool pin's latest comes from PyPI as the bare number, while its license
+    entry records the release tag (``v1.180.0`` for semgrep, cfn-lint, zizmor), and
+    the bump steps name that entry's new value and a ``gh api .../commits/<tag>``
+    lookup. Spelled bare, the step named a version that is not the tag and a
+    lookup that resolves no ref.
+    """
+    if current.startswith("v") and not latest.startswith("v"):
+        return "v" + latest
+    if not current.startswith("v") and latest.startswith("v"):
+        return latest[1:]
+    return latest
+
+
 def _license_steps(pins: Any, tool: str, latest: str) -> list[str]:
     entry = pins.THIRD_PARTY_LICENSES.get(tool)
     if entry is None:
         return []
-    project = _github_project(entry.repository, f"THIRD_PARTY_LICENSES[{tool!r}]")
+    project = _license_project(tool, entry)
+    latest = _spelled_like(entry.version, latest)
     steps = [
         f'THIRD_PARTY_LICENSES["{tool}"].version -> {latest}',
         (
@@ -843,18 +1003,45 @@ def _global_name(pins: Any, value: Any) -> str | None:
     )
 
 
+def _major(bare_version: str) -> str | None:
+    """The leading number of a version without its ``v``, or None if it has none."""
+    match = re.match(r"\d+", bare_version)
+    return match.group(0) if match else None
+
+
 def _release_binary_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
     tool = pin.tool
     old_bare = pin.version.lstrip("v")
     table = pins._ASSET_TABLES.get(tool, {})
     filenames = list(table.values())
     steps = [f'TOOL_VERSIONS["{tool}"] -> {latest}']
-    if filenames and all(old_bare in name for name in filenames):
+    table_name = _global_name(pins, table) or "asset filenames"
+    new_bare = latest.lstrip("v")
+    # Each name is judged on its own: one that carries no version (an unversioned
+    # binary beside versioned archives) must not drop the step for the others.
+    versioned = [name for name in filenames if old_bare in name]
+    if versioned:
+        which = "" if len(versioned) == len(filenames) else " that carry the version"
         steps.append(
-            f"{_global_name(pins, table) or 'asset filenames'}: the {len(filenames)} "
-            f"asset file names of {tool}, {old_bare} -> {latest.lstrip('v')}; check "
-            "each still exists upstream"
+            f"{table_name}: the {len(versioned)} asset file names of {tool}{which}, "
+            f"{old_bare} -> {new_bare}; check each still exists upstream"
         )
+    # A name that carries only the major version (cfn-guard's ``cfn-guard-v3-...``)
+    # changes when the major does, and not on any other bump.
+    old_major, new_major = _major(old_bare), _major(new_bare)
+    if old_major is not None and new_major not in (None, old_major):
+        major_only = [
+            name
+            for name in filenames
+            if name not in versioned
+            and re.search(rf"(?<![0-9A-Za-z])v{old_major}(?![0-9])", name)
+        ]
+        if major_only:
+            steps.append(
+                f"{table_name}: the {len(major_only)} asset file names of {tool} that "
+                f"carry only the major version, v{old_major} -> v{new_major}; check "
+                "each still exists upstream"
+            )
     taken_at = getattr(pins, "_DIGESTS_TAKEN_AT", {})
     if tool in taken_at:
         steps.append(f'_DIGESTS_TAKEN_AT["{tool}"] -> {latest}')
@@ -952,13 +1139,32 @@ def _gem_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
         # Bundler is not in the Gemfile; the lockfile records the Bundler that wrote
         # it, and the image installs that one (the Dockerfile ARG step follows).
         steps.append(f"{GEMFILE}.lock: its BUNDLED WITH line -> {latest}")
-        return steps
-    return steps + [
-        f'{GEMFILE}: gem "{pin.tool}", "{latest}"',
+    else:
+        steps += [
+            f'{GEMFILE}: gem "{pin.tool}", "{latest}"',
+            (
+                f"{GEMFILE}.lock: regenerate with "
+                f"`bundle lock --update {pin.tool}` in that directory"
+            ),
+        ]
+    # A gem with a license entry has that entry's values to move as well.
+    return steps + _license_steps(pins, pin.tool, latest)
+
+
+def _bundled_library_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
+    """A bundled library has no bump of its own: its version is its wheel's.
+
+    The checker never reports one as outdated (it is held), so these steps are
+    reached only when a bump of the wheel changes what it bundles. They say which
+    entry follows the wheel rather than naming an upstream release to fetch.
+    """
+    return [
         (
-            f"{GEMFILE}.lock: regenerate with "
-            f"`bundle lock --update {pin.tool}` in that directory"
-        ),
+            f"{pin.tool} is bundled by {pin.project} and is not pinned on its own: after "
+            f"a {pin.project} bump, read the version of {pin.tool} the new wheel carries "
+            f'and set THIRD_PARTY_LICENSES["{pin.tool}"].version to it, with its commit '
+            "and license-file digests taken from that release"
+        )
     ]
 
 
@@ -968,6 +1174,7 @@ _KIND_STEPS: dict[str, Callable[[Any, Pin, str], list[str]]] = {
     UV_TOOL: _uv_tool_steps,
     RULES_BUNDLE: _rules_bundle_steps,
     GEM: _gem_steps,
+    BUNDLED_LIBRARY: _bundled_library_steps,
 }
 
 
@@ -992,6 +1199,12 @@ def _pinned_digests(pins: Any, pin: Pin) -> list[str]:
     return list(dict.fromkeys(v.lower() for v in values if v))
 
 
+# One line of ``git grep -n -z``: the path, the line number and the matched text, the
+# first two ended by a NUL and the third by the newline. A path may hold a newline, so
+# the record is read as a whole rather than split into lines first.
+_GREP_RECORD = re.compile(rb"([^\0]+)\0(\d+)\0[^\n]*(?:\n|$)")
+
+
 def _copy_steps(pins: Any, pin: Pin, repo_root: Path) -> list[str]:
     """One step per tracked file outside the pins module that repeats a pinned digest.
 
@@ -1008,15 +1221,24 @@ def _copy_steps(pins: Any, pin: Pin, repo_root: Path) -> list[str]:
             spellings.append(f"sha256-{sri}")
     if not spellings:
         return []
-    argv = ["git", "-C", str(repo_root), "grep", "-n", "-I", "-F"]
+    # -z prints each path verbatim and ends the path and the line number with a NUL,
+    # so a path that holds a colon, a non-ASCII character or a quote is read back as
+    # it is. --no-color keeps a user's color.grep=always out of the paths. The output is
+    # read as bytes: a matched line in an encoding this locale cannot decode must not
+    # stop the report.
+    argv = ["git", "-C", str(repo_root), "grep", "-n", "-z", "--no-color", "-I", "-F"]
     for spelling in spellings:
         argv += ["-e", spelling]
     argv += ["--", ".", f":(exclude){PINS_FILE}"]
     try:
         found = subprocess.run(  # nosec B603 B607 - git, fixed arguments, this checkout
-            argv, capture_output=True, text=True, timeout=60, check=False
+            argv, capture_output=True, timeout=60, check=False
         )
-        failure = None if found.returncode in (0, 1) else found.stderr.strip()[:200]
+        failure = (
+            None
+            if found.returncode in (0, 1)
+            else found.stderr.decode("utf-8", "replace").strip()[:200]
+        )
     except (OSError, subprocess.TimeoutExpired) as exc:
         failure = str(exc)
     if failure is not None:
@@ -1026,9 +1248,9 @@ def _copy_steps(pins: Any, pin: Pin, repo_root: Path) -> list[str]:
             + ", ".join(spellings)
         ]
     lines: dict[str, list[str]] = {}
-    for line in found.stdout.splitlines():
-        path, number, _ = line.split(":", 2)
-        lines.setdefault(path, []).append(number)
+    for record in _GREP_RECORD.finditer(found.stdout):
+        path = record.group(1).decode("utf-8", "replace")
+        lines.setdefault(path, []).append(record.group(2).decode("ascii"))
     return [
         f"{path}:{','.join(numbers)}: a copy of a digest {pin.tool} pins; replace it "
         "with the new value"
@@ -1087,10 +1309,102 @@ _DEBIAN_SECURITY_INDEX = "https://deb.debian.org/debian-security/dists/{suite}/m
 _NODESOURCE_INDEX = "https://deb.nodesource.com/node_{major}.x/dists/nodistro/main/binary-{arch}/Packages"
 
 _APT_INSTALL = re.compile(
-    r"(?<![\w-])apt-get\s[^;&|]*?(?<![\w-])install(?![\w-])(?P<args>[^;&|]*)"
+    r"(?<![\w-])apt(?:-get)?\s[^;&|]*?(?<![\w-])install(?![\w-])(?P<args>[^;&|]*)"
 )
 _APT_PIN = re.compile(
     r"^(?P<package>[a-z0-9][a-z0-9+.-]+)=(?P<version>[A-Za-z0-9.+~:-]+)$"
+)
+# A pin whose version is an expansion, ``curl=${CURL_VERSION}``: a package and a version
+# that is known only when the build runs, which no index can be asked about.
+_APT_PIN_EXPANSION = re.compile(r"[a-z0-9][a-z0-9+.-]+=(?=\S*\$)\S+")
+_XARGS = re.compile(r"(?<![\w-])xargs(?![\w-])")
+# A file or a here-string given to a command as its input: ``< list``, ``<list``,
+# ``<<< "curl git"``. Not a here-document (``<<EOF``), a descriptor copy (``<&3``) or
+# ``< /dev/null``, which gives xargs no words.
+_XARGS_STDIN_FILE = re.compile(
+    r"(?<!<)<<<|(?<![<>])<(?![<&])(?!\s*/dev/null(?![\w/.-]))"
+)
+# xargs reading its words from a file: ``-a list``, ``-ra list``, ``--arg-file=list``.
+_XARGS_ARG_FILE = re.compile(r"\s(?:-[0-9A-Za-z]*a|--arg-file(?![\w-]))")
+
+# Tag parts of a base image that name a variant of the image, not a Debian suite.
+_IMAGE_VARIANTS = frozenset({"slim", "alpine"})
+# The NodeSource major the Dockerfile sets: NODE_MAJOR=22, NODE_MAJOR="22" or
+# ENV NODE_MAJOR 22.
+_NODE_MAJOR = re.compile(r"\bNODE_MAJOR(?:=|\s+)[\"']?(?P<major>\d+)\b")
+# The same major written into the repository URL apt reads, which is where apt gets it,
+# or into the URL of NodeSource's setup script (setup_22.x), which sets that repository up.
+_NODESOURCE_URL_MAJOR = re.compile(
+    r"deb\.nodesource\.com/(?:node|setup)_(?P<major>\d+)\.x(?![\w.])"
+)
+# Docker reads instruction names without regard to case.
+_RUN_INSTRUCTION = re.compile(r"^RUN\s", re.IGNORECASE)
+# A here-document marker on a RUN line: <<EOF, <<-EOF, <<"EOF", <<\EOF. Not a
+# here-string (<<<), and not a name that goes on into a call. A quote around the name,
+# or a backslash before it, stops the shell expanding the body (see _heredoc_markers).
+_HEREDOC_NAME = r"[A-Za-z_][A-Za-z0-9_]*"
+_HEREDOC_MARKER = re.compile(
+    rf"(?<!<)<<-?\s*(?:([\"'])(?P<name>{_HEREDOC_NAME})\1"
+    rf"|(?P<escaped>\\)?(?P<bare>{_HEREDOC_NAME}))(?![\w(])"
+)
+# Shell arithmetic, $((1 << shift)) or ((x = 1 << n)), with one level of inner
+# parentheses. Its shift operator is not a here-document, so it is cut out before the
+# markers are looked for.
+_ARITHMETIC = re.compile(r"\$?\(\((?:[^()]|\([^()]*\))*\)\)")
+# Where one shell command ends on a line: ``;``, ``|``, ``||``, ``&&`` and a lone ``&``,
+# not the ``&`` of ``2>&1`` or ``&>file``. Only a single ``|`` passes output on.
+_COMMAND_END = re.compile(r"\|\||&&|[;|]|(?<![<>&])&(?![>&])")
+# A redirection of output to a file: "> x", ">> x", "2> x", "&> x". Not a copy of a
+# descriptor (``2>&1``), and not /dev/null, which keeps nothing.
+_FILE_REDIRECT = re.compile(r"(?:&|\d*)>>?(?!&)\s*(?!/dev/null(?![\w/.-]))[^\s<>|;&]")
+# The file a redirection of output names: "> x", ">> x", "2> x", "&> x".
+_REDIRECT_TARGET = re.compile(r"(?:&|\d*)>>?(?!&)\s*(?P<file>[^\s<>|;&]+)")
+# A redirection or a here-document marker among the words of a command.
+_REDIRECT_WORD = re.compile(r"(?:&|\d*)>>?\s*\S*|<<-?\s*[\"'\\]?\w+[\"']?")
+# What _split_substitutions leaves in place of a command substitution, $(...) or
+# `...`: one word, with no shell metacharacter in it, that no package spelling matches.
+_SUBSTITUTION_WORD = "$(...)"
+# A positional or special parameter given as a whole word: $@, $*, $1, ${2}. In a script
+# written to a file it is whatever the script's caller passes, which is checked where
+# the caller is. Any other expansion names packages no lookup can see.
+_POSITIONAL_PARAMETER = re.compile(r"\$(?:[@*]|\d+|\{(?:[@*]|\d+)\})")
+# A comment line above a RUN that says the bodies of its here-documents are not scripts.
+_SKIP_FILE_BODIES = re.compile(r"#\s*apt-pin-check:\s*skip\s*")
+# Shells, which run the body of a here-document they are given, and the commands that
+# start the user's shell and give it their input: ``su - user <<EOF``.
+_SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ash", "ksh", "su", "runuser"})
+# The sudo options that start a shell: -s, -i, --shell, --login, in a cluster too (-Hs).
+_SUDO_SHELL_OPTION = re.compile(r"--shell|--login|-[A-Za-z]*[si][A-Za-z]*")
+# The commands that copy their input to a file or to their output unchanged, so a
+# here-document given to one of them is that file's content: ``cat > f <<'EOF'``,
+# ``tee f <<'EOF'``, ``install /dev/stdin f <<'EOF'``, ``cp /dev/stdin f <<'EOF'``,
+# ``dd of=f <<'EOF'``. Any other command (``xargs apt-get install -y``) reads its input
+# as it pleases.
+_COPIERS = frozenset({"cat", "tee", "install", "cp", "dd"})
+# Commands that run the command after them, and the options of each that take their
+# value as the next word. ``sudo -u builder cat`` runs cat.
+_WRAPPER_VALUE_OPTIONS = {
+    "sudo": frozenset("-C -D -g -h -p -R -r -T -t -U -u".split()),
+    "nice": frozenset({"-n"}),
+    "env": frozenset({"-u", "-C", "-S"}),
+    "command": frozenset(),
+    "exec": frozenset(),
+    "nohup": frozenset(),
+    "time": frozenset(),
+}
+# The words that open a command inside a loop or a conditional: the command after one
+# is what runs. ``do sh x.sh $p`` runs sh.
+_COMPOUND_KEYWORDS = frozenset(
+    {"do", "then", "else", "elif", "if", "while", "until", "!"}
+)
+_ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=\S*")
+# A shell redirection among the arguments of the install: "> /dev/null", "2>".
+_REDIRECTION = re.compile(r"(?:(?<=\s)|^)\d*(?:>>|>|<)\s*\S*")
+# The options of apt-get that take their value as the next word. A short option takes
+# it as the next word only when it is the last letter of its cluster: -yt suite, but
+# -tsuite.
+_APT_OPTIONS_WITH_VALUE = frozenset(
+    {"-o", "--option", "-t", "--target-release", "-c", "--config-file"}
 )
 
 
@@ -1116,25 +1430,422 @@ class AptResult:
     detail: str = ""
 
 
-def _run_blocks(text: str) -> list[list[tuple[int, str]]]:
-    """Each RUN instruction as its (line number, text) lines, comments dropped."""
-    blocks: list[list[tuple[int, str]]] = []
+def _heredoc_markers(line: str) -> list[tuple[str, bool]]:
+    """The here-documents opened on one line, as (name, body is a file's content).
+
+    A body is a file's content, and not commands run now, when the command it is given
+    to is a copier (``cat``, ``tee``, ``install`` or ``cp`` of ``/dev/stdin``, ``dd``),
+    every command it is piped on to is a copier that writes a file, one of them writes
+    a file (``cat > setup.sh <<'EOF'``, ``cat <<EOF >> conf``, ``tee setup.sh <<EOF``,
+    ``cat <<EOF | tee setup.sh``, ``install -D /dev/stdin x <<EOF``), and none of them is
+    a shell. A body given to a shell (``bash <<EOF > log``), to commands that write no
+    file, or to any other command (``xargs apt-get install -y <<EOF > log`` writes a
+    file, but its first reader is no copier) is that command's input, read as commands.
+    Both are read for installs; the flag only decides whether a positional parameter in
+    an install (``"$@"``) is skipped as the caller's. A marker that is not quoted
+    (``<<EOF``, not ``<<'EOF'`` or ``<<\\EOF``) has the build shell expand the body as
+    it is written, so what lands in the file is whatever the RUN's variables were; that
+    body is read as commands too. So is the body of a file the same instruction goes on
+    to run (``cat > x.sh <<'EOF' && sh x.sh jq``, ``... && chmod +x x.sh && x.sh``,
+    ``... && cat x.sh | sh -s jq``): its caller is on the line, so a ``"$@"`` in it is
+    the caller's package, installed now.
+    """
+    cleaned = _ARITHMETIC.sub(" ", line)
+    segments: list[tuple[int, int, str]] = []  # (start, stop, what ended the command)
+    start = 0
+    for end in _COMMAND_END.finditer(cleaned):
+        segments.append((start, end.start(), end.group()))
+        start = end.end()
+    segments.append((start, len(cleaned), ""))
+    markers: list[tuple[str, bool]] = []
+    for match in _HEREDOC_MARKER.finditer(cleaned):
+        first = next(
+            (i for i, (_, stop, _) in enumerate(segments) if match.start() < stop),
+            len(segments) - 1,
+        )
+        # The body is the input of its command, whose output goes on down the pipe.
+        sinks = [first]
+        while segments[sinks[-1]][2] == "|":
+            sinks.append(sinks[-1] + 1)
+        writes = shell = False
+        written: set[str] = set()
+        # The body is a file's content only if every command it reaches copies it: the
+        # one it is given to by what it is, those piped on to by what it is and by
+        # writing a file.
+        copies = True
+        for position, index in enumerate(sinks):
+            begin, stop, _ = segments[index]
+            command = cleaned[begin:stop]
+            words = _REDIRECT_WORD.sub(" ", command).split()
+            writes_here = bool(_FILE_REDIRECT.search(command)) or _writes_a_file(words)
+            writes = writes or writes_here
+            written.update(_written_files(command, words))
+            shell = shell or _runs_a_shell(words)
+            copies = copies and _program(words) in _COPIERS
+            copies = copies and (writes_here or position == 0)
+        # A quoted name (<<'EOF') or a backslash before it (<<\EOF) is a marker the
+        # shell does not expand the body for.
+        quoted = bool(match.group(1) or match.group("escaped"))
+        name = match.group("name") or match.group("bare")
+        # A file the same instruction runs is not kept for later: its body is the
+        # commands of this build, whatever the marker.
+        runs_it = bool(written) and _runs_a_file(
+            _other_pipelines(cleaned, segments, sinks), written
+        )
+        is_file = writes and copies and not shell and quoted and not runs_it
+        markers.append((name, is_file))
+    return markers
+
+
+def _written_files(command: str, words: list[str]) -> set[str]:
+    """The files one command writes its input to, as the names it spells them.
+
+    These are the names of ``> f``, ``>> f``, ``tee f``, ``install /dev/stdin f``,
+    ``cp /dev/stdin f`` and ``dd of=f``. ``/dev/null`` keeps nothing.
+    """
+    files = {
+        match.group("file").strip("'\"") for match in _REDIRECT_TARGET.finditer(command)
+    }
+    names = [word.strip("(){}").rsplit("/", 1)[-1] for word in words]
+    if "tee" in names:
+        after_tee = words[names.index("tee") + 1 :]
+        files.update(w for w in after_tee if not w.startswith("-"))
+    if "/dev/stdin" in words:
+        files.update(
+            w for w in words[words.index("/dev/stdin") + 1 :] if not w.startswith("-")
+        )
+    files.update(w[3:] for w in words if w.startswith("of="))
+    files.discard("/dev/null")
+    files.discard("")
+    return files
+
+
+def _other_pipelines(
+    cleaned: str, segments: list[tuple[int, int, str]], sinks: list[int]
+) -> list[list[str]]:
+    """The commands of a line that do not take a here-document, grouped by pipeline.
+
+    A pipeline is the run of commands joined by a single ``|``; ``&&``, ``||`` and ``;``
+    start a new one. The commands that read the body (``sinks``) are left out.
+    """
+    pipelines: list[list[str]] = []
+    piped_on = False
+    for index, (begin, end, ender) in enumerate(segments):
+        if index in sinks:
+            piped_on = False
+            continue
+        if piped_on and pipelines:
+            pipelines[-1].append(cleaned[begin:end])
+        else:
+            pipelines.append([cleaned[begin:end]])
+        piped_on = ender == "|"
+    return pipelines
+
+
+def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
+    """Whether a command of the pipelines runs one of the files, by its name or path.
+
+    A file is run when it is the program (``x.sh``, ``./x.sh``, ``sudo /tmp/x.sh``), or
+    when a shell, ``.`` or ``source`` has its name among the words (``sh x.sh``,
+    ``bash -e /tmp/x.sh jq``, ``. x.sh``, ``source <(cat x.sh)``), or inside a ``-c``
+    script (``sh -c 'chmod +x x.sh && x.sh'``), or when the shell is piped the commands
+    before it in the same pipeline and one of them names the file (``cat x.sh | sh -s
+    jq``). A command that follows a compound-command keyword runs as if the keyword
+    were not there (``for p in jq git; do sh x.sh $p; done``, ``if sh x.sh jq; then``,
+    ``! sh x.sh jq``). The names are matched without their directory, so a different
+    directory is taken for the same file: the body is then read as commands, which is
+    the side of caution.
+    """
+    wanted = {path.rsplit("/", 1)[-1] for path in files} - {""}
+    for pipeline in pipelines:
+        fed: list[str] = []  # the words of the commands piped into this one
+        for command in pipeline:
+            words = [w.strip("'\"") for w in _REDIRECT_WORD.sub(" ", command).split()]
+            lead = 0
+            while lead < len(words) and words[lead] in _COMPOUND_KEYWORDS:
+                lead += 1
+            words = words[lead:]
+            program = _program(words)
+            if program in wanted:
+                return True
+            if program in _SHELLS or program in {".", "source"}:
+                named = (w.strip("()").rsplit("/", 1)[-1] for w in words + fed)
+                if any(name in wanted for name in named):
+                    return True
+                # A script given as a string names the file somewhere in it.
+                script = words[words.index("-c") + 1 :] if "-c" in words else []
+                if any(name in word for word in script for name in wanted):
+                    return True
+            fed.extend(words)
+    return False
+
+
+def _program(words: list[str]) -> str:
+    """The program a command runs: its first word past assignments and wrappers.
+
+    ``FOO=1 cat`` and ``sudo -u builder cat`` run ``cat``. A word this cannot place (a
+    wrapper's option it does not know) is taken for the program, which no copier
+    matches, so the body is read as commands.
+    """
+    index = 0
+    while index < len(words):
+        word = words[index].strip("(){}")
+        name = word.rsplit("/", 1)[-1]
+        index += 1
+        if not name or _ENV_ASSIGNMENT.fullmatch(word):
+            continue
+        value_options = _WRAPPER_VALUE_OPTIONS.get(name)
+        if value_options is None:
+            return name
+        while index < len(words) and words[index].startswith("-"):
+            index += 2 if words[index] in value_options else 1
+    return ""
+
+
+def _writes_a_file(words: list[str]) -> bool:
+    """Whether the words of a command write what they read to a named file."""
+    names = [word.strip("(){}").rsplit("/", 1)[-1] for word in words]
+    if "tee" in names:
+        # tee with no file argument only copies to its output.
+        return any(not w.startswith("-") for w in words[names.index("tee") + 1 :])
+    if "/dev/stdin" in words and ("install" in names or "cp" in names):
+        return True
+    return "dd" in names and any(
+        w.startswith("of=") and w != "of=/dev/null" for w in words
+    )
+
+
+def _runs_a_shell(words: list[str]) -> bool:
+    """Whether the words of a command start a shell that reads its input."""
+    names = [word.strip("(){}").rsplit("/", 1)[-1] for word in words]
+    if any(name in _SHELLS for name in names):
+        return True
+    return "sudo" in names and any(_SUDO_SHELL_OPTION.fullmatch(w) for w in words)
+
+
+@dataclass(frozen=True)
+class _RunBlock:
+    """The (line number, text) lines of one RUN instruction, or of a file body in it."""
+
+    lines: list[tuple[int, str]]
+    # The lines are the content of a file the instruction writes with a quoted marker
+    # (``cat > x <<'EOF'``), a script that may be run later. They are read as commands
+    # all the same, but a positional parameter in them (``"$@"``) is whatever the
+    # script's caller passes, not a package this check can look up.
+    file_content: bool = False
+
+
+def _run_blocks(text: str) -> list[_RunBlock]:
+    """Each RUN instruction as its (line number, text) lines, comments dropped.
+
+    The instruction name is read without regard to case. Inside a continued
+    instruction a blank line and a comment line are skipped, as Docker skips them.
+    The body of a here-document belongs to the instruction, each of its lines ended
+    with ``;`` as the shell ends a command at a newline, except a line that ends with
+    a backslash, which continues on the next. The body of a here-document written to
+    a file with a quoted marker (``cat > setup.sh <<'EOF'``) is a block of its own,
+    flagged ``file_content``: the file may be run later in the build, so its installs
+    are read, not skipped. Those bodies are dropped instead when a comment line
+    ``# apt-pin-check: skip`` stands directly above the RUN (blank lines and other
+    comments may come between), for a file that is not a script. An instruction still
+    open at the end of the file is kept.
+    """
+    blocks: list[_RunBlock] = []
     current: list[tuple[int, str]] | None = None
+    # here-documents (name, body is a file's content) whose body is being read, in the
+    # order the shell reads them
+    terminators: list[tuple[str, bool]] = []
+    file_body: list[tuple[int, str]] = []  # the body being read, if it is a file's
+    skip_bodies = False  # a skip comment stands above the next RUN
+    run_skips_bodies = False  # the RUN being read has one
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
+        if current is not None and terminators:
+            if line == terminators[0][0]:
+                if terminators[0][1] and file_body and not run_skips_bodies:
+                    blocks.append(_RunBlock(file_body, file_content=True))
+                file_body = []
+                terminators.pop(0)
+                if not terminators:
+                    blocks.append(_RunBlock(current))
+                    current = None
+            elif line and not line.startswith("#"):
+                # A command ends at a newline, unless the line ends with a backslash:
+                # then the next line continues it, as in the body of a here-document.
+                target = file_body if terminators[0][1] else current
+                if line.endswith("\\"):
+                    target.append((number, line[:-1]))
+                else:
+                    target.append((number, f"{line} ;"))
+            continue
         if current is None:
-            if not re.match(r"^RUN\s", line):
+            if not line:
+                continue
+            if line.startswith("#"):
+                skip_bodies = skip_bodies or bool(_SKIP_FILE_BODIES.fullmatch(line))
+                continue
+            if not _RUN_INSTRUCTION.match(line):
+                skip_bodies = False
                 continue
             current = []
+            run_skips_bodies, skip_bodies = skip_bodies, False
             line = line[3:].strip()
-        elif line.startswith("#"):
+        elif not line or line.startswith("#"):
             continue
         continued = line.endswith("\\")
-        current.append((number, line[:-1] if continued else line))
-        if not continued:
-            blocks.append(current)
-            current = None
+        body = line[:-1] if continued else line
+        current.append((number, body))
+        if continued:
+            continue
+        # The command is the whole logical line, as Docker joins it: a shell named on
+        # one physical line takes the here-document marker on the next.
+        terminators = _heredoc_markers(" ".join(part for _, part in current))
+        if terminators:
+            continue
+        blocks.append(_RunBlock(current))
+        current = None
+    if file_body and not run_skips_bodies:
+        blocks.append(_RunBlock(file_body, file_content=True))
+    if current:
+        blocks.append(_RunBlock(current))
     return blocks
+
+
+def _block_text(block: list[tuple[int, str]]) -> str:
+    """The shell text of a RUN instruction: its lines joined, an exec form unpacked.
+
+    ``RUN ["apt-get", "install", "-y", "curl=1.2"]`` is a JSON array of the words of
+    one command, which is the command the shell form spells with spaces.
+    """
+    joined = " ".join(text for _, text in block)
+    if joined.lstrip().startswith("["):
+        try:
+            words = json.loads(joined)
+        except ValueError:
+            return joined
+        if isinstance(words, list) and all(isinstance(word, str) for word in words):
+            return " ".join(words)
+    return joined
+
+
+def _line_words(text: str) -> set[str]:
+    """The words of one Dockerfile line, without quotes, commas and brackets."""
+    return {word.strip("'\"") for word in re.split(r"[\s;&|,\[\]]+", text)}
+
+
+def _takes_separate_value(option: str) -> bool:
+    """Whether an apt-get option word takes the next word as its value."""
+    if option in _APT_OPTIONS_WITH_VALUE:
+        return True
+    if option.startswith("--") or "=" in option:
+        return False
+    for position, flag in enumerate(option[1:], start=1):
+        if flag in "otc":
+            return position == len(option) - 1
+    return False
+
+
+def _install_words(args: str) -> list[str]:
+    """The package words of the arguments after ``install``.
+
+    Options are not packages, and neither are the value an option takes as the next
+    word (``-t bookworm-backports``, ``-o Name=value``) or a redirection. The quotes
+    of a command given to a wrapper (``with-retry 'apt-get install -y curl=1.2'``) are
+    not part of a word.
+    """
+    words: list[str] = []
+    value_next = False
+    for raw in _REDIRECTION.sub(" ", args).split():
+        word = raw.strip("'\"")
+        if value_next:
+            value_next = False
+        elif not word:
+            continue
+        elif word.startswith("-"):
+            value_next = _takes_separate_value(word)
+        else:
+            words.append(word)
+    return words
+
+
+def _split_substitutions(text: str) -> list[str]:
+    """``text`` with each command substitution cut out, then each one's own text.
+
+    ``$(...)``, backticks and arithmetic ``$((...))`` become one word,
+    ``_SUBSTITUTION_WORD``, so a ``|``, ``;`` or ``&`` inside one does not end the
+    install it belongs to part way (``apt-get install -y $(grep x list | xargs)``),
+    and so the word is named in the refusal instead of the half of it that was left.
+    What is inside is read after the text around it, because it can hold an install
+    of its own. A substitution that is not closed is left as written.
+    """
+    outer: list[str] = []
+    inner: list[str] = []
+    position = 0
+    while position < len(text):
+        char = text[position]
+        end = -1
+        if text.startswith("$(", position):
+            depth = 0
+            for index in range(position + 1, len(text)):
+                if text[index] == "(":
+                    depth += 1
+                elif text[index] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        end = index
+                        break
+            start = position + 2
+        elif char == "`":
+            end = text.find("`", position + 1)
+            start = position + 1
+        if end == -1:
+            outer.append(char)
+            position += 1
+            continue
+        outer.append(_SUBSTITUTION_WORD)
+        inner.append(text[start:end])
+        position = end + 1
+    found = ["".join(outer)]
+    for part in inner:
+        found.extend(_split_substitutions(part))
+    return found
+
+
+def _xargs_input(shell: str, install: re.Match[str]) -> str:
+    """What ``xargs`` reads the packages of this install from, or ``""`` if not xargs.
+
+    ``xargs apt-get install -y <<EOF`` takes the words of the body as the packages. The
+    body lines are joined to the instruction as commands of their own, so no package in
+    them is an argument of the install and none can be read as one. The same holds when
+    the here-document is opened by an earlier stage of the pipeline that feeds xargs
+    (``cat <<'EOF' | xargs apt-get install -y``), when a redirection such as ``2>&1``
+    comes between the install and the marker, and when xargs reads a file
+    (``< packages.txt``, ``-a packages.txt``), a here-string or a pipe: the words it
+    reads are not in the Dockerfile at all. Packages given as arguments of the install
+    (``xargs apt-get install -y curl=1.2``) are read like any install.
+    """
+    text = shell.replace("|&", "| ")
+    ends = list(_COMMAND_END.finditer(text, 0, install.start()))
+    own_start = ends[-1].end() if ends else 0
+    runner = _XARGS.search(text, own_start, install.start())
+    if runner is None:
+        return ""
+    # The pipeline xargs ends: step back over every stage a single ``|`` joins.
+    first = len(ends)
+    while first and ends[first - 1].group() == "|":
+        first -= 1
+    pipeline_start = ends[first - 1].end() if first else 0
+    after = _COMMAND_END.search(text, install.end())
+    stage_end = after.start() if after else len(text)
+    if _HEREDOC_MARKER.search(text, pipeline_start, stage_end):
+        return "a here-document"
+    if _XARGS_STDIN_FILE.search(text, own_start, stage_end):
+        return "a file or a here-string"
+    if _XARGS_ARG_FILE.search(text, runner.end(), install.start()):
+        return "a file named by its -a or --arg-file option"
+    if ends and ends[-1].group() == "|":
+        return "a pipe"
+    return ""
 
 
 def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
@@ -1147,30 +1858,53 @@ def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
     """
     versions: dict[str, str] = {}
     lines: dict[str, list[int]] = {}
-    for block in _run_blocks(dockerfile.read_text(encoding="utf-8")):
-        joined = " ".join(text for _, text in block)
-        for match in _APT_INSTALL.finditer(joined):
-            for word in match.group("args").split():
-                if word.startswith("-"):
-                    continue
-                pin = _APT_PIN.match(word)
-                if pin is None:
+    for run in _run_blocks(dockerfile.read_text(encoding="utf-8")):
+        block = run.lines
+        for shell in _split_substitutions(_block_text(block)):
+            for match in _APT_INSTALL.finditer(shell):
+                where = f"{dockerfile.name}:{block[0][0]}"
+                if source := _xargs_input(shell, match):
                     raise PinEnumerationError(
-                        f"{dockerfile.name}:{block[0][0]} installs {word!r} with apt-get "
-                        "and no version. Pin it as package=version; see the comment "
-                        "above the first apt-get install for where versions come from."
+                        f"{where} installs packages with apt-get through xargs, which "
+                        f"reads them from {source}. The words it reads are not "
+                        "arguments this check can read. Spell each package as an "
+                        "argument of the install, as package=version."
                     )
-                package, version = pin.group("package"), pin.group("version")
-                if versions.setdefault(package, version) != version:
-                    raise PinEnumerationError(
-                        f"{package} is pinned to {versions[package]} and to {version} "
-                        f"in {dockerfile.name}; every stage has to install the same one."
+                for word in _install_words(match.group("args")):
+                    if run.file_content and _POSITIONAL_PARAMETER.fullmatch(word):
+                        # A script the image gets: "$@" is whatever its caller
+                        # passes, and the caller's install is checked where it is.
+                        continue
+                    if _SUBSTITUTION_WORD in word:
+                        raise PinEnumerationError(
+                            f"{where} installs {word!r} with apt-get, naming a "
+                            "package through a command substitution that this check "
+                            "cannot read. Spell each package as package=version."
+                        )
+                    if _APT_PIN_EXPANSION.fullmatch(word):
+                        raise PinEnumerationError(
+                            f"{where} installs {word!r} with apt-get, pinning the "
+                            "version through an expansion that this check cannot "
+                            "read. Spell the version out, as package=version."
+                        )
+                    pin = _APT_PIN.match(word)
+                    if pin is None:
+                        raise PinEnumerationError(
+                            f"{where} installs {word!r} with apt-get and no version. "
+                            "Pin it as package=version; see the comment above the "
+                            "first apt-get install for where versions come from."
+                        )
+                    package, version = pin.group("package"), pin.group("version")
+                    if versions.setdefault(package, version) != version:
+                        raise PinEnumerationError(
+                            f"{package} is pinned to {versions[package]} and to "
+                            f"{version} in {dockerfile.name}; every stage has to "
+                            "install the same one."
+                        )
+                    lines.setdefault(package, []).extend(
+                        [number for number, part in block if word in _line_words(part)]
+                        or [block[0][0]]
                     )
-                lines.setdefault(package, []).extend(
-                    number
-                    for number, text in block
-                    if word in re.split(r"[\s;&|]+", text)
-                )
     return [
         AptPin(package, versions[package], tuple(sorted(set(lines[package]))))
         for package in sorted(versions)
@@ -1180,6 +1914,18 @@ def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
 # The Debian package that installs the Ruby the image runs the gems with. Its version
 # is the interpreter's major.minor, behind an epoch: ruby=1:3.1 installs Ruby 3.1.
 _RUBY_PACKAGE = "ruby"
+
+# The RubyGems the image has, which the Dockerfile does not pin: it is whatever the
+# Debian ruby package bundles. Ruby 3.1.2, the 3.1 release in the pinned Debian
+# bookworm package, bundles RubyGems 3.3.7 (``VERSION`` in lib/rubygems.rb at the
+# upstream v3_1_2 tag, read 2026-10-30). This is the upstream number: Debian's own
+# build of the package was not read, so it is a floor, and a release that needs a newer
+# RubyGems than this is treated as not installable. A release's ``rubygems_version``
+# is compared with it. IMAGE_RUBYGEMS_RUBY_PIN is the ``ruby=`` apt pin the number was
+# taken for; a test fails when the Dockerfile's pin differs, so a Ruby bump makes
+# whoever makes it look at this number.
+IMAGE_RUBYGEMS: tuple[int, ...] = (3, 3, 7)
+IMAGE_RUBYGEMS_RUBY_PIN = "1:3.1"
 
 
 def image_ruby(apt_pins: Iterable[AptPin]) -> tuple[int, int]:
@@ -1206,17 +1952,46 @@ def image_ruby(apt_pins: Iterable[AptPin]) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def _base_image_codename(image: str) -> str:
+    """The Debian codename in an image reference's tag, or ``""`` when it holds none.
+
+    A digest (``@sha256:...``) is not the tag, and a port in the registry
+    (``localhost:5000/python``) is not a tag separator. Of the ``-`` parts of the tag,
+    an image variant (``slim``) and anything that is not a lowercase word (a version, a
+    build date) are not a codename; the last part left is.
+    """
+    name, _, tag = image.split("@", 1)[0].rpartition(":")
+    if not name or "/" in tag:
+        return ""
+    words = [
+        part
+        for part in tag.split("-")
+        if part not in _IMAGE_VARIANTS and re.fullmatch(r"[a-z]+", part)
+    ]
+    return words[-1] if words else ""
+
+
 def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
     """The indexes apt reads in the image the Dockerfile builds.
 
-    The Debian codename is the last ``-`` part of the ``BASE_IMAGE`` default's tag
-    (``python:3.12-slim-bookworm``), and the NodeSource repository is the one
-    ``NODE_MAJOR`` names, so a base-image or Node bump moves the lookup with it.
+    The Debian codename is the last word among the ``-`` parts of the ``BASE_IMAGE``
+    default's tag that is not an image variant (``python:3.12-slim-bookworm``,
+    ``debian:bookworm-slim``, ``debian:bookworm-20241016-slim``), with any
+    ``@sha256:...`` digest left out. The NodeSource repository is the major that
+    ``NODE_MAJOR``, a ``node_<major>.x`` repository URL or a ``setup_<major>.x`` setup
+    script URL names, so a base-image or Node bump moves the lookup with it.
+
+    Raises:
+        PinEnumerationError: when the tag holds no codename, when the Dockerfile
+            configures NodeSource without a major this can read in either spelling, or
+            when the two name different majors. The nodejs pin would
+            otherwise be looked up in Debian's own nodejs, reported unavailable, and
+            the report would name an older version to pin.
     """
     text = dockerfile.read_text(encoding="utf-8")
-    base = re.search(r"^ARG BASE_IMAGE=\S+:(?P<tag>\S+)$", text, re.MULTILINE)
-    codename = base.group("tag").rsplit("-", 1)[-1] if base else ""
-    if not re.fullmatch(r"[a-z]+", codename):
+    base = re.search(r"^ARG BASE_IMAGE=(?P<image>\S+)$", text, re.MULTILINE)
+    codename = _base_image_codename(base.group("image")) if base else ""
+    if not codename:
         raise PinEnumerationError(
             f"cannot read a Debian codename from {dockerfile.name}'s ARG BASE_IMAGE; "
             "the apt pins cannot be looked up without knowing which suite apt reads."
@@ -1232,9 +2007,30 @@ def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
             _DEBIAN_SECURITY_INDEX.format(suite=f"{codename}-security", arch="{arch}"),
         ),
     ]
-    node = re.search(r"\bNODE_MAJOR=(?P<major>\d+)\b", text)
-    if node is not None:
-        major = node.group("major")
+    code = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    # The major apt reads is the one in the repository URL, and a Dockerfile usually
+    # builds that URL from NODE_MAJOR. Either spelling names it; two values disagree.
+    majors = sorted(
+        {m.group("major") for m in _NODE_MAJOR.finditer(code)}
+        | {m.group("major") for m in _NODESOURCE_URL_MAJOR.finditer(code)}
+    )
+    if len(majors) > 1:
+        raise PinEnumerationError(
+            f"{dockerfile.name} names NodeSource major {', '.join(majors)} (in "
+            "NODE_MAJOR or in the repository URL); the NodeSource index to look the "
+            "nodejs pin up in is ambiguous."
+        )
+    if not majors and "deb.nodesource.com" in code:
+        raise PinEnumerationError(
+            f"{dockerfile.name} configures the NodeSource repository, but neither "
+            "NODE_MAJOR=<digits> (or ENV NODE_MAJOR <digits>) nor a node_<digits>.x "
+            "or setup_<digits>.x URL names its major version, so the nodejs pin "
+            "cannot be looked up in the right index."
+        )
+    if majors:
+        major = majors[0]
         indexes.append(
             AptIndex(
                 f"nodesource node_{major}.x",
@@ -1299,7 +2095,8 @@ def _dpkg_compare_part(a: str, b: str) -> int:
 
 
 def _split_debian_version(version: str) -> tuple[int, str, str]:
-    epoch, _, rest = version.rpartition(":") if ":" in version else ("0", "", version)
+    # dpkg ends the epoch at the first colon: an upstream version may hold more.
+    epoch, _, rest = version.partition(":") if ":" in version else ("0", "", version)
     upstream, _, revision = rest.rpartition("-") if "-" in rest else (rest, "", "")
     return int(epoch or 0), upstream, revision
 
@@ -1344,34 +2141,45 @@ def check_apt(
         for index in indexes:
             url = index.url.format(arch=arch)
             try:
-                listed = parse_packages_index(fetch(url))
+                body = fetch(url)
+                listed = parse_packages_index(body)
+                if not listed and body.strip():
+                    # A 200 answer with text in it and no package stanza (an error
+                    # page) is not an index. Read as one, it would make every pin look
+                    # retired. An empty body is an index: Debian empties
+                    # <suite>-updates at a point release and may leave it empty.
+                    raise ValueError("the index has text but lists no packages")
             except Exception as exc:  # reported per pin, and it fails the run
                 failed.append(f"{index.label} ({url}): {type(exc).__name__}: {exc}")
                 continue
             for package, versions in listed.items():
                 available.setdefault(package, set()).update(versions)
         for pin in pins:
-            versions = available.get(pin.package, set())
-            candidate = _newest(versions)
-            if failed:
-                results.append(
-                    AptResult(pin, arch, candidate, "error", "; ".join(failed))
-                )
-            elif candidate is None:
-                # Gone altogether, not merely moved on: apt cannot install it at any
-                # version, so the build is as broken as for a retired version.
-                results.append(
-                    AptResult(
-                        pin, arch, None, "unavailable", "no index lists the package"
-                    )
-                )
-            elif pin.version not in versions:
-                results.append(AptResult(pin, arch, candidate, "unavailable"))
-            elif compare_debian_versions(candidate, pin.version) > 0:
-                results.append(AptResult(pin, arch, candidate, "outdated"))
-            else:
-                results.append(AptResult(pin, arch, candidate, "current"))
+            try:
+                results.append(_judge_apt_pin(pin, arch, available, failed))
+            except Exception as exc:  # a version dpkg cannot order; reported per pin
+                detail = f"{type(exc).__name__}: {exc}"
+                results.append(AptResult(pin, arch, None, "error", detail))
     return results
+
+
+def _judge_apt_pin(
+    pin: AptPin, arch: str, available: dict[str, set[str]], failed: list[str]
+) -> AptResult:
+    """One pin against the versions the indexes list for its package."""
+    versions = available.get(pin.package, set())
+    candidate = _newest(versions)
+    if failed:
+        return AptResult(pin, arch, candidate, "error", "; ".join(failed))
+    if candidate is None:
+        # Gone altogether, not merely moved on: apt cannot install it at any
+        # version, so the build is as broken as for a retired version.
+        return AptResult(pin, arch, None, "unavailable", "no index lists the package")
+    if pin.version not in versions:
+        return AptResult(pin, arch, candidate, "unavailable")
+    if compare_debian_versions(candidate, pin.version) > 0:
+        return AptResult(pin, arch, candidate, "outdated")
+    return AptResult(pin, arch, candidate, "current")
 
 
 def render_apt_report(results: list[AptResult], markdown: bool = False) -> str:
@@ -1400,22 +2208,23 @@ def render_apt_report(results: list[AptResult], markdown: bool = False) -> str:
         out.append("|" + "|".join("---" for _ in columns) + "|")
         out += ["| " + " | ".join(row) + " |" for row in rows]
     else:
-        widths = [
-            max(len(c), *(len(row[i]) for row in rows)) for i, c in enumerate(columns)
-        ]
+        widths = _column_widths(columns, rows)
         fmt = "  ".join(f"{{:<{w}}}" for w in widths)
         out.append(fmt.format(*columns))
         out.append(fmt.format(*("-" * w for w in widths)))
         out += [fmt.format(*row).rstrip() for row in rows]
 
     bullet = "- " if markdown else "  - "
-    seen: set[tuple[str, str]] = set()
+    # One bullet per pin, candidate and status. The status is part of the key: an
+    # architecture where the pin is gone has to be told apart from one where it is
+    # merely behind, even when both name the same newest version.
+    seen: set[tuple[str, str | None, str]] = set()
     for r in results:
         if r.status not in ("unavailable", "outdated"):
             continue
-        if (r.pin.package, r.candidate) in seen:
+        if (r.pin.package, r.candidate, r.status) in seen:
             continue
-        seen.add((r.pin.package, r.candidate))
+        seen.add((r.pin.package, r.candidate, r.status))
         lines = ", ".join(f"Dockerfile:{n}" for n in r.pin.lines)
         if r.candidate is None:
             edit = f"{r.pin.package}={r.pin.version}"
@@ -1432,9 +2241,8 @@ def render_apt_report(results: list[AptResult], markdown: bool = False) -> str:
         )
     for r in results:
         if r.status == "error":
-            out.append(
-                f"{bullet}{r.pin.package} ({r.arch}): lookup failed ({r.detail})"
-            )
+            detail = _escape_markdown(r.detail) if markdown else r.detail
+            out.append(f"{bullet}{r.pin.package} ({r.arch}): lookup failed ({detail})")
     if all(r.status == "current" for r in results):
         out.append("\nEvery apt pin is the version apt would choose today.")
     return "\n".join(out) + "\n"
@@ -1486,9 +2294,7 @@ def render_table(results: list[Result], markdown: bool = False) -> str:
         ]
         lines += ["| " + " | ".join(row) + " |" for row in rows]
         return "\n".join(lines)
-    widths = [
-        max(len(c), *(len(row[i]) for row in rows)) for i, c in enumerate(_COLUMNS)
-    ]
+    widths = _column_widths(_COLUMNS, rows)
     fmt = "  ".join(f"{{:<{w}}}" for w in widths)
     lines = [fmt.format(*_COLUMNS), fmt.format(*("-" * w for w in widths))]
     lines += [fmt.format(*row) for row in rows]
@@ -1496,11 +2302,32 @@ def render_table(results: list[Result], markdown: bool = False) -> str:
 
 
 def _escape_markdown(text: str) -> str:
-    """Escape ``_`` outside code spans, so ``_DIGESTS`` is not read as emphasis."""
+    """Escape what Markdown would misread, outside code spans.
+
+    ``_`` is escaped so ``_DIGESTS`` is not read as emphasis. ``<`` is escaped
+    because text shaped like a tag (``<new commit>``, urllib's ``<urlopen error timed
+    out>``) is read as raw HTML, and GitHub's job summary drops it; ``&`` so that
+    ``&lt;`` in a message is shown as written. A code span prints all of them as they
+    are.
+    """
     parts = text.split("`")
     return "`".join(
-        part if i % 2 else part.replace("_", "\\_") for i, part in enumerate(parts)
+        part
+        if i % 2
+        else part.replace("&", "&amp;").replace("<", "&lt;").replace("_", "\\_")
+        for i, part in enumerate(parts)
     )
+
+
+def _column_widths(columns: tuple[str, ...], rows: list[tuple[str, ...]]) -> list[int]:
+    """The width of each column: its title or its longest entry, whichever is wider.
+
+    A table with no rows is as wide as its titles.
+    """
+    return [
+        max([len(title)] + [len(row[index]) for row in rows])
+        for index, title in enumerate(columns)
+    ]
 
 
 def render_report(pins: Any, results: list[Result], markdown: bool = False) -> str:
@@ -1538,15 +2365,38 @@ def render_report(pins: Any, results: list[Result], markdown: bool = False) -> s
             "of these is pinned and how each value was taken."
         )
     for r in errors:
-        out.append(f"\n{r.pin.tool}: lookup failed ({r.detail})")
+        detail = _escape_markdown(r.detail) if markdown else r.detail
+        out.append(f"\n{r.pin.tool}: lookup failed ({detail})")
     if not outdated and not errors:
-        out.append("\nEvery pin is at its upstream's latest release.")
+        # A held row (a bundled library, whose version another pin sets) carries a note
+        # that says why it is not compared. That is no release the image cannot use.
+        caveats = any(r.note for r in results if r.status != "held")
+        if caveats or any(r.status == "ahead" for r in results):
+            # Nothing is behind, but a pin newer than upstream's latest, or a newer
+            # release the image cannot use, is not "at its upstream's latest release".
+            out.append(
+                "\nNo pin is behind its upstream, but not every pin is at its "
+                "upstream's latest release; see the ahead rows and the notes above."
+            )
+        else:
+            out.append("\nEvery pin is at its upstream's latest release.")
     return "\n".join(out) + "\n"
+
+
+def _render_fault_notice(
+    heading: str, what: str, exc: Exception, markdown: bool
+) -> str:
+    """A short stand-in for a report that could not be rendered, for the job summary."""
+    text = f"could not render the {what}: {type(exc).__name__}: {exc}"
+    if markdown:
+        return f"## {heading}\n\n{_escape_markdown(text)}\n"
+    return f"\n{heading}\n  {text}\n"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description=__doc__.split("\n\n", 1)[0],
+        # Under python -OO there is no module docstring.
+        description=(__doc__ or "").split("\n\n", 1)[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -1573,11 +2423,67 @@ def main(argv: list[str] | None = None) -> int:
     except PinEnumerationError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    except Exception as exc:  # a pins module that does not import, a missing file
+        # Uncaught, this ends as a traceback with exit status 1, which this script
+        # means as "a pin is behind".
+        print(
+            f"error: could not read the pins: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
 
     results = check(pin_list, ruby=ruby)
     apt_results = check_apt(apt_pins, indexes, APT_INDEX_FETCHER)
-    sys.stdout.write(render_report(pins, results, markdown=args.markdown))
-    sys.stdout.write(render_apt_report(apt_results, markdown=args.markdown))
+    # The two reports are rendered apart: a fault in one must not take the other with
+    # it. The lookups are done, so what can be written is written, and a report that
+    # could not be built is a script fault (exit 2).
+    render_failed = False
+    try:
+        report = render_report(pins, results, markdown=args.markdown)
+    except Exception as exc:  # bump steps that cannot be built for an outdated pin
+        print(
+            f"error: could not render the report: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        render_failed = True
+        try:
+            # stdout is the job summary: the bare table has no notes, bump steps or
+            # closing line, and it has to say so.
+            report = (
+                render_table(results, markdown=args.markdown)
+                + "\n"
+                + _render_fault_notice(
+                    "Pinned tool notes and bump steps",
+                    "notes, bump steps and closing line",
+                    exc,
+                    args.markdown,
+                )
+            )
+        except Exception as table_exc:  # the same fault, one level down
+            print(
+                "error: could not render the tool table: "
+                f"{type(table_exc).__name__}: {table_exc}",
+                file=sys.stderr,
+            )
+            report = _render_fault_notice(
+                "Pinned tool versions", "tool report", table_exc, args.markdown
+            )
+    try:
+        apt_report = render_apt_report(apt_results, markdown=args.markdown)
+    except Exception as exc:  # a result the apt table cannot be built from
+        print(
+            f"error: could not render the apt report: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        # stdout is the job summary: it has to say that apt was not reported.
+        apt_report = _render_fault_notice(
+            "Dockerfile apt pins", "apt report", exc, args.markdown
+        )
+        render_failed = True
+    sys.stdout.write(report)
+    sys.stdout.write(apt_report)
+    if render_failed:
+        return EXIT_ERROR
     # The worse of the two, where an error (2) outranks a failing pin (1).
     return max(
         exit_code(results, args.fail_on_outdated),

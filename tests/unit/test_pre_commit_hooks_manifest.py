@@ -215,10 +215,10 @@ def test_a_precommit_hook_installs_the_extras_its_scanners_need(hook):
 # ---------------------------------------------------------------------------
 #
 TUTORIAL_PAGES = [
-    REPO_ROOT / "docs" / "content" / "tutorials" / name
+    REPO_ROOT / "docs" / "content" / "how-to" / name
     for name in (
-        "using-ash-with-pre-commit.md",
-        "using-ash-with-pre-commit.md.template",
+        "pre-commit.md",
+        "pre-commit.md.template",
     )
 ]
 
@@ -230,9 +230,13 @@ def test_the_tutorial_ignores_the_output_and_not_the_suppressions(page):
     That also ignores `.ash/.ash.yaml`, where the same page tells readers to
     suppress the rule a frozen `rev:` trips, so the suppression would never be
     committed and the hook would fail for everyone else.
+
+    The page moved from docs/content/tutorials/ to docs/content/how-to/pre-commit.md
+    in the docs restructure, and it now shows the line to add as a fenced block
+    after "add the line yourself:" instead of naming it inline.
     """
     text = page.read_text(encoding="utf-8")
-    [ignored] = re.findall(r"`([^`]+)` to your `\.gitignore`", text)
+    [ignored] = re.findall(r"add the line yourself:\n\n```text\n([^\n]+)\n```", text)
 
     assert ".ash/.ash.yaml" in text
     assert not ".ash/.ash.yaml".startswith(ignored)

@@ -11,9 +11,12 @@ out, too. So each works out, for its own target, every link to a file whose targ
 leaves it (``get_scan_set.file_links_leaving_tree``) and passes each one in the
 tool's own exclusion option:
 
-- bandit: ``--exclude``, as the link's path as bandit spells it. bandit matches each
-  entry with ``fnmatch`` and as a substring, so a path with a comma or a glob
-  character, or one that another file's path contains, cannot be excluded alone.
+- bandit: ``--exclude``, as a glob that matches the link's path alone. bandit
+  matches each entry with ``fnmatch`` and as a substring, so a glob character in
+  the path is escaped and one character is bracketed (``link.p[y]``), a text no
+  ordinary path holds. A comma or a line break in the path cannot be carried, and
+  a path that another walked path holds as text even so, or that names a
+  directory under the target, still refuses the target.
 - checkov: one ``--skip-path`` per link, anchored and escaped, so it matches that
   path and no other (checkov applies it with ``re.search`` and as a substring).
   checkov's terraform module finder joins every value into one regex a character
@@ -183,7 +186,10 @@ class TestBandit:
         entries = _bandit_excluded_entries(argv)
         root = Path(source).as_posix()
         for rel in ("link_out.py", "pkg/rel_out.py"):
-            assert f"{root}/{rel}" in entries
+            # The last character bracketed: a glob only that path matches, and a
+            # text no other path holds (bandit also skips every path an entry is
+            # a substring of).
+            assert f"{root}/{rel[:-1]}[{rel[-1]}]" in entries
             assert _bandit_excludes(os.path.join(root, rel), entries)
         for rel in ("app.py", "real/in.py", "link_in.py"):
             assert not _bandit_excludes(os.path.join(root, rel), entries)
@@ -200,39 +206,52 @@ class TestBandit:
 
         assert [a.key for a in scanner.args.extra_args] == before
 
-    @pytest.mark.parametrize(
-        "link, also",
-        [
-            ("a,b.py", {}),
-            ("a[1].py", {}),
-            ("a*b.py", {}),
-            ("a?b.py", {}),
-            ("a\nb.py", {}),
-            # bandit also excludes every path the entry is a substring of.
-            ("x.py", {"x.pyw": "z = 3\n"}),
-        ],
-        ids=[
-            "comma",
-            "bracket",
-            "star",
-            "question-mark",
-            "line-break",
-            "a-longer-name",
-        ],
-    )
+    @pytest.mark.parametrize("link", ["a,b.py", "a\nb.py"], ids=["comma", "line-break"])
     def test_a_link_bandit_cannot_exclude_alone_refuses_the_target(
-        self, tmp_path, link, also
+        self, tmp_path, link
     ):
+        """A comma splits bandit's --exclude value and a line break is dropped
+        with the whole flag, so neither path can be carried in any spelling."""
         source = _tree(
-            tmp_path,
-            files={"app.py": "x = 1\n", **also},
-            links={link: "outside/secret.py"},
+            tmp_path, files={"app.py": "x = 1\n"}, links={link: "outside/secret.py"}
         )
 
         refused = _refused(_bandit(source, tmp_path), source)
 
         assert repr(link) in str(refused)
         assert "link leaves the scanned tree" in str(refused)
+
+    @pytest.mark.parametrize(
+        "link, also",
+        [
+            ("a[1].py", {}),
+            ("a*b.py", {}),
+            ("a?b.py", {}),
+            # bandit also excludes every path the entry is a substring of; the
+            # bracketed spelling is a text the longer name does not hold.
+            ("x.py", {"x.pyw": "z = 3\n"}),
+        ],
+        ids=["bracket", "star", "question-mark", "a-longer-name"],
+    )
+    def test_a_link_with_a_glob_character_or_a_longer_neighbor_is_excluded_alone(
+        self, tmp_path, link, also
+    ):
+        """The glob characters are escaped and one character is bracketed, so
+        these are left out alone where they used to refuse the whole target."""
+        source = _tree(
+            tmp_path,
+            files={"app.py": "x = 1\n", **also},
+            links={link: "outside/secret.py"},
+        )
+        scanner = _bandit(source, tmp_path)
+
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+        entries = _bandit_excluded_entries(argv)
+        root = Path(source).as_posix()
+        assert _bandit_excludes(os.path.join(root, link), entries)
+        for rel in ("app.py", *also):
+            assert not _bandit_excludes(os.path.join(root, rel), entries)
 
 
 # ---------------------------------------------------------------------------

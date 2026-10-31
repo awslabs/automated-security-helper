@@ -159,7 +159,8 @@ def writes_sarif(sarif_text, exit_code=0):
             arg.split("=", 1)[1] for arg in command if arg.startswith(SARIF_OUTPUT_FLAG)
         )
         Path(destination).write_text(sarif_text, encoding="utf-8")
-        self.exit_code = max(self.exit_code, exit_code)
+        # scan() holds no exit code until snyk returns one, as the template does.
+        self.exit_code = max(self.exit_code or 0, exit_code)
         return {"stdout": "", "stderr": "", "returncode": exit_code}
 
     return _side_effect
@@ -292,97 +293,31 @@ def test_existing_configstore_credentials_suppress_the_warning(
 
 
 # ---------------------------------------------------------------------------
-# Severity threshold translation
+# Severity threshold
 # ---------------------------------------------------------------------------
-
-# Snyk's --severity-threshold accepts low/medium/high and has no "critical"
-# level, so ASH's CRITICAL is mapped down to high. HIGH and CRITICAL therefore
-# share an outcome on purpose; test_severity_ladder_is_not_vacuous pins that
-# the rest of the ladder does not collapse with them.
-SEVERITY_LADDER = {
-    None: None,
-    "ALL": None,
-    "LOW": "low",
-    "MEDIUM": "medium",
-    "HIGH": "high",
-    "CRITICAL": "high",
-}
 
 
 @pytest.mark.parametrize(
-    "threshold, expected", sorted(SEVERITY_LADDER.items(), key=lambda kv: str(kv[0]))
+    "threshold", [None, "ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 )
 @pytest.mark.unit
-def test_severity_threshold_translates_to_the_snyk_flag(
-    plugin_context, threshold, expected
-):
-    """Each ASH threshold maps to the snyk value, or to no flag at all.
-
-    The assertion is on the distinct values emitted. That the flag appears once is
-    test_the_severity_flag_is_sent_once's to check.
-    """
+def test_severity_threshold_is_not_passed_to_snyk(plugin_context, tmp_path, threshold):
+    """``severity_threshold`` says which findings count as failures, and ASH applies
+    it after the scan. Passed as ``--severity-threshold``, snyk dropped the findings
+    below it before ASH saw them, so they were neither reported nor counted."""
     scanner = SnykCodeScanner(
         context=plugin_context,
         config=SnykCodeScannerConfig(
             options=SnykCodeScannerConfigOptions(severity_threshold=threshold)
         ),
     )
-
-    values = {
-        arg.value
-        for arg in scanner.args.extra_args
-        if arg.key == "--severity-threshold"
-    }
-    if expected is None:
-        assert values == set(), (
-            f"threshold {threshold!r} must not emit --severity-threshold; got {values}"
-        )
-    else:
-        assert values == {expected}, (
-            f"threshold {threshold!r} should map to {expected!r}; got {values}"
-        )
-
-
-@pytest.mark.unit
-def test_the_severity_flag_is_sent_once(plugin_context, tmp_path):
-    """One --severity-threshold in the argv, however often the options are processed.
-
-    ScannerPluginBase.model_post_init calls _process_config_options once and
-    _resolve_arguments calls it again; the flag is added once, not on each call.
-    """
-    scanner = SnykCodeScanner(
-        context=plugin_context,
-        config=SnykCodeScannerConfig(
-            options=SnykCodeScannerConfigOptions(severity_threshold="MEDIUM")
-        ),
-    )
     target = tmp_path / "scan-me"
     target.mkdir()
 
-    for _ in range(2):
-        args = scanner._resolve_arguments(target=target, results_file=None)
-        positions = [i for i, a in enumerate(args) if a == "--severity-threshold"]
-        assert len(positions) == 1, args
-        assert args[positions[0] + 1] == "medium"
-    assert [a.key for a in scanner.args.extra_args] == ["--severity-threshold"]
+    args = scanner._resolve_arguments(target=target, results_file=None)
 
-
-@pytest.mark.unit
-def test_severity_ladder_is_not_vacuous():
-    """The ladder must not collapse to a single outcome.
-
-    A parametrized threshold table where every position expects the same thing
-    tests one case N times while looking exhaustive. Four distinct outcomes
-    across six positions is the intended shape: ALL/None both suppress the
-    flag, and HIGH/CRITICAL both map to high because snyk has no critical.
-    """
-    outcomes = list(SEVERITY_LADDER.values())
-    assert len(set(outcomes)) == 4, (
-        f"expected 4 distinct outcomes across the ladder, got {sorted(set(map(str, outcomes)))}"
-    )
-    assert SEVERITY_LADDER["HIGH"] == SEVERITY_LADDER["CRITICAL"] == "high"
-    assert SEVERITY_LADDER["LOW"] != SEVERITY_LADDER["MEDIUM"]
-    assert SEVERITY_LADDER[None] is SEVERITY_LADDER["ALL"] is None
+    assert "--severity-threshold" not in args, args
+    assert all(arg.key != "--severity-threshold" for arg in scanner.args.extra_args)
 
 
 # ---------------------------------------------------------------------------
@@ -537,16 +472,13 @@ def test_invocation_records_a_shell_quoted_command_line(
     assert invocation.exitCode == 0
     assert invocation.executionSuccessful is True
     assert invocation.startTimeUtc is not None
-    # endTimeUtc is None because this scanner builds the Invocation before it
-    # calls _post_scan, which is what sets self.end_time. CfnNagScanner does
-    # the two in the opposite order and does record an end time. Pinned here so
-    # that reordering the two calls surfaces as a test change rather than an
-    # unnoticed shift in report contents.
-    assert invocation.endTimeUtc is None
-    assert scanner.end_time is not None, (
-        "the scanner itself does learn its end time -- just after the "
-        "Invocation has already been constructed"
-    )
+    # The scanner records each target's end time when its run is over, before it
+    # builds the Invocation, so the record carries one. Before that it built the
+    # Invocation first and _post_scan set end_time after, which left endTimeUtc
+    # None in every report; this pin moved with the order.
+    assert invocation.endTimeUtc is not None
+    assert invocation.endTimeUtc >= invocation.startTimeUtc
+    assert scanner.end_time == invocation.endTimeUtc
 
 
 @pytest.mark.unit
@@ -1052,6 +984,45 @@ def test_the_row_records_exit_code_one_for_a_run_with_findings(
     assert row.exit_code == 1
 
 
+@pytest.mark.parametrize(
+    "level, status",
+    [
+        pytest.param("note", ScannerStatus.PASSED, id="below-the-threshold"),
+        pytest.param("error", ScannerStatus.FAILED, id="control-at-the-threshold"),
+    ],
+)
+@pytest.mark.unit
+def test_a_finding_below_the_threshold_is_reported_and_does_not_fail_the_row(
+    level,
+    status,
+    snyk_on_path,
+    populated_source,
+    subprocess_double,
+    plugin_context,
+    monkeypatch,
+):
+    """``severity_threshold`` is applied by ASH after the scan, to the severity snyk
+    gave each finding. With the threshold at HIGH, a ``note`` finding reaches the
+    report and is counted, and does not fail the row; the control, an ``error``
+    finding, does. Passed to snyk as a flag, the threshold dropped the first
+    before ASH saw it (``test_severity_threshold_is_not_passed_to_snyk``)."""
+    scanner = SnykCodeScanner(
+        context=plugin_context,
+        config=SnykCodeScannerConfig(
+            options=SnykCodeScannerConfigOptions(severity_threshold="HIGH")
+        ),
+    )
+    subprocess_double.side_effect = writes_sarif(
+        snyk_code_document([("javascript/HttpToHttps", level, "app.js", 1)]),
+        exit_code=1,
+    )
+
+    row = _executor_row(scanner, plugin_context, monkeypatch)
+
+    assert row.finding_count == 1, row.finding_count
+    assert row.status == status, (level, row.status)
+
+
 @pytest.mark.unit
 def test_the_exit_code_of_each_target_is_its_own(
     scanner, snyk_on_path, populated_source, subprocess_double, plugin_context
@@ -1406,6 +1377,28 @@ def test_when_every_file_is_ignored_nothing_is_sent(
     subprocess_double.assert_not_called()
 
 
+@pytest.mark.unit
+def test_when_every_file_is_ignored_the_row_is_skipped(
+    scanner,
+    snyk_on_path,
+    tree_with_vendor,
+    subprocess_double,
+    plugin_context,
+    monkeypatch,
+    refusals_set_aside,
+):
+    """Nothing is evaluated and nothing is sent, as for a scan set with no file:
+    the row grades SKIPPED (targets_attempted 0), not PASSED for a tool that never
+    ran. Pinned here so the all-ignored case cannot drift from the no-file one."""
+    row = _executor_row(
+        scanner, plugin_context, monkeypatch, ignore_paths=_ignore("**")
+    )
+
+    assert row.status == ScannerStatus.SKIPPED, row
+    assert scanner.targets_attempted == 0
+    subprocess_double.assert_not_called()
+
+
 @pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
@@ -1554,8 +1547,9 @@ def test_a_tree_holding_only_a_link_leaving_it_sends_nothing(
     refusals_set_aside,
 ):
     """The scan set leaves the link out and warns about it, as it does for every
-    scanner, so snyk-code has nothing to send: a PASSED row, as for an all-ignored
-    tree, and snyk is not run."""
+    scanner, so snyk-code has nothing to send and snyk is not run. Nothing was
+    evaluated, so the row grades SKIPPED (targets_attempted 0), not PASSED with
+    exit code 0 for a tool that never ran."""
     (plugin_context.source_dir / "app.js").symlink_to(
         plugin_context.source_dir.parent / "outside.js"
     )
@@ -1566,7 +1560,8 @@ def test_a_tree_holding_only_a_link_leaving_it_sends_nothing(
     with caplog.at_level(logging.INFO):
         row = _executor_row(scanner, plugin_context, monkeypatch)
 
-    assert row.status == ScannerStatus.PASSED, row
+    assert row.status == ScannerStatus.SKIPPED, row
+    assert scanner.targets_attempted == 0
     subprocess_double.assert_not_called()
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert "Not scanning 'app.js': link leaves the scanned tree" in warnings, warnings

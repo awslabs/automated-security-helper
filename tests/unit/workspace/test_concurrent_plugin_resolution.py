@@ -178,7 +178,7 @@ class TestARegistrationDuringAResolve:
 
         assert calls, "the registry changed and the memo was reused anyway"
         names = [
-            name for name, _, _ in manager._resolved_plugins["scanner"].registrations
+            name for name, *_ in manager._resolved_plugins["scanner"].registrations
         ]
         assert "registered-mid-iteration" in names
 
@@ -290,7 +290,7 @@ class TestTheCacheFollowsTheRegistrations:
             assert calls == [], "the cache did not warm again after the re-read"
 
         names = [
-            name for name, _, _ in manager._resolved_plugins["scanner"].registrations
+            name for name, *_ in manager._resolved_plugins["scanner"].registrations
         ]
         assert names[-1] == "added-later"
 
