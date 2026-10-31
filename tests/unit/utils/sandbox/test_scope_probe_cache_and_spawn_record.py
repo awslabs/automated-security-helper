@@ -153,6 +153,34 @@ def test_a_busy_resource_is_probed_again_after_the_window(
     assert probes == ["bwrap", "bwrap"]
 
 
+def test_the_window_runs_from_the_end_of_a_slow_probe(fresh_cache, monkeypatch, clock):
+    """A probe that itself takes 40 s must not use that time out of the window:
+    the answer is served for the full window after the probe ended."""
+    probes: list = []
+
+    def slow_probe(name):
+        probes.append(name)
+        clock.advance(40.0)
+        raise SandboxUnavailable(TIMED_OUT)
+
+    monkeypatch.setattr(scope, "_probe_backend", slow_probe)
+
+    with pytest.raises(scope.SandboxBackendUnavailable):
+        scope.resolve_backend("bwrap")
+
+    # Red at the base: the window was counted from before the probe, so it ended
+    # 40 s earlier and this call probed again.
+    clock.advance(scope._TRANSIENT_RETRY_SECONDS - 1.0)
+    with pytest.raises(scope.SandboxBackendUnavailable):
+        scope.resolve_backend("bwrap")
+    assert probes == ["bwrap"]
+
+    clock.advance(2.0)
+    with pytest.raises(scope.SandboxBackendUnavailable):
+        scope.resolve_backend("bwrap")
+    assert probes == ["bwrap", "bwrap"]
+
+
 def test_a_missing_backend_is_remembered(fresh_cache, monkeypatch, clock):
     """A missing program has no window: it is remembered for the process."""
     probes = _probe_answers(monkeypatch, [SandboxUnavailable(NOT_INSTALLED)])

@@ -295,7 +295,11 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
                 transient = _probe_reason_is_transient(cached)
             _resolved[cache_key] = cached
             if transient:
-                _transient_until[cache_key] = now + _TRANSIENT_RETRY_SECONDS
+                # Counted from the end of the probe: a probe that ran to its own
+                # timeout used up part of the window if it started from ``now``,
+                # and two such probes under auto left it already past.
+                probed_at = time.monotonic()
+                _transient_until[cache_key] = probed_at + _TRANSIENT_RETRY_SECONDS
             else:
                 _transient_until.pop(cache_key, None)
     if isinstance(cached, SandboxUnavailable):
