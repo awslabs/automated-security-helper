@@ -1346,7 +1346,7 @@ if [[ "${NO_RUN}" = "NO" ]]; then
     OUTPUT_PHYSICAL="${RESOLVED_DIR}"
     case "${SOURCE_PHYSICAL%/}/" in
       "${OUTPUT_PHYSICAL%/}"/*)
-        refuse "The output directory '$(shown "${OUTPUT_PATH}")' is the source directory '$(shown "${SOURCE_DIR}")' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it."
+        refuse "The output directory '$(shown "${OUTPUT_PATH}")' is the source directory '$(shown "${SOURCE_DIR}")' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it${OUTPUT_HINT}."
         ;;
     esac
   fi

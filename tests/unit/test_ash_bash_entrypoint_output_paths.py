@@ -240,6 +240,34 @@ def test_a_committed_link_under_the_default_output_names_the_option(
     assert list(elsewhere.iterdir()) == [], "nothing is written where the link points"
 
 
+@pytest.mark.parametrize("output", ["the-default", "given"])
+def test_a_default_output_that_resolves_to_the_source_names_the_option(
+    output, runner, tmp_path
+):
+    """The repository commits `.ash/ash_output -> ..`, so the default output
+    directory resolves to the source directory itself. That refusal (the output is
+    the source directory or a directory above it, exit 3) runs before the linked
+    output check, and at the base it was the one refusal of the default that did
+    not name --output-dir as the way to write elsewhere. It does now, as every
+    refusal of the default does; the same directory given as --output-dir is refused
+    with the same reason and no hint, since the choice was already made."""
+    source = tmp_path / "src"
+    (source / ".ash").mkdir(parents=True)
+    (source / ".ash" / "ash_output").symlink_to("..", target_is_directory=True)
+    args = ["--no-build", "--source-dir", "src"]
+    if output == "given":
+        args += ["--output-dir", "src/.ash/ash_output"]
+
+    result, calls = _run(runner, args, cwd=tmp_path)
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 3, shown
+    assert "or a directory above it" in result.stderr, result.stderr
+    hinted = "pass --output-dir to write elsewhere" in result.stderr
+    assert hinted == (output == "the-default"), result.stderr
+    assert calls == []
+
+
 def test_the_wrappers_status_lines_and_the_build_output_go_to_stderr(runner, tmp_path):
     """`./ash report --format json > file` has to hold the report alone. At the base
     the wrapper's status lines, and the image ID `build -q` prints, stood on stdout

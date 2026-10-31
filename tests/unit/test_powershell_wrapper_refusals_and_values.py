@@ -799,6 +799,32 @@ def test_the_linked_source_itself_as_the_output_directory_is_refused(
 
 
 @pytest.mark.integration
+def test_an_output_directory_above_the_source_is_refused_without_the_hint(
+    pwsh, recording_docker, tmp_path
+):
+    """-OutputDir names a directory above -SourceDir: refused with 3 as the source
+    directory or a directory above it, and the refusal does not name -OutputDir,
+    since the output was given. The same refusal in ./ash carries the hint when the
+    default reaches it (a committed `.ash/ash_output -> ..` resolves the default to
+    the source); in Invoke-ASH the default cannot reach it, because a default that
+    resolves to the source or above it runs through a link below the source, which
+    the link walk refuses first, with the hint. The refusal text carries the hint
+    variable all the same, so the two wrappers' refusals read alike."""
+    (tmp_path / "src" / "sub").mkdir(parents=True)
+
+    result = _invoke(
+        pwsh, tmp_path, recording_docker, "-SourceDir src/sub -OutputDir src"
+    )
+
+    stderr = " ".join(result.stderr.split())
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "is the source directory" in stderr, result.stderr
+    assert "or a directory above it" in stderr, result.stderr
+    assert "pass -OutputDir to write elsewhere" not in stderr, result.stderr
+    assert not (tmp_path / "docker-args.txt").exists()
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("output", ["the-default", "given"])
 def test_a_refused_default_output_directory_names_the_parameter(
     output, pwsh, recording_docker, tmp_path

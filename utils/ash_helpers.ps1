@@ -1809,7 +1809,7 @@ function Invoke-ASH {
             }
             if ($directories[0].StartsWith($directories[1], $pathComparison)) {
                 $global:LASTEXITCODE = $refusalExitCode
-                throw "The output directory '$(Format-AshShownValue $existingOutput)' is the source directory '$(Format-AshShownValue $sourceDirFull)' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it."
+                throw "The output directory '$(Format-AshShownValue $existingOutput)' is the source directory '$(Format-AshShownValue $sourceDirFull)' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it$outputHint."
             }
         }
 
