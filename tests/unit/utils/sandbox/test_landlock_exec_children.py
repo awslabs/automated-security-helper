@@ -43,6 +43,24 @@ ME = 1000
 Entry = Union[bytes, List[str], BaseException]
 
 
+#: The calls the stand-ins below never hand on to the real module. Their /proc is
+#: made up, so a pid in it (4242, 21, 31) is the number of whatever process the host
+#: happens to run under it: a test that reached one of these with such a pid would
+#: signal or pin that process. A test that expects the call stubs it on the stand-in.
+_SIGNALLING = {
+    os: ("kill", "killpg", "pidfd_open", "pidfd_send_signal"),
+    signal: ("pidfd_send_signal", "raise_signal", "pthread_kill"),
+}
+
+
+def _refuse_real_signalling(real: object, name: str) -> None:
+    """Raise when ``name`` is a call that signals or pins a process of the host."""
+    if name in _SIGNALLING.get(real, ()):
+        raise AssertionError(
+            f"{real.__name__}.{name} would reach the real module; stub it in the test"
+        )
+
+
 class _Procfs:
     """A /proc made of a dict: bytes are files, lists are directories, an exception
     is what reading that path raises; a path with no entry does not exist."""
@@ -65,6 +83,7 @@ class _Procfs:
         return isinstance(self.files.get(path), list)
 
     def open(self, path: str, mode: str = "rb") -> io.BytesIO:
+        assert mode == "rb", f"the stand-in /proc is read, not opened with {mode!r}"
         self.opened.append(path)
         entry = self.files.get(path)
         if isinstance(entry, bytes):
@@ -89,6 +108,7 @@ class _Os:
         return ME
 
     def __getattr__(self, name: str):
+        _refuse_real_signalling(os, name)
         return getattr(os, name)
 
 
@@ -577,6 +597,7 @@ class _Recording:
                 return self._returns
 
             return record
+        _refuse_real_signalling(self._real, name)
         return getattr(self._real, name)
 
 
@@ -924,3 +945,35 @@ def test_a_late_pass_without_children_files_still_reads_the_direct_children(
     )
 
     assert landlock_exec._descendants(until=lambda: 5.0) == [101]
+
+
+@pytest.mark.parametrize("name", ["kill", "killpg", "pidfd_open", "pidfd_send_signal"])
+def test_the_stand_in_os_refuses_every_signalling_call_it_was_not_given(procfs, name):
+    """The stand-in /proc names pids that are only numbers here; the real process
+    under one of them must never be signalled or pinned by a test that forgot to
+    stub the call."""
+    procfs({})
+
+    with pytest.raises(AssertionError, match=name):
+        getattr(landlock_exec.os, name)
+
+
+def test_a_recording_stand_in_refuses_the_signalling_calls_it_does_not_record():
+    recording = _Recording(os, {"kill"}, [])
+
+    recording.kill(4242, signal.SIGKILL)  # recorded, sent to no process
+    assert recording.getpid() == os.getpid()
+    for name in ("killpg", "pidfd_open", "pidfd_send_signal"):
+        with pytest.raises(AssertionError, match=name):
+            getattr(recording, name)
+    for name in ("pidfd_send_signal", "raise_signal", "pthread_kill"):
+        with pytest.raises(AssertionError, match=name):
+            getattr(_Recording(signal, set(), []), name)
+
+
+def test_the_stand_in_proc_is_only_opened_for_reading():
+    proc = _Procfs({"/proc/1/stat": b"1 (init) S 0"})
+
+    assert proc.open("/proc/1/stat", "rb").read() == b"1 (init) S 0"
+    with pytest.raises(AssertionError):
+        proc.open("/proc/1/stat", "wb")
