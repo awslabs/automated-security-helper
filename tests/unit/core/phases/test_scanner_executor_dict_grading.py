@@ -319,10 +319,14 @@ class TestAResultThatCannotBeReadIsThisRowsError:
         assert row.finding_count == 1
 
     def test_metadata_that_is_not_a_mapping_is_not_read(self, plugin_context):
-        row = _row(plugin_context, {"tool": "its own json", "metadata": None})
+        """The only difference from the mapping control below is ``metadata``: the
+        result is gradable (an empty findings list), so the row is PASSED and the
+        null is simply not read. With nothing else to grade the row would be ERROR
+        for that, and the test could not tell the metadata handling apart."""
+        row = _row(plugin_context, {"findings": [], "metadata": None})
 
-        assert row.status == ScannerStatus.ERROR
-        assert "could not be graded" in _reason(row)
+        assert row.status == ScannerStatus.PASSED
+        assert "could not be graded" not in _reason(row)
         assert row.metadata == {}
 
     def test_the_other_targets_keep_their_rows(self, plugin_context, tmp_path):
