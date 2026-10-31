@@ -1410,6 +1410,9 @@ _NEVER_RUNS_A_FILE = frozenset(
 # The commands that put a file under a second name or path, whose last word is the new
 # one: ``mv x.sh inst``, ``cp x.sh /usr/local/bin/inst``, ``ln -s x.sh inst``.
 _GIVES_A_FILE_ANOTHER_NAME = frozenset({"mv", "cp", "ln", "install"})
+# What may stand between two file names in one word of a shell script: ``/``, ``;``,
+# ``&``, quotes, ``$(``. A file name is made of word characters, dots, plus and dash.
+_NAME_SEPARATORS = re.compile(r"[^\w.+-]+")
 _ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=\S*")
 # A shell redirection among the arguments of the install: "> /dev/null", "2>".
 _REDIRECTION = re.compile(r"(?:(?<=\s)|^)\d*(?:>>|>|<)\s*\S*")
@@ -1576,7 +1579,8 @@ def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
     A file is run when it is the program (``x.sh``, ``./x.sh``, ``sudo /tmp/x.sh``), or
     when a shell, ``.`` or ``source`` has its name among the words (``sh x.sh``,
     ``bash -e /tmp/x.sh jq``, ``. x.sh``, ``source <(cat x.sh)``), or inside a ``-c``
-    script (``sh -c 'chmod +x x.sh && x.sh'``), or when the shell is piped the commands
+    script (``sh -c 'chmod +x x.sh && x.sh'``, where the name must stand as a name: a
+    file ``x`` is not in ``exit``), or when the shell is piped the commands
     before it in the same pipeline and one of them names the file (``cat x.sh | sh -s
     jq``). A command that follows a compound-command keyword runs as if the keyword
     were not there (``for p in jq git; do sh x.sh $p; done``, ``if sh x.sh jq; then``,
@@ -1609,9 +1613,10 @@ def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
             if program in _SHELLS or program in {".", "source"}:
                 if (named | piped) & wanted:
                     return True
-                # A script given as a string names the file somewhere in it.
+                # A script given as a string names the file somewhere in it, as a name
+                # of its own: `x` is in `. /x` and `chmod +x /x && /x`, not in `exit`.
                 script = words[words.index("-c") + 1 :] if "-c" in words else []
-                if any(name in word for word in script for name in wanted):
+                if any(_names_it(word, name) for word in script for name in wanted):
                     return True
             elif program in _GIVES_A_FILE_ANOTHER_NAME:
                 if _base_names(words[:-1]) & wanted:
@@ -1626,6 +1631,17 @@ def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
                 return True
             fed.extend(words)
     return False
+
+
+def _names_it(word: str, name: str) -> bool:
+    """Whether a word of a script has the file ``name`` in it as a name of its own.
+
+    A name that itself holds a separator (``a@b``) cannot be cut out of a word, so it
+    is looked for as it is.
+    """
+    if _NAME_SEPARATORS.search(name):
+        return name in word
+    return name in _NAME_SEPARATORS.split(word)
 
 
 def _base_names(words: Iterable[str]) -> set[str]:

@@ -342,6 +342,9 @@ class TestAFileTheSameInstructionRunsIsCommands:
             "RUN cat > /tmp/i.sh <<'EOF' && case $a in b) sh /tmp/other.sh;; esac",
             "RUN cat > /tmp/i.sh <<'EOF' && mv /tmp/i.sh /bin/inst",
             "RUN cat > /tmp/i.sh <<'EOF' && mv /tmp/other /bin/inst && inst jq",
+            # A file name inside another word of a -c script is not a mention of the file.
+            "RUN cat > /x <<'EOF' && sh -c 'exit 0'",
+            "RUN cat > /tmp/a <<'EOF' && sh -c 'date'",
             # Commands that only look at the file or change its mode run nothing.
             "RUN cat > /tmp/i.sh <<'EOF' && ls -l /tmp/i.sh && stat /tmp/i.sh",
             "RUN cat > /tmp/i.sh <<'EOF' && [ -f /tmp/i.sh ] && test -s /tmp/i.sh",
@@ -417,6 +420,15 @@ class TestAFileTheSameInstructionRunsIsCommands:
             ("cat > /x <<'EOF' && cp /x /y && sh /y jq", [("EOF", False)]),
             ("cat > /x <<'EOF' && cat /x | tee /y >/dev/null && y", [("EOF", False)]),
             ("cat > /x <<'EOF' && cat /x | timeout 5 sh -s jq", [("EOF", False)]),
+            # A -c script runs the file only when it names it, not when a word holds
+            # the file's name inside another word.
+            ("cat > /x <<'EOF' && sh -c 'exit 0'", [("EOF", True)]),
+            ("cat > /a <<'EOF' && sh -c 'date'", [("EOF", True)]),
+            ("cat > /x <<'EOF' && sh -c '. /x'", [("EOF", False)]),
+            ("cat > /x <<'EOF' && sh -c 'x jq'", [("EOF", False)]),
+            ("cat > /x <<'EOF' && sh -c 'cat $(echo /x)'", [("EOF", False)]),
+            # A name with a character of its own is looked for as it is.
+            ("cat > /a@b <<'EOF' && sh -c 'run:a@b'", [("EOF", False)]),
             # The same shapes that never reach the file leave it a kept one.
             ("cat > /x <<'EOF' && timeout 300 sh /y jq", [("EOF", True)]),
             ("cat > /x <<'EOF' && case $a in b) sh /y;; esac", [("EOF", True)]),
