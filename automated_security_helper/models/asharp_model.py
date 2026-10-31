@@ -1606,9 +1606,30 @@ class AshAggregatedResults(RecordModel):
         # still gets its counts from here. A scanner's count is the one those
         # metrics give it: its suppressed SARIF results plus the suppressed
         # findings its dict result recorded (_suppressed_by_scanner).
+        from automated_security_helper.core.scanner_statistics_calculator import (
+            ScannerStatisticsCalculator,
+        )
+
         suppressed_by_scanner = self._suppressed_by_scanner(flat_vulns)
         self.metadata.summary_stats.suppressed = sum(suppressed_by_scanner.values())
+        # The flattened findings and the metrics can split one scanner's
+        # suppressed results differently (see below): a scanner with some results
+        # the flatten names for another tool would be lowered to the part the
+        # flatten names for it. A row that exists is therefore set to the larger of
+        # the flattened count and the count the metrics give it. The flattened
+        # count still wins where it is higher, which keeps a model no metrics pass
+        # has visited counting from its findings.
+        row_names = {
+            name.lower() for name in self.scanner_results if isinstance(name, str)
+        }
         for scanner_key, count in suppressed_by_scanner.items():
+            if scanner_key in row_names:
+                count = max(
+                    count,
+                    ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
+                        self, scanner_key
+                    )[0],
+                )
             self._apply_suppression_side_effects(scanner_key, count)
         # A row of a scanner with no suppressed finding left (the SARIF was
         # narrowed since the row was written) would keep its old count while the
@@ -1623,10 +1644,6 @@ class AshAggregatedResults(RecordModel):
         # zero only when they find no suppressed finding for it either. The
         # findings appended from additional_reports below are never suppressed
         # (from_additional_report), so taking the counts before them loses none.
-        from automated_security_helper.core.scanner_statistics_calculator import (
-            ScannerStatisticsCalculator,
-        )
-
         for row_name, row in self.scanner_results.items():
             if (
                 isinstance(row, ScannerTargetStatusInfo)
