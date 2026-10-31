@@ -344,6 +344,59 @@ def test_a_result_named_by_a_run_with_no_threshold_of_its_own_is_still_judged_gl
     assert ras._gating_actionable_count(results, opts, False) == 0
 
 
+def _local_scan_that_reaches_the_orchestrator(tmp_path, monkeypatch, restriction):
+    """Run the local mode with *restriction*; the orchestrator's `create` is
+    replaced by an exit 77, so a run that gets there ends with that code."""
+    from automated_security_helper.core import orchestrator
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    reached = []
+
+    def create(**kwargs):
+        reached.append(True)
+        raise SystemExit(77)
+
+    monkeypatch.setattr(orchestrator.ASHScanOrchestrator, "create", create)
+    src = tmp_path / "src"
+    src.mkdir(exist_ok=True)
+    opts = ras.ScanOptions(
+        source_dir=src,
+        output_dir=tmp_path / "out",
+        severity_threshold_restriction=restriction,
+        progress=False,
+        show_summary=False,
+    )
+
+    with pytest.raises(SystemExit) as exited:
+        ras._run_local_mode(opts, MagicMock())
+
+    return exited.value.code, reached
+
+
+def test_a_severity_restriction_that_names_no_threshold_exits_3(tmp_path, monkeypatch):
+    """The orchestrator refused it with an ASHValidationError, which the generic
+    handler reads as a crash and exits 1 for, though it is an input ASH cannot
+    use, as an invalid configuration is."""
+    code, reached = _local_scan_that_reaches_the_orchestrator(
+        tmp_path, monkeypatch, "EXTREME"
+    )
+
+    assert code == 3
+    assert reached == []
+
+
+def test_a_known_or_blank_severity_restriction_reaches_the_orchestrator(
+    tmp_path, monkeypatch
+):
+    """Control: a ladder word, in any case, and a blank value are not refused."""
+    for restriction in ("high", "HIGH", "  "):
+        code, reached = _local_scan_that_reaches_the_orchestrator(
+            tmp_path, monkeypatch, restriction
+        )
+
+        assert (code, reached) == (77, [True]), restriction
+
+
 def _results_with_the_report_named_apart_from_ash_sarif(tmp_path, monkeypatch):
     """The metrics count nothing; the report this run wrote is reports/custom.sarif
     and holds one actionable finding. The count is taken from that file."""

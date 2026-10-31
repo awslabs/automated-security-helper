@@ -6047,6 +6047,27 @@ def _changed_file_set_for(
     }
 
 
+def _refuse_an_unknown_severity_restriction(restriction: Optional[str]) -> None:
+    """Refuse a severity restriction that names no threshold, with exit 3.
+
+    The restriction is an option the caller hands the scan (an MCP client's
+    ``severity_threshold``). The orchestrator refuses an unknown one with an
+    ``ASHValidationError``, which this module's generic handler reads as a
+    crash and exits 1 for; it is an input ASH cannot use, as an invalid
+    configuration is, so it is refused here, before anything is built, as the
+    configuration refusal (exit 3). A blank value means no restriction.
+    """
+    from automated_security_helper.utils.severity_ladder import normalize_threshold
+
+    if restriction is None or not restriction.strip():
+        return
+    if normalize_threshold(restriction) is None:
+        raise ASHConfigValidationError(
+            f"The severity threshold {restriction!r} is not one of ALL, LOW, "
+            "MEDIUM, HIGH or CRITICAL."
+        )
+
+
 def _run_local_mode(
     opts: ScanOptions, logger
 ) -> tuple[AshAggregatedResults, Optional[bool]]:
@@ -6090,6 +6111,7 @@ def _run_local_mode(
         config = opts.config
         if config is not None:
             _refuse_a_named_config_that_is_not_a_file(config)
+        _refuse_an_unknown_severity_restriction(opts.severity_threshold_restriction)
 
         if opts.config_overrides:
             logger.info(
