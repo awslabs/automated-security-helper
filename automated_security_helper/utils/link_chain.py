@@ -266,6 +266,11 @@ def _is_drive_relative(target: str) -> bool:
     per-process fact, and not from the directory the link is in, so what it
     names cannot be told from the link alone. It is read as text, as the share
     spellings are, whatever platform runs the reading.
+
+    Design note: the text is read with ``ntpath``, so a POSIX name such as
+    ``a:b`` or ``x:name`` also reads as drive-relative on Linux. No caller meets
+    that: the sandbox runs this reading only when ``_running_on_windows``, where
+    a letter and a colon at the front of a target do name a drive.
     """
     drive, rest = ntpath.splitdrive(target)
     if not drive or drive.startswith(("\\\\", "//")):
