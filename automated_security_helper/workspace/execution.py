@@ -339,6 +339,7 @@ from automated_security_helper.core.cancellation import (
     raise_if_cancelled,
 )
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+from automated_security_helper.core.previous_results import holds_restored_results
 from automated_security_helper.core.scanner_selection import (
     SelectionOrigin,
     selection_after_exclusions,
@@ -986,6 +987,40 @@ def _project_output_dir(settings: ProjectScanSettings, project: ProjectPlan) -> 
     literally named ``apps``.
     """
     return Path(settings.output_dir) / PROJECTS_DIR_NAME / project.key
+
+
+def _projects_whose_reports_this_run_wrote(
+    plan: WorkspacePlan,
+    settings: ProjectScanSettings,
+    collected: Dict[str, "_ProjectRun"],
+) -> Set[str]:
+    """The keys of the projects whose reports under projects/<key> are this run's.
+
+    A project counts when an orchestrator ran for it (``output_written``) and the
+    scan did not end with its previous results put back. ``output_written`` alone
+    is too wide for the report step: it is set once the orchestrator exists, so a
+    scan that raised or was cancelled before it wrote anything has it too. With
+    ``keep_previous_results`` the orchestrator puts the previous run's results back
+    on the way out of such a scan, ``reports/`` included, and leaves a marker
+    beside them (core/previous_results.py). Those files are an earlier run's, and
+    the manifest would list them as this run's artefacts and not as missing.
+
+    A completed scan is always this run's: it dropped the previous results when it
+    finished, so a marker left by a drop that failed does not describe its output.
+    A scan that had no previous results to set aside restores nothing and leaves no
+    marker, so what it wrote before it raised is still counted.
+    """
+    written: Set[str] = set()
+    for project in plan.projects:
+        entry = collected.get(project.key)
+        if entry is None or not entry.output_written:
+            continue
+        if entry.outcome.status is not ProjectRunStatus.COMPLETED and (
+            holds_restored_results(_project_output_dir(settings, project))
+        ):
+            continue
+        written.add(project.key)
+    return written
 
 
 def _skipped_outcome(
@@ -3077,9 +3112,11 @@ def execute_workspace(
             # output_written rather than on COMPLETED, because a project that
             # failed after its output directory was set up wrote its reports this
             # run, and a COMPLETED-only set named that one missing.
-            completed_projects={
-                key for key, entry in collected.items() if entry.output_written
-            },
+            # A failed project whose previous results were put back is left
+            # out: what is under it is an earlier run's.
+            completed_projects=_projects_whose_reports_this_run_wrote(
+                plan, settings, collected
+            ),
         )
         # After the results file, so the file is restamped when this changes the
         # answer: it records "the process status this run exited with", and a
