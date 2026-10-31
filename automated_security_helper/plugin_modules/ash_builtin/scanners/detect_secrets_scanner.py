@@ -2501,8 +2501,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         read back. Whatever the slot holds that is found nowhere else cannot
         be told from a hash by its content, so it is still treated as one.
         """
-        results = (document or {}).get("results")
-        if not isinstance(document, dict) or not isinstance(results, dict):
+        if not isinstance(document, dict):
+            return frozenset()
+        results = document.get("results")
+        if not isinstance(results, dict):
             return frozenset()
         hex_digest = re.compile(r"[0-9a-f]{40}")
         listed: Set[str] = set()

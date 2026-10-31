@@ -234,6 +234,20 @@ def test_a_listed_value_the_baseline_also_holds_elsewhere_is_not_an_echo(
     assert _on_the_baseline(report) == [(rule, 3), (rule, 9)]
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "document",
+    [["results"], "results", 7, None, [], {}, {"results": []}],
+    ids=["list", "string", "number", "none", "empty-list", "empty", "no-results"],
+)
+def test_a_document_that_is_not_a_baseline_lists_no_hash_echoes(document):
+    """The echo set is built from the parsed baseline document. A document
+    that is not a mapping has no entries, so it lists none, and the check for
+    that comes before the first lookup on it. Before, a non-empty list, a
+    string or a number raised ``AttributeError`` on ``.get``."""
+    assert DetectSecretsScanner._baseline_hash_echoes(document) == frozenset()
+
+
 @pytest.mark.integration
 def test_the_real_worker_reports_a_listed_value_that_is_also_under_notes(
     tmp_path, monkeypatch
