@@ -10,7 +10,8 @@
 * A message given by ``id`` alone was described as "No description", then by
   the id itself ("R1 - default"); it is resolved against the rule's
   ``messageStrings``, else its ``shortDescription``, and the id is the last
-  fallback.
+  fallback. When two scanners declare one rule id, the rule is the one in the
+  tool component of the result's own scanner.
 * A result whose kind says no problem (pass, notApplicable, informational) was
   emitted as a New vulnerability finding.
 * One location value the schema refuses discarded every location, the CVE and
@@ -64,6 +65,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Message,
     MultiformatMessageString,
     PhysicalLocation,
+    PropertyBag,
     Region,
     ReportingDescriptor,
     Result,
@@ -242,6 +244,90 @@ class TestFileNamesAndMessages:
 
         assert record["finding_info"]["desc"] == "Password in source"
         assert record["finding_info"]["title"] == "R1 - Password in source"
+
+    @staticmethod
+    def _shared_id_report(reporter, scanners) -> list:
+        """The records of one run, with one result per pair in *scanners*.
+
+        Each pair is the name of the extension that declares the rule ``R1``
+        (with text of its own, ``<name> text``; None declares nothing) and the
+        scanner the result names. Every result names ``R1`` by the message id
+        ``default`` alone, so its description comes from the rule it is
+        resolved against."""
+        extensions, results = [], []
+        for declaring, result_scanner in scanners:
+            if declaring:
+                extensions.append(
+                    ToolComponent(
+                        name=declaring,
+                        rules=[
+                            ReportingDescriptor(
+                                id="R1",
+                                messageStrings={
+                                    "default": MultiformatMessageString(
+                                        text=f"{declaring} text"
+                                    )
+                                },
+                            )
+                        ],
+                    )
+                )
+            results.append(
+                Result(
+                    ruleId="R1",
+                    level=Level.error,
+                    message=Message.model_validate({"id": "default"}),
+                    properties=PropertyBag(scanner_name=result_scanner),
+                )
+            )
+        model = AshAggregatedResults()
+        model.sarif = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name="ASH"), extensions=extensions),
+                    results=results,
+                )
+            ],
+        )
+        return json.loads(reporter.report(model))
+
+    def test_scanners_sharing_a_rule_id_are_each_described_by_their_own_rule(
+        self, reporter
+    ):
+        """The rules of every scanner were merged into one table by bare id,
+        first copy winning, so a result of the second scanner was titled and
+        described with the first scanner's text for the same id."""
+        records = self._shared_id_report(
+            reporter, [("semgrep", "semgrep"), ("opengrep", "opengrep")]
+        )
+
+        assert [r["finding_info"]["desc"] for r in records] == [
+            "semgrep text",
+            "opengrep text",
+        ]
+        assert [r["finding_info"]["title"] for r in records] == [
+            "R1 - semgrep text",
+            "R1 - opengrep text",
+        ]
+        assert [r["vulnerabilities"][0]["desc"] for r in records] == [
+            "semgrep text",
+            "opengrep text",
+        ]
+
+    def test_an_id_two_other_scanners_declare_is_not_borrowed_for_a_third(
+        self, reporter
+    ):
+        """A scanner with no rules of its own is not described with the text of
+        whichever other scanner declared the id first when more than one did:
+        the message falls back to its own id."""
+        records = self._shared_id_report(
+            reporter,
+            [("semgrep", "semgrep"), ("opengrep", "opengrep"), (None, "bandit")],
+        )
+
+        assert records[2]["finding_info"]["desc"] == "default"
+        assert records[2]["finding_info"]["title"] == "R1 - default"
 
 
 class TestNonFindingKinds:

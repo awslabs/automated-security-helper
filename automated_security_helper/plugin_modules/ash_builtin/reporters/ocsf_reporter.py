@@ -49,7 +49,11 @@ from automated_security_helper.utils.sarif_utils import (
     shared_finding_ids,
     suppressions_in_effect,
 )
-from automated_security_helper.utils.severity_ladder import result_severity
+from automated_security_helper.utils.severity_ladder import (
+    component_labels,
+    result_scanner_labels,
+    result_severity,
+)
 from automated_security_helper.utils.undecodable_text import recorded
 
 #: The longest ``finding_info.title`` this reporter writes, ellipsis included. The
@@ -102,11 +106,33 @@ def _file_name(path: str) -> str:
     return parts[-1] if parts else path
 
 
+def _component_labels(component: Any) -> frozenset:
+    """The names a tool component answers to, lower-cased: its name and full
+    name, and the scanner name ASH stamps on it
+    (``properties.scanner_details.tool_name``), which stays when a merge
+    renames the component. Compared with the scanner name a result carries."""
+    labels = set(component_labels(component))
+    props = getattr(component, "properties", None)
+    details = getattr(props, "scanner_details", None)
+    if details is None:
+        extra = getattr(props, "model_extra", None)
+        details = extra.get("scanner_details") if isinstance(extra, dict) else None
+    if isinstance(details, dict):
+        stamped = details.get("tool_name")
+    else:
+        stamped = getattr(details, "tool_name", None)
+    if isinstance(stamped, str) and stamped.strip():
+        labels.add(stamped.strip().lower())
+    return frozenset(labels)
+
+
 def _rule_descriptor(
-    rule_id: Optional[str], rules: Optional[Dict[str, Any]] = None
+    rule_id: Optional[str],
+    result: Any,
+    rules: Optional[Dict[str, Any]] = None,
 ) -> Any:
-    """The descriptor of the rule *rule_id* names, from *rules* (rule ids to their
-    descriptors, :func:`_rule_descriptors`), or None.
+    """The descriptor of the rule *rule_id* names for *result*, from *rules*
+    (:func:`_rule_descriptors`), or None.
 
     A message given by ``id`` alone is resolved against it: SARIF reads such a
     message through the rule's ``messageStrings`` (3.11.10). Without the rule
@@ -118,23 +144,56 @@ def _rule_descriptor(
     from the result again here: that read can raise, and this lookup runs inside
     the message-text handler, so a result whose rule id cannot be read lost its
     description as well.
+
+    Two scanners can declare one rule id with different text (a CVE id named by
+    two vulnerability scanners), and the aggregated report keeps each scanner's
+    rules in its own tool component. The descriptor is therefore the one in the
+    component that answers to the result's scanner name. A result whose scanner
+    has no component of its own gets the driver's copy, which is how SARIF reads
+    a bare rule id, else the only copy there is; with several extension copies
+    and no driver copy the id is ambiguous and no descriptor is returned, so a
+    finding is not described with another scanner's text.
     """
-    return rules.get(rule_id) if rules and rule_id else None
+    declared = rules.get(rule_id) if rules and rule_id else None
+    if not declared:
+        return None
+    scanner = result_scanner_labels(result)
+    if scanner:
+        for labels, _is_driver, descriptor in declared:
+            if labels and not labels.isdisjoint(scanner):
+                return descriptor
+    for _labels, is_driver, descriptor in declared:
+        if is_driver:
+            return descriptor
+    return declared[0][2] if len(declared) == 1 else None
 
 
-def _rule_descriptors(sarif: Any) -> Dict[str, Any]:
-    """Each rule id to the first descriptor declaring it, over every run's
-    driver and extensions: what a message given by ``id`` is resolved against."""
-    rules: Dict[str, Any] = {}
+def _rule_descriptors(sarif: Any) -> Dict[str, List[Tuple[frozenset, bool, Any]]]:
+    """Each rule id to the descriptors declaring it, over every run's driver and
+    extensions: what a message given by ``id`` is resolved against.
+
+    One entry per tool component that declares the id, in declaration order,
+    the driver before the extensions: the component's names
+    (:func:`_component_labels`), whether it is a driver, and the first
+    descriptor it holds for the id."""
+    rules: Dict[str, List[Tuple[frozenset, bool, Any]]] = {}
     for run in getattr(sarif, "runs", None) or []:
         tool = getattr(run, "tool", None)
-        components = [getattr(tool, "driver", None)]
-        components.extend(getattr(tool, "extensions", None) or [])
-        for component in components:
+        extensions = getattr(tool, "extensions", None) or []
+        components = [(getattr(tool, "driver", None), True)]
+        components.extend((extension, False) for extension in extensions)
+        for component, is_driver in components:
+            labels = _component_labels(component)
+            declared_here = set()
             for rule in getattr(component, "rules", None) or []:
                 rule_id = getattr(rule, "id", None)
-                if isinstance(rule_id, str) and rule_id and rule_id not in rules:
-                    rules[rule_id] = rule
+                if (
+                    isinstance(rule_id, str)
+                    and rule_id
+                    and rule_id not in declared_here
+                ):
+                    declared_here.add(rule_id)
+                    rules.setdefault(rule_id, []).append((labels, is_driver, rule))
     return rules
 
 
@@ -456,7 +515,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             desc = ""
             try:
                 desc = result_message_text(
-                    result, _rule_descriptor(named_rule, rules), default=""
+                    result, _rule_descriptor(named_rule, result, rules), default=""
                 )
                 ASH_LOGGER.debug(
                     f"Extracted message text for {rule_id}: {len(desc)} characters"
@@ -821,7 +880,9 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             try:
                 # Safely extract message text
                 message_text = result_message_text(
-                    result, _rule_descriptor(named_rule, rules), default=message_text
+                    result,
+                    _rule_descriptor(named_rule, result, rules),
+                    default=message_text,
                 )
                 ASH_LOGGER.debug(
                     f"Extracted message text for finding info {rule_id}: {len(message_text)} characters"
