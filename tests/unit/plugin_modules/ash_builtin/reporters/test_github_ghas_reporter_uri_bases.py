@@ -12,10 +12,14 @@ differently cannot share it, and the document is refused.
 """
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+    github_ghas_reporter,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter import (
     GHASReporter,
 )
@@ -112,6 +116,24 @@ class TestMultiRunBaseIds:
         ]
 
         assert reporter.report(_model(*runs)) is None
+
+    def test_the_refusal_names_the_base_both_declarations_and_the_runs(
+        self, reporter, monkeypatch
+    ):
+        logger = MagicMock()
+        monkeypatch.setattr(github_ghas_reporter, "ASH_LOGGER", logger)
+        runs = [
+            _run("R1", {"SRCROOT": "file:///repo/"}),
+            _run("R2", {"SRCROOT": "file:///elsewhere/"}),
+        ]
+
+        assert reporter.report(_model(*runs)) is None
+
+        (message,) = [call.args[0] for call in logger.error.call_args_list]
+        assert "'SRCROOT'" in message
+        assert "file:///repo/" in message
+        assert "file:///elsewhere/" in message
+        assert "runs 0 and 1" in message
 
 
 class TestOnlyReferencedBasesAreDeclared:

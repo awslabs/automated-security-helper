@@ -773,10 +773,11 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         anchored to: a scanner's table can list bases none of its results use,
         and those added nothing to the file but a way for two runs to disagree.
         Two runs declaring one key differently cannot share a table: None
-        refuses the document, naming the key (the same refusal as an
-        unplaceable project path).
+        refuses the document, and the log names the key, both declarations and
+        the two runs (the same refusal as an unplaceable project path).
         """
         merged: Dict[str, Dict[str, str]] = {}
+        first_run: Dict[str, int] = {}
         for index, run in enumerate(runs):
             if project_paths.get(index):
                 continue
@@ -796,12 +797,16 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             for key, entry in declared.items():
                 if key not in needed:
                     continue
-                if merged.setdefault(key, entry) != entry:
+                if key not in merged:
+                    merged[key] = entry
+                    first_run[key] = index
+                elif merged[key] != entry:
                     ASH_LOGGER.error(
-                        f"The GHAS report is not written: two runs declare the "
-                        f"base id '{key}' differently, and one document has one "
-                        "table of base ids. Upload each project's own report "
-                        "instead."
+                        f"The GHAS report is not written: runs {first_run[key]} and "
+                        f"{index} (counting from 0) declare the base id '{key}' "
+                        f"differently, as {merged[key]} and {entry}, and one "
+                        "document has one table of base ids. Upload each "
+                        "project's own report instead."
                     )
                     return None
         return merged
