@@ -161,6 +161,11 @@ def _finding_uid(key: str) -> str:
     return str(uuid.uuid5(_FINDING_UID_NAMESPACE, key))
 
 
+#: How a record describes a result whose message has nothing to read. The whole
+#: record and the degraded one read the message with this default, so a result
+#: with no message keys one finding, not two, whichever record is built.
+_NO_DESCRIPTION = "No description"
+
 #: Joins the parts of an identity key; a part's own separator is escaped.
 _IDENTITY_SEPARATOR = "|"
 
@@ -708,7 +713,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
             # Create unique finding info for this result
             ASH_LOGGER.debug(f"Creating finding info for {rule_id}")
-            message_text = "No description"
+            message_text = _NO_DESCRIPTION
             rule_part = rule_id  # Use already extracted rule_id
 
             try:
@@ -864,10 +869,21 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 # carry: the degraded label above tells the two apart. A suffix
                 # on the uid made a finding that degraded in one run and built
                 # whole in the next two records in a SIEM for good, and every
-                # record of it a Create.
+                # record of it a Create. The message is read with the default
+                # the whole record's key reads it with: left to the key's own
+                # default (empty), a result with nothing to read gave the two
+                # records two uids on a direct call.
+                try:
+                    fallback_message = result_message_text(
+                        result, default=_NO_DESCRIPTION
+                    )
+                except Exception:  # noqa: BLE001 -- the fallback's own fallback
+                    fallback_message = _NO_DESCRIPTION
                 fallback_finding_info = FindingInfo(
                     uid=_finding_uid(
-                        shared_id or identity or _identity_key(result, rule_id)
+                        shared_id
+                        or identity
+                        or _identity_key(result, rule_id, fallback_message)
                     ),
                     title=f"Error processing finding {rule_id}",
                     desc="An error occurred while processing this security finding",

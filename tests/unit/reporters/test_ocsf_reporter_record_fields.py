@@ -446,6 +446,27 @@ class TestTheFallbackRecordKeepsWhatItCanRead:
         assert DEGRADED_FINDING_LABEL not in (whole["metadata"].get("labels") or [])
         assert degraded["finding_info"]["uid"] == whole["finding_info"]["uid"]
 
+    def test_a_direct_call_keeps_the_uid_when_the_message_has_nothing_to_read(
+        self, reporter, metadata, monkeypatch
+    ):
+        """Called without an identity, the builder keys the finding on its own
+        fields. The whole record read an empty message as "No description" and
+        the degraded one read it as empty, so the same finding had two uids."""
+        result = Result(
+            ruleId="R1", level=Level.error, message=Message(root=Message1(text=""))
+        )
+        whole = reporter._create_vulnerability_finding(result, metadata, 1)
+
+        def explode(*args, **kwargs):
+            raise RuntimeError("status failed")
+
+        monkeypatch.setattr(reporter, "_determine_status_from_suppressions", explode)
+        degraded = reporter._create_vulnerability_finding(result, metadata, 1)
+
+        assert DEGRADED_FINDING_LABEL in (degraded.metadata.labels or [])
+        assert DEGRADED_FINDING_LABEL not in (whole.metadata.labels or [])
+        assert degraded.finding_info.uid == whole.finding_info.uid
+
 
 class TestTheShortfallRecordCannotCostTheFindings:
     def test_a_shortfall_record_that_cannot_be_built_leaves_the_findings(
