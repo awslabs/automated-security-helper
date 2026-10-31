@@ -224,6 +224,23 @@ def _indent(line: str) -> int:
 # the pin.
 _COMMAND_BREAKS = ";&|`"
 
+# A YAML list item whose first line opens a block scalar: `- run: |`, `- |`, `- run: >-`.
+# The lines under it are a script, one command per line, and not keys of the item.
+_BLOCK_SCALAR = re.compile(
+    r"^(?P<dash>[ \t]*-[ \t]+)(?P<key>[\w.\"'-]+:[ \t]+)?[|>][-+0-9]*[ \t]*(?:#.*)?$"
+)
+
+
+def _block_scalar_floor(line: str) -> Optional[int]:
+    """The indent a line must exceed to be inside the block scalar that `line` opens.
+
+    None when line is not a list item that opens one.
+    """
+    found = _BLOCK_SCALAR.match(line.rstrip())
+    if found is None:
+        return None
+    return len(found.group("dash")) if found.group("key") else _indent(line)
+
 
 def _entry_around(lines: List[str], index: int, begin: int, finish: int) -> str:
     """The YAML list entry or the shell command that holds the pin on lines[index].
@@ -243,10 +260,15 @@ def _entry_around(lines: List[str], index: int, begin: int, finish: int) -> str:
     side of the pin (see _COMMAND_BREAKS): `git clone <another project> && \\` and the
     clone on the next line are two commands, and a project named in the first must not
     excuse the pin of the second.
+
+    A pin on a line of a script under a list item that opens a block scalar (`- run: |`)
+    is read alone, with its own `\\`-continued lines: each line of such a script is a
+    command of its own, and the line with the `|` is no part of any of them.
     """
-    start = index
-    while start > 0 and lines[start - 1].rstrip().endswith("\\"):
-        start -= 1
+    run_start = index
+    while run_start > 0 and lines[run_start - 1].rstrip().endswith("\\"):
+        run_start -= 1
+    start = run_start
     if not lines[start].lstrip().startswith("- "):
         base = _indent(lines[start])
         above = start - 1
@@ -266,7 +288,13 @@ def _entry_around(lines: List[str], index: int, begin: int, finish: int) -> str:
     end = index
     while end + 1 < len(lines) and lines[end].rstrip().endswith("\\"):
         end += 1
-    if lines[start].lstrip().startswith("- "):
+    in_script = False
+    if start < run_start:
+        floor = _block_scalar_floor(lines[start])
+        if floor is not None and _indent(lines[run_start]) > floor:
+            start = run_start
+            in_script = True
+    if not in_script and lines[start].lstrip().startswith("- "):
         entry_indent = _indent(lines[start])
         while True:
             following = end + 1

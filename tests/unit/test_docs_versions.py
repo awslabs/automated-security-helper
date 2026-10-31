@@ -888,6 +888,81 @@ def test_an_allowance_does_not_excuse_the_next_command_of_a_chain(text):
     assert "pin of 3.3.0" in problems[0], problems
 
 
+# The same two clones as the lines of a script under a list item that opens a block
+# scalar. The newline is the separator there, and the only separator character before
+# the pin is the `|` of the block indicator.
+BLOCK_SCRIPT_CLONES = {
+    "a keyed item, the other clone first": (
+        f"- run: |\n    {OTHER_CLONE}\n    {ASH_CLONE}\n"
+    ),
+    "a keyed item, the other clone last": (
+        f"- run: |\n    {ASH_CLONE}\n    {OTHER_CLONE}\n"
+    ),
+    "a keyed item, a stripping indicator": (
+        f"- run: |-\n    {OTHER_CLONE}\n    {ASH_CLONE}\n"
+    ),
+    "a folded item": f"- run: >\n    {OTHER_CLONE}\n    {ASH_CLONE}\n",
+    "an item that is the script": f"- |\n    {OTHER_CLONE}\n    {ASH_CLONE}\n",
+    "a step with a name first": (
+        f"- name: Install\n  run: |\n    {OTHER_CLONE}\n    {ASH_CLONE}\n"
+    ),
+    "a continued clone after another project's": (
+        f"- run: |\n    {OTHER_CLONE}\n    {ASH_CLONE} \\\n      --depth 1\n"
+    ),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text", list(BLOCK_SCRIPT_CLONES.values()), ids=list(BLOCK_SCRIPT_CLONES)
+)
+def test_an_allowance_does_not_excuse_the_next_line_of_a_block_script(text):
+    """Red before: the entry of a pin under `- run: |` was the dash line and every
+    script line below it, the only separator character before the pin was the `|` of
+    the block indicator, so the project cloned on one line excused the pin of the
+    clone on the next."""
+    manager = _manager()
+    problems = dv.unrecognized_pin_problems(
+        manager, text, "page/", ("example/other-project",)
+    )
+    assert len(problems) == 1, problems
+    assert "pin of 3.3.0" in problems[0], problems
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"- run: |\n    git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git\n",
+        f"- run: |\n    {ASH_CLONE}\n    git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git\n",
+        f"- run: |\n    git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git \\\n"
+        "      --depth 1\n",
+    ],
+    ids=["one line", "after a line of this repository", "a continued clone"],
+)
+def test_an_allowance_still_excuses_the_pin_of_its_own_line_in_a_block_script(text):
+    """The control: the line that holds the pin and the allowed project is excused."""
+    manager = _manager()
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) >= 1
+    allowed = ("example/other-project",)
+    problems = dv.unrecognized_pin_problems(manager, text, "page/", allowed)
+    assert [p for p in problems if "pin of 2.0.0" in p] == [], problems
+
+
+@pytest.mark.unit
+def test_a_pre_commit_entry_with_a_block_scalar_key_is_still_one_entry():
+    """The control: only a block scalar on the dash line makes the lines below it a
+    script. A block scalar under a later key leaves the item one entry, so the
+    `repo:` line above it still names the project."""
+    manager = _manager()
+    text = (
+        f"- repo: {OTHER_PROJECT_URL}\n  note: |\n    kept as written\n  rev: v4.6.0\n"
+    )
+    allowed = ("example/other-project",)
+    assert len(dv.unrecognized_pin_problems(manager, text, "page/")) == 1
+    assert dv.unrecognized_pin_problems(manager, text, "page/", allowed) == []
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "text",
