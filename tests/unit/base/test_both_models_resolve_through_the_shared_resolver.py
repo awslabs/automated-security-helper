@@ -12,6 +12,8 @@ and this file pins the shared shape and the resolver's own behavior.
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from automated_security_helper.base import plugin_context as plugin_context_module
@@ -62,4 +64,68 @@ def test_an_unimportable_target_leaves_the_resolver_unresolved():
 
     assert resolver.resolved is False
     resolver.resolve(lambda: "now", lambda _target: None)
+    assert resolver.resolved is True
+
+
+def test_the_import_runs_outside_the_lock():
+    """The import must not hold the lock: a thread importing the config module
+    holds the import lock and asks for this one, so a thread that held this one
+    and asked for the import lock would deadlock with it."""
+    resolver: OnceOnlyResolver[str] = OnceOnlyResolver()
+    acquired_by_another_thread = []
+
+    def import_target() -> str:
+        def probe() -> None:
+            got = resolver._lock.acquire(blocking=False)
+            acquired_by_another_thread.append(got)
+            if got:
+                resolver._lock.release()
+
+        thread = threading.Thread(target=probe)
+        thread.start()
+        thread.join(timeout=10)
+        return "the class"
+
+    resolver.resolve(import_target, lambda _target: None)
+
+    assert acquired_by_another_thread == [True]
+
+
+def test_two_threads_past_the_first_check_bind_once():
+    """Both threads see the flag down and both import; the second finds it up
+    under the lock and does not bind again."""
+    resolver: OnceOnlyResolver[str] = OnceOnlyResolver()
+    both_imported = threading.Barrier(2, timeout=10)
+    bound = []
+
+    def import_target() -> str:
+        both_imported.wait()
+        return "the class"
+
+    threads = [
+        threading.Thread(target=resolver.resolve, args=(import_target, bound.append))
+        for _ in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert bound == ["the class"]
+    assert resolver.resolved is True
+
+
+def test_a_raising_bind_leaves_it_unresolved_and_the_next_call_retries():
+    resolver: OnceOnlyResolver[str] = OnceOnlyResolver()
+
+    def failing_bind(_target: str) -> None:
+        raise RuntimeError("the rebuild failed")
+
+    with pytest.raises(RuntimeError):
+        resolver.resolve(lambda: "the class", failing_bind)
+
+    assert resolver.resolved is False
+    bound = []
+    resolver.resolve(lambda: "the class", bound.append)
+    assert bound == ["the class"]
     assert resolver.resolved is True
