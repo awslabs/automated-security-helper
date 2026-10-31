@@ -288,7 +288,7 @@ def linked_output_component(
     # lookup reaches (``/opt/link/../x`` with ``/opt/link`` leading elsewhere
     # is ``<link's target>/x`` to the kernel and ``/opt/x`` as text), vetting
     # either would leave the other unexamined, so the spelling is refused. One
-    # directory under two names (``/tmp/../x`` on macOS, where ``/tmp`` is a
+    # directory under two names (``/tmp/sub/../x`` on macOS, where ``/tmp`` is a
     # link) is compared with both resolved and passes. Only a spelling with a
     # ``..`` can name two directories this way: asked of every spelling it cost
     # two real-path lookups per call, and on Windows, where abspath drops a

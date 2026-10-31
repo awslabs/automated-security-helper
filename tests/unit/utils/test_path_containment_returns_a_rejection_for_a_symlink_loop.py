@@ -13,7 +13,7 @@ CPython 3.13 raises nothing there: it resolves as far as it can and appends the
 rest unchecked, so the loop stayed in the answer, its text read as below the
 root, and ``loop/sub`` was ACCEPTED, where the same entry was refused one
 version earlier. The checks below therefore assert the rejection on every
-version: the resolved path is asked about once more with ``os.lstat``, which the
+version: the resolved path is asked about once more with ``os.stat``, which the
 kernel answers with ``ELOOP`` for a loop whatever the interpreter did.
 """
 

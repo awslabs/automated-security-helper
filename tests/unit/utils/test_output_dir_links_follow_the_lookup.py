@@ -103,7 +103,7 @@ def test_a_dotdot_after_a_link_that_names_another_directory_as_written_is_refuse
 
 @needs_symlinks
 def test_control_a_dotdot_after_a_link_that_names_one_directory_is_accepted(tmp_path):
-    """``/alias -> <tree>``, output ``/alias/sub/../out``: as written it is
+    """``/alias -> <tree>``, output ``/alias/opt/../out``: as written it is
     ``/alias/out`` and the lookup reaches ``<tree>/out``, one directory under two
     names (macOS's ``/tmp`` is such a link). Nothing to refuse."""
     tree, root = _tree(tmp_path)
