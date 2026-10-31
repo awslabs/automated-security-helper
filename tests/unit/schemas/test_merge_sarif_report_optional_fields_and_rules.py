@@ -575,11 +575,14 @@ def _run_with_tables(
     extensions=None,
     web_requests=None,
     addresses=None,
+    taxonomies=None,
 ) -> Run:
     """A run whose own tables the folded results used to point into."""
     fields: dict = {"tool": {"driver": {"name": driver}}, "results": results}
     if extensions is not None:
         fields["tool"]["extensions"] = extensions
+    if taxonomies is not None:
+        fields["taxonomies"] = taxonomies
     if artifacts is not None:
         fields["artifacts"] = [{"location": {"uri": uri}} for uri in artifacts]
     if logical is not None:
@@ -1380,6 +1383,68 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         taxon = aggregated.runs[0].results[0].taxa[0].root
         assert taxon.id == "CWE-79"
         assert taxon.toolComponent is None
+
+    def test_a_taxon_is_read_from_the_runs_taxonomies_not_its_extensions(self):
+        """A result's taxa are categories of a taxonomy, so the component
+        reference's index counts positions in ``run.taxonomies``. The run also
+        carries an extension at the same position; reading the reference against
+        it credited the taxon to the extension with the extension's id."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            taxa=[{"index": 1, "toolComponent": {"index": 0}}],
+                        )
+                    ],
+                    extensions=[
+                        {"name": "plugin", "taxa": [{"id": "P-0"}, {"id": "P-1"}]}
+                    ],
+                    taxonomies=[
+                        {"name": "CWE", "taxa": [{"id": "CWE-1"}, {"id": "CWE-79"}]}
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        taxon = aggregated.runs[0].results[0].taxa[0].root
+        assert taxon.id == "CWE-79"
+        assert taxon.toolComponent.name == "CWE"
+        assert taxon.toolComponent.index in (None, -1)
+
+    def test_a_taxon_naming_nothing_by_id_or_guid_is_dropped(self):
+        """An index past the end of the named taxonomy leaves the reference
+        with neither an id nor a guid once the indices are dropped; it names no taxon,
+        so the merged result does not keep it. The control beside it names its
+        taxon by id and stays."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [
+                        _finding(
+                            "T-1",
+                            taxa=[
+                                {"index": 9, "toolComponent": {"index": 0}},
+                                {"id": "CWE-79", "toolComponent": {"index": 0}},
+                            ],
+                        )
+                    ],
+                    taxonomies=[{"name": "CWE", "taxa": [{"id": "CWE-79"}]}],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        taxa = aggregated.runs[0].results[0].taxa
+        assert [taxon.root.id for taxon in taxa] == ["CWE-79"]
 
     def test_a_web_request_named_by_index_takes_its_row_from_the_runs_table(self):
         aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
