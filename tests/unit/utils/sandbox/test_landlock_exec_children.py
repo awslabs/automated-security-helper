@@ -384,6 +384,11 @@ def pidfd_refused(monkeypatch):
 
         fake_os.pidfd_open = refuse
         monkeypatch.setattr(landlock_exec, "os", fake_os)
+        # The pin is only tried where the signal can be sent through it, so the
+        # stand-in has one too: the host's own ``signal`` may not.
+        monkeypatch.setattr(
+            landlock_exec, "signal", _Recording(signal, {"pidfd_send_signal"}, calls)
+        )
         monkeypatch.setattr(landlock_exec, "_parent_pid", lambda pid: ME)
         sent = landlock_exec._kill_descendant(4242, {ME})
         calls.append(("returned", (sent,)))
@@ -432,6 +437,18 @@ def test_a_pinned_process_whose_parent_changed_before_the_signal_is_left_alone(
     assert landlock_exec._kill_descendant(4242, {ME}) is False
 
     assert calls == [("pidfd_open", (4242,)), ("close", (42,))]
+
+
+def test_the_refused_pin_rows_do_not_depend_on_the_hosts_signal_module(
+    pidfd_refused, monkeypatch
+):
+    """On a Python or a libc without ``signal.pidfd_send_signal`` the kill never
+    tries the pin: the gone-process row would have killed by number and the
+    refusal rows would not have been tried. The fixture's stand-in is what
+    ``_kill_descendant`` sees, whatever the host has."""
+    monkeypatch.delattr(signal, "pidfd_send_signal", raising=False)
+
+    assert pidfd_refused(errno.ESRCH) == [("returned", (False,))]
 
 
 def test_a_descendant_that_is_gone_is_skipped_in_silence(procfs, capsys):
