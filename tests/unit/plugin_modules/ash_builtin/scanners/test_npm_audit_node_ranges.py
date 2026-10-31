@@ -518,6 +518,104 @@ def test_a_dependent_of_a_two_advisory_root_points_each_advisory_at_its_own_copy
     ], refs
 
 
+def _mixed_report_with_dependencies(dependencies):
+    """A mixed entry (a critical advisory of its own, ``<2.0.0``) whose ``via``
+    also names the packages in ``dependencies``, a ``{name: severity}`` map;
+    each gets an entry of that severity with an advisory of its own."""
+    document = _mixed_report(["node_modules/minimist"], dependency=None)
+    document["vulnerabilities"]["minimist"]["via"] = [_via("<2.0.0"), *dependencies]
+    for source, (name, severity) in enumerate(dependencies.items(), start=2000):
+        advisory = _via("<1.0.0", source=source)
+        advisory.update(
+            name=name,
+            severity=severity,
+            url=f"https://github.com/advisories/GHSA-{name}-{name}-{name}",
+            title=f"{name} advisory",
+            cvss={},
+        )
+        document["vulnerabilities"][name] = {
+            "name": name,
+            "severity": severity,
+            "isDirect": False,
+            "via": [advisory],
+            "effects": ["minimist"],
+            "range": "<1.0.0",
+            "nodes": [f"node_modules/{name}"],
+            "fixAvailable": True,
+        }
+    return document
+
+
+@pytest.mark.parametrize(
+    ("dependencies", "graded"),
+    [
+        ({"mkdirp": "low"}, "low"),
+        ({"mkdirp": "low", "rimraf": "high"}, "high"),
+    ],
+    ids=["one-dependency", "the-highest-of-two"],
+)
+def test_a_copy_listed_for_its_dependency_is_graded_by_the_dependency(
+    scanner, monkeypatch, dependencies, graded
+):
+    """An entry's severity is the highest over everything in its ``via``, its
+    own critical advisory included, so the copy at 2.3.0 (listed only for the
+    dependency, outside the advisory's range) was graded critical: the
+    over-grading the transitive result exists to end, and enough to trip a
+    severity gate. It takes the highest severity of the entries it depends on."""
+    covered, outside = "node_modules/a/node_modules/minimist", "node_modules/minimist"
+    _versions(monkeypatch, {covered: "1.5.0", outside: "2.3.0"})
+    document = _mixed_report_with_dependencies(dependencies)
+    document["vulnerabilities"]["minimist"]["nodes"] = [covered, outside]
+
+    report = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
+
+    (transitive,) = [
+        r for r in report.runs[0].results if r.ruleId == "npm-audit-transitive-minimist"
+    ]
+    extra = transitive.properties.model_extra
+    assert extra["severity"] == graded, extra
+    assert extra["issue_severity"] == graded.upper(), extra
+    level = getattr(transitive.level, "value", transitive.level)
+    assert level == {"low": "note", "high": "error"}[graded], level
+    (own,) = [r for r in report.runs[0].results if r.ruleId.startswith("GHSA-xvch")]
+    assert own.properties.model_extra["severity"] == "critical"
+
+
+def test_a_copy_listed_for_a_dependency_with_no_entry_keeps_the_entrys_severity(
+    scanner, monkeypatch
+):
+    """Control: the report gives no entry for the named dependency, so there is
+    nothing to grade the copy by and it keeps the entry's severity."""
+    covered, outside = "node_modules/a/node_modules/minimist", "node_modules/minimist"
+    _versions(monkeypatch, {covered: "1.5.0", outside: "2.3.0"})
+
+    report = scanner._convert_npm_audit_to_sarif(
+        _mixed_report([covered, outside]), scanner.context.source_dir
+    )
+
+    (transitive,) = [
+        r for r in report.runs[0].results if r.ruleId == "npm-audit-transitive-minimist"
+    ]
+    assert transitive.properties.model_extra["severity"] == "critical"
+
+
+def test_an_entry_vulnerable_only_through_dependencies_keeps_its_severity(scanner):
+    """Control: with no advisory of its own the entry's severity is the
+    dependencies' already, and the result is graded by it as before."""
+    document = _with_dependent(
+        _report(["node_modules/minimist"], ranges=("<2.0.0",)),
+        ["node_modules/mkdirp"],
+    )
+    document["vulnerabilities"]["mkdirp"]["severity"] = "high"
+
+    report = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
+
+    (transitive,) = [
+        r for r in report.runs[0].results if r.ruleId == "npm-audit-transitive-mkdirp"
+    ]
+    assert transitive.properties.model_extra["severity"] == "high"
+
+
 def test_an_unknown_version_keeps_the_advisory_once_per_copy(scanner, monkeypatch):
     """Control: with no installed version the answer is uncertain, so the
     advisory is still reported on the copy. Once: the two via entries are one

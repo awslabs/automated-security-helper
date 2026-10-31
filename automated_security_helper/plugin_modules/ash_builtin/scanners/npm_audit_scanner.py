@@ -123,6 +123,9 @@ _SEVERITY_GRADE = {
     "info": "INFO",
 }
 
+# npm's severity words, lowest first.
+_SEVERITY_ORDER = ("info", "low", "moderate", "high", "critical")
+
 
 def _usable_cvss_score(cvss: Any) -> float | None:
     """The CVSS score in an advisory's ``cvss`` object, or None when it has none.
@@ -1874,6 +1877,32 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         ]
 
     @staticmethod
+    def _dependency_severity(
+        via_names: List[str], vulnerabilities: Dict[str, Any], fallback: str
+    ) -> str:
+        """The highest severity among the entries a dependency-only copy
+        depends on, ``fallback`` when none of them gives a known one.
+
+        An entry's own ``severity`` is the highest over its whole ``via``, its
+        own advisories included, so grading a copy that only the dependency
+        lists at the entry's severity graded it at an advisory that does not
+        cover it. A dependency with no entry (or a severity word npm does not
+        write) gives nothing to grade by, and the entry's severity stands: the
+        copy is then no less severe than before.
+        """
+        ranks = []
+        for name in via_names:
+            entry = vulnerabilities.get(name)
+            word = (
+                str(entry.get("severity") or "").lower()
+                if isinstance(entry, dict)
+                else ""
+            )
+            if word in _SEVERITY_ORDER:
+                ranks.append(_SEVERITY_ORDER.index(word))
+        return _SEVERITY_ORDER[max(ranks)] if ranks else fallback
+
+    @staticmethod
     def _widen_result(
         kept: Result, more_range: Any, pkg_name: str, title: str, url: Any
     ) -> None:
@@ -2305,9 +2334,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 # Get severity
                 severity = vuln_info.get("severity", "moderate")
 
-                # Map npm severity to SARIF level
-                level = _SEVERITY_LEVEL.get(severity, "warning")
-
                 # Process each vulnerability path
                 via_items = vuln_info.get("via", [])
                 if not isinstance(via_items, list):
@@ -2488,6 +2514,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 via_names = [v for v in via_items if isinstance(v, str)]
                 if via_names and (not has_dict_via or dependency_only):
                     vuln_id = f"npm-audit-transitive-{pkg_name}"
+                    # The entry's severity is the highest over everything in
+                    # its ``via``, its own advisories included. A copy listed
+                    # only for the dependency is as severe as the dependency's
+                    # entries, not as the advisory that does not cover it.
+                    severity = (
+                        self._dependency_severity(
+                            via_names, npm_audit_results["vulnerabilities"], severity
+                        )
+                        if has_dict_via
+                        else severity
+                    )
+                    level = _SEVERITY_LEVEL.get(severity, "warning")
                     via_refs = ", ".join(via_names)
                     title = f"Transitive vulnerability in {pkg_name} (via {via_refs})"
                     description = title
