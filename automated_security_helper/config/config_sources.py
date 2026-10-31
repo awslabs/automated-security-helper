@@ -1346,6 +1346,11 @@ class ConfigSource:
     it to the load as ``expect``, which ``read_config_bytes`` compares with the
     opened file): a source that passed the check and was swapped for a link out
     of the grant before the open is refused at the open, instead of read.
+
+    The descriptor the identity came from is closed when discovery returns. A
+    read discovery makes itself (the pyproject read) compares the identity while
+    the inode is still in use; a read the caller makes later compares a
+    (device, inode) pair that a recycled inode number could match.
     """
 
     path: Path
@@ -1736,9 +1741,12 @@ def _identity_held_after_the_judgment(
     read held to ``ABSENT_FILE`` refuses whatever file is at the name by then.
 
     With ``held`` the descriptor is appended to it and stays open for the caller to
-    close, so the inode stays in use until a read has compared the identity: a
-    freed inode number can be given to a file made afterwards, which would pass a
-    compare made on a closed descriptor.
+    close, so the inode stays in use while the caller's own reads compare the
+    identity: a freed inode number can be given to a file made afterwards, which
+    would pass a compare made on a closed descriptor. Discovery closes what it
+    holds when it returns, so it protects its own reads (the pyproject read); a
+    caller that compares ``ConfigSource.identity`` in a later read of its own
+    compares an identity no descriptor keeps in use any more.
     """
     opened = open_config_for_judgment(resolved, follow_links=False)
     if opened is None:
@@ -1813,10 +1821,12 @@ def _check_candidates(
     could be made to lead to a file outside the grant. It is the opened
     descriptor's (``_identity_held_after_the_judgment``), taken after the permit
     admitted the name and never looked up from the name afterwards, so the judged
-    file and the held file are one. A candidate the permit refuses is not opened.
-    ``held`` collects the descriptors, left open for the caller to close once its
-    reads have compared the identities. Without a permit nothing is checked and
-    no identity is taken, as before.
+    file and the held file are one at the check. A candidate the permit refuses
+    is not opened. ``held`` collects the descriptors, left open for the caller to
+    close once its own reads have compared the identities; discovery closes them
+    when it returns, so its protection against a freed inode number being reused
+    covers the reads it makes itself. Without a permit nothing is checked and no
+    identity is taken, as before.
     """
     if permit is None:
         return list(candidates)
