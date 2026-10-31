@@ -56,7 +56,7 @@ def launched(monkeypatch) -> Dict[str, Any]:
     monkeypatch.setattr(ras, "run_ash_nix", fake_run_ash_nix)
     monkeypatch.setattr(ras, "nix_preflight", lambda: None)
     monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
-    monkeypatch.setattr(ras, "sweep_env_dirs", list)
+    monkeypatch.setattr(ras, "sweep_env_dirs", lambda *_args, **_kwargs: [])
     return seen
 
 
@@ -261,7 +261,7 @@ def test_a_host_without_nix_keeps_the_previous_runs_output(tmp_path, monkeypatch
     monkeypatch.delenv(run_ash_nix.ASH_IN_NIX_ENV_VAR, raising=False)
     monkeypatch.setattr(run_ash_nix, "find_executable", lambda _name: None)
     monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
-    monkeypatch.setattr(ras, "sweep_env_dirs", list)
+    monkeypatch.setattr(ras, "sweep_env_dirs", lambda *_args, **_kwargs: [])
     src = tmp_path / "src"
     src.mkdir()
     out = tmp_path / "out"
@@ -574,7 +574,7 @@ def test_a_stand_in_runner_does_not_lift_the_refusal(tmp_path, monkeypatch):
     monkeypatch.delenv(run_ash_nix.ASH_IN_NIX_ENV_VAR, raising=False)
     monkeypatch.setattr(run_ash_nix, "find_executable", lambda _name: None)
     monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
-    monkeypatch.setattr(ras, "sweep_env_dirs", list)
+    monkeypatch.setattr(ras, "sweep_env_dirs", lambda *_args, **_kwargs: [])
     reached: list = []
 
     def recorder(**kwargs):

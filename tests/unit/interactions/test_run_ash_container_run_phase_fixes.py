@@ -214,7 +214,7 @@ def test_a_stop_that_ends_normally_does_not_kill_the_runtime(
 
 
 def test_the_reader_drains_the_pipe_after_a_failed_console_write(
-    monkeypatch, runtime_stand_in
+    monkeypatch, runtime_stand_in, capfd
 ):
     class BrokenConsole:
         def __init__(self, *args, **kwargs) -> None:
@@ -233,6 +233,9 @@ def test_the_reader_drains_the_pipe_after_a_failed_console_write(
     result = rac.run_cmd_direct(["runtime", "run", "scan"], check=False)
 
     assert result.stdout == "one\ntwo\nthree\n"
+    # The failure is said once, not for each of the three lines.
+    err = capfd.readouterr().err
+    assert err.count("Error writing stdout to the console") == 1, err
 
 
 def _cannot_spawn(**kwargs):
@@ -295,7 +298,12 @@ def test_the_debug_line_for_a_failed_run_shows_overrides_by_key(monkeypatch, cap
     assert isinstance(result, subprocess.CalledProcessError)
     assert planted not in out, out
     assert planted not in err, err
-    assert "project_name" in out
+    # The line this fix is about, not the earlier echo of the command, which
+    # shows the key on its own.
+    (failure_line,) = [
+        line for line in out.splitlines() if "Container execution failed" in line
+    ]
+    assert "project_name" in failure_line, failure_line
 
 
 def test_the_output_kept_on_a_finished_run_hides_the_runs_carried_values(monkeypatch):

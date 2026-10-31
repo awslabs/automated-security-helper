@@ -132,7 +132,7 @@ def _quiet_container_side_effects(monkeypatch) -> None:
     here, and none of it may start a process on the test host.
     """
     monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
-    monkeypatch.setattr(ras, "sweep_env_dirs", list)
+    monkeypatch.setattr(ras, "sweep_env_dirs", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         ras, "_take_own_values_for_record", lambda *args, **kwargs: None
     )
@@ -592,7 +592,7 @@ def test_a_refusal_inside_the_nix_shell_is_carried_past_a_kept_results_file(
     # touch nothing of this test's.
     monkeypatch.setattr(ras, "nix_preflight", lambda: None)
     monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
-    monkeypatch.setattr(ras, "sweep_env_dirs", list)
+    monkeypatch.setattr(ras, "sweep_env_dirs", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         ras,
         "run_ash_nix",

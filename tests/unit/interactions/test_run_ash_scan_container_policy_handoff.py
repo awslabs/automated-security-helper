@@ -47,7 +47,7 @@ def handed_over(monkeypatch) -> Dict[str, Any]:
 
     monkeypatch.setattr(ras, "run_ash_container", fake_run_ash_container)
     monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
-    monkeypatch.setattr(ras, "sweep_env_dirs", list)
+    monkeypatch.setattr(ras, "sweep_env_dirs", lambda *_args, **_kwargs: [])
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     return seen
 
