@@ -283,6 +283,35 @@ def test_a_report_over_loaded_results_leaves_the_saved_file_on_failure(
     assert saved.read_bytes() == saved_bytes
 
 
+def test_a_report_over_results_at_the_default_location_leaves_them_unchanged(
+    tmp_path, monkeypatch
+):
+    """The same case with the saved results where ``--use-existing`` reads them by
+    default, the results file of the output directory: the very file a write after
+    the failure would overwrite, so the assertion is on its bytes, not on a path
+    that must not exist."""
+    monkeypatch.setattr(
+        orchestrator_module, "existing_results_problem", lambda results: None
+    )
+    orchestrator = _orchestrator(
+        tmp_path,
+        monkeypatch,
+        _scan_phase_ran_to_its_end,
+        RuntimeError("reporter raised"),
+    )
+    saved_model = AshAggregatedResults()
+    _scan_phase_ran_to_its_end(saved_model)
+    saved = orchestrator.output_dir / RESULTS_FILE
+    saved.write_text(saved_model.model_dump_json(by_alias=True), encoding="utf-8")
+    saved_bytes = saved.read_bytes()
+    orchestrator.existing_results_path = saved
+
+    with pytest.raises(ASHValidationError, match="reporter raised"):
+        orchestrator._execute_scan(phases=["report"])
+
+    assert saved.read_bytes() == saved_bytes
+
+
 def test_the_completion_marker_is_not_the_completeness_checkpoint():
     """The fact the orchestrator reads is the one the scan phase's last step writes.
 

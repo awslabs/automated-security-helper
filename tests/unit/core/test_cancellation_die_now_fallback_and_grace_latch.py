@@ -245,6 +245,24 @@ class TestAFirstCtrlCDuringAGraceWaitLatchesWithoutInterrupting:
         monkeypatch.setattr(cancellation, "_TOOL_PIDS", ())
         monkeypatch.setattr(cancellation, "_remove_die_now_cleanups", lambda: None)
         monkeypatch.setattr(os, "killpg", lambda pgid, sig: killed.append((pgid, sig)))
+
+        # pid 424242 can be a live process on a host with a large pid_max, so a
+        # path that fell back to a kill or a wait by pid would signal or reap an
+        # unrelated process. Both are recorded, not run, and neither may be
+        # reached. (Recorded rather than raising: a Popen collected meanwhile
+        # waits through the same function, and an exception there is only
+        # printed.)
+        by_pid = []
+        monkeypatch.setattr(os, "kill", lambda pid, sig: by_pid.append(("kill", pid)))
+        monkeypatch.setattr(
+            os, "waitpid", lambda pid, flags: by_pid.append(("waitpid", pid)) or (0, 0)
+        )
+        monkeypatch.setattr(
+            os,
+            "waitid",
+            lambda idtype, pid, flags: by_pid.append(("waitid", pid)),
+            raising=False,
+        )
         monkeypatch.setattr(
             signal, "signal", lambda signum, handler: dispositions.append(handler)
         )
@@ -257,16 +275,20 @@ class TestAFirstCtrlCDuringAGraceWaitLatchesWithoutInterrupting:
             cancellation._handle_sigint(signal.SIGINT, None)
 
         assert killed == [(424242, signal.SIGKILL)]
+        assert [call for call in by_pid if call[1] == 424242] == []
         assert dispositions == [signal.SIG_DFL]
         assert raised == [signal.SIGINT]
 
     def test_outside_a_grace_wait_the_first_ctrl_c_still_interrupts(self, monkeypatch):
-        """The control: the interrupt arm of a command still runs."""
+        """The control: with a scan registered, so that a handler which ignored
+        the grace-wait count and held the interrupt back whenever any scan was
+        registered would fail here, the interrupt arm of a command still runs."""
         chained = []
+        scan = CancelEvent()
         monkeypatch.setattr(cancellation, "_SIGINT_SEEN", False)
         monkeypatch.setattr(cancellation, "_SIGTERM_SEEN", False)
         monkeypatch.setattr(cancellation, "_SHUTDOWN_REQUESTED", False)
-        monkeypatch.setattr(cancellation, "_SHUTDOWN_SCOPES", ())
+        monkeypatch.setattr(cancellation, "_SHUTDOWN_SCOPES", (scan,))
         monkeypatch.setattr(
             cancellation, "_PREVIOUS_SIGINT", lambda s, f: chained.append(s)
         )
@@ -274,4 +296,38 @@ class TestAFirstCtrlCDuringAGraceWaitLatchesWithoutInterrupting:
 
         cancellation._handle_sigint(signal.SIGINT, None)
 
+        assert cancellation._GRACE_WAITS == 0
         assert chained == [signal.SIGINT]
+
+    def test_the_count_goes_back_down_when_the_wait_is_interrupted(self, monkeypatch):
+        """The previous handler raises KeyboardInterrupt, inside the block, when no
+        scan is registered. A count that stayed raised would hold back every first
+        Ctrl-C of the process from then on."""
+
+        def interrupt(signum, frame):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(cancellation, "_SIGINT_SEEN", False)
+        monkeypatch.setattr(cancellation, "_SIGTERM_SEEN", False)
+        monkeypatch.setattr(cancellation, "_SHUTDOWN_REQUESTED", False)
+        monkeypatch.setattr(cancellation, "_SHUTDOWN_SCOPES", ())
+        monkeypatch.setattr(cancellation, "_PREVIOUS_SIGINT", interrupt)
+        monkeypatch.setattr(cancellation, "_GRACE_WAITS", 0)
+
+        with pytest.raises(KeyboardInterrupt):
+            with cancellation.stop_grace_in_progress():
+                assert cancellation._GRACE_WAITS == 1
+                cancellation._handle_sigint(signal.SIGINT, None)
+
+        # Red with a count that is raised and lowered without a try/finally.
+        assert cancellation._GRACE_WAITS == 0
+
+    def test_grace_waits_nest(self, monkeypatch):
+        monkeypatch.setattr(cancellation, "_GRACE_WAITS", 0)
+
+        with cancellation.stop_grace_in_progress():
+            with cancellation.stop_grace_in_progress():
+                assert cancellation._GRACE_WAITS == 2
+            assert cancellation._GRACE_WAITS == 1
+
+        assert cancellation._GRACE_WAITS == 0

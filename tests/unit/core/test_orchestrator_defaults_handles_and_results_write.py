@@ -201,11 +201,11 @@ class TestTheEngineIsBuiltFromWhatTheCallerGave:
         source, output = _dirs(tmp_path)
         existing = tmp_path / "existing.json"
         existing.write_text(AshAggregatedResults().model_dump_json(), encoding="utf-8")
-        encodings = []
+        reads = []
         real_read_text = Path.read_text
 
         def recording_read_text(self, *args, **kwargs):
-            encodings.append(kwargs.get("encoding"))
+            reads.append((self, kwargs.get("encoding")))
             return real_read_text(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "read_text", recording_read_text)
@@ -217,8 +217,10 @@ class TestTheEngineIsBuiltFromWhatTheCallerGave:
             existing_results_path=existing,
         )
 
-        # Red at the base: read with no encoding, the locale's.
-        assert encodings and all(encoding == "utf-8" for encoding in encodings)
+        # Red at the base: read with no encoding, the locale's. The read that is
+        # checked is the results file's own, not any read on the way.
+        assert (existing, "utf-8") in reads
+        assert all(encoding == "utf-8" for path, encoding in reads if path == existing)
 
     def test_a_callers_work_dir_reaches_the_plugin_context(self, tmp_path, monkeypatch):
         source, output = _dirs(tmp_path)
@@ -263,7 +265,15 @@ class TestTheEndOfAScan:
         work.mkdir()
         orchestrator = _with_stub_phases(tmp_path, monkeypatch, work_dir=work)
 
+        attempted = []
+        real_rmtree = orchestrator_module.shutil.rmtree
+
         def refuse(path, *args, **kwargs):
+            # Only the work directory is refused; any other removal in the
+            # process (a fixture's, a library's) runs as it would.
+            if Path(path) != work:
+                return real_rmtree(path, *args, **kwargs)
+            attempted.append(Path(path))
             raise PermissionError(13, "Permission denied", str(path))
 
         monkeypatch.setattr(orchestrator_module.shutil, "rmtree", refuse)
@@ -272,6 +282,9 @@ class TestTheEndOfAScan:
         results = orchestrator._execute_scan(phases=["report"])
 
         assert isinstance(results, AshAggregatedResults)
+        # The removal was tried, so the pass above is the failure being absorbed
+        # and not a cleanup branch that did not run.
+        assert attempted == [work]
 
     def test_the_results_file_is_written_once_every_phase_has_run(
         self, tmp_path, monkeypatch
@@ -355,7 +368,12 @@ class TestMetadataAndThresholds:
 
         assert engine._asharp_model.metadata.project_name == "api"
 
-    def test_a_blank_scanner_threshold_takes_the_restricted_global(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("requested", "effective"), [("LOW", "LOW"), ("HIGH", "MEDIUM")]
+    )
+    def test_a_blank_scanner_threshold_takes_the_restricted_global(
+        self, tmp_path, requested, effective
+    ):
         source, output = _dirs(tmp_path)
         config = AshConfig(
             scanners={"custom-scanner": {"options": {"severity_threshold": ""}}}
@@ -364,9 +382,11 @@ class TestMetadataAndThresholds:
 
         # LOW gates more findings than the default global MEDIUM, so it is the
         # stricter one and becomes the run's effective threshold; a request of
-        # HIGH would be looser and leave the configured MEDIUM standing.
-        orchestrator._restrict_severity_threshold(config, "LOW")
+        # HIGH would be looser and leave the configured MEDIUM standing. The two
+        # cases tell the effective global from the requested one: only HIGH over
+        # MEDIUM gives a different value for each.
+        orchestrator._restrict_severity_threshold(config, requested)
 
         options = (config.scanners.model_extra or {})["custom-scanner"]["options"]
         # Red at the base: the empty string was skipped as unset and stayed.
-        assert options["severity_threshold"] == "LOW"
+        assert options["severity_threshold"] == effective

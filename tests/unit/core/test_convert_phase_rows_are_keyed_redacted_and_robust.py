@@ -46,6 +46,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.interactions.run_ash_scan import incomplete_converters
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     RefusedInputInfo,
@@ -236,10 +237,12 @@ class TestFailureTextsCarryNoEnvironmentValue:
     ):
         plugin_context.config._environment_values = [ENV_VALUE]
 
-        # Captured at DEBUG: the traceback goes out at that level, and a capture
-        # at ERROR would never see it, so "the value is not in the log" would
-        # hold with the value in the traceback line.
-        with caplog.at_level(logging.DEBUG):
+        # Captured at DEBUG on ASH's own logger: a capture at the root alone does
+        # not lower that logger, so a level an earlier test left on it (INFO)
+        # would hide every DEBUG record and "the value is not in the log" would
+        # hold with nothing captured. (The construction path logs its failure at
+        # ERROR only; the convert path below logs a debug traceback as well.)
+        with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
             results, _ = _run(plugin_context, [_UnconstructableQuotingAValue])
 
         row = results.converter_results["_UnconstructableQuotingAValue"]
@@ -253,7 +256,7 @@ class TestFailureTextsCarryNoEnvironmentValue:
     def test_a_convert_failure_is_redacted_with_the_converters_values(
         self, plugin_context, caplog
     ):
-        with caplog.at_level(logging.DEBUG):
+        with caplog.at_level(logging.DEBUG, logger=ASH_LOGGER.name):
             results, progress = _run(plugin_context, [_LeakyConverter])
 
         row = results.converter_results["leaky-converter"]

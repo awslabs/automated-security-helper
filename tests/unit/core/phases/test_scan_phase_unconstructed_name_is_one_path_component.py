@@ -158,5 +158,8 @@ class TestTheRowOfAnUnconstructedScannerIsUnderAPlainKey:
         assert all("/" not in key for key in results.scanner_results)
         row = results.scanner_results[plugin_config_key(_Boom)]
         assert row.status == ScannerStatus.ERROR
-        # Nothing was written beside the output directory through the name.
-        assert not (tmp_path / "escaped").exists()
+        # Nothing was created through the name, wherever "scanners/../escaped"
+        # would have landed: the output directory is under tmp_path, so the one
+        # place the name could resolve to is inside it, and the walk covers both.
+        assert [path for path in tmp_path.rglob("*") if path.name == "escaped"] == []
+        assert not (mock_plugin_context.output_dir / "escaped").exists()

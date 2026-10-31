@@ -131,20 +131,39 @@ def _observed(plugin_context, plugins):
     return results, events, progress
 
 
-def _texts(results, events, progress, name: str) -> List[str]:
-    """Every text the phase wrote about the converter *name*."""
-    texts = [str(results.converter_results[name].failure)]
-    texts.extend(
+def _places(results, events, progress, name: str):
+    """The texts the phase wrote about the converter *name*, by place: the row's
+    failure, the progress descriptions that name it, the CONVERT_COMPLETE
+    messages."""
+    row = str(results.converter_results[name].failure)
+    descriptions = [
         str(call.kwargs.get("description", ""))
         for call in progress.update_task.call_args_list
         if name in str(call.kwargs.get("description", ""))
-    )
-    texts.extend(
+    ]
+    messages = [
         str(kwargs.get("message", ""))
         for event, kwargs in events
         if "CONVERT_COMPLETE" in event
+    ]
+    return row, descriptions, messages
+
+
+def _texts(results, events, progress, name: str) -> List[str]:
+    """Every text the phase wrote about the converter *name*."""
+    row, descriptions, messages = _places(results, events, progress, name)
+    return [row, *descriptions, *messages]
+
+
+def _every_place_says_the_reason(places) -> None:
+    """Each of the three places holds the reason, so a count of texts cannot be met
+    by two descriptions and no event."""
+    row, descriptions, messages = places
+    assert "sandbox refused 1 process" in row, row
+    assert any("sandbox refused 1 process" in text for text in descriptions), (
+        descriptions
     )
-    return texts
+    assert any("sandbox refused 1 process" in text for text in messages), messages
 
 
 class TestTheSandboxReasonsAreRedacted:
@@ -165,15 +184,13 @@ class TestTheSandboxReasonsAreRedacted:
             plugin_context, [_converter("sandbox-lost")]
         )
 
-        texts = _texts(results, events, progress, "sandbox-lost")
-        # The control half: the reason is still there, with its count, and the
-        # three places it goes (the row, the progress description, the event)
-        # were all read.
-        failure = texts[0]
-        assert "sandbox refused 1 process" in failure, failure
-        assert len(texts) >= 3, texts
+        places = _places(results, events, progress, "sandbox-lost")
+        # The control half: the reason is still there, with its count, in each of
+        # the three places it goes (the row, a progress description, an event).
+        _every_place_says_the_reason(places)
         # Red at the base: every one of them quoted the value.
-        for text in texts:
+        row, descriptions, messages = places
+        for text in [row, *descriptions, *messages]:
             assert "RUNCANARY-4b9e" not in text, text
 
     def test_a_value_only_the_converter_read_is_absent(
@@ -192,12 +209,13 @@ class TestTheSandboxReasonsAreRedacted:
             plugin_context, [_converter("own-value-lost", env_values=(OWN_VALUE,))]
         )
 
-        texts = _texts(results, events, progress, "own-value-lost")
+        places = _places(results, events, progress, "own-value-lost")
         # The control: the run's configuration holds no such value, so only the
         # converter's own can hide it.
         assert OWN_VALUE not in (plugin_context.config._environment_values or [])
-        assert "sandbox refused 1 process" in texts[0], texts[0]
-        for text in texts:
+        _every_place_says_the_reason(places)
+        row, descriptions, messages = places
+        for text in [row, *descriptions, *messages]:
             assert "OWNCANARY-d27a" not in text, text
 
     def test_the_control_without_a_value_keeps_the_reasons_whole(

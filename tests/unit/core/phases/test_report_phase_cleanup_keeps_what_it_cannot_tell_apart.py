@@ -90,14 +90,37 @@ class _CancellingCompanionReporter(ReporterPluginBase[_ProbeReporterConfig]):
         raise ScanCancelled("cancelled while the probe reporter ran")
 
 
-def _phase_over_an_earlier_report(tmp_path: Path):
+class _WrittenByPathConfig(ReporterPluginConfigBase):
+    name: Literal["written-probe"] = "written-probe"
+    extension: str = "written-probe.json"
+
+
+class _WrittenByPathReporter(ReporterPluginBase[_WrittenByPathConfig]):
+    """Returns a report, which the phase writes by path before the next reporter."""
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _WrittenByPathConfig()
+        return super().model_post_init(context)
+
+    def companion_file_names(self) -> Tuple[str, ...]:
+        return ()
+
+    def report(self, model: AshAggregatedResults) -> str:
+        return "{}"
+
+
+WRITTEN_BY_PATH = "ash.written-probe.json"
+
+
+def _phase_over_an_earlier_report(tmp_path: Path, plugins=None):
     context = _context(tmp_path)
     reports_dir = context.output_dir / "reports"
     reports_dir.mkdir(parents=True)
     (reports_dir / EARLIER_REPORT).write_text("{}")
     results = AshAggregatedResults()
     phase = ReportPhase(
-        plugins=[_CancellingCompanionReporter],
+        plugins=plugins or [_CancellingCompanionReporter],
         plugin_context=context,
         progress_display=LiveProgressDisplay(show_progress=False),
         asharp_model=results,
@@ -127,6 +150,35 @@ class TestAnIncompleteBaselineRemovesOnlyWhatThePhaseWrote:
         # after-listing's every entry looked new and the earlier report went.
         assert (reports_dir / EARLIER_REPORT).exists()
         assert reports_dir.exists()
+
+    def test_the_file_the_phase_wrote_by_path_goes_and_the_companion_stays(
+        self, tmp_path, monkeypatch
+    ):
+        """Both halves of the rule: with no baseline to tell new from old, the report
+        the phase wrote by path is removed (it knows that one is its own), and a
+        companion file the reporter wrote under a name the phase never learns is
+        kept, since it cannot be told from a pre-existing one."""
+        phase, context, results, reports_dir = _phase_over_an_earlier_report(
+            tmp_path, plugins=[_WrittenByPathReporter, _CancellingCompanionReporter]
+        )
+        original_rglob = Path.rglob
+        failed = {"n": 0}
+
+        def rglob_failing_on_the_first_listing(self: Path, pattern, *args, **kwargs):
+            if self == reports_dir and failed["n"] == 0:
+                failed["n"] += 1
+                raise PermissionError(13, "Permission denied", str(self))
+            return original_rglob(self, pattern, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "rglob", rglob_failing_on_the_first_listing)
+
+        with pytest.raises(ScanCancelled):
+            _execute(phase, context, results, ["written-probe", "cancel-probe"])
+
+        assert failed["n"] == 1
+        assert not (reports_dir / WRITTEN_BY_PATH).exists()
+        assert (reports_dir / EARLIER_REPORT).exists()
+        assert (reports_dir / _CancellingCompanionReporter.COMPANION).exists()
 
     def test_the_helper_answers_none_for_a_listing_that_did_not_complete(
         self, tmp_path, monkeypatch
