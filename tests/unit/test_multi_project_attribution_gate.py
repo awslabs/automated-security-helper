@@ -1038,6 +1038,62 @@ class TestScannerRollupRegression:
         assert any("recorded no scanners" in v for v in outcome.violations)
 
 
+class TestPerScannerRollupReadFromTheAggregatedFile:
+    """The per-scanner count check reads the aggregated file the run wrote.
+
+    The other tests in this module hand the gate the rollup in memory, and the
+    check below reads ``<output>/ash_aggregated_results.json`` instead; with no
+    such file it returns nothing, so the healthy fixture alone never exercises
+    it. Here that file is written beside the per-project subtrees the fixture
+    already carries, and the check is run through ``evaluate_results``.
+    """
+
+    @staticmethod
+    def _write_aggregated(output_dir, counts):
+        (output_dir / gate.RESULTS_FILENAME).write_text(
+            json.dumps(
+                {
+                    "scanner_results": {
+                        scanner: {"status": "FAILED", "finding_count": count}
+                        for scanner, count in counts.items()
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_an_aggregated_file_matching_the_projects_sums_is_clean(
+        self, healthy, output_dir
+    ):
+        # Each project's own file in the fixture reports one finding per scanner.
+        share = len(gate.FIXTURE_PROJECTS)
+        self._write_aggregated(output_dir, {"bandit": share, "checkov": share})
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert outcome.violations == []
+
+    def test_one_scanners_count_moved_into_anothers_is_reported(
+        self, healthy, output_dir
+    ):
+        """The totals across both scanners still agree, so only this check sees it."""
+        share = len(gate.FIXTURE_PROJECTS)
+        self._write_aggregated(output_dir, {"bandit": share + 1, "checkov": share - 1})
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        reported = [
+            v for v in outcome.violations if "the projects' own results sum to" in v
+        ]
+        assert len(reported) == 2, outcome.violations
+        assert any(
+            f"scanner_results['bandit'].finding_count is {share + 1} " in v
+            and f"sum to {share} for it" in v
+            for v in reported
+        )
+        assert any(
+            f"scanner_results['checkov'].finding_count is {share - 1} " in v
+            and f"sum to {share} for it" in v
+            for v in reported
+        )
+
+
 class TestLostWorkspacePathRegression:
     def test_a_counted_unconvertible_path_fails(self, healthy, output_dir):
         """Every fixture file lives inside its project, so none should be refused."""
