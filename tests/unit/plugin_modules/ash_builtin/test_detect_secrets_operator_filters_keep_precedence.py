@@ -183,11 +183,12 @@ def test_the_operators_patterns_stay_the_operators_after_the_executors_config_sw
     tmp_path, monkeypatch
 ):
     """The executor hands ``_pre_scan`` the config the scanner was built from.
-    The base class rebuilds ``self.config`` from a dump of it, which makes new
-    filter objects, and the dumps match so no settings pass runs again. The
-    record of which entries are the operator's was kept by object identity and
-    pointed at the discarded objects: every entry then read as the baseline's,
-    and the operator's ``^tests/`` was matched at the baseline's anchor."""
+    The base class rebuilds ``self.config`` from a dump of it only when that
+    dump differs from the current one, and a rebuild makes new filter objects,
+    so the record of which entries are the operator's cannot be kept by object
+    identity. Here the dumps match and no rebuild runs: the operator's
+    patterns must still be the operator's after ``_pre_scan``, and not the
+    baseline's at the baseline's anchor."""
     monkeypatch.chdir(tmp_path)
     context = _context_with_baseline(tmp_path, [{"path": SEQUENTIAL}])
     operator = DetectSecretsScanSettingsFiltersUsed(
@@ -201,11 +202,6 @@ def test_the_operators_patterns_stay_the_operators_after_the_executors_config_sw
     validated = scanner._pre_scan(context.source_dir, "source", config=scanner.config)
 
     assert validated is True
-    # The swap really made new objects, so identity alone cannot tell them.
-    assert all(
-        item is not operator
-        for item in scanner.config.options.scan_settings.filters_used
-    )
     own, others = scanner._exclude_patterns_by_author()
     assert [p.pattern for p in own] == ["^tests/"]
     assert others == []
