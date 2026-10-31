@@ -66,7 +66,7 @@ def _zip_bytes(entries: dict) -> bytes:
     return buf.getvalue()
 
 
-def _zip_with_symlink(link_name: str, link_target: str) -> bytes:
+def _zip_with_symlink(link_name: str, link_target: "str | bytes") -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         info = zipfile.ZipInfo(link_name)
@@ -440,7 +440,8 @@ class TestASymlinkRefusalQuotesABoundedExcerpt:
         return str(excinfo.value)
 
     def test_a_long_link_target_is_cut_to_a_bounded_prefix(self, tmp_path):
-        # Stored uncompressed, so the archive stays within one upload chunk.
+        # Stored uncompressed, so the archive is as large as the entry: a bit
+        # over half a MiB, which still fits one upload chunk (1 MiB).
         content = b"/" + b"a" * (512 * 1024)
         message = self._refusal_for(content, tmp_path)
 

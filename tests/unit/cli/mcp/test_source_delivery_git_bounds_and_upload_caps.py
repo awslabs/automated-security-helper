@@ -220,7 +220,7 @@ class TestAClonedRepositoryMustHaveACommit:
 
 
 class TestUploadsAreBoundedPerSession:
-    def test_a_fifth_upload_in_progress_is_refused(self, tmp_path):
+    def test_an_upload_past_the_per_session_limit_is_refused(self, tmp_path):
         """Red at the base: any number of upload ids could each hold an archive."""
         payload = _zip_bytes({"a.py": b"print(1)\n"})
         for n in range(sd._MAX_UPLOADS_PER_SESSION):
@@ -238,6 +238,13 @@ class TestUploadsAreBoundedPerSession:
             _upload(payload, f"upload-{n}", tmp_path)
 
         _upload(payload, "upload-0", tmp_path)
+
+        held = sorted(
+            path.name for path in (tmp_path / SESSION / "incoming").glob("*.zip")
+        )
+        assert held == sorted(
+            f"upload-{n}.zip" for n in range(sd._MAX_UPLOADS_PER_SESSION)
+        ), held
 
     def test_bytes_held_across_uploads_are_bounded(self, tmp_path, monkeypatch):
         # The bound counts the upload's own bytes with the others' on every
@@ -345,7 +352,14 @@ class TestZipEntriesNamedWithBackslashesAreRefused:
         with pytest.raises(ValueError, match="backslash"):
             _finalize("bs", sha256, tmp_path)
 
-        assert not (tmp_path / SESSION / "source" / "src\\main.py").exists()
+        # Nothing of the entry was written anywhere under the session, flat or
+        # nested, not only at the one path the flat extraction would have used.
+        written = [
+            path.name
+            for path in (tmp_path / SESSION).rglob("*")
+            if "main.py" in path.name
+        ]
+        assert written == [], written
 
     def test_a_forward_slash_entry_is_delivered(self, tmp_path):
         """Control: the zip format's own separator is extracted as a directory."""
@@ -359,7 +373,7 @@ class TestZipEntriesNamedWithBackslashesAreRefused:
 
 class TestClearSourceKeepsTheBinding:
     def test_the_bound_profile_outlives_the_workspace(self, tmp_path):
-        """The binding is the source of truth: its files are removed, it stays.
+        """The binding is the source of truth: the delivered source goes, it stays.
 
         An earlier shape of this test pinned the opposite: ``clear_source``
         dropped the binding with the workspace. The resolver has since been
@@ -369,12 +383,14 @@ class TestClearSourceKeepsTheBinding:
         binding ends with the session, not with ``clear_source``.
         """
         payload = _zip_bytes({"a.py": b"print(1)\n"})
-        _finalize("fine", _upload(payload, "fine", tmp_path), tmp_path)
+        delivered = _finalize("fine", _upload(payload, "fine", tmp_path), tmp_path)
         bind_session_config(SESSION, config=AshConfig(), profile_name="strict")
         assert session_has_binding(SESSION)
+        assert (delivered / "a.py").exists()
 
         sd.clear_source(SESSION, workspace_root=tmp_path)
 
+        assert not delivered.exists(), "the delivered source outlived the clear"
         assert session_has_binding(SESSION)
         assert sd.get_session_source_dir(SESSION) is None
 
