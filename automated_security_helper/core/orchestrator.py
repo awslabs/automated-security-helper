@@ -15,6 +15,7 @@ from typing import (
     List,
     Literal,
     Optional,
+    Sequence,
     Set,
     Tuple,
     cast,
@@ -607,6 +608,12 @@ class ASHScanOrchestrator(BaseModel):
                 "one is given. Pass the configuration as resolved_config."
             )
 
+    @property
+    def _output_path(self) -> Path:
+        """``output_dir`` as a Path: model_post_init gives it a value when it is
+        built without one, so a reader after construction has a directory."""
+        return cast(Path, self.output_dir)
+
     def __copy__(self) -> "ASHScanOrchestrator":
         return self._with_its_own_run_id(super().__copy__())
 
@@ -736,7 +743,7 @@ class ASHScanOrchestrator(BaseModel):
         # committed is refused as the committed entry it is, with exit 3 and its
         # path, as the CLI and the MCP tools refuse it (core/committed_output.py),
         # and one git does not track as a link (_refuse_linked_output_dir).
-        if is_link(self.output_dir):
+        if is_link(self._output_path):
             self._refuse_committed_results_paths()
             self._refuse_linked_output_dir()
         self._build_engine(config)
@@ -768,7 +775,7 @@ class ASHScanOrchestrator(BaseModel):
         would without keep_previous_results, and they do not come back if it
         fails.
         """
-        self._previous_results = PreviousResults(self.output_dir)
+        self._previous_results = PreviousResults(self._output_path)
         try:
             self._previous_results.set_aside()
             self._previous_results_set_aside = True
@@ -804,7 +811,7 @@ class ASHScanOrchestrator(BaseModel):
         complete set and remove this scan's.
         """
         try:
-            PreviousResults(self.output_dir).discard()
+            PreviousResults(self._output_path).discard()
         except OSError as e:
             ASH_LOGGER.warning(
                 f"Could not remove the previous results an MCP scan kept in "
@@ -943,7 +950,7 @@ class ASHScanOrchestrator(BaseModel):
         """
         if self.work_dir is not None:
             return Path(self.work_dir)
-        return self.output_dir.joinpath(ASH_WORK_DIR_NAME)
+        return self._output_path.joinpath(ASH_WORK_DIR_NAME)
 
     def restrict_to_changed_files(self, changed_files: Optional[Set[Path]]) -> None:
         """Narrow this run's results to *changed_files*, after :meth:`initialize`.
@@ -1123,12 +1130,12 @@ class ASHScanOrchestrator(BaseModel):
             ASHValidationError: one of those is a symlink or a junction.
         """
         try:
-            refuse_linked_output_dir(self.source_dir, self.output_dir)
+            refuse_linked_output_dir(self.source_dir, self._output_path)
         except OutputDirLinkRefused as refusal:
             raise ASHValidationError(str(refusal)) from refusal
 
     def _adopt_this_runs_values(
-        self, loaded: AshAggregatedResults, config: AshConfig
+        self, loaded: AshAggregatedResults, config: AshConfig | None
     ) -> None:
         """Make the config recorded in loaded results this run's own.
 
@@ -1293,7 +1300,7 @@ class ASHScanOrchestrator(BaseModel):
                 }
             )
 
-    def _writes_results_file(self, phases: List[str]) -> bool:
+    def _writes_results_file(self, phases: Sequence[str]) -> bool:
         """Whether this run owns the results file: a scan ran (not a report over
         existing results) and there is an output directory to write into."""
         return bool(
@@ -1305,7 +1312,7 @@ class ASHScanOrchestrator(BaseModel):
         the write. Only its own file: the previous results, if any were kept,
         sit in the held set, and the caller puts them back. A removal that fails
         is logged; the cancel is what the caller sees."""
-        results_file = Path(self.output_dir) / "ash_aggregated_results.json"
+        results_file = self._output_path / "ash_aggregated_results.json"
         try:
             results_file.unlink(missing_ok=True)
         except OSError as e:
@@ -1314,7 +1321,7 @@ class ASHScanOrchestrator(BaseModel):
                 f"the file could not be removed: {error_text(e)}"
             )
 
-    def _write_results_after_failure(self, phases: List[str]) -> None:
+    def _write_results_after_failure(self, phases: Sequence[str]) -> None:
         """Write the results the engine holds when a phase AFTER the scan raised.
 
         The scan phase used to write ash_aggregated_results.json at its own
@@ -1360,7 +1367,7 @@ class ASHScanOrchestrator(BaseModel):
             )
             return
         try:
-            results.save_model(self.output_dir)
+            results.save_model(self._output_path)
             ASH_LOGGER.info(
                 f"Saved the scan's results to {self.output_dir} before the failure "
                 f"is reported"
@@ -1410,7 +1417,7 @@ class ASHScanOrchestrator(BaseModel):
         alone.
         """
         for name in PREVIOUS_RUN_FILE_NAMES:
-            old_file = self.output_dir / name
+            old_file = self._output_path / name
             try:
                 old_file.unlink(missing_ok=True)
             except OSError as e:
@@ -1442,13 +1449,13 @@ class ASHScanOrchestrator(BaseModel):
         opened them; nothing here writes them.
         """
         if self.existing_results_path is None:
-            refuse_committed_entries(self.output_dir, not_on_disk=LOG_FILE_NAMES)
+            refuse_committed_entries(self._output_path, not_on_disk=LOG_FILE_NAMES)
             return
         files, directories = report_over_existing_results_writes(
             inspect=False, cleanup=not self.no_cleanup
         )
         refuse_committed_entries(
-            self.output_dir,
+            self._output_path,
             files=files,
             directories=directories,
             not_on_disk=LOG_FILE_NAMES,
@@ -1624,7 +1631,7 @@ class ASHScanOrchestrator(BaseModel):
         return results
 
     def _write_results_file(
-        self, phases: List[str] | None, results: AshAggregatedResults
+        self, phases: Sequence[str] | None, results: AshAggregatedResults
     ) -> None:
         """Write ash_aggregated_results.json once, after every phase has run.
 
@@ -1662,7 +1669,7 @@ class ASHScanOrchestrator(BaseModel):
             return
         ASH_LOGGER.debug(f"Saving AshAggregatedResults to {self.output_dir}")
         try:
-            results.save_model(self.output_dir)
+            results.save_model(self._output_path)
         except Exception as e:
             values = config_environment_values(self.config)
             ASH_LOGGER.error(
@@ -1734,7 +1741,7 @@ class ASHScanOrchestrator(BaseModel):
                     # The inspect phase writes analysis/, which initialize did not
                     # check for a report over existing results.
                     refuse_committed_entries(
-                        self.output_dir, files=(), directories=("analysis",)
+                        self._output_path, files=(), directories=("analysis",)
                     )
                 ASH_LOGGER.info(
                     f"Loading existing results from {self.existing_results_path}"
@@ -1800,7 +1807,7 @@ class ASHScanOrchestrator(BaseModel):
                 # Ensure the reports directory exists but don't clean up any other
                 # directories. Outside the handler above, which would report a link
                 # refused here as results that failed to load.
-                ensure_reports_dir(self.output_dir.joinpath("reports"))
+                ensure_reports_dir(self._output_path.joinpath("reports"))
             # Only identify files to scan if we're not using existing results
             elif "convert" in phases or "scan" in phases:
                 # Before the walk: a scan with no engine walked the whole tree and
