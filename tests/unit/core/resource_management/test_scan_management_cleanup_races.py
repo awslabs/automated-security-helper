@@ -25,9 +25,11 @@ instance attributes.
 import asyncio
 import os
 import shutil
+import sys
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -524,6 +526,145 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         assert "symbolic link" in result["output_dir_error"]
         assert (elsewhere / "keep.txt").exists()
         assert output.is_symlink()
+
+    def test_a_junction_as_the_output_directory_is_left_and_the_entry_goes(
+        self, registry, tmp_path
+    ):
+        """A Windows junction is a link to the delete as much as a symbolic
+        link is, but ``Path.is_symlink`` is False for it before Python 3.12
+        while ``resolve()`` follows it, so the check passed and the delete took
+        the junction's target. The junction answer is the module's
+        ``_is_junction``; here it reads True for the output directory (the
+        Windows test below makes a real one)."""
+        entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
+        output = _output_of(entry)
+        registry.get_scan.return_value = entry
+
+        with (
+            _use(registry),
+            patch(f"{_MODULE}._is_junction", lambda path: path == output),
+        ):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["removed_output"] is False
+        assert "junction" in result["output_dir_error"]
+        assert (output / "ash_aggregated_results.json").exists()
+
+    def test_a_directory_that_is_not_a_junction_is_still_removed(
+        self, registry, tmp_path
+    ):
+        entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
+        output = _output_of(entry)
+        registry.get_scan.return_value = entry
+
+        with _use(registry), patch(f"{_MODULE}._is_junction", lambda path: False):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["removed_output"] is True
+        assert not output.exists()
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="junctions are a Windows form")
+    def test_a_real_junction_is_left_in_place_with_its_target(
+        self, registry, tmp_path
+    ):
+        import _winapi
+
+        source = tmp_path / "src"
+        (source / ".ash").mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "keep.txt").write_text("keep", encoding="utf-8")
+        output = source / ".ash" / "ash_output"
+        _winapi.CreateJunction(str(elsewhere), str(output))
+        entry = ScanRegistryEntry(
+            scan_id="scan-1",
+            directory_path=str(source),
+            output_directory=str(output),
+        )
+        entry.status = MCScanStatus.COMPLETED
+        entry.has_runner = False
+        registry.get_scan.return_value = entry
+
+        with _use(registry):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["removed_output"] is False
+        assert "junction" in result["output_dir_error"]
+        assert (elsewhere / "keep.txt").exists()
+
+    def test_the_junction_answer_comes_from_is_junction_where_the_path_has_one(self):
+        from automated_security_helper.core.resource_management.scan_management import (
+            _is_junction,
+        )
+
+        class Junction:
+            def is_junction(self):
+                return True
+
+        class Refusing:
+            def is_junction(self):
+                raise OSError("unreadable")
+
+        assert _is_junction(Junction()) is True
+        assert _is_junction(Refusing()) is False
+
+    def test_the_junction_answer_reads_the_reparse_flag_where_the_path_has_no_method(
+        self,
+    ):
+        """Before Python 3.12 a path has no ``is_junction``: the file attributes
+        of the path itself carry the reparse-point flag (Windows only; elsewhere
+        the attribute is absent and the answer is False)."""
+        import stat
+
+        from automated_security_helper.core.resource_management.scan_management import (
+            _is_junction,
+        )
+
+        class OlderPath:
+            pass
+
+        def lstat_with(attributes):
+            return lambda path: SimpleNamespace(st_file_attributes=attributes)
+
+        flagged = SimpleNamespace(lstat=lstat_with(stat.FILE_ATTRIBUTE_REPARSE_POINT))
+        plain = SimpleNamespace(lstat=lstat_with(stat.FILE_ATTRIBUTE_DIRECTORY))
+        linux_like = SimpleNamespace(lstat=lambda path: SimpleNamespace())
+
+        def unreadable(path):
+            raise OSError("gone")
+
+        with patch(f"{_MODULE}.os", flagged):
+            assert _is_junction(OlderPath()) is True
+        with patch(f"{_MODULE}.os", plain):
+            assert _is_junction(OlderPath()) is False
+        with patch(f"{_MODULE}.os", linux_like):
+            assert _is_junction(OlderPath()) is False
+        with patch(f"{_MODULE}.os", SimpleNamespace(lstat=unreadable)):
+            assert _is_junction(OlderPath()) is False
+
+    def test_a_vanished_entry_is_judged_on_the_path_that_was_deleted(
+        self, registry, tmp_path
+    ):
+        """The delete acts on the resolved path, so the question after a
+        FileNotFoundError out of it (is the tree gone?) is about that path and
+        not about the stored spelling, which can still exist."""
+        entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)
+        output = _output_of(entry)
+        gone = Path(entry.canonical_output_directory) / "removed-meanwhile"
+        registry.get_scan.return_value = entry
+
+        def vanished(path):
+            raise FileNotFoundError("an entry vanished under the walk")
+
+        with (
+            _use(registry),
+            patch(f"{_MODULE}._resolved_output_dir", lambda *args: gone),
+            patch(f"{_MODULE}._remove_output_tree", vanished),
+        ):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert output.exists()
+        assert result["removed_output"] is True
 
     def test_a_real_output_tree_is_still_removed(self, registry, tmp_path):
         entry = _entry(tmp_path, status=MCScanStatus.COMPLETED, has_runner=False)

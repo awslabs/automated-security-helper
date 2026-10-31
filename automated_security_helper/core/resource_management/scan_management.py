@@ -11,7 +11,9 @@ to provide a higher-level interface for scan management.
 """
 
 import asyncio
+import os
 import shutil
+import stat
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -116,6 +118,31 @@ def _resolved_output_dir(
     except ValueError:
         return None
     return resolved
+
+
+def _is_junction(path: Path) -> bool:
+    """Whether ``path`` is itself a Windows junction (or another reparse point).
+
+    ``Path.is_symlink`` is False for a junction before Python 3.12, while
+    ``Path.resolve`` follows it, so a removal that refuses links by
+    ``is_symlink`` alone deletes the junction's target. ``Path.is_junction``
+    answers it from 3.12; before that the file attributes of the path itself
+    (``lstat``, which does not follow it) carry the reparse-point flag, on
+    Windows only: elsewhere the attribute does not exist and the answer is
+    False. A path that cannot be read answers False; the delete that follows
+    reports it.
+    """
+    is_junction = getattr(path, "is_junction", None)
+    if is_junction is not None:
+        try:
+            return bool(is_junction())
+        except OSError:
+            return False
+    try:
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def _remove_output_tree(output_dir: Path) -> bool:
@@ -546,8 +573,13 @@ async def cleanup_scan_resources(
         if remove_output and entry.output_directory:
             try:
                 output_dir = Path(entry.output_directory)
+                # The path remove() deletes, once it has checked it: the
+                # resolved form, which is what the delete acts on. The
+                # FileNotFoundError arm below asks about this one.
+                checked = output_dir
 
                 def remove() -> bool:
+                    nonlocal checked
                     # The path was recorded at registration; a link placed on
                     # or above it since would redirect the delete outside the
                     # output tree the scan registered. Checked here, on the
@@ -571,11 +603,16 @@ async def cleanup_scan_resources(
                     # A link as the last component is left in place, with
                     # what it points to: rmtree refuses a link, so the delete
                     # would fail on every retry and keep the entry for good.
-                    if output_dir.is_symlink():
+                    # A Windows junction is one too, and is_symlink does not
+                    # see it before Python 3.12 while resolve() follows it, so
+                    # the delete below would take its target.
+                    if output_dir.is_symlink() or _is_junction(output_dir):
                         raise _OutputDirectoryInUse(
-                            "the output directory is itself a symbolic link, "
-                            "which is left in place with what it points to"
+                            "the output directory is itself a symbolic link or "
+                            "a junction, which is left in place with what it "
+                            "points to"
                         )
+                    checked = resolved
                     # The stats and the recursive delete, on the worker thread
                     # this remover runs on, of the path that was just checked
                     # and not of the stored spelling; True when the tree is
@@ -630,7 +667,7 @@ async def cleanup_scan_resources(
                 # The directory itself may be gone (someone else removed it,
                 # which is not an error) or may still be there with part of
                 # the tree in it.
-                removed_output = not await asyncio.to_thread(output_dir.exists)
+                removed_output = not await asyncio.to_thread(checked.exists)
                 if not removed_output:
                     output_removal_failed = True
                     output_dir_error = (
