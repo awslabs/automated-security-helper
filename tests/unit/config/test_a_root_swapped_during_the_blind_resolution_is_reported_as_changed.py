@@ -112,7 +112,9 @@ def test_a_root_that_changed_during_the_second_resolution_is_a_changed_file(
 
     raised = _raised_as_the_caller_raises_it(blind)
     assert config_file_changed(raised)
-    assert str(tmp_path) not in str(raised)
+    # The refusal is the generic reason, which names the config it is about; the
+    # fact that a file changed rides on the mark, which holds no path.
+    assert "environment references hold" in str(raised), "premise: the generic reason"
 
 
 def test_a_plain_failure_of_the_second_resolution_stays_a_plain_failure(
