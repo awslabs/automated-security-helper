@@ -149,16 +149,16 @@ def test_a_colon_rule_id_entry_is_re_scanned(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# The on-disk spelling lookup reads each directory once and indexes it
+# The on-disk spelling lookup reads each directory once and keeps its names in a set
 # --------------------------------------------------------------------------- #
 
 
-def test_each_directory_is_listed_once_and_indexed_over_many_entries(
+def test_each_directory_is_listed_once_and_kept_as_a_set_over_many_entries(
     tmp_path, monkeypatch
 ):
     """An ignore file can name thousands of entries under one directory; each
-    lookup reads the directory's listing from the cache, as a set of names
-    and a casefold index, never as a list to scan."""
+    lookup reads the directory's listing from the cache, as a set of names,
+    never as a list to scan."""
     for index in range(200):
         _write(tmp_path, f"app/f{index}.py")
     _write(tmp_path, "top.py")
@@ -184,9 +184,9 @@ def test_each_directory_is_listed_once_and_indexed_over_many_entries(
     assert spelled[200:] == ["top.py", None]
     # One listing per directory touched: the root and app.
     assert sorted(scanned) == sorted([tmp_path, tmp_path / "app"])
-    names, folded = listings[tmp_path / "app"]
+    names = listings[tmp_path / "app"]
     assert isinstance(names, set) and len(names) == 200
-    assert isinstance(folded, dict) and folded["f7.py"] == ["f7.py"]
+    assert "f7.py" in names
 
 
 # --------------------------------------------------------------------------- #

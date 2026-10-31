@@ -1195,24 +1195,24 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         tree_dir = copies_dir / RESCAN_TREE_DIR
         self_dir = copies_dir / RESCAN_SELF_DIR
         in_tree = 0
-        itself = False
+        # The names the directory lists for the ignore file: one, unless the
+        # file is also linked under another name.
+        itself_names: List[str] = []
         not_checked = 0
         copied_bytes = 0
-        listings: Dict[Path, Tuple[Set[str], Dict[str, List[str]]]] = {}
+        listings: Dict[Path, Set[str]] = {}
         spellings_seen: Set[str] = set()
         for index, relative in enumerate(relatives):
-            if in_tree + int(itself) >= MAX_RESCAN_FILES:
+            if in_tree + len(itself_names) >= MAX_RESCAN_FILES:
                 not_checked = len(relatives) - index
                 break
             if deadline is not None and _monotonic() >= deadline:
                 raise self._rescan_timeout_error(self._effective_scan_timeout())
-            # The name as the directory lists it (_on_disk_spelling). On a
-            # case-insensitive filesystem an entry spelled in another case
-            # reaches the same file; the copy's path, the test for the ignore
-            # file itself and the comparison with the first run's results all
-            # need the spelling the directory scan reports, and two spellings
-            # of one file are one copy. A name that reaches no file is skipped
-            # here, as the open below skipped it.
+            # Only a name the directories list exactly (_on_disk_spelling): the
+            # rejoined ignore line is matched exactly against the name the
+            # directory scan reports, so an entry in another case hid nothing.
+            # A name that reaches no file is skipped here, as the open below
+            # skipped it.
             spelled = self._on_disk_spelling(target_abs, relative, listings)
             if spelled is None or spelled in spellings_seen:
                 continue
@@ -1225,9 +1225,13 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 for output in outputs_inside
             ) and not committed(Path(os.path.normpath(target_abs / relative))):
                 continue
-            destination = (self_dir if relative == IGNORE_FILE_NAME else tree_dir) / (
-                relative
-            )
+            # The ignore file itself goes alone, under the name the directory
+            # lists, and is decided by identity (_is_the_ignore_file): a
+            # repository's `.GITLEAKSIGNORE` on a case-insensitive filesystem
+            # is the file gitleaks reads, and at the copy tree's root it would
+            # be read as the ignore file again.
+            is_ignore_file = self._is_the_ignore_file(target_abs, relative)
+            destination = (self_dir if is_ignore_file else tree_dir) / relative
             try:
                 handle = open_in_scanned_tree(
                     target_abs / relative, target_abs, allow_hardlinks=True
@@ -1266,83 +1270,94 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                         f"({exc.strerror or type(exc).__name__}); without the "
                         "re-scan the findings the file hides would go unreported"
                     ) from None
-            if relative == IGNORE_FILE_NAME:
-                itself = True
+            if is_ignore_file:
+                itself_names.append(relative)
             else:
                 in_tree += 1
+
+        # The copy filesystem's own matching is the last test: a name the tree's
+        # filesystem keeps apart from the ignore file can be the same file on
+        # the copies', and gitleaks would read the copy at the tree's root as
+        # the ignore file. Without the re-scan what the file hides would not be
+        # reported, so the scan fails instead.
+        if in_tree and (tree_dir / IGNORE_FILE_NAME).exists():
+            raise ScannerError(
+                f"A file the scanned tree's {IGNORE_FILE_NAME} names would be read "
+                f"as {IGNORE_FILE_NAME} when ASH copies it for the re-scan, because "
+                "the filesystem the copies are made on matches names differently "
+                "from the scanned tree's; without the re-scan the findings the "
+                "file hides would not be reported"
+            )
 
         batches = []
         if in_tree:
             batches.append((tree_dir, ".", reports_dir / "tree.sarif"))
-        if itself:
-            batches.append((self_dir, IGNORE_FILE_NAME, reports_dir / "self.sarif"))
-        return batches, in_tree + int(itself), not_checked
+        for number, name in enumerate(itself_names):
+            report = "self.sarif" if number == 0 else f"self-{number}.sarif"
+            batches.append((self_dir, name, reports_dir / report))
+        return batches, in_tree + len(itself_names), not_checked
 
     @staticmethod
     def _on_disk_spelling(
         root: Path,
         relative: str,
-        listings: Dict[Path, Tuple[Set[str], Dict[str, List[str]]]],
+        listings: Dict[Path, Set[str]],
     ) -> Optional[str]:
-        """``relative`` spelled as the directories under ``root`` list it, or None.
+        """``relative`` when every directory under ``root`` lists it as spelled, or None.
 
         gitleaks walks the directory and reports each file by the name the
-        directory lists, and a ``.gitleaksignore`` entry can spell that name in
-        another letter case. On a case-sensitive filesystem that entry names no
-        file; on a case-insensitive one (macOS and Windows by default) it names
-        the listed file, so the re-scan copied it under the entry's spelling,
-        reported it under that spelling, which matched none of the first run's
-        results, and added each finding a second time; two spellings of one
-        file were two copies of one path, which failed the scan; and an entry
-        naming the ignore file itself in another case put a copy of it at the
-        copy tree's root, where gitleaks read it as the ignore file again.
+        directory lists. The rejoined ``.gitleaksignore`` line is matched
+        EXACTLY against ``<file>:<rule>:<line>`` with that name, so an entry
+        spelled in another letter case hid no finding, even where the
+        filesystem opens the listed file under that spelling (macOS and Windows
+        by default). Mapping such an entry to the listed name bought a copy and
+        a re-scan whose results were all de-duplicated, and the spelling it
+        copied under matched none of the first run's results and added every
+        finding a second time, or made two copies of one path, which failed the
+        scan. A name some directory does not list exactly is None.
 
-        Each component is taken as listed when the listing holds it; otherwise
-        the listed name that differs only in case and is the same file as the
-        entry's spelling (``os.path.samefile``) is taken. On a case-sensitive
-        filesystem that comparison fails, so a wrong-case entry gives None, as
-        the open did before. ``listings`` caches each directory's entries
-        across the entries of one ignore file, read once per directory and
-        held as a set of its names beside an index from each name's casefold
-        to the listed names that fold to it. Both lookups are then constant
-        in the directory's size: a list made ``part in names`` and the
-        casefold fallback a scan of the whole listing for every path part of
-        every entry, and the ignore file can hold up to ``MAX_IGNORE_FILE_BYTES``
-        of entries, with the ones that name no file or repeat one not
-        counting toward ``MAX_RESCAN_FILES``.
+        ``listings`` caches each directory's entries across the entries of one
+        ignore file, read once per directory and held as a set of its names, so
+        the lookup is constant in the directory's size: the ignore file can hold
+        up to ``MAX_IGNORE_FILE_BYTES`` of entries, with the ones that name no
+        file or repeat one not counting toward ``MAX_RESCAN_FILES``.
         """
-        parts: List[str] = []
         current = root
         for part in PurePosixPath(relative).parts:
-            listing = listings.get(current)
-            if listing is None:
+            names = listings.get(current)
+            if names is None:
                 try:
                     with os.scandir(current) as entries:
                         names = {entry.name for entry in entries}
                 except OSError:
                     return None
-                folded_index: Dict[str, List[str]] = {}
-                for name in names:
-                    folded_index.setdefault(name.casefold(), []).append(name)
-                listing = (names, folded_index)
-                listings[current] = listing
-            names, folded_index = listing
-            chosen: Optional[str] = None
-            if part in names:
-                chosen = part
-            else:
-                for name in folded_index.get(part.casefold(), ()):
-                    try:
-                        if os.path.samefile(current / name, current / part):
-                            chosen = name
-                            break
-                    except OSError:
-                        continue
-            if chosen is None:
+                listings[current] = names
+            if part not in names:
                 return None
-            parts.append(chosen)
-            current = current / chosen
-        return "/".join(parts)
+            current = current / part
+        return relative
+
+    @staticmethod
+    def _is_the_ignore_file(root: Path, relative: str) -> bool:
+        """Whether ``relative``, a name the directory lists, is the file gitleaks
+        reads as ``<root>/.gitleaksignore``.
+
+        Decided by identity and not by spelling: on a case-insensitive
+        filesystem (macOS and Windows by default) a repository that commits the
+        file as ``.GITLEAKSIGNORE`` has it read as the ignore file, and the
+        directory lists that spelling. Copied to the copy tree's root, which is
+        on a filesystem of its own that reads names the same way, it would be
+        read as the ignore file again and hide the same fingerprints in the
+        re-scan.
+        """
+        if relative == IGNORE_FILE_NAME:
+            return True
+        if "/" in relative:
+            return False
+        try:
+            return os.path.samefile(root / relative, root / IGNORE_FILE_NAME)
+        except OSError:
+            return False
 
     def _rescan_copies_dir(self) -> Path:
         """A new, empty directory for the re-scan's copies, outside the scanned tree.
