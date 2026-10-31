@@ -446,7 +446,9 @@ def test_the_end_time_covers_the_re_scan(tmp_path, monkeypatch):
     scanner = _scanner(tmp_path)
     source = Path(scanner.context.source_dir)
     _write(source, "app/x.py")
-    (source / ".gitleaksignore").write_text("app/x.py:github-pat:1\n")
+    # Bytes, as the pending record below holds them: text mode would write the
+    # newline as CR LF on Windows, and the file would read as changed.
+    (source / ".gitleaksignore").write_bytes(b"app/x.py:github-pat:1\n")
     results_file = scanner.results_dir / "source" / "gitleaks.sarif"
     _pending(scanner, source, results_file, b"app/x.py:github-pat:1\n")
     monkeypatch.setattr(scanner, "_add_back_gitleaksignore_drops", lambda *a, **k: None)
