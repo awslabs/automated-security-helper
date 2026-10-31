@@ -297,6 +297,31 @@ def test_a_results_file_that_is_not_cyclonedx_raises_instead_of_returning_it(tmp
     assert "nope" not in message
 
 
+def test_a_scanners_unlisted_or_malformed_license_is_kept_not_refused(tmp_path):
+    """The license list is read as tolerantly from a scanner as from a stored
+    file: syft embeds a newer SPDX list than the one ASH's enum was cut from, and
+    one stray entry must not turn a whole SBOM into a failed scan. An id outside
+    the enum is kept as text; an entry that is neither form is kept as written,
+    with one warning. Making the scanner's intake strict would change both."""
+    stray = {"licence": {"id": "MIT"}}
+    licenses = [{"license": {"id": "Imaginary-9.9"}}, stray]
+    document = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "components": [{"type": "library", "name": "lib", "licenses": licenses}],
+    }
+    scanner = _scanner(_context(tmp_path))
+
+    with patch("automated_security_helper.utils.log.ASH_LOGGER") as logger:
+        report = _scan_with(scanner, {"returncode": 0}, document)
+
+    kept = json.loads(report.model_dump_json(by_alias=True, exclude_none=True))
+    assert kept["components"][0]["licenses"] == licenses
+    warned = [str(call.args[0]) for call in logger.warning.call_args_list]
+    assert len(warned) == 1, warned
+    assert "fits neither license form" in warned[0], warned
+
+
 def test_the_catch_all_error_is_redacted_and_records_this_runs_end_time(tmp_path):
     scanner = _scanner(_context(tmp_path))
     scanner.end_time = None
