@@ -588,16 +588,21 @@ def judge_undecodable_candidate(
     with replacement and, when it holds NUL bytes, as UTF-16 and UTF-32 in both byte
     orders, since such a file written without a mark carries no readable marker
     under a UTF-8 reading), and the readings are judged as the UTF-8 route judges a
-    file the parser rejected, so a file's encoding never changes its answer:
+    file the parser rejected, so a file's encoding does not change its answer:
 
     * :data:`UNDECODABLE_TEMPLATE`: a reading's STRUCTURE is a template (a mapping
       with a ``Resources`` mapping, :func:`_structure_says_template`), or the second
       read failed. A template ASH could not decode: the scanners count it as a
       failed, unevaluated target, the tool-absent check as a template. The module's
       rule holds here as on the UTF-8 route: a marker alone never makes a file a
-      failed target; that takes a structure read. The first cut answered from the
-      marker too, so a Jinja-templated stack saved as cp1252 was a failed target in
-      three scanners while its UTF-8 twin was skipped as unparseable.
+      failed target; that takes a structure read. The structure is read the way
+      the UTF-8 route reads it, by shape and without building a value
+      (:func:`_has_top_level_resources`), for any reading that no lenient parse
+      yields a document for, so a value no constructor can build (``!!int
+      forty-two``) does not hide a ``Resources`` mapping here either. The first cut
+      answered from the marker too, so a Jinja-templated stack saved as cp1252 was
+      a failed target in three scanners while its UTF-8 twin was skipped as
+      unparseable.
     * :data:`UNDECODABLE_DAMAGED`: no reading has that structure, but one carries a
       CloudFormation marker (:func:`_could_be_a_template`): a damaged template, as
       the UTF-8 route reads a rejected file with a marker. The scanners name it as
@@ -935,7 +940,10 @@ def unmarked_wide_template_reason(text: str) -> str | None:
     template by its STRUCTURE (:func:`_structure_says_template`): a failed target
     takes a structure read here as on every other route, so a reading that carries
     only a marker is not a reason; :func:`_could_be_a_template` still counts such a
-    reading for the tool-absent check and the unparseable record. A reading that
+    reading for the tool-absent check and the unparseable record. The structure is
+    read by shape, as the UTF-8 route reads it (:func:`_has_top_level_resources`),
+    when no lenient parse of the reading yields a document, so a value no
+    constructor can build does not hide a ``Resources`` mapping. A reading that
     still holds a NUL is not text of that encoding and is not tried
     (:func:`_wide_readings`).
     """
@@ -1039,11 +1047,13 @@ def _could_be_a_template(text: str) -> bool:
     The marker answers only "could this be a damaged template": the reason a
     SKIPPED target gives, and the tool-absent check's MISSING. It never makes a
     file a failed target; that takes a structure read, on every route: the UTF-8
-    route's :func:`unevaluable_template_reason` and :func:`_has_top_level_resources`,
-    the non-UTF-8 route's :func:`judge_undecodable_candidate` and the unmarked
-    UTF-16/UTF-32 route's :func:`unmarked_wide_template_reason`, which both decide
-    with :func:`_structure_says_template`. A file whose root is a sequence could not
-    be a template, marker or not (:func:`_root_is_a_sequence`).
+    route's :func:`unevaluable_template_reason`, which reads the shape with
+    :func:`_has_top_level_resources`, the non-UTF-8 route's
+    :func:`judge_undecodable_candidate` and the unmarked UTF-16/UTF-32 route's
+    :func:`unmarked_wide_template_reason`, which both decide with
+    :func:`_structure_says_template`: a lenient parse when it yields a document,
+    else that same shape read. A file whose root is a sequence could not be a
+    template, marker or not (:func:`_root_is_a_sequence`).
 
     A UTF-16 or UTF-32 file written without a byte-order mark decodes as UTF-8
     without an error (NUL is valid UTF-8), so its text arrives here NUL-interleaved

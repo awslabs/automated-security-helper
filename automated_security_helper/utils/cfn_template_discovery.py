@@ -37,8 +37,10 @@ The outcomes per file
 * a candidate that is not UTF-8 (``UnicodeDecodeError``): decoded as well as it can
   be and judged from its text (``cfn_template_model.judge_undecodable_candidate``),
   with the three answers the UTF-8 route gives a file the parser rejects, so the
-  encoding never changes a file's answer. A reading whose STRUCTURE is a template is
-  a template ASH could not decode, returned in ``unreadable``; one that carries
+  encoding does not change a file's answer. A reading whose STRUCTURE is a template
+  (a ``Resources`` mapping, read by shape without building a value, as the UTF-8
+  route reads it) is a template ASH could not decode, returned in ``unreadable``,
+  even when a value in it cannot be built; one that carries
   only a CloudFormation marker is a damaged template, returned in ``unparseable``
   (a Jinja-templated stack saved as cp1252 reads as its UTF-8 twin does, where the
   first cut made it a failed target from the marker alone); a file that is not
@@ -218,7 +220,7 @@ def discover_templates(
             # read at all.
             #
             # Three answers, the ones the UTF-8 route gives a file the parser
-            # rejects, so a file's encoding never changes them: its STRUCTURE
+            # rejects, so a file's encoding does not change them: its STRUCTURE
             # makes it a failed target; a marker alone makes it a damaged template,
             # unparseable; neither makes it a skip. The judgment answers a failed
             # second read as a template itself, so no except arm is needed here.
