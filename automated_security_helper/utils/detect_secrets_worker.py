@@ -44,8 +44,9 @@ entry is reported, because a baseline the scanned repository wrote itself (the i
 file the scanner loads by default) may mark a finding but may not remove it. Trusted
 or not, the baseline's copy of a secret the scan found again is left out, since the
 scanned copy reports it once, and the scanned copy carries the audit marks
-(``is_secret``, ``is_verified``) of the copy that was left out. A baseline with no
-``results`` mapping holds no entries. OUTPUT is created with mode 0600, as the request file is.
+(``is_secret``, ``is_verified``) of the copy that was left out, whether or not the
+baseline was trusted. A baseline with no ``results`` mapping holds no entries. OUTPUT
+is created with mode 0600, as the request file is.
 
 A secret found by this scan also carries ``ash_start_column``, the 1-based column its
 value starts at in its line, when the value is found there. detect-secrets reports no
