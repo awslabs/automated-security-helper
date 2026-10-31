@@ -630,6 +630,32 @@ def test_an_ini_entry_with_a_glob_in_a_middle_component_warns_it_crosses(
     assert repr("src/tests") not in told[0]
 
 
+def test_a_whitespace_only_ini_entry_names_no_path_and_draws_no_warning(
+    tmp_path, caplog
+):
+    """``exclude = tests, `` leaves an entry of one space after the comma. It
+    built a glob of a space below the target and drew the "surrounding
+    whitespace" warning, and for a target path holding a space the own-path
+    warning too. It names no path, so it is dropped like an empty entry, and
+    the entry beside it is unchanged."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = tests, \n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py", "tests/a.py"])
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    root = source.as_posix()
+    entries = _entries(argv)
+    assert _covers(entries, f"{root}/tests/a.py"), entries
+    assert not any(entry.startswith(f"{root}/ ") for entry in entries), entries
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("surrounding whitespace" in m for m in messages), messages
+
+
 def test_a_double_star_between_directories_draws_no_crossing_warning(
     tmp_path, caplog
 ):

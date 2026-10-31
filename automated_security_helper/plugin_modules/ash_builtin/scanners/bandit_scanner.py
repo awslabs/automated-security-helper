@@ -1503,7 +1503,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         entries: List[str] = []
         unpassable = 0
         for entry in raw.split(","):
-            if not entry:
+            # An entry of nothing but whitespace (``tests, `` leaves one after
+            # the comma) names no path: it built a glob of a space and, for a
+            # target path holding a space, drew the own-path warning.
+            if not entry.strip():
                 continue
             if "\0" in entry:
                 # No argument can carry a NUL; exec would refuse the whole
