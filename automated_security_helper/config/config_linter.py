@@ -730,7 +730,11 @@ class ConfigLinter:
         # entries belong to them: a suppression carries no scanner name, and the
         # findings it would have matched were never reported. Every entry it
         # lists is then in doubt, and commenting out a suppression that is in
-        # force makes the next full scan fail, so none is commented out.
+        # force makes the next full scan fail, so none is commented out. The
+        # reporter lists a scanner only when a later full scan would run it
+        # (tool missing, error, excluded for that run); one with nothing to scan
+        # or turned off in the configuration is not listed, so this skip does
+        # not fire on a scan where every scanner that could run did.
         if cls._scanners_not_run_of(report_data):
             return raw_content, [], report_timestamp
 
@@ -2289,8 +2293,9 @@ class ConfigLinter:
                         "The unused suppressions report lists scanners that did "
                         f"not run ({', '.join(not_run)}). It does not record "
                         "which suppressions belong to them, so none is offered "
-                        "to --fix-unused; run a scan with those scanners enabled "
-                        "first.",
+                        "to --fix-unused; run a scan in which those scanners "
+                        "run first (a scanner with nothing to scan, or turned "
+                        "off in the configuration, is not listed).",
                         result.environment_values,
                     ),
                 )

@@ -61,7 +61,11 @@ def test_scanners_that_did_not_run_are_named_with_a_caveat(tmp_path):
         bandit={"status": ScannerStatus.PASSED},
         semgrep={"status": ScannerStatus.MISSING},
         checkov={"status": ScannerStatus.ERROR},
-        grype={"status": ScannerStatus.SKIPPED},
+        grype={
+            "status": ScannerStatus.SKIPPED,
+            "excluded": True,
+            "skipped_reason": "excluded from this run (--exclude-scanners)",
+        },
     )
 
     report = json.loads(UnusedSuppressionsReporter(context=context).report(model))

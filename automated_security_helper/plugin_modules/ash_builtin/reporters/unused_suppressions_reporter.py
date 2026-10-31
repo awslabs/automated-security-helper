@@ -325,12 +325,15 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             report_data["not_evaluated"] = self.NOT_EVALUATED
 
         # A suppression is matched against the findings a scanner reports. A
-        # scanner that did not run (its tool missing, an error, excluded or
-        # skipped) reported none, so a suppression for one of its findings
+        # scanner that did not run (its tool missing, an error, or excluded for
+        # this run) reported none, so a suppression for one of its findings
         # could not be matched and reads as unused here although it is in
         # force. The report names those scanners so the "remove it" reading
         # is qualified; a suppression carries no scanner name, so it cannot
-        # say which entries are affected. Not in workspace mode: this report
+        # say which entries are affected. A scanner that found nothing to scan,
+        # or that the configuration turns off, is not named: a later scan of the
+        # same tree leaves it out the same way (see _scanners_not_run). Not in
+        # workspace mode: this report
         # then covers no suppression (the list above is empty), and each
         # project's own report carries the caveat for that project's scan.
         scanners_not_run = [] if workspace else self._scanners_not_run(model)
@@ -417,22 +420,57 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
 
     @staticmethod
     def _scanners_not_run(model: "AshAggregatedResults") -> List[str]:
-        """The scanners whose results say they did not run: status MISSING,
-        ERROR or SKIPPED, a dependency not satisfied, or excluded. Sorted by
-        name; empty when every recorded scanner ran."""
+        """The scanners that did not run when a full scan of this configuration
+        would have run them: status MISSING or ERROR, a dependency not
+        satisfied, or excluded for this run. Sorted by name; empty when every
+        recorded scanner ran or was left out for a reason a later scan shares.
+
+        Two kinds of row are not listed, because a later scan of the same tree
+        and configuration leaves the scanner out the same way, so a suppression
+        for its findings is unused in the same sense as any other:
+
+        - a SKIPPED scanner that was not excluded: it looked and found nothing
+          to scan (no lockfile for npm-audit, no template for cdk-nag), so it
+          had no finding to match;
+        - an excluded scanner whose recorded reason says the configuration
+          disabled it (``enabled: false``).
+
+        An exclusion that is the operator's choice for this run alone (a
+        ``--scanners`` or ``--exclude-scanners`` selection, a shard split,
+        ``--python-only``) stays listed: the next full scan runs the scanner.
+        So does an excluded row with no recorded reason, since the cause is then
+        unknown.
+        """
         from automated_security_helper.core.enums import ScannerStatus
 
         not_run = []
         for name, info in (getattr(model, "scanner_results", None) or {}).items():
             status = getattr(info, "status", None)
-            if (
-                status
-                in (ScannerStatus.MISSING, ScannerStatus.ERROR, ScannerStatus.SKIPPED)
-                or not getattr(info, "dependencies_satisfied", True)
-                or getattr(info, "excluded", False)
+            if status in (ScannerStatus.MISSING, ScannerStatus.ERROR) or not getattr(
+                info, "dependencies_satisfied", True
+            ):
+                not_run.append(str(name))
+            elif getattr(info, "excluded", False) and not (
+                UnusedSuppressionsReporter._disabled_by_configuration(info)
             ):
                 not_run.append(str(name))
         return sorted(not_run)
+
+    #: What the scan phase and the executor write into ``skipped_reason`` for a
+    #: scanner the configuration turns off. An unrecognized wording reads as an
+    #: exclusion for this run, which is the side that comments nothing out.
+    CONFIG_DISABLED_REASON: ClassVar[str] = "disabled in the configuration"
+
+    @staticmethod
+    def _disabled_by_configuration(info: Any) -> bool:
+        """Whether *info*'s recorded reason says the configuration disabled the
+        scanner (alone or beside a selection for this run: a full scan of the
+        same configuration leaves it out too)."""
+        reason = getattr(info, "skipped_reason", None)
+        return (
+            isinstance(reason, str)
+            and UnusedSuppressionsReporter.CONFIG_DISABLED_REASON in reason
+        )
 
     @staticmethod
     def _suppression_to_dict(
