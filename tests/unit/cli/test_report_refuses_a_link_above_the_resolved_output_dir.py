@@ -11,6 +11,10 @@ directory examines the components below the working directory only, so for a
 the reporter wrote into reports/ behind the link. The guard now also runs from the
 given directory's parent down to the resolved directory, so those components are
 examined whatever the working directory is.
+
+The tests that name a directory outside the working directory run from a directory
+of their own that does not hold the temporary directory, so the second guard is the
+one that refuses; run from a directory above it, the first guard would.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 pytestmark = [
     pytest.mark.unit,
+    pytest.mark.usefixtures("own_environment"),
     pytest.mark.skipif(
         os.name == "nt", reason="symlink creation needs a privilege on Windows"
     ),
@@ -50,67 +55,76 @@ def _write_results(output: Path) -> None:
 
 
 def _report(output_dir: Path):
-    with patch(SARIF_REPORT, return_value=json.dumps({"runs": []})):
-        return CliRunner().invoke(
+    """The result of the command, and the reporter's patched ``report``."""
+    with patch(SARIF_REPORT, return_value=json.dumps({"runs": []})) as reporter:
+        result = CliRunner().invoke(
             app, ["report", "--format", "sarif", "--output-dir", str(output_dir)]
         )
+    return result, reporter
 
 
-def _flat(output: str) -> str:
-    """The output with its whitespace and panel borders removed, so a phrase and
-    a path are found wherever a line broke."""
-    return "".join(output.translate(str.maketrans("", "", "│╭╮╰╯─")).split())
+def _squeezed(text: str) -> str:
+    """The text with its whitespace and panel borders removed, so a phrase and a
+    path are found wherever a line broke."""
+    return "".join(text.translate(str.maketrans("", "", "│╭╮╰╯─")).split())
 
 
-# The guard's own words (utils/output_dir_links.linked_output_component): the
-# component "is a symlink". A refusal for another reason that echoes the path
-# (pytest names tmp_path after the test, so a path under it holds "link") must
-# not pass for the guard's.
-REFUSAL = "isasymlink"
+@pytest.fixture
+def elsewhere(own_environment, tmp_path_factory, monkeypatch) -> Path:
+    """A working directory that does not hold the test's temporary directory.
+
+    ``tmp_path_factory.mktemp`` makes a sibling of ``tmp_path``, so a directory
+    below ``tmp_path`` is outside it, wherever the base temporary directory is
+    (inside a checkout, say). Entered after ``own_environment``, which enters
+    ``tmp_path``."""
+    cwd = tmp_path_factory.mktemp("elsewhere")
+    monkeypatch.chdir(cwd)
+    return cwd
 
 
-def test_a_link_at_the_given_directorys_ash_outside_cwd_is_refused(tmp_path):
-    """tmp_path is outside the working directory: a basetemp inside the checkout
-    would let the working-directory guard see <dir>/.ash and leave the
-    parent-rooted guard untested."""
-    assert not tmp_path.resolve().is_relative_to(Path.cwd().resolve())
+def test_a_link_at_the_given_directorys_ash_outside_cwd_is_refused(tmp_path, elsewhere):
     real = tmp_path / "real"
     _write_results(real / ".ash" / "ash_output")
     target = tmp_path / "target"
     target.mkdir()
     (target / ".ash").symlink_to(real / ".ash", target_is_directory=True)
+    assert not target.is_relative_to(Path.cwd())
 
-    result = _report(target)
+    result, reporter = _report(target)
 
     assert result.exit_code == 3, result.output
-    flat = _flat(result.output)
-    assert REFUSAL in flat, result.output
-    assert (target / ".ash").as_posix() in flat, result.output
+    assert _squeezed(
+        f"{(target / '.ash').as_posix()} is a symlink, on the way to the output "
+        "directory"
+    ) in _squeezed(result.output), result.output
+    reporter.assert_not_called()
 
 
-def test_a_link_at_the_given_directory_outside_cwd_is_refused(tmp_path):
-    assert not tmp_path.resolve().is_relative_to(Path.cwd().resolve())
+def test_a_link_at_the_given_directory_outside_cwd_is_refused(tmp_path, elsewhere):
     real = tmp_path / "real"
     _write_results(real / ".ash" / "ash_output")
     target = tmp_path / "target"
     target.symlink_to(real, target_is_directory=True)
+    assert not target.is_relative_to(Path.cwd())
 
-    result = _report(target)
+    result, reporter = _report(target)
 
     assert result.exit_code == 3, result.output
-    flat = _flat(result.output)
-    assert REFUSAL in flat, result.output
-    assert target.as_posix() in flat, result.output
+    assert _squeezed(
+        f"{target.as_posix()} is a symlink, on the way to the output directory"
+    ) in _squeezed(result.output), result.output
+    reporter.assert_not_called()
 
 
-def test_a_plain_given_directory_outside_cwd_is_still_read(tmp_path):
-    assert not tmp_path.resolve().is_relative_to(Path.cwd().resolve())
+def test_a_plain_given_directory_outside_cwd_is_still_read(tmp_path, elsewhere):
     real = tmp_path / "real"
     _write_results(real / ".ash" / "ash_output")
+    assert not real.is_relative_to(Path.cwd())
 
-    result = _report(real)
+    result, reporter = _report(real)
 
     assert result.exit_code == 0, result.output
+    reporter.assert_called_once()
 
 
 def test_a_link_at_the_parents_ash_is_refused_when_the_directory_is_given_as_dot_dot(
@@ -127,12 +141,13 @@ def test_a_link_at_the_parents_ash_is_refused_when_the_directory_is_given_as_dot
     (repo / ".ash").symlink_to(real / ".ash", target_is_directory=True)
     monkeypatch.chdir(sub)
 
-    result = _report(Path(".."))
+    result, reporter = _report(Path(".."))
 
     assert result.exit_code == 3, result.output
-    flat = _flat(result.output)
-    assert REFUSAL in flat, result.output
-    assert (repo / ".ash").as_posix() in flat, result.output
+    assert _squeezed(
+        f"{(repo / '.ash').as_posix()} is a symlink, on the way to the output directory"
+    ) in _squeezed(result.output), result.output
+    reporter.assert_not_called()
 
 
 def test_a_link_at_the_given_directorys_ash_under_cwd_is_refused(tmp_path, monkeypatch):
@@ -144,7 +159,11 @@ def test_a_link_at_the_given_directorys_ash_under_cwd_is_refused(tmp_path, monke
     target.mkdir()
     (target / ".ash").symlink_to(real / ".ash", target_is_directory=True)
 
-    result = _report(Path("target"))
+    result, reporter = _report(Path("target"))
 
     assert result.exit_code == 3, result.output
-    assert REFUSAL in _flat(result.output), result.output
+    assert (
+        f"{(target / '.ash').as_posix()} is a symlink, on the way to the output "
+        "directory"
+    ) in _squeezed(result.output), result.output
+    reporter.assert_not_called()
