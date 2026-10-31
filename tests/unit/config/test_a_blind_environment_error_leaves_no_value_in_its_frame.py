@@ -17,6 +17,7 @@ held a local whose repr contained the value read from the environment.
 
 from __future__ import annotations
 
+import errno
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,22 @@ def _config_sources_frames(traceback):
         if frame.f_code.co_filename.endswith("config_sources.py"):
             yield frame
         traceback = traceback.tb_next
+
+
+def _chain(error: BaseException):
+    """``error`` and every exception reachable from it through ``__context__``
+    and ``__cause__``: what a chain walker (a traceback renderer that ignores
+    ``__suppress_context__``, a debugger) prints."""
+    seen = set()
+    pending = [error]
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        pending.append(current.__context__)
+        pending.append(current.__cause__)
 
 
 def test_the_resolving_frame_holds_no_environment_value(
@@ -59,6 +76,37 @@ def test_the_resolving_frame_holds_no_environment_value(
     for frame in frames:
         for name, value in frame.f_locals.items():
             assert MARKER not in repr(value), (frame.f_code.co_name, name)
+
+
+def test_a_missing_base_is_refused_as_itself_with_a_cause_that_names_no_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing base is refused as itself, with the environment set.
+
+    The refusal names the base and quotes no value, so it is raised as it is
+    rather than rebuilt environment-blind (the route the other tests here
+    drive). It keeps the cause that says which path problem it is, because
+    ``config_load_category`` reads the chain to answer the MCP category as a
+    path problem. That cause is rebuilt without the OSError's file name, so
+    nothing on the chain holds the value the root read."""
+    monkeypatch.setenv("ASH_U35_READ", MARKER)
+    root = tmp_path / ".ash.yaml"
+    root.write_text(
+        "extends: missing-base.yaml\nproject_name: ${ASH_U35_READ}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ASHConfigSourceError) as refused:
+        resolve_config_document(root)
+
+    assert "missing-base.yaml" in str(refused.value), str(refused.value)
+    cause = refused.value.__cause__
+    assert isinstance(cause, OSError), repr(cause)
+    assert cause.errno == errno.ENOENT, repr(cause)
+    assert cause.filename is None, repr(cause)
+    for linked in _chain(refused.value):
+        assert MARKER not in str(linked), linked
+        assert MARKER not in repr(linked), linked
 
 
 def test_the_literal_route_returns_an_error_with_no_traceback(tmp_path: Path) -> None:
