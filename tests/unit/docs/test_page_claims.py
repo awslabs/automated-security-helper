@@ -10519,14 +10519,19 @@ def test_a_session_write_while_the_sweep_removes_its_workspace_is_refused_as_bus
 
         removing = threading.Event()
         release = threading.Event()
-        real_remove = sessions._remove_session_state
+        # The delete of the tree the sweep renamed aside. The sweep holds the
+        # session (try_begin_sweep) from its last look at the age until that
+        # delete is done, so a write meets the hold while this is open; the
+        # stale session has a workspace, so the sweep does not take the
+        # removal that has no guard (_remove_session_state).
+        real_remove = sessions._remove_set_aside_tree
 
-        def held_remove(session_id: str) -> None:
+        def held_remove(doomed: Optional[Path]) -> None:
             removing.set()
             assert release.wait(timeout=30), "the test never released the remover"
-            real_remove(session_id)
+            real_remove(doomed)
 
-        monkeypatch.setattr(sessions, "_remove_session_state", held_remove)
+        monkeypatch.setattr(sessions, "_remove_set_aside_tree", held_remove)
         removed: List[str] = []
         sweep = threading.Thread(
             target=lambda: removed.extend(
