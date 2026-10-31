@@ -388,6 +388,9 @@ def _may_not_write(target: Path, before: os.stat_result | None) -> bool:
 def _carry_file_identity(fd: int, before: os.stat_result | None) -> None:
     """Give the staging file at ``fd`` the replaced file's owner and mode.
 
+    Called before any text is written to the staging file, so the text is never
+    in a file more open than the one it replaces.
+
     The owner first: a chown clears set-id bits on some systems, and it is
     attempted only where the staging file's owner differs (a process running as
     root over a bind-mounted config, say, which otherwise handed the file back
@@ -446,8 +449,11 @@ def _write_config_text(config_path: Path, text: str) -> None:
         if _may_not_write(target, before):
             raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
         with open_for_atomic_write(target, encoding="utf-8") as handle:
-            handle.write(text)
+            # Before the first byte: the staging file is created with the
+            # umask-derived mode, and a 0o600 config's text must not be written
+            # into a file another local user can open.
             _carry_file_identity(handle.fileno(), before)
+            handle.write(text)
     except OSError as error:
         if not _staged_write_falls_back(error):
             raise
@@ -465,8 +471,9 @@ def _write_config_bytes(config_path: Path, data: bytes) -> None:
         if _may_not_write(target, before):
             raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target))
         with open_for_atomic_write(target, binary=True) as handle:
-            handle.write(data)
+            # Before the first byte, as in _write_config_text.
             _carry_file_identity(handle.fileno(), before)
+            handle.write(data)
     except OSError as error:
         if not _staged_write_falls_back(error):
             raise
