@@ -289,15 +289,22 @@ def linked_output_component(
     # is ``<link's target>/x`` to the kernel and ``/opt/x`` as text), vetting
     # either would leave the other unexamined, so the spelling is refused. One
     # directory under two names (``/tmp/../x`` on macOS, where ``/tmp`` is a
-    # link) is compared with both resolved and passes.
-    written = Path(os.path.abspath(spelled))
-    if os.path.normcase(_real_path(written)) != os.path.normcase(_real_path(reached)):
-        return (
-            f"the output directory {spelled.as_posix()} steps back through a "
-            f"link with ..: the lookup reaches {reached.as_posix()} while the "
-            f"path as written names {written.as_posix()}; spell it without .. or "
-            "as the directory it reaches"
-        )
+    # link) is compared with both resolved and passes. Only a spelling with a
+    # ``..`` can name two directories this way: asked of every spelling it cost
+    # two real-path lookups per call, and on Windows, where abspath drops a
+    # trailing dot or space that the lookup's path keeps, it refused a spelling
+    # with no ``..`` for the wrong reason.
+    if ".." in spelled.parts:
+        written = Path(os.path.abspath(spelled))
+        if os.path.normcase(_real_path(written)) != os.path.normcase(
+            _real_path(reached)
+        ):
+            return (
+                f"the output directory {spelled.as_posix()} steps back through a "
+                f"link with ..: the lookup reaches {reached.as_posix()} while the "
+                f"path as written names {written.as_posix()}; spell it without .. "
+                "or as the directory it reaches"
+            )
     where = _shown(spelled, reached)
     if is_link(reached):
         return f"the output directory {where} is {_kind(reached)}"
