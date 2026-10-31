@@ -3199,11 +3199,12 @@ def _run_projects(
                     module_names=module_names,
                 )
         except ScanCancelled:
-            # Only the cancel before the scan reaches _scan_one_project lands
-            # here (a project cancelled while it waited for a worker); a cancel
-            # inside the scan returns its outcome from there, where whether the
-            # output was handed is known. Nothing was written: output_written
-            # keeps its default.
+            # A cancel before the scan has begun lands here: while the project
+            # waited for a worker, or in the head of _scan_one_project (the
+            # changed-file diff, the link refusal and the mkdir), which runs
+            # before that function's try. A cancel inside the scan returns its
+            # outcome from there, where whether the output was handed is known.
+            # Nothing was handed to a scan: output_written keeps its default.
             ASH_LOGGER.info(
                 f"Project '{project.key}' stopped: it was cancelled before it started"
             )
@@ -3435,15 +3436,18 @@ def _read_back_abandoned_workers(
                 late = future.result()
             except Exception as exc:  # noqa: BLE001 -- the worker already guards
                 # The worker guards every raise of the scan and its reduction, so
-                # a raise reaching here came from the worker itself. Said, not
-                # skipped: what this worker brought back is lost the same way a
-                # worker that never came back loses it, and the docstring's
-                # promise is that such a loss is loud.
+                # a raise reaching here came from the worker outside that guard:
+                # the head of _scan_one_project (the changed-file diff, the link
+                # refusal, the mkdir) runs before its try, so it can be a project
+                # that never reached a scan. Said, not skipped: what this worker
+                # brought back is lost the same way a worker that never came back
+                # loses it, and the docstring's promise is that such a loss is
+                # loud.
                 note = (
                     f"its worker raised {type(exc).__name__}: {error_text(exc)}; "
-                    "the secret values its findings exposed did not reach the "
-                    "workspace masking set and its own output was not masked for "
-                    "the other projects' secrets"
+                    "if it had scanned, the secret values its findings exposed "
+                    "did not reach the workspace masking set and its own output "
+                    "was not masked for the other projects' secrets"
                 )
                 ASH_LOGGER.error(f"Project '{project.key}': {note}.")
                 recorded.outcome.error = (
