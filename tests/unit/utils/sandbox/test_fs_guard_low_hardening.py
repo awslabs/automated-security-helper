@@ -78,6 +78,38 @@ def test_the_outermost_registered_root_guards_the_write(tmp_path):
 
 
 @POSIX
+@pytest.mark.parametrize("writer", ["open_for_write", "open_for_atomic_write"])
+def test_a_link_between_the_outer_and_inner_roots_is_refused_and_nothing_lands_beyond_it(
+    tmp_path, writer
+):
+    """The property the module docstring names, not the selector above: with an
+    output directory and a scanner's results directory inside it both registered,
+    the components between the two are opened by name from the OUTER root, so a
+    link a scanner planted there is refused. Opened from the inner root (the
+    deepest, as it once was) the link is followed and the file lands beyond it."""
+    outer = tmp_path / "out"
+    inner = outer / "scanners" / "probe"
+    inner.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "probe").mkdir(parents=True)
+    register_writable_root(outer)
+    register_writable_root(inner)
+    try:
+        (outer / "scanners").rename(outer / "moved-aside")
+        (outer / "scanners").symlink_to(elsewhere, target_is_directory=True)
+
+        with pytest.raises(OutputLinkRefused):
+            with getattr(fs_guard, writer)(inner / "report.json") as handle:
+                handle.write("not for elsewhere")
+    finally:
+        release_writable_root(inner)
+        release_writable_root(outer)
+
+    assert sorted(p.name for p in (elsewhere / "probe").iterdir()) == []
+    assert sorted(p.name for p in elsewhere.iterdir()) == ["probe"]
+
+
+@POSIX
 def test_a_root_reached_through_another_spelling_is_still_guarded(tmp_path):
     real = tmp_path / "real"
     real.mkdir()
