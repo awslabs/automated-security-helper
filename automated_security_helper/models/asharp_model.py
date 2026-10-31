@@ -1705,7 +1705,7 @@ class AshAggregatedResults(RecordModel):
             if not isinstance(name, str) or name.lower() in seen:
                 continue
             seen.add(name.lower())
-            recorded_by_dict = ScannerStatisticsCalculator._dict_result_counts(
+            recorded_by_dict = ScannerStatisticsCalculator.dict_result_counts(
                 self, name
             ).suppressed
             if recorded_by_dict:

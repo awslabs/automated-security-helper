@@ -607,6 +607,21 @@ class ScannerStatisticsCalculator:
         return total
 
     @staticmethod
+    def dict_result_counts(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> ScannerSeverityCount:
+        """The severity counts recorded on *scanner_name*'s non-SARIF target reports.
+
+        The public name of ``_dict_result_counts``, for callers outside this class:
+        ``AshAggregatedResults.to_flat_vulnerabilities`` counts a scanner's
+        suppressed findings with it, the same count the metrics read, and must not
+        depend on a private helper's signature.
+        """
+        return ScannerStatisticsCalculator._dict_result_counts(
+            asharp_model, scanner_name
+        )
+
+    @staticmethod
     def dict_counts_unrecorded(
         asharp_model: AshAggregatedResults, scanner_name: str
     ) -> bool:
