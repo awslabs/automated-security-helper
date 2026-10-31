@@ -240,6 +240,19 @@ class ScanRegistryEntry:
         # Whether this scan has been recorded on the earlier scans of its output
         # tree (_record_supersession). Recorded once, at the first claim.
         self.claimed_output_tree = False
+        # The ids of scans whose output tree lies INSIDE this one (a project scan
+        # under the output directory of a scan of the workspace root) that ran,
+        # kept their files, and have since left the registry: recorded by
+        # ScanRegistry._remember_nested_scan when the nested scan is removed.
+        # The files are still in this scan's tree, and the registry no longer
+        # holds the entry that would say so, so the fact is kept here, as
+        # later_scan_ids keeps it for a scan of the very same directory.
+        self.removed_nested_scan_ids: List[str] = []
+        # Whether remove_output_of_scan deleted this scan's output tree (its
+        # remover reported the tree gone). A scan removed from the registry
+        # after that left no files behind, so it holds nothing in the tree of an
+        # enclosing scan (_remember_nested_scan).
+        self.output_removed = False
         self.end_time: Optional[datetime] = None
         self.status = MCScanStatus.PENDING
         self.severity_threshold = severity_threshold
@@ -731,8 +744,15 @@ class ScanRegistry:
         while a scan of the containing tree clears only its own result entries
         (``RESULT_ENTRIES``) and never touches ``projects/``, so a project scan
         registered BEFORE the containing scan keeps its files in the tree the
-        removal deletes. Only live entries are read: the files of a nested scan
-        that was cleaned up without ``remove_output`` are no registered scan's.
+        removal deletes.
+
+        A nested scan that has left the registry with its output kept (cleaned
+        up without ``remove_output``) still has its files in the tree, so it
+        counts too: :meth:`_remember_nested_scan` recorded it on this entry
+        (``removed_nested_scan_ids``) when it was removed, the way
+        ``later_scan_ids`` keeps a removed scan of the same directory. Read
+        from the registry alone, cleaning a finished project scan up made the
+        removal of the root scan's tree delete the project's results.
         """
         inside: List[str] = []
         for other in self._registry.values():
@@ -744,13 +764,46 @@ class ScanRegistry:
                 continue
             if other.claimed_output_tree and not other.output_holds_previous_results:
                 inside.append(other.scan_id)
+        for removed_id in entry.removed_nested_scan_ids:
+            if removed_id not in self._registry and removed_id not in inside:
+                inside.append(removed_id)
         return inside
+
+    def _remember_nested_scan(self, removed: ScanRegistryEntry) -> None:
+        """Record ``removed`` on the entries whose output tree contains its own.
+
+        Called with the lock held, right after ``removed`` left the registry. A
+        nested scan that ran (``claimed_output_tree``) and did not put the
+        previous results back wrote files into the enclosing scan's tree; the
+        entry that said so is gone, so the enclosing entries keep the id
+        (``removed_nested_scan_ids``) for :meth:`_later_scans_inside`. A scan
+        whose output ``remove_output_of_scan`` deleted (``output_removed``)
+        left nothing in the tree and is not recorded. Only entries registered
+        now are touched: a scan registered after this one left meets the files
+        as any scan meets what an output directory already holds.
+        """
+        if (
+            not removed.claimed_output_tree
+            or removed.output_holds_previous_results
+            or removed.output_removed
+        ):
+            return
+        for other in self._registry.values():
+            if other.canonical_output_directory not in (
+                removed.canonical_output_directory.parents
+            ):
+                continue
+            if removed.scan_id not in other.removed_nested_scan_ids:
+                other.removed_nested_scan_ids.append(removed.scan_id)
 
     def _forget_later_scan(self, removed: ScanRegistryEntry) -> None:
         """Drop ``removed`` from the earlier entries' ``later_scan_ids`` when its
         files are not what the tree holds: it put the previous results back. A
         removed scan whose own files are in the tree stays recorded (the caller
-        holds the lock); a scan that never claimed the tree was never recorded."""
+        holds the lock); a scan that never claimed the tree was never recorded.
+        A removed scan nested inside another's tree is recorded on that scan
+        (:meth:`_remember_nested_scan`)."""
+        self._remember_nested_scan(removed)
         if not removed.output_holds_previous_results:
             return
         for other in self._registry.values():
@@ -1399,11 +1452,18 @@ class ScanRegistry:
                     False,
                 )
             removal = entry.output_removal = Event()
+        removed = False
         try:
-            return None, remover()
+            removed = remover()
+            return None, removed
         finally:
             with self._registry_lock:
                 entry.output_removal = None
+                if removed:
+                    # The tree is gone: when this entry leaves the registry it
+                    # leaves no files in an enclosing scan's tree
+                    # (_remember_nested_scan).
+                    entry.output_removed = True
             removal.set()
 
     def update_scan_status(

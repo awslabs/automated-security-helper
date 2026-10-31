@@ -383,7 +383,9 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         old, project_scan, project, inner = self._root_scan_and_inner_project(
             registry, tmp_path
         )
-        registry.update_scan_status(project_scan, MCScanStatus.COMPLETED)
+        # Cancelled from PENDING: the project scan never ran, so it leaves no
+        # file in the tree and its cleanup does not hold the removal back.
+        registry.update_scan_status(project_scan, MCScanStatus.CANCELLED)
         registry.cleanup_scan(project_scan)
         removing, release = self._removal_in_progress(registry, old)
         try:
@@ -467,6 +469,114 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert reason == "a later scan holds its results in this output directory"
         assert removed is False
         assert ran == []
+
+    def test_a_finished_scan_cleaned_up_with_its_output_kept_still_holds_the_tree(
+        self, tmp_path
+    ):
+        """A project scan that ran inside the root scan's output tree and was
+        then cleaned out of the registry WITHOUT removing its output left its
+        files in that tree. The removal read live entries only, so the root
+        scan's removal went ahead and deleted them."""
+        registry = ScanRegistry()
+        old, project_scan, _project, _inner = self._root_scan_and_inner_project(
+            registry, tmp_path
+        )
+        registry.update_scan_status(project_scan, MCScanStatus.RUNNING)
+        registry.update_scan_status(project_scan, MCScanStatus.COMPLETED)
+        assert registry.cleanup_scan(project_scan) is True
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: ran.append(1) or True
+        )
+
+        assert reason == "a later scan holds its results in this output directory"
+        assert removed is False
+        assert ran == []
+
+    def test_the_age_sweep_of_a_finished_inner_scan_keeps_the_tree_held(
+        self, tmp_path
+    ):
+        registry = ScanRegistry()
+        old, project_scan, _project, _inner = self._root_scan_and_inner_project(
+            registry, tmp_path
+        )
+        registry.update_scan_status(project_scan, MCScanStatus.RUNNING)
+        registry.update_scan_status(project_scan, MCScanStatus.COMPLETED)
+        registry.get_scan(project_scan).end_time -= timedelta(days=2)
+        assert registry.cleanup_completed_scans(max_age_hours=1) == 1
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: ran.append(1) or True
+        )
+
+        assert "later scan" in reason
+        assert removed is False
+        assert ran == []
+
+    def test_an_inner_scan_whose_output_was_removed_holds_nothing_afterwards(
+        self, tmp_path
+    ):
+        """The control: the project scan's own removal ran and reported its tree
+        gone, so cleaning it up leaves no file behind for the root scan's
+        removal to protect."""
+        registry = ScanRegistry()
+        old, project_scan, _project, _inner = self._root_scan_and_inner_project(
+            registry, tmp_path
+        )
+        registry.update_scan_status(project_scan, MCScanStatus.RUNNING)
+        registry.update_scan_status(project_scan, MCScanStatus.COMPLETED)
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(project_scan), lambda: True
+        )
+        assert (reason, removed) == (None, True)
+        assert registry.cleanup_scan(project_scan) is True
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: ran.append(1) or True
+        )
+
+        assert reason is None
+        assert removed is True
+        assert ran == [1]
+
+    def test_an_inner_scan_that_put_the_previous_results_back_holds_nothing(
+        self, tmp_path
+    ):
+        """The control: its files are not what the tree holds."""
+        registry = ScanRegistry()
+        old, project_scan, _project, _inner = self._root_scan_and_inner_project(
+            registry, tmp_path
+        )
+        registry.update_scan_status(project_scan, MCScanStatus.RUNNING)
+        registry.update_scan_status(project_scan, MCScanStatus.FAILED, "stopped")
+        registry.get_scan(project_scan).output_holds_previous_results = True
+        assert registry.cleanup_scan(project_scan) is True
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: True
+        )
+
+        assert reason is None
+        assert removed is True
+
+    def test_an_inner_scan_cleaned_up_before_it_ran_holds_nothing(self, tmp_path):
+        """The control: cancelled from PENDING, it never claimed the tree."""
+        registry = ScanRegistry()
+        old, project_scan, _project, _inner = self._root_scan_and_inner_project(
+            registry, tmp_path
+        )
+        registry.update_scan_status(project_scan, MCScanStatus.CANCELLED)
+        assert registry.cleanup_scan(project_scan) is True
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: True
+        )
+
+        assert reason is None
+        assert removed is True
 
     def test_a_project_scan_that_never_ran_holds_nothing_in_the_tree(self, tmp_path):
         """The control: a project scan cancelled from PENDING never claimed its
