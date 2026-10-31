@@ -1548,6 +1548,25 @@ def test_a_listed_tmpdir_is_refused_so_no_backend_passes_it(
         plan.run_cleanup()
 
 
+@pytest.mark.parametrize("entry", ["TEMP", "TEMP=/somewhere", "TMP", "TMP=/somewhere"])
+def test_a_listed_temp_or_tmp_is_refused_like_tmpdir(layout, entry):
+    """Python's ``tempfile`` reads TMPDIR, then TEMP, then TMP. bwrap and firejail set
+    none, so a listed TEMP or TMP would be the scanner's temporary directory there;
+    the caller's own are passed by no backend."""
+    name = entry.partition("=")[0]
+    with pytest.raises(ValueError, match=name) as refused:
+        policy_module.parse_environment(["MY_VAR", entry])
+    assert "/somewhere" not in str(refused.value)
+
+    with pytest.raises(SandboxUnavailable, match=name):
+        _policy(layout, environment=("MY_VAR", entry))
+
+    passed = _policy(layout).filter_env(
+        {"TMPDIR": "/caller", "TEMP": "/caller", "TMP": "/caller"}
+    )
+    assert not {"TMPDIR", "TEMP", "TMP"} & set(passed)
+
+
 def test_the_tmpdir_refusal_says_what_each_backend_does():
     """Only Landlock and sandbox-exec set TMPDIR; bwrap and firejail give each
     scanner a private /tmp and set no variable, so the text must not say that every

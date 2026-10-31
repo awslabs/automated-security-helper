@@ -219,6 +219,11 @@ DEFAULT_ENVIRONMENT: Tuple[str, ...] = (
 #: one trailing newline.
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
+#: The variables a tool reads its temporary directory from, in the order Python's
+#: ``tempfile`` reads them. A list may not set them: the sandbox makes the
+#: temporary directory a scanner gets.
+_TEMP_DIR_NAMES = ("TMPDIR", "TEMP", "TMP")
+
 
 def _environment_entries(entries: Iterable[str]) -> Tuple[str, ...]:
     """*entries* as a tuple, once it is known to be a list of entries.
@@ -265,10 +270,12 @@ def parse_environment(
     A name that marks a credential (``CREDENTIAL_MARKERS``) and a name the sandbox
     always drops (``DROPPED_ENV_NAMES``) are refused even when listed, so the
     list cannot open the channel that a scanner's own ``env_names`` grant is for.
-    ``TMPDIR`` is refused too: the Landlock and sandbox-exec backends replace it with
-    a private directory after this list is applied, and the bwrap and firejail
-    backends do not, so a listed value would reach the scanner under two of the
-    four.
+    The names a tool reads its temporary directory from (``_TEMP_DIR_NAMES``) are
+    refused too: the Landlock and sandbox-exec backends replace ``TMPDIR`` with a
+    private directory after this list is applied, and the bwrap and firejail
+    backends set none, so a listed ``TMPDIR`` would reach the scanner under two of
+    the four, and a listed ``TEMP`` or ``TMP`` is what Python's ``tempfile`` reads
+    wherever ``TMPDIR`` is unset.
     The error names the variable and never shows a value, which may be a secret:
     an entry whose part before the first ``=`` is not a variable name is named by
     its position, never by that part, because the entry may be a value written
@@ -276,9 +283,10 @@ def parse_environment(
 
     Raises:
         ValueError: The list is a string or a mapping, or an entry is not text,
-            names no variable, names a credential, a dropped variable or
-            ``TMPDIR``, carries a NUL in its value, or sets a URL with a user name
-            and password (``filter_env`` would drop it from every scanner).
+            names no variable, names a credential, a dropped variable or a
+            temporary-directory variable, carries a NUL in its value, or sets a URL
+            with a user name and password (``filter_env`` would drop it from every
+            scanner).
     """
     names: Dict[str, None] = {}
     values: Dict[str, str] = {}
@@ -297,13 +305,14 @@ def parse_environment(
             raise ValueError(
                 f"environment entry {name!r} is refused: the sandbox never passes it"
             )
-        if name == "TMPDIR":
+        if name in _TEMP_DIR_NAMES:
             raise ValueError(
-                f"environment entry {name!r} is refused: the Landlock and "
-                "sandbox-exec backends point it at a private directory of their "
-                "own, and bwrap and firejail give each scanner a private /tmp, so "
-                "a listed value would send temporary files somewhere the sandbox "
-                "did not make for the scanner"
+                f"environment entry {name!r} is refused: it names the directory "
+                "a tool writes temporary files to. The Landlock and sandbox-exec backends "
+                "point TMPDIR at a private directory of their own, and bwrap and "
+                "firejail give each scanner a private /tmp, so a listed value "
+                "would send temporary files somewhere the sandbox did not make "
+                "for the scanner"
             )
         marker = next((m for m in CREDENTIAL_MARKERS if m in name.upper()), None)
         if marker is not None:
