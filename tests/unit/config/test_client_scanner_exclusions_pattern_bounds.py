@@ -179,6 +179,63 @@ def _start_a_grandchild_and_hang(pid_file: str) -> None:
     time.sleep(120)
 
 
+def _is_running(pid: int) -> bool:
+    """Whether ``pid`` is a process that is still running, not one that has ended.
+
+    ``os.kill(pid, 0)`` succeeds on a process that has ended and has not been
+    waited for (a zombie), and the grandchild of the guard's child is
+    reparented to whatever is process 1 where the test runs: an init that does
+    not reap, as in a container whose first process is not an init, leaves it
+    a zombie for good. Where ``/proc`` is there, a zombie (or a process being
+    torn down) reads as ended.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    try:
+        text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return not Path("/proc/self/stat").exists()
+    except OSError:
+        return True
+    # ``pid (comm) state ...``: the command can hold spaces and parentheses, so
+    # the state is read after the last closing parenthesis.
+    state = text.rpartition(")")[2].split()[:1]
+    return state not in (["Z"], ["X"])
+
+
+@pytest.mark.skipif(
+    not Path("/proc/self/stat").exists() or os.name != "posix",
+    reason="a zombie is told from a running process by /proc",
+)
+def test_an_ended_process_nobody_has_waited_for_does_not_read_as_running():
+    """A process that has ended and been left unwaited-for is a zombie: the
+    signal-0 probe still finds it, which is what a venue whose first process
+    does not reap leaves the guard's grandchild as. It must read as ended."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
+        os.kill(child.pid, 0)  # the control: the probe the test replaced succeeds
+        assert not _is_running(child.pid)
+    finally:
+        child.wait()
+
+
+@pytest.mark.skipif(
+    not Path("/proc/self/stat").exists() or os.name != "posix",
+    reason="a zombie is told from a running process by /proc",
+)
+def test_a_running_process_reads_as_running():
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        assert _is_running(child.pid)
+    finally:
+        child.kill()
+        child.wait()
+    assert not _is_running(child.pid)
+
+
 @pytest.mark.skipif(
     "fork" not in multiprocessing.get_all_start_methods() or os.name != "posix",
     reason="the guard runs the call in a forked child on POSIX only",
@@ -186,7 +243,8 @@ def _start_a_grandchild_and_hang(pid_file: str) -> None:
 def test_the_guard_kills_the_process_a_runaway_call_started(tmp_path):
     """At the limit the guard killed only its direct child, which orphaned a
     runaway evaluation worker (a grandchild) at full CPU after pytest exited.
-    The group is killed now: the process the call started is gone."""
+    The group is killed now: the process the call started is gone, or ended
+    and left for a process 1 that does not reap it."""
     pid_file = tmp_path / "grandchild.pid"
 
     outcome = _outcome_of(_start_a_grandchild_and_hang, str(pid_file), limit=3.0)
@@ -196,11 +254,8 @@ def test_the_guard_kills_the_process_a_runaway_call_started(tmp_path):
     deadline = time.monotonic() + 10.0
     alive = True
     while alive and time.monotonic() < deadline:
-        try:
-            os.kill(grandchild, 0)
-        except ProcessLookupError:
-            alive = False
-        else:
+        alive = _is_running(grandchild)
+        if alive:
             time.sleep(0.05)
     if alive:
         os.kill(grandchild, signal.SIGKILL)
