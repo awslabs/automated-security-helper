@@ -1255,11 +1255,40 @@ def _classified_output_dirs(
 
 def _one_spelling_each(paths: Set[Path]) -> Set[Path]:
     """*paths* with one entry for each directory, where two spellings name one
-    (:func:`_name_keys`): the first in sorted order is kept."""
+    (:func:`_name_keys`): the one spelled as the file system holds it, else the
+    first in sorted order.
+
+    The exclusions built from these paths are matched case-exactly by tools such
+    as syft, grype and trivy, against the names on disk. This run's output
+    directory spelled ``.ASH/ash_output`` sorts before the earlier run's
+    ``.ash/ash_output`` that is really there, and keeping the sorted-first one
+    left the tool's own reports readable under their real name.
+    """
     kept: Dict[Tuple[str, ...], Path] = {}
     for path in sorted(paths):
-        kept.setdefault(_name_keys(path), path)
+        key = _name_keys(path)
+        current = kept.setdefault(key, path)
+        if current is not path and not _spelled_as_on_disk(current):
+            if _spelled_as_on_disk(path):
+                kept[key] = path
     return set(kept.values())
+
+
+def _spelled_as_on_disk(path: Path) -> bool:
+    """Whether every component of *path* is spelled as the directory entry that
+    holds it, which on a file system that compares names without regard to case
+    is not a given: ``.ASH`` reaches the directory a listing calls ``.ash``. False
+    for a component that cannot be listed or is not there."""
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        try:
+            listed = os.listdir(current)
+        except OSError:
+            return False
+        if part not in listed:
+            return False
+        current = current / part
+    return True
 
 
 def _an_enclosing_repository_lists(directory: Path) -> bool:
