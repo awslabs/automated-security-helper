@@ -27,6 +27,10 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.config.path_trust import OperatorPaths
+from automated_security_helper.config.secret_verification_trust import (
+    UntrustedDetectSecretsSettings,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
     HEX_HIGH_ENTROPY_TYPE,
     IS_BASELINE_FILE_FILTER,
@@ -235,9 +239,8 @@ def _recording_worker(scanner, monkeypatch) -> dict:
 
     def scanned(self, *, baseline, scan_paths, scan_settings_dict, **kwargs):
         seen["names"] = sorted(Path(path).name for path in scan_paths)
-        seen["filters"] = [
-            item.get("path") for item in scan_settings_dict.get("filters_used", [])
-        ]
+        seen["entries"] = list(scan_settings_dict.get("filters_used", []))
+        seen["filters"] = [item.get("path") for item in seen["entries"]]
         collection_cls, _, _ = _detect_secrets_api()
         collection = collection_cls()
         collection.root = self._secrets_collection.root
@@ -416,3 +419,204 @@ def test_the_real_worker_reads_a_key_in_a_baseline_that_carries_a_filter_naming_
 
     assert report is not False
     assert _on_the_baseline(report) == [(AWS_RULE, line)]
+
+
+# --------------------------------------------------------------------------- #
+# A configuration the repository wrote is not the operator's
+# --------------------------------------------------------------------------- #
+
+NAME_FILTER_OF_THE_REPOSITORY = {
+    "path": IS_BASELINE_FILE_FILTER,
+    "filename": BASELINE_NAME,
+}
+
+
+def _operator_document(*entries: dict) -> dict:
+    """The operator's trusted base config, as ``resolve_config`` records it in
+    ``AshConfig._operator_paths``, holding these ``filters_used`` entries."""
+    return {
+        "scanners": {
+            "detect_secrets": {
+                "options": {"scan_settings": {"filters_used": list(entries)}}
+            }
+        }
+    }
+
+
+def _scanner_read_from_the_repository(
+    context: PluginContext, repository_entries: list[dict], *operator_entries: dict
+) -> DetectSecretsScanner:
+    """A scanner whose merged ``filters_used`` holds ``repository_entries``, in
+    a configuration read from the repository's own files (the record
+    ``resolve_config`` leaves on it). ``operator_entries`` are the entries the
+    operator's own configuration names as well; with none, the operator's
+    configuration names no filter."""
+    context.config._untrusted_detect_secrets_settings = UntrustedDetectSecretsSettings(
+        reason="the configuration was read from the scanned repository"
+    )
+    if operator_entries:
+        context.config._operator_paths = OperatorPaths(
+            documents=[_operator_document(*operator_entries)]
+        )
+    settings = DetectSecretsScanSettings(
+        filters_used=[
+            DetectSecretsScanSettingsFiltersUsed(**entry)
+            for entry in repository_entries
+        ]
+    )
+    return DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(scan_settings=settings)
+        ),
+    )
+
+
+@pytest.mark.unit
+def test_a_repository_written_name_filter_is_not_handed_to_the_worker(
+    tmp_path, monkeypatch
+):
+    """The baseline holds a key under ``notes`` and the repository's committed
+    config names the baseline in ``is_baseline_file``. The worker skips every
+    file of that name, so the key is never read: the same outcome the filter
+    read from the baseline itself is kept from. The configuration is the
+    repository's, not the operator's, so the worker is not handed the filter
+    and the baseline is in the scan set."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    _write_baseline(source, notes=PLANTED)
+    scanner = _scanner_read_from_the_repository(
+        context, [NAME_FILTER_OF_THE_REPOSITORY, UUID_FILTER]
+    )
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert BASELINE_NAME in seen["names"]
+    assert UUID_FILTER["path"] in seen["filters"]
+    assert IS_BASELINE_FILE_FILTER not in seen["filters"]
+
+
+@pytest.mark.unit
+def test_a_name_filter_the_operator_also_names_reaches_the_worker(
+    tmp_path, monkeypatch
+):
+    """Control: the operator's own configuration names the same filter and the
+    same file name, so the merged entry is theirs and is handed over."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    _write_baseline(source)
+    scanner = _scanner_read_from_the_repository(
+        context, [NAME_FILTER_OF_THE_REPOSITORY], NAME_FILTER_OF_THE_REPOSITORY
+    )
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert seen["filters"].count(IS_BASELINE_FILE_FILTER) == 1
+
+
+@pytest.mark.unit
+def test_a_repository_config_cannot_add_a_name_filter_beside_the_operators(
+    tmp_path, monkeypatch
+):
+    """The operator's configuration names the filter for ``vendored.baseline``;
+    the repository's adds one for its own baseline. Naming the filter is not
+    enough: the entry the repository wrote skips the file the repository chose,
+    and only the operator's reaches the worker."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    _write_baseline(source, notes=PLANTED)
+    operators = {"path": IS_BASELINE_FILE_FILTER, "filename": "vendored.baseline"}
+    scanner = _scanner_read_from_the_repository(
+        context, [operators, NAME_FILTER_OF_THE_REPOSITORY], operators
+    )
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert [
+        item.get("filename")
+        for item in seen["entries"]
+        if item.get("path") == IS_BASELINE_FILE_FILTER
+    ] == ["vendored.baseline"]
+
+
+@pytest.mark.unit
+def test_a_repository_written_pattern_does_not_drop_the_baseline_from_the_scan(
+    tmp_path, monkeypatch
+):
+    """The repository's committed config carries ``^\\.secrets\\.baseline$``.
+    Read as the operator's it would run over every file and take the baseline
+    out of the scan set. It is read as the baseline's: its other pattern still
+    applies, and the baseline file is kept apart from both."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    (source / "kept.py").write_text("x = 1\n", encoding="utf-8")
+    (source / "skipped.py").write_text("x = 2\n", encoding="utf-8")
+    _write_baseline(source, notes=PLANTED)
+    scanner = _scanner_read_from_the_repository(
+        context,
+        [
+            {
+                "path": SHOULD_EXCLUDE_FILE_FILTER,
+                "pattern": [r"^\.secrets\.baseline$", r"^skipped\.py$"],
+            }
+        ],
+    )
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert seen["names"] == [BASELINE_NAME, "kept.py"]
+
+
+@pytest.mark.unit
+def test_a_pattern_the_operator_also_names_still_drops_the_baseline(
+    tmp_path, monkeypatch
+):
+    """Control: the operator's own configuration names the pattern that matches
+    the baseline, so it is theirs and leaves the baseline out of the scan set."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    (source / "kept.py").write_text("x = 1\n", encoding="utf-8")
+    _write_baseline(source)
+    entry = {"path": SHOULD_EXCLUDE_FILE_FILTER, "pattern": [r"^\.secrets\.baseline$"]}
+    scanner = _scanner_read_from_the_repository(context, [entry], entry)
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert seen["names"] == ["kept.py"]
+
+
+@pytest.mark.unit
+def test_one_entry_holding_both_writers_patterns_is_split_by_writer(
+    tmp_path, monkeypatch
+):
+    """After the merge one ``should_exclude_file`` entry can hold a pattern of
+    each writer. The operator's ``^tests/`` still drops its files, and the
+    repository's ``^\\.secrets\\.baseline$`` still does not drop the baseline."""
+    monkeypatch.chdir(tmp_path)
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    (source / "tests").mkdir()
+    (source / "tests" / "x.py").write_text("x = 3\n", encoding="utf-8")
+    (source / "kept.py").write_text("x = 1\n", encoding="utf-8")
+    _write_baseline(source)
+    operators = {"path": SHOULD_EXCLUDE_FILE_FILTER, "pattern": ["^tests/"]}
+    merged = {
+        "path": SHOULD_EXCLUDE_FILE_FILTER,
+        "pattern": ["^tests/", r"^\.secrets\.baseline$"],
+    }
+    scanner = _scanner_read_from_the_repository(context, [merged], operators)
+    seen = _recording_worker(scanner, monkeypatch)
+
+    scanner.scan(target=source, target_type="source")
+
+    assert seen["names"] == [BASELINE_NAME, "kept.py"]

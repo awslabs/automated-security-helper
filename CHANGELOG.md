@@ -8097,7 +8097,10 @@
   file. The worker is not handed the baseline's `is_baseline_file` filter, which
   skips files by name and can name any file, unless the operator's own settings
   carry it or the baseline is one the operator named outside the scanned tree.
-  The baseline's `should_exclude_file` patterns apply to every file except the
+  When the configuration was also read from the repository's own files, an
+  `is_baseline_file` entry or an exclude pattern counts as the operator's only
+  where the operator's own configuration names the same entry. The baseline's
+  `should_exclude_file` patterns apply to every file except the
   baseline itself. A `baseline_file` the operator names that resolves inside the
   scanned tree, or inside a git checkout holding it, is read as the repository's
   record too: its known candidates stay in the report as suppressed findings,

@@ -201,6 +201,17 @@ WORDLIST_FILTER = "detect_secrets.filters.wordlist.should_exclude_secret"
 WORDLIST_FILE_KEY = (
     "scanners.detect_secrets.options.scan_settings.filters_used[].file_name"
 )
+#: The option keys the operator's record (``AshConfig._operator_paths``) is read
+#: at for the parts of a ``filters_used`` entry whose author matters when the
+#: configuration was also read from the repository's own files
+#: (``DetectSecretsScanner._operator_authored``).
+FILTER_PATH_KEY = "scanners.detect_secrets.options.scan_settings.filters_used[].path"
+FILTER_FILENAME_KEY = (
+    "scanners.detect_secrets.options.scan_settings.filters_used[].filename"
+)
+FILTER_PATTERN_KEY = (
+    "scanners.detect_secrets.options.scan_settings.filters_used[].pattern"
+)
 #: The ``min_length`` detect-secrets' own ``wordlist.initialize`` defaults to.
 WORDLIST_DEFAULT_MIN_LENGTH = 3
 
@@ -1338,6 +1349,47 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
         settings.filters_used = kept
 
+    def _operator_authored(self, item: Any) -> bool:
+        """Whether the operator, not a repository file, wrote this filter entry.
+
+        ``_operator_filter_ids`` holds every entry of the resolved configuration.
+        That is the operator's own when the configuration was read from the
+        operator's files alone. When part of it was read from files the
+        repository controls (the record ``_untrusted_detect_secrets_settings``),
+        the merged entry no longer says which file wrote it, so the entry counts
+        as the operator's only when the operator's own configuration names the
+        same filter, and for the ``is_baseline_file`` filter the same file name
+        (``named_by_operator``). An entry the repository wrote is read as the
+        baseline's, whose filters a repository's own files may not use to hide
+        the baseline it commits.
+        """
+        if id(item) not in self._operator_filter_ids:
+            return False
+        if self._repository_config_record() is None:
+            return True
+        config = getattr(self.context, "config", None)
+        path = getattr(item, "path", None)
+        if not isinstance(path, str) or not named_by_operator(
+            FILTER_PATH_KEY, path, config
+        ):
+            return False
+        if path != IS_BASELINE_FILE_FILTER:
+            return True
+        filename = getattr(item, "filename", None)
+        return filename is None or (
+            isinstance(filename, str)
+            and named_by_operator(FILTER_FILENAME_KEY, filename, config)
+        )
+
+    def _repository_config_record(self) -> Optional[Any]:
+        """The record left on the config when part of it was read from files the
+        operator did not write, or None when every file was the operator's."""
+        return getattr(
+            getattr(self.context, "config", None),
+            "_untrusted_detect_secrets_settings",
+            None,
+        )
+
     def _operator_named_wordlist(self, item: Any) -> bool:
         """Whether the operator's own config names this entry's word list.
 
@@ -1760,22 +1812,52 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         files it excluded were scanned with no warning. An entry not recorded as
         the operator's is read as the baseline's, which is the one-anchor
         behavior for a scanner whose settings were set after it was configured.
+        When the configuration was also read from the repository's own files, a
+        pattern counts as the operator's only if the operator's own
+        configuration names it (``_operator_authored``): the rest are read as
+        the baseline's, so a committed pattern cannot take the baseline file
+        itself out of the scan set.
 
         Returns:
             ``(operator_patterns, baseline_patterns)``.
         """
-        entries = list(self.config.options.scan_settings.filters_used)
-        own = [item for item in entries if id(item) in self._operator_filter_ids]
-        others = [item for item in entries if id(item) not in self._operator_filter_ids]
-
-        def _dump(items: List[Any]) -> Dict[str, Any]:
-            return {
-                "filters_used": [item.model_dump(exclude_none=True) for item in items]
-            }
+        config = getattr(self.context, "config", None)
+        from_repository = self._repository_config_record() is not None
+        own: List[Dict[str, Any]] = []
+        others: List[Dict[str, Any]] = []
+        for item in self.config.options.scan_settings.filters_used:
+            dump = item.model_dump(exclude_none=True)
+            if id(item) not in self._operator_filter_ids:
+                others.append(dump)
+            elif not from_repository or dump.get("path") != SHOULD_EXCLUDE_FILE_FILTER:
+                own.append(dump)
+            else:
+                # The configuration was also read from the repository's own
+                # files, so one entry can hold patterns of both writers. Each
+                # pattern the operator's configuration does not name is read
+                # as the baseline's: matched at its anchor, and kept apart
+                # from the baseline file it could otherwise take out of the
+                # scan (``scan``).
+                raw = dump.get("pattern", [])
+                patterns = [raw] if isinstance(raw, str) else raw
+                if not isinstance(patterns, list):
+                    others.append(dump)
+                    continue
+                mine = [
+                    pattern
+                    for pattern in patterns
+                    if isinstance(pattern, str)
+                    and named_by_operator(FILTER_PATTERN_KEY, pattern, config)
+                ]
+                rest = [pattern for pattern in patterns if pattern not in mine]
+                if mine:
+                    own.append({**dump, "pattern": mine})
+                if rest:
+                    others.append({**dump, "pattern": rest})
 
         return (
-            self._get_baseline_exclude_patterns(_dump(own), values),
-            self._get_baseline_exclude_patterns(_dump(others), values),
+            self._get_baseline_exclude_patterns({"filters_used": own}, values),
+            self._get_baseline_exclude_patterns({"filters_used": others}, values),
         )
 
     @staticmethod
@@ -2828,22 +2910,33 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # skips the baseline by name has no job there. Read from a file
                 # the repository controls it skips whatever file the
                 # repository names, the baseline (scanned above) included, so
-                # only an entry the operator's own settings carry survives.
-                operator_wrote_baseline_filter = any(
-                    id(item) in self._operator_filter_ids
-                    and item.path == IS_BASELINE_FILE_FILTER
+                # only an entry the operator's own settings carry survives. An
+                # entry of the configuration (a repository's own files can have
+                # written it: _operator_authored) is judged by its writer, one
+                # the baseline supplied by whose baseline it is. They are kept
+                # by the file name they skip, which is what the worker acts on.
+                handed_names = [
+                    getattr(item, "filename", None)
                     for item in self.config.options.scan_settings.filters_used
-                )
-                left_out = {SHOULD_EXCLUDE_FILE_FILTER}
-                if not known_entries_trusted and not operator_wrote_baseline_filter:
-                    left_out.add(IS_BASELINE_FILE_FILTER)
+                    if item.path == IS_BASELINE_FILE_FILTER
+                    and (
+                        self._operator_authored(item)
+                        if id(item) in self._operator_filter_ids
+                        else known_entries_trusted
+                    )
+                ]
                 kept_filters = [
                     item
                     for item in scan_settings_dict["filters_used"]
-                    if item.get("path") not in left_out
+                    if item.get("path") != SHOULD_EXCLUDE_FILE_FILTER
+                    and (
+                        item.get("path") != IS_BASELINE_FILE_FILTER
+                        or item.get("filename") in handed_names
+                    )
                 ]
-                if IS_BASELINE_FILE_FILTER in left_out and any(
+                if any(
                     item.get("path") == IS_BASELINE_FILE_FILTER
+                    and item.get("filename") not in handed_names
                     for item in scan_settings_dict["filters_used"]
                 ):
                     self._plugin_log(
