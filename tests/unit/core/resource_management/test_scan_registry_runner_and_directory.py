@@ -323,6 +323,55 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert "running or stopping" in reason
         assert removed is False
 
+    @staticmethod
+    def _root_scan_and_inner_project(registry, tmp_path):
+        """A finished scan of a workspace root, and a project scan whose output
+        directory lies inside the root scan's: the layout a workspace scan
+        gives a project (``<output root>/projects/<key>``) under the output
+        directory a single scan of the root uses by default."""
+        root = tmp_path / "ws"
+        project = root / "proj"
+        project.mkdir(parents=True)
+        outer = root / ".ash" / "ash_output"
+        inner = outer / "projects" / "proj-key"
+        old = _register(registry, root, outer)
+        registry.update_scan_status(old, MCScanStatus.COMPLETED)
+        project_scan = _register(registry, project, inner)
+        return old, project_scan, project, inner
+
+    def test_a_running_scan_inside_the_tree_refuses_the_removal(self, tmp_path):
+        registry = ScanRegistry()
+        old, project_scan, _project, _inner = self._root_scan_and_inner_project(
+            registry, tmp_path
+        )
+        registry.update_scan_status(project_scan, MCScanStatus.RUNNING)
+        ran = []
+
+        reason, removed = registry.remove_output_of_scan(
+            registry.get_scan(old), lambda: ran.append(1) or True
+        )
+
+        assert "running or stopping" in reason
+        assert removed is False
+        assert ran == []
+
+    def test_a_registration_inside_a_tree_being_removed_waits_for_it(self, tmp_path):
+        registry = ScanRegistry()
+        old, project_scan, project, inner = self._root_scan_and_inner_project(
+            registry, tmp_path
+        )
+        registry.update_scan_status(project_scan, MCScanStatus.COMPLETED)
+        registry.cleanup_scan(project_scan)
+        removing, release = self._removal_in_progress(registry, old)
+        try:
+            with pytest.raises(MCPResourceError, match="being removed"):
+                _register(registry, project, inner, removal_wait_seconds=0)
+        finally:
+            release.set()
+            removing.join(timeout=10)
+
+        assert registry.get_scan_count() == 1
+
     def test_the_latest_scan_of_a_directory_removes_off_the_lock(self, tmp_path):
         registry = ScanRegistry()
         _old, new = self._two_scans(registry, tmp_path, MCScanStatus.COMPLETED)

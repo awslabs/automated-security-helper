@@ -991,12 +991,12 @@ class ScanRegistry:
             requested = _canonical_directory(directory_path)
             requested_output = _canonical_directory(output_directory)
             for entry in self._registry.values():
-                if (
-                    entry.output_removal is not None
-                    and entry.canonical_output_directory == requested_output
+                if entry.output_removal is not None and _shares_an_output_tree(
+                    entry.canonical_output_directory, requested_output
                 ):
-                    # The tree is being deleted off the lock
-                    # (remove_output_of_scan). register_scan waits for that to
+                    # The tree, or one that contains it or lies inside it, is
+                    # being deleted off the lock (remove_output_of_scan).
+                    # register_scan waits for that to
                     # end, within its bound, and tries again, so the new scan is
                     # not registered into a tree being removed from under it. Decided under
                     # the lock, so a removal that starts after this attempt
@@ -1258,8 +1258,11 @@ class ScanRegistry:
         Scans of one source directory write the same output tree under it by
         default, and the question is about that tree, so the comparison is on
         ``canonical_output_directory``: a scan of the same source that was given
-        another output directory shares nothing with this one. The tree is
-        another scan's while that scan occupies it
+        another output directory shares nothing with this one. Two output
+        directories share a tree when they are the same directory or one lies
+        inside the other (``_shares_an_output_tree``), so a project scan whose
+        output sits under this scan's output directory is another scan's tree
+        too. The tree is another scan's while that scan occupies it
         (:meth:`ScanRegistryEntry.occupies_its_directory`), and it holds a LATER
         scan's results once one has claimed it (``later_scan_ids``: marked
         running, or closed after it ran), whatever that scan's state since,
@@ -1319,7 +1322,13 @@ class ScanRegistry:
             for other in self._registry.values():
                 if other.scan_id == entry.scan_id:
                     continue
-                if other.canonical_output_directory != entry.canonical_output_directory:
+                # A tree, not a name: a project scan of a workspace writes under
+                # the output directory of a single scan of the workspace root, so
+                # an equality test let the removal of the outer tree delete a
+                # running project's live output.
+                if not _shares_an_output_tree(
+                    other.canonical_output_directory, entry.canonical_output_directory
+                ):
                     continue
                 if other.output_removal is not None:
                     return (
