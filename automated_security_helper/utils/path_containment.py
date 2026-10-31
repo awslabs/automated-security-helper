@@ -85,7 +85,8 @@ Failure modes and known limitations
   loop stayed in the answer, ``is_relative_to`` read the text as inside, and
   the path was accepted. The resolved path is therefore asked about once more
   with ``os.stat`` (``_is_a_loop``), which the kernel answers with ``ELOOP``
-  for a loop on any version, and that is the same ``SYMLINK`` rejection. A path
+  for a loop on any version (Windows with its error 1921), and that is the same
+  ``SYMLINK`` rejection. A path
   that does not exist answers ``ENOENT`` there, not ``ELOOP``, so
   ``must_exist=False`` is unchanged. It also includes a candidate or
   root holding a NUL character, which no file system path can: ``os.lstat`` and
@@ -119,6 +120,10 @@ from automated_security_helper.utils.output_dir_links import same_by_identity
 PathLike = Union[str, Path]
 
 _PARENT = ".."
+
+#: ``ERROR_CANT_RESOLVE_FILENAME``: what Windows answers ``os.stat`` with for a
+#: reparse-point loop, which it reports with no ``ELOOP`` (``_is_a_loop``).
+_WINERROR_CANT_RESOLVE_FILENAME = 1921
 
 
 class PathContainmentViolation(str, Enum):
@@ -233,13 +238,18 @@ def _is_a_loop(resolved: Path) -> bool:
     among them on every version; a path that merely does not exist answers
     ``ENOENT`` and is not a loop. The last component counts too: a root that is
     itself the looping link, with the candidate ``.``, was accepted when only
-    the components before the last were followed. Any other error is left to
-    the checks that follow.
+    the components before the last were followed. Windows has no ``ELOOP``: a
+    reparse-point loop fails ``os.stat`` with ``ERROR_CANT_RESOLVE_FILENAME``
+    (winerror 1921), the error CPython 3.10-3.12's own ``resolve()`` checks for,
+    so that counts as a loop as well. Any other error is left to the checks that
+    follow.
     """
     try:
         os.stat(resolved)
     except OSError as error:
-        return error.errno == errno.ELOOP
+        return error.errno == errno.ELOOP or (
+            getattr(error, "winerror", None) == _WINERROR_CANT_RESOLVE_FILENAME
+        )
     return False
 
 
