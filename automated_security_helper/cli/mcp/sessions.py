@@ -822,10 +822,23 @@ def _set_session_state_aside(session_id: str, sandbox: Path) -> Optional[Path]:
     )
     from automated_security_helper.cli.mcp.source_delivery import (
         _drop_session_source_dir,
+        _remove_tree,
         _set_aside_for_removal,
     )
 
     doomed = _set_aside_for_removal(sandbox, session_id)
+    if doomed is not None and doomed == sandbox:
+        # The rename was refused, or the stat failed with anything but
+        # FileNotFoundError (source_delivery._set_aside_for_removal returns the
+        # workspace itself for both): the tree still stands at the session's
+        # own path with its marker, so what makes the released-guard delete
+        # safe does not hold for it. It is deleted here, inside the caller's
+        # guard, as every delete was before the two steps were split; deleted
+        # after the release, a ScanPresence in another server could take the
+        # guard, find the marker and register under the deletion. Nothing is
+        # left for the caller to delete.
+        _remove_tree(doomed)
+        doomed = None
     _drop_session_source_dir(session_id)
     clear_session_state(session_id)
     get_default_registry().forget(session_id)
