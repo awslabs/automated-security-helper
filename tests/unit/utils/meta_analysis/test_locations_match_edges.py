@@ -31,17 +31,29 @@ def _sarif(uri="a.py", start=3, end=5):
 
 
 @pytest.mark.parametrize(
-    "location",
+    "location, expected",
     [
-        {"physicalLocation": None},
-        {"physicalLocation": {"artifactLocation": None, "region": None}},
-        {"physicalLocation": {"artifactLocation": {"uri": "a.py"}, "region": None}},
+        # No physicalLocation, or no artifactLocation: the location names no file,
+        # and the other side names a.py, so they are not one place.
+        ({"physicalLocation": None}, False),
+        ({"physicalLocation": {"artifactLocation": None, "region": None}}, False),
+        # The file is a.py and there is no region: a match at file level.
+        (
+            {"physicalLocation": {"artifactLocation": {"uri": "a.py"}, "region": None}},
+            True,
+        ),
     ],
+    ids=["null-physical-location", "null-artifact-and-region", "null-region"],
 )
-def test_a_null_sub_object_is_read_as_absent(location):
-    # Raised TypeError ("argument of type 'NoneType' is not iterable") before.
-    assert locations_match(location, _sarif()) in (True, False)
-    assert locations_match(_sarif(), location) in (True, False)
+def test_a_null_sub_object_is_read_as_absent(location, expected):
+    # Raised TypeError ("argument of type 'NoneType' is not iterable") before. The
+    # answer is each case's own, and the same from either side: asserting only a
+    # boolean would also pass a null sub-object that matched everything.
+    assert locations_match(location, _sarif()) is expected
+    assert locations_match(_sarif(), location) is expected
+    # A null sub-object does not make the location match a different file either.
+    assert locations_match(location, _sarif(uri="other.py")) is False
+    assert locations_match(_sarif(uri="other.py"), location) is False
 
 
 def test_a_null_region_matches_at_file_level():
