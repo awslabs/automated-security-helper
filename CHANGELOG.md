@@ -8531,12 +8531,14 @@
   finding counts toward the outcome and some were left out, the headline sentence
   says so instead of saying that no finding reached its threshold. A report with
   no such finding differs only by the extra choice in the HTML scope menu.
+
 - **A workspace project that completed with a skip reason, and also exceeds its
   threshold or has an incomplete scan, reads `FAILED` in the project table.** It
   read `SKIPPED (<reason>)` while the run's exit code failed for it. The row now
   reads `FAILED`, or `FAILED (incomplete)`, as the exit code does, and shows the
   project's finding counts instead of `n/a`. A project that completed with a skip
   reason and neither condition still reads `SKIPPED (<reason>)`.
+
 - **The HTML report prints a scan text block as written when nothing in it needs
   changing, and says what it changed when something does.** A snippet or
   description that holds no control character and no CI command form is printed
