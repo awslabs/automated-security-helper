@@ -997,15 +997,23 @@ class ASHScanOrchestrator(BaseModel):
         # The values this run's configuration read from the environment: a
         # project name among them is a value, not a label, and the reports print
         # metadata.project_name as text.
-        environment_values = set(config_environment_values(self.config))
+        environment_values = list(config_environment_values(self.config))
         for key, value in self.metadata.items():
             if key == "project_name":
-                if isinstance(value, str) and value.strip() in environment_values:
+                if (
+                    isinstance(value, str)
+                    and value.strip()
+                    and text_without_values(value.strip(), environment_values)
+                    != value.strip()
+                ):
                     # A workspace hands each project its resolved display label,
                     # which can be the project_name its config read from the
-                    # environment; written here it reached the per-project HTML,
-                    # Markdown, text and flat JSON reports as text. The name the
-                    # engine recorded (the masked or reference form) stands.
+                    # environment, or a label that holds such a value; written
+                    # here it reached the per-project HTML, Markdown, text and
+                    # flat JSON reports as text. Compared by redaction, not by
+                    # equality: a name that quotes a value inside a longer label
+                    # was written. The name the engine recorded (the masked or
+                    # reference form) stands.
                     ASH_LOGGER.warning(
                         "Ignoring a project_name in scan metadata that is a value "
                         "the configuration read from the environment; keeping "

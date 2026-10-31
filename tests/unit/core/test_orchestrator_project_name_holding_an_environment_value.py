@@ -1,0 +1,67 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A project name that holds a value the config read from the environment is not applied.
+
+Why these tests exist
+---------------------
+``ASHScanOrchestrator._apply_metadata`` copies the workspace's project label onto
+the results' metadata, which every report prints as text. It dropped the label
+when it was exactly a value the configuration read from the environment, and
+applied it otherwise, so a label that quoted such a value inside a longer name
+(``team-<value>-api``) reached the reports. The test is now the redaction the rest
+of the run uses: a label the redaction changes holds a value, and the name the
+engine recorded stands.
+
+Each test states the assertion that fails at the base.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+pytestmark = pytest.mark.unit
+
+SECRET = "envproj-secret-5e19"
+
+
+def _applied(tmp_path, label: str) -> str:
+    source = tmp_path / "proj"
+    source.mkdir()
+    output = tmp_path / "out"
+    output.mkdir()
+    orchestrator = ASHScanOrchestrator(source_dir=source, output_dir=output)
+    config = AshConfig()
+    config._environment_values = [SECRET]
+    orchestrator.config = config
+    engine = MagicMock()
+    engine._asharp_model.metadata.project_name = "recorded"
+    orchestrator.execution_engine = engine
+    orchestrator.metadata = {"project_name": label}
+
+    orchestrator._apply_metadata()
+
+    return engine._asharp_model.metadata.project_name
+
+
+def test_a_label_that_is_the_value_is_not_applied(tmp_path):
+    assert _applied(tmp_path, SECRET) == "recorded"
+
+
+def test_a_label_that_quotes_the_value_inside_a_longer_name_is_not_applied(tmp_path):
+    # Red at the base: only a label equal to the value was dropped.
+    assert _applied(tmp_path, f"team-{SECRET}-api") == "recorded"
+
+
+def test_a_label_with_surrounding_space_that_is_the_value_is_not_applied(tmp_path):
+    assert _applied(tmp_path, f"  {SECRET}  ") == "recorded"
+
+
+def test_a_plain_label_is_applied(tmp_path):
+    """The control: a name that holds no value still names the project."""
+    assert _applied(tmp_path, "payments-api") == "payments-api"
