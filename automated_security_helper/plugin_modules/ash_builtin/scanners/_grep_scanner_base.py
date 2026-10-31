@@ -1343,13 +1343,17 @@ def _matches_an_exclude_pattern(path: str, target: Path, patterns: List[str]) ->
     """Whether one of ``patterns``, as the tools read an ``--exclude`` value, can
     name the reported ``path``: a glob matched against the file's name and against
     each directory of the path below the project root (a trailing ``/`` names a
-    directory), or against the whole reported path. Read permissively: a pattern
-    this says cannot match certainly did not leave the file out. A leading ``/``
-    anchors a pattern at the project root in the tools' gitignore-style reading,
-    and a trailing one names a directory; both are dropped here, so ``/src/``
-    names the ``src`` component the way ``src/`` does."""
+    directory), against each leading run of those components joined with ``/``
+    (``src/sub`` for a pattern with an inner slash, anchored at the root, and
+    ``src/sub/app.py`` for a directory-qualified file glob, whichever way the tool
+    spelled the path), or against the whole reported path. Read permissively: a
+    pattern this says cannot match certainly did not leave the file out. A
+    leading ``/`` anchors a pattern at the project root in the tools'
+    gitignore-style reading, and a trailing one names a directory; both are
+    dropped here, so ``/src/`` names the ``src`` component the way ``src/`` does."""
     parts = (*_parts_of_target_below_root(target), *_parts_below(path, target))
-    candidates = (*parts, Path(path).as_posix())
+    joined = ["/".join(parts[:end]) for end in range(1, len(parts) + 1)]
+    candidates = (*parts, *joined, Path(path).as_posix())
     for pattern in patterns:
         glob = pattern.strip("/") or pattern
         if any(fnmatch.fnmatchcase(candidate, glob) for candidate in candidates):

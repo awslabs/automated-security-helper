@@ -627,6 +627,13 @@ def test_an_operator_pattern_that_cannot_name_the_file_does_not_take_the_blame(
     (``rstrip("/")`` only), so ``/src`` matched neither the ``src`` component nor
     the path ``src/app.py``, and the refusal said "does not recognize as its own"
     for a pattern the operator wrote.
+    The directory-qualified rows fail at the tip before this one: the candidates
+    were each component alone and the path as reported, so ``sub/*.py`` and
+    ``sub/app.py`` matched nothing when the tool reported the path absolute, and
+    ``sub/deeper/`` (glob ``sub/deeper``) matched neither a component nor the
+    whole path ``sub/deeper/app.py``; the refusal said "does not recognize as its
+    own" for a pattern the operator wrote. The ``sub/``, ``sub/*/app.py`` rows
+    already matched there and pin that the leading joins add no loss.
     """
     scanner = _scanner(test_plugin_context, monkeypatch, exclude=["*.md"])
     with pytest.raises(ScannerError) as refused:
@@ -646,6 +653,29 @@ def test_an_operator_pattern_that_cannot_name_the_file_does_not_take_the_blame(
         named = _scanner(test_plugin_context, monkeypatch, exclude=exclude)
         with pytest.raises(ScannerError, match="its --exclude patterns left out all 1"):
             _grade(named, tmp_path, _excluded("src/app.py"))
+
+    # A pattern with a directory component names the file whichever way the tool
+    # spelled its path: an absolute one (the target here is ``tmp_path / "src"``)
+    # or a relative one below a nested directory.
+    absolute = (tmp_path / "src" / "sub" / "app.py").as_posix()
+    for exclude, reported in (
+        (["sub/*.py"], absolute),
+        (["sub/app.py"], absolute),
+        (["sub/"], absolute),
+        (["sub/deeper/"], "sub/deeper/app.py"),
+        (["/sub/deeper"], "sub/deeper/app.py"),
+        (["sub/*/app.py"], "sub/deeper/app.py"),
+    ):
+        named = _scanner(test_plugin_context, monkeypatch, exclude=exclude)
+        with pytest.raises(ScannerError, match="its --exclude patterns left out all 1"):
+            _grade(named, tmp_path, _excluded(reported))
+
+    # The control: an inner-slash pattern that names another directory still
+    # cannot name the file, and the refusal says so.
+    other = _scanner(test_plugin_context, monkeypatch, exclude=["other/*.py"])
+    with pytest.raises(ScannerError) as unnamed:
+        _grade(other, tmp_path, _excluded(absolute))
+    assert "does not recognize as its own" in str(unnamed.value), str(unnamed.value)
 
 
 @pytest.mark.parametrize("marker", ["directory", "file"])
