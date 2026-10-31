@@ -978,7 +978,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         dependency check, which runs before any scan, judged trivy's default
         scanners for a scan whose ``scan.scanners`` sends it elsewhere. trivy
         reads a list setting as a YAML list or as one string split the way it
-        splits an environment variable (``_split_list_string``). A file
+        splits an environment variable (``_split_list_string``). The entries are
+        not trimmed, as in ``_environment_list``: ``scan.skip-dirs: "vendor, build"``
+        is ``vendor`` and `` build`` in the file as in ``TRIVY_SKIP_DIRS``, and only
+        an entry with no characters at all is dropped. A file
         that cannot be read or parsed, including one that is not UTF-8 (a
         ``UnicodeDecodeError`` is a ``ValueError``), counts as setting nothing.
         """
@@ -1001,7 +1004,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             listed = _split_list_string(listed)
         if not isinstance(listed, list):
             return []
-        return [str(name).strip() for name in listed if str(name).strip()]
+        return [str(name) for name in listed if str(name)]
 
     def _environment_list(self, name: str) -> List[str]:
         """``name`` in the scan's environment as trivy reads a list flag from it.

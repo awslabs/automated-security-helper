@@ -1454,7 +1454,7 @@ def test_control_a_readable_config_file_sets_the_scanners(tmp_path):
 
 @pytest.mark.parametrize(
     "written",
-    ['"vuln misconfig"', '"vuln,misconfig"', '"vuln, misconfig"', "[vuln, misconfig]"],
+    ['"vuln misconfig"', '"vuln,misconfig"', "[vuln, misconfig]"],
 )
 def test_a_config_file_scanner_string_is_split_on_whitespace_and_commas(
     tmp_path, written
@@ -1505,6 +1505,57 @@ def test_a_config_file_list_string_with_a_comma_is_not_also_split_on_spaces(
         "vendor",
         "build dir",
     ]
+
+
+def test_a_config_file_list_string_with_a_space_after_the_comma_is_not_trimmed(
+    tmp_path,
+):
+    """The config file's list string goes through the conversion the environment
+    does, which does not trim: ``"vendor, build"`` is ``vendor`` and `` build``, so
+    trivy skips a directory named `` build``, not ``build``. The file was trimmed,
+    so a ``build`` directory the operator's own trivy would scan was skipped and its
+    findings withheld. ``"vuln, misconfig"`` as a scanner set is read the same way
+    in the file as in ``TRIVY_SCANNERS``: the second name carries its space."""
+    value = "vendor, build"
+    from_env = _repo_scanner(tmp_path, scanners=[])
+    from_env.extra_env = {"TRIVY_SKIP_DIRS": value, "TRIVY_SCANNERS": "vuln, misconfig"}
+    from_file = _repo_scanner(tmp_path, scanners=[])
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        f'scan:\n  skip-dirs: "{value}"\n  scanners: "vuln, misconfig"\n',
+        encoding="utf-8",
+    )
+    config_args = [f"--config={operator.as_posix()}"]
+    ashs_own = "--skip-dirs=.ash/ash_output"
+
+    in_file = from_file._config_file_list(config_args, "scan", "skip-dirs")
+
+    assert in_file == ["vendor", " build"]
+    assert from_env._environment_list("TRIVY_SKIP_DIRS") == in_file
+    assert from_file._operator_skip_args([*config_args, ashs_own]) == [
+        "--skip-dirs=vendor",
+        '--skip-dirs=" build"',
+    ]
+    assert from_env._operator_skip_args([ashs_own]) == [
+        "--skip-dirs=vendor",
+        '--skip-dirs=" build"',
+    ]
+    assert from_file._effective_scanners(config_args) == ["vuln", " misconfig"]
+    assert from_env._effective_scanners(EMPTY_CONFIG_ARGS) == ["vuln", " misconfig"]
+
+
+def test_control_an_empty_entry_of_a_config_file_list_string_is_still_dropped(
+    tmp_path,
+):
+    scanner = _repo_scanner(tmp_path)
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text('scan:\n  skip-dirs: "vendor,,build,"\n', encoding="utf-8")
+
+    assert scanner._config_file_list(
+        [f"--config={operator.as_posix()}"], "scan", "skip-dirs"
+    ) == ["vendor", "build"]
 
 
 @pytest.mark.parametrize(
