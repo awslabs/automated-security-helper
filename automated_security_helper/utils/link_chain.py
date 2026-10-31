@@ -151,10 +151,11 @@ def is_a_drive_spelling(text: str) -> bool:
 class _Hops:
     """The one budget of ``os.readlink`` calls a judgment may spend.
 
-    Shared between the chain reading and the component walk when one calls the
-    other (a hop's target has parent components, and a parent component can be
-    a link with its own chain), so a crafted tree of links costs at most
-    ``LINK_HOPS`` reads in all, never a product of nested bounds.
+    Shared by every read of one judgment: the walk of the path's own components,
+    the chain reading of a link and the walk of that link's parents and targets
+    all draw on it (a hop's target has parent components, and a parent
+    component can be a link with its own chain), so a crafted tree of links
+    costs at most ``LINK_HOPS`` reads in all, never a product of nested bounds.
     """
 
     def __init__(self, left: int) -> None:
@@ -179,14 +180,20 @@ def link_chain_names_a_windows_share(
     at the first name that is not a link, or that is not there: a local name is
     then all that resolving would open, and the answer is False.
 
-    A hop's target is walked name by name from the directory the link is in
-    (``text`` is that link's own location, so the directory holds no link the
-    caller has not judged: the component walk, :func:`first_unsafe_link`, calls
-    this with the directory it has reached), so ``os.lstat``, which does not
-    follow the entry it is given but DOES follow a link in any of its parents,
-    is only asked about an entry under parents already examined. A parent of
-    the target that is a link to a share, or whose target cannot be read, or
-    that cannot be examined at all, is the chain's answer. A config file linked
+    ``text`` may be spelled through links. Its own parents are walked first,
+    name by name from its anchor, so that a link among them is judged before
+    the link is read and the directory the link is in is the one reached: a
+    relative target is taken from there, not from where ``text`` was spelled
+    (``repo/a/l3`` with ``repo/a`` a link to ``repo/b/c`` has ``l3`` in
+    ``repo/b/c``). A parent that is a link to a share, or whose target cannot
+    be read, is the answer, as it is for a parent of a hop's target.
+
+    A hop's target is walked name by name from the directory the link is in, so
+    ``os.lstat``, which does not follow the entry it is given but DOES follow a
+    link in any of its parents, is only asked about an entry under parents
+    already examined. A parent of the target that is a link to a share, or
+    whose target cannot be read, or that cannot be examined at all, is the
+    chain's answer. A config file linked
     as ``.ash/ash.yaml -> ..\\vendor\\cfg.yaml`` with ``vendor`` a junction to a
     share is judged at ``vendor`` and the share is never opened.
 
@@ -226,6 +233,19 @@ def _parent(reached: str) -> str:
     if not parent and os.path.splitdrive(reached)[0]:
         return reached
     return parent
+
+
+def _anchor_and_names(collapsed: str) -> Tuple[str, List[str]]:
+    """Where a collapsed spelling starts, and the names under it to walk.
+
+    The anchor is the drive and root, or the root, or the share root; a relative
+    spelling starts at ``""``, the directory the process is in.
+    """
+    parsed = Path(collapsed)
+    parts = list(parsed.parts)
+    if parsed.anchor and parts and parts[0] == parsed.anchor:
+        return parts[0], parts[1:]
+    return "", parts
 
 
 def _split_target(directory: str, target: str) -> Tuple[str, List[str]]:
@@ -319,18 +339,32 @@ def _walk_names(
 
 
 def _chain_names_a_windows_share(text: str, budget: _Hops) -> Optional[bool]:
+    anchor, names = _anchor_and_names(os.path.normpath(text))
+    if not names:
+        # An anchor alone is no link to read.
+        return None
+    # The parents of ``text`` are walked first, from the anchor, so that a link
+    # among them is judged before the link itself is read and the link's own
+    # directory is the one reached: a relative target is taken from there, not
+    # from where the caller spelled ``text``.
+    directory, parent_finding = _walk_names(anchor, names[:-1], budget, spliced=False)
+    if parent_finding is not None:
+        return True if parent_finding.reaches_a_share else None
+    if directory is None:
+        # A parent is not there, so the entry is not either.
+        return None
     if not budget.take():
         return None
     try:
-        target = os.readlink(text)
+        target = os.readlink(os.path.join(directory, names[-1]))
     except (OSError, ValueError):
         # As in _walk_names: the entry went away, or it is a reparse point
         # that is no symbolic link or junction.
         return None
     if names_a_windows_share(target):
         return True
-    start, names = _split_target(os.path.dirname(text), target)
-    _, finding = _walk_names(start, names, budget, spliced=True)
+    start, target_names = _split_target(directory, target)
+    _, finding = _walk_names(start, target_names, budget, spliced=True)
     if finding is None:
         return False
     return True if finding.reaches_a_share else None
@@ -409,12 +443,7 @@ def first_unsafe_link(text: str, *, hops: int = LINK_HOPS) -> Optional[UnsafeLin
 
 def _first_unsafe_link(text: str, budget: _Hops) -> Optional[UnsafeLink]:
     collapsed = os.path.normpath(text)
-    parsed = Path(collapsed)
-    parts = list(parsed.parts)
-    if parsed.anchor and parts and parts[0] == parsed.anchor:
-        reached, names = parts[0], parts[1:]
-    else:
-        reached, names = "", parts
+    reached, names = _anchor_and_names(collapsed)
     # The components are the collapsed spellings the answer names; the walk
     # itself goes by the prefix it has reached, which differs from the spelling
     # once a local link has been followed.

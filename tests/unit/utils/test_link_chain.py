@@ -613,3 +613,51 @@ class TestAStepBackInsideATargetIsTakenByText:
 
         assert found is not None
         assert found.reaches_a_share is True
+
+
+class TestTheChainReadingStartsFromTheDirectoryTheLinkIsReallyIn:
+    """``link_chain_names_a_windows_share`` takes a link spelled through links.
+
+    ``repo/a`` is a link to ``b/c``, so ``repo/a/l3`` is the entry
+    ``repo/b/c/l3``, and its target ``../x`` is ``repo/b/x``. The chain reading
+    started its walk from ``dirname(text)``, the caller's spelling ``repo/a``,
+    read ``repo/x`` (not there), and answered local for a link to a share.
+    """
+
+    def test_a_relative_hop_through_a_linked_parent_is_found(self, tmp_path):
+        """Red at the base: the answer was False (local)."""
+        tree = TestARelativeHopIsTakenFromTheDirectoryItWasReachedIn
+        repo = tree._tree(tmp_path, share=True)
+
+        assert (
+            link_chain.link_chain_names_a_windows_share(str(repo / "a" / "l3")) is True
+        )
+
+    def test_the_same_tree_with_a_local_target_stays_local(self, tmp_path):
+        """Control: ``x`` is a plain directory, so the hop leads to a local name."""
+        tree = TestARelativeHopIsTakenFromTheDirectoryItWasReachedIn
+        repo = tree._tree(tmp_path, share=False)
+
+        assert (
+            link_chain.link_chain_names_a_windows_share(str(repo / "a" / "l3")) is False
+        )
+
+    def test_a_share_link_in_a_parent_of_the_text_is_the_answer(self, tmp_path):
+        """Red at the base: ``os.readlink`` on a path under a link to a share
+        found nothing there and the answer was None, with the link in the parent
+        never judged."""
+        (tmp_path / "lnk").symlink_to("\\\\server\\share")
+
+        assert (
+            link_chain.link_chain_names_a_windows_share(str(tmp_path / "lnk" / "entry"))
+            is True
+        )
+
+    def test_a_parent_that_is_not_there_leaves_the_chain_unjudged(self, tmp_path):
+        """Control: with no parent there is no entry to read."""
+        assert (
+            link_chain.link_chain_names_a_windows_share(
+                str(tmp_path / "missing" / "link")
+            )
+            is None
+        )
