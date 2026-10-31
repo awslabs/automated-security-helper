@@ -379,6 +379,24 @@ def warn_unmatched_directory_suppressions(
         if _pattern_components(_match_form(path))[-1] == "**":
             continue
         written = (recorded or {}).get(id(suppression), {}).get("path")
+        if (
+            isinstance(written, str)
+            and written != path
+            and not written.endswith(("/", "\\"))
+        ):
+            # The slash comes from the value the config read from the
+            # environment, not from what the file wrote (``${DIR}``, say). The
+            # written form cannot be shown with the slash, and advice that
+            # spelled ``${DIR}/**/*`` would resolve to ``dir//**/*``, which
+            # matches nothing: so no spelling is advised.
+            ASH_LOGGER.warning(
+                f"The suppression with path '{written}' matched no finding: the "
+                "path it reads ends in '/', and a suppression path ending in '/' "
+                "matches only that literal path, not the files in the directory. "
+                "To suppress the findings below the directory, make the path "
+                "name it without the trailing '/' and append '/**/*'."
+            )
+            continue
         if isinstance(written, str) and written.rstrip("/\\"):
             path = written
             directory = written.rstrip("/\\")
