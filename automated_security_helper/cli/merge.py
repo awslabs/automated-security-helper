@@ -2270,8 +2270,29 @@ def _converter_acceptance_ids(merged: AshAggregatedResults, config: Any) -> Set[
     return ids
 
 
+def _shard_converter_acceptance_ids(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]], config: Any
+) -> Set[str]:
+    """The acceptance ids of every shard, each read from that shard's own rows.
+
+    The merged converter row keeps one record per path, and a record the
+    completeness gate counts replaces an accepted one for the same path
+    (``_merge_converter_rows``), so an acceptance one shard recorded and
+    another shard's tool failure displaced is no longer on the merged row. The
+    shard's convert phase did register that suppression as used, and it is still
+    in ``used_suppressions``; reading the ids from the shards' own rows is what
+    lets the ``--ignore-suppressions`` clear keep it.
+    """
+    ids: Set[str] = set()
+    for _, results in loaded:
+        ids |= _converter_acceptance_ids(results, config)
+    return ids
+
+
 def apply_aggregated_suppressions(
-    merged: AshAggregatedResults, plugin_context: PluginContext
+    merged: AshAggregatedResults,
+    plugin_context: PluginContext,
+    converter_acceptance_ids: Optional[Set[str]] = None,
 ) -> AshAggregatedResults:
     """Run the aggregated suppression pass ``ash scan`` runs, over the merged SARIF.
 
@@ -2330,6 +2351,12 @@ def apply_aggregated_suppressions(
     Args:
         merged: The merged results, with metrics already populated from the union.
         plugin_context: Carries the scan's own config and ``ignore_suppressions``.
+        converter_acceptance_ids: The acceptance ids read from the shards' own
+            converter rows (:func:`_shard_converter_acceptance_ids`), kept by the
+            ``--ignore-suppressions`` clear beside the ones the merged rows
+            carry. A merged row holds one record per path, so an acceptance a
+            gate-counting record from another shard displaced is only on the
+            shard's row. None reads the merged rows alone.
 
     Returns:
         *merged*, with suppressions applied and metrics recomputed. Returned
@@ -2379,6 +2406,7 @@ def apply_aggregated_suppressions(
             # input was never converted, flag or no flag), so those ids stay.
             merged.used_suppressions.intersection_update(
                 _converter_acceptance_ids(merged, plugin_context.config)
+                | (converter_acceptance_ids or set())
             )
             # Written into the results for a later ``ash report`` over the file,
             # whose context carries no flag: the unused-suppressions reporter
@@ -3476,7 +3504,15 @@ def merge_command(
         trusted_config, merged.ash_config, reporter_plugins
     )
 
-    merged = apply_aggregated_suppressions(merged, plugin_context)
+    merged = apply_aggregated_suppressions(
+        merged,
+        plugin_context,
+        converter_acceptance_ids=(
+            _shard_converter_acceptance_ids(loaded, merged.ash_config)
+            if ignore_suppressions
+            else None
+        ),
+    )
 
     # The first write to disk, made only after every refusal has had its say.
     output_dir_path.mkdir(parents=True, exist_ok=True)

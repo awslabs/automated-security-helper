@@ -29,6 +29,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.cli.merge import (
     apply_aggregated_suppressions,
     lift_ash_suppressions,
+    merge_shard_results,
 )
 from automated_security_helper.models.asharp_model import (
     ConverterStatusInfo,
@@ -44,7 +45,12 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Suppression,
 )
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
-from tests.unit.cli.merge_shard_support import SCANNERS, build_shard
+from tests.unit.cli.merge_shard_support import (
+    SCANNERS,
+    as_loaded,
+    build_shard,
+    build_shards,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -409,6 +415,74 @@ def test_an_acceptance_with_no_recorded_id_is_rederived_from_its_path(tmp_path):
     )
 
     assert merged.used_suppressions == {expected}
+
+
+def test_an_acceptance_another_shards_tool_failure_displaced_survives_the_clear(
+    tmp_path,
+):
+    """One shard's suppression accepted a failed input and registered its id as
+    used; another shard's tool failure on the same path then replaced the
+    accepted record in the merged row (one record per path, the one the
+    completeness gate counts). Read from the merged row alone, the clear no
+    longer knew the id was a converter's and removed it from the record. Read
+    from each shard's own row, it stays. Red at the base: the keyword and the
+    helper do not exist, and the merged row carries no acceptance to read."""
+    # Imported here so that, at a tree without the helper, only this test is red
+    # and the rest of the module still collects and runs.
+    from automated_security_helper.cli.merge import _shard_converter_acceptance_ids
+
+    shards = build_shards(2)
+    shards[0].converter_results["jupyter"] = ConverterStatusInfo(
+        failed_inputs=[_accepted(ACCEPTED_INPUT, ACCEPTANCE_ID)]
+    )
+    shards[1].converter_results["jupyter"] = ConverterStatusInfo(
+        failed_inputs=[
+            FailedInputInfo(
+                path=ACCEPTED_INPUT, reason="nbconvert crashed", kind="tool"
+            )
+        ]
+    )
+    shards[0].used_suppressions = {ACCEPTANCE_ID, SHARD_MATCHED}
+    loaded = as_loaded(shards)
+    merged = merge_shard_results(loaded)
+    merged_records = merged.converter_results["jupyter"].failed_inputs
+    assert [record.accepted for record in merged_records] == [False]
+
+    lifted = apply_aggregated_suppressions(
+        merged,
+        _context(tmp_path, merged.ash_config, ignore_suppressions=True),
+        converter_acceptance_ids=_shard_converter_acceptance_ids(
+            loaded, merged.ash_config
+        ),
+    )
+
+    assert lifted.used_suppressions == {ACCEPTANCE_ID}
+
+
+def test_the_merged_row_alone_does_not_keep_a_displaced_acceptance(tmp_path):
+    """The control for the keyword: without the shards' ids the clear reads the
+    merged row, which no longer holds the displaced acceptance, so the id goes
+    with the rest of the record (the behavior every call without the keyword
+    keeps)."""
+    shards = build_shards(2)
+    shards[0].converter_results["jupyter"] = ConverterStatusInfo(
+        failed_inputs=[_accepted(ACCEPTED_INPUT, ACCEPTANCE_ID)]
+    )
+    shards[1].converter_results["jupyter"] = ConverterStatusInfo(
+        failed_inputs=[
+            FailedInputInfo(
+                path=ACCEPTED_INPUT, reason="nbconvert crashed", kind="tool"
+            )
+        ]
+    )
+    shards[0].used_suppressions = {ACCEPTANCE_ID, SHARD_MATCHED}
+    merged = merge_shard_results(as_loaded(shards))
+
+    lifted = apply_aggregated_suppressions(
+        merged, _context(tmp_path, merged.ash_config, ignore_suppressions=True)
+    )
+
+    assert lifted.used_suppressions == set()
 
 
 def test_a_record_a_suppression_did_not_accept_keeps_nothing(tmp_path):
