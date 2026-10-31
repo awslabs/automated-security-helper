@@ -263,10 +263,13 @@ def _no_scan_running(
     try:
         # Inside the try: a refusal here releases the change in the finally.
         if a_scan_in_another_server_holds(session_id):
+            # One answer for two causes: a scan of the session in another
+            # server, or that server holding the scan registry for the whole
+            # bounded wait (``sessions._BUSY_GATE_LOCK_WAIT_SECONDS``).
             raise SourceDeliveryBusyError(
                 "a scan of this session is running in another server sharing "
-                "the workspace root; change the delivered source after it "
-                "finishes"
+                "the workspace root, or another server is holding the scan "
+                "registry; change the delivered source after it finishes"
             )
         yield
     finally:

@@ -328,6 +328,27 @@ def test_a_change_is_refused_as_busy_while_another_server_holds_the_lock(
         pass  # the change goes on once the lock is free
 
 
+def test_the_busy_refusal_names_the_scan_registry_when_the_lock_is_the_reason(
+    root, another_servers_lock
+) -> None:
+    """No scan of the session was seen: the registry was held for the whole wait.
+
+    The refusal for a lock still held at the end of the bounded wait is the same
+    retryable error as the one for a scan, and its text has to be true of both,
+    so a client is not told a scan runs when another server was only holding
+    the registry.
+    """
+    _sandbox(root, REPLICATED)
+
+    with pytest.raises(sd.SourceDeliveryBusyError) as refused:
+        with sd._no_scan_running(REPLICATED):
+            pytest.fail("the change began while another server held the lock")
+
+    message = str(refused.value)
+    assert "another server" in message, message
+    assert "scan registry" in message, message
+
+
 def test_registering_a_scan_still_waits_for_the_lock_the_gate_gives_up(
     root, another_servers_lock
 ) -> None:
