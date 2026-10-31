@@ -360,7 +360,12 @@ def test_a_path_that_climbs_back_in_is_matched_as_the_file_it_names(
     finding the scanner had reported, against the module's rule that a finding
     its matching misses is reported and never hidden. Every kind now reads the
     collapsed path, so an entry that names ``x`` leaves the file alone and an
-    entry that names ``vendor`` still hides it."""
+    entry that names ``vendor`` still hides it.
+
+    The absolute path is the one the SARIF step builds from the same URI
+    (the source directory joined with it, ``..`` kept), not a collapsed one:
+    checkov's candidates are cut from it, so a collapsed path in this test never
+    reached the spelling that hid the entry ``x`` from the checkov kind."""
     entry = ClientScannerExclusion(
         scanner=scanner,
         option=option,
@@ -370,7 +375,7 @@ def test_a_path_that_climbs_back_in_is_matched_as_the_file_it_names(
         paths=("x/**",) if kind == "trivy-ignore-file" else paths,
     )
     assert not entry.hides(
-        relative="x/../vendor/a.py", absolute="/s/vendor/a.py", rule_id=rule_id
+        relative="x/../vendor/a.py", absolute="/s/x/../vendor/a.py", rule_id=rule_id
     )
     control = ClientScannerExclusion(
         scanner=scanner,
@@ -381,7 +386,7 @@ def test_a_path_that_climbs_back_in_is_matched_as_the_file_it_names(
         paths=("**/vendor/**",) if kind == "trivy-ignore-file" else (),
     )
     assert control.hides(
-        relative="x/../vendor/a.py", absolute="/s/vendor/a.py", rule_id=rule_id
+        relative="x/../vendor/a.py", absolute="/s/x/../vendor/a.py", rule_id=rule_id
     )
 
 

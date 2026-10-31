@@ -847,6 +847,19 @@ def files_kept_by_patterns(
 _REGEX_SYNTAX = re.compile(r"[.*+?^$|()\[\]{}\\]")
 
 
+def _as_walked(absolute: str) -> str:
+    """``absolute`` as a directory walk would spell it: no ``.`` or ``..`` part.
+
+    A path with neither is returned as it was, in the caller's own spelling. One
+    with either is collapsed (``posixpath.normpath`` over the slashed form), so
+    ``/s/x/../vendor/a.py`` is ``/s/vendor/a.py``.
+    """
+    slashed = _slashed(absolute)
+    if not {".", ".."}.intersection(slashed.split("/")):
+        return absolute
+    return posixpath.normpath(slashed)
+
+
 def checkov_skips(
     pattern: str,
     absolute: str,
@@ -874,7 +887,14 @@ def checkov_skips(
     deadline, and inline it would hold this process's interpreter lock for the
     whole search.
     A literal pattern, or one that did not compile, is searched inline.
+
+    checkov matches against the path it walked, which never spells a ``.`` or
+    ``..`` directory. The SARIF step keeps a ``..`` of the finding's URI in
+    ``absolute`` (``/s/x/../vendor/a.py``), so it is collapsed here before the
+    candidates are built; matched as spelled, an entry ``x`` found the ``x`` and
+    hid a finding checkov would have reported at ``vendor/a.py``.
     """
+    absolute = _as_walked(absolute)
     candidates = [absolute]
     parts = [part for part in _slashed(relative).split("/") if part]
     base = absolute[: len(absolute) - len("/".join(parts))].rstrip("/")
