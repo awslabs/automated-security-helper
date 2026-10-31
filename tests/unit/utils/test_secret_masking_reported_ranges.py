@@ -386,6 +386,43 @@ class TestAResourceLevelCredentialFinding:
 
         assert _context(model, 1) == RESOURCE_MASKED
 
+    @pytest.mark.parametrize("column", [None, 1])
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "The database password must not be a plaintext string.",
+            "Resource 'Database': the password must not be a plaintext string.",
+        ],
+        ids=["plain", "quotes-the-resource-name"],
+    )
+    def test_the_range_runs_to_the_end_whatever_else_the_finding_says(
+        self, message, column
+    ):
+        """Where the range heuristics meet. A quoted value limits a finding to its
+        own line, but only the value a hard-coded-password rule quotes after its
+        label does: the logical ID a cfn-nag style message names is no value. A
+        start column of 1 is a placeholder, not a span. Either one winning
+        would shrink the range to line 3 and show MasterUserPassword."""
+        finding = _result(
+            "AwsSolutions-RDS-1",
+            "template.yaml",
+            3,
+            message,
+            "cdk-nag",
+            end=3,
+            column=column,
+        )
+        model = _results(
+            finding,
+            _neighbor("template.yaml", 6, 3, RESOURCE_LINES),
+            _neighbor("template.yaml", 40, 40, [FAR_LINE]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _context(model, 1) == RESOURCE_MASKED
+        assert _context(model, 2) == MASKED_LINE + "\n"
+
     def test_a_producers_real_end_line_bounds_the_range(self):
         """Control: checkov reports the resource block's own last line."""
         model = _results(
