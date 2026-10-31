@@ -4810,7 +4810,10 @@
   exit 2. `ash config validate` and `ash config lint` also exit 3, not 1, for a
   file that cannot be loaded at all (missing, a directory, unreadable, not UTF-8,
   not valid YAML, JSON or TOML, or using a YAML alias) and when discovery refuses
-  a source; 1 still means a file that loads has problems. They, and
+  a source. A file that loads but that a scan would refuse exits 3 as well. For
+  a file that a scan would accept, both commands exit 0 and print what they find
+  as warnings; `ash config lint` exits 1 only when `--fix` or `--fix-unused`
+  could not rewrite the file. They, and
   `ash config update`, read the file as a scan does, so a FIFO at the config name
   is refused at once instead of blocking the command.
 
