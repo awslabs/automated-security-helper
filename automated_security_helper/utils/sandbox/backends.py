@@ -580,14 +580,19 @@ def _operator_ca_reads(
 def _carved_homes(policy: SandboxPolicy) -> List[Path]:
     """The homes a granted path that holds one must not reopen, resolved.
 
-    HOME's directory, the passwd entry's when it is another one, and each directory
-    or file a link at the top of either names (``policy._home_link_targets``), which
-    is part of that home. The filesystem root is left out: a HOME of "/" (a
-    container's) names no home, and as one it would sit inside no path and take
-    every other home's place.
+    HOME's directory and the passwd entry's when it is another one. The filesystem
+    root is left out: a HOME of "/" (a container's) names no home, and as one it
+    would sit inside no path and take every other home's place.
+
+    A directory or file that a link at the top of a home names
+    (``policy._home_link_targets``) is not carved. It lies outside every system
+    read path, so a path that holds it is one the policy lists for the scan itself
+    (the scanned tree, an operator's extra read path), and the policy's own path is
+    read whole, as bwrap and firejail read it (``_hidden_around`` leaves a link
+    target inside a shown path alone). What no listed path holds stays unread under
+    every backend.
     """
-    homes = _homes_to_hide(policy)
-    return homes + _home_link_targets(homes, files=True)
+    return _homes_to_hide(policy)
 
 
 def _around(paths: Sequence[Path], homes: Sequence[Path]) -> List[Path]:

@@ -294,3 +294,68 @@ def test_sandbox_exec_gives_back_the_policys_own_path_inside_the_home(prefix, tm
     assert _last_file_read_rule(lines, home / ".ssh" / "id").startswith(
         "(deny file-read*"
     )
+
+
+def _backend_reads(backend, policy, path, prefix, tmp_path, monkeypatch):
+    """Whether the rules ``backend`` builds for ``policy`` let a scanner read ``path``.
+
+    Landlock: some grant is the path or holds it. sandbox-exec: the last file-read
+    rule that covers it is an allow. firejail, which blacklists rather than
+    grants: ``_hidden_around`` hides nothing of it. The stand-in for /tmp keeps
+    firejail's own skip of everything under /tmp from answering for these paths.
+    """
+    path = _real(path)
+    if backend == "landlock":
+        granted = _landlock_read_grants(policy, tmp_path, monkeypatch)
+        return any(p == path or p in path.parents for p in granted)
+    if backend == "sandbox-exec":
+        profile = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        return _last_file_read_rule(profile.splitlines(), path).startswith(
+            "(allow file-read*"
+        )
+    monkeypatch.setattr(backends_module, "_TMP_ROOT", tmp_path / "stand-in-tmp")
+    shown = [_real(p) for p in policy.read_only]
+    return backends_module._hidden_around(path, shown, [_real(prefix.home)]) == []
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [
+        pytest.param(
+            "landlock",
+            marks=pytest.mark.skipif(
+                sys.platform == "win32",
+                reason="Landlock is a Linux backend; its plan document is read on "
+                "POSIX hosts",
+            ),
+        ),
+        "sandbox-exec",
+        "firejail",
+    ],
+)
+def test_every_backend_reads_a_file_a_home_link_names_inside_the_scanned_tree(
+    prefix, tmp_path, monkeypatch, backend
+):
+    """~/.gitconfig -> <tree>/gitconfig, with <tree> the tree being scanned.
+
+    The target is outside the home and outside every system read path, so a path
+    that holds it is one the policy lists for the scan: it is read like the rest of
+    that path under every backend, as firejail reads it. A file a home link names
+    beside the tree is a file of the user's the policy lists nowhere, and stays
+    unread under every backend (the control).
+    """
+    tree = tmp_path / "persist" / "dotfiles"
+    inside = tree / "gitconfig"
+    beside = tmp_path / "persist" / "netrc"
+    tree.mkdir(parents=True)
+    inside.write_text("[user]\n\tname = me\n")
+    beside.write_text("machine example login me password x\n")
+    try:
+        (prefix.home / ".gitconfig").symlink_to(inside)
+        (prefix.home / ".netrc").symlink_to(beside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available on this platform")
+    policy = _policy(tree)
+
+    assert _backend_reads(backend, policy, inside, prefix, tmp_path, monkeypatch)
+    assert not _backend_reads(backend, policy, beside, prefix, tmp_path, monkeypatch)
