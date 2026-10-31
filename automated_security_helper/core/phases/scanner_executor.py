@@ -148,11 +148,19 @@ def _failure_text(error: BaseException, values: Iterable[str]) -> str:
     from the environment, and the named exit reaches ash.log, the row's errors,
     the failure dict and the ERROR event; written from the raw code, it carried
     the value in clear beside a description that had hidden it.
+
+    A text code is redacted first and quoted after. ``repr`` writes a newline,
+    a quote or a backslash in its escaped form, so a value that holds one is no
+    longer in the quoted text as the configuration read it, and redacting the
+    quoted text left it in clear.
     """
     described = error_text(error, values)
     if not isinstance(error, SystemExit):
         return described
-    code_text = text_without_values(repr(error.code), values)
+    if isinstance(error.code, str):
+        code_text = repr(text_without_values(error.code, values))
+    else:
+        code_text = text_without_values(repr(error.code), values)
     named = f"the scanner called sys.exit({code_text})"
     if not described or described == text_without_values(str(error.code), values):
         return named

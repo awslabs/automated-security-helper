@@ -219,6 +219,25 @@ def test_an_exit_message_quoting_an_environment_value_is_redacted(
     assert "the scanner called sys.exit(3)" in _reasons(plain), plain.errors
 
 
+def test_an_exit_message_with_an_escaped_character_is_redacted_before_it_is_quoted():
+    """The named exit quotes the code with ``repr``, which writes a newline as the
+    two characters backslash and n. A value holding a newline is not in that
+    quoted text as the configuration read it, so redacting the quoted text left
+    it in clear. Red at the base: both lines of the value are in the text."""
+    value = "env-canary-line-one\nenv-canary-line-two"
+
+    described = scanner_executor._failure_text(
+        SystemExit(f"token {value} refused"), [value]
+    )
+
+    assert "the scanner called sys.exit(" in described, described
+    assert "env-canary-line-one" not in described, described
+    assert "env-canary-line-two" not in described, described
+    # The control: a plain code is named as before beside the planted value.
+    plain = scanner_executor._failure_text(SystemExit(3), [value])
+    assert "the scanner called sys.exit(3)" in plain, plain
+
+
 def test_the_scanner_handler_redacts_an_environment_value_from_the_exit(
     plugin_context, monkeypatch, caplog
 ):
