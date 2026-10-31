@@ -142,6 +142,9 @@ def test_a_json_report_is_parsed_once_for_a_terminal(results_dir, monkeypatch):
         original(content, report_format, stream=terminal, **kwargs)
 
     monkeypatch.setattr(report_module, "_write_report", on_a_terminal)
+    # The command hands the document over only when its stdout is a terminal;
+    # the runner's is not, and the writer above stands in for the real stream.
+    monkeypatch.setattr(report_module, "_stdout_is_terminal", lambda: True)
     monkeypatch.delenv("NO_COLOR", raising=False)
     parses: list = []
     real_loads = json.loads
@@ -159,3 +162,32 @@ def test_a_json_report_is_parsed_once_for_a_terminal(results_dir, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "runs" in terminal.getvalue(), terminal.getvalue()
     assert len(parses) == 1, parses
+
+
+@pytest.mark.parametrize(
+    ("on_a_terminal", "extra", "handed_over"),
+    [(False, [], False), (True, ["--no-color"], False), (True, [], True)],
+    ids=["a-pipe", "a-terminal-without-color", "a-terminal-with-color"],
+)
+def test_the_parsed_document_is_handed_over_only_to_indent_on_a_terminal(
+    results_dir, monkeypatch, on_a_terminal, extra, handed_over
+):
+    """Only the indenting on an interactive terminal reads the parsed document.
+    Handed over anywhere else, the tree of a report of tens of megabytes stays
+    alive beside the report text for the whole write."""
+    seen: list = []
+
+    def recorder(content, report_format, **kwargs):
+        seen.append(kwargs["parsed"])
+
+    monkeypatch.setattr(report_module, "_write_report", recorder)
+    monkeypatch.setattr(report_module, "_stdout_is_terminal", lambda: on_a_terminal)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    document = json.dumps({"version": "2.1.0", "runs": []})
+
+    with patch(SARIF_REPORT, return_value=document):
+        result = _report(results_dir, "sarif", *extra)
+
+    assert result.exit_code == 0, result.output
+    assert len(seen) == 1, seen
+    assert (seen[0] is not report_module._NOT_PARSED) is handed_over, seen

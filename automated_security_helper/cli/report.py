@@ -172,6 +172,12 @@ def _report_is_json(report_format: str, reporter_plugin: object) -> bool:
 _NOT_PARSED = object()
 
 
+def _stdout_is_terminal() -> bool:
+    """Whether stdout is an interactive terminal, which is the one place
+    ``_write_report`` indents a JSON report from the parsed document."""
+    return bool(getattr(sys.stdout, "isatty", lambda: False)())
+
+
 # The longest content of a JSON format that failed the JSON check the error
 # quotes. A reporter's error text in the report's place is one short line, and
 # the line is the reason. Anything longer, on more than one line, or shaped like a
@@ -1206,11 +1212,18 @@ def report_command(
                     _non_json_report_text(report_content, exc),
                 )
                 raise typer.Exit(1)
+        pretty_output = bool(color and not os.environ.get("NO_COLOR"))
+        if not (pretty_output and _stdout_is_terminal()):
+            # Only the indenting on an interactive terminal reads the document.
+            # Elsewhere the parsed tree of a report of tens of megabytes would
+            # stay alive beside the report text, and the encoded bytes, for the
+            # whole write; the check above is all it was parsed for.
+            parsed_report = _NOT_PARSED
         try:
             _write_report(
                 report_content,
                 report_format,
-                pretty=(color and not os.environ.get("NO_COLOR")),
+                pretty=pretty_output,
                 is_json=report_is_json,
                 parsed=parsed_report,
             )
