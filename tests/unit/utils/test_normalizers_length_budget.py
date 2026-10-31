@@ -10,6 +10,7 @@ its name failed to be made, so the input was never scanned. ``max_bytes`` cuts a
 long name and ends it in a digest of the whole input.
 """
 
+import hashlib
 import re
 
 import pytest
@@ -18,7 +19,7 @@ from automated_security_helper.utils.normalizers import get_normalized_filename
 
 pytestmark = pytest.mark.unit
 
-DIGEST_TAIL = re.compile(r"-[0-9a-f]{12}$")
+DIGEST_TAIL = re.compile(r"_z[0-9a-f]{12}$")
 #: U+00E9: a word character, so it passes through as two bytes of UTF-8.
 E_ACUTE = chr(0xE9)
 
@@ -56,6 +57,39 @@ def test_two_long_names_that_share_their_first_bytes_stay_apart():
     assert first != second
     assert len(first.encode("utf-8")) <= 200
     assert len(second.encode("utf-8")) <= 200
+
+
+def test_an_input_spelled_like_a_cut_name_does_not_take_its_name():
+    # A cut name was ``<first bytes>-<digest>``, and ``-`` passes through the
+    # escaper as it is, so an input spelled that way came back as the same name.
+    budget = 40
+    long_input = "a" * 60
+    digest = hashlib.sha256(long_input.encode("utf-8")).hexdigest()[:12]
+    lookalike = "a" * 27 + "-" + digest
+
+    cut = get_normalized_filename(long_input, max_bytes=budget)
+    uncut = get_normalized_filename(lookalike, max_bytes=budget)
+
+    assert len(lookalike.encode("utf-8")) == budget
+    assert uncut == lookalike
+    assert cut != uncut
+    assert len(cut.encode("utf-8")) <= budget
+    assert DIGEST_TAIL.search(cut)
+
+
+def test_a_cut_that_ends_in_an_escape_does_not_read_as_a_longer_token():
+    # Escaped, ``.`` is ``__`` and a following ``z`` is not part of the token, so
+    # an uncut name can hold ``__z``. A cut that ended on one ``_`` must not
+    # join the separator into that spelling.
+    budget = 30
+    long_input = "a" * 15 + "." + "b" * 40
+    cut = get_normalized_filename(long_input, max_bytes=budget)
+    digest = cut[-12:]
+    lookalike = get_normalized_filename("a" * 15 + ".z" + digest)
+
+    assert len(cut.encode("utf-8")) <= budget
+    assert DIGEST_TAIL.search(cut)
+    assert cut != lookalike
 
 
 def test_a_cut_through_a_multibyte_character_leaves_valid_text():

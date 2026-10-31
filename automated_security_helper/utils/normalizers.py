@@ -43,19 +43,29 @@ def _escape(character: str, fold_case: bool = False) -> str:
 #: How many characters of the input's SHA-256 a cut name carries.
 _DIGEST_CHARS = 12
 
+#: What joins a cut name to its digest. ``_z`` is not one of the tokens the
+#: escaper writes (``__``, ``_0``, ``_s``, ``_x``, ``_u``, ``_U``), so a cut name
+#: holds a token no uncut name holds and the two never meet, whatever the input
+#: spells. A plain ``-`` could not do this: ``-`` passes through as it is, so an
+#: input spelled like a cut name was returned as the very same name.
+_DIGEST_SEPARATOR = "_z"
+
 
 def _cut_with_digest(name: str, source: str, max_bytes: int) -> str:
     """*name* when it fits *max_bytes* of UTF-8, else its first bytes and a digest
-    of *source*, ``<cut>-<digest>``, at most *max_bytes* in all."""
+    of *source*, ``<cut>_z<digest>``, at most *max_bytes* in all."""
     encoded = name.encode("utf-8")
     if len(encoded) <= max_bytes:
         return name
     digest = hashlib.sha256(source.encode("utf-8", "surrogateescape")).hexdigest()[
         :_DIGEST_CHARS
     ]
-    room = max_bytes - len(digest) - 1
-    cut = encoded[:room].decode("utf-8", "ignore").rstrip("-_")
-    return f"{cut}-{digest}"
+    room = max_bytes - len(digest) - len(_DIGEST_SEPARATOR)
+    # A cut that ends in an escape character would join the separator into a
+    # token of its own (``_`` and ``_z`` read as ``__`` and ``z``), so it is
+    # dropped; a cut through the rest of a token leaves a token no name holds.
+    cut = encoded[:room].decode("utf-8", "ignore").rstrip("_")
+    return f"{cut}{_DIGEST_SEPARATOR}{digest}"
 
 
 def get_normalized_filename(
@@ -87,9 +97,10 @@ def get_normalized_filename(
     of them was once a single ``-``. A path with many of them can run past the 255 bytes a file
     name may take, and the directory made for it then fails to be made. A caller
     that makes a name of the result passes ``max_bytes`` (UTF-8 bytes): a longer
-    name is cut and ends in ``-`` and a digest of the whole input, so two long
+    name is cut and ends in ``_z`` and a digest of the whole input, so two long
     names that share their first bytes stay apart, and the name is never longer
-    than ``max_bytes``. A name that fits is returned as it is.
+    than ``max_bytes``. ``_z`` is a token the escaper never writes, so no input
+    has an uncut name equal to a cut one. A name that fits is returned as it is.
 
     Args:
         str_to_normalize (str | Path): The string to normalize.
