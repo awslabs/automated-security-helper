@@ -2253,16 +2253,28 @@ async def _off_the_loop(
     anything (:meth:`_WorkspaceScanClaim.thread_starts`), so the release follows
     the thread's return when the call has left first. A thread that finds the
     claim already released does nothing, as when the executor drops the job.
+
+    The thread holds the call's run log scope the same way, until it returns:
+    its lines belong to the scan, and a call cancelled here releases its own
+    hold (:func:`_in_a_run_log_scope_of_its_own`), which closed the scope under a
+    thread that kept logging.
     """
 
     def _held() -> _T:
         if claim is not None and not claim.thread_starts():
             raise RuntimeError("the workspace scan was cancelled before it started")
+        # The thread runs in a copy of the call's context, so this is the scope
+        # the call logs under; None outside a scope, which holding ignores.
+        scope = current_run_log_scope()
+        hold_run_log_scope(scope)
         try:
             return function()
         finally:
-            if claim is not None:
-                claim.thread_returns()
+            try:
+                if claim is not None:
+                    claim.thread_returns()
+            finally:
+                release_run_log_scope(scope)
 
     return await asyncio.to_thread(_held)
 

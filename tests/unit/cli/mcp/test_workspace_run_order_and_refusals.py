@@ -42,6 +42,7 @@ from automated_security_helper.models.workspace import (
     WorkspaceProjectResult,
     WorkspaceResults,
 )
+from automated_security_helper.utils import log as log_module
 from automated_security_helper.workspace.execution import (
     ProjectScanSettings,
     WorkspaceRunResult,
@@ -1165,6 +1166,70 @@ class TestAThreadThatReadsTheTreeHoldsTheClaim:
             assert await asyncio.to_thread(counted.released.wait, 10)
 
         assert counted.returned == 1
+
+
+class TestAThreadThatLogsHoldsTheRunLogScope:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("blocked", ["_resolve", "build_project_scan_settings"])
+    async def test_a_call_cancelled_while_a_thread_runs_keeps_the_scope_open(
+        self, tmp_path, monkeypatch, _fresh_registry, blocked
+    ):
+        """Red at the base: the scope closed under the thread.
+
+        The plan's resolution (``_resolve``) and the settings builder run on
+        threads that log under the scan's run log scope. Cancelling the call
+        released every hold on the scope that the call owned, the wrapper's own
+        for the first and the scan's share for the second, and closed it while
+        the thread kept logging under a retired scope. The thread holds the scope
+        itself until it returns, and the last hold closes it.
+        """
+        monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp"))
+        monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
+        entered = threading.Event()
+        release = threading.Event()
+        closed_by_the_thread = threading.Event()
+        seen: dict = {}
+        loop_thread = threading.get_ident()
+        real_release = workspace_module.release_run_log_scope
+
+        def blocking(*args, **kwargs):
+            seen["scope"] = log_module.current_run_log_scope()
+            entered.set()
+            release.wait(timeout=10)
+            raise RuntimeError("stand-in resolution ended")
+
+        def release_and_note(scope):
+            real_release(scope)
+            if threading.get_ident() != loop_thread:
+                closed_by_the_thread.set()
+
+        claim = workspace_module._WorkspaceScanClaim(None, counted=_Counted())
+        plan = _plan(tmp_path)
+        scan = workspace_module._in_a_run_log_scope_of_its_own(
+            workspace_module._scan_workspace
+        )
+
+        with (
+            patch.object(workspace_module, blocked, side_effect=blocking),
+            patch.object(
+                workspace_module, "release_run_log_scope", side_effect=release_and_note
+            ),
+        ):
+            task = asyncio.ensure_future(
+                scan(workspace_file=plan.workspace_file, claim=claim)
+            )
+            assert await asyncio.to_thread(entered.wait, 10)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            scope = seen["scope"]
+            assert scope is not None
+            assert scope in log_module._ACTIVE_RUN_LOG_SCOPES
+            release.set()
+            assert await asyncio.to_thread(closed_by_the_thread.wait, 10)
+
+        assert scope not in log_module._ACTIVE_RUN_LOG_SCOPES
 
 
 class TestTheSettleRunsUnderTheSessionsPresence:
