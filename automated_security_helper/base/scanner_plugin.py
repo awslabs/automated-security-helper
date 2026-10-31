@@ -2053,9 +2053,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # does its own bounded cut inside the shared helper.
         stderr_text = "\n".join(self.errors).strip()
         # ``errors`` also holds the notes ASH's own ``_plugin_log`` put there
-        # (a timeout notice, the offline explainer), which are not what the
-        # tool wrote: when they are all it holds, the tool's stderr log is
-        # still unread, and is read below beside them.
+        # (a timeout notice, say), which are not what the tool wrote: when they
+        # are all it holds, the tool's stderr log is still unread, and is read
+        # below beside them. The offline explainer is not one of them. The uv
+        # layer takes its line out of the notes because it quotes the log
+        # itself, so it counts as the tool's text here and the log is not read
+        # beside it (the docstring above says the same).
         tool_said_nothing = not "\n".join(self._tool_error_lines()).strip()
         values_were_read = False
         read_values: Optional[Tuple[str, ...]] = None
