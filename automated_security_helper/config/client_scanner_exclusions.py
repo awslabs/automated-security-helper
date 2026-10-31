@@ -1563,7 +1563,13 @@ def _names_an_operator_file(
     POSIX path, and resolved. ``operator_entries`` holds, for each operator
     document's value, the text and its resolutions (``_operator_entries``).
 
-    A value that matches as text is the operator's own spelling and is kept.
+    A value that matches as text is answered with the operator's file as the
+    option holds it: the document's text anchored at that document's
+    directory (``operator_entries`` stores it so). An absolute text is its own
+    answer, so the value is kept. A relative text is not: kept relative, the
+    option names a file by a base trivy resolves against its own working
+    directory, which can be the scanned tree, where the client's own file of
+    that name would apply unmarked.
     A value that matches only once resolved (a link, or another route to the
     operator's file) is answered with the operator's resolved path instead:
     the option then names the operator's file directly, and the tool, which
@@ -1585,9 +1591,10 @@ def _names_an_operator_file(
     any other client value.
     """
     if value in operator_entries:
-        return value
-    if Path(value).as_posix() in operator_entries:
-        return value
+        return str(operator_entries[value])
+    posix = Path(value).as_posix()
+    if posix in operator_entries:
+        return str(operator_entries[posix])
     if not _lexically_under(value, inside):
         return None
     try:
@@ -1636,17 +1643,28 @@ def _operator_entries(
     directory, so a relative operator value compares with the anchored absolute
     path the merged config holds.
     """
+    from automated_security_helper.config.operator_paths import anchored_path
+
     found: Dict[str, Any] = {pattern: pattern for pattern in spec.default}
 
     def take(value: Any, directory: Optional[Path]) -> None:
         if spec.kind == "trivy-ignore-file":
             text = _path_text(value)
             if text:
-                found.setdefault(text, text)
-                found.setdefault(Path(text).as_posix(), text)
+                # What the option holds for this file: the text anchored at the
+                # document's directory, as the loader anchors it. A relative
+                # text kept as it was is not the operator's file once it
+                # reaches trivy, whose base is not that directory.
+                held = (
+                    text
+                    if directory is None
+                    else anchored_path(text, directory, expands_variables=False)
+                )
+                found.setdefault(text, held)
+                found.setdefault(Path(text).as_posix(), held)
                 anchored = Path(text) if directory is None else directory / text
                 try:
-                    found.setdefault(anchored.resolve().as_posix(), text)
+                    found.setdefault(anchored.resolve().as_posix(), held)
                 except (OSError, RuntimeError, ValueError):
                     pass
             return

@@ -455,6 +455,26 @@ def test_an_operator_chain_files_ignore_file_survives_a_delivered_override(tmp_p
     assert config._client_scanner_exclusions == []
 
 
+def test_a_delivered_relative_ignore_file_equal_to_the_operators_is_anchored(tmp_path):
+    """A delivered ``.trivyignore`` whose text equals the operator's relative
+    text was accepted as the operator's and kept relative, and a relative
+    value is resolved by trivy against a base that can be the scanned tree,
+    where the client's own ``.trivyignore`` of that name applies unmarked. The
+    option now holds the operator's file as the operator's document anchors it."""
+    config = AshConfig()
+    options = config.scanners.trivy.options
+    options.ignore_file = ".trivyignore"
+    operator = {"scanners": {"trivy": {"options": {"ignore_file": ".trivyignore"}}}}
+    delivered = {"scanners": {"trivy": {"options": {"ignore_file": ".trivyignore"}}}}
+
+    _strip(config, delivered, operator, tmp_path)
+
+    assert options.ignore_file == str(
+        _operator_document(tmp_path).parent / ".trivyignore"
+    )
+    assert config._client_scanner_exclusions == []
+
+
 def test_an_entry_an_operator_file_adds_by_a_patch_operation_is_the_operators(
     tmp_path,
 ):
