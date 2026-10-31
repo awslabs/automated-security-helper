@@ -801,6 +801,30 @@ def run_command(args: List[str], shell: bool = False):
     from automated_security_helper.utils.uv_tool_runner import find_uv_or_none
 
     values = _INSTALL_VALUES.get()
+    if shell and isinstance(args, (list, tuple)) and len(args) != 1:
+        # One command line for the shell is one string. Several words under
+        # shell=True have no reading that is safe: POSIX runs the first word as
+        # the script and the rest as its $0, $1, ..., and a space join hands the
+        # shell the words to read again, so `["bash", "-c", "cd d && make"]`
+        # would run `bash -c cd d` and then `make` in the wrong directory, and a
+        # Windows path with a space would lose the quoting list2cmdline gives it.
+        # No words at all is no line either: handed on as `[]`, the runner would
+        # have nothing to run under a shell.
+        # Not run, and counted as a failed command; the plugin declares the line.
+        if args:
+            print(
+                "[bold red]Not run: a command declared with shell=True is one "
+                f"command line for the shell, and this one is {len(args)} "
+                f"separate words: {escape(_shown_command(args, values))}. Declare "
+                "the whole line as one string.[/bold red]"
+            )
+        else:
+            print(
+                "[bold red]Not run: a command declared with shell=True is one "
+                "command line for the shell, and this one has no words. Declare "
+                "the whole line as one string.[/bold red]"
+            )
+        return 1
     if args and not shell and args[0] == "uv":
         # Plugins declare their uv installs as `uv ...`. Resolved like any other
         # program name, that found only a uv on PATH or in the ASH bin directory,
@@ -838,13 +862,14 @@ def run_command(args: List[str], shell: bool = False):
                     timeout=INSTALL_COMMAND_TIMEOUT_SECONDS,
                 )
         else:
-            # A CustomCommand declared shell=True is one shell command line: its
-            # arguments are its words, joined by spaces exactly as the "Running
-            # command" line shows them, so what the shell expands is what was
-            # printed (an argument the shell must read as given carries its own
-            # quoting). Handed to Popen as a list with shell=True, POSIX runs
-            # `sh -c` on the first word alone and passes the rest as $0, $1, ...
-            command = " ".join(args) if shell and isinstance(args, list) else args
+            # A CustomCommand declared shell=True is one shell command line, and
+            # its one string is handed to the shell as written. Handed to Popen as
+            # a list with shell=True, POSIX runs `sh -c` on the first word alone
+            # and passes the rest as $0, $1, ...; a list of several words is
+            # refused above, since joining it would have the shell read the words
+            # again, whatever quoting each carried.
+            is_one_line = shell and isinstance(args, (list, tuple)) and len(args) == 1
+            command = args[0] if is_one_line else args
             with empty_directory() as start:
                 result = run_cmd(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
                     args=command,

@@ -257,18 +257,19 @@ def test_a_command_iterable_that_raises_raises_inside_the_check():
 def test_a_custom_command_keeps_its_shell_flag():
     """The flag was dropped before the installer saw the command."""
     commands = _well_formed_commands(
-        [CustomCommand(args=["echo", "$HOME"], shell=True), ["pip", "install", "x"]]
+        [CustomCommand(args=["echo $HOME"], shell=True), ["pip", "install", "x"]]
     )
 
-    assert commands == [(["echo", "$HOME"], True), (["pip", "install", "x"], False)]
+    assert commands == [(["echo $HOME"], True), (["pip", "install", "x"], False)]
 
 
 def test_a_shell_command_reaches_the_runner_as_one_command_line(monkeypatch):
     """With the flag carried (the base returns the CustomCommand itself), the
     installer handed the runner the argv LIST with shell=True; on POSIX, Popen
     then runs `sh -c` on the first word alone and the rest become $0, $1, ...,
-    so `echo $HOME` printed an empty line. The words are joined into the one
-    command line the "Running command" line shows."""
+    so a list of words printed an empty line for `echo $HOME`. The one string a
+    shell command is declared as reaches the shell as written, the line the
+    "Running command" line shows."""
     seen = {}
 
     def fake_run(args, **kwargs):
@@ -279,7 +280,7 @@ def test_a_shell_command_reaches_the_runner_as_one_command_line(monkeypatch):
     monkeypatch.setattr(subprocess_utils, "run_command", fake_run)
     monkeypatch.setattr(subprocess_utils, "run_succeeded", lambda result: True)
 
-    code = dependencies.run_command(["echo", "$HOME"], shell=True)
+    code = dependencies.run_command(["echo $HOME"], shell=True)
 
     assert code == 0
     assert seen["args"] == "echo $HOME", seen["args"]
