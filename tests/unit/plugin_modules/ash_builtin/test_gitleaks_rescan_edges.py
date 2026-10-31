@@ -48,6 +48,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scan
     GitleaksScanner,
     GitleaksScannerConfig,
     GitleaksScannerConfigOptions,
+    gitleaksignore_candidates,
     gitleaksignore_files,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -134,6 +135,70 @@ def test_a_plain_entry_still_names_its_file_once():
 
 def test_a_two_part_line_hides_nothing():
     assert gitleaksignore_files(b"app/x.py:4\n") == []
+
+
+# --------------------------------------------------------------------------- #
+# The candidate names are bounded
+# --------------------------------------------------------------------------- #
+
+
+def test_a_line_of_colons_makes_only_names_a_file_can_have():
+    """A line of ``a:`` repeated to the 64 KiB a line may hold splits at every
+    colon: about 32,000 prefixes, quadratic in the line, built from the scanned
+    tree's own text before the re-scan's deadline is set. Only a prefix whose
+    last component fits NAME_MAX is a name any file can have."""
+    line = b"a:" * 32767 + b"\n"
+
+    files, unread = gitleaksignore_candidates(line)
+
+    assert files == [("a:" * count)[:-1] for count in range(1, 129)]
+    assert unread == 0
+    assert all(len(name) <= module.MAX_NAME_LENGTH for name in files)
+
+
+def test_a_long_directory_part_does_not_hide_a_short_last_component():
+    """The limit is on the last component, not the whole prefix."""
+    directory = "d" * 300
+    files, _ = gitleaksignore_candidates(f"{directory}/x.py:github-pat:1\n".encode())
+    assert files == [f"{directory}/x.py"]
+
+
+def test_a_prefix_longer_than_a_path_is_never_made(monkeypatch):
+    monkeypatch.setattr(module, "MAX_CANDIDATE_LENGTH", 20)
+    files, unread = gitleaksignore_candidates(b"a/b/c:" + b"x/" * 20 + b":r:1\n")
+    assert files == ["a/b/c"]
+    assert unread == 0
+
+
+def test_names_past_the_limit_are_counted_as_unread(monkeypatch):
+    monkeypatch.setattr(module, "MAX_IGNORE_CANDIDATES", 3)
+    data = b"".join(f"app/f{index}.py:github-pat:1\n".encode() for index in range(10))
+
+    files, unread = gitleaksignore_candidates(data)
+
+    assert files == ["app/f0.py", "app/f1.py", "app/f2.py"]
+    assert unread == 7
+
+
+def test_names_the_limit_left_unread_fail_the_scan_as_incomplete(
+    tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setattr(module, "MAX_IGNORE_CANDIDATES", 2)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
+    source = Path(scanner.context.source_dir)
+    names = [f"app/f{index}.py" for index in range(5)]
+    for name in names:
+        _write(source, name)
+    (source / ".gitleaksignore").write_text(
+        "".join(f"{name}:github-pat:1\n" for name in names)
+    )
+    with caplog.at_level("WARNING"):
+        _add_back(scanner, source, _report(), tmp_path)
+    assert [call["files"] for call in calls] == [["app/f0.py", "app/f1.py"]]
+    assert scanner._rescan_skipped == 3
+    assert "3 name(s) in the scanned tree's .gitleaksignore were not read" in (
+        caplog.text
+    )
 
 
 def test_a_colon_rule_id_entry_is_re_scanned(tmp_path, monkeypatch):

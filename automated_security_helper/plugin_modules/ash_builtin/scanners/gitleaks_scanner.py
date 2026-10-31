@@ -258,6 +258,22 @@ MAX_RESCAN_BYTES = 1 << 30
 #: the scan: its entries could not all be re-scanned.
 MAX_IGNORE_FILE_BYTES = 32 * 1024 * 1024
 
+#: Longest candidate file name taken from a ``.gitleaksignore`` line, in characters:
+#: Linux's ``PATH_MAX`` (macOS's is 1024), or the extended-length limit on
+#: Windows. A longer prefix names no file, so it is never built.
+MAX_CANDIDATE_LENGTH = 32_767 if os.name == "nt" else 4_096
+
+#: Longest last component of a candidate, in bytes: ``NAME_MAX``.
+MAX_NAME_LENGTH = 255
+
+#: Most candidate names, and most characters in all, taken from the tree's
+#: ``.gitleaksignore``. One line splits at every colon, so a few lines of colons
+#: could otherwise make gigabytes of strings before the re-scan's deadline is
+#: set. What is left unread is reported as names not evaluated, which fails the
+#: scan as incomplete (``run_ash_scan.unevaluated_rules``).
+MAX_IGNORE_CANDIDATES = 100_000
+MAX_IGNORE_CANDIDATE_CHARS = 64 * 1024 * 1024
+
 #: The characters Go's ``unicode.IsSpace`` reports as space, which
 #: ``strings.TrimSpace`` strips from both ends of each ``.gitleaksignore`` line:
 #: Unicode's White_Space property. Python's ``str.strip()`` strips more (U+001C
@@ -304,6 +320,11 @@ def _write_private_copy(source: BinaryIO, destination: Path) -> None:
 
 
 def gitleaksignore_files(data: bytes) -> List[str]:
+    """The candidate files of ``gitleaksignore_candidates``, without the count left unread."""
+    return gitleaksignore_candidates(data)[0]
+
+
+def gitleaksignore_candidates(data: bytes) -> Tuple[List[str], int]:
     """The file part of each fingerprint in ``data``, as gitleaks 8.30.1 reads it.
 
     ``Detector.AddGitleaksIgnore`` (``detect/detect.go`` at v8.30.1) reads the
@@ -324,8 +345,22 @@ def gitleaksignore_files(data: bytes) -> List[str]:
 
     Bytes are decoded with ``surrogateescape``, so a name that is not UTF-8 maps
     back to the same bytes on disk.
+
+    Returns the candidates and the number of candidates left unread. The
+    candidates are bounded, because one line of ``a:`` repeated up to the 64 KiB
+    a line may hold splits at every colon and the prefixes are quadratic in its
+    length (about a gigabyte of strings for one such line, with hundreds allowed
+    in the file), all from the scanned tree's own text and before the re-scan's
+    deadline is set. A prefix no file can have is never made (longer than
+    ``MAX_CANDIDATE_LENGTH``, or ending in a component longer than
+    ``MAX_NAME_LENGTH``), and reading stops when ``MAX_IGNORE_CANDIDATES`` names
+    or ``MAX_IGNORE_CANDIDATE_CHARS`` characters have been made. What is left,
+    counted by the colons of the lines not read, is the second value; the caller
+    reports it as names not evaluated, so the scan fails as incomplete.
     """
-    files = []
+    files: List[str] = []
+    unread = 0
+    characters = 0
     for raw in data.split(b"\n"):
         if len(raw) >= _MAX_SCAN_TOKEN:
             break
@@ -337,12 +372,34 @@ def gitleaksignore_files(data: bytes) -> List[str]:
             parts[0] = parts[0].replace("\\", "/")
         elif len(parts) == 4:
             parts[1] = parts[1].replace("\\", "/")
-        pieces = ":".join(parts).split(":")
-        for end in range(1, len(pieces) - 1):
-            file_part = ":".join(pieces[:end])
-            if file_part:
-                files.append(file_part)
-    return files
+        joined = ":".join(parts)
+        # A candidate is the text before a colon, and the last colon leaves no
+        # rule and line behind it, so every colon but the last starts one.
+        colons = [index for index, char in enumerate(joined) if char == ":"][:-1]
+        for number, position in enumerate(colons):
+            if position == 0:
+                continue
+            if position > MAX_CANDIDATE_LENGTH:
+                # Every later prefix is longer, and none can be a file.
+                break
+            if (
+                len(files) >= MAX_IGNORE_CANDIDATES
+                or characters + position > MAX_IGNORE_CANDIDATE_CHARS
+            ):
+                unread += len(colons) - number
+                break
+            # The last component, measured before the prefix is built: more
+            # characters than NAME_MAX bytes is too long in any encoding.
+            first_of_last = joined.rfind("/", 0, position) + 1
+            if position - first_of_last > MAX_NAME_LENGTH:
+                continue
+            file_part = joined[:position]
+            last = file_part[first_of_last:]
+            if len(last.encode("utf-8", "surrogateescape")) > MAX_NAME_LENGTH:
+                continue
+            files.append(file_part)
+            characters += position
+    return files, unread
 
 
 def _mask_quoted_ignore_entries(log_path: Path) -> None:
@@ -460,6 +517,10 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     # _execute_scan: a source run that failed after its re-scan left the count
     # for the converted target's report.
     _rescan_skipped: int = PrivateAttr(default=0)
+    # Candidate names the last read of the tree's .gitleaksignore left unread
+    # (MAX_IGNORE_CANDIDATES), set by _gitleaksignore_files and taken into
+    # _rescan_skipped by _add_back_gitleaksignore_drops.
+    _rescan_unread: int = PrivateAttr(default=0)
     # The stderr log of a re-scan run that failed this target, for
     # _describe_scan_failure, which otherwise describes the first run's exit
     # code and log. None until a re-scan fails; reset per target.
@@ -773,6 +834,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         # that found leaks (2) made a converted run's failure (1) read as leaks.
         self.exit_code = 0
         self._rescan_skipped = 0
+        self._rescan_unread = 0
         self._rescan_failure_log = None
         # Absolute: gitleaks runs with its working directory at the source (or
         # the copies) directory, and a library caller's relative output
@@ -992,7 +1054,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             return []
         target_abs = self._rescan_root(target)
         names = set()
-        for name in gitleaksignore_files(data):
+        candidates, self._rescan_unread = gitleaksignore_candidates(data)
+        for name in candidates:
             # Joining keeps an absolute entry as it is.
             lexical = Path(os.path.normpath(target_abs / name))
             if lexical == target_abs or not lexical.is_relative_to(target_abs):
@@ -1028,6 +1091,15 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         ends.
         """
         relatives = self._gitleaksignore_files(target, ignore_data)
+        unread, self._rescan_unread = self._rescan_unread, 0
+        if unread:
+            self._rescan_skipped += unread
+            self._plugin_log(
+                f"{unread} name(s) in the scanned tree's {IGNORE_FILE_NAME} were "
+                f"not read: ASH reads at most {MAX_IGNORE_CANDIDATES} candidate "
+                "names per file. The scan is reported as incomplete.",
+                level=logging.WARNING,
+            )
         if not relatives:
             return
         runs = raw.get("runs") or []
@@ -1071,7 +1143,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             batches, copied, skipped = self._copy_for_rescan(
                 target, relatives, copies_dir, rescan_dir, final_args, deadline
             )
-            self._rescan_skipped = skipped
+            self._rescan_skipped += skipped
             if skipped:
                 self._plugin_log(
                     f"{skipped} file(s) the scanned tree's {IGNORE_FILE_NAME} names "
@@ -1650,9 +1722,10 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                     text=(
                         f"gitleaks: {skipped} file(s) the scanned tree's "
                         f"{IGNORE_FILE_NAME} names were not re-scanned, past "
-                        f"ASH's limits of {MAX_RESCAN_FILES} files and "
-                        f"{MAX_RESCAN_BYTES} bytes, so a finding that file hides "
-                        "in them is not reported."
+                        f"ASH's limits of {MAX_RESCAN_FILES} files, "
+                        f"{MAX_RESCAN_BYTES} bytes and {MAX_IGNORE_CANDIDATES} "
+                        "names read, so a finding that file hides in them is "
+                        "not reported."
                     )
                 )
             ),
