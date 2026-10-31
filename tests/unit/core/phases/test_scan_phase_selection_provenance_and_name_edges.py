@@ -216,6 +216,26 @@ class TestAPhaseWithoutAProgressDisplay:
 
         assert isinstance(results, AshAggregatedResults)
 
+    def test_the_stand_in_copies_as_itself(self):
+        """Every attribute was answered with a no-op, a dunder lookup included, so
+        ``copy.deepcopy`` found ``__deepcopy__``, called it and returned None."""
+        import copy
+
+        stand_in = scan_phase_module._NoProgress()
+
+        copied = copy.deepcopy(stand_in)
+
+        assert isinstance(copied, scan_phase_module._NoProgress)
+        assert not hasattr(stand_in, "__deepcopy__")
+
+    def test_the_methods_the_phase_calls_still_do_nothing(self):
+        stand_in = scan_phase_module._NoProgress()
+
+        assert stand_in.add_task(phase=None, description="x", total=1) == 0
+        assert stand_in.update_task(task_id=0, completed=100) is None
+        # Control: another display method a caller reaches for is accepted.
+        assert stand_in.add_summary_row("name", "status") is None
+
 
 class TestShardProvenance:
     def test_a_second_run_does_not_keep_the_first_runs_split(self, ctx):

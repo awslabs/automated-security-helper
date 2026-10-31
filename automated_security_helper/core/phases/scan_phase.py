@@ -438,12 +438,23 @@ class _NoProgress:
     library or MCP caller that built a phase with the default failed there with an
     AttributeError. Every call is accepted and does nothing; ``add_task`` answers
     a task id as the real display does.
+
+    The two methods the phase and its executor call are defined. Any other
+    display method a caller reaches for is accepted too, but a dunder name is
+    not: answered with a no-op, ``__deepcopy__`` made ``copy.deepcopy`` return
+    None instead of a copy, and the same goes for the other protocol lookups.
     """
 
     def add_task(self, *args: Any, **kwargs: Any) -> int:
         return 0
 
+    def update_task(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
     def __getattr__(self, name: str) -> Callable[..., None]:
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+
         def accept(*args: Any, **kwargs: Any) -> None:
             return None
 
