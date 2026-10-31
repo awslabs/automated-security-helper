@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import heapq
 from contextvars import ContextVar
 from datetime import datetime
 from enum import Enum
@@ -393,6 +394,19 @@ class LicenseChoice(RootModel):
             shape = _license_entry_shape(entry)
             if shape in seen:
                 continue
+            if len(seen) >= _SHAPES_WARNED_PER_LOAD:
+                # None marks that the summing-up line was written. A BOM whose
+                # every entry differs would otherwise log one line per entry and
+                # grow the set with it.
+                if None not in seen:
+                    seen.add(None)
+                    ASH_LOGGER.warning(
+                        "More than "
+                        f"{_SHAPES_WARNED_PER_LOAD} different license entry "
+                        "shapes fit neither license form in this BOM; further "
+                        "shapes are kept as written without a warning."
+                    )
+                continue
             seen.add(shape)
             ASH_LOGGER.warning(
                 f"License entry {index} of a CycloneDX license list is {shape}, "
@@ -410,12 +424,38 @@ class LicenseChoice(RootModel):
 _LICENSE_SHAPES_WARNED: ContextVar = ContextVar("_LICENSE_SHAPES_WARNED", default=None)
 
 
+#: Limits on the description of stray license entries, which is scanned content:
+#: how many keys one description lists, how many characters of each key, and how
+#: many different shapes one load describes before the rest are summed up in one
+#: line (LicenseChoice._warn_about_entries_kept_as_written).
+_SHAPE_KEYS_LISTED = 8
+_SHAPE_KEY_CHARS = 40
+_SHAPES_WARNED_PER_LOAD = 50
+
+
 def _license_entry_shape(entry: Any) -> str:
-    """How a stray license entry is described: its keys, or its type."""
+    """How a stray license entry is described: its keys, or its type.
+
+    The keys come from the BOM, so each is quoted with ``repr`` (a newline or a
+    terminal escape in a key cannot reach the log as itself) and cut to
+    :data:`_SHAPE_KEY_CHARS`, and at most :data:`_SHAPE_KEYS_LISTED` of them are
+    listed, the rest counted.
+    """
     if isinstance(entry, dict):
         if not entry:
             return "an empty object"
-        return "an object with the keys " + ", ".join(sorted(str(k) for k in entry))
+        keys = heapq.nsmallest(
+            _SHAPE_KEYS_LISTED, (str(key)[: _SHAPE_KEY_CHARS + 1] for key in entry)
+        )
+        listed = ", ".join(
+            repr(key[:_SHAPE_KEY_CHARS])
+            + ("..." if len(key) > _SHAPE_KEY_CHARS else "")
+            for key in keys
+        )
+        more = len(entry) - len(keys)
+        return f"an object with the keys {listed}" + (
+            f", and {more} more" if more > 0 else ""
+        )
     return f"a value of type {type(entry).__name__}"
 
 

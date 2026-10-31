@@ -322,7 +322,7 @@ def test_a_stray_entry_leaves_its_neighbors_typed_and_warns_once():
     assert logger.warning.call_count == 1
     message = logger.warning.call_args.args[0]
     assert "entry 1" in message
-    assert "an object with the keys license" in message
+    assert "an object with the keys 'license'" in message
 
 
 STRAY = {"license": {"id": "MIT"}, "expression": "MIT"}
@@ -346,7 +346,7 @@ def test_the_same_entry_shape_warns_once_per_load():
         CycloneDXReport.model_validate(BOM_WITH_STRAY_ENTRIES)
     assert logger.warning.call_count == 2
     first, second = (call.args[0] for call in logger.warning.call_args_list)
-    assert "an object with the keys expression, license" in first
+    assert "an object with the keys 'expression', 'license'" in first
     assert "a value of type str" in second
 
 
@@ -373,6 +373,52 @@ def test_a_list_validated_outside_a_load_deduplicates_within_itself_only():
             {"type": "library", "name": "lib", "licenses": [STRAY, "MIT"]}
         )
     assert again.warning.call_count == 3
+
+
+def test_a_stray_key_reaches_the_log_quoted_and_cut_not_as_itself():
+    """The keys of a stray entry come from the BOM. A newline in one cannot start
+    a forged log line, a terminal escape stays inert text, and a very long key is
+    cut (the policy of tests/unit/models/test_validation_errors_hide_input.py:
+    scanned content does not reach a message as itself)."""
+    entry = {
+        "a\nWARNING forged line": 1,
+        "\x1b[31mred": 2,
+        "x" * 10_000: 3,
+    }
+    with patch(LOGGER) as logger:
+        LicenseChoice.model_validate([entry])
+    message = logger.warning.call_args.args[0]
+    assert "\n" not in message
+    assert "\x1b" not in message
+    assert "x" * 100 not in message
+    assert repr("a\nWARNING forged line") in message
+    assert len(message) < 800
+
+
+def test_a_stray_entry_with_many_keys_lists_a_few_and_counts_the_rest():
+    entry = {f"key_{index:02d}": index for index in range(12)}
+    with patch(LOGGER) as logger:
+        LicenseChoice.model_validate([entry])
+    message = logger.warning.call_args.args[0]
+    assert "'key_00'" in message and "'key_07'" in message
+    assert "'key_08'" not in message
+    assert ", and 4 more" in message
+
+
+def test_a_load_with_many_different_stray_shapes_logs_a_bounded_number_of_lines():
+    """Every entry different would log a line per entry and grow the set of
+    shapes with the BOM: the shapes described are capped, and one line says the
+    rest are kept without a warning."""
+    import automated_security_helper.schemas.cyclonedx_bom_1_6_schema as module
+
+    cap = module._SHAPES_WARNED_PER_LOAD
+    entries = [{f"shape_{index}": 1} for index in range(cap + 10)]
+    with patch(LOGGER) as logger:
+        choice = LicenseChoice.model_validate(entries)
+    assert len(choice.root) == cap + 10, "every entry is still kept as written"
+    assert logger.warning.call_count == cap + 1
+    summary = logger.warning.call_args_list[-1].args[0]
+    assert f"More than {cap} different license entry shapes" in summary
 
 
 def test_control_a_well_formed_list_warns_nothing():
