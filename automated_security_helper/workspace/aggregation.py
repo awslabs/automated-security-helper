@@ -162,7 +162,10 @@ from automated_security_helper.utils.severity_ladder import (
     result_scanner_name,
     result_severity,
 )
-from automated_security_helper.utils.workspace_paths import to_workspace_pattern
+from automated_security_helper.utils.workspace_paths import (
+    drive_anchor,
+    to_workspace_pattern,
+)
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
 #: The ``originalUriBaseIds`` key each project's run declares for its own root.
@@ -262,20 +265,15 @@ def _slash_before_a_drive(text: str) -> bool:
     """Whether *text* is ``/C:/...`` or ``/C:``: a drive letter behind one separator.
 
     ``file:///C:/x`` reduces to ``/C:/x``, and that leading separator is dropped so
-    a drive is spelled one way. The test is a drive's shape, an ASCII letter at
-    [1] and a separator or the end of the text at [3], never only the colon at
-    [2]: ``/x:legacy/src/x.py`` is a rooted POSIX path whose first component holds
-    a colon, and dropping its separator made it ``x:legacy/src/x.py``, which
+    a drive is spelled one way. The test is a drive's shape, never only the colon
+    at [2]: ``/x:legacy/src/x.py`` is a rooted POSIX path whose first component
+    holds a colon, and dropping its separator made it ``x:legacy/src/x.py``, which
     nothing read as a drive, so it was rebased under the project as if relative.
-    ``utils/workspace_paths.py`` reads a drive letter at the start of text whose
-    separators are already stripped, so it never sees this shape; this predicate
-    is the one place the leading separator is judged.
+    This is the one place the leading separator is judged; what counts as a drive
+    is ``utils.workspace_paths.drive_anchor``'s rule, the one the pattern
+    converters read, so a letter-colon name is a name on both sides.
     """
-    if len(text) < 3 or text[0] != "/" or text[2] != ":":
-        return False
-    if not (text[1].isascii() and text[1].isalpha()):
-        return False
-    return len(text) == 3 or text[3] in "/\\"
+    return text.startswith("/") and bool(drive_anchor(text[1:]))
 
 
 def _strip_file_scheme(uri: str) -> str:
