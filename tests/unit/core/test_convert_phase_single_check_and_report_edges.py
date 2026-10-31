@@ -438,7 +438,9 @@ def turned_off_unconstructable(plugin_context, monkeypatch):
     """The config turns off the one converter whose constructor raises."""
 
     def get_plugin_config(self, plugin_type=None, plugin_name=None, **_):
-        if "Unconstructable" in str(plugin_name):
+        # The phase looks a section up by ``plugin_config_key``, which is the
+        # lowercased class name for a plugin that declares no name of its own.
+        if "unconstructable" in str(plugin_name).lower():
             return {"name": plugin_name, "enabled": False}
         return None
 
