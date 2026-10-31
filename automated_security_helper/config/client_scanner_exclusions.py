@@ -1742,8 +1742,10 @@ def _spelled_like(template: Any, source: Any) -> Any:
     in the template's shape: an operator mapping under a plain-string option is
     its path, an operator string under a mapping or model option is an entry of
     that path alone, and a model the operator's fields do not validate as on
-    their own keeps the template's other fields under the operator's
-    (``model_copy``). The client's own copy was kept whenever the shapes
+    their own keeps the template's other fields under the operator's, validated
+    as a whole; fields refused even then leave the template with only the
+    operator's expiration (``model_copy``). The client's own copy was kept
+    whenever the shapes
     differed or the model refused the fields, so a client string stood in for an
     operator mapping with the operator's expiration lost, and a client model
     kept its own reason and expiration under an operator string.
@@ -1760,9 +1762,23 @@ def _spelled_like(template: Any, source: Any) -> Any:
             try:
                 # An operator string names no expiration: the entry does not
                 # expire, so the client's expiration goes with its reason kept.
-                return template.model_copy(update={"expiration": None, **fields})
-            except Exception:  # noqa: BLE001 -- keep the option well typed
-                return template
+                # The fields are laid over the template's and validated as a
+                # whole, so the option holds a well-typed model.
+                return type(template).model_validate(
+                    {**template.model_dump(), "expiration": None, **fields}
+                )
+            except Exception:  # noqa: BLE001 -- the fields are refused on any base
+                try:
+                    # Not a model on any base: only the operator's expiration is
+                    # taken over, as it is (an unreadable day reads as expired,
+                    # ``_entry_expired``), so the client's expiration never
+                    # stands and none of the operator's refused values is
+                    # written into the model.
+                    return template.model_copy(
+                        update={"expiration": fields.get("expiration")}
+                    )
+                except Exception:  # noqa: BLE001 -- keep the option well typed
+                    return template
     if isinstance(template, Mapping):
         # Any mapping, as ``_entry_fields`` reads one: a mapping that is not a
         # ``dict`` fell through to the template and kept the client's own

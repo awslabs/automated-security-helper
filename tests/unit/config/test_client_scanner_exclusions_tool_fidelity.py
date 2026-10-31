@@ -47,6 +47,7 @@ from automated_security_helper.config.client_scanner_exclusions import (
     _entry_fields,
     _pattern_of,
     _same_trivy_id,
+    _spelled_like,
     _trusted_ignore_file,
     glob_excludes,
     parse_trivy_ignore_file,
@@ -468,6 +469,36 @@ def test_the_bandit_kind_cuts_its_root_from_the_collapsed_absolute_path(monkeypa
     assert not unrelated.hides(
         relative="x/../vendor/a.py", absolute="/s/x/../vendor/a.py", rule_id=None
     )
+
+
+def test_an_operator_mapping_the_model_refuses_is_not_written_in_unvalidated():
+    """The operator's entry takes the client's place in the option. A mapping
+    that is not a model on its own (a string names no reason) is built on top
+    of the client's fields and validated, so the option holds a well-typed
+    model with the operator's expiration and not the client's. A mapping that
+    is refused on that base too (a reason that is not text) was copied into the
+    model unvalidated, a number where a string belongs; now only the
+    operator's expiration is taken over and the client's reason stays."""
+    client = IgnorePathWithReason(
+        path="legacy", reason="client", expiration="2088-01-01"
+    )
+
+    named = _spelled_like(client, "legacy")
+    assert isinstance(named, IgnorePathWithReason)
+    assert (named.path, named.reason, named.expiration) == ("legacy", "client", None)
+
+    refused = _spelled_like(
+        client, {"path": "legacy", "reason": ["not text"], "expiration": "2099-01-01"}
+    )
+    assert isinstance(refused, IgnorePathWithReason)
+    assert refused.reason == "client"
+    assert refused.expiration == "2099-01-01"
+
+    unreadable = _spelled_like(
+        client, {"path": "legacy", "reason": "op", "expiration": "soon"}
+    )
+    assert unreadable.expiration == "soon"
+    assert unreadable.expiration != client.expiration
 
 
 @pytest.mark.parametrize(
