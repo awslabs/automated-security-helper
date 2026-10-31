@@ -82,14 +82,18 @@ def _resolved_output_dir(
     anywhere above them. (A per-component lstat walk from the source directory
     down checked none of the source's own ancestors, and checked only the last
     component when the stored spelling did not sit under the stored source.)
-    A link that stays inside the tree is admitted: the delete then removes a
-    directory the scan owned.
+    A path that resolves inside the tree through a link is admitted here, and
+    the delete then removes the directory it resolves to, one the scan owned.
+    The caller still refuses an output directory that is itself a link, whatever
+    it points to, and leaves it in place.
 
     The caller deletes the path this returns, never the stored spelling: the
     kernel resolves a path again when the delete opens it, so a link on the
     stored spelling retargeted between this check and the delete would land
     the recursive delete in the new target. The resolved path holds no link
-    when it is read.
+    when it is read. The delete is still by path: a component of the resolved
+    path replaced by a link between the resolution and the moment the delete
+    opens it is not caught, a window this check narrows and does not close.
 
     The comparison is against the OUTPUT tree, not the scanned directory. A
     single MCP scan writes under its source (``<source>/.ash/ash_output``), but
