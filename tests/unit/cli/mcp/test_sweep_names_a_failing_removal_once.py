@@ -58,10 +58,13 @@ def _warnings_naming(caplog, session_id: str) -> list:
 def test_a_removal_that_keeps_failing_is_named_once(root, monkeypatch, caplog):
     sandbox = _aged_workspace(root, STUCK)
 
-    def cannot_remove(session_id: str) -> None:
+    # The step the sweep runs under its guard for a session with a workspace
+    # (the rename aside and the dropping of the session's state). A session
+    # with none takes _remove_session_state, which this sweep does not.
+    def cannot_remove(session_id: str, sandbox_path: Path) -> None:
         raise PermissionError(13, "Permission denied", str(sandbox))
 
-    monkeypatch.setattr(sessions, "_remove_session_state", cannot_remove)
+    monkeypatch.setattr(sessions, "_set_session_state_aside", cannot_remove)
 
     with caplog.at_level(logging.WARNING):
         sessions.sweep_stale_workspaces(1.0, now=time.time() + 3600)
