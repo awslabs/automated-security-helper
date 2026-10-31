@@ -1804,13 +1804,16 @@ def _check_the_plans_operator_config(
     the plan's ``--dry-run`` is what runs. That holds only for a plan resolved
     with the same operator config as these settings: a plan resolved without one,
     or with another, would be scanned without the operator's final fields. And
-    the file must not have changed since the plan was resolved
-    (``operator_config_digest``), or the scan would run settings the plan did not
-    report. Either is refused for this project, as a config error.
+    the operator's file must hold the content the plan was made from
+    (``operator_config_digest``): a file rewritten since the plan, or another file
+    in the operator's role for a project with no config of its own, would run
+    settings the plan did not report. Either is refused for this project, as a
+    config error.
 
     Raises:
         ASHConfigValidationError: The plan and these settings disagree, or the
-            operator config changed since the plan.
+            operator's file does not hold the content the plan was made from
+            (its digest differs from the plan's).
     """
     from automated_security_helper.config.resolve_config import operator_config_digest
     from automated_security_helper.workspace.resolver import _operator_config
