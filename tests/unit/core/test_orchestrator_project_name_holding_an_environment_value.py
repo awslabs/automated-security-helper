@@ -30,14 +30,14 @@ pytestmark = pytest.mark.unit
 SECRET = "envproj-secret-5e19"
 
 
-def _applied(tmp_path, label: str) -> str:
+def _applied(tmp_path, label: str, value: str = SECRET) -> str:
     source = tmp_path / "proj"
     source.mkdir()
     output = tmp_path / "out"
     output.mkdir()
     orchestrator = ASHScanOrchestrator(source_dir=source, output_dir=output)
     config = AshConfig()
-    config._environment_values = [SECRET]
+    config._environment_values = [value]
     orchestrator.config = config
     engine = MagicMock()
     engine._asharp_model.metadata.project_name = "recorded"
@@ -60,6 +60,20 @@ def test_a_label_that_quotes_the_value_inside_a_longer_name_is_not_applied(tmp_p
 
 def test_a_label_with_surrounding_space_that_is_the_value_is_not_applied(tmp_path):
     assert _applied(tmp_path, f"  {SECRET}  ") == "recorded"
+
+
+@pytest.mark.parametrize("short", ["a", "ab", "api"])
+def test_a_label_that_is_a_short_value_is_not_applied(tmp_path, short):
+    # Red without the equality arm: the redaction leaves a value under four
+    # characters alone unless the text quotes it, so the text is unchanged and
+    # the label was applied, where an exact match was dropped before.
+    assert _applied(tmp_path, short, value=short) == "recorded"
+    assert _applied(tmp_path, f"  {short}  ", value=short) == "recorded"
+
+
+def test_a_label_that_only_contains_a_short_value_is_applied(tmp_path):
+    """The control for the short band: only an exact match is dropped there."""
+    assert _applied(tmp_path, "payments-api", value="api") == "payments-api"
 
 
 def test_a_plain_label_is_applied(tmp_path):

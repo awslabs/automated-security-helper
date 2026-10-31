@@ -1010,17 +1010,23 @@ class ASHScanOrchestrator(BaseModel):
                 if (
                     isinstance(value, str)
                     and value.strip()
-                    and text_without_values(value.strip(), environment_values)
-                    != value.strip()
+                    and (
+                        value.strip() in environment_values
+                        or text_without_values(value.strip(), environment_values)
+                        != value.strip()
+                    )
                 ):
                     # A workspace hands each project its resolved display label,
                     # which can be the project_name its config read from the
                     # environment, or a label that holds such a value; written
                     # here it reached the per-project HTML, Markdown, text and
                     # flat JSON reports as text. Compared by redaction, not by
-                    # equality: a name that quotes a value inside a longer label
-                    # was written. The name the engine recorded (the masked or
-                    # reference form) stands.
+                    # equality alone: a name that quotes a value inside a longer
+                    # label was written. Equality still counts as well, because
+                    # the redaction leaves a short value (under four characters)
+                    # alone unless the text quotes it, so a label that is exactly
+                    # such a value would otherwise be applied. The name the
+                    # engine recorded (the masked or reference form) stands.
                     ASH_LOGGER.warning(
                         "Ignoring a project_name in scan metadata that is a value "
                         "the configuration read from the environment; keeping "
