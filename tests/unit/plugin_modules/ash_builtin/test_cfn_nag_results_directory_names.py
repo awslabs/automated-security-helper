@@ -7,7 +7,9 @@ with only its dependency probe and subprocess boundary faked:
 * two templates whose paths differ in case alone (``Stack.yaml`` and
   ``stack.yaml``) got names that differ in case alone, which one directory on a
   filesystem that ignores case (APFS and NTFS by default); the name folds case now,
-  so the two stay apart whatever the filesystem;
+  so the two stay apart whatever the filesystem (the scan is handed the two paths
+  and no second file is written, since there is only one file on such a
+  filesystem);
 * a template nested deeply enough made a name past the 255 bytes one path
   component may take, the directory could not be made and the template was counted
   as a failed target; the name is held to a budget now, and two long names that
@@ -40,6 +42,11 @@ CFN_TEMPLATE = """Resources:
 
 #: A real file name holds at most this many bytes.
 NAME_MAX = 255
+
+#: The module the scan reads its candidate list and template text through.
+SCANNER_MODULE = (
+    "automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner"
+)
 
 
 def _empty_sarif() -> str:
@@ -99,10 +106,22 @@ def _deep_directory(root: Path, levels: int = 5, width: int = 60) -> Path:
 def test_two_templates_that_differ_in_case_alone_get_directories_that_do_not(
     scanner, results_dirs
 ):
+    # The two spellings are handed to the scan as paths and no file is written
+    # under the second one: on a filesystem that ignores case (APFS and NTFS by
+    # default) ``Stack.yaml`` and ``stack.yaml`` are one file, so writing both
+    # left one template and the count below failed before the name was measured.
+    # The name is made from the path alone, so the test does not need the files.
     work = scanner.context.work_dir
     (work / "Stack.yaml").write_text(CFN_TEMPLATE)
-    (work / "stack.yaml").write_text(CFN_TEMPLATE)
-    names = [path.name for path in results_dirs()]
+    spellings = [str(work / "Stack.yaml"), str(work / "stack.yaml")]
+    with (
+        patch(
+            f"{SCANNER_MODULE}.cloudformation_candidate_files",
+            return_value=spellings,
+        ),
+        patch(f"{SCANNER_MODULE}.read_template_text", return_value=CFN_TEMPLATE),
+    ):
+        names = [path.name for path in results_dirs()]
     assert len(names) == 2, names
     assert len({name.lower() for name in names}) == 2, names
 
