@@ -10,9 +10,10 @@ every walk of a loaded document (the record of what a file read from the
 environment, the ``extends`` merge, the model's validation) recursed through it
 until Python's recursion limit, which surfaced as a raw RecursionError instead
 of the refusal any other malformed file gets. :class:`NoRecursiveAliasLoader`,
-the base of a config loader, raises :class:`RecursiveAliasError`, a YAML
-composer error, while the document is composed, before anything is constructed
-or walked, so every caller refuses it as a file that does not parse. An alias
+the base of the loader the MCP configuration tools read a file as written with,
+raises :class:`RecursiveAliasError`, a YAML composer error, while the document
+is composed, before anything is constructed or walked, so every caller refuses
+it as a file that does not parse. An alias
 of a node that is already complete is a shared value, not a cycle, and loads as
 before.
 
