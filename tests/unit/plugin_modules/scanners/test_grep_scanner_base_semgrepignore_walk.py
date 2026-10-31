@@ -15,6 +15,9 @@ have read and did not, because ASH runs both with ``--x-ignore-semgrepignore-fil
   resolution warnings; it used to be neither recorded nor logged without one.
 - A disabled scanner runs neither tool, so it records no note; it used to, because
   the arguments are built at construction for every registered scanner.
+- ``SemgrepScannerConfig.enabled`` defaults to False on Windows, where semgrep has no
+  build, so a scanner built with the default config records no note there. A test
+  that wants the note says ``enabled=True`` itself.
 
 Building the scanners probes uv and opengrep; the tool guard answers the probes as
 a host without the tools would, so nothing starts here.
@@ -208,3 +211,25 @@ def test_an_enabled_scanner_records_the_note(test_plugin_context):
     assert [w for w in warnings if (source / ".semgrepignore").as_posix() in w], (
         warnings
     )
+
+
+def test_a_scanner_left_at_its_default_notes_the_file_only_where_it_is_enabled(
+    test_plugin_context,
+):
+    """A config built with no ``enabled`` follows the platform default: the note is
+    made where that default is on (Linux, macOS) and not where it is off (Windows,
+    where semgrep has no build and the scanner runs nothing).
+
+    This holds on every platform. It pins the coupling between the default and the
+    note, so a missing note on Windows is not taken for a bug.
+    """
+    source = Path(test_plugin_context.source_dir)
+    source.mkdir(parents=True, exist_ok=True)
+    (source / ".semgrepignore").write_text("tests/\n", encoding="utf-8")
+    warnings = test_plugin_context.config._resolution_warnings
+    config = SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=False))
+
+    SemgrepScanner(context=test_plugin_context, config=config)
+
+    noted = [w for w in warnings if (source / ".semgrepignore").as_posix() in w]
+    assert bool(noted) is config.enabled, (config.enabled, warnings)
