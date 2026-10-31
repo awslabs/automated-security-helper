@@ -1792,7 +1792,7 @@ def _named_member(
     return None
 
 
-def _a_member_runs_through(key: str, sorted_keys: List[str]) -> bool:
+def _a_member_runs_through(key: str, sorted_keys: List[str], fold: bool = True) -> bool:
     """Whether some member's key (``sorted_keys``, every member's _written_key,
     sorted) runs through ``key`` as a directory: starts with it and a separator.
 
@@ -1801,10 +1801,12 @@ def _a_member_runs_through(key: str, sorted_keys: List[str]) -> bool:
     answer, and no string is built for any directory a member's path passes
     through: a name of thousands of components built a string per prefix, each as
     long as the prefix, for every member that had one. The separator is the one the
-    keys are joined with (os.path.normcase of ``/``: a backslash where the host
-    folds names as Windows does).
+    keys are joined with, which follows ``fold``, the switch the keys were made
+    with (_written_key): with it on, os.path.normcase of ``/`` (a backslash where
+    the host folds names as Windows does); with it off the keys are the written
+    paths as they are, so ``/`` on every host.
     """
-    start = key + os.path.normcase("/")
+    start = key + (os.path.normcase("/") if fold else "/")
     index = bisect.bisect_left(sorted_keys, start)
     return index < len(sorted_keys) and sorted_keys[index].startswith(start)
 
@@ -1864,7 +1866,7 @@ def _renamed_member_name(
         if (
             renamed_key not in taken
             and renamed_key not in written
-            and not _a_member_runs_through(renamed_key, sorted_taken)
+            and not _a_member_runs_through(renamed_key, sorted_taken, fold)
             and renamed_key not in directories
             and directory_key not in taken
             and directory_key not in written

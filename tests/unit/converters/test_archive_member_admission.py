@@ -555,22 +555,99 @@ def test_a_member_left_out_costs_no_directory_strings(test_plugin_context, monke
     assert calls["n"] == 0
 
 
-def test_a_member_runs_through_a_directory_only_where_a_key_starts_with_it_and_a_separator():
+def _windows_like_normcase(path: str) -> str:
+    """What ``ntpath.normcase`` does to a name: lower-cases it and writes ``/`` as
+    a backslash. Stood in for ``os.path.normcase`` so a test reads the shape a
+    Windows host gives the keys on any host."""
+    return path.replace("/", "\\").lower()
+
+
+class _PathAsOnWindows:
+    """``os.path`` as the archive converter sees it, with only ``normcase``
+    replaced; everything else is the real module's."""
+
+    normcase = staticmethod(_windows_like_normcase)
+
+    def __getattr__(self, name):
+        return getattr(os.path, name)
+
+
+class _OsAsOnWindows:
+    """``os`` as the archive converter sees it, with ``path`` replaced. The stand-in
+    is set on the converter's module alone, so nothing else that reads
+    ``os.path.normcase`` (pathlib's case-sensitivity probe, which is cached) meets
+    it."""
+
+    path = _PathAsOnWindows()
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+def _stand_in_windows_normcase(monkeypatch) -> None:
+    monkeypatch.setattr(archive_converter, "os", _OsAsOnWindows())
+
+
+@pytest.mark.parametrize("fold", [True, False], ids=["fold-on", "fold-off"])
+@pytest.mark.parametrize("host", ["posix", "windows-like"])
+def test_a_member_runs_through_a_directory_only_where_a_key_starts_with_it_and_a_separator(
+    fold, host, monkeypatch
+):
     """The directory test the rename reads: over the sorted keys of every member,
     one bisect. ``m~2/m.js`` is a directory because a member is written below it;
     ``m.js`` and ``m`` are not, nor ``m~3/m.js``; and a key that merely starts
-    with the same characters (``ab`` beside ``abc/x``) is not a directory."""
-    keys = sorted(["m.js", "m~2/m.js/x.py", "abc/x", "other"])
-    runs_through = archive_converter._a_member_runs_through
+    with the same characters (``ab`` beside ``abc/x``) is not a directory.
 
-    assert runs_through("m~2/m.js", keys) is True
-    assert runs_through("m~2", keys) is True
-    assert runs_through("abc", keys) is True
-    assert runs_through("m.js", keys) is False
-    assert runs_through("m", keys) is False
-    assert runs_through("m~3/m.js", keys) is False
-    assert runs_through("ab", keys) is False
+    The keys are made by ``_written_key`` with the same switch the test reads them
+    with, on a host that leaves names alone and on one that writes ``/`` as a
+    backslash when it folds them: with the fold off the keys keep ``/`` on both,
+    and the separator the test looks for has to be the one they carry."""
+    if host == "windows-like":
+        _stand_in_windows_normcase(monkeypatch)
+
+    def key(name: str) -> str:
+        return archive_converter._written_key(name, "zip", fold)
+
+    keys = sorted(key(n) for n in ["m.js", "m~2/m.js/x.py", "abc/x", "other"])
+
+    def runs_through(name: str, sorted_keys=keys) -> bool:
+        return archive_converter._a_member_runs_through(key(name), sorted_keys, fold)
+
+    assert runs_through("m~2/m.js") is True
+    assert runs_through("m~2") is True
+    assert runs_through("abc") is True
+    assert runs_through("m.js") is False
+    assert runs_through("m") is False
+    assert runs_through("m~3/m.js") is False
+    assert runs_through("ab") is False
     assert runs_through("m.js", []) is False
+
+
+@pytest.mark.parametrize("fold", [True, False], ids=["fold-on", "fold-off"])
+def test_a_duplicate_is_not_placed_where_a_later_members_directory_stands_on_a_host_that_folds_names(
+    test_plugin_context, monkeypatch, fold
+):
+    """The same case as the control below it, on a host whose ``normcase`` writes
+    ``/`` as a backslash (Windows), with the output directory measured to fold case
+    (the control) and not to (the case this guards): the keys keep ``/`` when the
+    fold is off, so a directory test that looked for the host's separator found no
+    key under ``m~2/m.js``, placed the second ``m.js`` there, and refused the
+    archive's own ``m~2/m.js/x.py`` as under a file."""
+    _stand_in_windows_normcase(monkeypatch)
+    monkeypatch.setattr(archive_converter, "_filesystem_folds_case", lambda _t: fold)
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    members = [
+        zipfile.ZipInfo("m.js"),
+        zipfile.ZipInfo("m.js"),
+        zipfile.ZipInfo("m~2/m.js/x.py"),
+    ]
+
+    admitted = converter.inspect_members(members, target_path=None)
+
+    assert [m.filename for m in admitted] == ["m.js", "m~3/m.js", "m~2/m.js/x.py"]
+    assert converter.refused_inputs == []
 
 
 def test_a_renamed_member_never_takes_a_name_a_later_members_directory_stands_on(
