@@ -59,9 +59,11 @@ def test_a_rename_refused_with_ebusy_falls_back_to_the_in_place_write(
     """A bind-mounted config file: os.replace onto the mount point fails EBUSY."""
     target = config_file.resolve()
     real_replace = os.replace
+    refused: list[str] = []
 
     def replace_unless_mounted(src, dst, *args, **kwargs):
         if isinstance(dst, (str, os.PathLike)) and Path(dst).resolve() == target:
+            refused.append(os.fspath(dst))
             raise OSError(errno.EBUSY, os.strerror(errno.EBUSY), os.fspath(dst))
         return real_replace(src, dst, *args, **kwargs)
 
@@ -70,6 +72,9 @@ def test_a_rename_refused_with_ebusy_falls_back_to_the_in_place_write(
     result = _update(config_file)
 
     assert result.exit_code == 0, result.output
+    # The rename was tried and refused: the in-place write was the fallback, not
+    # the only write made.
+    assert refused == [os.fspath(target)]
     assert _written(config_file)["fail_on_findings"] is False
     assert [p.name for p in config_file.parent.iterdir()] == [config_file.name]
 
@@ -81,10 +86,12 @@ def test_a_staging_file_refused_with_eacces_falls_back_to_the_in_place_write(
     cannot be created, the file itself can be."""
     real_open = os.open
     staging_prefix = f".{config_file.name}."
+    refused: list[str] = []
 
     def open_unless_staging(path, flags, *args, **kwargs):
         name = os.path.basename(os.fspath(path))
         if isinstance(name, str) and name.startswith(staging_prefix):
+            refused.append(name)
             raise PermissionError(
                 errno.EACCES, os.strerror(errno.EACCES), os.fspath(path)
             )
@@ -95,6 +102,9 @@ def test_a_staging_file_refused_with_eacces_falls_back_to_the_in_place_write(
     result = _update(config_file)
 
     assert result.exit_code == 0, result.output
+    # The staging file was asked for under its name beside the config and
+    # refused; a writer that never staged would pass without it.
+    assert len(refused) == 1 and refused[0].startswith(staging_prefix)
     assert _written(config_file)["fail_on_findings"] is False
 
 

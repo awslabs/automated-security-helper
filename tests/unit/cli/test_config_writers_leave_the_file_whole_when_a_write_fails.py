@@ -100,7 +100,8 @@ def test_init_force_leaves_the_config_whole_when_the_write_fails(
         config_app, ["init", "--config", str(config_file), "--force"]
     )
 
-    assert result.exit_code != 0
+    assert result.exit_code == 1, result.output
+    assert "Error writing config file" in result.output
     assert config_file.read_text(encoding="utf-8") == STARTING_CONFIG
     assert sorted(p.name for p in config_file.parent.iterdir()) == [
         ".ash",
