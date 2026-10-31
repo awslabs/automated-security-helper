@@ -949,14 +949,22 @@ class TestDirectoryComparisonIsCanonical:
 
         The cheapest wrong way to do this is a ``startswith`` or a prefix strip,
         and ``proj`` against ``proj-backup`` is where that shows.
+
+        Each directory has an output directory of its own: two directories
+        naming one output directory are refused by design (see
+        ``test_two_directories_cannot_share_an_output_directory`` in
+        ``test_scan_registry_lookups_and_claims.py``), which is a different
+        rule from the one measured here.
         """
         project, output = self._project_and_output(tmp_path)
         sibling = tmp_path / "proj-backup"
         sibling.mkdir()
+        sibling_output = tmp_path / "out-backup"
+        sibling_output.mkdir()
         registry = ScanRegistry()
 
         first = self._register(registry, project, output)
-        second = self._register(registry, sibling, output)
+        second = self._register(registry, sibling, sibling_output)
 
         assert first != second
         assert registry.get_scan_count() == 2
@@ -1003,13 +1011,18 @@ class TestDirectoryComparisonIsCanonical:
 
         Left comparing raw strings, ``list_scans`` would report zero scans for a
         directory ``register_scan`` had just refused as occupied.
+
+        The second scan has its own output directory: sharing one with the
+        first is refused at registration, and this test is about the filter.
         """
         project, output = self._project_and_output(tmp_path)
         sibling = tmp_path / "other"
         sibling.mkdir()
+        sibling_output = tmp_path / "out-other"
+        sibling_output.mkdir()
         registry = ScanRegistry()
         first = self._register(registry, project, output)
-        self._register(registry, sibling, output)
+        self._register(registry, sibling, sibling_output)
 
         matched = registry.list_scans(directory_path=str(project) + os.sep)
 
