@@ -69,6 +69,26 @@ def ash_log_records():
         logger.removeHandler(handler)
 
 
+@pytest.fixture
+def ash_records_at_every_level():
+    records: List[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect(level=1)
+    logger = logging.getLogger("ash")
+    level = logger.level
+    logger.setLevel(1)
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+
+
 def _zip(path: Path, members: List[Tuple[str, bytes]]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w") as archive:
@@ -458,6 +478,47 @@ def test_many_members_bound_for_one_path_are_renamed_in_bounded_time(
     assert len(single) == archive_converter.MEMBER_REFUSALS_LISTED, len(single)
     expected = count - 1 - archive_converter.MEMBER_REFUSALS_LISTED
     assert len(aggregate) == 1 and f"{expected} more members" in aggregate[0], aggregate
+
+
+def test_log_lines_naming_members_and_archives_are_not_read_as_markup(
+    test_plugin_context, ash_records_at_every_level
+):
+    """A member's or an archive's name is the archive's own, and a ``[/x]`` in one
+    raises in the log handler when the line is read as markup, so the line is lost
+    (the neighboring record_*_input lines carry NO_MARKUP for this). Each line that
+    names a member or an archive carries it: a refusal with no archive, the detail
+    of a refusal under one, a rename, a member found, and an archive extracted only
+    in part. The lines are produced, so a missing one fails the test too."""
+    records = ash_records_at_every_level
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+
+    converter.inspect_members([zipfile.ZipInfo("/[/a].js")], target_path=None)
+    converter.inspect_members(
+        [zipfile.ZipInfo("[/x].js"), zipfile.ZipInfo("[/x].js/y.js")],
+        target_path=None,
+        archive="a.zip",
+    )
+    converter.inspect_members(
+        [zipfile.ZipInfo("[/m].js"), zipfile.ZipInfo("[/m].js")],
+        target_path=None,
+        archive="b.zip",
+    )
+    converter._record_extracted_in_part("[/a].tar", [1024], [], archive_file="[/a].tar")
+
+    for fragment in (
+        "Skipped archive member",
+        "runs through",
+        "numbered directory",
+        "Found .js file",
+        "was extracted only in part",
+    ):
+        lines = [
+            r for r in records if fragment in r.getMessage() and "[/" in r.getMessage()
+        ]
+        assert lines, fragment
+        assert all(getattr(r, "markup", True) is False for r in lines), fragment
 
 
 def test_a_member_left_out_costs_no_directory_strings(test_plugin_context, monkeypatch):

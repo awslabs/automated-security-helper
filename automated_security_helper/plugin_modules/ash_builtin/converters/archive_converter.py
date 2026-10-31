@@ -54,7 +54,7 @@ from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
     scan_set,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.utils.scan_output_dirs import record_converted_sources
 from automated_security_helper.utils.scanned_tree import (
@@ -1606,7 +1606,8 @@ def _target_name(archive_file: str, archive_display: str) -> str:
         shown_on_one_line(
             f"Extracting {archive_display} under {cut}-{digest}: its folded "
             "path is longer than a file name may be"
-        )
+        ),
+        extra=NO_MARKUP,
     )
     return f"{cut}-{digest}"
 
@@ -2249,12 +2250,16 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # ``detail`` is what the constant reason leaves out (the path the member
         # runs through): logged with the member, never part of the recorded reason,
         # which keys the per-reason listing cap.
+        # NO_MARKUP on every line that names a member or an archive, as the
+        # record_*_input lines do: the names are the archive's own, and a "[/x]" in
+        # one raises in the log handler as markup and the line is lost.
         if archive is None:
             ASH_LOGGER.warning(
                 shown_on_one_line(
                     f"Skipped archive member '{member}': {reason}"
                     + (f" ({detail})" if detail else "")
-                )
+                ),
+                extra=NO_MARKUP,
             )
         else:
             self.record_refused_input(TreeInputRefused(archive, reason), member=member)
@@ -2262,7 +2267,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 ASH_LOGGER.verbose(
                     shown_on_one_line(
                         f"Archive member '{member}' of '{archive}': {detail}"
-                    )
+                    ),
+                    extra=NO_MARKUP,
                 )
 
     def _record_trailing_bytes(
@@ -2349,7 +2355,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         ASH_LOGGER.warning(
             shown_on_one_line(
                 f"Archive '{archive}' was extracted only in part: {detail}"
-            )
+            ),
+            extra=NO_MARKUP,
         )
         # One record per archive, in the category the completeness gate reads:
         # the unextracted remainder is tried-and-could-not coverage lost, so it
@@ -2535,7 +2542,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         f"Skipping archive member {member_name} of {archive} due to "
                         f"global ignore_path '{ignored_by.path}' with reason "
                         f"'{ignored_by.reason}'"
-                    )
+                    ),
+                    extra=NO_MARKUP,
                 )
                 continue
 
@@ -2624,7 +2632,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                     )
                                     + ": "
                                     + _MEMBER_RENAMED.format(renamed=renamed)
-                                )
+                                ),
+                                extra=NO_MARKUP,
                             )
                         if isinstance(member, tarfile.TarInfo):
                             member.name = renamed
@@ -2652,7 +2661,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             # The member's name, not the member object: its str is the repr,
             # which spells the name tar's or zip's own way beside an address.
             label = f".{member_ext} file" if member_ext else "file"
-            ASH_LOGGER.verbose(shown_on_one_line(f"Found {label}: {member_name}"))
+            ASH_LOGGER.verbose(
+                shown_on_one_line(f"Found {label}: {member_name}"), extra=NO_MARKUP
+            )
             filtered_members.append(member)
         for problem, count in unlisted.items():
             if archive is None:
@@ -2668,7 +2679,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     + _MEMBERS_RENAMED_UNLISTED.format(
                         count=renamed_count - MEMBER_REFUSALS_LISTED
                     )
-                )
+                ),
+                extra=NO_MARKUP,
             )
         if too_long and archive is not None:
             noun = "member" if too_long == 1 else "members"
@@ -2796,7 +2808,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 ASH_LOGGER.verbose(
                     shown_on_one_line(
                         f"Extracting {archive_file} contents to target_path: {Path(target_path).as_posix()}"
-                    )
+                    ),
+                    extra=NO_MARKUP,
                 )
 
                 # Opened under the scanned-tree rule, and everything below reads from
