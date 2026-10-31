@@ -2568,6 +2568,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         f", loaded with the baseline "
                         f"{Path(self._baseline_file_path()).as_posix()}"
                     )
+                # The baseline's path can be a value read from the environment,
+                # and this text is quoted in the error the filter raises:
+                # redacted like every other line here that names the baseline.
+                pattern_source = text_without_values(pattern_source, values)
                 scannable = self._apply_file_exclusions(
                     scannable,
                     own_patterns,

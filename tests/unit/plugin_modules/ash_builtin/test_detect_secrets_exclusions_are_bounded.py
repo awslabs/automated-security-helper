@@ -23,6 +23,7 @@ what the call did, within a limit of its own.
 
 from __future__ import annotations
 
+import json
 import multiprocessing
 import re
 import time
@@ -38,6 +39,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     SHOULD_EXCLUDE_FILE_FILTER,
     DetectSecretsScanner,
     DetectSecretsScannerConfig,
+    DetectSecretsScannerConfigOptions,
     DetectSecretsScanSettingsFiltersUsed,
 )
 
@@ -217,3 +219,109 @@ def test_the_scan_bounds_the_filter_by_its_scan_timeout(tmp_path, monkeypatch):
 
     assert seen.get("timeout") == 7
     assert "should_exclude_file" in seen.get("source", "")
+
+
+# ---------------------------------------------------------------------------
+# The name the filter gives its baseline is redacted like the scan's other lines
+# ---------------------------------------------------------------------------
+
+
+def _sources_the_scan_gives_the_filter(
+    tmp_path: Path, monkeypatch, values: tuple[str, ...]
+) -> tuple[list[str], str]:
+    """Every ``source`` text a scan hands the baseline's file filter, and the
+    baseline's path.
+
+    The baseline is the operator's own file outside the scanned tree, named
+    through ``baseline_file``, and its ``should_exclude_file`` filter is the one
+    the scan applies. ``values`` stands for what the config read from the
+    environment (``_environment_values``): the scan redacts its lines with them.
+    """
+    from detect_secrets.core.potential_secret import PotentialSecret
+
+    context = _context(tmp_path)
+    source = Path(context.source_dir)
+    _write(source, "settings.py")
+    _write(source, "tests/fixture.py")
+    baseline = tmp_path / "operator-baseline-from-environment.json"
+    baseline.write_text(
+        json.dumps(
+            {
+                "version": "1.5.0",
+                "plugins_used": [{"name": "AWSKeyDetector"}],
+                "filters_used": [
+                    {"path": SHOULD_EXCLUDE_FILE_FILTER, "pattern": ["^tests/"]}
+                ],
+                "results": {
+                    "settings.py": [
+                        {
+                            "type": "AWS Access Key",
+                            "hashed_secret": PotentialSecret.hash_secret("placeholder"),
+                            "line_number": 1,
+                            "is_secret": False,
+                        }
+                    ]
+                },
+                "generated_at": "2026-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    scanner = DetectSecretsScanner(
+        context=context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(baseline_file=str(baseline))
+        ),
+    )
+    assert scanner._baseline_in_use()
+    sources: list[str] = []
+    unbounded = DetectSecretsScanner._apply_file_exclusions
+
+    def recording(files, exclude_patterns, root=None, **kwargs):
+        sources.append(kwargs.get("source", ""))
+        return unbounded(files, exclude_patterns, root)
+
+    monkeypatch.setattr(
+        DetectSecretsScanner, "_apply_file_exclusions", staticmethod(recording)
+    )
+    monkeypatch.setattr(
+        DetectSecretsScanner, "_environment_values", lambda self: tuple(values)
+    )
+    monkeypatch.setattr(type(scanner), "_scan_in_worker", lambda self, **kwargs: None)
+
+    scanner.scan(target=source, target_type="source")
+
+    return sources, baseline.as_posix()
+
+
+def test_the_filters_source_hides_a_baseline_path_read_from_the_environment(
+    tmp_path, monkeypatch
+):
+    """A ``baseline_file`` read from an environment reference is a value the
+    scan hides everywhere it prints. The text the filter's error quotes named
+    the baseline whole, as the path."""
+    baseline_value = str(tmp_path / "operator-baseline-from-environment.json")
+
+    sources, _ = _sources_the_scan_gives_the_filter(
+        tmp_path, monkeypatch, (baseline_value,)
+    )
+
+    assert sources
+    for source in sources:
+        assert "should_exclude_file" in source
+        assert baseline_value not in source
+        assert Path(baseline_value).as_posix() not in source
+        assert "operator-baseline-from-environment" not in source
+
+
+def test_the_filters_source_names_a_baseline_that_is_not_an_environment_value(
+    tmp_path, monkeypatch
+):
+    """Control: with no environment value to hide, the error still tells the
+    operator which baseline the filter came from."""
+    sources, path = _sources_the_scan_gives_the_filter(tmp_path, monkeypatch, ())
+
+    assert sources
+    for source in sources:
+        assert "should_exclude_file" in source
+        assert path in source
