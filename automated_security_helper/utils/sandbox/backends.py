@@ -1417,6 +1417,11 @@ _TRUST_ROOT_KEYCHAINS = (
 
 _trust_roots_cache: List[Optional[str]] = []
 
+#: Non-empty once the failed-export warning has been logged. An export that
+#: failed in time is tried again at every spawn (below), so the warning would
+#: otherwise repeat at every spawn of the run; later failures are logged at DEBUG.
+_trust_roots_warned: List[bool] = []
+
 
 def _system_trust_roots() -> Optional[str]:
     """The system's root certificates as PEM, exported once per process.
@@ -1458,7 +1463,7 @@ def _system_trust_roots() -> Optional[str]:
             exported.append(result.stdout)
     pem = "\n".join(exported) if exported else None
     if pem is None:
-        ASH_LOGGER.warning(
+        message = (
             "Could not export the system root certificates; a sandboxed scanner "
             "that reads them itself (semgrep) may fail to verify TLS."
             + (
@@ -1467,6 +1472,11 @@ def _system_trust_roots() -> Optional[str]:
                 else ""
             )
         )
+        if _trust_roots_warned:
+            ASH_LOGGER.debug(message)
+        else:
+            _trust_roots_warned.append(True)
+            ASH_LOGGER.warning(message)
         if timed_out:
             _trust_roots_cache.append(None)
         return None

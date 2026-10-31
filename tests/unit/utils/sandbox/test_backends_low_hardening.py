@@ -24,6 +24,7 @@ a plan would probe, and every assertion reads a command line or a profile.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess  # nosec B404 - CompletedProcess is built by hand, nothing runs
@@ -175,6 +176,38 @@ def test_a_failed_root_export_is_tried_again(layout, monkeypatch):
     assert backends._system_trust_roots() is None
     assert backends._system_trust_roots() == "BEGIN CERTIFICATE\n"
     assert backends._system_trust_roots() == "BEGIN CERTIFICATE\n"
+
+
+def test_a_failed_root_export_warns_once_per_run(layout, monkeypatch, caplog):
+    """The export is tried again at every spawn when it failed in time, so the
+    warning that it failed is logged once; later failures are logged at DEBUG."""
+    keychain = layout.tmp / "roots.keychain"
+    keychain.write_text("")
+    monkeypatch.setattr(backends, "_TRUST_ROOT_KEYCHAINS", (str(keychain),))
+    monkeypatch.setattr(backends, "_trust_roots_cache", [])
+    monkeypatch.setattr(backends, "_trust_roots_warned", [])
+    monkeypatch.setattr(
+        backends.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="refused"
+        ),
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="ash"):
+        for _ in range(3):
+            assert backends._system_trust_roots() is None
+
+    about = [
+        record
+        for record in caplog.records
+        if "Could not export the system root certificates" in record.getMessage()
+    ]
+    assert [record.levelno for record in about] == [
+        logging.WARNING,
+        logging.DEBUG,
+        logging.DEBUG,
+    ]
 
 
 def test_a_root_export_that_ran_out_of_time_is_not_tried_again(layout, monkeypatch):
