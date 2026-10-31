@@ -1609,6 +1609,19 @@ class AshAggregatedResults(RecordModel):
         self.metadata.summary_stats.suppressed = sum(suppressed_by_scanner.values())
         for scanner_key, count in suppressed_by_scanner.items():
             self._apply_suppression_side_effects(scanner_key, count)
+        # A row of a scanner with no suppressed finding left (the SARIF was
+        # narrowed since the row was written) would keep its old count while the
+        # summary above dropped, so it is reset. Only a row of the declared type
+        # that still holds a count is touched: any other row is left as it is.
+        for row_name, row in self.scanner_results.items():
+            if (
+                isinstance(row, ScannerTargetStatusInfo)
+                and isinstance(row_name, str)
+                and row_name.lower() not in suppressed_by_scanner
+                and (row.suppressed_finding_count or row.severity_counts.suppressed)
+            ):
+                row.suppressed_finding_count = 0
+                row.severity_counts.suppressed = 0
 
         for scanner_name, results in self.additional_reports.items():
             if results is None:
