@@ -32,11 +32,11 @@ pytestmark = pytest.mark.unit
 CAPTURES = (
     Path(__file__).resolve().parents[4] / "test_data" / "scanners" / "npmaudit" / "yarn"
 )
-#: Lockfile ``a`` answers with the CLEAN report and ``b`` with the advisories,
-#: and the walk is pinned to audit ``a`` first. A merge that kept only the first
-#: lockfile's records then saved nothing, where ``b``'s records are expected;
-#: with the vulnerable capture first (the shape before), the "first only" merge
-#: saved exactly the expected set and the test passed on the bug.
+#: One lockfile answers with the CLEAN report and the other with the
+#: advisories, and the walk is pinned to audit ``a`` first. Each order is run:
+#: a merge that kept only the first lockfile's records saves nothing when the
+#: advisories come second, and one that kept only the last saves nothing when
+#: they come first.
 CAPTURE = CAPTURES / "classic-vuln.json"
 CLEAN_CAPTURE = CAPTURES / "classic-clean.json"
 
@@ -67,19 +67,22 @@ def _project(root):
     (root / "yarn.lock").write_text("# yarn lockfile v1\n", encoding="utf-8")
 
 
-def test_two_yarn_lockfiles_keep_both_sets_of_records(plugin_context):
-    """Lockfile ``a`` is audited first and answers with the clean capture;
-    ``b`` is audited second and answers with the vulnerable one. The merged
-    file then holds exactly ``b``'s records, the SECOND lockfile's: a merge that
-    kept the first lockfile's records and dropped every lockfile after it saved
-    none, where the earlier arrangement (vulnerable first) gave that merge the
-    expected set for free. The walk is pinned to list ``a`` before ``b`` so the
-    order does not depend on the filesystem, and the audits are recorded by the
-    package they ran in."""
+@pytest.mark.parametrize("vulnerable", ["a", "b"])
+def test_two_yarn_lockfiles_keep_both_sets_of_records(plugin_context, vulnerable):
+    """One of two lockfiles answers with the vulnerable capture, the other with
+    the clean one, and the merged file then holds exactly the vulnerable
+    lockfile's records. Both orders are run: with ``b`` vulnerable (audited
+    second) a merge that kept the first lockfile's records and dropped every
+    lockfile after it saves none; with ``a`` vulnerable (audited first) a merge
+    that kept only the last lockfile's records saves none, a blind spot the
+    first arrangement alone moved rather than closed. The walk is pinned to
+    list ``a`` before ``b`` so the order does not depend on the filesystem, and
+    the audits are recorded by the package they ran in."""
     vuln = json.loads(CAPTURE.read_text(encoding="utf-8"))
     clean = json.loads(CLEAN_CAPTURE.read_text(encoding="utf-8"))
     assert vuln["yarn_version"].split(".")[0] == clean["yarn_version"].split(".")[0]
-    by_project = {"a": clean, "b": vuln}
+    by_project = {"a": clean, "b": clean}
+    by_project[vulnerable] = vuln
     _project(plugin_context.work_dir / "a")
     _project(plugin_context.work_dir / "b")
     audits = []
@@ -129,13 +132,13 @@ def test_two_yarn_lockfiles_keep_both_sets_of_records(plugin_context):
     expected = one_lockfile["yarn_advisories"]
     assert len(expected) > 0
     # The SARIF already had both lockfiles' findings; results.json now does too:
-    # exactly b's records (the second lockfile's), and none from a (it had
-    # none). The raw records carry no lockfile field of their own; the SARIF
-    # results do, so the lockfile each finding came from is read there.
+    # exactly the vulnerable lockfile's records, and none from the clean one.
+    # The raw records carry no lockfile field of their own; the SARIF results
+    # do, so the lockfile each finding came from is read there.
     assert len(report.runs[0].results) == len(expected)
     assert {
         r.properties.model_extra.get("lockfile") for r in report.runs[0].results
-    } == {"b/yarn.lock"}
+    } == {f"{vulnerable}/yarn.lock"}
     saved = json.loads(
         scanner.results_dir.joinpath("converted", "results.json").read_text()
     )
