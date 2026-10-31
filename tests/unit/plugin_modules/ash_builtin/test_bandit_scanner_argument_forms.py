@@ -16,6 +16,8 @@ or carried a value the command line cannot hold:
   with no warning, and bandit ran with an empty ``--exclude``.
 * A literal made only of ``/!^-]`` was passed as itself, a plain substring of
   any path that continues it, so bandit skipped files the entry did not name.
+  Of those, ``^``, ``-`` and ``]`` have a one-character class (``[-]``) and an
+  entry that names such a file excludes it; only ``/`` and ``!`` have none.
 * An absolute ``excluded_paths`` entry was read relative to the target and
   excluded nothing, silently.
 * An entry a walked path holds as text was left out with a VERBOSE line only,
@@ -334,22 +336,43 @@ def test_a_comma_in_the_targets_path_is_warned_about(tmp_path, caplog):
 
 
 # ---------------------------------------------------------------------------
-# A literal of only "/!^-]" has no safe glob form
+# A literal of only "/!" has no safe glob form; "^", "-" and "]" have one
 # ---------------------------------------------------------------------------
 
 
-def test_a_literal_of_only_special_characters_has_no_form():
+@pytest.mark.parametrize("name", ["-", "^", "]]", "-^]"])
+def test_a_literal_of_only_range_characters_gets_a_one_character_class(name):
+    """``[-]``, ``[^]`` and ``[]]`` are valid one-character classes in
+    ``fnmatch``, so a name made of these characters has a form that matches
+    itself and is a substring of no other path."""
+    form = _not_a_plain_substring(name)
+
+    assert form is not None
+    assert "[" in form
+    assert fnmatch.fnmatchcase(name, form)
+    assert not fnmatch.fnmatchcase(name + "x", form)
+    assert form not in f"/scan/{name}x.py"
+
+
+def test_a_literal_of_only_special_characters_has_the_forms_it_can_have():
     assert _not_a_plain_substring("app.py") == "app.p[y]"
-    assert _not_a_plain_substring("-") is None
-    assert _not_a_plain_substring("]]") is None
+    assert _not_a_plain_substring("-") == "[-]"
+    assert _not_a_plain_substring("!") is None
+    assert _not_a_plain_substring("/") is None
+    assert _not_a_plain_substring("!/") is None
 
 
 def test_such_a_literal_is_not_passed_as_a_plain_substring():
     """``/scan/-`` is a plain substring of ``/scan/-x.py``; at the base it was
-    passed as written and bandit skipped that file too."""
-    assert bandit_exclude_globs("/scan", "-") == []
+    passed as written and bandit skipped that file too. The entry is the
+    bracketed ``/scan/[-]`` now, which names exactly the top-level file ``-``:
+    the entry for it was left out and the file stayed scanned, though the
+    operator excluded it by name and nothing applies the entry after the
+    scan."""
+    assert bandit_exclude_globs("/scan", "-") == ["/scan/[-]"]
     entries = bandit_excluded_path_globs("/scan", "-")
     assert "/scan/-" not in entries
+    assert "/scan/[-]" in entries
     assert "/scan/*/-" in entries
     assert "/scan/-/*" in entries
 
@@ -357,14 +380,13 @@ def test_such_a_literal_is_not_passed_as_a_plain_substring():
         """bandit 1.9.4's rule: an fnmatch glob, or a plain substring."""
         return any(fnmatch.fnmatch(path, e) or e in path for e in entries)
 
-    # Applied as bandit applies them: the neighbor file stays, a nested "-" and
-    # the files under a top-level "-" directory are skipped, and a top-level
-    # FILE named "-" is left to bandit, since the only entry that would name it
-    # is the plain substring that also took the neighbor.
+    # Applied as bandit applies them: the neighbor file stays, a nested "-", the
+    # files under a top-level "-" directory and the top-level FILE named "-"
+    # are skipped.
     assert not skipped("/scan/-x.py")
     assert skipped("/scan/d/-")
     assert skipped("/scan/-/a.py")
-    assert not skipped("/scan/-")
+    assert skipped("/scan/-")
 
 
 def test_a_link_named_only_with_special_characters_still_gets_an_entry(tmp_path):

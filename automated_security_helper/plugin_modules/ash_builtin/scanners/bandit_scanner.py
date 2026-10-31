@@ -472,12 +472,21 @@ def _not_a_plain_substring(literal: str) -> Optional[str]:
 
     The bracketed character is the last one that is not ``/``, ``!``, ``^``,
     ``-`` or ``]``, which read as a separator, a negation, a range or the class's
-    end inside brackets. A literal made only of those (``-``, ``]]``) has no
-    such form and None is returned: passed as it was, ``<anchor>/-`` would be a
-    plain substring of ``<anchor>/-x.py`` and make bandit skip that file too.
+    end inside brackets. A literal made only of ``^``, ``-`` and ``]`` has a
+    form still: each is a one-character class when it stands alone in the
+    brackets (``[-]``, ``[^]`` and ``[]]`` in ``fnmatch``), so the last such
+    character is bracketed (``-`` is ``[-]``, ``]]`` is ``][]]``). Only a
+    literal made of ``/`` and ``!`` alone has no form, and None is returned:
+    ``!`` opens a negation (``[!]`` is no class), and passed as it was,
+    ``<anchor>/!`` would be a plain substring of ``<anchor>/!x.py`` and make
+    bandit skip that file too. (A literal of ``-`` was left unbracketed and
+    unexcluded before, though ``[-]`` names exactly that one file.)
     """
     for index in range(len(literal) - 1, -1, -1):
         if literal[index] not in "/!^-]":
+            return f"{literal[:index]}[{literal[index]}]{literal[index + 1 :]}"
+    for index in range(len(literal) - 1, -1, -1):
+        if literal[index] in "^-]":
             return f"{literal[:index]}[{literal[index]}]{literal[index + 1 :]}"
     return None
 
@@ -520,8 +529,8 @@ def bandit_exclude_globs(anchor: str, pattern: str) -> List[str]:
     ``./app.py`` covers no file of the tree and bandit is told to skip none. Nor a
     pattern or anchor holding a line break or a NUL (``_cannot_be_passed``): the
     argument could not carry it, and the SARIF step applies the ignore path. Nor
-    a literal made only of ``/!^-]`` (``_not_a_plain_substring`` has no form for
-    it that is not a plain substring of other paths).
+    a literal made only of ``/`` and ``!`` (``_not_a_plain_substring`` has no
+    form for it that is not a plain substring of other paths).
     """
     pattern = pattern.replace("\\", "/")
     if pattern.endswith("/") and pattern.strip("/"):
@@ -1819,7 +1828,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             if spelled == entry:
                 bracketed = _not_a_plain_substring(entry)
                 if bracketed is None:
-                    # Only when the whole "<root>/<path>" is made of "/!^-]":
+                    # Only when the whole "<root>/<path>" is made of "/!":
                     # the root's own characters are bracketed otherwise, so a
                     # link named "-" under an ordinary root keeps its entry.
                     raise ScannerError(
