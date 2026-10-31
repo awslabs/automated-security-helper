@@ -338,9 +338,13 @@ def _below_resolved_root(path: str, root: str) -> Optional[str]:
     boundary = wanted if wanted.endswith(os.sep) else wanted + os.sep
     if not folded.startswith(boundary):
         return None
-    # Case folding keeps the length of a path; keep the spelling on disk.
-    spelled = resolved if len(resolved) == len(folded) else folded
-    return spelled[len(boundary) :].replace(os.sep, "/") or None
+    if len(resolved) != len(folded):
+        # The part below the root is read from the spelling on disk, which is
+        # the spelling aggregation writes; a fold that changes the length of a
+        # path cannot be cut back onto it, and the folded spelling would name a
+        # file that is not there. The path is left unplaced.
+        return None
+    return resolved[len(boundary) :].replace(os.sep, "/") or None
 
 
 def _placed_by_root(path: str, root: str) -> str:

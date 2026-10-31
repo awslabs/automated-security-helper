@@ -15,6 +15,7 @@ import sys
 import pytest
 
 from automated_security_helper.utils.meta_analysis.locations_match import (
+    _below_resolved_root,
     file_paths_match,
     resolve_scan_root,
 )
@@ -165,6 +166,36 @@ def test_a_link_to_a_file_of_the_root_places_the_file(tmp_path):
     # A link to a file outside the root is no file of the root.
     assert _matched(str(stray_alias), "b.py", str(root)) == 0
     assert _matched(str(stray_alias), "lib/b.py", str(root)) == 0
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a symbolic link needs a privilege")
+def test_a_fold_that_changes_a_length_leaves_a_path_unplaced(tmp_path, monkeypatch):
+    """The part of a path below the root is read from the spelling on disk, the
+    one aggregation writes. Where case folding changes the length of a path, the
+    folded text cannot be cut back onto that spelling, and it names no file: the
+    path stays absolute and matches only an identical path."""
+    root = tmp_path / "real"
+    (root / "lib").mkdir(parents=True)
+    into_root = tmp_path / "shared"
+    into_root.symlink_to(root / "lib", target_is_directory=True)
+    through_link = str(into_root / "a.py")
+
+    # Control: a fold that keeps the length places the path as it does without one.
+    monkeypatch.setattr(os.path, "normcase", str.lower)
+    _below_resolved_root.cache_clear()
+    assert _matched(through_link, "lib/a.py", str(root)) == 1
+
+    monkeypatch.setattr(
+        os.path, "normcase", lambda text: text.replace("lib", "LIBRARY")
+    )
+    _below_resolved_root.cache_clear()
+    try:
+        # The folded remainder is not a file of the scan.
+        assert _matched(through_link, "LIBRARY/a.py", str(root)) == 0
+        assert _matched(through_link, "lib/a.py", str(root)) == 0
+        assert _matched(through_link, through_link, str(root)) == 1
+    finally:
+        _below_resolved_root.cache_clear()
 
 
 def test_two_identical_paths_outside_the_root_are_one_file():
