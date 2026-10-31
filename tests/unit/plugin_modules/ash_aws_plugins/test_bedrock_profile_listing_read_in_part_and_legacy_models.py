@@ -42,22 +42,32 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_re
     _exhaustion_text,
 )
 from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
+    MODULE,
     make_reporter,
     plugin_context_in,
 )
 
 pytestmark = pytest.mark.unit
 
-#: The model the fallback chain names after the configured one below.
-CHAIN_MODEL = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+#: Opaque ids, as the doubles module treats every model id: the code under test
+#: reads only the area prefix and the listing, so no real model is named. The
+#: fallback chain is the table in ``_CHAIN`` below, patched in for every test.
+#: CHAIN_MODEL is the model the chain names after EU_CONFIGURED.
+CHAIN_MODEL = "test-vendor.chain-model-v1:0"
 EU_PROFILE = f"eu.{CHAIN_MODEL}"
 US_PROFILE = f"us.{CHAIN_MODEL}"
-EU_CONFIGURED = "eu.anthropic.claude-3-7-sonnet-20250219-v1:0"
+EU_CONFIGURED = "eu.test-vendor.configured-model-v1:0"
 
-#: Opaque ids: the chain has no entry for this prefix, so its fallback is the
-#: default chain head, FALLBACK.
 CONFIGURED = "test-vendor.configured-model-v1:0"
-FALLBACK = "us.amazon.nova-pro-v1:0"
+FALLBACK = "us.test-vendor.fallback-model-v1:0"
+
+#: What follows each configured model; a model with no entry ends the walk.
+_CHAIN = {EU_CONFIGURED: EU_PROFILE, CONFIGURED: FALLBACK}
+
+
+@pytest.fixture(autouse=True)
+def _opaque_fallback_chain(monkeypatch):
+    monkeypatch.setattr(f"{MODULE}.get_fallback_model", _CHAIN.get)
 
 
 def _model(model_id, *, types, status="ACTIVE"):
