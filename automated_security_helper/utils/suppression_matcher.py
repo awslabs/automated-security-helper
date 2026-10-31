@@ -229,7 +229,7 @@ def _search_comment(pattern: "re.Pattern[str]", line: str) -> Optional["re.Match
 
 
 def _reason(match: "re.Match[str]") -> str:
-    """The directive's reason: the text after its rule id, up to the line's end
+    r"""The directive's reason: the text after its rule id, up to the line's end
     or the first carriage return, whichever comes first.
 
     Lines are split at line feeds alone (``find_inline_suppressions``), so a
@@ -841,9 +841,9 @@ def find_inline_suppressions(
     CR is not a line break). That is the contract for a file with no line feed
     at all (classic Mac CR-only line endings): it is one line here, so at most
     one directive is found, the first on the line, it names line 1 (line 2 for
-    ``ash-ignore-next-line``), and its reason runs to the end of the file, the
-    rest of that one line; a scanner that numbers such a file by CR reports
-    lines these directives never match.
+    ``ash-ignore-next-line``), and its reason ends at the first carriage return
+    after it (``_reason``), not at the end of the file; a scanner that numbers
+    such a file by CR reports lines these directives never match.
 
     Args:
         file_path: Path to the source file to scan.
