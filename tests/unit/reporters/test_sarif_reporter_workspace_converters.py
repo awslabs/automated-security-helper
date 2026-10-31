@@ -24,6 +24,7 @@ from automated_security_helper.models.workspace import (
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_reporter import (
     SarifReporter,
+    run_of_project,
     workspace_converter_invocations,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -360,6 +361,31 @@ def test_an_unstamped_run_at_the_index_is_still_the_projects_run(
 
     assert "invocations" not in doc["runs"][0]
     assert len(doc["runs"][1]["invocations"]) == 1
+
+
+class TestAnInvocationListWithNoProjectStamp:
+    """A hand-built invocation list names no project, so there is no stamp to
+    look for; the index is trusted only in a document with no stamp at all."""
+
+    @staticmethod
+    def _unstamped() -> Invocation:
+        return Invocation(executionSuccessful=True)
+
+    def test_the_run_at_the_index_is_taken_in_an_unstamped_document(self):
+        runs = [_run(), _run()]
+
+        assert run_of_project(runs, 1, [self._unstamped()]) is runs[1]
+        assert run_of_project(runs, 0, []) is runs[0]
+
+    def test_nothing_is_attached_in_a_document_with_a_stamped_run(self):
+        runs = [_run("api"), _run()]
+
+        assert run_of_project(runs, 1, [self._unstamped()]) is None
+        assert run_of_project(runs, 1, []) is None
+
+    def test_an_index_past_the_runs_attaches_nothing(self):
+        # The control: the index is trusted only while it points at a run.
+        assert run_of_project([_run()], 5, [self._unstamped()]) is None
 
 
 def _dump(model: AshAggregatedResults) -> str:

@@ -281,6 +281,13 @@ def run_of_project(runs: List[Any], run_index: int, invocations: List[Any]) -> A
     it, so the unstamped run was the wrong run to take. When no run is the
     project's, nothing is attached and the log says which project's shortfalls
     the document does not carry.
+
+    An invocation list whose first invocation carries no ``workspace_project``
+    stamp (one built by hand, or an empty list) names no project to look for.
+    The index is then trusted exactly when no run of the document is stamped,
+    and nothing is attached when any run is. The aggregator stamps every
+    invocation it writes, so this is the case of a caller that did not go
+    through it.
     """
     key = (
         _stamped_property(invocations[0], "workspace_project") if invocations else None
