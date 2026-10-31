@@ -2003,9 +2003,17 @@ class _WorkspaceScanClaim:
         released (``call_returns``). Releasing again there gave away a place in
         the per-session limit, or the session's tree, that another scan of the
         session held by then.
+
+        A thread that reads the tree (:meth:`thread_starts`) and has not returned
+        keeps the claim, as it does against :meth:`call_returns` and
+        :meth:`worker_declines`: the hold goes back to the call, and the last
+        thread to return, or the call's exit, releases it.
         """
         with self._lock:
             if self._holder != "worker":
+                return
+            if self._threads:
+                self._holder = "call"
                 return
             self._holder = "released"
         self._release()

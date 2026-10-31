@@ -885,6 +885,26 @@ class TestAWorkerThatMissedTheClaimReleasesNothing:
 
         assert counted.returned == 1
 
+    def test_a_worker_returning_while_a_thread_reads_the_tree_keeps_the_claim(self):
+        """Red at the base: worker_returns released with a thread still running.
+
+        The thread that resolves the workspace (``thread_starts``) holds the
+        claim so the session's tree is not removed under it. A worker that
+        returns first gives the hold back to the call, and the last thread to
+        return releases, once.
+        """
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+
+        assert claim.thread_starts() is True
+        assert claim.worker_starts() is True
+        claim.call_returns()
+        claim.worker_returns()
+        assert counted.returned == 0, "released under a thread that still reads"
+        claim.thread_returns()
+
+        assert counted.returned == 1
+
     def test_the_run_itself_releases_once_when_the_call_left_first(self, tmp_path):
         """Through ``_run``: the raise for a lost claim does not release twice."""
         order: List[str] = []
