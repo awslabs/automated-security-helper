@@ -449,7 +449,11 @@ class TestOffline:
         was told as a local failure, with the free-space remedy."""
         archive, bundle = bundle_zip
 
-        def dropped(url, destination, rename_to=None, expected_sha256=None):
+        # ``mode`` as the real helper takes it, so the stand-in is called the way
+        # the installer calls the helper and raises the wire error it is given.
+        def dropped(
+            url, destination, rename_to=None, expected_sha256=None, *, mode=None
+        ):
             raise error
 
         with pytest.raises(RulesBundleUnavailable) as refused:
