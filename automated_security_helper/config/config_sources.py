@@ -5343,10 +5343,11 @@ def _environment_blind_error(
             # caller raises the returned error with the chain cut (`from
             # None`), but a traceback is carried on the error itself, so it
             # is cut here, where it would otherwise leave with the frame.
-            if config_file_changed(literal_error):
+            if changed:
                 # The caller raises this error `from None`, which drops the
                 # ConfigFileChangedError it was raised from, and with it the
-                # fact that a file changed after it was checked. The fact rides
+                # fact that a file changed after it was checked, whether the
+                # first resolution or this one met the change. The fact rides
                 # on the error itself, as it does on a reworded base error; the
                 # mark carries no path.
                 setattr(literal_error, _FILE_CHANGED_MARK, True)

@@ -165,6 +165,44 @@ def test_a_second_refusal_that_names_a_reference_keeps_the_mark_too(
     assert config_file_changed(raised)
 
 
+def test_a_second_refusal_for_another_reason_keeps_the_mark_the_first_one_met(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first resolution met a changed file; the second fails for a plain
+    reason that names no reference, so its own error is the one returned. It
+    reads as a changed file all the same, because the caller drops the cause
+    the first refusal was raised from."""
+    _second_resolution(
+        monkeypatch, raises=ASHConfigSourceError("the base could not be read")
+    )
+
+    blind = _environment_blind_error(
+        tmp_path / ".ash.yaml", tmp_path, None, _a_changed_file_refusal()
+    )
+
+    raised = _raised_as_the_caller_raises_it(blind)
+    assert "the base could not be read" in str(raised), "premise: its own error"
+    assert config_file_changed(raised)
+
+
+def test_a_second_refusal_for_another_reason_after_a_plain_one_carries_no_mark(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control: nothing changed on either side, so its own error is returned
+    unmarked."""
+    _second_resolution(
+        monkeypatch, raises=ASHConfigSourceError("the base could not be read")
+    )
+
+    blind = _environment_blind_error(
+        tmp_path / ".ash.yaml", tmp_path, None, ASHConfigSourceError("refused")
+    )
+
+    raised = _raised_as_the_caller_raises_it(blind)
+    assert "the base could not be read" in str(raised), "premise: its own error"
+    assert not config_file_changed(raised)
+
+
 def test_a_generic_reason_after_a_plain_refusal_carries_no_mark(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
