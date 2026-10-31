@@ -2091,7 +2091,9 @@ def test_a_scanner_that_wrote_the_uv_tool_lock_is_warned_of(
     assert lock.as_posix() in warning, warning
     assert "changed while the sandboxed scanner probe ran" in warning, warning
     assert "was written" not in warning, warning
-    assert "may have been another one" in warning, warning
+    assert "another one running at the same time" in warning, warning
+    assert "or the operator" in warning, warning
+    assert "a change means a sandboxed scanner wrote to it" not in warning, warning
     assert "MARKER-left-for-a-later-run" not in warning, warning
 
 
@@ -2148,5 +2150,9 @@ def test_a_change_to_the_uv_tool_lock_that_keeps_its_size_and_time_is_warned_of(
     if change == "chmod":
         assert "mode 0o644 to 0o600" in warning, warning
     else:
-        assert "rewritten with its size and mode unchanged" in warning, warning
+        # The change time also moves for a chown or a hard link, so the text does
+        # not call it a rewrite.
+        assert "changed without a size or mode change" in warning, warning
+        assert "rewritten" not in warning, warning
+    assert "a change means a sandboxed scanner wrote to it" not in warning, warning
     assert "BBBB" not in warning, warning

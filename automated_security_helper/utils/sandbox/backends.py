@@ -186,16 +186,16 @@ def _uv_lock_watch(policy: SandboxPolicy) -> List[Callable[[], None]]:
                         f"mode {oct(was[2] & 0o7777)} to {oct(now[2] & 0o7777)}"
                     )
                 if not changes:
-                    changes.append("rewritten with its size and mode unchanged")
+                    changes.append("changed without a size or mode change")
                 ASH_LOGGER.warning(
                     shown_on_one_line(
                         f"The uv tools lock {lock.as_posix()} changed while the "
                         f"sandboxed scanner {policy.scanner_name} ran "
                         f"({'; '.join(changes)}). The sandbox may write this one "
                         "host file so that `uv tool run` can take uv's lock, and uv "
-                        "keeps nothing in it, so a change means a sandboxed scanner "
-                        "wrote to it; when scanners run at the same time it may "
-                        "have been another one."
+                        "keeps nothing in it, so a change means something wrote to "
+                        "it or changed its attributes: a sandboxed scanner, another "
+                        "one running at the same time, or the operator."
                     ),
                     extra=NO_MARKUP,
                 )
