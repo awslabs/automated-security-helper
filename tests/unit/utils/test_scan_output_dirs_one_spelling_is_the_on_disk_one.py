@@ -32,10 +32,27 @@ from automated_security_helper.utils.scan_output_dirs import _one_spelling_each
 pytestmark = pytest.mark.unit
 
 
+class _FoldedPath(type(Path())):
+    """A path that compares and hashes without regard to case, as pathlib's
+    Windows paths do, so a set or a dict keyed by them holds one entry for two
+    spellings of a directory on any host. Equality under it says nothing about
+    which spelling was kept, so the tests compare ``str``."""
+
+    def __eq__(self, other):
+        return str(self).casefold() == str(other).casefold()
+
+    def __hash__(self):
+        return hash(str(self).casefold())
+
+
 def _tree(tmp_path) -> Path:
     base = Path(os.path.realpath(tmp_path))
     (base / ".ash" / "ash_output").mkdir(parents=True)
     return base
+
+
+def _texts(paths) -> list:
+    return sorted(str(path) for path in paths)
 
 
 @pytest.mark.parametrize("platform", ["darwin", "win32"])
@@ -47,9 +64,11 @@ def test_the_spelling_on_disk_is_kept_over_one_that_sorts_first(
     earlier = base / ".ash" / "ash_output"
     monkeypatch.setattr(sys, "platform", platform)
 
-    kept = _one_spelling_each({this_run, earlier})
+    kept = _one_spelling_each([this_run, earlier])
 
-    assert kept == {earlier}
+    # Compared as text: where pathlib folds case, ``{earlier}`` equals
+    # ``{this_run}`` and a set comparison would pass whichever was kept.
+    assert _texts(kept) == [str(earlier)]
 
 
 @pytest.mark.parametrize("platform", ["darwin", "win32"])
@@ -63,8 +82,8 @@ def test_the_answer_does_not_depend_on_the_order_the_spellings_arrive_in(
 
     # ``.asH`` sorts before ``.ash`` (H is below h) whichever way round the two
     # reach the function.
-    assert _one_spelling_each({sorts_first, on_disk}) == {on_disk}
-    assert _one_spelling_each({on_disk, sorts_first}) == {on_disk}
+    assert _texts(_one_spelling_each([sorts_first, on_disk])) == [str(on_disk)]
+    assert _texts(_one_spelling_each([on_disk, sorts_first])) == [str(on_disk)]
 
 
 @pytest.mark.parametrize("platform", ["darwin", "win32"])
@@ -76,7 +95,7 @@ def test_control_with_neither_spelling_on_disk_the_first_in_sorted_order_is_kept
     second = base / ".ash" / "ash_output"
     monkeypatch.setattr(sys, "platform", platform)
 
-    assert _one_spelling_each({first, second}) == {first}
+    assert _texts(_one_spelling_each([first, second])) == [str(first)]
 
 
 def test_control_on_linux_two_spellings_are_two_directories(tmp_path, monkeypatch):
@@ -85,7 +104,43 @@ def test_control_on_linux_two_spellings_are_two_directories(tmp_path, monkeypatc
     earlier = base / ".ash" / "ash_output"
     monkeypatch.setattr(sys, "platform", "linux")
 
-    assert _one_spelling_each({this_run, earlier}) == {this_run, earlier}
+    kept = _one_spelling_each([this_run, earlier])
+
+    assert _texts(kept) == _texts([this_run, earlier])
+
+
+@pytest.mark.parametrize("owned", [True, False], ids=["named", "scanned"])
+def test_both_spellings_reach_the_choice_where_paths_compare_without_case(
+    tmp_path, monkeypatch, owned
+):
+    base = _tree(tmp_path)
+    root = _FoldedPath(base)
+    this_run = root / ".ASH" / "ash_output"
+    earlier = root / ".ash" / "ash_output"
+    # The fixture folds as pathlib does on Windows: a set holds one of the two.
+    assert this_run == earlier
+    assert len({this_run, earlier}) == 1
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(
+        scan_output_dirs,
+        "_output_dir_candidates_with_owner",
+        lambda *args: [(this_run, owned), (earlier, owned)],
+    )
+    monkeypatch.setattr(
+        scan_output_dirs, "_spelled_under", lambda candidate, *rest: candidate
+    )
+    monkeypatch.setattr(
+        scan_output_dirs, "_an_enclosing_repository_lists", lambda directory: False
+    )
+
+    named, scanned = scan_output_dirs._classified_output_dirs(base, this_run)
+
+    # The earlier run's ``.ash`` is what the file system holds and the tools
+    # match exclusions against: it is the spelling kept, in whichever list the
+    # directory belongs to, and the other list holds nothing.
+    kept, other = (named, scanned) if owned else (scanned, named)
+    assert _texts(kept) == [str(earlier)]
+    assert _texts(other) == []
 
 
 def test_a_component_that_cannot_be_listed_is_not_on_disk(tmp_path, monkeypatch):

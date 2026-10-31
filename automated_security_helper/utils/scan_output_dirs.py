@@ -1226,8 +1226,11 @@ def _classified_output_dirs(
     """
     root = _absolute(source_dir)
     root_resolved = _resolved(root)
-    named: Set[Path] = set()
-    scanned: Set[Path] = set()
+    # Lists, not sets: where pathlib compares paths without case (Windows), a
+    # set holds one of two spellings of a directory, the first added, and the
+    # choice of spelling below would never see the other.
+    named: List[Path] = []
+    scanned: List[Path] = []
     for candidate, owned in _output_dir_candidates_with_owner(
         source_dir, output_dir, workspace_output_dir
     ):
@@ -1235,25 +1238,25 @@ def _classified_output_dirs(
         if spelled is None:
             continue
         if owned or _an_enclosing_repository_lists(spelled):
-            named.add(spelled)
+            named.append(spelled)
         else:
-            scanned.add(spelled)
+            scanned.append(spelled)
     # One entry per directory: where names compare without case, this run's
     # output directory spelled in one case and the earlier run's on disk in
     # another are one directory, and two spellings of it each read as below
     # the other, so the reduction to the outermost directories dropped both and
     # named nothing.
-    named = _one_spelling_each(named)
-    named_keys = {_name_keys(path) for path in named}
-    scanned = {
+    named_once = _one_spelling_each(named)
+    named_keys = {_name_keys(path) for path in named_once}
+    scanned_once = {
         path
         for path in _one_spelling_each(scanned)
         if _name_keys(path) not in named_keys
     }
-    return named, scanned
+    return named_once, scanned_once
 
 
-def _one_spelling_each(paths: Set[Path]) -> Set[Path]:
+def _one_spelling_each(paths: Iterable[Path]) -> Set[Path]:
     """*paths* with one entry for each directory, where two spellings name one
     (:func:`_name_keys`): the one spelled as the file system holds it, else the
     first in sorted order.
@@ -1263,6 +1266,9 @@ def _one_spelling_each(paths: Set[Path]) -> Set[Path]:
     directory spelled ``.ASH/ash_output`` sorts before the earlier run's
     ``.ash/ash_output`` that is really there, and keeping the sorted-first one
     left the tool's own reports readable under their real name.
+
+    Not a set: a caller that gathered the paths into one has already lost every
+    spelling but the first of a directory wherever pathlib folds case itself.
     """
     kept: Dict[Tuple[str, ...], Path] = {}
     for path in sorted(paths):
