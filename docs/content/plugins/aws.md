@@ -7,14 +7,15 @@ they use.
 
 | Reporter | Sends to | What leaves the machine |
 |---|---|---|
-| `s3` | An S3 bucket | The scan summary and the resolved ASH configuration |
-| `cloudwatch-logs` | A CloudWatch Logs log group | The same summary and configuration |
+| `s3` | An S3 bucket | The scan summary, the resolved ASH configuration, and the SARIF report with the findings |
+| `cloudwatch-logs` | A CloudWatch Logs log group | The scan summary and the resolved ASH configuration |
 | `bedrock-summary-reporter` | Amazon Bedrock | Finding messages, file paths, and severity counts |
 | `aws-security-hub` | AWS Security Hub | Nothing yet: the reporter checks its connection and writes a placeholder file ([details](#aws-security-hub)) |
 
-The S3 and CloudWatch Logs reporters do not send individual findings. To collect findings
-centrally, copy a findings file such as `reports/ash.ocsf.json` or `reports/ash.sarif` to
-your storage yourself ([Export reports](../how-to/export-reports.md)).
+The CloudWatch Logs reporter does not send individual findings. The S3 reporter sends them
+only as the SARIF report inside its object. To collect findings centrally in another form,
+copy a findings file such as `reports/ash.ocsf.json` or `reports/ash.sarif` to your storage
+yourself ([Export reports](../how-to/export-reports.md)).
 
 ## Load the package {#enable}
 
@@ -193,8 +194,9 @@ directory; ASH warns once per run about a prefix that does not. The object holds
 counts, each scanner's and converter's status and finding counts, and the resolved ASH
 configuration, which includes your suppressions and ignore paths. In the configuration and
 the metadata, a value or key a config file read from the environment is the reference the
-file wrote ([Read values from the environment](../how-to/configure.md#environment)). It holds no
-individual findings.
+file wrote ([Read values from the environment](../how-to/configure.md#environment)). When the
+scan produced a SARIF report, the object also holds it under the `sarif` key, and that report
+carries the individual findings.
 
 Before the upload it calls `HeadBucket`. Locally it writes the uploaded content to
 `reports/s3-report.json` and a receipt with the object URL to `reports/ash.s3.json`. When
@@ -206,8 +208,8 @@ bucket, which `HeadBucket` requires.
 
 ### `cloudwatch-logs` {#cloudwatch-logs}
 
-Sends one log event per scan with the same summary and configuration as the S3 object,
-to the stream `log_stream_name` in `log_group_name`. It creates the stream if needed;
+Sends one log event per scan with the scan summary and the resolved ASH configuration the S3
+object holds, without the SARIF report, to the stream `log_stream_name` in `log_group_name`. It creates the stream if needed;
 the log group must already exist. Locally it writes the event and the API response to
 `reports/ash.cwlog.json`.
 
