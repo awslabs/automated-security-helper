@@ -501,7 +501,13 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         extra.append(f"--ignorefile={self._ignore_file()}")
         extra.append(f"--secret-config={self._secret_config_file([config_token])}")
         # Each link leaving the target, and each path the global ignore paths ignore.
-        extra.extend(self._link_skip_args(target, global_ignore_paths))
+        # The operator's own skip entries are sized first and kept out of this share
+        # of the argument budget (TrivyScannerBase._skip_args_reserved): ASH's
+        # tokens have a fallback when left out, the operator's have none.
+        reserved = self._skip_args_reserved(extra)
+        extra.extend(
+            self._link_skip_args(target, global_ignore_paths, reserved=reserved)
+        )
         # The operator's own skip lists, which ASH's skip flags would otherwise
         # replace (TrivyScannerBase._operator_skip_args).
         extra.extend(self._operator_skip_args(extra))

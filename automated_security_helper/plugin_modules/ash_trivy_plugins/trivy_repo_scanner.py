@@ -384,6 +384,15 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             # scanner alone, and whether that scanner runs is read through the
             # config file the run passes (TrivyScannerBase._effective_scanners).
             pinned = self._pinned_config_args()
+            # ASH's own output directories inside the target, as the builtin
+            # trivy scanner skips them: the converted copies the converted
+            # target scans already, and an earlier run's reports and results.
+            output_dir_args = self._output_dir_skip_args(target, target_type)
+            # The operator's own skip entries are sized first and kept out of the
+            # links' share of the argument budget
+            # (TrivyScannerBase._skip_args_reserved): ASH's tokens have a fallback
+            # when left out, the operator's have none.
+            reserved = self._skip_args_reserved([*pinned, *output_dir_args])
             inserted = [
                 f"--ignorefile={self._ignore_file()}",
                 f"--secret-config={self._secret_config_file(pinned)}",
@@ -394,11 +403,8 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 f"--timeout={trivy_timeout(self._effective_scan_timeout())}",
                 # Each link leaving the target (trivy follows no link), and each
                 # path the global ignore paths ignore.
-                *self._link_skip_args(target, global_ignore_paths),
-                # ASH's own output directories inside the target, as the builtin
-                # trivy scanner skips them: the converted copies the converted
-                # target scans already, and an earlier run's reports and results.
-                *self._output_dir_skip_args(target, target_type),
+                *self._link_skip_args(target, global_ignore_paths, reserved=reserved),
+                *output_dir_args,
             ]
             # The operator's own skip lists, which ASH's skip flags would
             # otherwise replace (TrivyScannerBase._operator_skip_args).

@@ -1672,10 +1672,12 @@ def test_an_entry_without_the_expected_fields_raises_instead_of_matching_nothing
 def test_the_operators_skip_entries_are_held_to_what_is_left_of_the_budget(
     tmp_path, monkeypatch
 ):
-    """ASH's own tokens take their share first; the operator's entries, moved onto
-    the command line because ASH passes a skip flag of its own, take what is left.
+    """The operator's entries, moved onto the command line because ASH passes a skip
+    flag of its own, take what the skip tokens already on it leave of the budget.
     A large generated list in the operator's file was passed whole, past the size
-    a program is started with."""
+    a program is started with. Which tokens are already there is the callers' to
+    decide: they size the operator's entries before the links' and ignored paths'
+    tokens, see the tests that run a whole scan below."""
     scanner = _repo_scanner(tmp_path)
     scanner.extra_env = {"TRIVY_SKIP_DIRS": "aaaa,bbbb,cccc,dddd"}
     ashs_own = "--skip-dirs=x"
@@ -1709,3 +1711,147 @@ def test_control_the_operators_skip_entries_all_fit_a_budget_that_holds_them(
 
     assert tokens == ["--skip-dirs=aaaa", "--skip-dirs=bbbb"], tokens
     assert not [m for m in messages if "exceed the size" in m], messages
+
+
+# --- a tree that fills ASH's share still carries the operator's skip entries -------
+
+#: One ignored-file token ``_link_skip_args`` builds, as the budget counts it.
+_IGNORED_FILE_TOKEN = len("--skip-files=ignored/000.txt") + 1
+
+
+def _ignored_files(count: int) -> list[str]:
+    return [f"ignored/{index:03d}.txt" for index in range(count)]
+
+
+def _fill_the_budget_for_ten_ignored_files(monkeypatch, *, spare: int = 5) -> None:
+    """Forty ignored files, and a budget that ten of their tokens fill to within
+    ``spare`` bytes, so the operator's entry fits only if the links leave room."""
+    monkeypatch.setattr(
+        trivy_base, "trivy_skip_files", lambda *a, **k: _ignored_files(40)
+    )
+    monkeypatch.setattr(trivy_base, "trivy_skip_dirs", lambda *a, **k: [])
+    monkeypatch.setattr(
+        trivy_base,
+        "skip_args_budget",
+        lambda environment: 10 * _IGNORED_FILE_TOKEN + spare,
+    )
+
+
+def _operator_warnings(messages: list[str]) -> list[str]:
+    return [m for m in messages if "operator's skip" in m]
+
+
+def test_a_tree_that_fills_ashs_budget_still_carries_the_operators_skip_variable(
+    tmp_path, monkeypatch
+):
+    """The links' tokens were built first and took the whole budget, so the
+    operator's one-entry ``TRIVY_SKIP_DIRS=vendor``, which trivy no longer reads
+    once ASH passes a skip flag of its own, was dropped. ASH's tokens have a
+    fallback (ASH drops the findings of a path trivy reads); the operator's have
+    none, so they are sized first and the links get what is left."""
+    scanner = _builtin_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "vendor"}
+    _fill_the_budget_for_ten_ignored_files(monkeypatch)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        argv, _, _ = scanner._execute_scan(
+            Path(scanner.context.source_dir), "source", []
+        )
+
+    assert "--skip-dirs=vendor" in argv, argv
+    assert len([a for a in argv if a.startswith("--skip-files=")]) == 9, argv
+    assert not _operator_warnings(messages), messages
+
+
+def test_a_tree_that_fills_ashs_budget_still_carries_the_operators_config_skip_files(
+    tmp_path, monkeypatch
+):
+    _operator_config_in_env(
+        tmp_path, monkeypatch, "scan:\n  skip-files:\n    - secrets.txt\n"
+    )
+    scanner = _builtin_scanner(tmp_path)
+    _fill_the_budget_for_ten_ignored_files(monkeypatch)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        argv, _, _ = scanner._execute_scan(
+            Path(scanner.context.source_dir), "source", []
+        )
+
+    assert "--skip-files=secrets.txt" in argv, argv
+    assert not _operator_warnings(messages), messages
+
+
+def test_trivy_repo_also_keeps_the_operators_skip_variable_when_ashs_budget_is_full(
+    tmp_path, monkeypatch
+):
+    for module in (scanner_plugin, trivy_repo_scanner):
+        if hasattr(module, "find_executable"):
+            monkeypatch.setattr(module, "find_executable", lambda name: f"/bin/{name}")
+    scanner = _repo_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "vendor"}
+    scanner.dependencies_satisfied = True
+    _fill_the_budget_for_ten_ignored_files(monkeypatch)
+    report = {
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": {"name": "Trivy", "rules": []}}, "results": []}],
+    }
+    argv: list[str] = []
+
+    def _run(self, command, **kwargs):
+        argv[:] = [str(a) for a in command]
+        destination = Path(command[command.index("--output") + 1])
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(report), encoding="utf-8")
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(TrivyRepoScanner, "_run_subprocess", autospec=True) as double,
+        patch.object(scanner, "_plugin_log"),
+    ):
+        double.side_effect = _run
+        scanner.scan(target=Path(scanner.context.source_dir), target_type="source")
+
+    assert "--skip-dirs=vendor" in argv, argv
+    assert len([a for a in argv if a.startswith("--skip-files=")]) == 9, argv
+
+
+def test_the_operator_warning_fires_only_when_the_operators_own_list_overflows(
+    tmp_path, monkeypatch
+):
+    """Beside one skip token of ASH's own (an output directory) the budget holds two
+    of the operator's four entries: the other two are named in one warning, the
+    links get nothing, and the first two entries are still given to trivy."""
+    scanner = _builtin_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": "aaaa,bbbb,cccc,dddd"}
+    _fill_the_budget_for_ten_ignored_files(monkeypatch)
+    ashs_own = "--skip-dirs=out"
+    one_entry = len("--skip-dirs=aaaa") + 1
+    monkeypatch.setattr(
+        trivy_base,
+        "skip_args_budget",
+        lambda environment: len(ashs_own) + 1 + 2 * one_entry + 3,
+    )
+    messages, logging_patch = _logged(scanner)
+
+    with (
+        logging_patch,
+        patch.object(
+            TrivyScannerBase, "_output_dir_skip_args", return_value=[ashs_own]
+        ),
+    ):
+        argv, _, _ = scanner._execute_scan(
+            Path(scanner.context.source_dir), "source", []
+        )
+
+    assert [a for a in argv if a.startswith("--skip-dirs=")] == [
+        ashs_own,
+        "--skip-dirs=aaaa",
+        "--skip-dirs=bbbb",
+    ], argv
+    assert not [a for a in argv if a.startswith("--skip-files=")], argv
+    (warning,) = _operator_warnings(messages)
+    assert warning.startswith("2 entries"), warning
