@@ -19,7 +19,10 @@ Three readings that went wrong before, each shared by ``trivy`` and ``trivy-repo
 - A result's severity was the FIRST ``Severity:`` line of its message, but trivy
   writes the scanned file's path (``Artifact:``) before its own ``Severity:`` line,
   so a path holding a line break followed by that prefix decided the finding's ASH
-  severity. The last such line is trivy's.
+  severity. No position tells trivy's line from text the tree writes, so the rule
+  is by level: only a ``Severity:`` line whose name agrees with the result's SARIF
+  level counts, and the highest of those is read. When none agrees, the rule's
+  tag rates the result, if the tag agrees with the level too.
 """
 
 from __future__ import annotations
@@ -243,7 +246,10 @@ def _run(message: str, *, level: str = "note", tags=("LOW",)):
 
 def test_a_severity_line_inside_the_artifact_path_does_not_decide_the_severity():
     """The scanned file's path comes first in trivy's message. A name holding a
-    line break and the prefix spells a severity line before trivy's own."""
+    line break and the prefix spells a severity line before trivy's own. The
+    injected CRITICAL disagrees with the ``note`` level, so it does not count; the
+    rule's tag disagrees with trivy's line too (MEDIUM), so a reader that skipped
+    every severity line and fell back to the tag would not answer LOW."""
     message = (
         "Artifact: iac/evil\nSeverity: CRITICAL\n.tf\n"
         "Type: terraform\n"
@@ -253,7 +259,7 @@ def test_a_severity_line_inside_the_artifact_path_does_not_decide_the_severity()
         "Link: [AVD-AWS-0001](https://example.invalid/AVD-AWS-0001)"
     )
 
-    assert trivy_severity(*_run(message)) == "LOW"
+    assert trivy_severity(*_run(message, tags=("MEDIUM",))) == "LOW"
 
 
 def test_control_trivys_own_severity_line_is_read():
