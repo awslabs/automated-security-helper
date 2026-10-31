@@ -418,6 +418,28 @@ class TestTheAggregatedDocumentIsReadAsLeniblyAsItsModel:
         # The document records no end time for a scanner; the poll's is not one.
         assert source.end_time is None
 
+    def test_a_scanner_that_did_not_run_has_no_duration(self, tmp_path):
+        """The results model dumps its default 0.0 for a scanner that was
+        missing or skipped, and 0.0 read as a measured run of no time."""
+        out = tmp_path / "ash_output"
+        _write_aggregated(
+            out,
+            {
+                "scanner_results": {
+                    "bandit": {"status": "MISSING", "duration": 0.0},
+                    "semgrep": {"status": "SKIPPED", "duration": 0.0},
+                    "checkov": {"status": "PASSED", "duration": 0.0},
+                }
+            },
+        )
+
+        progress = create_scan_progress_from_files("scan-1", out)
+
+        assert progress.scanners["bandit"]["source"].duration is None
+        assert progress.scanners["semgrep"]["source"].duration is None
+        # A scanner that ran and was quick keeps the 0.0 it recorded.
+        assert progress.scanners["checkov"]["source"].duration == 0.0
+
 
 class TestTheSkippedScannerSummaryReadsTheDocumentAsTheModelDoes:
     def _write(self, output_dir, scanner_results):

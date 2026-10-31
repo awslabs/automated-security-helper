@@ -1401,7 +1401,13 @@ def _add_aggregated_scanner_progress(
             scanner_name=scanner_name,
             target_type="source",
             status=mapped_status,
-            duration=_recorded_duration(scanner_info),
+            # A scanner that did not run has no duration: the results model
+            # dumps its default 0.0, which is not a measurement.
+            duration=(
+                None
+                if mapped_status is MCScannerStatus.SKIPPED
+                else _recorded_duration(scanner_info)
+            ),
             finding_count=recorded_count or 0,
         )
 
