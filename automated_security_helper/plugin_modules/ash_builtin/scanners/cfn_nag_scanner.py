@@ -227,6 +227,12 @@ def _macos_developer_tools_present() -> bool:
     )
 
 
+#: The most bytes a template's results directory name may take before the
+#: ``-2``, ``-3`` suffix of ``_unique_name``. A file name holds 255 bytes, so this
+#: leaves room for a suffix of up to fourteen digits.
+_RESULTS_DIR_NAME_BYTES = 240
+
+
 def _unique_name(name: str, used: Dict[str, int]) -> str:
     """``name``, or ``name-2``, ``name-3`` and so on when an earlier template of
     this scan took it.
@@ -1015,8 +1021,17 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 # are non-CloudFormation files, which are an expected skip rather than a
                 # scanner failure.
                 self.targets_attempted += 1
+                # Case is folded so two templates whose paths differ in case alone
+                # (``Stack.yaml`` and ``stack.yaml``) do not share a directory on a
+                # filesystem that ignores case, and the name is held to what one
+                # path component may take, so a deeply nested template still gets
+                # a directory.
                 normalized_filename = _unique_name(
-                    get_normalized_filename(str_to_normalize=cfn_file),
+                    get_normalized_filename(
+                        str_to_normalize=cfn_file,
+                        fold_case=True,
+                        max_bytes=_RESULTS_DIR_NAME_BYTES,
+                    ),
                     results_dir_names,
                 )
                 results_file_dir = target_results_dir.joinpath(normalized_filename)
