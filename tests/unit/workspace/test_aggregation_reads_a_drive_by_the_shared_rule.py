@@ -27,12 +27,20 @@ pytestmark = pytest.mark.unit
         ("file:///C:/ws/api/x.py", "C:/ws/api/x.py"),
         ("/C:/ws/api/x.py", "C:/ws/api/x.py"),
         ("/C:", "C:"),
-        ("/C:\\ws\\x.py", "C:/ws/x.py"),
     ],
 )
 def test_a_drive_behind_one_separator_loses_the_separator(uri, expected):
     """Control, green on both sides: the shapes the private copy accepted."""
     assert aggregation._posix_text(uri) == expected
+
+
+def test_a_backslash_drive_in_a_windows_project_loses_the_separator():
+    """Control, green on both sides: a backslash is a separator only where the
+    project's path is a Windows path, so the project's path is passed. Without
+    it the backslashes are POSIX name characters and are kept, on every
+    platform; the row used to leave the project out and read them as separators.
+    """
+    assert aggregation._posix_text("/C:\\ws\\x.py", "C:\\ws") == "C:/ws/x.py"
 
 
 @pytest.mark.parametrize("uri", ["/x:legacy/src/x.py", "/1:x.py", "/ab:/x.py"])
