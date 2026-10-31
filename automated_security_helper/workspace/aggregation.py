@@ -798,8 +798,8 @@ def rebase_run_for_project(
 #: project-wide one governs".
 #:
 #: The same call shape as ``severity_ladder.ScannerThresholdResolver`` with the
-#: opposite meaning for a falsy answer: there a falsy answer turns the gate OFF
-#: for that scanner. Python's structural typing cannot tell the two apart, so
+#: opposite meaning for ``None``: there an answer of ``None`` or empty text turns
+#: the gate OFF for that scanner. Python's structural typing cannot tell the two apart, so
 #: the names do: a value of this type is never handed to the ladder's
 #: ``result_fails_scanner_threshold`` as it is; :func:`effective_threshold_resolver`
 #: is the one conversion, filling the project-wide threshold in for ``None`` and
@@ -895,8 +895,9 @@ def actionable_results_by_scanner(
             left a project's workspace verdict disagreeing with its own.
 
     Returns:
-        Scanner name to actionable count. A falsy effective threshold counts
-        nothing for that scanner, which is how an operator turns the gate off.
+        Scanner name to actionable count. An effective threshold of ``None`` or
+        empty text counts nothing for that scanner, which is how an operator
+        turns the gate off.
 
     One predicate with the ``--min-severity`` gate below:
     ``severity_ladder.result_fails_scanner_threshold`` grades the result, and
@@ -918,8 +919,9 @@ def actionable_results_by_scanner(
         counts.setdefault(name, 0)
         if result_is_suppressed(result):
             continue
-        # A falsy effective threshold fails nothing (severity_fails_threshold),
-        # which is the gate turned off for that scanner.
+        # An effective threshold of None or empty text fails nothing
+        # (severity_fails_threshold), which is the gate turned off for that
+        # scanner.
         if result_fails_scanner_threshold(result, effective):
             counts[name] += 1
     return counts
@@ -936,8 +938,9 @@ def count_actionable_results(
     The sum of :func:`actionable_results_by_scanner`; see it for the rules.
 
     Returns:
-        The number of actionable findings. Zero when *threshold* is falsy and no
-        resolver names a threshold, which is how an operator turns the gate off.
+        The number of actionable findings. Zero when *threshold* is ``None`` or
+        empty text and no resolver names a threshold, which is how an operator
+        turns the gate off.
     """
     return sum(
         actionable_results_by_scanner(

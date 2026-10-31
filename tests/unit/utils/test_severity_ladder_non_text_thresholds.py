@@ -22,7 +22,9 @@ import pytest
 from automated_security_helper.utils import severity_ladder
 from automated_security_helper.utils.severity_ladder import (
     resolve_scanner_threshold,
+    result_fails_scanner_threshold,
     severity_fails_threshold,
+    stricter_of,
 )
 
 pytestmark = pytest.mark.unit
@@ -103,6 +105,60 @@ def test_no_threshold_still_turns_the_gate_off(ash_log, value):
     """The control: unset and empty are the two values that mean no gate."""
     assert severity_fails_threshold("CRITICAL", value) is False
     assert not [r for r in ash_log.records if r.levelname == "WARNING"]
+
+
+@pytest.mark.parametrize("value", FALSY_NOT_TEXT, ids=repr)
+def test_stricter_of_does_not_read_a_falsy_value_that_is_not_text_as_absent(
+    ash_log, value
+):
+    """The gate reads only None and empty text as no threshold. ``stricter_of``
+    tested for truth, so it answered None (the gate off) for ``(0, None)`` where
+    the gate judged the same ``0`` as CRITICAL: one configured value, two
+    answers, depending on whether a workspace ceiling was combined with it."""
+    assert stricter_of(value, None) is value
+    assert stricter_of(None, value) is value
+    assert stricter_of(value, "") is value
+    assert stricter_of("", value) is value
+    # The same answer whether or not the value went through stricter_of.
+    assert severity_fails_threshold(
+        "CRITICAL", stricter_of(value, None)
+    ) == severity_fails_threshold("CRITICAL", value)
+    # A real rung is stricter than a value that gates like CRITICAL.
+    assert stricter_of(value, "HIGH") == "HIGH"
+    assert stricter_of("HIGH", value) == "HIGH"
+
+
+@pytest.mark.parametrize("value", NOT_TEXT, ids=lambda value: type(value).__name__)
+def test_stricter_of_ranks_a_value_that_is_not_text_without_raising(value):
+    """The strictness key of a truthy value that is not text held the value
+    itself, so it was compared with the text key of an unrecognised word (a
+    number with ``"BOGUS"``: TypeError) or looked up in a table (a list:
+    unhashable)."""
+    assert stricter_of(value, None) is value
+    assert stricter_of(None, value) is value
+    assert stricter_of(value, "HIGH") == "HIGH"
+    assert stricter_of("HIGH", value) == "HIGH"
+    assert stricter_of(value, "BOGUS") is stricter_of("BOGUS", value)
+
+
+def test_stricter_of_still_turns_the_gate_off_for_none_and_empty_text():
+    """The control: absent on both sides is still no threshold."""
+    assert stricter_of(None, None) is None
+    assert stricter_of("", None) is None
+    assert stricter_of("", "") is None
+
+
+@pytest.mark.parametrize("value", FALSY_NOT_TEXT, ids=repr)
+def test_a_resolver_answering_a_falsy_value_that_is_not_text_gates_like_critical(
+    ash_log, value
+):
+    """The resolver contract says only None and empty text turn a scanner's gate
+    off; the per-result gate reads a resolver's answer the way the ladder does."""
+    critical = {"properties": {"issue_severity": "CRITICAL", "scanner_name": "bandit"}}
+    high = {"properties": {"issue_severity": "HIGH", "scanner_name": "bandit"}}
+
+    assert result_fails_scanner_threshold(critical, lambda _name: value) is True
+    assert result_fails_scanner_threshold(high, lambda _name: value) is False
 
 
 def test_the_sarif_level_gate_does_not_turn_off_for_a_falsy_value_either(ash_log):

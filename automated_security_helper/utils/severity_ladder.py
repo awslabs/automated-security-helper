@@ -59,11 +59,14 @@ So the strictness order, strictest first, is
 ``ALL < LOW < MEDIUM < HIGH < CRITICAL``, and ``stricter_of`` returns whichever
 argument sits earlier in it.
 
-A falsy threshold (``None`` or ``""``) is looser still: nothing fails, not even
+A threshold that is ``None`` or ``""`` is looser still: nothing fails, not even
 a critical finding. That is deliberate and predates this module -- it is how an
 operator turns the gate off -- so the comparison functions preserve it exactly.
-Note that this makes the falsy value *not* a synonym for ``CRITICAL``. The one
-place that never returns a falsy value is :func:`resolve_scanner_threshold`: a
+Only those two values turn the gate off: a value that is not text (``0``,
+``False``, an empty list) names no rung and gates like ``CRITICAL``, in the
+comparison functions as in the gate. Note that this makes the gate-off value
+*not* a synonym for ``CRITICAL``. The one
+place that never returns a gate-off value is :func:`resolve_scanner_threshold`: a
 scanner's or the global settings' ``severity_threshold`` left blank is an unset
 value there, not a request for no gate, and falls through to the next default.
 
@@ -456,6 +459,10 @@ def normalize_threshold(value: object) -> Optional[str]:
     ``plugin_modules.ash_builtin.reporters.junitxml_reporter._normalized_threshold``
     is this same predicate, written before this function existed; it is left in
     place here only because that file is outside this change's scope.
+
+    This is the text edge, not the gate: a value that is not text and falsy
+    (``0``, ``False``) names no threshold here and is None. Past the edge the
+    gate reads such a value as an unrecognised one (:func:`_gate_is_off`).
     """
     if not value:
         return None
@@ -463,7 +470,7 @@ def normalize_threshold(value: object) -> Optional[str]:
     return upper if upper in SEVERITY_THRESHOLDS else None
 
 
-def _strictness_key(threshold: Optional[str]) -> Tuple[int, str]:
+def _strictness_key(threshold: object) -> Tuple[int, str]:
     """Sort key for threshold strictness; a lower key is stricter.
 
     The three tiers keep the ordering total and independent of argument order:
@@ -472,9 +479,16 @@ def _strictness_key(threshold: Optional[str]) -> Tuple[int, str]:
     ``CRITICAL`` even though they gate identically, so that a real ``CRITICAL``
     always wins the comparison rather than the tie being decided by which
     argument came first.
+
+    The absence of a threshold is :func:`_gate_is_off`'s, the same test the gate
+    applies: ``0``, ``False`` and an empty list are not absent, they gate like
+    ``CRITICAL``. A value that is not text is keyed by its type's name, so the
+    key is always text and two keys can be compared.
     """
-    if not threshold:
+    if _gate_is_off(threshold):
         return (2, "")
+    if not isinstance(threshold, str):
+        return (1, f"<{type(threshold).__name__}>")
     if threshold in _THRESHOLD_MIN_RANK:
         return (0, f"{SEVERITY_THRESHOLDS.index(threshold):02d}")
     return (1, threshold)
@@ -486,12 +500,17 @@ def stricter_of(a: Optional[str], b: Optional[str]) -> Optional[str]:
     Total and commutative over every input, including ``None`` and ``""``.
     Returns ``None`` when neither side configures a threshold, which is why the
     return type is optional: the absence of a threshold is a value in the
-    domain, so it has to be a value in the range too.
+    domain, so it has to be a value in the range too. Absent is what
+    :func:`severity_fails_threshold` reads as absent (``None`` or empty text): a
+    value that is not text, falsy or not, is a threshold that gates like
+    ``CRITICAL``, so ``stricter_of(0, None)`` is ``0`` and not the gate turned
+    off. Two values that rank alike (two of one type that are not text) gate
+    alike, and the first is returned.
 
     Used to combine a workspace-level ceiling with a project-level setting: the
     project may tighten the gate but never loosen it.
     """
-    if not a and not b:
+    if _gate_is_off(a) and _gate_is_off(b):
         return None
     return a if _strictness_key(a) <= _strictness_key(b) else b
 
@@ -627,7 +646,7 @@ def sarif_level_fails_threshold(level: Optional[str], threshold: Optional[str]) 
 #: names none. The answer is the threshold the gate compares against: the
 #: scanner's own ``options.severity_threshold`` when it has one, else the
 #: scan's (``global_settings.severity_threshold``, or the workspace project's);
-#: a falsy answer turns the gate off for that scanner.
+#: an answer of ``None`` or empty text turns the gate off for that scanner.
 ScannerThresholdResolver = Callable[[Optional[str]], Optional[str]]
 
 
