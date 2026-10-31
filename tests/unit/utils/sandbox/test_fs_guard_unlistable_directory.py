@@ -34,11 +34,23 @@ pytestmark = [
     pytest.mark.skipif(
         sys.platform == "win32", reason="POSIX directory modes and symlinks"
     ),
-    pytest.mark.skipif(
-        hasattr(os, "geteuid") and os.geteuid() == 0,
-        reason="root can list a directory whatever its mode",
-    ),
 ]
+
+
+def _skip_as_root():
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root can list and search a directory whatever its mode")
+
+
+@pytest.fixture
+def unprivileged():
+    """Skip, as root, a test that takes a mode away from a directory: root lists
+    and searches it anyway, so nothing would be refused. The tests that set no mode
+    (a link at the root, an injected error, a vanished directory) run as root too."""
+    _skip_as_root()
+
+
+needs_unprivileged = pytest.mark.usefixtures("unprivileged")
 
 
 def _warnings(caplog, head):
@@ -69,6 +81,7 @@ def locked_tree(tmp_path):
     """A results directory holding a subdirectory that cannot be listed, with a
     symlink inside it made before the mode was taken away. The mode is restored
     afterwards so tmp_path can be removed."""
+    _skip_as_root()
     root = tmp_path / "results"
     locked = root / "locked"
     locked.mkdir(parents=True)
@@ -84,6 +97,7 @@ def locked_tree(tmp_path):
 def readable_locked_tree(tmp_path):
     """The same, but the subdirectory can be read and not searched (0o600): its
     entries list, and their lstat is refused."""
+    _skip_as_root()
     root = tmp_path / "results"
     locked = root / "locked"
     locked.mkdir(parents=True)
@@ -111,6 +125,7 @@ def test_the_sweep_refuses_a_directory_it_cannot_list(locked_tree, caplog):
     assert os.path.lexists(locked / "escape"), "the refused link is left as found"
 
 
+@needs_unprivileged
 def test_the_sweep_refusal_hides_an_env_read_value(tmp_path, caplog):
     """The refusal names the directory and the root, and a tool can name a
     directory after an option it was given: the warning is redacted with the
@@ -135,6 +150,7 @@ def test_the_sweep_refusal_hides_an_env_read_value(tmp_path, caplog):
     assert refused.value.__cause__ is None
 
 
+@needs_unprivileged
 def test_the_sweep_refusal_is_value_free_when_the_values_could_not_be_read(
     tmp_path, caplog
 ):
@@ -164,6 +180,7 @@ def test_the_sweep_refusal_is_value_free_when_the_values_could_not_be_read(
     assert refused.value.__context__ is None or refused.value.__suppress_context__
 
 
+@needs_unprivileged
 def test_a_root_the_sweep_cannot_open_is_refused_through_the_same_path(
     tmp_path, caplog
 ):
@@ -237,6 +254,7 @@ def test_a_refusal_does_not_end_the_sweep_of_siblings_or_other_roots(
     assert summaries and "removed 3 " in summaries[0], summaries
 
 
+@needs_unprivileged
 def test_several_refusals_raise_once_with_the_others_counted(tmp_path, caplog):
     root = tmp_path / "results"
     for name in ("a-locked", "b-locked"):
@@ -304,6 +322,7 @@ def test_refuse_links_below_refuses_a_readable_but_unsearchable_directory(
     assert "locked/escape" in str(refused.value), str(refused.value)
 
 
+@needs_unprivileged
 def test_the_refusal_names_the_directory_by_its_path_below_the_root(tmp_path, caplog):
     """fwalk's ``onerror`` saw a bare entry name, so "cache" under the root could
     be a/cache or b/cache; the walk reports the path below the root."""
@@ -385,6 +404,7 @@ def test_the_os_walk_fallback_records_a_failed_removal_sweeps_on_and_refuses(
     assert summaries and "removed 1 " in summaries[0], summaries
 
 
+@needs_unprivileged
 def test_a_link_the_sweep_cannot_remove_is_refused_not_passed_over(tmp_path, caplog):
     """A scanner can plant a link and take the write bit off its directory:
     the listing and the lstat work, the unlink fails with EACCES, and the sweep
@@ -408,6 +428,7 @@ def test_a_link_the_sweep_cannot_remove_is_refused_not_passed_over(tmp_path, cap
     assert os.path.lexists(locked / "out.sarif"), "the link is left as found"
 
 
+@needs_unprivileged
 @pytest.mark.parametrize("walk", ["descriptors", "by-name"])
 def test_a_readable_but_unsearchable_directory_is_refused_once_not_once_per_entry(
     tmp_path, caplog, monkeypatch, walk
@@ -439,6 +460,7 @@ def test_a_readable_but_unsearchable_directory_is_refused_once_not_once_per_entr
     assert "; and " not in str(refused.value), str(refused.value)
 
 
+@needs_unprivileged
 def test_refusals_past_the_warning_limit_are_counted_and_said_once(
     tmp_path, caplog, monkeypatch
 ):
@@ -464,6 +486,7 @@ def test_refusals_past_the_warning_limit_are_counted_and_said_once(
     assert "and 4 more" in text and "first 2" in text, text
 
 
+@needs_unprivileged
 @pytest.mark.parametrize("walk", ["descriptors", "by-name"])
 def test_a_failed_removal_names_the_entry_by_its_path_below_the_root(
     tmp_path, caplog, monkeypatch, walk
@@ -533,6 +556,7 @@ def test_refuse_links_below_refuses_a_directory_it_cannot_list(locked_tree):
     assert refused.value.__cause__ is None
 
 
+@needs_unprivileged
 def test_refuse_links_below_hides_an_env_read_value(tmp_path, caplog):
     """The pre-check names the directory it could not list, and a tool can name a
     directory after an option it was given: the warning and the raised exception
@@ -558,6 +582,7 @@ def test_refuse_links_below_hides_an_env_read_value(tmp_path, caplog):
     assert refused.value.__suppress_context__
 
 
+@needs_unprivileged
 def test_refuse_links_below_is_value_free_when_the_values_could_not_be_read(
     tmp_path, caplog
 ):
@@ -632,6 +657,7 @@ def test_a_refused_pre_check_leaves_no_directory_descriptor_open(tmp_path):
     assert len(os.listdir("/proc/self/fd")) == before
 
 
+@needs_unprivileged
 def test_a_root_that_cannot_be_checked_is_refused_not_skipped(tmp_path, caplog):
     """The sibling route at the root: ``Path.is_symlink`` already reads a missing
     root as False, so the handler around it only ever met the other errors (a
