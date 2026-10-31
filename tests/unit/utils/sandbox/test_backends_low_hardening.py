@@ -2135,9 +2135,20 @@ def test_a_change_to_the_uv_tool_lock_that_keeps_its_size_and_time_is_warned_of(
             lock.chmod(0o600)
         else:
             before = lock.stat()
-            lock.write_text("BBBB")
-            os.utime(lock, ns=(before.st_atime_ns, before.st_mtime_ns))
-            after = lock.stat()
+            # A filesystem whose change time is coarser than the sleep above would
+            # read a write in the plan's tick as equal. Rewrite until the change
+            # time has moved, for a few seconds at most, and skip where it never
+            # does: the case measures the watch, not the filesystem's clock.
+            deadline = time.monotonic() + 3
+            while True:
+                lock.write_text("BBBB")
+                os.utime(lock, ns=(before.st_atime_ns, before.st_mtime_ns))
+                after = lock.stat()
+                if after.st_ctime_ns != before.st_ctime_ns:
+                    break
+                if time.monotonic() > deadline:
+                    pytest.skip("this filesystem's change time did not move in 3 s")
+                time.sleep(0.1)
             assert (after.st_size, after.st_mtime_ns) == (
                 before.st_size,
                 before.st_mtime_ns,
