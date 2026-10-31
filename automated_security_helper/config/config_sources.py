@@ -2598,7 +2598,9 @@ def read_config_file_as_written(path: Path) -> Any:
     return read_config_file_literally(path, keep_env_tags=True)
 
 
-def read_config_file_literally(path: Path, keep_env_tags: bool = False) -> Any:
+def read_config_file_literally(
+    path: Path, keep_env_tags: bool = False, expect: Optional[FileIdentity] = None
+) -> Any:
     """``read_config_file`` without reading the environment.
 
     Every value that would be read from the environment (an ``!ENV`` scalar, a
@@ -2608,8 +2610,16 @@ def read_config_file_literally(path: Path, keep_env_tags: bool = False) -> Any:
     came from the environment, and to report an ``extends`` failure without
     them. A path that is not a regular file is refused before it is opened
     (``refuse_unless_a_file``).
+
+    ``expect`` is passed to ``read_config_text``, as ``read_config_file`` passes
+    it. A chain walk hands a reader that takes it the identity it vetted, so the
+    literal re-resolution of a refused chain reads the file the first
+    resolution read, and refuses one swapped in between
+    (``ConfigFileChangedError``).
     """
-    return parse_config_text_literally(path, read_config_text(path), keep_env_tags)
+    return parse_config_text_literally(
+        path, read_config_text(path, expect=expect), keep_env_tags
+    )
 
 
 class TagWrittenReference(str):
@@ -5131,16 +5141,14 @@ def resolve_config_document(
     )
     data: Any = None
     blind_for: Optional[ASHConfigSourceError] = None
+    # The root is read as the file its caller checked (`expect`), or as the file
+    # the name leads to now when the caller handed no identity; one swapped in
+    # before the open is refused. The same identity holds the literal
+    # re-resolution of a refused chain (_environment_blind_error), so a root
+    # swapped between the two resolutions is refused there too.
+    held = expect if expect is not None else identity_to_hold(config_path)
     try:
-        # The root is read as the file its caller checked (`expect`), or as the
-        # file the name leads to now when the caller handed no identity; one
-        # swapped in before the open is refused.
-        data, _unconfined, _owned = _resolve(
-            config_path,
-            (),
-            state,
-            expect=expect if expect is not None else identity_to_hold(config_path),
-        )
+        data, _unconfined, _owned = _resolve(config_path, (), state, expect=held)
     except ASHConfigSourceError as error:
         if reader is read_config_file_literally:
             raise
@@ -5169,7 +5177,9 @@ def resolve_config_document(
         for opened in state.held:
             opened.close()
     if blind_for is not None:
-        blind = _environment_blind_error(config_path, root, permit_base, blind_for)
+        blind = _environment_blind_error(
+            config_path, root, permit_base, blind_for, expect=held
+        )
         # The fresh error's traceback carries this frame, and a walker that
         # prints frame locals (a debugger, a verbose traceback renderer) would
         # print what the chain read from the environment: `state` holds every
@@ -5211,6 +5221,7 @@ def _environment_blind_error(
     root: Path,
     permit_base: Optional[PermitBase],
     error: ASHConfigSourceError,
+    expect: Optional[FileIdentity] = None,
 ) -> ASHConfigSourceError:
     """Why `config_path`'s chain does not resolve, without environment values.
 
@@ -5228,7 +5239,15 @@ def _environment_blind_error(
     key as written); otherwise it is the generic base-file reason. A refusal
     by `permit_base` is returned as it is (ASHConfigInputNotPermittedError),
     so callers report it as a refusal.
+
+    `expect` is the identity the first resolution held the root to. The literal
+    resolution is held to it as well, so a root swapped in between is refused
+    (``ConfigFileChangedError``) and not read. The caller raises the error
+    returned here ``from None``, which drops what it was raised from, so the
+    fact that a file changed rides on the error as a mark
+    (``_FILE_CHANGED_MARK``), whichever of the two resolutions met the change.
     """
+    changed = config_file_changed(error)
     if isinstance(error, ASHConfigUnsetVariableError):
         # The literal reading below would find nothing wrong: the reference fails
         # only once the environment is read, because the variable is unset. So
@@ -5252,8 +5271,10 @@ def _environment_blind_error(
             confine_to=root,
             permit_base=permit_base,
             reader=read_config_file_literally,
+            expect=expect,
         )
     except ASHConfigSourceError as literal_error:
+        changed = changed or config_file_changed(literal_error)
         if "${" not in str(literal_error):
             # Without its traceback: that traceback runs through this frame,
             # whose local `error` is the refused error (its text can quote a
@@ -5270,10 +5291,12 @@ def _environment_blind_error(
                 # mark carries no path.
                 setattr(literal_error, _FILE_CHANGED_MARK, True)
             return literal_error.with_traceback(None)
-    except (yaml.YAMLError, OSError, ValueError):
+    except (yaml.YAMLError, OSError, ValueError) as literal_failure:
         # The file reads with the environment but not without it; nothing more
-        # can be said without quoting what the environment supplied.
-        pass
+        # can be said without quoting what the environment supplied. A root
+        # that changed since it was checked is the exception: that is said, on
+        # the mark below, and quotes nothing.
+        changed = changed or config_file_changed(literal_failure)
     # Not "the base named through a variable is missing": that base may exist,
     # and a file it extends be the one missing.
     names = tuple(getattr(error, _EMPTY_KEY_REFERENCE_NAMES_MARK, ()))
@@ -5307,9 +5330,15 @@ def _environment_blind_error(
             "extends) is missing, cannot be read, or is outside the directory bases "
             "must stay inside"
         )
-    if isinstance(error, ASHConfigInputNotPermittedError):
-        return ASHConfigInputNotPermittedError(reason)
-    return ASHConfigSourceError(reason)
+    blind: ASHConfigSourceError = (
+        ASHConfigInputNotPermittedError(reason)
+        if isinstance(error, ASHConfigInputNotPermittedError)
+        else ASHConfigSourceError(reason)
+    )
+    if changed:
+        # The caller raises this error `from None`; the fact rides on the error.
+        setattr(blind, _FILE_CHANGED_MARK, True)
+    return blind
 
 
 def _is_same_file(a: Path, b: Path) -> bool:
