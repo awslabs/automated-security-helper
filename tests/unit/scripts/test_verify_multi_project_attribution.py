@@ -45,6 +45,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -1057,12 +1058,12 @@ class TestExecutionKnobs:
         assert all("did not reach the run" in v for v in violations)
 
     def test_the_root_config_names_the_asserted_values(self, gate):
-        assert f"max_parallel_projects: {gate.ROOT_MAX_PARALLEL_PROJECTS}" in (
-            gate.WORKSPACE_ROOT_CONFIG
-        )
-        assert f"project_timeout: {gate.ROOT_PROJECT_TIMEOUT_SECONDS}" in (
-            gate.WORKSPACE_ROOT_CONFIG
-        )
+        """Parsed, not searched: the text could hold the numbers under other keys."""
+        config = yaml.safe_load(gate.WORKSPACE_ROOT_CONFIG)
+        assert config["workspace"] == {
+            "max_parallel_projects": gate.ROOT_MAX_PARALLEL_PROJECTS,
+            "project_timeout": gate.ROOT_PROJECT_TIMEOUT_SECONDS,
+        }
 
 
 class TestGateScannersFoundSomething:
