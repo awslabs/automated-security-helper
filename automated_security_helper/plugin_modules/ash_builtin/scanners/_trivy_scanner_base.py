@@ -183,7 +183,7 @@ _TERRAFORM_MISCONFIG_SCANNER = "terraform"
 _TRIVY_DEFAULT_SCANNERS = ("vuln", "secret")
 
 #: The other spellings trivy reads a scanner name in, and the name each means
-#: (``ValueNormalize`` of ``ScannersFlag`` in pkg/flag/scan_flags.go; ``config`` is
+#: (the value normalization of trivy's ``scanners`` flag definition; ``config`` is
 #: the deprecated name of ``misconfig``). trivy applies it to ``--scanners``,
 #: ``TRIVY_SCANNERS`` and ``scan.scanners`` alike, so a membership test on
 #: ``_effective_scanners`` has to see the canonical name.
