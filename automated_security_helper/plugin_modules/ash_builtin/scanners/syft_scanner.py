@@ -44,6 +44,13 @@ from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 
+#: The CycloneDX version syft is asked to write. Without ``@<version>`` syft writes
+#: the latest it supports, which moves with syft (its formats guide lists 1.2 to 1.7),
+#: while ``CycloneDXReport`` models version 1.6 and refuses any field outside it, so
+#: a syft that moved on would have every SBOM refused whole. See
+#: ``schemas/cyclonedx_bom_1_6_schema``.
+CYCLONEDX_SPEC_VERSION = "1.6"
+
 
 class SyftScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
@@ -441,7 +448,9 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             results_file = target_results_dir.joinpath("syft.cdx.json")
             self.args = ToolArgs(
                 format_arg="--output",
-                format_arg_value=f"cyclonedx-json={results_file.as_posix()}",
+                format_arg_value=(
+                    f"cyclonedx-json@{CYCLONEDX_SPEC_VERSION}={results_file.as_posix()}"
+                ),
                 scan_path_arg=None,
                 extra_args=[
                     ToolExtraArg(

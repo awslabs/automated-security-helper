@@ -94,7 +94,7 @@ def _scan_with(
         if commands is not None:
             commands.append([str(part) for part in command])
         if document is not None:
-            (value,) = [a for a in command if str(a).startswith("cyclonedx-json=")]
+            (value,) = [a for a in command if str(a).startswith("cyclonedx-json@")]
             destination = Path(str(value).split("=", 1)[1])
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(json.dumps(document))
@@ -224,6 +224,61 @@ def test_control_the_source_target_keeps_the_source_directory_as_base_path(tmp_p
         _flag_value(command, "--base-path")
         == Path(os.path.abspath(context.source_dir)).as_posix()
     )
+
+
+# --- the CycloneDX version syft is asked for --------------------------------------------
+
+
+def _output_values(command: list[str]) -> list[str]:
+    return [
+        command[index + 1]
+        for index, token in enumerate(command[:-1])
+        if token == "--output"
+    ]
+
+
+def test_syft_is_asked_for_the_cyclonedx_version_the_model_reads(tmp_path):
+    """Without ``@<version>`` syft writes the latest CycloneDX it supports, and
+    ``CycloneDXReport`` models 1.6 and refuses any field outside it, so a syft
+    that moved on would have every SBOM refused whole. The request names the
+    version the model describes, and the results file it points at is the one the
+    scan reads back."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
+        CYCLONEDX_SPEC_VERSION,
+    )
+    from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
+        CycloneDXReport,
+    )
+
+    scanner = _scanner(_context(tmp_path))
+    commands: list[list[str]] = []
+
+    _scan_with(scanner, {"returncode": 0}, MINIMAL_SBOM, commands=commands)
+
+    (command,) = commands
+    (requested,) = [
+        value
+        for value in _output_values(command)
+        if value.startswith("cyclonedx-json")
+    ]
+    spec, _, destination = requested.partition("=")
+    assert spec == "cyclonedx-json@1.6", requested
+    assert destination.endswith("syft.cdx.json"), requested
+    assert CYCLONEDX_SPEC_VERSION == "1.6"
+    assert CycloneDXReport.model_fields["specVersion"].default == "1.6"
+
+
+def test_control_the_additional_outputs_keep_their_own_unversioned_formats(tmp_path):
+    """Only the file ASH reads back is pinned; a format the operator asks for on
+    top is written as syft's own default for it."""
+    scanner = _scanner(_context(tmp_path), additional_outputs=["spdx-json"])
+    commands: list[list[str]] = []
+
+    _scan_with(scanner, {"returncode": 0}, MINIMAL_SBOM, commands=commands)
+
+    (command,) = commands
+    formats = sorted(value.partition("=")[0] for value in _output_values(command))
+    assert formats == ["cyclonedx-json@1.6", "spdx-json"], command
 
 
 # --- failures -------------------------------------------------------------------------

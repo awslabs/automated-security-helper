@@ -59,7 +59,7 @@ def scanner(tmp_path) -> SyftScanner:
 def _scan_with(scanner: SyftScanner, response: dict, *, write_results: bool = False):
     def run(command, **kwargs):
         if write_results:
-            (value,) = [a for a in command if str(a).startswith("cyclonedx-json=")]
+            (value,) = [a for a in command if str(a).startswith("cyclonedx-json@")]
             destination = Path(str(value).split("=", 1)[1])
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(
