@@ -1997,7 +1997,7 @@ def names_a_location(value: str) -> bool:
     One definition for the cdk-nag scanner's dependency check and the cdk-nag
     wrapper, which read ``JSII_NODE`` by the same test and must not drift apart.
     """
-    separators = {"/", os.sep, os.altsep} - {None}
+    separators = {"/", os.sep, *([os.altsep] if os.altsep else [])}
     return bool(value) and any(separator in value for separator in separators)
 
 
