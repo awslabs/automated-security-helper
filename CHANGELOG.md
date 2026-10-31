@@ -8006,6 +8006,30 @@
   scan's own output or work directory, which the operator's configuration may
   name, was refused with a warning. Each entry is now judged by its own writer.
 
+- **A detect-secrets baseline the repository controls is scanned like any other
+  file.** A baseline found in the scanned tree (`.secrets.baseline`,
+  `.ash/.secrets.baseline`), or named by a config the operator did not write, was
+  left out of the scan, so anything a repository put in a file of that name was
+  never read. It is now in the scan set. A detector that reads back a hash the
+  baseline lists, whichever detector made the finding, is not reported for that
+  file. The worker is not handed the baseline's `is_baseline_file` filter, which
+  skips files by name and can name any file, unless the operator's own settings
+  carry it or the baseline is one the operator named outside the scanned tree.
+  The baseline's `should_exclude_file` patterns apply to every file except the
+  baseline itself. A `baseline_file` the operator names that resolves inside the
+  scanned tree, or inside a git checkout holding it, is read as the repository's
+  record too: its known candidates stay in the report as suppressed findings,
+  where they used to be removed. The baseline's
+  `detect_secrets.filters.regex.should_exclude_line` and
+  `detect_secrets.filters.regex.should_exclude_secret` patterns still apply to
+  every file it covers, the baseline included, as its other exclusions do. The
+  word list filter, `detect_secrets.filters.wordlist.should_exclude_secret`, is
+  a different filter and is not taken from a baseline the repository controls.
+  The `is_baseline_file` entry of a baseline the operator named outside the
+  scanned tree is handed over as written, so one generated in a repository as
+  `.secrets.baseline` and moved out still skips every file of that name, the
+  repository's own baseline included, until its `filename` is edited.
+
 ### Reporting changes
 
 - **GitLab SAST reports a finding with several locations at its first located
