@@ -605,10 +605,11 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the install receipts under ASH's home",
     ),
-    # Two opens, both with O_CREAT: read-write first, read-only where the account
-    # may not write a lock file another account made.
+    # One open creates: the read-write open, with O_CREAT. The read-only fallback
+    # for a lock file another account made does not ask to create, so it is no
+    # write and the detector does not count it.
     (f"{_ASH}/utils/file_lock.py", "_open_lock_file", "os.open"): (
-        2,
+        1,
         "lock files in the content-database cache",
     ),
     (f"{_ASH}/utils/directory_refusals.py", "_write_refused", "os.open"): (
@@ -646,8 +647,10 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         _RULES_INSTALLS,
     ),
+    # Three renames: the old bundle aside, the staged one into place, and the old
+    # one back when that rename fails.
     (f"{_ASH}/utils/rules_bundles.py", "_install_locked", "os.replace"): (
-        2,
+        3,
         _RULES_INSTALLS,
     ),
     (f"{_ASH}/utils/rules_bundles.py", "_install_locked", "write_text"): (
