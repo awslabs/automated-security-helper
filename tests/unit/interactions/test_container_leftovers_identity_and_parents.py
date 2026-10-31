@@ -65,9 +65,11 @@ def clean_daemon_environment(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _record_under_the_current_daemon() -> dict:
+def _record_under_the_current_daemon(runtime: str = "/usr/bin/docker") -> dict:
+    # The runtime is the first thing a record is compared on, so a record is
+    # made under the runtime the sweep will be run with.
     return {
-        "runtime": "/usr/bin/docker",
+        "runtime": runtime,
         "runner_argv": [],
         "daemon_env": container_leftovers._daemon_environment(),
     }
@@ -136,7 +138,7 @@ def test_a_record_made_under_another_podman_default_connection_is_left_alone(
     _podman_connections_file(
         tmp_path, monkeypatch, {"Connection": {"Default": "machine-a"}}
     )
-    record = _record_under_the_current_daemon()
+    record = _record_under_the_current_daemon("/usr/bin/podman")
     _podman_connections_file(
         tmp_path, monkeypatch, {"Connection": {"Default": "machine-b"}}
     )
@@ -167,7 +169,7 @@ def test_the_same_podman_default_connection_differs_in_nothing(
     _podman_connections_file(
         tmp_path, monkeypatch, {"Connection": {"Default": "machine-a"}}
     )
-    record = _record_under_the_current_daemon()
+    record = _record_under_the_current_daemon("/usr/bin/podman")
 
     assert (
         container_leftovers._differs_from_this_run(record, ["/usr/bin/podman"]) is None
