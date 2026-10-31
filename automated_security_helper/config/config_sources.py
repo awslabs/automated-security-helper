@@ -808,7 +808,9 @@ def _descriptor_path(fd: int, named: Path, identity: FileIdentity) -> Optional[P
     return resolved
 
 
-def open_config_for_judgment(path: Path) -> Optional[OpenedConfig]:
+def open_config_for_judgment(
+    path: Path, follow_links: bool = True
+) -> Optional[OpenedConfig]:
     """``path`` opened for a grant check, or None when it leads to no regular file.
 
     Only a path that leads to a regular file now is opened, and the opened
@@ -817,16 +819,25 @@ def open_config_for_judgment(path: Path) -> Optional[OpenedConfig]:
     judges the name as before. The open does not wait on a FIFO that was swapped in
     since and does not make a terminal the process's controlling one. A name that
     cannot be opened (absent, unreadable) gives None as well.
+
+    With ``follow_links`` False the last component of ``path`` must not be a
+    link: one that is gives None, and the open itself refuses a leaf made a link
+    since the check (``O_NOFOLLOW``, where the platform has it). A caller that
+    already judged the path a name resolves to opens that resolved path this way,
+    so a leaf swapped for a link after the judgment is never opened through it.
     """
+    nofollow = 0 if follow_links else getattr(os, "O_NOFOLLOW", 0)
     try:
-        if not stat.S_ISREG(os.stat(path).st_mode):
+        info = os.stat(path) if follow_links else os.lstat(path)
+        if not stat.S_ISREG(info.st_mode):
             return None
         fd = os.open(
             path,
             os.O_RDONLY
             | getattr(os, "O_NONBLOCK", 0)
             | getattr(os, "O_NOCTTY", 0)
-            | getattr(os, "O_BINARY", 0),
+            | getattr(os, "O_BINARY", 0)
+            | nofollow,
         )
     except (OSError, ValueError):
         return None
@@ -1708,24 +1719,28 @@ def _identity_held_after_the_judgment(
 ) -> FileIdentity:
     """What a read of ``path`` is held to, once the permit admitted ``resolved``.
 
-    ``path`` is opened now, after the judgment (a name the permit refused is never
-    opened), and the identity is the descriptor's, when the descriptor leads to
-    the very path that was judged (``OpenedConfig.real``). The identity is never
-    looked up from the name again: that was a second lookup beside the one the
-    judgment made, so a link re-pointed between the two had its new target held as
-    the file judged. It is ``ABSENT_FILE`` when the name leads to no regular file
-    (a directory, a dangling link, an unreadable name), when it was made to lead
-    elsewhere before the open (the descriptor's path is not the judged one), and
-    when the descriptor's path cannot be told: no identity vouches for a file the
-    permit did not see, and a read held to ``ABSENT_FILE`` refuses whatever file
-    is at the name by then.
+    ``resolved``, the path that was judged, is opened now, after the judgment (a
+    name the permit refused is never opened), and the identity is the
+    descriptor's, when the descriptor leads to that very path
+    (``OpenedConfig.real``). It is the judged path that is opened and not the
+    name ``path``: a link re-pointed between the judgment and the open would
+    make the open reach a file outside the grant. The open does not follow a
+    link at the last component, so a leaf swapped for one since the judgment is
+    not opened through it either. The identity is never looked up from the name
+    again: that was a second lookup beside the one the judgment made, so a link
+    re-pointed between the two had its new target held as the file judged. It is
+    ``ABSENT_FILE`` when the judged path leads to no regular file now (a
+    directory, a dangling link, an unreadable name, a leaf made a link), when
+    the descriptor's path is not the judged one, and when the descriptor's path
+    cannot be told: no identity vouches for a file the permit did not see, and a
+    read held to ``ABSENT_FILE`` refuses whatever file is at the name by then.
 
     With ``held`` the descriptor is appended to it and stays open for the caller to
     close, so the inode stays in use until a read has compared the identity: a
     freed inode number can be given to a file made afterwards, which would pass a
     compare made on a closed descriptor.
     """
-    opened = open_config_for_judgment(path)
+    opened = open_config_for_judgment(resolved, follow_links=False)
     if opened is None:
         return ABSENT_FILE
     identity = opened.identity if opened.real == resolved else ABSENT_FILE

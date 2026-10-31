@@ -159,8 +159,8 @@ def test_the_judged_descriptor_stays_open_until_discovery_has_compared_its_ident
     real_open = config_sources.open_config_for_judgment
     real_read = config_sources.read_config_bytes
 
-    def recording_open(path):
-        opened = real_open(path)
+    def recording_open(path, **kwargs):
+        opened = real_open(path, **kwargs)
         if opened is not None:
             opened_files.append(opened)
         return opened
@@ -198,9 +198,9 @@ def test_a_name_the_permit_refuses_is_never_opened(
     opened: List[Path] = []
     real_open = config_sources.open_config_for_judgment
 
-    def recording_open(path):
+    def recording_open(path, **kwargs):
         opened.append(Path(path))
-        return real_open(path)
+        return real_open(path, **kwargs)
 
     monkeypatch.setattr(config_sources, "open_config_for_judgment", recording_open)
 
@@ -253,7 +253,7 @@ def test_the_check_that_reads_no_identity_opens_nothing(
     (repo / ".ash.yaml").write_text("project_name: checked\n", encoding="utf-8")
     opened: List[Path] = []
 
-    def recording_open(path):
+    def recording_open(path, **kwargs):
         opened.append(Path(path))
         return None
 

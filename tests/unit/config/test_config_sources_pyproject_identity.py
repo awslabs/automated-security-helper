@@ -65,9 +65,12 @@ def _swap_after_the_check(monkeypatch: pytest.MonkeyPatch, pyproject: Path) -> l
     real_open = config_sources.open_config_for_judgment
     opened_after_the_check: list = []
 
-    def open_then_swap(path):
-        opened = real_open(path)
-        if Path(path) == pyproject and not opened_after_the_check:
+    def open_then_swap(path, **kwargs):
+        opened = real_open(path, **kwargs)
+        if (
+            Path(os.path.realpath(path)) == Path(os.path.realpath(pyproject))
+            and not opened_after_the_check
+        ):
             opened_after_the_check.append(opened)
             _replace_with_a_new_file(
                 pyproject, "[tool.ash]\nproject_name = 'swapped'\n"
