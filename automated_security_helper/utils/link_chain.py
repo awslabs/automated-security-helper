@@ -36,10 +36,11 @@ open a link's own entry and never what it names:
   that leads to a share, or whose target cannot be read, is the answer. A
   component that is not there ends the walk with nothing judged: nothing below it
   is there either, and the gates judge the path as they do on every other
-  platform. A component that IS there but cannot be examined (``os.lstat``
-  refuses it, or its spelling cannot be given to the filesystem) is the answer
-  too, marked unexaminable: it may be a link resolving would follow, and the
-  doubt is refused, never passed on as a local name.
+  platform. So does a spelling Windows calls invalid (``*``, ``?``): no entry
+  can have that name. A component that IS there but cannot be examined
+  (``os.lstat`` refuses it, or its spelling cannot be given to the filesystem)
+  is the answer too, marked unexaminable: it may be a link resolving would
+  follow, and the doubt is refused, never passed on as a local name.
 
 Both readings walk a path the way resolving does, so that ``os.lstat`` is only ever
 asked about an entry whose parent directories have all been examined and hold no
@@ -80,6 +81,12 @@ from typing import List, Optional, Tuple
 LINK_HOPS = 40
 
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+#: Windows error codes for a spelling no entry can have: 123 is
+#: ERROR_INVALID_NAME (a name with ``*`` or ``?``, say), 161 is
+#: ERROR_BAD_PATHNAME. ``os.lstat`` raises a plain ``OSError`` for them, not
+#: ``FileNotFoundError``, and ``os.path.realpath`` reads them as not there.
+_INVALID_SPELLING_WINERRORS = frozenset({123, 161})
 
 
 def is_link_stat(info: os.stat_result) -> bool:
@@ -334,7 +341,12 @@ def _walk_names(
         except (FileNotFoundError, NotADirectoryError):
             # Not there: a local name that resolving would open nothing for.
             return None, None
-        except (OSError, ValueError):
+        except (OSError, ValueError) as error:
+            if getattr(error, "winerror", None) in _INVALID_SPELLING_WINERRORS:
+                # A spelling Windows calls invalid (``*``, ``?``) names no entry,
+                # so it is not there, as a missing name is; resolving it opens
+                # nothing, and the gates judge the path.
+                return None, None
             # Cannot be examined (a directory the process cannot search, an
             # entry it may not read, or a spelling the filesystem refuses, such
             # as an embedded NUL that ``os.lstat`` raises ValueError for): the
@@ -455,7 +467,8 @@ def first_unsafe_link(text: str, *, hops: int = LINK_HOPS) -> Optional[UnsafeLin
     the spelling the caller gave. A component that is not there ends the walk
     with None:
     nothing below it is there either, and the caller's gates judge the path as
-    they do on every other platform. A component that IS there but cannot be
+    they do on every other platform; a spelling Windows calls invalid (WinError
+    123 or 161) is not there either. A component that IS there but cannot be
     examined (its entry refuses the read, or the spelling cannot be given to the
     filesystem) is the answer, marked ``unexaminable``: it may be a link that
     resolving would follow, and the doubt is refused, as the chain reading

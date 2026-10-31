@@ -735,3 +735,107 @@ class TestADriveSpellingKeepsItsStepBack:
         link.symlink_to(target)
 
         assert link_chain.first_unsafe_link(str(link)) is None
+
+
+def _an_error_with_a_windows_code(path, winerror, errno=22):
+    """An ``OSError`` as Windows raises it: ``winerror`` is set on the instance.
+
+    The constructor reads its fourth argument as ``winerror`` only on Windows, so
+    the code is set as an attribute, which is what the walk reads on any platform.
+    """
+    error = OSError(errno, "The filename, directory name, or volume label syntax", path)
+    error.winerror = winerror
+    return error
+
+
+class TestASpellingWindowsCallsInvalidIsNotThere:
+    """A name with ``*`` or ``?`` can be no entry, so it is not a link.
+
+    On Windows ``os.lstat`` raises a plain ``OSError`` with WinError 123 or 161
+    for such a name, not ``FileNotFoundError``. The walk put every other error in
+    the bucket of components it cannot examine, so a typo or a glob in a client's
+    path was refused as a security matter ("an entry that cannot be read may be a
+    link") where it had been left to the existence check.
+    """
+
+    @pytest.mark.parametrize("winerror", [123, 161])
+    def test_a_component_with_an_invalid_name_ends_the_walk_unjudged(
+        self, tmp_path, monkeypatch, winerror
+    ):
+        """Red at the base: the answer was an unexaminable component."""
+        granted = tmp_path / "granted"
+        granted.mkdir()
+        real_lstat = os.lstat
+
+        def invalid_lstat(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "bad*name":
+                raise _an_error_with_a_windows_code(str(path), winerror)
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", invalid_lstat)
+
+        assert link_chain.first_unsafe_link(str(granted / "bad*name" / "repo")) is None
+        assert link_chain.first_unsafe_link(str(granted / "bad*name")) is None
+
+    def test_an_invalid_name_in_a_links_target_leaves_the_chain_local(
+        self, tmp_path, monkeypatch
+    ):
+        """Red at the base: the chain was unjudged (None) and the walk reported
+        the link with a target it could not read."""
+        link = tmp_path / "link"
+        link.symlink_to(os.path.join(str(tmp_path), "bad?name"))
+        real_lstat = os.lstat
+
+        def invalid_lstat(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "bad?name":
+                raise _an_error_with_a_windows_code(str(path), 123)
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", invalid_lstat)
+
+        assert link_chain.link_chain_names_a_windows_share(str(link)) is False
+        assert link_chain.first_unsafe_link(str(link)) is None
+
+    @pytest.mark.parametrize("winerror", [5, 32, 1920])
+    def test_any_other_windows_code_is_still_unexaminable(
+        self, tmp_path, monkeypatch, winerror
+    ):
+        """Controls: access denied (5), a sharing violation (32) and an entry the
+        OS cannot reach (1920) are doubt, and the doubt is refused."""
+        granted = tmp_path / "granted"
+        granted.mkdir()
+        real_lstat = os.lstat
+
+        def refusing_lstat(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "mid":
+                raise _an_error_with_a_windows_code(str(path), winerror, errno=13)
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", refusing_lstat)
+
+        found = link_chain.first_unsafe_link(str(granted / "mid" / "repo"))
+
+        assert found is not None
+        assert found.component == str(granted / "mid")
+        assert found.unexaminable is True
+
+    def test_an_error_with_no_windows_code_is_still_unexaminable(
+        self, tmp_path, monkeypatch
+    ):
+        """Control: ``EINVAL`` alone, as POSIX raises it, says nothing about a
+        Windows spelling."""
+        granted = tmp_path / "granted"
+        granted.mkdir()
+        real_lstat = os.lstat
+
+        def refusing_lstat(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == "mid":
+                raise OSError(22, "Invalid argument", str(path))
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "lstat", refusing_lstat)
+
+        found = link_chain.first_unsafe_link(str(granted / "mid"))
+
+        assert found is not None
+        assert found.unexaminable is True
