@@ -1147,12 +1147,15 @@ def _row_fields(row: object) -> Dict[str, Any]:
     }
 
 
-#: The rebuilt statuses under which the scanner's tool ran: a recorded exit code
-#: on such a row is the tool's, and is kept when the per-target reports carry
-#: none. A MISSING or SKIPPED tool never ran, so its row carries None.
-_RAN_STATUSES = frozenset(
-    {ScannerStatus.PASSED, ScannerStatus.FAILED, ScannerStatus.ERROR}
-)
+#: The rebuilt statuses under which the scanner's tool ran to a grade: a recorded
+#: exit code on such a row is the tool's, and is kept when the per-target reports
+#: carry none. A MISSING or SKIPPED tool never ran, so its row carries None; and
+#: an ERROR row is not kept either, because the rule is read off the row's own
+#: previous status (PASSED or FAILED), which an ERROR row no longer has: a code
+#: kept onto one survived the first rebuild and was dropped by the next, so a
+#: saved results file and the same file after ``ash report`` or ``ash merge``
+#: disagreed on it.
+_CODE_KEPT_STATUSES = frozenset({ScannerStatus.PASSED, ScannerStatus.FAILED})
 
 
 def _populate_scanner_results_from_unified_metrics(
@@ -1239,10 +1242,13 @@ def _populate_scanner_results_from_unified_metrics(
         # a code while its reports carry none (an older writer, a merged file)
         # has the row as the code's only record. A row whose own status says the
         # tool ran (PASSED or FAILED) keeps that code rather than having it
-        # erased by the rebuild, when the rebuilt status says it ran too. A
-        # code on a row that said MISSING, SKIPPED or ERROR is not the record
-        # of a run: kept, a stale code survived a rebuild to PASSED, and an
-        # older file's default 0 survived on an ERROR row.
+        # erased by the rebuild, when the rebuilt status is PASSED or FAILED
+        # too. A code on a row that said MISSING, SKIPPED or ERROR is not the
+        # record of a run: kept, a stale code survived a rebuild to PASSED, and
+        # an older file's default 0 survived on an ERROR row. A rebuild to ERROR
+        # keeps none either: the rebuilt row says ERROR, so its own rebuild would
+        # drop the code, and one rule has to give one answer however many times
+        # the file is rebuilt.
         # The skipped reason is written when the metrics have one and dropped
         # when they have none (the metrics are the authority: a row's stale
         # reason is not kept), without passing a None that would mark the field
@@ -1250,7 +1256,7 @@ def _populate_scanner_results_from_unified_metrics(
         recorded_code = fields.get("exit_code")
         if (
             metrics.exit_code is None
-            and status in _RAN_STATUSES
+            and status in _CODE_KEPT_STATUSES
             and previous_ran
             and isinstance(recorded_code, int)
             and not isinstance(recorded_code, bool)

@@ -221,8 +221,9 @@ class TestTheRebuiltRow:
         file whose rows carry a code and whose reports carry none (an older
         writer, a merged file) has the row as the code's only record; the
         rebuild used to erase it with the metrics' None. Red at the base: the
-        row read None after the rebuild."""
-        for ran in ("PASSED", "FAILED", "ERROR"):
+        row read None after the rebuild. A rebuild to ERROR keeps no code (the
+        next test: kept, it survived one rebuild and not the second)."""
+        for ran in ("PASSED", "FAILED"):
             model = AshAggregatedResults()
             model.scanner_results["tool"] = ScannerTargetStatusInfo(
                 status=ScannerStatus.PASSED, exit_code=3
@@ -233,6 +234,27 @@ class TestTheRebuiltRow:
             )
 
             assert model.scanner_results["tool"].exit_code == 3, ran
+
+    def test_rebuilding_a_rebuilt_row_gives_the_same_exit_code(self):
+        """A rebuild is run again on a file that was rebuilt (``ash report``,
+        ``ash merge``), so the rule has to give one answer however often it is
+        applied. Red at the base: a PASSED row with code 3 rebuilt to ERROR kept
+        the 3, and the second rebuild, which finds an ERROR row, dropped it, so a
+        saved results file and the same file after a report disagreed."""
+        for recorded in ("PASSED", "FAILED"):
+            for rebuilt in ("ERROR", recorded):
+                model = AshAggregatedResults()
+                model.scanner_results["tool"] = ScannerTargetStatusInfo(
+                    status=ScannerStatus(recorded), exit_code=3
+                )
+                rows = [_metrics(status=rebuilt, exit_code=None)]
+
+                _populate_scanner_results_from_unified_metrics(model, rows)
+                first = model.scanner_results["tool"].exit_code
+                _populate_scanner_results_from_unified_metrics(model, rows)
+                second = model.scanner_results["tool"].exit_code
+
+                assert first == second, (recorded, rebuilt, first, second)
 
     def test_a_code_on_a_row_that_did_not_say_the_tool_ran_is_not_kept(self):
         """The row's own status decides whether its code is the record of a run:
