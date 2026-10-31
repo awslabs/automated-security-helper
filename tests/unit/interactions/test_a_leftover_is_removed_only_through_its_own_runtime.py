@@ -146,6 +146,7 @@ def test_a_record_keeps_its_runtime_and_the_daemon_environment(state, monkeypatc
         "docker_config_current_context",
         "CONTAINER_HOST",
         "CONTAINER_CONNECTION",
+        "podman_default_connection",
         "CONTAINERD_ADDRESS",
         "CONTAINERD_NAMESPACE",
     }

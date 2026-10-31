@@ -98,17 +98,53 @@ def _docker_current_context() -> Optional[str]:
     return context if isinstance(context, str) and context else None
 
 
+def _podman_default_connection() -> Optional[str]:
+    """The connection ``podman`` selects when no variable names one, or None.
+
+    ``podman system connection default NAME`` writes it to
+    ``podman-connections.json`` under the containers config directory (older
+    podman: ``active_service`` in ``containers.conf``), so a run after the switch
+    talks to another machine's daemon with no variable changed, as a docker
+    context switch does. Best effort: a file that cannot be read or parsed is
+    None, as an unset variable is.
+    """
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+        os.path.expanduser("~"), ".config"
+    )
+    directory = os.path.join(base, "containers")
+    try:
+        with open(
+            os.path.join(directory, "podman-connections.json"), encoding="utf-8"
+        ) as stream:
+            document = json.load(stream)
+    except (OSError, ValueError):
+        document = None
+    connection = document.get("Connection") if isinstance(document, dict) else None
+    default = connection.get("Default") if isinstance(connection, dict) else None
+    if isinstance(default, str) and default:
+        return default
+    try:
+        with open(
+            os.path.join(directory, "containers.conf"), encoding="utf-8"
+        ) as stream:
+            text = stream.read()
+    except (OSError, ValueError):
+        return None
+    found = re.search(r'^\s*active_service\s*=\s*"([^"\n]+)"', text, re.MULTILINE)
+    return found.group(1) if found else None
+
+
 def _daemon_environment() -> Dict[str, Optional[str]]:
     """The environment a container runtime client picks its daemon from.
 
     A record keeps what these were when the container was started, so a later
     start talks to the same daemon or leaves the record alone. An unset variable
     is None. Beside docker's host and context variables: the docker config
-    directory and the context its file selects, podman's connection, and
-    containerd's address and namespace (nerdctl), each of which selects a daemon
-    on its own; a sweep that recorded only the first three asked the wrong daemon
-    under a changed one of these, heard "no such container" and dropped the
-    record of a live container.
+    directory and the context its file selects, podman's connection and the
+    default connection its config selects, and containerd's address and
+    namespace (nerdctl), each of which selects a daemon on its own; a sweep that
+    recorded only the first three asked the wrong daemon under a changed one of
+    these, heard "no such container" and dropped the record of a live container.
     """
     return {
         "DOCKER_HOST": os.environ.get("DOCKER_HOST"),
@@ -117,6 +153,7 @@ def _daemon_environment() -> Dict[str, Optional[str]]:
         "docker_config_current_context": _docker_current_context(),
         "CONTAINER_HOST": os.environ.get("CONTAINER_HOST"),
         "CONTAINER_CONNECTION": os.environ.get("CONTAINER_CONNECTION"),
+        "podman_default_connection": _podman_default_connection(),
         "CONTAINERD_ADDRESS": os.environ.get("CONTAINERD_ADDRESS"),
         "CONTAINERD_NAMESPACE": os.environ.get("CONTAINERD_NAMESPACE"),
     }

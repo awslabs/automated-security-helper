@@ -132,6 +132,62 @@ def test_a_record_made_under_another_docker_context_file_is_left_alone(
     )
 
 
+def _podman_connections_file(tmp_path, monkeypatch, document) -> Path:
+    config = tmp_path / "xdg-config" / "containers"
+    config.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    path = config / "podman-connections.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
+def test_a_record_made_under_another_podman_default_connection_is_left_alone(
+    clean_daemon_environment, monkeypatch, tmp_path
+):
+    """No variable changes: `podman system connection default` rewrites a file,
+    and the sweep after it asks another machine's daemon, hears "no such
+    container" and drops the record of one that is running."""
+    _podman_connections_file(
+        tmp_path, monkeypatch, {"Connection": {"Default": "machine-a"}}
+    )
+    record = _record_under_the_current_daemon()
+    _podman_connections_file(
+        tmp_path, monkeypatch, {"Connection": {"Default": "machine-b"}}
+    )
+
+    assert (
+        container_leftovers._differs_from_this_run(record, ["/usr/bin/podman"])
+        == "podman_default_connection"
+    )
+
+
+def test_the_older_podman_setting_in_containers_conf_is_read_too(
+    clean_daemon_environment, monkeypatch, tmp_path
+):
+    config = tmp_path / "xdg-config" / "containers"
+    config.mkdir(parents=True)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    (config / "containers.conf").write_text(
+        '[engine]\nactive_service = "machine-a"\n', encoding="utf-8"
+    )
+
+    assert container_leftovers._podman_default_connection() == "machine-a"
+
+
+def test_the_same_podman_default_connection_differs_in_nothing(
+    clean_daemon_environment, monkeypatch, tmp_path
+):
+    """Control."""
+    _podman_connections_file(
+        tmp_path, monkeypatch, {"Connection": {"Default": "machine-a"}}
+    )
+    record = _record_under_the_current_daemon()
+
+    assert (
+        container_leftovers._differs_from_this_run(record, ["/usr/bin/podman"]) is None
+    )
+
+
 def test_the_same_daemon_differs_in_nothing(clean_daemon_environment):
     """Control."""
     record = _record_under_the_current_daemon()
