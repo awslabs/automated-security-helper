@@ -339,6 +339,10 @@ ASH_BIN_PATH: Optional[Path] = _bin_path_at_import()
 #: is what ASH has always shipped, so an unusable value behaves as though the
 #: variable were absent rather than moving the gate somewhere new.
 _FALLBACK_SEVERITY_LEVEL = "MEDIUM"
+#: The threshold ASH ships, as a schema or a help text says it. Those are written
+#: from the models, so a text built from ``ASH_DEFAULT_SEVERITY_LEVEL`` would carry
+#: the environment of whichever process generated it; this value does not move.
+SHIPPED_SEVERITY_LEVEL = _FALLBACK_SEVERITY_LEVEL
 
 
 def _resolve_default_severity_level(raw: Optional[str]) -> str:

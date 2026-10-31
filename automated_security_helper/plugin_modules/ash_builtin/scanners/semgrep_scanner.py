@@ -123,7 +123,12 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
 class SemgrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["semgrep"] = "semgrep"
     # Semgrep does not support Windows at all
-    enabled: bool = platform.system().lower() != "windows"
+    # The schema says the shipped default (on), so the committed schema is the same
+    # whichever system generated it.
+    enabled: bool = Field(
+        default=platform.system().lower() != "windows",
+        json_schema_extra={"default": True},
+    )
     options: Annotated[
         SemgrepScannerConfigOptions, Field(description="Configure Semgrep scanner")
     ] = SemgrepScannerConfigOptions()

@@ -60,6 +60,7 @@ from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
     ASH_CONFIG_ENV_VAR_PREFIX,
     ASH_DEFAULT_SEVERITY_LEVEL,
+    SHIPPED_SEVERITY_LEVEL,
     is_readable_environment_name,
     is_refused_config_environment_name,
 )
@@ -1835,7 +1836,12 @@ class AshConfigGlobalSettingsSection(RedactedSection):
     severity_threshold: Annotated[
         Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
         Field(
-            description="Global minimum severity level to consider findings as failures across all scanners"
+            description="Global minimum severity level to consider findings as failures across all scanners",
+            # The default below is the process environment's. The schema says the
+            # shipped one, so the committed schema does not depend on which
+            # environment generated it (tests/unit/schemas/
+            # test_schema_bytes_do_not_depend_on_the_host.py).
+            json_schema_extra={"default": SHIPPED_SEVERITY_LEVEL},
         ),
     ] = ASH_DEFAULT_SEVERITY_LEVEL
 
@@ -2449,6 +2455,9 @@ class AshConfig(RedactedSection):
         str,
         Field(
             description="Name of the project being scanned",
+            # The default below reads ASH_PROJECT_NAME; the schema says the shipped
+            # one, as for ``severity_threshold``.
+            json_schema_extra={"default": "ash-scan"},
         ),
     ] = os.environ.get("ASH_PROJECT_NAME", "ash-scan")
 

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidatorFunctionWrapHandler
 from pydantic import ValidationError, ValidationInfo, WrapValidator, model_validator
 from pydantic_core import PydanticUseDefault
 
-from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.core.constants import SHIPPED_SEVERITY_LEVEL
 from automated_security_helper.utils.redacted_model import RedactedSection
 from automated_security_helper.utils.unknown_keys import (
     refuse_unknown_keys,
@@ -219,7 +219,7 @@ class ScannerOptionsBase(PluginOptionsBase):
     severity_threshold: Annotated[
         Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None,
         Field(
-            description=f"Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of {ASH_DEFAULT_SEVERITY_LEVEL}."
+            description=f"Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of {SHIPPED_SEVERITY_LEVEL}."
         ),
     ] = None
 

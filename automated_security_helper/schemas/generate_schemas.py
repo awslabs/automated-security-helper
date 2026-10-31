@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, List, Literal
 
+from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema, JsonRef
 
 #: An environment reference as a configuration file writes it: ``${VAR}``,
@@ -86,7 +87,60 @@ def _keep_property_names(
     return json_schema
 
 
-class ConfigFileJsonSchema(GenerateJsonSchema):
+def _put_shipped_defaults(instance: Any, encoded: Any) -> None:
+    """Replace, in ``encoded``, the value of each field that names a shipped default.
+
+    ``encoded`` is the JSON form of ``instance``, a default value being written
+    into a schema. A few defaults come from the process that imports the models:
+    the project name and severity threshold from the environment, whether
+    opengrep and semgrep are on from the operating system. A field says what the
+    schema must show for it instead with ``json_schema_extra={"default": ...}``,
+    and that is what it shows as its own property. A model that holds such a
+    field as its default (``global_settings``, ``scanners``) is written into the
+    schema as the whole instance, so the field's value inside it is put back
+    here as well, or the schema would carry the generating host's values at
+    every place a section is the default of a field above it.
+    """
+    if isinstance(instance, BaseModel) and isinstance(encoded, dict):
+        for name, info in type(instance).model_fields.items():
+            for key in (info.serialization_alias, info.alias, name):
+                if key is None or key not in encoded:
+                    continue
+                extra = info.json_schema_extra
+                if isinstance(extra, dict) and "default" in extra:
+                    encoded[key] = copy.deepcopy(extra["default"])
+                else:
+                    _put_shipped_defaults(getattr(instance, name, None), encoded[key])
+                break
+    elif isinstance(instance, dict) and isinstance(encoded, dict):
+        for key, value in instance.items():
+            if key in encoded:
+                _put_shipped_defaults(value, encoded[key])
+    elif (
+        isinstance(instance, (list, tuple))
+        and isinstance(encoded, list)
+        and len(instance) == len(encoded)
+    ):
+        for value, written in zip(instance, encoded):
+            _put_shipped_defaults(value, written)
+
+
+class ShippedDefaultsJsonSchema(GenerateJsonSchema):
+    """A schema generator whose defaults do not depend on the generating host.
+
+    See :func:`_put_shipped_defaults`. The committed schemas are generated, and
+    were generated with whatever ``ASH_PROJECT_NAME`` and
+    ``ASH_DEFAULT_SEVERITY_LEVEL`` the generating shell held and on whichever
+    operating system it ran; with this base they are the same bytes anywhere.
+    """
+
+    def encode_default(self, dft: Any) -> Any:
+        encoded = super().encode_default(dft)
+        _put_shipped_defaults(dft, encoded)
+        return encoded
+
+
+class ConfigFileJsonSchema(ShippedDefaultsJsonSchema):
     """The configuration file's schema, which admits what the loader resolves.
 
     A configuration file may write any scalar as a reference to the environment
@@ -232,7 +286,7 @@ def _serializer_name(schema: Any) -> str:
     return getattr(function, "__qualname__", "")
 
 
-class StoredResultsJsonSchema(GenerateJsonSchema):
+class StoredResultsJsonSchema(ShippedDefaultsJsonSchema):
     """The results schema, which accepts what a results load keeps.
 
     Ignore paths, suppressions, plugin options and plugin sections refuse an

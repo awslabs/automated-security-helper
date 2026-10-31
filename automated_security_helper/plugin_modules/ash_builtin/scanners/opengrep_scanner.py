@@ -131,7 +131,12 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
 
 class OpengrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["opengrep"] = "opengrep"
-    enabled: bool = platform.system().lower() != "windows"
+    # Off by default on Windows. The schema says the shipped default (on), so the
+    # committed schema is the same whichever system generated it.
+    enabled: bool = Field(
+        default=platform.system().lower() != "windows",
+        json_schema_extra={"default": True},
+    )
     options: Annotated[
         OpengrepScannerConfigOptions, Field(description="Configure Opengrep scanner")
     ] = OpengrepScannerConfigOptions()
