@@ -8195,6 +8195,67 @@ def test_ash_mcp_refuses_options_with_the_exit_code_the_mcp_page_gives(
     assert bool(served) == (expected == 0), served
 
 
+@pytest.mark.parametrize(
+    "kept_in, expected",
+    [
+        pytest.param("workspace-delivery", 3, id="inside-the-mcp-workspace-root"),
+        pytest.param("checkout", 3, id="in-a-git-checkout-under-an-allowed-root"),
+        pytest.param("server-config", 0, id="control-a-config-the-server-wrote"),
+    ],
+)
+@pytest.mark.unit
+def test_ash_mcp_refuses_a_profile_kept_where_a_scan_may_rewrite_it(
+    _mcp_cli: Callable[..., Any], tmp_path: Path, kept_in: str, expected: int
+) -> None:
+    """mcp-server.md (How the server runs scans).
+
+    The page's second and third cases for exit code 3, next to the profile file that
+    does not load. The profile is the same valid file in each; only where it sits
+    differs, so the exit code can come from the place and not from the file. It sits
+    in a session workspace under ``ASH_MCP_WORKSPACE_ROOT``, where a client could
+    have delivered it, or in a directory holding a ``.git`` entry under
+    ``ASH_MCP_ALLOWED_ROOTS``. The control is the file the server itself writes
+    in a session's ``config/`` directory, which the page says is fine.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        SESSION_CONFIG_FILENAME,
+    )
+    from automated_security_helper.cli.mcp.sandbox import CONFIG_DIR_NAME
+
+    assert_on_page(MCP_SERVER, _MCP_EXITS_FOR_REFUSED_OPTIONS)
+    workspace = tmp_path / "workspaces"
+    allowed = tmp_path / "allowed"
+    session = workspace / "session-one"
+    checkout = allowed / "repo"
+    places = {
+        "workspace-delivery": session / "delivered",
+        "checkout": checkout,
+        "server-config": session / CONFIG_DIR_NAME,
+    }
+    for directory in (workspace, allowed, session, checkout / ".git"):
+        directory.mkdir(parents=True, exist_ok=True)
+    workspace.chmod(0o700)
+    profile = places[kept_in] / (
+        SESSION_CONFIG_FILENAME if kept_in == "server-config" else "profile.yaml"
+    )
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    profile.write_text("project_name: p\n", encoding="utf-8")
+    assert profile.is_file()
+
+    result, served = _mcp_cli(
+        "--profile",
+        f"strict={profile}",
+        ASH_MCP_WORKSPACE_ROOT=str(workspace),
+        ASH_MCP_ALLOWED_ROOTS=str(allowed),
+    )
+
+    assert result.exit_code == expected, (
+        f"ash mcp --profile strict={profile.name} (kept in {kept_in}) exited "
+        f"{result.exit_code}, expected {expected}:\n{result.output[-1500:]}"
+    )
+    assert bool(served) == (expected == 0), served
+
+
 def _mcp_cannot_listen(
     cwd: Path, monkeypatch: pytest.MonkeyPatch, mcp_cli
 ) -> Tuple[int, str]:
