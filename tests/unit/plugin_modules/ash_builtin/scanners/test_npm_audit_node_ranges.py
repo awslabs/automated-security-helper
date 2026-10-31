@@ -343,10 +343,11 @@ def _uri(result) -> str:
     return location["physicalLocation"]["artifactLocation"]["uri"]
 
 
-def _with_dependent(document, nodes):
-    """Add ``mkdirp``, which is vulnerable only through ``minimist``."""
-    document["vulnerabilities"]["mkdirp"] = {
-        "name": "mkdirp",
+def _with_dependent(document, nodes, name="mkdirp"):
+    """Add a package vulnerable only through ``minimist`` (``mkdirp`` unless
+    ``name`` says another)."""
+    document["vulnerabilities"][name] = {
+        "name": name,
         "severity": "critical",
         "isDirect": False,
         "via": ["minimist"],
@@ -423,6 +424,98 @@ def test_a_root_reference_names_no_node_that_is_not_a_path(scanner, item):
     ]
     refs = transitive.properties.model_extra["root_advisories"]
     assert [ref["uri"] for ref in refs] == ["node_modules/minimist/package.json"], refs
+
+
+def _refs_of(report, package):
+    """The root references of ``package``'s transitive result, and those among
+    them that no result of the report answers to (same rule id and path)."""
+    results = report.runs[0].results
+    have = {(r.ruleId, r.properties.model_extra.get("package_path")) for r in results}
+    (transitive,) = [
+        r for r in results if r.ruleId == f"npm-audit-transitive-{package}"
+    ]
+    refs = transitive.properties.model_extra["root_advisories"]
+    dangling = [
+        ref for ref in refs if (ref["rule_id"], ref.get("package_path")) not in have
+    ]
+    return refs, dangling
+
+
+def test_a_dependent_of_a_mixed_root_points_only_at_results_that_exist(
+    scanner, monkeypatch
+):
+    """``minimist`` has its own advisory (``<2.0.0``) and a dependency; the copy
+    at 2.3.0 is listed for the dependency and has no result under the
+    advisory. A dependent listed every copy under the advisory, so one of its
+    references answered to no result, and the suppression pass leaves a
+    dependent visible when a reference matches nothing: suppressing the
+    advisory could not suppress it. The references name the copy the advisory
+    covers, for the dependent and for the root's own transitive result."""
+    covered, outside = "node_modules/a/node_modules/minimist", "node_modules/minimist"
+    _versions(monkeypatch, {covered: "1.5.0", outside: "2.3.0"})
+    document = _with_dependent(
+        _mixed_report([covered, outside], dependency="y"),
+        ["node_modules/d"],
+        name="d",
+    )
+
+    report = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
+
+    for package in ("d", "minimist"):
+        refs, dangling = _refs_of(report, package)
+        assert dangling == [], (package, dangling)
+        assert [(ref["rule_id"], ref["package_path"]) for ref in refs] == [
+            ("GHSA-xvch-5gv4-984h", covered)
+        ], (package, refs)
+
+
+def test_a_dependent_of_a_two_advisory_root_points_each_advisory_at_its_own_copy(
+    scanner, monkeypatch
+):
+    """Two advisories of one root, each covering one of its two copies: the
+    root has a result for each advisory on its own copy only, so a reference to
+    either advisory on the other copy answers to nothing."""
+    lo, hi = "node_modules/a/node_modules/minimist", "node_modules/minimist"
+    _versions(monkeypatch, {lo: "0.5.0", hi: "2.5.0"})
+
+    def advisory(rng, ghsa, title, source):
+        entry = _via(rng, source=source)
+        entry["url"] = f"https://github.com/advisories/{ghsa}"
+        entry["title"] = title
+        return entry
+
+    document = _with_dependent(
+        {
+            "auditReportVersion": 2,
+            "vulnerabilities": {
+                "minimist": {
+                    "name": "minimist",
+                    "severity": "critical",
+                    "isDirect": False,
+                    "via": [
+                        advisory("<1.0.0", "GHSA-aaaa-aaaa-aaaa", "One", 1),
+                        advisory(">=2.0.0 <3.0.0", "GHSA-bbbb-bbbb-bbbb", "Two", 2),
+                    ],
+                    "effects": [],
+                    "range": "<1.0.0 || >=2.0.0 <3.0.0",
+                    "nodes": [lo, hi],
+                    "fixAvailable": True,
+                }
+            },
+            "metadata": {"vulnerabilities": {"critical": 1}},
+        },
+        ["node_modules/d"],
+        name="d",
+    )
+
+    report = scanner._convert_npm_audit_to_sarif(document, scanner.context.source_dir)
+
+    refs, dangling = _refs_of(report, "d")
+    assert dangling == [], dangling
+    assert sorted((ref["rule_id"], ref["package_path"]) for ref in refs) == [
+        ("GHSA-aaaa-aaaa-aaaa", lo),
+        ("GHSA-bbbb-bbbb-bbbb", hi),
+    ], refs
 
 
 def test_an_unknown_version_keeps_the_advisory_once_per_copy(scanner, monkeypatch):

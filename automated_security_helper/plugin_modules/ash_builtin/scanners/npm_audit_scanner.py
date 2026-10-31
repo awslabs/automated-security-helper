@@ -1730,9 +1730,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         Empty when the entry lists no copy or no advisory with a range. An item
         of ``nodes`` that is not a path is not a copy (``_entry_nodes``).
         """
-        nodes = [
-            node for node in vuln_info.get("nodes") or [] if isinstance(node, str)
-        ]
+        nodes = [node for node in vuln_info.get("nodes") or [] if isinstance(node, str)]
         advisories = [
             via for via in via_items if isinstance(via, dict) and via.get("range")
         ]
@@ -1756,6 +1754,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         via_items: List[Any],
         lock_rel: str | None,
         lock_index: NpmLockIndex | None,
+        log: bool = True,
     ) -> Set[Any]:
         """The listed copies of an npm entry that fall outside EVERY range of
         its advisories, by the lockfile's versions.
@@ -1778,6 +1777,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         disagreement (``_dependency_only_copies``): giving it the own
         advisory's rule, severity and fix text blamed it for a problem it does
         not have.
+
+        ``log`` is off for a reader that asks about an entry the conversion
+        loop has already named.
         """
         if any(isinstance(via, str) for via in via_items):
             return set()
@@ -1788,7 +1790,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         disagreeing = self._copies_outside_every_range(
             pkg_name, vuln_info, via_items, lock_rel, lock_index
         )
-        if disagreeing:
+        if disagreeing and log:
             named = ", ".join(sorted(str(path) for path in disagreeing))
             ASH_LOGGER.debug(
                 f"npm-audit: {len(disagreeing)} of {len(nodes)} listed copy(ies) "
@@ -1798,6 +1800,28 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 extra=NO_MARKUP,
             )
         return disagreeing
+
+    @staticmethod
+    def _advisory_skips_copy(
+        via: Dict[str, Any],
+        node_path: Any,
+        version: Any,
+        disagreeing: Set[Any],
+    ) -> bool:
+        """Whether one advisory of an entry makes no result for one listed copy.
+
+        True when the advisory gives a range, the lockfile gives the copy's
+        version, the range excludes it, and the copy is not one of the entry's
+        disagreeing copies (which keep a result for every advisory). An
+        uncertain answer keeps the result. The conversion decides whether to
+        emit a result with this, and the root references a dependent carries
+        decide whether a result exists to point at with the same answer.
+        """
+        return (
+            bool(via.get("range"))
+            and node_path not in disagreeing
+            and _version_in_range(version, via.get("range")) is False
+        )
 
     @staticmethod
     def _entry_nodes(
@@ -1966,7 +1990,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         when the lockfile gives one, and the result URI. Suppression uses these
         to treat the transitive finding as suppressed only when every one of
         those results is. npm audit does not say which copy of a root package a
-        dependent resolves to, so every copy is listed.
+        dependent resolves to, so every copy is listed that has a result under
+        the advisory: a copy the advisory's range excludes (``_advisory_skips_copy``,
+        the conversion's own test, so a copy listed only for the root's
+        dependency, or covered by another advisory of the entry alone) has none,
+        and a reference to a result that does not exist leaves the dependent
+        visible whatever is suppressed.
         """
         roots: Dict[tuple[str, str, str], Dict[str, str]] = {}
         seen: set[str] = set()
@@ -1981,6 +2010,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             if not isinstance(via_items, list):
                 via_items = [via_items]
             advisory_ids = self._entry_advisory_ids(name, via_items)
+            disagreeing = self._disagreeing_copies(
+                name, info, via_items, lock_rel, lock_index, log=False
+            )
             for via in via_items:
                 if isinstance(via, str):
                     pending.append(via)
@@ -2003,6 +2035,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     pkg_location, identity = self._node_place(
                         name, node_path, lock_rel, lock_index
                     )
+                    if self._advisory_skips_copy(
+                        via,
+                        node_path,
+                        identity.get(PACKAGE_VERSION_KEY),
+                        disagreeing,
+                    ):
+                        continue
                     ref = {"rule_id": rule_id}
                     if identity.get(PACKAGE_PATH_KEY):
                         ref["package_path"] = identity[PACKAGE_PATH_KEY]
@@ -2279,13 +2318,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # split into several ranges was reported once per
                         # range on every copy. An uncertain answer keeps the
                         # result, and so does a copy no range covers (above).
-                        if (
-                            node_path not in disagreeing
-                            and via.get("range")
-                            and _version_in_range(
-                                identity.get(PACKAGE_VERSION_KEY), via_range
-                            )
-                            is False
+                        if self._advisory_skips_copy(
+                            via,
+                            node_path,
+                            identity.get(PACKAGE_VERSION_KEY),
+                            disagreeing,
                         ):
                             continue
                         uri = f"node_modules/{pkg_location}/package.json"
@@ -2378,9 +2415,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         lock_rel,
                         lock_index,
                     )
-                    transitive_copies = (
-                        dependency_only if has_dict_via else entry_nodes
-                    )
+                    transitive_copies = dependency_only if has_dict_via else entry_nodes
                     for node_path in transitive_copies:
                         pkg_location, identity = self._node_place(
                             pkg_name, node_path, lock_rel, lock_index
