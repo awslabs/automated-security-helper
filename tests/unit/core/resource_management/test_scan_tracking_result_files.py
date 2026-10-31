@@ -749,6 +749,28 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
                 {},
                 id="booleans-are-not-counts",
             ),
+            pytest.param(
+                {
+                    "severity_counts": {},
+                    "findings": [
+                        {"severity": "HIGH"},
+                        {"severity": "HIGH"},
+                        {"severity": "LOW"},
+                    ],
+                },
+                3,
+                {"high": 2, "low": 1},
+                id="an-empty-bucket-object-without-a-count-reads-the-findings",
+            ),
+            pytest.param(
+                {
+                    "severity_counts": {"high": "3"},
+                    "findings": [{"severity": "MEDIUM"}, {"severity": "LOW"}],
+                },
+                2,
+                {"medium": 1, "low": 1},
+                id="buckets-that-are-all-unusable-without-a-count-read-the-findings",
+            ),
         ],
     )
     def test_malformed_counts_are_read_defensively(

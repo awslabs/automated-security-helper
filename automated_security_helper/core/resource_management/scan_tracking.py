@@ -695,6 +695,11 @@ def _progress_counts_of_document(
     """
     findings = _findings_of_document(document)
     recorded_count, recorded_counts = _counts_of_document(document)
+    if not recorded_counts:
+        # An object that names no usable bucket ({} or only unusable values)
+        # records nothing: the findings array speaks, as it does when the
+        # document has no severity_counts at all.
+        recorded_counts = None
     if recorded_counts is not None:
         counts = empty_severity_counts()
         for severity, value in recorded_counts.items():
