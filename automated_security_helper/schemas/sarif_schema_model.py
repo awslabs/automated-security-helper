@@ -2530,6 +2530,26 @@ def _first_segment(text: Optional[str], fold_case: bool) -> Optional[str]:
     return parts[0].lower() if fold_case else parts[0]
 
 
+def _top_level_is_a_link(candidate: str) -> bool:
+    """Whether the first directory of a POSIX-rooted *candidate* is a symlink here.
+
+    Reads that one entry (``/tmp`` for ``/tmp/proj/a.py``) and walks nothing
+    else, so it cannot reach into an automounted directory. A top-level link
+    (``/tmp`` to ``/private/tmp``, ``/home`` to ``/var/home``) is how the same
+    directory gets two spellings, so a candidate under one is resolved toward the
+    place the link names even when the source directory was given resolved. False
+    for a candidate that is not rooted at ``/`` (a drive path, a relative one) and
+    for a name that cannot be read.
+    """
+    parts = PurePosixPath(candidate).parts
+    if len(parts) < 2 or parts[0] != "/":
+        return False
+    try:
+        return Path("/", parts[1]).is_symlink()
+    except (OSError, ValueError):
+        return False
+
+
 def _resolved_relative_text(
     candidate: str,
     resolved_root: Optional[str],
@@ -2557,8 +2577,12 @@ def _resolved_relative_text(
     directory (``/net/<host>`` on macOS, an autofs map, a mapped network drive)
     is a mount of that host; so a candidate is resolved only when it starts
     under the same top-level segment as the source directory, as resolved or as
-    given (*lexical_root*): the filter resolves toward places the source
-    directory already reaches, and a URI anywhere else is compared as spelled.
+    given (*lexical_root*), or under a top-level directory that is itself a
+    symlink (``_top_level_is_a_link``): the filter resolves toward places the
+    source directory already reaches, and a URI anywhere else is compared as
+    spelled. The link case is the source directory given resolved
+    (``/private/tmp/x``, ``/var/home/u/x``) while the scanner wrote the link's
+    spelling (``/tmp/x``, ``/home/u/x``), where the first segments differ.
     None when the root could not be resolved, neither spelling matches, the
     candidate is UNC-rooted or starts elsewhere and did not match as spelled, or
     the candidate cannot be resolved.
@@ -2571,10 +2595,12 @@ def _resolved_relative_text(
     if candidate.startswith("//"):
         return None
     first = _first_segment(candidate, fold_case)
-    if first is None or first not in (
+    if first is None:
+        return None
+    if first not in (
         _first_segment(resolved_root, fold_case),
         _first_segment(lexical_root, fold_case),
-    ):
+    ) and not _top_level_is_a_link(candidate):
         return None
     try:
         resolved_candidate = root_text(Path(candidate).resolve())

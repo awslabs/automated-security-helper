@@ -16,6 +16,7 @@ with no location is retained.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path, PureWindowsPath
 
 import pytest
@@ -219,6 +220,64 @@ class TestWindowsForms:
         _resolved_relative_text("/work/other/y.py", "/work/proj", False)
         _resolved_relative_text("/src/pkg/y.py", "/work/proj", False, "src/pkg")
         assert resolved == ["/work/other/y.py", "/src/pkg/y.py"]
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-rooted paths")
+    def test_the_link_spelling_of_a_resolved_source_dir_is_still_resolved(
+        self, monkeypatch
+    ):
+        """``source_dir`` given resolved (``/private/tmp/proj``) while the scanner
+        wrote the link's spelling (``/tmp/proj/...``): the first segments differ,
+        and the result was dropped as if it named another tree. A top-level
+        directory that is a symlink lets the candidate be resolved; the same
+        call with no link at ``/tmp`` still compares it as spelled."""
+        links = {"/tmp"}
+        original = Path.resolve
+
+        def fake_resolve(self, *args, **kwargs):
+            text = self.as_posix()
+            if text.startswith("/tmp/"):
+                return Path("/private" + text)
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", fake_resolve)
+        monkeypatch.setattr(Path, "is_symlink", lambda self: self.as_posix() in links)
+
+        assert (
+            _resolved_relative_text(
+                "/tmp/proj/src/a.py", "/private/tmp/proj", False, "/private/tmp/proj"
+            )
+            == "src/a.py"
+        )
+
+        links.clear()
+        assert (
+            _resolved_relative_text(
+                "/tmp/proj/src/a.py", "/private/tmp/proj", False, "/private/tmp/proj"
+            )
+            is None
+        )
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-rooted paths")
+    def test_a_result_under_a_linked_top_level_is_kept_by_the_filter(
+        self, monkeypatch
+    ):
+        """The same fact end to end: the listed file is kept when the scanner's
+        URI is the link's spelling of the resolved source directory."""
+        original = Path.resolve
+
+        def fake_resolve(self, *args, **kwargs):
+            text = self.as_posix()
+            if text.startswith("/tmp/"):
+                return Path("/private" + text)
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", fake_resolve)
+        monkeypatch.setattr(Path, "is_symlink", lambda self: self.as_posix() == "/tmp")
+        report = _report("file:///tmp/proj/src/a.py", "/work/other/b.py")
+
+        report.filter_results_by_files({"src/a.py"}, Path("/private/tmp/proj"))
+
+        assert _lines(report) == [1]
 
     def test_a_remote_mount_result_is_filtered_without_a_resolve(self, monkeypatch):
         resolved: list[str] = []
