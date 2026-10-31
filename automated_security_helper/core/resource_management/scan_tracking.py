@@ -607,6 +607,11 @@ def _status_of_document(data: Dict[str, Any]) -> Optional[str]:
     return status if isinstance(status, str) and status else None
 
 
+#: Keys of a ``severity_counts`` object that total the buckets beside them and
+#: are not buckets themselves.
+_SEVERITY_SUMMARY_KEYS = frozenset({"total", "actionable"})
+
+
 def _counts_of_document(
     data: Dict[str, Any],
 ) -> Tuple[Optional[int], Optional[Dict[str, int]]]:
@@ -617,6 +622,11 @@ def _counts_of_document(
     exists. A progress view that counted only a findings array reported every
     finished scanner as 0 findings with all-zero severity counts while a scan
     ran.
+
+    The summary fields a severity-count object can carry beside its buckets
+    (``total`` and ``actionable``, the totals ``ScannerSeverityCount`` exposes)
+    are not buckets: read as one, each added its value under ``unknown``, a
+    finding that does not exist.
     """
     count = data.get("finding_count")
     counts = data.get("severity_counts")
@@ -627,7 +637,10 @@ def _counts_of_document(
         {
             str(key).lower(): value
             for key, value in counts.items()
-            if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            if isinstance(value, int)
+            and not isinstance(value, bool)
+            and value >= 0
+            and str(key).lower() not in _SEVERITY_SUMMARY_KEYS
         }
         if isinstance(counts, dict)
         else None,

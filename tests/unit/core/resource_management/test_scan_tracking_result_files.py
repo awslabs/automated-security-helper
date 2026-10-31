@@ -717,6 +717,15 @@ class TestTheFileBasedViewCountsWhatTheScannerRecorded:
                 id="a-negative-bucket-is-dropped",
             ),
             pytest.param(
+                {
+                    "finding_count": 1,
+                    "severity_counts": {"high": 1, "total": 1, "actionable": 1},
+                },
+                1,
+                {"high": 1},
+                id="the-total-and-actionable-keys-are-not-buckets",
+            ),
+            pytest.param(
                 {"finding_count": True, "severity_counts": {"high": True}},
                 0,
                 {},
