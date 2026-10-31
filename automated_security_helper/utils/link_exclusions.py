@@ -298,19 +298,27 @@ def ignored_entries(
     # bridge -> third_party/hub, which holds a link on to scanned files) is
     # followed back link by link, where one pass judged each link by its
     # destination's own counts and left the first link's name hiding files
-    # reached three hops down.
+    # reached three hops down. The links are indexed by destination once, so a
+    # directory that stops being whole queues the links that lead to it and no
+    # others: a scan of every link per discarded link was P x L steps.
     links = dict(directory_links or {})
+    by_destination: dict[str, list[str]] = {}
+    for link, leads_to in links.items():
+        by_destination.setdefault(leads_to, []).append(link)
     pending = [link for link, leads_to in links.items() if leads_to not in whole]
     queued = set(pending)
     while pending:
         link = pending.pop()
         parts = link.split("/")
         for depth in range(1, len(parts)):
-            whole.discard("/".join(parts[:depth]))
-        for other, leads_to in links.items():
-            if other not in queued and leads_to not in whole:
-                queued.add(other)
-                pending.append(other)
+            discarded = "/".join(parts[:depth])
+            if discarded not in whole:
+                continue
+            whole.discard(discarded)
+            for other in by_destination.get(discarded, ()):
+                if other not in queued:
+                    queued.add(other)
+                    pending.append(other)
 
     def _under_whole(relative: str) -> bool:
         parts = relative.split("/")
