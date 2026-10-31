@@ -149,7 +149,9 @@ def test_a_stopping_scan_refusal_tells_only_its_owner_how_it_ended(
         )
 
     assert "already has an active scan" in str(other.value), other.value
-    assert "stopping" not in str(other.value), other.value
+    # The refusal quotes the directory path, which here contains the word
+    # "stopping", so the assertion is on the phrase the owner is told.
+    assert "still stopping" not in str(other.value), other.value
     assert "scan_id" not in other.value.context, other.value.context
     assert MCScanStatus.CANCELLED.value not in str(other.value), other.value
     assert MCScanStatus.CANCELLED.value not in str(other.value.context), (
