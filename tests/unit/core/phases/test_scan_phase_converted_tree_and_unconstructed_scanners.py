@@ -25,6 +25,7 @@ The fixtures mirror ``tests/unit/core/phases/test_phases_scan_phase.py``.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -200,7 +201,7 @@ class TestAnUnstatableEntryDoesNotAbortTheScan:
         assert str(denied) not in cached
 
     def test_an_unlistable_directory_is_skipped_loudly_and_the_walk_goes_on(
-        self, scan_phase, mock_plugin_context, monkeypatch
+        self, scan_phase, mock_plugin_context, monkeypatch, caplog
     ):
         """One directory that cannot be listed loses its own subtree and nothing
         else, with a WARNING that names it. Red at the base: the rglob walk raised
@@ -223,15 +224,15 @@ class TestAnUnstatableEntryDoesNotAbortTheScan:
             return original_scandir(path, *args, **kwargs)
 
         monkeypatch.setattr(os, "scandir", scandir_or_fail)
-        warnings = []
-        monkeypatch.setattr(
-            "automated_security_helper.core.phases.scan_phase.ASH_LOGGER.warning",
-            lambda message, *a, **k: warnings.append(str(message)),
-        )
 
-        results = scan_phase._execute_phase(
-            aggregated_results=AshAggregatedResults(), parallel=False
-        )
+        # caplog, not a patched ASH_LOGGER.warning: a lambda set on the shared
+        # logger would leave an instance attribute behind, drop the message's
+        # formatting arguments and hide every other warning of the phase.
+        with caplog.at_level(logging.WARNING):
+            results = scan_phase._execute_phase(
+                aggregated_results=AshAggregatedResults(), parallel=False
+            )
+        warnings = [record.getMessage() for record in caplog.records]
 
         assert isinstance(results, AshAggregatedResults)
         cached = mock_plugin_context.cached_source_files
