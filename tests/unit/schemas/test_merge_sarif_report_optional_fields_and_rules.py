@@ -613,6 +613,7 @@ def _run_with_tables(
     web_requests=None,
     addresses=None,
     taxonomies=None,
+    web_responses=None,
 ) -> Run:
     """A run whose own tables the folded results used to point into."""
     fields: dict = {"tool": {"driver": {"name": driver}}, "results": results}
@@ -628,6 +629,8 @@ def _run_with_tables(
         fields["threadFlowLocations"] = steps
     if web_requests is not None:
         fields["webRequests"] = web_requests
+    if web_responses is not None:
+        fields["webResponses"] = web_responses
     if addresses is not None:
         fields["addresses"] = addresses
     if bases is not None:
@@ -1588,6 +1591,51 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         request = aggregated.runs[0].results[0].webRequest
         assert (request.method, request.target) == ("GET", "/x")
         assert request.index in (None, -1)
+
+    def test_a_web_response_named_by_index_takes_its_row_from_the_runs_table(self):
+        """The counterpart of the web request above, read from ``webResponses``:
+        the walk handles the two keys alike, and each has its own table."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_finding("T-1", webResponse={"index": 0})],
+                    web_responses=[
+                        {"protocol": "http", "statusCode": 404, "reasonPhrase": "gone"}
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        response = aggregated.runs[0].results[0].webResponse
+        assert (response.statusCode, response.reasonPhrase) == (404, "gone")
+        assert response.index in (None, -1)
+
+    def test_an_analysis_target_named_by_index_takes_its_uri_from_its_own_run(self):
+        """``analysisTarget`` is an artifact location like the ones under the
+        result's locations: an index alone points into the incoming run's
+        artifacts, and the aggregate's first run has other ones."""
+        aggregated = SarifReport(
+            runs=[_run_with_tables("aggregate", [], artifacts=["first/a.py"])]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_finding("T-1", analysisTarget={"index": 0})],
+                    artifacts=["second/target.py"],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        target = aggregated.runs[0].results[0].analysisTarget
+        assert target.uri == "second/target.py"
+        assert target.index in (None, -1)
 
     def test_a_property_bag_key_spelled_like_a_field_is_left_as_written(self):
         """The control: a property bag is the scanner's own text, not a place
