@@ -3280,7 +3280,10 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
     before the index goes, since without them the rule would read as the
     driver's; one that names an extension the run does not carry, or the
     driver, is dropped, and a reference left with neither id nor guid is
-    dropped whole.
+    dropped whole. The exception is a reference that kept the name of a
+    component other than the driver: it takes the result's ``ruleId`` as its
+    own id, so the rule stays attributed to that component instead of reading
+    as the driver's.
     """
     reference = dumped.get("rule")
     if dumped.get("ruleId") is None:
@@ -3315,6 +3318,18 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
                             component[key] = value
             if component.get("name") is not None or component.get("guid") is not None:
                 kept["toolComponent"] = component
+        if (
+            kept.get("id") is None
+            and kept.get("guid") is None
+            and "toolComponent" in kept
+            and dumped.get("ruleId")
+        ):
+            # A reference that named its rule by index alone, in a component
+            # other than the driver, and whose id the result now states. Dropped
+            # whole, the rule would read as the driver's in the merged run (the
+            # reason the component's name is kept above); the id the result
+            # carries is the rule's, so the reference keeps it.
+            kept["id"] = dumped["ruleId"]
         if kept.get("id") is None and kept.get("guid") is None:
             dumped.pop("rule", None)
         else:

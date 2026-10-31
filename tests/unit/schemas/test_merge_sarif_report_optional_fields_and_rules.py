@@ -311,8 +311,45 @@ class TestResultsKeepTheirRuleById:
         assert merged.ruleId == "T-0"
         # The reference carried neither id nor guid, so without its index it
         # names nothing and is dropped rather than left pointing into the
-        # incoming run's rules.
+        # incoming run's rules. It named no component, so it read as the
+        # driver's, which after the merge is the aggregate's own: the result's
+        # ruleId is all that is left to say, and is enough. A reference into an
+        # extension is the other case, the next test.
         assert merged.rule is None
+
+    def test_an_index_only_reference_into_an_extension_keeps_its_component(self):
+        """The counterpart of the driver case above: a reference that names an
+        extension by name, with an index and no id, gains the rule's id from the
+        result and keeps the component's name. Dropped whole, the merged result
+        carried the id with nothing saying which component it came from, and
+        read as the driver's rule."""
+        aggregated = SarifReport(runs=[_run("aggregate", [], [])])
+        incoming = SarifReport(
+            runs=[
+                _run(
+                    "tool",
+                    [
+                        _finding(
+                            None, rule={"index": 1, "toolComponent": {"name": "pack"}}
+                        )
+                    ],
+                    [],
+                    rules=[{"id": "D-0"}, {"id": "D-1"}],
+                    extensions=[
+                        {"name": "pack", "rules": [{"id": "P-0"}, {"id": "P-1"}]}
+                    ],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        merged = aggregated.runs[0].results[0]
+        assert merged.ruleId == "P-1"
+        reference = merged.rule.root.model_dump(exclude_unset=True)
+        assert reference["id"] == "P-1"
+        assert reference["toolComponent"] == {"name": "pack"}
+        assert "index" not in reference
 
     def test_a_rule_reference_keeps_its_id_and_loses_the_run_scoped_indices(self):
         aggregated = SarifReport(runs=[_run("aggregate", [], [])])
