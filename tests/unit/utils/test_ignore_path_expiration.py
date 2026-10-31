@@ -1517,6 +1517,73 @@ class TestEveryReaderFiltersExpiredEntries:
             f"{sorted(found ^ set(self.ENTRY_FIELDS))}"
         )
 
+    def test_filtered_at_read_fields_are_handed_only_to_a_filtering_function(self):
+        """The ``filtered-at-read`` label is a claim about the code, so it is
+        checked like the other two kinds: every read of the field is an
+        argument of a call to a function in the same module, and that function
+        passes the parameter receiving it through ``active_ignore_paths``. A
+        read anywhere else, or a callee that stopped filtering, fails here."""
+        offenders = []
+        checked = 0
+        for (rel, field_name), kind in sorted(self.ENTRY_FIELDS.items()):
+            if kind != "filtered-at-read":
+                continue
+            tree = ast.parse((self.PACKAGE / rel).read_text(encoding="utf-8"))
+            parents = {
+                child: parent
+                for parent in ast.walk(tree)
+                for child in ast.iter_child_nodes(parent)
+            }
+            functions = {
+                node.name: node
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            reads = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Attribute)
+                and node.attr == field_name
+                and isinstance(node.ctx, ast.Load)
+            ]
+            assert reads, f"no read of {field_name} found in {rel}"
+            for node in reads:
+                call = parents.get(node)
+                where = f"{rel}:{node.lineno} {field_name}"
+                if not isinstance(call, ast.Call) or node not in call.args:
+                    offenders.append(f"{where} is read outside a call's arguments")
+                    continue
+                callee = functions.get(self._called_name(call) or "")
+                if callee is None:
+                    offenders.append(f"{where} is handed to a function not in {rel}")
+                    continue
+                names = [arg.arg for arg in callee.args.args]
+                if names and names[0] in ("self", "cls"):
+                    names = names[1:]
+                position = call.args.index(node)
+                if position >= len(names):
+                    offenders.append(f"{where} lands in no named parameter")
+                    continue
+                parameter = names[position]
+                filtered = any(
+                    isinstance(inner, ast.Call)
+                    and self._called_name(inner) == "active_ignore_paths"
+                    and any(
+                        isinstance(name, ast.Name) and name.id == parameter
+                        for argument in inner.args
+                        for name in ast.walk(argument)
+                    )
+                    for inner in ast.walk(callee)
+                )
+                if not filtered:
+                    offenders.append(
+                        f"{where}: {callee.name} does not pass {parameter} "
+                        "through active_ignore_paths()"
+                    )
+                checked += 1
+        assert checked, "no filtered-at-read field was checked"
+        assert offenders == [], "\n".join(offenders)
+
     def test_scanner_option_lists_are_read_through_active_ignore_paths(self):
         offenders = []
         for (rel, field_name), kind in sorted(self.ENTRY_FIELDS.items()):
