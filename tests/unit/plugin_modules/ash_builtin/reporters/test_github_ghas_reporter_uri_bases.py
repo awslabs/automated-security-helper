@@ -200,11 +200,34 @@ class TestABaseARunDoesNotDeclare:
         assert any(
             "run 1" in message
             and "'SRCROOT'" in message
-            and "without declaring it" in message
+            and "without declaring a uri for it" in message
             and "file:///repo/" in message
             and "from run 0" in message
             for message in warned
         )
+
+    def test_a_run_declaring_a_base_with_no_uri_is_warned_about_in_its_own_words(
+        self, reporter, monkeypatch
+    ):
+        """The second run does declare SRCROOT, with an entry that has no uri,
+        which the table drops. The warning said it referred to the base id
+        "without declaring it", which that run's own table contradicts; it now
+        says what is missing, a uri."""
+        runs = [
+            _run("R1", {"SRCROOT": "file:///repo/"}),
+            _run("R2", {"SRCROOT": None}, base="SRCROOT"),
+        ]
+
+        warned = self._warnings(reporter, monkeypatch, runs)
+
+        assert any(
+            "run 1" in message
+            and "'SRCROOT'" in message
+            and "without declaring a uri for it" in message
+            and "from run 0" in message
+            for message in warned
+        )
+        assert not any("without declaring it" in message for message in warned)
 
     def test_runs_that_each_declare_their_own_base_are_not_warned_about(
         self, reporter, monkeypatch
@@ -216,7 +239,7 @@ class TestABaseARunDoesNotDeclare:
 
         warned = self._warnings(reporter, monkeypatch, runs)
 
-        assert not any("without declaring it" in message for message in warned)
+        assert not any("declaring a uri for it" in message for message in warned)
 
     def test_a_base_no_run_declares_is_not_warned_about(self, reporter, monkeypatch):
         """Nothing is borrowed when no run declares the id, and a scanner that
@@ -228,7 +251,7 @@ class TestABaseARunDoesNotDeclare:
 
         warned = self._warnings(reporter, monkeypatch, runs)
 
-        assert not any("without declaring it" in message for message in warned)
+        assert not any("declaring a uri for it" in message for message in warned)
 
 
 class TestOnlyReferencedBasesAreDeclared:

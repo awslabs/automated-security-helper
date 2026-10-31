@@ -791,9 +791,9 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         Two runs declaring one key differently cannot share a table: None
         refuses the document, and the log names the key, both declarations and
         the two runs (the same refusal as an unplaceable project path). A run
-        that refers to a base id it does not declare, which another run does,
-        is read against that run's entry and is warned about; the document is
-        still written.
+        that refers to a base id it does not declare, or declares with no uri,
+        while another run declares it with one, is read against that run's
+        entry and is warned about; the document is still written.
         """
         merged: Dict[str, Dict[str, str]] = {}
         first_run: Dict[str, int] = {}
@@ -831,17 +831,19 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                         "project's own report instead."
                     )
                     return None
-        # A run that refers to a base id it never declares contributes nothing
-        # to the table, and the document resolves that id with the entry another
-        # run declared for it: a root the referring run did not name. Said once
-        # per run and base, because the document is still written.
+        # A run that refers to a base id it never declares, or declares with no
+        # uri (:meth:`_original_uri_base_ids` drops such an entry), contributes
+        # nothing to the table, and the document resolves that id with the entry
+        # another run declared for it: a root the referring run did not name.
+        # Said once per run and base, because the document is still written.
         for index, key in undeclared:
             if key in merged:
                 ASH_LOGGER.warning(
                     f"GHAS report: run {index} (counting from 0) refers to the "
-                    f"base id '{key}' without declaring it; the document declares "
-                    f"it as {merged[key]} from run {first_run[key]}, and that run's "
-                    "entry is what the locations of this run are read against."
+                    f"base id '{key}' without declaring a uri for it; the document "
+                    f"declares it as {merged[key]} from run {first_run[key]}, and "
+                    "that run's entry is what the locations of this run are read "
+                    "against."
                 )
         return merged
 
