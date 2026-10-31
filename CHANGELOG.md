@@ -190,9 +190,11 @@
   reason. Before, a scanner could keep a symlink out of the sweep by making its
   directory unlistable, and the scan passed with the link in place. The check that
   runs before a sandboxed scanner starts (`refuse_links_below`) refuses a results
-  directory root that is itself a symlink, and redacts and logs its refusals the
-  same way instead of chaining the operating system's error, which carries the
-  full path.
+  directory root that is itself a symlink. Called with the plugin's environment
+  values, it redacts and logs its refusals the same way instead of chaining the
+  operating system's error, which carries the full path; called with none, it logs
+  nothing and raises the refusal alone, for the scanner executor's own handler to
+  redact.
 
   If a sandbox was requested and cannot be provided, ASH never falls back to
   running the scanner unsandboxed, and the scan exits 1. A backend named

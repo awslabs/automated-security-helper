@@ -798,7 +798,7 @@ def _too_deep(root: Path, dirpath: Union[str, bytes], dirnames: List[str]) -> No
 
 def refuse_links_below(
     root: Union[str, Path],
-    values: Iterable[str] = (),
+    values: Optional[Iterable[str]] = None,
     *,
     values_unread: bool = False,
 ) -> None:
@@ -821,7 +821,11 @@ def refuse_links_below(
     redacted as the sweep's are (``sweep_writable``): ``values`` are the caller's
     env-read values, ``values_unread`` says it could not read them, the line is
     logged as a warning, and the OSError raised carries the same line, with the
-    walk's own error not chained, since its ``filename`` is the full path.
+    walk's own error not chained, since its ``filename`` is the full path. A caller
+    that passes neither (``values`` left as None) has given nothing to redact with,
+    and a warning logged then would carry the entry's name and the root as they
+    are: nothing is logged, and the OSError is raised for the caller's own handler
+    to redact, as it redacts any error of the scan.
     """
     root = Path(os.path.abspath(root))
     if not hasattr(os, "fwalk"):
@@ -839,15 +843,25 @@ def refuse_links_below(
             "cannot be checked",
         )
 
-    shown_values = tuple(values)
+    shown_values = tuple(values) if values is not None else ()
 
     def refuse(what: str, relative: str, error: OSError) -> None:
+        text = (
+            f"Could not {what} {relative} under {root} ({error}), so a link below "
+            "it could not be refused"
+        )
+        if values is None and not values_unread:
+            # No redaction values and no word that they are unreadable: a
+            # directory can be named after an option value, and no scope is
+            # active before the scan starts, so a log line here would be written
+            # unredacted. Raised alone, for the caller's handler to redact; the
+            # OS error is not chained, as its ``filename`` is the full path.
+            raise OSError(_errno_of(error), text) from None
         # Redacted and logged as the sweep's refusals are, and raised from the
         # logged line alone: a directory can be named after an option value, and
         # the OS error chained here carries the full path in its ``filename``.
         shown = _sweep_warning(
-            f"Could not {what} {relative} under {root} ({error}), so a link below "
-            "it could not be refused",
+            text,
             f"Could not {what} an entry of a scanner's results directory, so a "
             "link below it could not be refused; it is not named because the "
             "plugin's redaction values could not be read",

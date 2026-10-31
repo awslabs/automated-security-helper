@@ -583,6 +583,42 @@ def test_refuse_links_below_hides_an_env_read_value(tmp_path, caplog):
 
 
 @needs_unprivileged
+def test_refuse_links_below_logs_nothing_when_given_no_values(tmp_path, caplog):
+    """The scanner executor calls the pre-check with the results directory alone,
+    before any sandbox scope is active, so nothing could redact a warning there: a
+    directory named after an option value would be logged as it is. With no values
+    and no word that they could not be read, the refusal is raised and not logged,
+    and the caller's handler redacts the raise as it redacts any error of the scan.
+    Passing the values (even none) or ``values_unread`` still logs, as above."""
+    value = "PRECHECKSECRET-9923"
+    root = tmp_path / "results"
+    locked = root / f"dir-{value}"
+    locked.mkdir(parents=True)
+    locked.chmod(0o000)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="ash"):
+            with pytest.raises(PermissionError) as refused:
+                fs_guard.refuse_links_below(root)
+            logged_without_values = [
+                record.getMessage()
+                for record in caplog.records
+                if value in record.getMessage()
+                or record.getMessage().startswith("Could not")
+            ]
+            with pytest.raises(PermissionError):
+                fs_guard.refuse_links_below(root, ())
+            logged_with_empty = _warnings(caplog, "Could not list")
+    finally:
+        locked.chmod(0o700)
+
+    assert logged_without_values == [], logged_without_values
+    assert len(logged_with_empty) == 1, logged_with_empty
+    assert f"dir-{value}" in str(refused.value), str(refused.value)
+    assert refused.value.__cause__ is None
+    assert refused.value.__suppress_context__
+
+
+@needs_unprivileged
 def test_refuse_links_below_is_value_free_when_the_values_could_not_be_read(
     tmp_path, caplog
 ):
