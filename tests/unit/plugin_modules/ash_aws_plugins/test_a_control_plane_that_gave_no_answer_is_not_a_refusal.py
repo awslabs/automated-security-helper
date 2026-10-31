@@ -95,21 +95,24 @@ class ControlPlane:
         self.listings = 0
         self.model_listings = 0
 
-    def _failure(self):
-        """The failure both listings share, or None when they answer.
+    def _failure(self, operation):
+        """The failure both listings share, or None when they answer, built for
+        the *operation* that is failing (a new error per call, naming the call
+        that was made, as botocore's does); ``error`` is the one instance a
+        caller gave, raised as it is.
 
         ``throttle_first`` counts profile listings, so a model listing made
         before any (the dependency check's reachability probe) is not throttled
         by it; one made alongside the k-th profile listing shares its fate."""
         if self.throttled or 0 < self.listings <= self.throttle_first:
-            return _error("ThrottlingException", "Rate exceeded")
+            return _error("ThrottlingException", "Rate exceeded", operation)
         if self.listing_error is not None:
-            return _error(self.listing_error, "the listing was refused")
+            return _error(self.listing_error, "the listing was refused", operation)
         return self.error
 
     def list_inference_profiles(self):
         self.listings += 1
-        failure = self._failure()
+        failure = self._failure("ListInferenceProfiles")
         if failure is not None:
             raise failure
         if self.profile_error is not None:
@@ -118,7 +121,7 @@ class ControlPlane:
 
     def list_foundation_models(self):
         self.model_listings += 1
-        failure = self._failure()
+        failure = self._failure("ListFoundationModels")
         if failure is not None:
             raise failure
         return {

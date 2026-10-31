@@ -32,22 +32,27 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
 
-ON_DEMAND = "us.amazon.nova-pro-v1:0"
-ON_DEMAND_ARN = "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0"
-PROFILED = "anthropic.claude-3-7-sonnet-20250219-v1:0"
+# Opaque placeholders, no real model names and no account ids. The on-demand
+# model has no area prefix, as an on-demand id has none, and its ARN names that
+# same id. The profiled model is routed only by the two profiles below, whose
+# ids are its id under an area prefix; their ARNs name the profile id.
+ON_DEMAND = "test-vendor.test-ondemand-v1:0"
+ON_DEMAND_ARN = (
+    "arn:aws:bedrock:us-east-1::foundation-model/test-vendor.test-ondemand-v1:0"
+)
+PROFILED = "test-vendor.test-profiled-v1:0"
 PROFILED_ARN = (
-    "arn:aws:bedrock:us-east-1::foundation-model/"
-    "anthropic.claude-3-7-sonnet-20250219-v1:0"
+    "arn:aws:bedrock:us-east-1::foundation-model/test-vendor.test-profiled-v1:0"
 )
-US_PROFILE = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+US_PROFILE = "us.test-vendor.test-profiled-v1:0"
 US_PROFILE_ARN = (
-    "arn:aws:bedrock:us-east-1:123456789012:inference-profile/"
-    "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    "arn:aws:bedrock:us-east-1:account:inference-profile/"
+    "us.test-vendor.test-profiled-v1:0"
 )
-GLOBAL_PROFILE = "global.anthropic.claude-3-7-sonnet-20250219-v1:0"
+GLOBAL_PROFILE = "global.test-vendor.test-profiled-v1:0"
 GLOBAL_PROFILE_ARN = (
-    "arn:aws:bedrock:us-east-1:123456789012:inference-profile/"
-    "global.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    "arn:aws:bedrock:us-east-1:account:inference-profile/"
+    "global.test-vendor.test-profiled-v1:0"
 )
 
 
