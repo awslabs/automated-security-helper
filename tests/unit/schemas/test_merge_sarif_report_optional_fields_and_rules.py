@@ -819,6 +819,92 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
         location = _first_artifact_location(aggregated)
         assert (location.uri, location.uriBaseId) == ("x.py", "SRCROOT")
 
+    @pytest.mark.parametrize(
+        ("bases", "expected"),
+        [
+            pytest.param(
+                {"SRCROOT": {"uri": "src/", "uriBaseId": "SRCROOT"}},
+                ("x.py", "SRCROOT"),
+                id="self-reference",
+            ),
+            pytest.param(
+                {
+                    "A": {"uri": "a/", "uriBaseId": "B"},
+                    "B": {"uri": "b/", "uriBaseId": "A"},
+                },
+                ("x.py", "A"),
+                id="two-link-cycle",
+            ),
+            pytest.param(
+                {"SRCROOT": {"uri": "src/", "uriBaseId": "GONE"}},
+                ("src/x.py", "GONE"),
+                id="dangling-link",
+            ),
+        ],
+    )
+    def test_a_malformed_base_chain_does_not_abort_the_merge(self, bases, expected):
+        """A scanner's SARIF can define a base that names itself, two bases that
+        name each other, or a base on one the run never defines. The walk over
+        the chain keeps a visited set, so each ends: the merge finishes, the
+        result is kept, and the location is left as written when the chain cannot
+        be expanded, or expanded as far as it goes (a dangling link keeps its
+        last id). A walker without the set would loop on the first two."""
+        aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
+        start = next(iter(bases))
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool", [_located(uri="x.py", uri_base_id=start)], bases=bases
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        assert len(aggregated.runs[0].results) == 1
+        location = _first_artifact_location(aggregated)
+        assert (location.uri, location.uriBaseId) == expected
+
+    def test_a_longer_chain_in_the_aggregate_than_in_the_incoming_run_is_expanded(
+        self,
+    ):
+        """The reverse of the chain that differs below an equal first link: the
+        aggregate's SRCROOT sits on a REPOROOT and the incoming run's stands
+        alone. They name the same place by different routes, but a definition
+        that differs is not the same base here, so the incoming location is
+        expanded from its own definition and the aggregate's table is left as
+        it was."""
+        aggregated = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "aggregate",
+                    [],
+                    bases={
+                        "SRCROOT": {"uri": "src/", "uriBaseId": "REPOROOT"},
+                        "REPOROOT": "file:///repo/",
+                    },
+                )
+            ]
+        )
+        incoming = SarifReport(
+            runs=[
+                _run_with_tables(
+                    "tool",
+                    [_located(uri="x.py", uri_base_id="SRCROOT")],
+                    bases={"SRCROOT": "file:///repo/src/"},
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        location = _first_artifact_location(aggregated)
+        assert location.uri == "file:///repo/src/x.py"
+        assert location.uriBaseId is None
+        assert aggregated.runs[0].originalUriBaseIds["REPOROOT"].uri == (
+            "file:///repo/"
+        )
+
     def test_a_base_without_a_trailing_slash_is_expanded_with_one(self):
         aggregated = SarifReport(runs=[_run_with_tables("aggregate", [])])
         incoming = SarifReport(
