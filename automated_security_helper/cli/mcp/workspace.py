@@ -2254,7 +2254,8 @@ async def _off_the_loop(
     running git there. The thread takes a hold on the claim before it does
     anything (:meth:`_WorkspaceScanClaim.thread_starts`), so the release follows
     the thread's return when the call has left first. A thread that finds the
-    claim already released does nothing, as when the executor drops the job.
+    claim already released reads nothing and raises ``RuntimeError``; with the
+    call gone nothing awaits that result, as when the executor drops the job.
 
     The thread holds the call's run log scope the same way, until it returns:
     its lines belong to the scan, and a call cancelled here releases its own
