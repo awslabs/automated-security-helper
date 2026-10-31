@@ -177,13 +177,28 @@ def _working_directory() -> Path:
     (or unmounted) under the shell, and that escaped as a traceback from every
     command that defaults to the working directory, ahead of the refusal
     :func:`_source_dir` exists to give.
+
+    Only FileNotFoundError says the directory is gone. Any other error (a parent
+    that cannot be searched, say) is reported with its own text, as
+    ``ash report`` reports it, so a directory that is still there is not called
+    deleted.
     """
     try:
         return Path.cwd()
-    except OSError:
+    except FileNotFoundError:
         echo(
             "Source directory does not exist: the current directory was deleted or "
             "unmounted. Change to a directory that exists, or pass --source-dir.",
+            err=True,
+        )
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+    except OSError as e:
+        echo(
+            shown_on_one_line(
+                "Source directory cannot be used: the current directory cannot be "
+                f"read ({error_text(e)}). Change to a directory that can be read, "
+                "or pass --source-dir."
+            ),
             err=True,
         )
         raise typer.Exit(ASH_EXIT_USAGE_ERROR)
