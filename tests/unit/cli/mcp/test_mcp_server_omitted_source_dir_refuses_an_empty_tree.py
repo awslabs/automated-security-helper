@@ -89,6 +89,60 @@ def test_a_tree_holding_only_a_git_directory_is_refused(tmp_path) -> None:
     assert resolution.error["error_type"] == "delivered_source_missing"
 
 
+def test_a_tree_holding_only_a_git_file_is_refused(tmp_path) -> None:
+    """A checkout made as a worktree or a submodule has a ``.git`` FILE (a
+    gitlink), not a directory; skipped by name like the directory is."""
+    delivered = tmp_path / "session-f" / "source"
+    delivered.mkdir(parents=True)
+    (delivered / ".git").write_text("gitdir: ../elsewhere\n", encoding="utf-8")
+    sd._set_session_source_dir("session-f", delivered)
+
+    resolution = _resolve_omitted_source_dir("session-f")
+
+    assert resolution.source_dir is None, "a bare gitlink was handed to the scan"
+    assert resolution.error is not None
+    assert resolution.error["error_type"] == "delivered_source_missing"
+
+
+def test_a_nested_git_directory_holds_nothing_either(tmp_path) -> None:
+    """``.git`` is skipped at every level, not only at the top: a nested
+    checkout whose files never landed is as empty as a top-level one."""
+    delivered = tmp_path / "session-g" / "source"
+    (delivered / "vendor" / "lib" / ".git" / "objects").mkdir(parents=True)
+    (delivered / "vendor" / "lib" / ".git" / "HEAD").write_text(
+        "ref: refs/heads/main\n", encoding="utf-8"
+    )
+    sd._set_session_source_dir("session-g", delivered)
+
+    resolution = _resolve_omitted_source_dir("session-g")
+
+    assert resolution.source_dir is None, "a nested bare .git was handed to the scan"
+    assert resolution.error is not None
+    assert resolution.error["error_type"] == "delivered_source_missing"
+
+
+def test_a_tree_of_symbolic_links_only_is_refused(tmp_path) -> None:
+    """No link is followed and none counts as a file: a link to a file and a
+    link to a directory that holds one leave the delivered tree itself empty."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "app.py").write_text("x = 1\n", encoding="utf-8")
+    delivered = tmp_path / "session-h" / "source"
+    delivered.mkdir(parents=True)
+    try:
+        (delivered / "file-link").symlink_to(outside / "app.py")
+        (delivered / "dir-link").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("this platform does not create symbolic links here")
+    sd._set_session_source_dir("session-h", delivered)
+
+    resolution = _resolve_omitted_source_dir("session-h")
+
+    assert resolution.source_dir is None, "a tree of links was handed to the scan"
+    assert resolution.error is not None
+    assert resolution.error["error_type"] == "delivered_source_missing"
+
+
 def test_a_file_below_an_empty_top_level_is_used(tmp_path) -> None:
     delivered = tmp_path / "session-e" / "source"
     (delivered / "src" / "pkg").mkdir(parents=True)
