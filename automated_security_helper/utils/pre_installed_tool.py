@@ -91,7 +91,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence, Tuple, Union
-from automated_security_helper.utils.error_text import ESCAPE_CODES
+from automated_security_helper.utils.error_text import ESCAPE_CODES, text_without_values
 from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.process_env import environ_for_parsed_output
 
@@ -1134,16 +1134,18 @@ def _judge(
     reasons = []
     # The summary's parallel parts name no constraint text and no path. They
     # do name the missing extras: those are the caller's own requirement's
-    # words, which the reason that carries the summary already shows, and a
-    # refusal that says only "missing extra" tells the reader nothing the
-    # remedy does not have to repeat.
+    # words, and a refusal that says only "missing extra" tells the reader
+    # nothing the remedy does not have to repeat. The summary is the field
+    # whose text reaches the results, so it is redacted with the caller's
+    # values: an extra spelled by an env-read value prints as that value's
+    # placeholder there, as it does in every other text the results carry.
     summary_parts = []
     if missing:
         named_missing = (
             f"missing extra{'s' if len(missing) > 1 else ''}: {', '.join(missing)}"
         )
         reasons.append(named_missing)
-        summary_parts.append(named_missing)
+        summary_parts.append(text_without_values(named_missing, values))
     if (
         version_constraint
         and _dry_run(

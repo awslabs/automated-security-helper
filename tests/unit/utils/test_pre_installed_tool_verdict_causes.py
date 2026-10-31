@@ -384,6 +384,63 @@ class TestTheCauseOfAnUnsatisfiedVerdict:
         )
         assert verdict.missing_extras == ("sarif",)
 
+    def test_a_missing_extra_spelled_by_a_hidden_value_is_hidden_in_the_summary(
+        self, monkeypatch
+    ):
+        """The summary is the field whose text reaches the results, so an extra
+        the caller's env-read values spell is redacted there, as it is in every
+        other text the results carry."""
+        hidden = "internal-extra-name"
+        monkeypatch.setattr(
+            pre_installed_tool, "_dry_run", self._judge_missing_stub(hidden)
+        )
+        answer = _judge(
+            "/opt/bin/bandit",
+            "bandit",
+            [hidden],
+            None,
+            f"bandit[{hidden}]",
+            "/opt/uv",
+            sys.executable,
+            None,
+            "its environment",
+            None,
+            values=(hidden,),
+        )
+        assert answer.missing_extras == (hidden,)
+        assert answer.summary.startswith("missing extra"), answer.summary
+        assert hidden not in answer.summary, answer.summary
+
+    def test_a_missing_extra_no_value_spells_is_named_in_the_summary(self, monkeypatch):
+        """The control: with nothing to hide the summary names the extra."""
+        extra = "internal-extra-name"
+        monkeypatch.setattr(
+            pre_installed_tool, "_dry_run", self._judge_missing_stub(extra)
+        )
+        answer = _judge(
+            "/opt/bin/bandit",
+            "bandit",
+            [extra],
+            None,
+            f"bandit[{extra}]",
+            "/opt/uv",
+            sys.executable,
+            None,
+            "its environment",
+            None,
+            values=(),
+        )
+        assert answer.summary == f"missing extra: {extra}"
+
+    @staticmethod
+    def _judge_missing_stub(extra):
+        def _dry_run_stub(uv, interpreter, requirement, target=None, no_deps=False):
+            if f"[{extra}]" in requirement:
+                return ("unsatisfied", "would install more")
+            return ("satisfied", "")
+
+        return _dry_run_stub
+
 
 class TestAProbeThatCouldNotRunNamesItsCause:
     def test_the_version_probes_spawn_error_is_in_the_detail(self, monkeypatch):
