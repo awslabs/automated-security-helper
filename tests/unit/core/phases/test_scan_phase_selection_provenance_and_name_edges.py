@@ -26,6 +26,7 @@ Each test is red on the tree that carried the defect:
 from __future__ import annotations
 
 import contextlib
+import os
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -834,6 +835,35 @@ class TestSmallThings:
         # Red at the base: "Could not list <dir>, so nothing under it is scanned"
         # on every run that converted nothing.
         assert not any("Could not list" in line for line in _lines(logger, "warning"))
+        assert phase._include_work_dir is False
+
+    def test_a_work_directory_that_cannot_be_checked_is_warned_about(
+        self, ctx, logger, monkeypatch
+    ):
+        """A work directory under a parent ASH cannot search is not absent: the
+        check for it fails with a permission error. Red at the base: ``isdir``
+        answered False for that too, so the converted tree dropped out of the
+        scan with no line, where the walk's own warning would have named it."""
+        work = ctx.source_dir.parent / "work-under-a-locked-parent"
+        work.mkdir()
+        (work / "converted.py").write_text("x = 1\n")
+        ctx.work_dir = work
+        real_stat = os.stat
+
+        def stat_or_refuse(path, *args, **kwargs):
+            if os.fspath(path) == str(work):
+                raise PermissionError(13, "Permission denied", str(work))
+            return real_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "stat", stat_or_refuse)
+        phase = _phase(ctx)
+
+        _run(phase)
+
+        assert any(
+            "Could not list" in line and "work-under-a-locked-parent" in line
+            for line in _lines(logger, "warning")
+        ), _lines(logger, "warning")
         assert phase._include_work_dir is False
 
     def test_a_result_processor_is_not_built_per_call(self, ctx):

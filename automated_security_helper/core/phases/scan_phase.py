@@ -325,7 +325,23 @@ def _holds_a_regular_file(directory: Any) -> bool:
     reports a missing top directory as one it could not list, and the work
     directory is absent on every run that converted nothing, so that warning
     was logged on each of them.
+
+    Absent is the only answer that is silent. ``os.path.isdir`` answers False for
+    any failure of the check, so a work directory under a parent ASH may not
+    search read as absent: the converted tree dropped out of the scan with no
+    line, where the walk's own "could not list" warning would have named it. Any
+    failure but "not there" is warned about and holds no file for this run.
     """
+    try:
+        os.stat(str(directory))
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as error:
+        ASH_LOGGER.warning(
+            f"Could not list {directory}, so nothing under it is scanned: "
+            f"{error.strerror or error}"
+        )
+        return False
     if not os.path.isdir(str(directory)):
         return False
     return next(iter(_regular_files_under(directory)), None) is not None
