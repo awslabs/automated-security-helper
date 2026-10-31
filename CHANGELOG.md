@@ -8209,6 +8209,17 @@
   reports take these readings, and the kinds that state no finding, from one
   shared definition, so they cannot drift apart again.
 
+- **The GitLab SAST description of a result whose message is given by id is read
+  from the rule in its own run and scanner.** Such a message names a string of
+  its rule, and the description is that string. The rules were looked up by bare
+  rule id over every run and every scanner, keeping the first, so a rule id that
+  two scanners declare (grype and trivy on a CVE) took the first scanner's string
+  for both. The lookup now takes the rule from the run the result is in and, in
+  it, from the scanner component the result names, and reads a string the
+  component declares for all its rules (`globalMessageStrings`) when the rule
+  declares none of its own. The description of such a result can change from the
+  other scanner's text to its own.
+
 - **The Markdown report's project line puts adjacent references in one code
   span.** A project name written as `${ORG}${REPO}`, or a reference written
   against a mention or a URL, was printed as two code spans back to back, and

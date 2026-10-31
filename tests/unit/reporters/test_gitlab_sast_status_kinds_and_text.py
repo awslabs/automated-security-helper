@@ -206,6 +206,98 @@ class TestMessageAndSecretText:
         )
 
 
+def _by_id(scanner: str | None, line: int) -> Result:
+    """A result of rule ``CVE-1`` whose message names the string ``default``."""
+    return Result(
+        ruleId="CVE-1",
+        level=Level.warning,
+        message=Message.model_validate({"id": "default"}),
+        locations=[_located(line=line)],
+        properties=PropertyBag(scanner_name=scanner) if scanner else None,
+    )
+
+
+def _declaring(
+    text: str, *, name: str = "scanner", fallback: str | None = None
+) -> ToolComponent:
+    """A component whose rule ``CVE-1`` declares *text* as its ``default``
+    string, and that declares *fallback* for all its rules when it is given."""
+    return ToolComponent(
+        name=name,
+        rules=[
+            ReportingDescriptor(
+                id="CVE-1",
+                messageStrings={"default": MultiformatMessageString(text=text)},
+            )
+        ],
+        globalMessageStrings=(
+            {"default": MultiformatMessageString(text=fallback)} if fallback else None
+        ),
+    )
+
+
+def _described(reporter, *runs: Run) -> list[str]:
+    model = AshAggregatedResults()
+    model.sarif = SarifReport(version="2.1.0", runs=list(runs))
+    return [v["description"] for v in _report(reporter, model)["vulnerabilities"]]
+
+
+class TestAMessageGivenByIdIsResolvedWhereItsRuleLives:
+    """ASH writes one run whose scanners are the extensions of its tool, and two
+    scanners can declare one rule id with different message strings. A lookup
+    keyed on the bare rule id, built over every run and extension, kept the first
+    descriptor and read every later scanner's message against it."""
+
+    def test_two_scanners_declaring_one_rule_id_keep_their_own_strings(self, reporter):
+        run = Run(
+            tool=Tool(
+                driver=ToolComponent(name="ASH"),
+                extensions=[
+                    _declaring("Text from trivy", name="trivy"),
+                    _declaring("Text from grype", name="grype"),
+                ],
+            ),
+            results=[_by_id("trivy", 1), _by_id("grype", 2)],
+        )
+
+        assert _described(reporter, run) == ["Text from trivy", "Text from grype"]
+
+    def test_the_same_rule_id_in_two_runs_is_read_in_its_own_run(self, reporter):
+        runs = [
+            Run(
+                tool=Tool(driver=_declaring("Text from run one")),
+                results=[_by_id(None, 1)],
+            ),
+            Run(
+                tool=Tool(driver=_declaring("Text from run two")),
+                results=[_by_id(None, 2)],
+            ),
+        ]
+
+        assert _described(reporter, *runs) == ["Text from run one", "Text from run two"]
+
+    def test_a_string_the_component_declares_for_all_its_rules_is_read(self, reporter):
+        """SARIF 3.11.10 keeps a message string a rule does not declare in the
+        component's ``globalMessageStrings``."""
+        component = ToolComponent(
+            name="scanner",
+            rules=[ReportingDescriptor(id="CVE-1")],
+            globalMessageStrings={
+                "default": MultiformatMessageString(text="Text from the component")
+            },
+        )
+        run = Run(tool=Tool(driver=component), results=[_by_id(None, 1)])
+
+        assert _described(reporter, run) == ["Text from the component"]
+
+    def test_the_rules_own_string_wins_over_the_components(self, reporter):
+        # The control: the component's string is the fallback, not the answer.
+        component = _declaring("Text from the rule", fallback="Text from the component")
+        run = Run(tool=Tool(driver=component), results=[_by_id(None, 1)])
+
+        assert _described(reporter, run) == ["Text from the rule"]
+
+
 class TestSuppressions:
     def test_the_first_reasoned_suppression_in_effect_gives_the_solution(
         self, reporter
