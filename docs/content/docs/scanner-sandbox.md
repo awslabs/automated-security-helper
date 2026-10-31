@@ -228,6 +228,9 @@ it needs.
   ASH started with (or one the list sets), never for a value that appears later in
   the environment. A `SSL_CERT_DIR` entry that is a home directory or holds one is
   not granted, with a warning, because it would show far more than the certificates.
+  So is an entry that the backend cannot write in its options (a path with `~` or `*`
+  under firejail, or a control character under sandbox-exec): it is passed through
+  but not granted, with a warning, and the scan goes on.
 - No local IPC endpoint is reachable, with or without a network: not the Docker or
   Podman socket, the session bus, `$SSH_AUTH_SOCK`, the journal, nor a socket in a
   directory the sandbox mounts, such as the Nix daemon's under `/nix`. On Linux every

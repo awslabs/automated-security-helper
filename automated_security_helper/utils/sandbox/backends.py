@@ -402,8 +402,16 @@ def _is_within(path: Path, parent: Path) -> bool:
         return False
 
 
+#: The CA-bundle entries already reported as unspellable, as (variable, entry). A
+#: backend that cannot write an entry in its options leaves it out at every spawn;
+#: the warning is for the first one.
+_ca_unspelled_warned: Set[Tuple[str, str]] = set()
+
+
 def _operator_ca_reads(
-    policy: SandboxPolicy, child_env: Mapping[str, str]
+    policy: SandboxPolicy,
+    child_env: Mapping[str, str],
+    spell: Optional[Callable[[Path], str]] = None,
 ) -> List[Path]:
     """The files and directories the operator's CA-bundle settings name, as spelled.
 
@@ -424,6 +432,11 @@ def _operator_ca_reads(
     sits above a home directory (it would expose far more than the directory the
     operator meant, so it is warned about), and anything inside a path the policy
     already lists, which the spawn sees.
+
+    ``spell`` is the backend's way of writing a path in its options (it raises
+    SandboxUnavailable for one it cannot write). An entry it refuses is left out
+    with a warning, once, rather than refusing every spawn: the grant is a
+    convenience, and the setting is still passed through as it was without it.
     """
     listed, configured = parse_environment(policy.environment)
     started = startup_environ()
@@ -462,6 +475,17 @@ def _operator_ca_reads(
             in_a_home = any(real == h or _is_within(real, h) for h in homes)
             if not in_a_home and any(real == p or _is_within(real, p) for p in seen):
                 continue
+            if spell is not None:
+                try:
+                    spell(real)
+                except SandboxUnavailable as e:
+                    if (name, entry) not in _ca_unspelled_warned:
+                        _ca_unspelled_warned.add((name, entry))
+                        ASH_LOGGER.warning(
+                            f"${name} names {entry!r}, which is not readable in "
+                            f"the scanner sandbox: {e}"
+                        )
+                    continue
             if Path(entry) not in reads:
                 reads.append(Path(entry))
     return reads
@@ -1115,7 +1139,10 @@ class FirejailBackend(SandboxBackend):
         child_env = policy.filter_env(env)
         # The bundle or directory the operator's CA-bundle settings name, readable
         # even where it sits under the home directory --private hides.
-        ca_reads = [_real(p) for p in _operator_ca_reads(policy, child_env)]
+        ca_reads = [
+            _real(p)
+            for p in _operator_ca_reads(policy, child_env, spell=_firejail_path)
+        ]
         granted = [
             _real(p)
             for p in [
@@ -1877,7 +1904,7 @@ class SandboxExecBackend(SandboxBackend):
         # backends grant them; the SSL_CERT_FILE above has its own rule.
         ca_reads = [
             p
-            for p in _operator_ca_reads(policy, child_env)
+            for p in _operator_ca_reads(policy, child_env, spell=_sbpl_string)
             if trust_roots is None or _real(p) != _real(trust_roots)
         ]
         unpack_dir = None

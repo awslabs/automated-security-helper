@@ -1127,6 +1127,50 @@ def test_a_ca_path_that_cannot_be_examined_is_passed_on_and_fails_no_plan(
         plan.run_cleanup()
 
 
+@POSIX
+@pytest.mark.parametrize(
+    ("kind", "odd_name"),
+    [("firejail", "certs~old"), ("sandbox-exec", "certs\x01old")],
+)
+def test_a_ca_entry_the_backend_cannot_spell_is_left_out_not_refused(
+    layout, monkeypatch, caplog, kind, odd_name
+):
+    """One entry firejail or sandbox-exec cannot write must not refuse every spawn.
+
+    firejail reads ``~`` in a path option as a macro and sandbox-exec cannot write a
+    control character in a profile; both refused the whole plan for the grant of
+    such a directory in SSL_CERT_DIR, where the bundle used to be passed through
+    unreadable. The entry is left out with a warning, once, the setting still
+    reaches the scanner as written, and the other entry is still granted.
+    """
+    odd, fine = layout.home / odd_name, layout.home / "certs-fine"
+    odd.mkdir()
+    fine.mkdir()
+    value = os.pathsep.join([str(odd), str(fine)])
+    env = {"SSL_CERT_DIR": value}
+    monkeypatch.setattr(backends, "startup_environ", lambda: dict(env))
+    monkeypatch.setattr(backends, "_ca_unspelled_warned", set())
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        for _ in range(2):
+            plan = _plan_of(kind, layout, monkeypatch, _policy(layout), env)
+            try:
+                assert plan.env["SSL_CERT_DIR"] == value
+                granted = _read_grants(kind, plan)
+            finally:
+                plan.run_cleanup()
+            assert _real(fine).as_posix() in granted
+            assert _real(odd).as_posix() not in granted
+
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if "SSL_CERT_DIR" in record.getMessage()
+        and "not readable" in record.getMessage()
+    ]
+    assert len(warnings) == 1, warnings
+
+
 def test_the_default_environment_list_is_the_proxy_family_and_the_ca_set(layout):
     """With no list written, exactly these are passed, and nothing else the caller has."""
     expected = _PROXY_NAMES | _CA_NAMES
