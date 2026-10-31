@@ -170,12 +170,17 @@ def test_the_commands_own_parameter_objects_keep_their_variable_during_a_parse(
     """The parameter objects belong to the command, which a server shares between
     scans running at once. A parse that set the variable aside by clearing it on
     those objects hid it from every other parse in flight; the variable is set
-    aside on this parse's own copy, and the command's parameter keeps it."""
+    aside on this parse's own copy, and the command's parameter keeps it.
+
+    The app registers two commands, so the object built from it is a group;
+    the parameter read here is the one on its ``run`` subcommand."""
     seen: list = []
     holder: dict = {}
 
     def on_count(value: int):
-        parameter = next(p for p in holder["command"].params if p.name == "count")
+        parameter = next(
+            p for p in holder["command"].commands["run"].params if p.name == "count"
+        )
         seen.append(parameter.envvar)
         return value
 
