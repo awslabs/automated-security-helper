@@ -43,7 +43,9 @@ from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 
 #: What GitHub acts on without Markdown syntax: an ``@name`` (or ``@org/team``)
 #: notifies that user or team, and a bare URL becomes a link. Neither is
-#: preceded by a word character, so an e-mail address is left alone. A URL
+#: preceded by a word character, so an e-mail address is left alone. GitHub
+#: still links a bare address as a ``mailto:`` link, which notifies nobody and
+#: sends nothing until a reader follows it, so that is accepted. A URL
 #: stops at whitespace, ``<``, ``>``, a backtick or a pipe, and does not end on
 #: the punctuation that closes the sentence or bracket it sits in.
 _AUTO_REFERENCE = re.compile(

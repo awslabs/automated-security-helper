@@ -80,7 +80,9 @@ class TestAMentionOrAUrlIsNotActedOn:
         assert _text("x](https://example.com/b) y") == "x\\](`https://example.com/b`) y"
 
     def test_an_address_and_ordinary_text_are_left_alone(self):
-        # The control: not everything with an "@" or a dot is a mention.
+        # The control: not everything with an "@" or a dot is a mention. A bare
+        # address is still linked as ``mailto:`` by GitHub, which notifies
+        # nobody, and that is accepted.
         assert _text("mail me@example.com") == "mail me@example.com"
         assert _text("a_b *c*") == "a\\_b \\*c\\*"
 
