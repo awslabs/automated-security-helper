@@ -793,6 +793,58 @@ def test_the_suppression_pass_shares_one_budget_across_its_findings(
     assert closed == [seen[0]]
 
 
+def test_the_suppression_pass_closes_its_budget_when_an_evaluation_raises(
+    tmp_path, monkeypatch
+):
+    """The failure the bound exists for is a ScannerError escaping the pass (a
+    search that ran past scan_timeout), not the pass returning. The error
+    reaches the caller, and the budget, with its worker process, is closed
+    exactly once on the way out: the pass holds it as a context manager, so a
+    ``close()`` that moved back to the normal return would leave a live worker
+    after any exception."""
+    import automated_security_helper.utils.sarif_utils as sarif_utils
+    from automated_security_helper.base.plugin_context import PluginContext
+
+    seen: list = []
+    closed: list = []
+
+    class _ClosingBudget(EvaluationBudget):
+        def close(self, graceful: bool = True) -> None:
+            closed.append(self)
+            super().close(graceful)
+
+    def raising(result, run, exclusions, normalize, source_dir, budget=None):
+        seen.append(budget)
+        raise ScannerError("a regular expression ran past the scanner's scan_timeout")
+
+    monkeypatch.setattr(sarif_utils, "_client_exclusion_for", raising)
+    monkeypatch.setattr(exclusions_module, "EvaluationBudget", _ClosingBudget)
+    config = AshConfig()
+    config._client_scanner_exclusions = [
+        ClientScannerExclusion(
+            scanner="checkov",
+            option="skip_path",
+            kind="checkov",
+            pattern="vend.r",
+            reason="r",
+            scan_timeout=5,
+        )
+    ]
+    source = tmp_path / "src"
+    source.mkdir()
+    context = PluginContext(
+        source_dir=source, output_dir=tmp_path / "out", config=config
+    )
+
+    with pytest.raises(ScannerError, match="scan_timeout"):
+        sarif_utils.apply_suppressions_to_sarif(
+            _report_of(["vendor/x.tf", "src/y.tf"]), context
+        )
+
+    assert len(seen) == 1
+    assert closed == [seen[0]]
+
+
 # ---------------------------------------------------------------------------
 # The moved entry records the scanner's own time limit
 # ---------------------------------------------------------------------------
