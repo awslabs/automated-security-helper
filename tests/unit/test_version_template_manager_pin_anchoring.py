@@ -476,8 +476,18 @@ class TestTheReadersOfAPageSeeOnlyAshPins:
                 f"Intro line.\nRun `git clone --branch v2.0.0 {OTHER_URL}.git`.\nOutro.\n",
                 f"Run `git clone --branch v2.0.0 {OTHER_URL}.git`.",
             ),
+            # A rev: written after a list nested under a sibling key: the entry still
+            # runs up to its repo: line. Red at the base, where the walk stopped at the
+            # nested `- id:` line and returned the rev: line alone.
+            (
+                (
+                    f"  - repo: {OTHER_URL}\n    hooks:\n      - id: x\n"
+                    "    rev: v4.6.0\n  - repo: https://github.com/e/n\n"
+                ),
+                f"  - repo: {OTHER_URL}\n    hooks:\n      - id: x\n    rev: v4.6.0",
+            ),
         ],
-        ids=["block", "rev-first", "continued", "prose"],
+        ids=["block", "rev-first", "continued", "prose", "below-a-nested-item"],
     )
     def test_the_entry_around_a_listed_pin_is_the_whole_entry_or_command(
         self, text, entry

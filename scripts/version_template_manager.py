@@ -220,7 +220,10 @@ def _entry_around(lines: List[str], index: int) -> str:
     A command continued with a trailing backslash is whole. A line of a YAML list entry
     is read up to the `- ` line that starts the entry and down through the lines
     indented deeper than it, so a pre-commit `rev:` comes with the `repo:` line above
-    it, and a `- rev:` with the `repo:` below it. Prose and other text stay one line.
+    it, and a `- rev:` with the `repo:` below it. A list item nested deeper than the
+    `rev:` (the `- id:` lines under a `hooks:` key) belongs to a sibling key and is
+    walked past, so the `repo:` line above it is still found. Prose and other text stay
+    one line.
     """
     start = index
     while start > 0 and lines[start - 1].rstrip().endswith("\\"):
@@ -232,8 +235,10 @@ def _entry_around(lines: List[str], index: int) -> str:
             if lines[above].lstrip().startswith("- "):
                 if _indent(lines[above]) < base:
                     start = above
-                break
-            if _indent(lines[above]) < base:
+                    break
+                if _indent(lines[above]) == base:
+                    break
+            elif _indent(lines[above]) < base:
                 break
             above -= 1
     end = index
