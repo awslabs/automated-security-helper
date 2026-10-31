@@ -484,8 +484,24 @@ class ReportContentEmitter:
             next_step = "Review findings by severity, then inspect the source."
         else:
             title, tone = "No actionable findings", "success"
-            description = "Completed scanners reported no findings at or above their configured thresholds."
-            next_step = "Review scanner coverage and findings below the threshold."
+            if policy_not_gating:
+                # A finding the workspace policy added, in a project whose
+                # policy_scanners_gate is off, can sit above the threshold and
+                # still decide nothing. The sentence below would deny it exists
+                # beside the "Not gating" figure, so say what was left out.
+                policy_noun = "finding is" if policy_not_gating == 1 else "findings are"
+                description = (
+                    "Completed scanners reported no findings that count toward the "
+                    f"outcome. {policy_not_gating} workspace-policy {policy_noun} "
+                    "reported and left out of it because policy_scanners_gate is off."
+                )
+                next_step = (
+                    "Review the workspace-policy findings left out of the outcome, "
+                    "then scanner coverage and findings below the threshold."
+                )
+            else:
+                description = "Completed scanners reported no findings at or above their configured thresholds."
+                next_step = "Review scanner coverage and findings below the threshold."
 
         return {
             "title": title,

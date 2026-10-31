@@ -285,3 +285,85 @@ class TestTheTextAndMarkdownSummariesCountItApart:
 
         assert "1 below threshold · 0 suppressed" in out, out
         assert "not gating" not in out
+
+
+_NO_POLICY_DESCRIPTION = (
+    "Completed scanners reported no findings at or above their configured thresholds."
+)
+_NO_POLICY_NEXT_STEP = "Review scanner coverage and findings below the threshold."
+
+
+class TestTheHeadlineDoesNotDenyIt:
+    def test_the_headline_names_the_finding_left_out_of_the_outcome(
+        self, not_gating_model
+    ):
+        """RED at the base: with only a CRITICAL non-gating policy finding the
+        headline read "no findings at or above their configured thresholds" and
+        a next step about findings "below the threshold", beside the "Not
+        gating 1" figure."""
+        summary = ReportContentEmitter(
+            not_gating_model, human_presentation=True
+        ).get_scan_summary()
+
+        assert summary["actionable"] == 0, summary
+        assert summary["policy_not_gating"] == 1, summary
+        assert summary["description"] == (
+            "Completed scanners reported no findings that count toward the outcome. "
+            "1 workspace-policy finding is reported and left out of it because "
+            "policy_scanners_gate is off."
+        ), summary
+        next_step = summary["next_step"]
+        assert "workspace-policy findings left out of the outcome" in next_step, summary
+        description = summary["description"]
+        assert "at or above their configured thresholds" not in description, summary
+
+    def test_the_count_and_the_verb_follow_the_number_left_out(self, tmp_path):
+        second = _result("POLICY-TWO", "error", origin="workspace-policy")
+        model = _model(
+            tmp_path,
+            [_critical_policy_finding(), second],
+            policy_scanners_gate=False,
+            policy_origin_finding_count=2,
+        )
+
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        summary = emitter.get_scan_summary()
+
+        assert summary["policy_not_gating"] == 2, summary
+        description = summary["description"]
+        assert "2 workspace-policy findings are reported and left out" in description
+
+    def test_the_sentences_are_unchanged_when_none_is_left_out(self, tmp_path):
+        """The control: with no such finding the two sentences are the ones every
+        clean report carries."""
+        model = _model(tmp_path, [_low_ordinary_finding()], policy_scanners_gate=False)
+
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        summary = emitter.get_scan_summary()
+
+        assert summary["policy_not_gating"] == 0, summary
+        assert summary["title"] == "No actionable findings", summary
+        assert summary["description"] == _NO_POLICY_DESCRIPTION, summary
+        assert summary["next_step"] == _NO_POLICY_NEXT_STEP, summary
+
+    def test_a_gating_policy_finding_keeps_the_review_required_sentences(
+        self, gating_model
+    ):
+        summary = ReportContentEmitter(
+            gating_model, human_presentation=True
+        ).get_scan_summary()
+
+        assert summary["title"] == "Review required", summary
+        assert "workspace-policy" not in summary["description"], summary
+
+    def test_the_text_and_markdown_reports_carry_the_headline(
+        self, not_gating_model, test_plugin_context
+    ):
+        text = TextReporter(context=test_plugin_context).report(not_gating_model)
+        markdown = MarkdownReporter(context=test_plugin_context).report(
+            not_gating_model
+        )
+
+        for out in (text, markdown):
+            assert "1 workspace-policy finding is reported and left out" in out, out
+            assert "workspace-policy findings left out of the outcome" in out, out
