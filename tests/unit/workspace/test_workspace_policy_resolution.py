@@ -268,7 +268,7 @@ def test_a_package_path_naming_no_project_refuses_the_workspace(tmp_path):
         "workspace:\n"
         "  suppressions:\n"
         "    - path: '**/*.js'\n"
-        "      package_path: node_modules/left-pad\n"
+        "      package_path: vendored/zz-widget\n"
         "      reason: vendored copy\n",
     )
 
@@ -277,7 +277,9 @@ def test_a_package_path_naming_no_project_refuses_the_workspace(tmp_path):
 
     message = str(excinfo.value)
     assert "names no project's package copy" in message
-    assert "'node_modules/left-pad'" in message
+    # On the entry's own line: the refusal's header quotes 'node_modules/left-pad'
+    # as an example, so that value would pass without the entry's being quoted.
+    assert "suppression entry 1: its package_path 'vendored/zz-widget'" in message
 
 
 def test_an_unrewritable_policy_pattern_refuses_naming_project_and_pattern(tmp_path):

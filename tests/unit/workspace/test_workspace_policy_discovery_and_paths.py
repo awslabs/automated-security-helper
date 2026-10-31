@@ -239,7 +239,11 @@ class TestAPackagePathNamingNoProjectIsRefusedAcrossTheProjects:
         ]
 
     def test_a_project_relative_value_is_refused_naming_the_entry(self):
-        policy = self._policy("node_modules/left-pad")
+        """The value is one the refusal's fixed header never quotes, and it is
+        read on the entry's own line: ``'node_modules/left-pad'`` is also the
+        header's example, so a refusal that stopped quoting the operator's value
+        still held it."""
+        policy = self._policy("vendored/zz-widget")
         resolved = self._resolved(policy, "api", "web")
 
         with pytest.raises(WorkspaceDefinitionError) as excinfo:
@@ -248,8 +252,7 @@ class TestAPackagePathNamingNoProjectIsRefusedAcrossTheProjects:
             )
 
         message = str(excinfo.value)
-        assert "suppression entry 1" in message
-        assert "'node_modules/left-pad'" in message
+        assert "suppression entry 1: its package_path 'vendored/zz-widget'" in message
         assert "relative to the workspace" in message
         assert "names no project's package copy" in message
 
