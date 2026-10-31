@@ -440,13 +440,14 @@ def test_the_budget_on_windows_fits_the_command_line_limit(monkeypatch):
 def test_the_budget_elsewhere_reads_the_hosts_arg_max_less_the_environment(
     monkeypatch,
 ):
+    arg_max = 2_000_000
     # ``raising=False``: Windows has no ``os.sysconf`` to replace, and this test
     # plays a Linux host there too (the platform is patched above the call).
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(trivy_base.os, "sysconf", lambda name: 2_000_000, raising=False)
+    monkeypatch.setattr(trivy_base.os, "sysconf", lambda name: arg_max, raising=False)
 
     assert skip_args_budget({}) == _SKIP_ARGS_BUDGET
-    assert skip_args_budget({"A": "x" * 100_000}) == 1_000_000 - (1 + 100_000 + 2)
+    assert skip_args_budget({"A": "x" * 100_000}) == arg_max // 2 - (1 + 100_000 + 2)
     assert skip_args_budget({"A": "x" * 2_000_000}) == _SKIP_ARGS_FLOOR
 
 
