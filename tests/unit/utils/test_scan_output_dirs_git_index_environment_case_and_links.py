@@ -115,6 +115,11 @@ def test_where_names_compare_without_case_the_pathspec_does_too(
     assert answer.names == ["reports/x.md", "README"]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="a name holding ':' cannot exist on Windows; the pathspec arm for the "
+    "win32 platform is measured here with the directory on a POSIX host",
+)
 @pytest.mark.parametrize("platform", ["darwin", "win32"])
 def test_where_names_compare_without_case_a_leading_colon_is_still_a_name(
     tmp_path, monkeypatch, platform

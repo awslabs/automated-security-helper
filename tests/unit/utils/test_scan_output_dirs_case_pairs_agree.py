@@ -56,7 +56,15 @@ def test_control_on_linux_another_case_is_another_directory(monkeypatch):
 
 
 def test_output_dirs_inside_does_not_raise_for_a_directory_in_another_case(folding):
-    inside = output_dirs_inside([Path("/a/Repo/out"), Path("/a/elsewhere")], "/a/repo")
+    # Spelled from the host's own root: output_dirs_inside makes the target
+    # absolute with os.path.abspath, which on Windows adds the drive, so a
+    # drive-less literal on the other side compared unequal before any name
+    # was read and the directory read as outside.
+    base = Path(os.path.abspath("/a"))
+
+    inside = output_dirs_inside(
+        [base / "Repo" / "out", base / "elsewhere"], base / "repo"
+    )
 
     assert inside == [Path("out")]
 
@@ -128,10 +136,14 @@ def test_entries_at_results_paths_take_names_apart_by_key(folding):
         Path("/a/repo"), ["ash_aggregated_results.json", "Reports/x.json", "src/a.py"]
     )
 
-    assert found == [
-        Path("/a/repo/Reports/x.json"),
-        Path("/a/repo/ash_aggregated_results.json"),
-    ]
+    # pathlib orders paths by its own platform rule (case-exact on POSIX, folded
+    # on Windows), so the expectation is sorted the same way the function sorts.
+    assert found == sorted(
+        [
+            Path("/a/repo/Reports/x.json"),
+            Path("/a/repo/ash_aggregated_results.json"),
+        ]
+    )
 
 
 def test_classified_output_dirs_names_a_directory_given_in_another_case(
