@@ -24,7 +24,7 @@ from __future__ import annotations
 import typing
 from typing import Any, Callable, Iterable, Mapping
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
@@ -104,13 +104,21 @@ def _enabled_problems(
     value = section["enabled"]
     if _read_from_environment(value):
         return []
+    # Through the plugin's own config class, as it is built, so a validator on
+    # the field runs. The class may require other fields or hold a model-level
+    # check, so only the errors located at ``enabled`` count. A type the class
+    # cannot build a schema for (a schema error is a TypeError) is not a value
+    # problem and is left to the plugin's own build.
     try:
-        TypeAdapter(field.annotation).validate_python(value)
+        config_class.model_validate({"enabled": value})
     except ValidationError as error:
         return [
             f"{where}.enabled ({plugin}): {item.get('msg', '')}"
             for item in error.errors()
+            if tuple(item.get("loc", ()))[:1] == ("enabled",)
         ]
+    except (TypeError, ValueError):
+        return []
     return []
 
 

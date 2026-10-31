@@ -285,13 +285,43 @@ def _scanner_options(config: "AshConfig", scanner: str) -> Any:
     return None
 
 
+def _typed_as_the_model_reads(options: Any, option: str, value: Any) -> Any:
+    """*value* for *option* as the options model reads it (``"256"`` is 256).
+
+    The one coercion both callers use. The option's own field is read first
+    (lax, as a plugin's options are read at load; the field's annotation with
+    its constraints), which works for a model with other required fields or a
+    model-level check. A value that only the model's own validators accept (a
+    before-validator on the field that turns ``"256 MiB"`` into 256) fails
+    there, so the whole model is read once more over its current values with
+    this one replaced. A value neither reading accepts raises the first
+    reading's error, as the field alone did. A name the model declares no field
+    for is returned as given.
+    """
+    field = type(options).model_fields.get(option)
+    if field is None:
+        return value
+    annotation: Any = field.annotation
+    if field.metadata:
+        annotation = Annotated[(annotation, *field.metadata)]
+    try:
+        return TypeAdapter(annotation).validate_python(value)
+    except (TypeError, ValueError) as field_error:
+        try:
+            current = options.model_dump()
+            current[option] = value
+            return getattr(type(options).model_validate(current), option)
+        except (AttributeError, TypeError, ValueError):
+            raise field_error from None
+
+
 def _as_the_model_reads(options: Any, option: str, value: Any) -> Any:
     """*value*, the raw text or number a file wrote for *option*, as the
     scanner's options model reads it (``"256"`` is 256), so it is compared with
     the typed value the trusted base holds. A value the model refuses is
     returned as written: it is not the trusted base's."""
     try:
-        return getattr(type(options).model_validate({option: value}), option)
+        return _typed_as_the_model_reads(options, option, value)
     except (AttributeError, TypeError, ValueError):
         return value
 
@@ -885,18 +915,13 @@ def _set_scanner_option(options: Any, option: str, value: Any) -> None:
     what is stored is the model's type and the comparison is like with like.
     The one field, not the whole model: validating ``{option: value}`` as a
     model raised for any options model with another required field, or a
-    model validator reading several fields, on a value the field accepts. The
-    trusted base's value is the model's already. A name the model declares no
-    field for is set as given.
+    model validator reading several fields, on a value the field accepts. A
+    value only the model's own validators accept is read through the whole
+    model second (:func:`_typed_as_the_model_reads`), so the write-back takes
+    what the load took. The trusted base's value is the model's already. A name
+    the model declares no field for is set as given.
     """
-    field = type(options).model_fields.get(option)
-    if field is None:
-        typed = value
-    else:
-        annotation: Any = field.annotation
-        if field.metadata:
-            annotation = Annotated[(annotation, *field.metadata)]
-        typed = TypeAdapter(annotation).validate_python(value)
+    typed = _typed_as_the_model_reads(options, option, value)
     if getattr(options, option) != typed:
         setattr(options, option, typed)
 

@@ -104,6 +104,54 @@ def test_control_an_enabled_value_the_model_accepts_is_not_refused(enabled):
     assert _refusal(config) is None
 
 
+def test_enabled_is_checked_through_the_plugins_config_class():
+    """``enabled`` goes through the config class as the plugin is built: a
+    validator on the field runs, so a value it turns into a boolean is not
+    refused; another required field the section does not carry is not this
+    check's to report; a wrong type is refused and located at ``enabled``."""
+    from pydantic import BaseModel, field_validator
+
+    from automated_security_helper.config.plugin_option_check import (
+        _enabled_problems,
+    )
+
+    class _Lenient(BaseModel):
+        enabled: bool = True
+        name: str
+
+        @field_validator("enabled", mode="before")
+        @classmethod
+        def _on_demand(cls, value):
+            return True if value == "on-demand" else value
+
+    assert _enabled_problems(_Lenient, {"enabled": "on-demand"}, "s.x", "p 'x'") == []
+    refused = _enabled_problems(_Lenient, {"enabled": "maybe"}, "s.x", "p 'x'")
+    assert len(refused) == 1, refused
+    assert refused[0].startswith("s.x.enabled (p 'x'): "), refused
+
+
+def test_an_enabled_type_with_no_schema_is_not_a_crash():
+    """A field type pydantic builds no schema for on its own (a plain class the
+    model allows as an arbitrary type) used to raise out of the check, from the
+    bare annotation's adapter. It is checked through the class now."""
+    from pydantic import BaseModel, ConfigDict
+
+    from automated_security_helper.config.plugin_option_check import (
+        _enabled_problems,
+    )
+
+    class _Marker:
+        pass
+
+    class _Arbitrary(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        enabled: _Marker = _Marker()
+
+    assert _enabled_problems(_Arbitrary, {"enabled": _Marker()}, "s.x", "p 'x'") == []
+    problems = _enabled_problems(_Arbitrary, {"enabled": "text"}, "s.x", "p 'x'")
+    assert all(item.startswith("s.x.enabled (p 'x'): ") for item in problems)
+
+
 def test_an_enabled_value_read_from_the_environment_is_left_to_the_plugin():
     """The loader's marker for text read from the environment, holding text
     the model would refuse: not this check's to refuse. The plugin that reads

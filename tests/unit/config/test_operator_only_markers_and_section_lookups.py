@@ -125,6 +125,46 @@ def test_the_write_back_types_one_field_without_revalidating_the_whole_model():
         _set_scanner_option(options, "limit", "0")
 
 
+def test_a_value_only_the_models_validator_accepts_is_written_back_not_refused():
+    """The load accepted ``"256 MiB"`` because the options model has a
+    before-validator on the field; the field's own annotation alone does not.
+    The write-back reads the field first and the whole model second, so the
+    value the load took is the value stored. The comparison reads it the same
+    way (``_as_the_model_reads``), on a model with another required field too,
+    where the old whole-model read of the one option raised and returned the
+    text as written."""
+    from pydantic import field_validator
+
+    from automated_security_helper.config.operator_only_options import (
+        _as_the_model_reads,
+        _set_scanner_option,
+    )
+
+    class _Normalizing(BaseModel):
+        limit: int = 1
+        ceiling: int
+
+        @field_validator("limit", mode="before")
+        @classmethod
+        def _mebibytes(cls, value):
+            if isinstance(value, str) and value.endswith(" MiB"):
+                return int(value.removesuffix(" MiB"))
+            return value
+
+    options = _Normalizing(limit=1, ceiling=512)
+
+    _set_scanner_option(options, "limit", "256 MiB")
+
+    assert options.limit == 256 and isinstance(options.limit, int)
+    assert _as_the_model_reads(options, "limit", "256 MiB") == 256
+    assert _as_the_model_reads(options, "limit", "128") == 128
+    # The control: a value no reading accepts is still refused, and the
+    # comparison still hands back the text as written.
+    with pytest.raises(ValidationError):
+        _set_scanner_option(options, "limit", "lots")
+    assert _as_the_model_reads(options, "limit", "lots") == "lots"
+
+
 def test_an_option_a_file_outside_the_tree_set_holds_that_files_value():
     """The chain document holds the limit a file outside the tree wrote; the
     configuration holds another value by the time the settle runs. That other
