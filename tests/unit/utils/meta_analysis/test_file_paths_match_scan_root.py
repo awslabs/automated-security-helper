@@ -78,16 +78,15 @@ def test_with_a_root_files_are_compared_whole(first, second):
     assert file_paths_match(second, first, ROOT) is False
 
 
-def test_an_absolute_path_outside_the_root_keeps_the_end_of_path_rule():
-    """The root cannot place a path that is not below it, so it is compared as it
-    is without a root: by its end against a relative path, and whole against
-    another absolute one."""
-    assert file_paths_match("/elsewhere/lib/a.py", "lib/a.py", ROOT) is True
-    assert file_paths_match("lib/a.py", "/elsewhere/lib/a.py", ROOT) is True
-    assert file_paths_match("/elsewhere/lib/a.py", "a.py", ROOT) is True
+def test_an_absolute_path_outside_the_root_is_never_a_relative_one():
+    """The root cannot place a path that is not below it, and a relative path is
+    relative to the root: the two are not one file, whatever their ends share.
+    An outside path still matches an identical one."""
+    assert file_paths_match("/elsewhere/lib/a.py", "lib/a.py", ROOT) is False
+    assert file_paths_match("lib/a.py", "/elsewhere/lib/a.py", ROOT) is False
+    assert file_paths_match("/elsewhere/lib/a.py", "a.py", ROOT) is False
     assert file_paths_match("/elsewhere/lib/a.py", "/elsewhere/lib/a.py", ROOT) is True
     assert file_paths_match("/elsewhere/lib/a.py", "/other/lib/a.py", ROOT) is False
-    # An end that is not a whole component is not a tail.
     assert file_paths_match("/elsewhere/lib/a.py", "b/a.py", ROOT) is False
 
 
@@ -114,9 +113,10 @@ def test_a_root_with_a_trailing_separator_reads_as_the_same_root():
 def test_a_sibling_directory_that_shares_the_roots_prefix_is_not_below_it():
     """``/work/app2`` is not under ``/work/app``: the prefix is cut at a component,
     so ``2/lib/a.py`` is not the path below the root. The path is outside the
-    root and keeps the end-of-path rule."""
+    root, so it is not the file ``lib/a.py`` of the root either."""
     assert file_paths_match("/work/app2/lib/a.py", "2/lib/a.py", ROOT) is False
-    assert file_paths_match("/work/app2/lib/a.py", "lib/a.py", ROOT) is True
+    assert file_paths_match("/work/app2/lib/a.py", "lib/a.py", ROOT) is False
+    assert file_paths_match("lib/a.py", "/work/app2/lib/a.py", ROOT) is False
 
 
 def test_locations_match_threads_the_root():

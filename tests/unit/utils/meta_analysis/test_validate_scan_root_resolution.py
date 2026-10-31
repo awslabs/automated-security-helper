@@ -100,12 +100,36 @@ def test_a_root_reached_through_a_link_names_the_directory_it_points_at(tmp_path
     assert _matched(str(resolved / "lib" / "a.py"), "a.py", str(link)) == 0
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="a symbolic link needs a privilege")
+def test_a_report_spelled_through_a_link_is_not_matched_by_its_end(tmp_path):
+    """A report path that reaches the root through a link is below the root, so
+    it is compared whole. Read as outside the root it met an aggregate that had
+    dropped its leading directory (``lib/a.py`` written ``a.py``) by the end of
+    its path, the match the root exists to refuse."""
+    real = tmp_path / "real"
+    (real / "lib").mkdir(parents=True)
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    through_link = str(link / "lib" / "a.py")
+
+    for root in (str(link), str(real.resolve())):
+        assert _matched(through_link, "lib/a.py", root) == 1
+        assert _matched(through_link, "a.py", root) == 0
+        # The aggregate's path is the one that is relative.
+        assert _matched("lib/a.py", through_link, root) == 1
+        assert _matched("a.py", through_link, root) == 0
+
+
 def test_two_identical_paths_outside_the_root_are_one_file():
     assert _matched("/elsewhere/lib/a.py", "/elsewhere/lib/a.py", ROOT) == 1
     assert _matched("/elsewhere/lib/a.py", "/other/lib/a.py", ROOT) == 0
 
 
-def test_a_path_outside_the_root_meets_a_relative_one_by_its_end():
-    assert _matched("/elsewhere/lib/a.py", "lib/a.py", ROOT) == 1
+def test_a_path_outside_the_root_is_not_a_relative_one():
+    """A relative path is relative to the root, and the aggregate writes one only
+    for a file below the source directory: ``lib/a.py`` is not the file of a
+    directory the scan did not cover."""
+    assert _matched("/elsewhere/lib/a.py", "lib/a.py", ROOT) == 0
+    assert _matched("lib/a.py", "/elsewhere/lib/a.py", ROOT) == 0
     # A path below the root is still compared whole.
     assert _matched("/work/app/lib/a.py", "a.py", ROOT) == 0

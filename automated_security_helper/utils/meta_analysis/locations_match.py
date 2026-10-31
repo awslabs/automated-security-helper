@@ -1,3 +1,4 @@
+import functools
 import os
 import re
 from typing import Dict, Optional
@@ -279,33 +280,93 @@ def _below_root(path: str, root: str) -> str:
     return path
 
 
+def _is_resolvable(text: str) -> bool:
+    """Whether *text* is an absolute path of this host's own kind, which the file
+    system here can resolve: a drive path on Windows, a path that starts with
+    ``/`` elsewhere. The other system's spelling resolves to nothing real, and
+    ``os.path.realpath`` would read it relative to the working directory."""
+    if os.name == "nt":
+        return bool(_DRIVE_PATH.match(text[:3]))
+    return text.startswith("/")
+
+
+@functools.lru_cache(maxsize=4096)
+def _below_resolved_root(path: str, root: str) -> Optional[str]:
+    """*path* (normalized, absolute) as the path relative to *root* (normalized)
+    when it spells the root another way, else None.
+
+    The text of the path is not below the root's text, but an ancestor of it can
+    still be the root reached another way: through a link (``/tmp/x`` for
+    ``/private/tmp/x``), or with the case or short names of a Windows path. The
+    shallowest ancestor that resolves to the root is the boundary and the tail
+    below it is kept as written, as aggregation does when it makes a URI
+    relative to the source directory (``sarif_utils._relative_to_resolved_root``).
+    A path of another system's spelling, or one no ancestor of which exists as
+    the root, is None.
+
+    Cached on the pair: a report names the same few paths against every
+    candidate result, and each ancestor costs a file system walk. A link
+    retargeted while the process runs is read as it was first seen.
+    """
+    if not (_is_resolvable(path) and _is_resolvable(root)):
+        return None
+    try:
+        wanted = os.path.normcase(os.path.realpath(root))
+        parts = path.split("/")
+        for depth in range(1, len(parts)):
+            if not parts[depth]:
+                continue
+            ancestor = "/".join(parts[:depth])
+            if not ancestor or ancestor.endswith(":"):
+                ancestor += "/"
+            if os.path.normcase(os.path.realpath(ancestor)) == wanted:
+                return "/".join(parts[depth:])
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _placed_by_root(path: str, root: str) -> str:
+    """*path* (normalized) as a path relative to the scan root when the root can
+    place it, else unchanged: below the root as spelled, or below it through an
+    ancestor that resolves to it. A relative path is already relative to it."""
+    placed = _below_root(path, root)
+    if not _is_absolute(placed):
+        return placed
+    tail = _below_resolved_root(path, root)
+    return placed if tail is None else tail
+
+
 def file_paths_match(file1: str, file2: str, scan_root: Optional[str] = None) -> bool:
     """Whether two location URIs name the same file.
 
-    Equal once normalized, or one is absolute and the other, relative, is its
-    tail at a component boundary: ``/work/app/src/a.py`` and ``src/a.py`` are one
-    file. Two relative paths are compared whole, so ``src/a.py`` and
-    ``other/src/a.py`` stay two files.
+    Without *scan_root*: equal once normalized, or one is absolute and the other,
+    relative, is its tail at a component boundary: ``/work/app/src/a.py`` and
+    ``src/a.py`` are one file. Two relative paths are compared whole, so
+    ``src/a.py`` and ``other/src/a.py`` stay two files.
 
     The tail rule cannot tell which file an absolute path means when two files of
     the scan share their end (``src/main.py`` and ``services/api/src/main.py``),
     and it reads an aggregate that dropped a leading directory (``lib/a.py``
     written ``a.py``) as a file kept. With *scan_root*, the directory the scan was
-    run on, a path below it is read as the path relative to it first, so the
-    files of the scan are compared whole and no tail is matched for them. An
-    absolute path outside the root is not a file of the scan the root can place,
-    so it keeps the tail rule against a relative path and matches an identical
-    path as before. The root is compared as it is given: see
-    :func:`resolve_scan_root` for one reached through a link.
+    run on, the tail rule is not used: a relative path is a path relative to the
+    root, and an absolute path is made relative to it when it is below it, as
+    spelled or through an ancestor that resolves to the root (a report that
+    spells a linked directory another way). The files of the scan are then
+    compared whole. An absolute path the root cannot place is not a file of the
+    scan, so it matches only an identical path and never a relative one: the
+    aggregate writes a relative path only for a file below the source directory,
+    so ``lib/a.py`` is not the file ``/work/app2/lib/a.py`` of a sibling
+    directory. A report written where the scan saw the files under another
+    mount (a container) names no file of the root either; give no root for it.
     """
     norm1 = _normalize_file_path(file1)
     norm2 = _normalize_file_path(file2)
-    root = _root_prefix(scan_root) if scan_root else None
-    if root is not None:
-        norm1 = _below_root(norm1, root)
-        norm2 = _below_root(norm2, root)
     if norm1 == norm2:
         return True
+    root = _root_prefix(scan_root) if scan_root else None
+    if root is not None:
+        return _placed_by_root(norm1, root) == _placed_by_root(norm2, root)
     for longer, shorter in ((norm1, norm2), (norm2, norm1)):
         if (
             shorter

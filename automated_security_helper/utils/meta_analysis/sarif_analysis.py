@@ -141,8 +141,10 @@ def validate_sarif_aggregation(
             path. Without it, a relative path matches an absolute one that ends
             with it. The root is resolved once (``os.path.realpath``), so one
             reached through a link names the directory it points at; a root
-            that is not an absolute path is refused. An absolute path outside
-            the root keeps the end-of-path rule against a relative one.
+            that is not an absolute path is refused. A report path spelled
+            through a link to the root is read as below it. An absolute path
+            that is not below the root matches only an identical path, never a
+            relative one: a relative path is relative to the root.
 
     Returns:
         Dict with validation results and statistics
