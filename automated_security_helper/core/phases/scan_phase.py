@@ -127,7 +127,8 @@ def _declared_scanner_roster(config) -> List[str]:
     configured is one they expect to run, and its silent absence is the same defect.
     An extras section the configuration turns off (`enabled: false`) is listed too:
     the roster is what the configuration declares, not what is switched on, and the
-    documentation says a scanner that is left off is still listed. A disabled
+    documentation-contract tests (tests/unit/docs/test_page_claims.py) pin that a
+    scanner that is left off is still listed. A disabled
     section whose module is not loaded has no row to be matched against, which is
     what any section that never loaded looks like here; the roster cannot tell the
     two apart, and it does not try to. A built-in field is listed whatever its flag
