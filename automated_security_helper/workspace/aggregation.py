@@ -152,6 +152,10 @@ from automated_security_helper.models.workspace import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.policy_origin import (
+    POLICY_ORIGIN as POLICY_ORIGIN,
+    is_policy_origin as _properties_are_policy_origin,
+)
 from automated_security_helper.utils.uri_separators import (
     root_text,
     sanitized_uri_text,
@@ -201,23 +205,19 @@ _STAMP_READ_LIMIT = 1 << 20
 #: changed between 3.11 and 3.12 and this project supports 3.10 through 3.14.
 _DRIVE_ANCHOR = re.compile(r"^[A-Za-z]:[/\\]")
 
-#: Marks a finding that came from a scanner only ``workspace.additional_scanners``
-#: asked for, rather than one the project enables itself. Written to
-#: ``properties.origin`` on the SARIF result and added to ``properties.tags`` by
-#: the executor; the verdict and the rollup exclude such findings unless the
-#: policy gate is on. The spelling is the one the CLI reference and
-#: ``AshWorkspaceConfig.json`` document. One home: ``execution`` imports this
-#: module, so the constant and the predicate live here and it imports them
-#: (a second copy let the two drift with no test failing on the drift).
-POLICY_ORIGIN = "workspace-policy"
 
-
+# POLICY_ORIGIN (imported above) marks a finding that came from a scanner only
+# ``workspace.additional_scanners`` asked for, rather than one the project
+# enables itself. Written to ``properties.origin`` on the SARIF result and added
+# to ``properties.tags`` by the executor; the project's outcome and the rollup
+# exclude such findings unless the policy gate is on. The spelling is the one the CLI
+# reference and ``AshWorkspaceConfig.json`` document. One home:
+# ``utils.policy_origin`` holds the constant and the question of a property bag,
+# which the reports ask the same way; ``execution`` imports both from here (a
+# second copy let the two drift with no test failing on the drift).
 def is_policy_origin(result: Mapping[str, Any]) -> bool:
     """Whether this SARIF result came from a scanner only the policy added."""
-    properties = result.get("properties")
-    if not isinstance(properties, Mapping):
-        return False
-    return properties.get("origin") == POLICY_ORIGIN
+    return _properties_are_policy_origin(result.get("properties"))
 
 
 #: Stands in for a backslash that is part of a file name while a URI passes

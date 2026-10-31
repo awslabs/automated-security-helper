@@ -29,15 +29,12 @@ def is_policy_origin(properties: object) -> bool:
     """Whether *properties* (a finding's property bag) marks it policy-origin.
 
     *properties* is the bag as a mapping, or as a model whose extras hold the
-    keys the schema does not declare. Only ``origin`` decides; tags never do.
+    keys the schema does not declare (a pydantic model with extras allowed
+    answers attribute access for them). Only ``origin`` decides; tags never do.
     ``None``, or a bag that holds no origin, is not policy-origin.
     """
     if properties is None:
         return False
     if isinstance(properties, Mapping):
         return properties.get("origin") == POLICY_ORIGIN
-    extra = getattr(properties, "__pydantic_extra__", None) or {}
-    origin = extra.get("origin")
-    if origin is None:
-        origin = getattr(properties, "origin", None)
-    return origin == POLICY_ORIGIN
+    return getattr(properties, "origin", None) == POLICY_ORIGIN
