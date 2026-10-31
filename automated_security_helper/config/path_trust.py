@@ -1036,10 +1036,7 @@ def refused_derived_product(
         ):
             continue
         if _inside(path, resolved_base):
-            with _WARNED_LOCK:
-                first = (key, path.as_posix()) not in _WARNED
-                _WARNED.add((key, path.as_posix()))
-            if first:
+            if _first_warning(key, path):
                 shown_path = _shown_escaped(
                     _named(value, path, config, env_named), config
                 )
