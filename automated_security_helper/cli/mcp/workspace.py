@@ -147,6 +147,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    TypeVar,
     Union,
 )
 
@@ -1939,11 +1940,40 @@ class _WorkspaceScanClaim:
         self._counted = counted
         self._lock = threading.Lock()
         self._holder = "call"  # then "worker", then "released"
+        # Threads that read the session's tree before the worker exists (the
+        # resolution of the workspace), and whether the call has left. A call
+        # cancelled while such a thread runs leaves it running.
+        self._threads = 0
+        self._call_left = False
 
     @property
     def claimed(self) -> bool:
         """True when the scan holds its session's tree."""
         return self._claimed is not None
+
+    def thread_starts(self) -> bool:
+        """A thread that reads the tree before the worker takes a hold; False if none is left.
+
+        The claim then outlives the call: a call cancelled while the thread runs
+        leaves it running, and a claim released at the call's exit let the
+        session end, and its tree be removed, under a thread still reading
+        configs and running git there. Released by :meth:`thread_returns` once
+        the call has left and no thread is left.
+        """
+        with self._lock:
+            if self._holder == "released":
+                return False
+            self._threads += 1
+            return True
+
+    def thread_returns(self) -> None:
+        """Give back the hold :meth:`thread_starts` took; release if it was the last."""
+        with self._lock:
+            self._threads -= 1
+            if self._threads or not self._call_left or self._holder != "call":
+                return
+            self._holder = "released"
+        self._release()
 
     def worker_starts(self) -> bool:
         """Take the claim over for the worker; False if the call already left."""
@@ -1952,6 +1982,24 @@ class _WorkspaceScanClaim:
                 return False
             self._holder = "worker"
             return True
+
+    def worker_declines(self) -> None:
+        """Give back to the call a claim the worker took but will not use.
+
+        The worker took the claim, then found the task had abandoned the scan
+        and settled it (``SettleHandoff``). The task settles while the call is
+        still in its handler, so the claim must stay held until the call leaves:
+        it goes back to the call, which releases it at its exit, or, when the
+        call has left already, is released here.
+        """
+        with self._lock:
+            if self._holder != "worker":
+                return
+            if self._threads or not self._call_left:
+                self._holder = "call"
+                return
+            self._holder = "released"
+        self._release()
 
     def worker_returns(self) -> None:
         """Release the claim the worker took; nothing when the call released it.
@@ -1969,9 +2017,10 @@ class _WorkspaceScanClaim:
         self._release()
 
     def call_returns(self) -> None:
-        """Release the claim, unless a worker that started holds it."""
+        """Release the claim, unless a worker that started or a thread holds it."""
         with self._lock:
-            if self._holder != "call":
+            self._call_left = True
+            if self._holder != "call" or self._threads:
                 return
             self._holder = "released"
         self._release()
@@ -2109,10 +2158,24 @@ async def _execute(
         # task's own settle followed). Settling again here would restore previous
         # results into directories _release_projects has freed, which another
         # scan may have registered and set aside by now.
+        #
+        # The claim is taken first and the handoff second, so that no call can
+        # leave between them. The other order let the call's exit release the
+        # claim after this thread had won the handoff (the task then does not
+        # settle) and before it took the claim, and the settle ran with neither
+        # the claim nor the presence, on a tree the call's exit may have had
+        # removed. This way a thread that wins the handoff already holds the
+        # claim, and one that loses it gives the claim back to the call, which
+        # releases it after the task's own settle.
+        took_the_claim = claim is None or claim.worker_starts()
         if not starts.thread_starts():
+            if claim is not None and took_the_claim:
+                claim.worker_declines()
             return None
         try:
-            if claim is not None and not claim.worker_starts():
+            if not took_the_claim:
+                # The call left without abandoning the handoff: not a path the
+                # handlers take, kept as the failure it always was.
                 raise RuntimeError("the workspace scan was cancelled before it started")
             claimed = claim is not None and bool(claim.claimed)
             with ScanPresence(session_id if claimed else None):
@@ -2149,9 +2212,10 @@ async def _execute(
         finally:
             # The claim goes back after the settle (above); worker_returns
             # releases nothing when the call released first. A thread that
-            # started but found the call gone (worker_starts False) is the one
-            # path that reaches here unsettled: the task did not settle, because
-            # the thread had started, so this settle is its only one.
+            # started but found the call gone (took_the_claim False) reaches
+            # here unsettled: the task did not settle, because the thread had
+            # started, so this settle is its only one. The handlers abandon the
+            # handoff before the call leaves, so that is not a path they take.
             if claim is not None:
                 claim.worker_returns()
             _settle_once()
@@ -2170,6 +2234,35 @@ async def _execute(
             monitor.cancel()
             with suppress(asyncio.CancelledError):
                 await monitor
+
+
+_T = TypeVar("_T")
+
+
+async def _off_the_loop(
+    claim: Optional[_WorkspaceScanClaim], function: Callable[[], _T]
+) -> _T:
+    """Run ``function`` on a worker thread, holding ``claim`` until the thread returns.
+
+    A call cancelled at the await leaves the thread running, and the call's exit
+    releases the claim: a session that ended meanwhile was removed
+    (``finish_ended_session``) under a thread still reading its configs and
+    running git there. The thread takes a hold on the claim before it does
+    anything (:meth:`_WorkspaceScanClaim.thread_starts`), so the release follows
+    the thread's return when the call has left first. A thread that finds the
+    claim already released does nothing, as when the executor drops the job.
+    """
+
+    def _held() -> _T:
+        if claim is not None and not claim.thread_starts():
+            raise RuntimeError("the workspace scan was cancelled before it started")
+        try:
+            return function()
+        finally:
+            if claim is not None:
+                claim.thread_returns()
+
+    return await asyncio.to_thread(_held)
 
 
 def _under_session_lock(
@@ -2813,7 +2906,11 @@ async def _scan_workspace(
             # the committed-output check runs one git subprocess per existing
             # project output directory (30 s timeout each), which on the loop
             # stalled every other MCP session for the whole of it.
-            settings, project_outputs = await asyncio.to_thread(_resolve_and_refuse)
+            #
+            # The claim is held by the thread until it returns (_off_the_loop):
+            # a call cancelled here leaves the thread reading the session's
+            # tree, and the call's exit must not release the claim under it.
+            settings, project_outputs = await _off_the_loop(claim, _resolve_and_refuse)
 
             # The selection pre-check, before any output or registry work: a
             # refused command line registers nothing, creates nothing and sets

@@ -126,6 +126,9 @@ class _Claim:
     def worker_returns(self) -> None:
         self.order.append("worker_returns")
 
+    def worker_declines(self) -> None:
+        self.order.append("worker_declines")
+
 
 def _same_path(first, second) -> bool:
     """Whether two spellings name one place, once resolved."""
@@ -703,9 +706,11 @@ class _Counted:
 
     def __init__(self) -> None:
         self.returned = 0
+        self.released = threading.Event()
 
     def scan_returned(self) -> None:
         self.returned += 1
+        self.released.set()
 
 
 class TestAThreadTheTaskAbandonedSettlesNothing:
@@ -743,7 +748,10 @@ class TestAThreadTheTaskAbandonedSettlesNothing:
             )
 
         assert result is None
-        assert order == [], order
+        # Nothing is settled by the late thread. It had taken the claim before
+        # the handoff (so that no call can leave between the two) and gives it
+        # back to the call, which releases it after the task's own settle.
+        assert order == ["worker_starts", "worker_declines"], order
 
 
 class TestAWorkerThatMissedTheClaimReleasesNothing:
@@ -808,6 +816,219 @@ class TestAWorkerThatMissedTheClaimReleasesNothing:
         assert counted.returned == 1
         # The thread had started, so the task did not settle: the thread must.
         assert order == ["settle"]
+
+
+class _CallLeavesFirst(SettleHandoff):
+    """A handoff the call's exit overtakes just as the thread asks for it.
+
+    ``thread_starts`` runs ``call_leaves`` (``claim.call_returns``) before it
+    answers: the window between the thread taking the handoff and the claim, in
+    the order the worker once asked for them.
+    """
+
+    def __init__(self, call_leaves) -> None:
+        super().__init__()
+        self._call_leaves = call_leaves
+
+    def thread_starts(self) -> bool:
+        self._call_leaves()
+        return super().thread_starts()
+
+
+class TestTheSettleKeepsTheClaimWhenTheCallLeavesFirst:
+    def test_a_call_that_leaves_as_the_thread_starts_does_not_unprotect_the_settle(
+        self, tmp_path
+    ):
+        """Red at the base: the settle ran after the call's exit had released the claim.
+
+        The thread won the handoff (so the task does not settle), the call then
+        left and released the claim, and the thread found it gone and raised;
+        the settle that followed ran with neither the claim nor the presence, on
+        a tree the release may have had removed. The claim is taken first now,
+        so the call's exit cannot release it under the thread.
+        """
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+        returned_at_settle = []
+
+        with (
+            patch.object(
+                workspace_module,
+                "execute_workspace",
+                side_effect=lambda p, s, **k: _result(p, s),
+            ),
+            patch.object(workspace_module, "ScanPresence") as presence,
+        ):
+            presence.return_value.__enter__.return_value = None
+            presence.return_value.__exit__.return_value = False
+            asyncio.run(
+                workspace_module._execute(
+                    plan=_plan(tmp_path),
+                    settings=_settings(tmp_path),
+                    project_outputs={},
+                    progress_reporter=None,
+                    session_id=None,
+                    claim=claim,
+                    settle=lambda: returned_at_settle.append(counted.returned),
+                    handoff=_CallLeavesFirst(claim.call_returns),
+                )
+            )
+
+        assert returned_at_settle == [0], returned_at_settle
+        assert counted.returned == 1
+
+    def test_a_thread_that_lost_the_handoff_gives_the_claim_back_to_the_call(
+        self, tmp_path
+    ):
+        """The task settles when it abandons before the thread starts; the claim
+        stays held through that settle and goes when the call leaves."""
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+        handoff = SettleHandoff()
+        assert handoff.task_abandons() is True
+        settled: List[str] = []
+
+        with patch.object(workspace_module, "ScanPresence") as presence:
+            presence.return_value.__enter__.return_value = None
+            presence.return_value.__exit__.return_value = False
+            result = asyncio.run(
+                workspace_module._execute(
+                    plan=_plan(tmp_path),
+                    settings=_settings(tmp_path),
+                    project_outputs={},
+                    progress_reporter=None,
+                    session_id=None,
+                    claim=claim,
+                    settle=lambda: settled.append("settle"),
+                    handoff=handoff,
+                )
+            )
+
+        assert result is None
+        assert settled == []
+        assert counted.returned == 0
+        claim.call_returns()
+        assert counted.returned == 1
+
+    def test_a_thread_that_lost_it_after_the_call_left_releases_once(self, tmp_path):
+        """Control: the call left while the thread held the claim and then lost
+        the handoff; the thread's hand-back is the release, and only one."""
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+        handoff = _CallLeavesFirst(claim.call_returns)
+        assert handoff.task_abandons() is True
+
+        with patch.object(workspace_module, "ScanPresence") as presence:
+            presence.return_value.__enter__.return_value = None
+            presence.return_value.__exit__.return_value = False
+            result = asyncio.run(
+                workspace_module._execute(
+                    plan=_plan(tmp_path),
+                    settings=_settings(tmp_path),
+                    project_outputs={},
+                    progress_reporter=None,
+                    session_id=None,
+                    claim=claim,
+                    handoff=handoff,
+                )
+            )
+
+        assert result is None
+        assert counted.returned == 1
+
+
+class TestAThreadThatReadsTheTreeHoldsTheClaim:
+    def test_a_call_that_leaves_first_leaves_the_claim_to_the_thread(self):
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+
+        assert claim.thread_starts() is True
+        claim.call_returns()
+        assert counted.returned == 0
+        claim.thread_returns()
+
+        assert counted.returned == 1
+
+    def test_a_thread_that_returns_first_leaves_the_release_to_the_call(self):
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+
+        assert claim.thread_starts() is True
+        claim.thread_returns()
+        assert counted.returned == 0
+        claim.call_returns()
+
+        assert counted.returned == 1
+
+    def test_the_last_of_two_threads_releases(self):
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+
+        assert claim.thread_starts() and claim.thread_starts()
+        claim.call_returns()
+        claim.thread_returns()
+        assert counted.returned == 0
+        claim.thread_returns()
+
+        assert counted.returned == 1
+
+    def test_a_thread_cannot_take_a_claim_the_call_released(self):
+        """Control: with no thread holding, the call's exit releases at once, and
+        a thread that starts afterwards finds nothing to hold."""
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+
+        claim.call_returns()
+
+        assert counted.returned == 1
+        assert claim.thread_starts() is False
+
+    @pytest.mark.asyncio
+    async def test_a_call_cancelled_during_resolution_keeps_the_claim_to_the_end(
+        self, tmp_path, monkeypatch, _fresh_registry
+    ):
+        """Red at the base: the call's exit released the claim under the thread.
+
+        The resolution runs on a thread that reads every project's config and
+        runs git; cancelling the call leaves it running. The claim is released
+        when that thread returns, not when the call leaves.
+        """
+        monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp"))
+        monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_settings(options):
+            entered.set()
+            release.wait(timeout=10)
+            raise RuntimeError("stand-in resolution ended")
+
+        counted = _Counted()
+        claim = workspace_module._WorkspaceScanClaim(None, counted=counted)
+        plan = _plan(tmp_path)
+        scan = workspace_module._in_a_run_log_scope_of_its_own(
+            workspace_module._scan_workspace
+        )
+
+        with patch.object(
+            workspace_module,
+            "build_project_scan_settings",
+            side_effect=blocking_settings,
+        ):
+            task = asyncio.ensure_future(
+                scan(workspace_file=plan.workspace_file, claim=claim)
+            )
+            assert await asyncio.to_thread(entered.wait, 10)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            claim.call_returns()
+            assert counted.returned == 0
+            release.set()
+            assert await asyncio.to_thread(counted.released.wait, 10)
+
+        assert counted.returned == 1
 
 
 class TestTheSettleRunsUnderTheSessionsPresence:
