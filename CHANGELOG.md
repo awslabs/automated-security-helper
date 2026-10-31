@@ -4118,8 +4118,10 @@
   - A uv command other than `uv tool` or `uvx` also gets `UV_NO_PROJECT=1` and
     `UV_PYTHON` set to ASH's interpreter, because uv looks for a project and a
     `.venv` in every parent directory too. A command that names `--project`,
-    `--python`, `-p` or `--system` keeps its own choice, and so does a `UV_PYTHON` or
-    `UV_SYSTEM_PYTHON` you set.
+    `--python`, `-p` or `--system` keeps its own choice, and so does a `UV_PYTHON` you
+    set. A `UV_SYSTEM_PYTHON` you set counts only for `uv pip`, the one subcommand that
+    reads it; `uv run` and the others ignore it, so they still get ASH's interpreter
+    and do not fall back to a `.venv` in the scanned tree.
   - `ASH_BIN_PATH` is made absolute where ASH reads it, so a relative value names
     the same directory for every command. An empty value now counts as unset; it
     used to mean the current directory. `--bin-path` shows its default as
