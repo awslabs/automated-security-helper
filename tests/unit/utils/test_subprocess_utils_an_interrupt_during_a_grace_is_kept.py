@@ -55,16 +55,24 @@ def test_a_group_emptied_during_the_wait_gets_no_kill_at_the_interrupt():
     the id is the kernel's to reuse, so nothing is aimed at it."""
     process = _running_child()
     sent: List[int] = []
-    survives = iter([True, False])
+    # The group's membership is its own state, not the leader's: the wait below
+    # reaps the leader and empties the group, and every read answers from that
+    # state however many the code makes. An iterator of two answers tied the
+    # test to exactly two reads, and a third raised StopIteration inside the
+    # code under test.
+    group = {"has_members": True}
 
     def wait_reaps_then_the_interrupt_lands(*args, **kwargs):
         process.returncode = 0
         process.poll.return_value = 0
+        group["has_members"] = False
         raise KeyboardInterrupt
 
     with (
         patch.object(
-            subprocess_utils, "_group_survives", side_effect=lambda pgid: next(survives)
+            subprocess_utils,
+            "_group_survives",
+            side_effect=lambda pgid: group["has_members"],
         ),
         patch.object(
             subprocess_utils,
