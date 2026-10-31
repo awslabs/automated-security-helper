@@ -80,6 +80,7 @@ from automated_security_helper.utils.subprocess_utils import (
     signal_death,
     signal_ending,
     spawn_run,
+    spawn_run_failure_after_the_start,
 )
 from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.pre_installed_tool import ANSI_ESCAPE
@@ -122,7 +123,11 @@ _PYTHON_LANGUAGE = re.compile(r"python[0-9.]*")
 #: The errno values of a launch the OS refused, as against a run that failed
 #: after nbconvert started: the program is missing or not executable, its
 #: working directory is not one, its arguments do not fit, or no process could be
-#: made. An OSError with another code came from the run itself.
+#: made. An OSError with another code came from the run itself. The codes tell a
+#: launch from a run only for an error whose call recorded no start: ENOMEM and
+#: EAGAIN are what a refused fork gives, and reading nbconvert's output can give
+#: the same codes once the process exists. An error raised after the start is a
+#: failed run whatever its code (_run_nbconvert).
 _LAUNCH_ERRNOS = frozenset(
     {
         errno.ENOENT,
@@ -1103,8 +1108,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 route.
             SandboxUnavailable: the sandbox backend refused this one spawn.
             _NbconvertNotRun: uv could not run nbconvert on the notebook, the
-                jupyter-nbconvert the check chose cannot be used now, or the OS
-                refused the direct launch. Its message names no path: the failed
+                jupyter-nbconvert the check chose cannot be used now, the OS
+                refused the direct launch, or an OSError ended its run after the
+                start. Its message names no path: the failed
                 input's record names the notebook, and the copy's path is the
                 host's, so it is logged and not recorded.
         """
@@ -1198,11 +1204,18 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             # why, with no path and no file content. Raised here, around the
             # one launch, so an OSError in ASH's own work before or after it
             # keeps its own record. The launch and the run share this one
-            # clause, so the code tells them apart: an error the OS gives a
-            # launch (_LAUNCH_ERRNOS) says nbconvert was not started, and any
-            # other (an I/O error reading its output, say) that its run failed,
-            # which "could not be started" misnamed.
+            # clause, so the call's record of its start tells them apart
+            # first: an error raised after the process existed is a failed
+            # run, whatever its errno (a read of nbconvert's output can give
+            # EAGAIN or ENOMEM too), and "could not be started" misnamed it.
+            # Only a call that records its start carries the record
+            # (spawn_run does); an error with none is read by its code: an
+            # error the OS gives a launch (_LAUNCH_ERRNOS) says nbconvert was
+            # not started, and any other (an I/O error reading its output,
+            # say) that its run failed.
             what = e.strerror or type(e).__name__
+            if spawn_run_failure_after_the_start(direct, e) is not None:
+                raise _NbconvertNotRun(f"the run of nbconvert failed: {what}")
             if isinstance(e, (FileNotFoundError, PermissionError, NotADirectoryError)):
                 raise _NbconvertNotRun(f"nbconvert could not be started: {what}")
             if e.errno in _LAUNCH_ERRNOS:

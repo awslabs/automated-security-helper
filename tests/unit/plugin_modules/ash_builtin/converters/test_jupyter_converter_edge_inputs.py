@@ -19,6 +19,8 @@
   language only in its kernelspec, or as ``python3``, got the wrong exporter.
 - On the direct route an OSError after nbconvert started was recorded as a failed
   start, and a signal death as an exit code.
+- On the sandboxed route an OSError with EAGAIN or ENOMEM raised after nbconvert
+  started was worded as a failed start, though the process had been made.
 - A notebook the sandbox refused was recorded twice, as refused and as failed.
 - Log lines quoting the notebook's path were rendered as markup.
 - Both converters walked the tree without the workspace's output directory.
@@ -33,6 +35,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -42,9 +45,10 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
     JupyterConverter,
     JupyterConverterConfig,
     _FoundNbconvert,
+    _NbconvertNotRun,
     _parse_notebook,
 )
-from automated_security_helper.utils import uv_tool_runner
+from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 from automated_security_helper.utils.log import NO_MARKUP
 from automated_security_helper.utils.subprocess_utils import (
     SpawnFailedProcess,
@@ -396,6 +400,66 @@ def test_a_launch_the_os_refused_is_a_failed_start(
     reason = _direct_run(converter, monkeypatch, test_plugin_context, missing)
 
     assert reason == "nbconvert could not be started: No such file or directory"
+
+
+def _sandboxed_run_raising(
+    converter, monkeypatch, tmp_path, error: OSError, *, process_existed: bool
+) -> str:
+    """The reason ``_run_nbconvert`` gives when the sandboxed launch raises
+    ``error``. ``spawn_run`` records the start of its child and hangs the record
+    on every exception it raises, one with no process when nothing started."""
+    started = subprocess_utils._StartedChild()
+    if process_existed:
+        started.process = SimpleNamespace(pid=4242, returncode=0, poll=lambda: 0)
+    setattr(error, subprocess_utils._STARTED_CHILD_ATTRIBUTE, started)
+
+    def raising(cmd, **kwargs):
+        raise error
+
+    use_stand_in_nbconvert(monkeypatch, converter)
+    monkeypatch.setattr(f"{MODULE}.sandbox_requested", lambda context: True)
+    refuse_process_starts(monkeypatch)
+    monkeypatch.setattr(f"{MODULE}.spawn_run", raising)
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    with pytest.raises(_NbconvertNotRun) as raised:
+        converter._run_nbconvert(
+            tmp_path / "notebook.ipynb", output_dir, "nb.ipynb", "python"
+        )
+    return str(raised.value)
+
+
+@pytest.mark.parametrize("code", [errno.EAGAIN, errno.ENOMEM])
+def test_an_error_after_the_sandboxed_process_existed_is_a_failed_run(
+    converter, monkeypatch, tmp_path, code
+):
+    """EAGAIN and ENOMEM are what a refused fork gives, and a read of nbconvert's
+    output can give them too: with the process made, the run failed."""
+    reason = _sandboxed_run_raising(
+        converter,
+        monkeypatch,
+        tmp_path,
+        OSError(code, os.strerror(code)),
+        process_existed=True,
+    )
+
+    assert reason == f"the run of nbconvert failed: {os.strerror(code)}"
+
+
+@pytest.mark.parametrize("code", [errno.EAGAIN, errno.ENOMEM])
+def test_a_sandboxed_fork_the_os_refused_is_still_a_failed_start(
+    converter, monkeypatch, tmp_path, code
+):
+    """The control: the same codes with no process made are a launch refused."""
+    reason = _sandboxed_run_raising(
+        converter,
+        monkeypatch,
+        tmp_path,
+        OSError(code, os.strerror(code)),
+        process_existed=False,
+    )
+
+    assert reason == f"nbconvert could not be started: {os.strerror(code)}"
 
 
 # ---------------------------------------------------------------- one record
