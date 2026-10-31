@@ -309,13 +309,46 @@ class TestResultsKeepTheirRuleById:
 
         merged = aggregated.runs[0].results[0]
         assert merged.ruleId == "T-0"
+        # This driver is not the aggregate's, so the merge adds it to the
+        # aggregate's extensions and T-0's descriptor lives there.
+        extensions = aggregated.runs[0].tool.extensions
+        assert [extension.name for extension in extensions] == ["tool"]
+        assert [rule.id for rule in extensions[0].rules] == ["T-0"]
         # The reference carried neither id nor guid, so without its index it
         # names nothing and is dropped rather than left pointing into the
-        # incoming run's rules. It named no component, so it read as the
-        # driver's, which after the merge is the aggregate's own: the result's
-        # ruleId is all that is left to say, and is enough. A reference into an
-        # extension is the other case, the next test.
+        # incoming run's rules. It named no component, which SARIF 3.52.7 reads
+        # as the driver's, and it is left that way on purpose: the merge keeps
+        # a component name only when the scanner wrote one. A result that names
+        # its rule by ruleId alone carries no reference at all and reads as the
+        # driver's in the same way, so the ruleId is the key that finds this
+        # rule in the merged report. Naming the "tool" extension here would
+        # attribute this one reference and none of the tool's other results.
+        # A reference into an extension is the next test.
         assert merged.rule is None
+
+    def test_a_reference_into_the_aggregates_own_driver_gains_its_rule_id(self):
+        """The control for the test above: when the incoming driver is the
+        aggregate's own, its rules join the driver, no extension is added, and a
+        reference with no component reads as the driver's exactly."""
+        aggregated = SarifReport(runs=[_run("tool", [], [])])
+        incoming = SarifReport(
+            runs=[
+                _run(
+                    "tool",
+                    [_finding(None, rule={"index": 0})],
+                    [],
+                    rules=[{"id": "T-0"}],
+                )
+            ]
+        )
+
+        aggregated.merge_sarif_report(incoming)
+
+        merged = aggregated.runs[0].results[0]
+        assert merged.ruleId == "T-0"
+        assert merged.rule is None
+        assert not aggregated.runs[0].tool.extensions
+        assert [rule.id for rule in aggregated.runs[0].tool.driver.rules] == ["T-0"]
 
     def test_an_index_only_reference_into_an_extension_keeps_its_component(self):
         """The counterpart of the driver case above: a reference that names an
