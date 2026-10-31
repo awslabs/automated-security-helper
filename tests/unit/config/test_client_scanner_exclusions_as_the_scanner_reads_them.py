@@ -442,6 +442,69 @@ def test_an_operator_file_respelling_a_trusted_expired_path_is_not_blamed_on_the
     ), override._resolution_warnings
 
 
+def test_a_day_an_earlier_operator_file_wrote_and_a_later_one_wiped_is_not_the_operators(
+    tmp_path,
+):
+    """The chain replaces a list whole. The first operator file gives ``legacy``
+    the day 2088-01-01 and the second file replaces the list without it, so
+    that day is nobody's any more. A client override holding ``legacy`` with
+    that day was blamed on the operator, as the day of a file that is still in
+    the chain. The same day with the first file left alone is still the
+    operator's."""
+    base = AshConfig()
+    base.scanners.bandit.options.excluded_paths = [
+        IgnorePathWithReason(path="legacy", reason="op", expiration="2000-01-01"),
+    ]
+    first = _operator_bandit(
+        {"path": "legacy", "reason": "op2", "expiration": "2088-01-01"}
+    )
+    second = _operator_bandit({"path": "other", "reason": "op3"})
+
+    def strip(override, *operator_files):
+        documents = {
+            tmp_path / "operator" / f"{index}.yaml": document
+            for index, document in enumerate(operator_files)
+        }
+        documents[tmp_path / "c.yaml"] = {}
+        return strip_client_scanner_exclusions(
+            override,
+            documents,
+            base,
+            source_dir=tmp_path,
+            scanned_root=tmp_path,
+            is_delivered=lambda path: Path(path) == tmp_path / "c.yaml",
+        )
+
+    def override():
+        config = AshConfig()
+        config.scanners.bandit.options.excluded_paths = [
+            IgnorePathWithReason(
+                path="legacy", reason="client", expiration="2088-01-01"
+            ),
+        ]
+        return config
+
+    wiped = override()
+    strip(wiped, first, second)
+    assert any(
+        "'legacy'" in warning and "MCP client delivered" in warning
+        for warning in wiped._resolution_warnings
+    ), wiped._resolution_warnings
+    assert not any(
+        "operator's own config" in warning for warning in wiped._resolution_warnings
+    ), wiped._resolution_warnings
+
+    kept = override()
+    strip(kept, first)
+    assert any(
+        "'legacy'" in warning and "operator's own config" in warning
+        for warning in kept._resolution_warnings
+    ), kept._resolution_warnings
+    assert not any(
+        "MCP client delivered" in warning for warning in kept._resolution_warnings
+    ), kept._resolution_warnings
+
+
 @pytest.mark.parametrize(
     ("expiration", "kept"),
     [("2000-01-01", []), ("2099-01-01", ["shared"])],

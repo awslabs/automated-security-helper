@@ -1483,11 +1483,18 @@ def _expiration_days_written(
     spec: ScannerExclusionOption,
     spellings: Sequence[str],
 ) -> Dict[str, Set[Optional[str]]]:
-    """The expiration days ``documents`` write for each pattern at ``spec``'s option under ``spellings`` (None for an entry with none)."""
+    """The expiration days ``documents`` write for each pattern at ``spec``'s option under ``spellings`` (None for an entry with none).
+
+    Only the days the chain still holds: the chain replaces a list whole, so a
+    file that writes the option takes away every day an earlier file gave it,
+    as ``_operator_entries`` takes away its entries.
+    """
     found: Dict[str, Set[Optional[str]]] = {}
     for _path, document in documents:
         for spelling in spellings:
-            for value in _document_values(document, spec, spelling):
+            for value, whole in _document_writes(document, spec, spelling):
+                if whole:
+                    found.clear()
                 if isinstance(value, str):
                     entries: List[Any] = [value]
                 elif isinstance(value, list):
