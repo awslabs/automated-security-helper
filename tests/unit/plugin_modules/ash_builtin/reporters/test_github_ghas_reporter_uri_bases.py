@@ -176,6 +176,61 @@ class TestOnlyWrittenResultsCount:
         assert doc["originalUriBaseIds"] == {"SRCROOT": {"uri": "file:///repo/"}}
 
 
+class TestABaseARunDoesNotDeclare:
+    @staticmethod
+    def _warnings(reporter, monkeypatch, runs) -> list:
+        logger = MagicMock()
+        monkeypatch.setattr(github_ghas_reporter, "ASH_LOGGER", logger)
+        assert reporter.report(_model(*runs)) is not None
+        return [call.args[0] for call in logger.warning.call_args_list]
+
+    def test_a_run_using_a_base_only_another_run_declares_is_warned_about(
+        self, reporter, monkeypatch
+    ):
+        """The second run's location names SRCROOT and its table declares
+        OTHER; the document resolved the location against the first run's
+        SRCROOT, a root the second run never named, and said nothing."""
+        runs = [
+            _run("R1", {"SRCROOT": "file:///repo/"}),
+            _run("R2", {"OTHER": "file:///other/"}, base="SRCROOT"),
+        ]
+
+        warned = self._warnings(reporter, monkeypatch, runs)
+
+        assert any(
+            "run 1" in message
+            and "'SRCROOT'" in message
+            and "without declaring it" in message
+            and "file:///repo/" in message
+            and "from run 0" in message
+            for message in warned
+        )
+
+    def test_runs_that_each_declare_their_own_base_are_not_warned_about(
+        self, reporter, monkeypatch
+    ):
+        runs = [
+            _run("R1", {"SRCROOT": "file:///repo/"}),
+            _run("R2", {"SRCROOT": "file:///repo/"}),
+        ]
+
+        warned = self._warnings(reporter, monkeypatch, runs)
+
+        assert not any("without declaring it" in message for message in warned)
+
+    def test_a_base_no_run_declares_is_not_warned_about(self, reporter, monkeypatch):
+        """Nothing is borrowed when no run declares the id, and a scanner that
+        names a base without declaring it is common."""
+        runs = [
+            _run("R1", {"SRCROOT": "file:///repo/"}),
+            _run("R2", {}, base="MISSING"),
+        ]
+
+        warned = self._warnings(reporter, monkeypatch, runs)
+
+        assert not any("without declaring it" in message for message in warned)
+
+
 class TestOnlyReferencedBasesAreDeclared:
     def test_a_base_no_result_refers_to_is_not_declared(self, reporter):
         run = _run("R1", {"SRCROOT": "file:///repo/", "UNUSED": "file:///unused/"})

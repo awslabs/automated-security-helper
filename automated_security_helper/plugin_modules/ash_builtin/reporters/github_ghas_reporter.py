@@ -788,16 +788,24 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         and those added nothing to the file but a way for two runs to disagree.
         Two runs declaring one key differently cannot share a table: None
         refuses the document, and the log names the key, both declarations and
-        the two runs (the same refusal as an unplaceable project path).
+        the two runs (the same refusal as an unplaceable project path). A run
+        that refers to a base id it does not declare, which another run does,
+        is read against that run's entry and is warned about; the document is
+        still written.
         """
         merged: Dict[str, Dict[str, str]] = {}
         first_run: Dict[str, int] = {}
+        undeclared: List[Tuple[int, str]] = []
         for index, run in enumerate(runs):
             if project_paths.get(index):
                 continue
             declared = GHASReporter._original_uri_base_ids(run)
+            used = self._used_uri_base_ids(run)
+            undeclared.extend(
+                (index, key) for key in sorted(used) if key not in declared
+            )
             needed: set = set()
-            pending = [key for key in self._used_uri_base_ids(run) if key in declared]
+            pending = [key for key in used if key in declared]
             while pending:
                 key = pending.pop()
                 if key in needed:
@@ -821,6 +829,18 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                         "project's own report instead."
                     )
                     return None
+        # A run that refers to a base id it never declares contributes nothing
+        # to the table, and the document resolves that id with the entry another
+        # run declared for it: a root the referring run did not name. Said once
+        # per run and base, because the document is still written.
+        for index, key in undeclared:
+            if key in merged:
+                ASH_LOGGER.warning(
+                    f"GHAS report: run {index} (counting from 0) refers to the "
+                    f"base id '{key}' without declaring it; the document declares "
+                    f"it as {merged[key]} from run {first_run[key]}, and that run's "
+                    "entry is what the locations of this run are read against."
+                )
         return merged
 
     def _emits_automation_details(self) -> bool:
