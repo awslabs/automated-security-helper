@@ -158,6 +158,22 @@ def _failure_text(error: BaseException, values: Iterable[str]) -> str:
     return f"{named}: {described}"
 
 
+def _interrupted_results(scanner_name: str, target_type: str) -> Dict[str, Any]:
+    """The result record of a target whose scan was ended by an interrupt.
+
+    Set where the interrupt is seen, so the finally block that logs a target
+    with no result does not report the scanner in flight as one that returned
+    nothing. The scan is ending; the record is discarded with the raise.
+    """
+    return {
+        "errors": [
+            f"{scanner_name} did not finish on {target_type}: the scan was interrupted"
+        ],
+        "status": "failed",
+        "exception": "the scan was interrupted",
+    }
+
+
 def _exit_is_the_shutdowns(error: BaseException) -> bool:
     """Whether a SystemExit reaching a scanner's handler is the process's shutdown.
 
@@ -1580,7 +1596,18 @@ class ScannerExecutor:
                 # interrupt are not Exceptions and still end the scan.
                 except (Exception, SystemExit) as e:
                     if _exit_is_the_shutdowns(e):
-                        # The process is going down, not this scanner.
+                        # The process is going down, not this scanner. Marked
+                        # interrupted as the arm below marks a cancel: an
+                        # exception raised in this handler is not seen by that
+                        # sibling arm, so the finally block logged "returned no
+                        # result" at ERROR for the scanner that was in flight.
+                        ASH_LOGGER.debug(
+                            f"{scanner_config_name} was interrupted on {target_type}",
+                            extra=NO_MARKUP,
+                        )
+                        raw_results = _interrupted_results(
+                            scanner_config_name, target_type
+                        )
                         raise
                     # Redacted with the config's environment values and the
                     # plugin's own: the exception can name an option either read
@@ -1719,16 +1746,7 @@ class ScannerExecutor:
                         f"{scanner_config_name} was interrupted on {target_type}",
                         extra=NO_MARKUP,
                     )
-                    raw_results = {
-                        "errors": [
-                            (
-                                f"{scanner_config_name} did not finish on "
-                                f"{target_type}: the scan was interrupted"
-                            )
-                        ],
-                        "status": "failed",
-                        "exception": "the scan was interrupted",
-                    }
+                    raw_results = _interrupted_results(scanner_config_name, target_type)
                     raise
                 finally:
                     # Formatted only when TRACE is on: the f-string rendered the

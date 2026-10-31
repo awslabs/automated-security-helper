@@ -226,6 +226,23 @@ class TestAShutdownsExitStillEndsTheScan:
                 _targets(plugin_context),
             )
 
+    def test_the_scanner_in_flight_is_not_logged_as_returning_no_result(
+        self, plugin_context, monkeypatch, caplog
+    ):
+        """Red at the base: the exit left the handler before the interrupted record
+        was set, so the finally block logged "returned no result" at ERROR, the
+        line the interrupted branch exists to keep out of the log."""
+        monkeypatch.setattr(scanner_executor, "shutdown_requested", lambda: True)
+
+        with pytest.raises(SystemExit):
+            _executor(plugin_context)._execute_scanner(
+                "shape-tool",
+                _scanner(plugin_context, SystemExit(0)),
+                _targets(plugin_context),
+            )
+
+        assert "returned no result" not in caplog.text, caplog.text
+
     def test_the_scanner_handler_lets_it_through(self, plugin_context, monkeypatch):
         monkeypatch.setattr(scanner_executor, "shutdown_requested", lambda: True)
         executor = _executor(plugin_context)
