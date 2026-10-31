@@ -494,8 +494,12 @@ def _strictness_key(threshold: object) -> Tuple[int, str]:
     return (1, threshold)
 
 
-def stricter_of(a: Optional[str], b: Optional[str]) -> Optional[str]:
+def stricter_of(a: Any, b: Any) -> Optional[str]:
     """Return whichever of *a* and *b* gates more findings.
+
+    Each side is text or ``None`` on every real route, but the function reads
+    any value, so the arguments are not annotated as text; the return type
+    stays the text callers hold.
 
     Total and commutative over every input, including ``None`` and ``""``.
     Returns ``None`` when neither side configures a threshold, which is why the
