@@ -13,6 +13,7 @@ by name is the root itself at the moment it is opened, not wherever a link above
 it has been re-pointed meanwhile.
 """
 
+import errno
 import os
 import sys
 
@@ -48,6 +49,29 @@ def aliased_root(tmp_path):
         release_writable_root(root)
 
 
+def _recording_resolution(monkeypatch):
+    """Record every call that can resolve or examine a path: realpath, lstat,
+    stat and readlink. Patched on the modules themselves, so a function that
+    imported one by name before the patch is the only call this cannot see."""
+    seen = []
+
+    def wrap(real, name):
+        def recording(path, *args, **kwargs):
+            seen.append((name, path))
+            return real(path, *args, **kwargs)
+
+        return recording
+
+    for module, name in (
+        (os.path, "realpath"),
+        (os, "lstat"),
+        (os, "stat"),
+        (os, "readlink"),
+    ):
+        monkeypatch.setattr(module, name, wrap(getattr(module, name), name))
+    return seen
+
+
 def test_the_outermost_spelling_of_the_root_is_the_anchor(aliased_root):
     """With ``out/sub/back -> out`` planted, both ``alias/out`` and
     ``alias/out/sub/back`` resolve to the root; the outer one is the anchor, so
@@ -77,21 +101,23 @@ def test_nothing_below_a_root_matched_by_spelling_is_resolved(
 ):
     """A write spelled through the root's own name needs no resolution at all;
     the ancestors below the matched root are never looked at."""
-    out, _aliased = aliased_root
+    out, aliased = aliased_root
     (out / "sub" / "deeper").mkdir()
-    resolved = []
-    real_realpath = os.path.realpath
-
-    def recording_realpath(p, *args, **kwargs):
-        resolved.append(os.fspath(p))
-        return real_realpath(p, *args, **kwargs)
-
-    monkeypatch.setattr(os.path, "realpath", recording_realpath)
+    seen = _recording_resolution(monkeypatch)
 
     anchored = fs_guard._root_anchor(out / "sub" / "deeper" / "x", [out])
 
     assert anchored == (out, out)
-    assert resolved == []
+    assert seen == []
+
+    # The control, with the same recorders: the aliased spelling of the same
+    # write IS resolved, so an empty record above means nothing was looked at,
+    # not that the recorders see nothing (a resolution through Path.resolve, a
+    # from-import of realpath, or an lstat of the ancestors would be recorded).
+    anchored = fs_guard._root_anchor(aliased / "sub" / "deeper" / "x", [out])
+
+    assert anchored == (out, aliased)
+    assert seen, "resolving an aliased spelling was not recorded"
 
 
 def test_an_anchor_that_no_longer_leads_to_the_root_is_refused(
@@ -150,10 +176,17 @@ def test_a_guarded_read_refuses_an_anchor_that_leads_elsewhere(tmp_path):
         out.rename(tmp_path / "moved")
         out.symlink_to(elsewhere)
 
-        with pytest.raises(OSError):
+        with pytest.raises(OSError) as refused:
             fs_guard.read_bytes_at_most(out / "x", 64)
     finally:
         release_writable_root(root)
+
+    # The reader's own refusal, not any OSError (a permission error, a bad
+    # descriptor or a missing file would each have passed a bare OSError check):
+    # ELOOP, and the message that names the anchor.
+    assert refused.value.errno == errno.ELOOP, refused.value
+    assert "was not read" in str(refused.value), str(refused.value)
+    assert "does not lead to the directory" in str(refused.value), str(refused.value)
 
 
 def test_the_by_name_check_examines_a_directory_another_writer_made_first(
