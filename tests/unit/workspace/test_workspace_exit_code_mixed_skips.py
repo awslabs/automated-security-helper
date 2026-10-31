@@ -32,7 +32,8 @@ Examined means a ``NO_CHANGES`` skip, by identity. The model admits a SKIPPED
 entry with no ``skip_reason`` at all; written as "any entry whose reason is not
 ERROR", the branch read such an entry as examined and a run of only such entries
 exited 0, a gate passing an unexpected state. It is neither examined nor set
-aside: alone it exits 4, and beside an unchanged skip it changes nothing.
+aside: alone it exits 4, and beside an unchanged skip it exits 4 as well, since
+a project whose skip nothing explains may be code nothing examined.
 """
 
 from __future__ import annotations
@@ -100,14 +101,26 @@ def test_a_skipped_project_with_no_reason_is_not_examined():
     )
 
 
-def test_a_skipped_project_with_no_reason_changes_nothing_beside_others():
-    """Neither examined nor set aside: an unchanged sibling still exits 0, and
-    a tolerated ERROR sibling alone beside it still exits 4."""
+def test_a_skipped_project_with_no_reason_beside_an_unchanged_one_exits_4():
+    """Neither examined nor set aside, and not passed over: beside an unchanged
+    sibling it still exits 4. Red at the base: the entry was ignored and the
+    unchanged sibling made the run exit 0, a gate passing an unexpected state.
+    A tolerated ERROR sibling alone beside it still exits 4."""
     assert (
         workspace_exit_code(
             [_skipped("api", SkippedProjectReason.NO_CHANGES), _skipped("web", None)]
         )
-        is WorkspaceExitCode.SUCCESS
+        is WorkspaceExitCode.WORKSPACE_ERROR
+    )
+    assert (
+        workspace_exit_code(
+            [
+                _skipped("api", SkippedProjectReason.NO_CHANGES),
+                _skipped("web", SkippedProjectReason.ERROR),
+                _skipped("lib", None),
+            ]
+        )
+        is WorkspaceExitCode.WORKSPACE_ERROR
     )
     assert (
         workspace_exit_code(

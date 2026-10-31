@@ -1104,8 +1104,10 @@ def workspace_exit_code(
         # The test is for NO_CHANGES by identity, not for "not ERROR": the
         # model admits a SKIPPED entry with no skip_reason at all, and a gate
         # must not turn an unexpected state into a pass. Such an entry is
-        # neither examined nor set aside, so it decides nothing on its own and
-        # a run of only such entries exits 4.
+        # neither examined nor set aside, and it is not passed over beside an
+        # unchanged sibling either: the run exits 4 whenever one is present,
+        # because a project whose skip nothing explains may be code nothing
+        # examined.
         #
         # Nothing examined means no project was named, every project named was
         # missing, or no entry says a project was looked at: exiting 0 would
@@ -1115,7 +1117,8 @@ def workspace_exit_code(
             for entry in entries
             if entry.skip_reason is SkippedProjectReason.NO_CHANGES
         ]
-        if examined:
+        unexplained = [entry for entry in entries if entry.skip_reason is None]
+        if examined and not unexplained:
             return WorkspaceExitCode.SUCCESS
         return WorkspaceExitCode.WORKSPACE_ERROR
 
