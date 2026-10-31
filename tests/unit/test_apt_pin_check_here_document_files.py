@@ -591,6 +591,37 @@ class TestOnlyACopierMakesTheBodyAFile:
         with pytest.raises(checker.PinEnumerationError, match=self.XARGS_REFUSED):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            "RUN cat <<'EOF' | xargs apt-get install -y",
+            "RUN cat <<EOF | xargs apt-get install -y",
+            'RUN cat <<"EOF" | xargs -r apt-get install -y',
+            "RUN cat <<'EOF' | tr '\\n' ' ' | xargs apt-get install -y",
+            "RUN cat <<'EOF' |& xargs apt-get install -y",
+            "RUN xargs apt-get install -y 2>&1 <<'EOF'",
+            "RUN xargs apt-get install -y 2>&1 <<EOF",
+        ],
+    )
+    def test_a_here_document_reaches_xargs_through_a_pipe_or_a_redirection(
+        self, tmp_path, first_line
+    ):
+        # Red before: the marker stood in the `cat` stage, or after the `&` of `2>&1`,
+        # outside the part of the line the check read. The body was joined to the RUN as
+        # commands, so only the pinned first line was an argument of the install and
+        # `git` stood in a command of its own: the check read {curl} and was green.
+        body = f"{first_line}\n{CURL}\ngit\nEOF\n"
+        with pytest.raises(checker.PinEnumerationError, match=self.XARGS_REFUSED):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_a_here_document_in_an_earlier_command_is_not_xargs_input(self, tmp_path):
+        """Control: a marker before ``&&`` feeds that command, not the install."""
+        body = (
+            "RUN cat > /usr/local/share/note.txt <<'EOF' && "
+            f"xargs apt-get install -y {CURL}\nhello\nEOF\n"
+        )
+        assert _pins(tmp_path, body) == {"curl": ("7.88.1-10+deb12u15", (3,))}
+
     def test_xargs_with_its_packages_as_arguments_is_read_like_any_install(
         self, tmp_path
     ):

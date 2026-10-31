@@ -1703,11 +1703,24 @@ def _xargs_reads_a_here_document(shell: str, install: re.Match[str]) -> bool:
 
     ``xargs apt-get install -y <<EOF`` takes the words of the body as the packages. The
     body lines are joined to the instruction as commands of their own, so no package in
-    them is an argument of the install and none can be read as one.
+    them is an argument of the install and none can be read as one. The same holds when
+    the here-document is opened by an earlier stage of the pipeline that feeds xargs
+    (``cat <<'EOF' | xargs apt-get install -y``), and when a redirection such as
+    ``2>&1`` comes between the install and the marker.
     """
-    start = max(shell.rfind(char, 0, install.start()) for char in ";&|") + 1
-    command = shell[start : install.end()]
-    return bool(_XARGS.search(command) and _HEREDOC_MARKER.search(command))
+    text = shell.replace("|&", "| ")
+    ends = list(_COMMAND_END.finditer(text, 0, install.start()))
+    own_start = ends[-1].end() if ends else 0
+    if not _XARGS.search(text, own_start, install.start()):
+        return False
+    # The pipeline xargs ends: step back over every stage a single ``|`` joins.
+    first = len(ends)
+    while first and ends[first - 1].group() == "|":
+        first -= 1
+    pipeline_start = ends[first - 1].end() if first else 0
+    after = _COMMAND_END.search(text, install.end())
+    pipeline_end = after.start() if after else len(text)
+    return bool(_HEREDOC_MARKER.search(text, pipeline_start, pipeline_end))
 
 
 def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
