@@ -57,6 +57,25 @@ def snapshot_environ() -> Dict[str, str]:
         return dict(os.environ)
 
 
+#: The environment as this module was first imported: the operator's own
+#: variables, before any scanner ran (every plugin imports this module through
+#: plugin_base before a scanner instance exists).
+_STARTUP_ENVIRON: Dict[str, str] = snapshot_environ()
+
+
+def startup_environ() -> Dict[str, str]:
+    """A copy of the environment as it was when ASH started.
+
+    For a reader that must take only the operator's own value of a variable
+    and never one a scanner thread set, or set for a moment, while others
+    spawn (the sandbox-exec backend grants a read of the operator's
+    SSL_CERT_FILE, and must not grant one for a value a scanner put there).
+    ``snapshot_environ`` answers what a child would inherit now; this answers
+    what the operator started ASH with.
+    """
+    return dict(_STARTUP_ENVIRON)
+
+
 #: The variables that set how a child lays text out and colors it for a terminal.
 #: uv wraps its messages at the caller's COLUMNS and colors them under FORCE_COLOR
 #: or CLICOLOR_FORCE even into a pipe (measured with uv 0.13), so text ASH parses

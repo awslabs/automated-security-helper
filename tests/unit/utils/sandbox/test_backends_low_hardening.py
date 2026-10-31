@@ -830,7 +830,10 @@ def test_an_operators_ssl_cert_file_is_readable(layout, monkeypatch):
     monkeypatch.setattr(tempfile, "tempdir", str(layout.tmp))
     pem = layout.home / "certs.pem"
     pem.write_text("")
-    monkeypatch.setenv("SSL_CERT_FILE", str(pem))
+    # The operator's value is the one ASH started with.
+    monkeypatch.setattr(
+        backends, "startup_environ", lambda: {"SSL_CERT_FILE": str(pem)}
+    )
     policy = _policy(layout, system_trust_roots=True)
 
     plan = SandboxExecBackend().plan(["/bin/true"], {"SSL_CERT_FILE": str(pem)}, policy)
@@ -838,6 +841,25 @@ def test_an_operators_ssl_cert_file_is_readable(layout, monkeypatch):
         profile = plan.argv[plan.argv.index("-p") + 1]
         assert plan.env["SSL_CERT_FILE"] == str(pem)
         assert f'(allow file-read* (literal "{_real(pem).as_posix()}"))' in profile
+    finally:
+        plan.run_cleanup()
+
+
+def test_an_ssl_cert_file_set_after_startup_opens_nothing(layout, monkeypatch):
+    """A value in the live environment that ASH did not start with is a scanner
+    thread's (set while others spawn), not the operator's: passed through, with
+    no read granted for it."""
+    monkeypatch.setattr(tempfile, "tempdir", str(layout.tmp))
+    pem = layout.home / "certs.pem"
+    pem.write_text("")
+    monkeypatch.setenv("SSL_CERT_FILE", str(pem))
+    policy = _policy(layout, system_trust_roots=True)
+
+    plan = SandboxExecBackend().plan(["/bin/true"], {"SSL_CERT_FILE": str(pem)}, policy)
+    try:
+        profile = plan.argv[plan.argv.index("-p") + 1]
+        assert plan.env["SSL_CERT_FILE"] == str(pem)
+        assert f'(allow file-read* (literal "{_real(pem).as_posix()}"))' not in profile
     finally:
         plan.run_cleanup()
 

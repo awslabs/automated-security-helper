@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.process_env import startup_environ
 from automated_security_helper.utils.sandbox.policy import (
     SandboxPolicy,
     SandboxUnavailable,
@@ -1727,13 +1728,18 @@ class SandboxExecBackend(SandboxBackend):
         # An SSL_CERT_FILE the operator set is passed through and wins, as it
         # would unsandboxed; the profile is told to allow reading it, since the
         # file can sit where the profile denies reads (under the home directory).
-        # The grant is for the operator's value alone, read from ASH's own
-        # environment: a value the spawn's environment carries from elsewhere is
-        # passed through like every allowlisted variable but opens nothing the
-        # profile denies, as under bwrap and Landlock, which grant nothing for it.
+        # The grant is for the operator's value alone, read from the environment
+        # ASH started with (process_env.startup_environ), not the live one: scanner
+        # threads change the environment while others spawn, and a value one of
+        # them set must not be granted as the operator's. A value the spawn's
+        # environment carries from elsewhere is passed through like every
+        # allowlisted variable but opens nothing the profile denies, as under
+        # bwrap and Landlock, which grant nothing for it.
         if child_env.get("SSL_CERT_FILE"):
             named = Path(child_env["SSL_CERT_FILE"])
-            operators = child_env["SSL_CERT_FILE"] == os.environ.get("SSL_CERT_FILE")
+            operators = child_env["SSL_CERT_FILE"] == startup_environ().get(
+                "SSL_CERT_FILE"
+            )
             if operators and named.is_absolute() and named.is_file():
                 trust_roots = named
         elif policy.system_trust_roots:
