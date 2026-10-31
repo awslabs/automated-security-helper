@@ -45,6 +45,7 @@ from automated_security_helper.utils.process_env import (
 )
 from automated_security_helper.utils.subprocess_utils import (
     lookup_for_scan,
+    names_a_location,
     started_from_working_directory,
 )
 
@@ -1398,15 +1399,6 @@ def _violations_from_validation_report(
     return per_pack, None
 
 
-def _names_a_location(value: str) -> bool:
-    """Whether *value* spells a filesystem location (holds a path separator) rather
-    than a bare command name that PATH resolves; the scanner's dependency check reads
-    ``JSII_NODE`` by the same test. ``/`` is a separator on every platform node runs
-    on; ``os.sep`` and ``os.altsep`` cover the host's own."""
-    separators = {"/", os.sep, os.altsep} - {None}
-    return bool(value) and any(separator in value for separator in separators)
-
-
 def run_cdk_nag_against_cfn_template(
     template_path: Path,
     nag_packs: List[
@@ -1482,7 +1474,7 @@ def run_cdk_nag_against_cfn_template(
                         "node is not on PATH, and the copy found through the "
                         f"working directory, {local}, is not run"
                     )
-        elif not _names_a_location(explicit_node):
+        elif not names_a_location(explicit_node):
             node, refusal = lookup_for_scan(explicit_node, lookup_root)
             if node is not None:
                 jsii_env["JSII_NODE"] = node

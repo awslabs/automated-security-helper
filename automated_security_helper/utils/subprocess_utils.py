@@ -1946,6 +1946,18 @@ def started_from_working_directory(
     return None
 
 
+def names_a_location(value: str) -> bool:
+    """Whether *value* spells a filesystem location (holds a path separator) rather
+    than a bare command name that PATH resolves. ``/`` is a separator on every
+    platform node runs on; ``os.sep`` and ``os.altsep`` cover the host's own.
+
+    One definition for the cdk-nag scanner's dependency check and the cdk-nag
+    wrapper, which read ``JSII_NODE`` by the same test and must not drift apart.
+    """
+    separators = {"/", os.sep, os.altsep} - {None}
+    return bool(value) and any(separator in value for separator in separators)
+
+
 #: The suffixes the operating system starts by running cmd.exe on the file. Which
 #: suffixes the lookup tries is decided where the candidate names are built.
 _BATCH_SUFFIXES = (".bat", ".cmd")

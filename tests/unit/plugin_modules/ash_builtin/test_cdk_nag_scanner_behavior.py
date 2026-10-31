@@ -49,6 +49,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
 )
 from automated_security_helper.utils import cdk_nag_wrapper as wrapper_module
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.cdk_nag_wrapper import CdkNagWrapperResponse
 from automated_security_helper.utils.error_text import config_environment_values
 
@@ -1906,3 +1907,31 @@ def test_the_script_still_exits_one_when_the_reason_hook_raises(
         "cdk-nag did not scan: the scanner recorded no reason" in r.getMessage()
         for r in caplog.records
     )
+
+
+def test_the_scanner_and_the_wrapper_share_one_location_test_for_jsii_node():
+    """The scanner's dependency check and the wrapper read JSII_NODE by the same test,
+    and the wrapper's docstring said the two must apply it alike. Each module held its
+    own copy of the function. They now import the one definition from the module both
+    already depend on, so the identity is what keeps them from drifting apart."""
+    assert cdk_nag_scanner.names_a_location is subprocess_utils.names_a_location
+    assert wrapper_module.names_a_location is subprocess_utils.names_a_location
+    assert not hasattr(cdk_nag_scanner, "_names_a_location")
+    assert not hasattr(wrapper_module, "_names_a_location")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("", False),
+        ("node", False),
+        ("nodejs", False),
+        ("/opt/node/bin/node", True),
+        ("bin/node", True),
+        ("./node", True),
+    ],
+)
+def test_a_value_with_a_separator_names_a_location_and_a_bare_name_does_not(
+    value, expected
+):
+    assert subprocess_utils.names_a_location(value) is expected

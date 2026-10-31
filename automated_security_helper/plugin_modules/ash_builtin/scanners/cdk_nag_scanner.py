@@ -64,7 +64,10 @@ from automated_security_helper.utils.scanned_tree import (
 )
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.models.core import IgnorePathWithReason
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.subprocess_utils import (
+    find_executable,
+    names_a_location,
+)
 
 # Last-resort copy of the "cdk" extra's contents. The source of truth is
 # [project.optional-dependencies] cdk in pyproject.toml; this list duplicates it
@@ -840,14 +843,6 @@ def _jsii_node_value() -> str:
     return os.environ.get("JSII_NODE") or ""
 
 
-def _names_a_location(value: str) -> bool:
-    """Whether *value* spells a filesystem location (holds a path separator) rather
-    than a bare command name that PATH resolves. ``/`` is a separator on every
-    platform node runs on; ``os.sep`` and ``os.altsep`` cover the host's own."""
-    separators = {"/", os.sep, os.altsep} - {None}
-    return bool(value) and any(separator in value for separator in separators)
-
-
 def _node_named_by_jsii_node() -> Optional[str]:
     """The node ``JSII_NODE`` names, when it names a file that exists, else None.
 
@@ -870,7 +865,7 @@ def _node_named_by_jsii_node() -> Optional[str]:
     named = _jsii_node_value()
     if not named:
         return None
-    if _names_a_location(named):
+    if names_a_location(named):
         return named if Path(named).is_file() else None
     return find_executable(named)
 
@@ -1043,7 +1038,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         says it, and hide nothing that is private.
         """
         named = _jsii_node_value()
-        carried = named if _names_a_location(named) else ""
+        carried = named if names_a_location(named) else ""
         return (*super()._environment_values(), *((carried,) if carried else ()))
 
     def model_post_init(self, context):
