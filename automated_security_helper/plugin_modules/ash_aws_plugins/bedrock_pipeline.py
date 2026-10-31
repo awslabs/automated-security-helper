@@ -39,9 +39,9 @@ _DEPRECATED_PARAM_PATTERN = re.compile(
 # temperature or top_p, not both ("`temperature` and `top_p` cannot both be
 # specified for this model. Please use only one."). The client always sends the
 # two, so without this repair every call to such a model failed and the walk
-# switched models with no word of why. The second-named parameter is dropped
-# and the first kept: the message names them in the order the model prefers,
-# and temperature is the knob an operator sets.
+# switched models with no word of why. Which one is dropped does not depend on
+# the order the message names them: top_p is dropped and temperature kept
+# (``_pair_member_to_drop``), because temperature is the knob an operator sets.
 _EXCLUSIVE_PARAMS_PATTERN = re.compile(
     r"`(?P<first>[A-Za-z0-9_]+)`\s+and\s+`(?P<second>[A-Za-z0-9_]+)`\s+"
     r"(?:cannot|can\s*not|can't|may\s+not)\s+both\s+be\s+(?:specified|set|used)",
@@ -58,6 +58,16 @@ def _normalize_param_name(name: str) -> str:
     return the refusal instead of retrying without the parameter.
     """
     return name.replace("_", "").lower()
+
+
+def _pair_member_to_drop(first: str, second: str) -> str:
+    """Which of a pair of parameters a model takes one of is dropped: ``top_p``
+    when the pair holds it, whichever way the message orders the two (the
+    operator's temperature stays), else the second-named."""
+    for name in (second, first):
+        if _normalize_param_name(name) == "topp":
+            return name
+    return second
 
 
 def _drop_parameter(converse_args: Dict[str, Any], name: str) -> bool:
@@ -213,6 +223,7 @@ class BedrockModelClient:
         max_delay: float = 60.0,
         model_label: Optional[str] = None,
         values: Iterable[str] = (),
+        dropped_by_model: Optional[Dict[str, Set[str]]] = None,
     ) -> None:
         self._runtime = bedrock_runtime
         self._model_id = model_id
@@ -230,11 +241,21 @@ class BedrockModelClient:
         # the WARNINGs and DEBUG lines land in ash.log, and the "*Error ...*"
         # strings become report content the caller writes to files.
         self._values = list(value_tuple(values))
-        # The inference parameters this model refused on an earlier call (a
-        # deprecated one, or the second of a pair it takes one of). Left out of
-        # every later request, so the refusal and its retry are paid once per
-        # client, not once per report section.
-        self._dropped_params: Set[str] = set()
+        # The inference parameters each model refused on an earlier call (a
+        # deprecated one, or one of a pair the model takes one of). Left out of
+        # every later request to that model, so the refusal and its retry are
+        # paid once per model, not once per report section. The dict is shared
+        # with every client derived from this one (``with_model``,
+        # ``with_max_tokens``): a derived client for a fallback model that
+        # starts empty paid the refusal again in every section.
+        self._dropped_by_model: Dict[str, Set[str]] = (
+            dropped_by_model if dropped_by_model is not None else {}
+        )
+
+    @property
+    def _dropped_params(self) -> Set[str]:
+        """What this client's model refused on an earlier call."""
+        return self._dropped_by_model.setdefault(self._model_id, set())
 
     def _redacted(self, text: str) -> str:
         """*text* redacted with the caller's environment values.
@@ -259,6 +280,7 @@ class BedrockModelClient:
             base_delay=self._base_delay,
             max_delay=self._max_delay,
             values=self._values,
+            dropped_by_model=self._dropped_by_model,
         )
 
     def with_max_tokens(self, max_tokens: int) -> "BedrockModelClient":
@@ -276,6 +298,7 @@ class BedrockModelClient:
             max_delay=self._max_delay,
             model_label=self._model_label,
             values=self._values,
+            dropped_by_model=self._dropped_by_model,
         )
 
     def try_call(self, prompt: str, system_prompt: str) -> str:
@@ -455,17 +478,20 @@ class BedrockModelClient:
             )
             return True
         pair = _EXCLUSIVE_PARAMS_PATTERN.search(msg)
-        if pair and _drop_parameter(converse_args, pair.group("second")):
-            self._dropped_params.add(pair.group("second"))
-            ASH_LOGGER.verbose(
-                self._redacted(
-                    f"Model {self._model_label} takes '{pair.group('first')}' or "
-                    f"'{pair.group('second')}' but not both; retrying without "
-                    f"'{pair.group('second')}', and leaving it out of this "
-                    "client's later calls"
+        if pair:
+            first, second = pair.group("first"), pair.group("second")
+            dropped = _pair_member_to_drop(first, second)
+            kept = first if dropped == second else second
+            if _drop_parameter(converse_args, dropped):
+                self._dropped_params.add(dropped)
+                ASH_LOGGER.verbose(
+                    self._redacted(
+                        f"Model {self._model_label} takes '{kept}' or '{dropped}' "
+                        f"but not both; retrying without '{dropped}', and leaving "
+                        "it out of this client's later calls"
+                    )
                 )
-            )
-            return True
+                return True
         return False
 
     def _failed(
