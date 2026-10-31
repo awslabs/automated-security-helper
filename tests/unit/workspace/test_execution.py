@@ -31,8 +31,8 @@ from automated_security_helper.models.workspace import (
     SkippedProjectReason,
     WorkspaceExitCode,
 )
+from automated_security_helper.workspace import execution as execution_module
 from automated_security_helper.workspace.execution import (
-    _ABANDONED_STOP_GRACE_SECONDS,
     ProjectScanSettings,
     execute_workspace,
 )
@@ -1580,7 +1580,9 @@ class TestFailureHandling:
         assert PROJECT_TIMEOUT.is_integer(), PROJECT_TIMEOUT
         assert f"'{int(PROJECT_TIMEOUT)}' s project_timeout" in error, error
 
-    def test_the_timeout_bounds_wall_clock_when_the_bound_is_smaller(self, tmp_path):
+    def test_the_timeout_bounds_wall_clock_when_the_bound_is_smaller(
+        self, tmp_path, monkeypatch
+    ):
         """The defect: a queued project was never given a deadline.
 
         The deadline check skipped any project with no start time, which is
@@ -1599,8 +1601,12 @@ class TestFailureHandling:
         on this path too so a worker that comes back inside it brings the
         secret values its findings exposed into the cross-project masking set.
         That wait is bounded and part of the contract; the open-ended wait on a
-        held slot is the defect this test pins.
+        held slot is the defect this test pins. The grace is set small here, so
+        the bound is a fixed number that does not grow with the production
+        constant and the run does not wait out the whole production grace.
         """
+        grace = 0.3
+        monkeypatch.setattr(execution_module, "_ABANDONED_STOP_GRACE_SECONDS", grace)
         _, plan = _make_workspace(
             tmp_path,
             ("wedged", "MEDIUM"),
@@ -1618,10 +1624,10 @@ class TestFailureHandling:
         finally:
             release.set()
 
-        bound = PROJECT_TIMEOUT + _ABANDONED_STOP_GRACE_SECONDS + 2.0
+        bound = PROJECT_TIMEOUT + grace + 2.0
         assert elapsed < bound, (
             f"took {elapsed:.1f}s; the project_timeout was {PROJECT_TIMEOUT}s plus "
-            f"the {_ABANDONED_STOP_GRACE_SECONDS}s stop grace, bound {bound}s"
+            f"the {grace}s grace, bound {bound}s"
         )
         statuses = {p.project: p.status for p in outcome.payload.projects}
         assert statuses == {
