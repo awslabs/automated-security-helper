@@ -625,20 +625,81 @@ class TestTheCutListPointsToTheRest:
             assert "'Not gating' scope" not in out, out
 
 
+def _mixed_severity_findings() -> list:
+    """Four policy findings, entered in an order the severity order changes.
+
+    Entered AAA (MEDIUM), BBB (HIGH), CCC (CRITICAL), DDD (HIGH). The list in
+    entry order and the list sorted by path are both AAA, BBB, CCC, DDD; the
+    list in severity order, ties by path, is CCC, BBB, DDD, AAA. A list that is
+    unsorted, or sorted by path alone, differs from it in every position but
+    one.
+    """
+    return [
+        _result(
+            f"POLICY-{name}",
+            "error" if severity == "CRITICAL" else "warning",
+            origin="workspace-policy",
+            issue_severity=severity,
+        )
+        for name, severity in (
+            ("AAA", "MEDIUM"),
+            ("BBB", "HIGH"),
+            ("CCC", "CRITICAL"),
+            ("DDD", "HIGH"),
+        )
+    ]
+
+
+_SEVERITY_ORDER = ["POLICY-CCC", "POLICY-BBB", "POLICY-DDD", "POLICY-AAA"]
+
+
 def test_the_not_gating_rows_are_the_overview_rows_of_the_same_findings(tmp_path):
     """The two lists share one row shape and one severity order (a pin, green
-    at the base and at the tip of the refactor that gave them one builder)."""
-    emitter = ReportContentEmitter(_three_left_out(tmp_path), human_presentation=True)
+    at the base and at the tip of the refactor that gave them one builder).
+
+    The fixture mixes severities, entered against their order, so a list that
+    kept entry order or sorted by path alone would fail here.
+    """
+    model = _model(
+        tmp_path,
+        _mixed_severity_findings(),
+        policy_scanners_gate=False,
+        policy_origin_finding_count=4,
+    )
+    emitter = ReportContentEmitter(model, human_presentation=True)
 
     left_out = emitter.get_policy_not_gating_findings(10)
     overview = emitter.get_findings_overview()
 
-    assert len(left_out) == 3, left_out
+    assert [row["rule_id"] for row in left_out] == _SEVERITY_ORDER, left_out
+    assert len(overview) == 4, overview
     assert sorted(left_out, key=lambda row: row["rule_id"]) == sorted(
         overview, key=lambda row: row["rule_id"]
     )
-    assert [row["rule_id"] for row in left_out] == [
-        "POLICY-AAA",
-        "POLICY-BBB",
-        "POLICY-CCC",
-    ]
+    # The limit takes the head of the severity order.
+    assert [row["rule_id"] for row in emitter.get_policy_not_gating_findings(2)] == (
+        _SEVERITY_ORDER[:2]
+    )
+
+
+def test_the_detailed_findings_use_the_same_severity_order(tmp_path):
+    """The other user of the shared sort key.
+
+    With the policy's gate on, the same findings are actionable down to the
+    project's HIGH gate (AAA is MEDIUM, below it), and the detailed list puts
+    them in the order the not-gating list has: severity, then path.
+    """
+    model = _model(
+        tmp_path,
+        _mixed_severity_findings(),
+        policy_scanners_gate=True,
+        policy_origin_finding_count=4,
+    )
+    emitter = ReportContentEmitter(model, human_presentation=True)
+
+    detailed = emitter.get_detailed_findings(10)
+
+    assert [row["rule_id"] for row in detailed] == _SEVERITY_ORDER[:3], detailed
+    assert [row["rule_id"] for row in emitter.get_detailed_findings(2)] == (
+        _SEVERITY_ORDER[:2]
+    )
