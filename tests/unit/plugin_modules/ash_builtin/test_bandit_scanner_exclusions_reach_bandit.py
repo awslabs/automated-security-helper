@@ -633,14 +633,17 @@ def test_an_ini_entry_with_a_glob_in_a_middle_component_warns_it_crosses(
 def test_a_whitespace_only_ini_entry_names_no_path_and_draws_no_warning(
     tmp_path, caplog
 ):
-    """``exclude = tests, `` leaves an entry of one space after the comma. It
-    built a glob of a space below the target and drew the "surrounding
-    whitespace" warning, and for a target path holding a space the own-path
-    warning too. It names no path, so it is dropped like an empty entry, and
-    the entry beside it is unchanged."""
+    """``exclude = tests, ,vendor`` has an entry of one space between two
+    commas. It built a glob of a space below the target and drew the
+    "surrounding whitespace" warning, and for a target path holding a space the
+    own-path warning too. It names no path, so it is dropped like an empty
+    entry, and the entries beside it are unchanged. The space is in the middle
+    because ``configparser`` strips a value's ends: a trailing ``tests, `` read
+    as ``tests,``, whose empty entry the old ``if not entry`` skipped, so that
+    spelling passed without the whitespace check."""
     ini = tmp_path / ".bandit"
-    ini.write_text("[bandit]\nexclude = tests, \n", encoding="utf-8")
-    source = _tree(tmp_path, ["app.py", "tests/a.py"])
+    ini.write_text("[bandit]\nexclude = tests, ,vendor\n", encoding="utf-8")
+    source = _tree(tmp_path, ["app.py", "tests/a.py", "vendor/b.py"])
     scanner = _scanner(
         source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
     )
@@ -651,6 +654,8 @@ def test_a_whitespace_only_ini_entry_names_no_path_and_draws_no_warning(
     root = source.as_posix()
     entries = _entries(argv)
     assert _covers(entries, f"{root}/tests/a.py"), entries
+    assert _covers(entries, f"{root}/vendor/b.py"), entries
+    assert not _covers(entries, f"{root}/app.py"), entries
     assert not any(entry.startswith(f"{root}/ ") for entry in entries), entries
     messages = [r.getMessage() for r in caplog.records]
     assert not any("surrounding whitespace" in m for m in messages), messages
