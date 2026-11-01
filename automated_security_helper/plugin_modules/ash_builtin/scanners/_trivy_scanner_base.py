@@ -92,8 +92,6 @@ from automated_security_helper.utils.link_exclusions import (
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.subprocess_utils import (
-    COULD_NOT_STOP_ENDING,
-    WAS_KILLED_ENDING,
     find_executable,
 )
 from automated_security_helper.utils.error_text import text_without_values
@@ -782,56 +780,6 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         the scanners trivy will run (``_effective_scanners``, which before the
         first scan reads the operator's config file as the scan will)."""
         return "vuln" in self._effective_scanners()
-
-    def _refuse_flagged_response(self, response: Any, timeout: float | None) -> None:
-        """Raise for a run the subprocess layer flagged, before its file is read.
-
-        For a ``scan()`` override that runs one tool per target (``trivy-repo``):
-        the four readings ``ScannerPluginBase.scan`` makes for every template
-        scanner. A killed tool writes no results file, so the error would otherwise
-        be "No such file or directory" instead of the timeout; a tool that could
-        not start the same; a tool that ran while ASH could not record its output
-        (exit 0, a file that may be complete) is not graded on that file; a tool a
-        signal ASH did not send ended did not finish. The exit code alone does not
-        say any of this: a flagged response keeps the tool's own code, 0 included.
-        """
-        if not isinstance(response, dict):
-            return
-        name = self.__class__.__name__
-        if response.get("timed_out"):
-            limit = self._timeout_limit_token(timeout)
-            if self.scan_could_not_stop is not None:
-                ending = f"{COULD_NOT_STOP_ENDING}. It produced no"
-            else:
-                ending = f"{WAS_KILLED_ENDING}, so it produced no"
-            raise ScannerError(
-                text_without_values(
-                    f"{name} timed out after {limit}{ending} results file. Raise "
-                    f"scanners.{getattr(self.config, 'name', '<scanner>')}.options"
-                    ".scan_timeout if this target legitimately needs longer, or set "
-                    "it to null to leave this scanner unbounded.",
-                    self._values_to_redact(),
-                )
-            )
-        if response.get("spawn_failed"):
-            raise ScannerError(
-                f"{name} could not start its tool, so it produced no results file."
-            )
-        if response.get("post_run_error"):
-            raise ScannerError(
-                text_without_values(
-                    f"{name} ran, but ASH could not record the scanner's output: "
-                    f"{response.get('error')}",
-                    self._values_to_redact(),
-                )
-            )
-        if response.get("signaled"):
-            raise ScannerError(
-                text_without_values(
-                    f"{name} did not finish: {response.get('error')}",
-                    self._values_to_redact(),
-                )
-            )
 
     def _trivy_cache_dir(self) -> Path:
         """trivy's cache directory, resolved as trivy resolves it on this host.

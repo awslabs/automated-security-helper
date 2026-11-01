@@ -75,8 +75,6 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.subprocess_utils import (
-    COULD_NOT_STOP_ENDING,
-    WAS_KILLED_ENDING,
     find_executable,
     in_tree_refusal,
     spawn_run,
@@ -1669,7 +1667,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         self.targets_attempted = None
         self.targets_failed = 0
         # Check if the target directory is empty or doesn't exist
-        if _target_is_empty(target):
+        if self._target_is_empty(target):
             message = (
                 f"Target directory {target} is empty or doesn't exist. Skipping scan."
             )
@@ -2064,71 +2062,6 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             # this one an end before its start.
             self.end_time = datetime.now(timezone.utc)
             raise ScannerError(f"Ferret scan failed: {e}")
-
-    def _refuse_flagged_response(self, response: Any, timeout: float | None) -> None:
-        """Raise for a run the subprocess layer flagged, before its file is read.
-
-        The four readings ``ScannerPluginBase.scan`` makes for every template
-        scanner, which this override of ``scan()`` left out: a killed tool writes
-        no results file, so the error would otherwise be "No such file or
-        directory" instead of the timeout; a tool that could not start the same; a
-        tool that ran while ASH could not record its output (exit 0, a file that
-        may be complete) is not graded on that file; a tool a signal ASH did not
-        send ended did not finish. The exit code alone does not say any of this: a
-        flagged response keeps the tool's own code, 0 included.
-        """
-        if not isinstance(response, dict):
-            return
-        name = self.__class__.__name__
-        if response.get("timed_out"):
-            limit = self._timeout_limit_token(timeout)
-            if self.scan_could_not_stop is not None:
-                ending = f"{COULD_NOT_STOP_ENDING}. It produced no"
-            else:
-                ending = f"{WAS_KILLED_ENDING}, so it produced no"
-            raise ScannerError(
-                text_without_values(
-                    f"{name} timed out after {limit}{ending} results file. Raise "
-                    f"scanners.{getattr(self.config, 'name', '<scanner>')}.options"
-                    ".scan_timeout if this target legitimately needs longer, or set "
-                    "it to null to leave this scanner unbounded.",
-                    self._values_to_redact(),
-                )
-            )
-        if response.get("spawn_failed"):
-            raise ScannerError(
-                f"{name} could not start its tool, so it produced no results file."
-            )
-        if response.get("post_run_error"):
-            raise ScannerError(
-                text_without_values(
-                    f"{name} ran, but ASH could not record the scanner's output: "
-                    f"{response.get('error')}",
-                    self._values_to_redact(),
-                )
-            )
-        if response.get("signaled"):
-            raise ScannerError(
-                text_without_values(
-                    f"{name} did not finish: {response.get('error')}",
-                    self._values_to_redact(),
-                )
-            )
-
-
-def _target_is_empty(target: Path) -> bool:
-    """Whether ``target`` is missing, or a directory with nothing in it.
-
-    A target that is a file is not empty, and a directory that cannot be listed
-    is left to the tool: the probe used to raise ``PermissionError`` out of
-    ``scan()`` before its error handling began.
-    """
-    try:
-        if not target.exists():
-            return True
-        return target.is_dir() and not any(target.iterdir())
-    except OSError:
-        return False
 
 
 def _patterns_for_uncovered_links(

@@ -316,7 +316,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         self._reset_errors()
         global_ignore_paths = list(global_ignore_paths or [])
         # Check if the target directory is empty or doesn't exist
-        if _target_is_empty(target):
+        if self._target_is_empty(target):
             message = (
                 f"Target directory {target} is empty or doesn't exist. Skipping scan."
             )
@@ -573,18 +573,3 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         # the try body returns, so this line is reached from the except alone; a
         # future exit that falls through gets the generic text, not an unbound name.
         raise ScannerError(failure or "Trivy scan failed")
-
-
-def _target_is_empty(target: Path) -> bool:
-    """Whether ``target`` is missing, or a directory with nothing in it.
-
-    A target that is a file is not empty, and a directory that cannot be listed
-    is left to the tool: the probe used to raise ``NotADirectoryError`` or
-    ``PermissionError`` out of ``scan()`` before its error handling began.
-    """
-    try:
-        if not target.exists():
-            return True
-        return target.is_dir() and not any(target.iterdir())
-    except OSError:
-        return False
