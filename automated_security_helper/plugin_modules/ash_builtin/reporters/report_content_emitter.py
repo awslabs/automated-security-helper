@@ -86,6 +86,11 @@ _SCAN_TIME_FORMATS = (
 #: A trailing ``+HH:MM`` or ``-HH:MM`` UTC offset.
 _UTC_OFFSET = re.compile(r"([+-])(\d{2}):(\d{2})$")
 
+#: The place of each severity in a findings list, most severe first. A severity
+#: this table does not name sorts after all of them.
+_SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+_UNLISTED_SEVERITY_PLACE = len(_SEVERITY_ORDER)
+
 
 def _count_severity(counts: Dict[str, int], severity: Any) -> None:
     """Count one finding under its severity's bucket.
@@ -696,9 +701,8 @@ class ReportContentEmitter:
     @staticmethod
     def _severity_sort_key(vuln: FlatVulnerability) -> tuple:
         """Most severe first, then by file, line and rule."""
-        severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
         return (
-            severity_order.get(str(vuln.severity).upper(), 5),
+            _SEVERITY_ORDER.get(str(vuln.severity).upper(), _UNLISTED_SEVERITY_PLACE),
             vuln.file_path or "",
             vuln.line_start or 0,
             vuln.rule_id or "",
