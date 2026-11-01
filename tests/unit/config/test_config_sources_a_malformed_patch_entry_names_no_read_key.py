@@ -4,12 +4,11 @@
 """A malformed ``patch`` entry's refusal names no key read from the environment.
 
 A ``patch`` entry without a ``path`` is refused with the keys it holds. A key
-the file wrote as an environment reference is, by then, the value the
-variable holds, and the refusal listed it, so the value reached the message an
-operator, ash.log and an MCP client read. Such a key is now named as
-``<value>``, as every other refusal of an operation names what the file read.
-
-Red at the base: the refusal held the variable's value.
+the file wrote as an environment reference is named in the refusal as the file
+spelled it, ``${ASH_MALFORMED_PATCH_KEY}``, and never as the value the variable
+holds, so the value reaches no message an operator, ash.log or an MCP client
+read. This path renders the key's source spelling, not the ``<value>`` form
+other refusals use for what the file read.
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ def test_a_key_read_from_the_environment_is_not_quoted(tmp_path: Path) -> None:
 
     assert "must be a mapping with 'op' and 'path'" in message, message
     assert READ_VALUE not in message, message
-    assert "<value>" in message, message
+    assert "${ASH_MALFORMED_PATCH_KEY}" in message, message
 
 
 def test_a_key_the_file_wrote_itself_is_named(tmp_path: Path) -> None:
