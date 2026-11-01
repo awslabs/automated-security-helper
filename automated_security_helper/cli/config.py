@@ -2245,10 +2245,13 @@ def _apply_fixes(
     )
 
     if fixed_issues:
-        # One line and exit 1 for a target that cannot be written, as update
-        # reports it; the error escaped as a traceback.
+        # Bytes: fixed_content ends its lines with the file's own line break
+        # (ConfigLinter.fix), and text mode would turn the "\n" of a CRLF file
+        # into "\r\n" a second time on Windows. One line and exit 1 for a target
+        # that cannot be written, as update reports it; the error escaped as a
+        # traceback.
         try:
-            _write_config_text(config_path, fixed_content)
+            _write_config_bytes(config_path, fixed_content.encode("utf-8"))
         except OSError as e:
             secho(
                 shown_on_one_line(f"Error writing config file: {error_text(e)}"),

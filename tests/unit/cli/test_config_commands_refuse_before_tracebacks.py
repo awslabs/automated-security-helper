@@ -752,7 +752,7 @@ def test_lint_fix_reports_a_write_failure_on_one_line(tmp_path, monkeypatch):
     def refuse_write(*_args, **_kwargs):
         raise OSError("read-only file system")
 
-    monkeypatch.setattr(config_cli, "_write_config_text", refuse_write)
+    monkeypatch.setattr(config_cli, "_write_config_bytes", refuse_write)
 
     result = _invoke(["lint", "--config", str(config), "--fix", "-y"])
 
