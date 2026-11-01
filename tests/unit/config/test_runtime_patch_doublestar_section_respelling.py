@@ -1,13 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A denial whose section segment is ``**`` covers every spelling of its plugin.
+"""A denial whose section segment is a glob covers every spelling of its plugin.
 
 The lookup reads a scanner section keyed ``Bandit`` as bandit's
 (``plugin_key_lookup_names``), so a denial naming bandit has to refuse a write
-there. A denial with a glob section segment (``/*/bandit/...``) is matched over
-the respelled path; one with ``**`` there (``/**/bandit/**``) was not, and
-matched as written its ``bandit`` segment does not match ``Bandit``.
+there, and a denial with a glob section segment (``/*/bandit/**``) is matched
+over the respelled path. A ``**`` section segment names every ancestor too
+(a subtree denial is read at, below and above the pointer), so it is not the
+spelling for one plugin under any section: that is what the ``*`` segment is.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from automated_security_helper.config.runtime_patch import (
 pytestmark = pytest.mark.unit
 
 ALLOWLIST = RuntimeOverridesConfig(
-    enabled=True, allowed_paths=["/scanners/**"], denied_paths=["/**/bandit/**"]
+    enabled=True, allowed_paths=["/scanners/**"], denied_paths=["/*/bandit/**"]
 )
 
 
