@@ -2193,8 +2193,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # to redact and mark; head_and_tail makes the one cut, at the end.
             read_bound = _STDERR_EXCERPT_LIMIT * 32
             try:
+                # Whole lines only when the bound cut the read: it ended inside a
+                # line, and whatever the hook below hides, it cannot hide a
+                # string whose rest was never read, so the piece of it that ends
+                # the read would be quoted at the excerpt's tail. A log with no
+                # line break in its read leaves nothing to quote, and the
+                # excerpt is then the marker naming the log.
                 raw_log, read_cut = read_log_bounded(
-                    log_path, read_bound, values, trim_inputs
+                    log_path, read_bound, values, trim_inputs, whole_lines=True
                 )
             except Exception:  # noqa: BLE001 -- reading the log is best-effort
                 raw_log, read_cut = "", False
@@ -2203,15 +2209,6 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 # it; one the tool never wrote is told apart below.
                 log_unreadable = os.path.lexists(log_path)
             if raw_log or read_cut:
-                if read_cut:
-                    # The bound ended the read inside a line. Whatever the
-                    # hook below hides, it cannot hide a string whose rest
-                    # was never read, so the piece of it that ends the read
-                    # would be quoted at the excerpt's tail. Only whole
-                    # lines continue past this point; a log with no line
-                    # break in its read leaves nothing to quote, and the
-                    # excerpt is then the marker naming the log.
-                    raw_log = raw_log[: raw_log.rfind("\n") + 1]
                 try:
                     # The log is the tool's stderr as it wrote it, so the
                     # plugin's text-shaping hook (the one that hides what the

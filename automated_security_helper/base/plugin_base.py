@@ -579,6 +579,8 @@ def read_log_bounded(
     byte_bound: int,
     values: Iterable[str],
     inputs: Iterable[str] = (),
+    *,
+    whole_lines: bool = False,
 ) -> Tuple[str, bool]:
     """ONE bounded read for every excerpt of a tool's log.
 
@@ -588,6 +590,15 @@ def read_log_bounded(
     (:func:`trimmed_at_read_edge`), because bytes past the bound were never
     read and a value split at the edge leaves a piece whole-spelling
     redaction cannot match. Returns ``(text, cut)``.
+
+    ``whole_lines`` is for a caller that hands the text to a hook which hides
+    strings the trim does not know (a plugin's text-shaping hook): a string
+    that crosses the bound is not whole in the text the hook sees, so the hook
+    leaves the piece that was read. On a cut, the text then ends at its last
+    line break and the line the bound landed in is dropped; a cut read with no
+    line break in it is returned as ``""``, and the caller (which knows the
+    read was cut) names the log instead of quoting it. A read the bound did
+    not cut is returned whole, and the option changes nothing for it.
 
     Raises what the read raises: each caller owns its fallback (the carried
     log adds a could-not-be-read note, the scan-failure excerpt falls to its
@@ -604,6 +615,8 @@ def read_log_bounded(
     text = raw[:byte_bound].decode("utf-8", errors="replace")
     if cut:
         text = trimmed_at_read_edge(text, values, inputs)
+        if whole_lines:
+            text = text[: text.rfind("\n") + 1]
     return text, cut
 
 
