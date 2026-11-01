@@ -1282,7 +1282,13 @@ class TestAThreadThatLogsHoldsTheRunLogScope:
 
         def release_and_note(scope):
             real_release(scope)
-            if threading.get_ident() != loop_thread:
+            # Two holds are released off the loop (the scan's share, then the
+            # runner's own), so an off-loop release alone does not mean the
+            # scope closed; the event stands for the close itself.
+            if (
+                threading.get_ident() != loop_thread
+                and scope not in log_module._ACTIVE_RUN_LOG_SCOPES
+            ):
                 closed_by_the_thread.set()
 
         claim = workspace_module._WorkspaceScanClaim(None, counted=_Counted())

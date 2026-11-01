@@ -113,7 +113,9 @@ class TestOnlyTheVulnerabilityDatabaseCounts:
         (cache / "java-db").mkdir()
         stale = cache / "db" / "trivy.db"
         stale.write_bytes(b"\x00")
-        old = time.time() - 30 * 24 * 3600
+        # An hour past the boundary: a backward clock step on the runner between
+        # this read and the validator's own cannot pull the age under 30 days.
+        old = time.time() - 30 * 24 * 3600 - 3600
         os.utime(stale, (old, old))
         (cache / "java-db" / "trivy-java.db").write_bytes(b"\x00")
         monkeypatch.setenv("TRIVY_CACHE_DIR", str(cache))
