@@ -40,7 +40,7 @@ from automated_security_helper.config.ash_config import AshConfig
 
 pytestmark = pytest.mark.unit
 
-SESSION = "client-u35"
+SESSION = "client-one"
 CANARY = "ash-canary-x35c-qzvy-ignored"
 
 

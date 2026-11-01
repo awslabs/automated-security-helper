@@ -35,14 +35,14 @@ from automated_security_helper.utils.redacted_model import env_resolved_scalar
 pytestmark = pytest.mark.unit
 
 VARIABLE = "ASH_VAR_SAVE_TOKEN_NAME"
-VALUE = "u35-save-value-from-the-environment"
+VALUE = "one-save-value-from-the-environment"
 
 
 def _with_an_external_section(value) -> AshConfig:
     return AshConfig.model_validate(
         {
             "project_name": "save-demo",
-            "scanners": {"u35-external-tool": {"options": {"token_name": value}}},
+            "scanners": {"one-external-tool": {"options": {"token_name": value}}},
         }
     )
 
@@ -89,7 +89,7 @@ def test_an_external_sections_environment_value_is_written_as_text(tmp_path: Pat
     config = _with_an_external_section(env_resolved_scalar(VALUE, VARIABLE))
     # The premise: the unvalidated section still holds the resolver's marker.
     raw = config.get_plugin_config(
-        plugin_type="scanner", plugin_name="u35-external-tool"
+        plugin_type="scanner", plugin_name="one-external-tool"
     )
     assert type(raw["options"]["token_name"]).__name__ == "EnvResolvedScalar"
     target = tmp_path / "ash.yaml"
@@ -97,7 +97,7 @@ def test_an_external_sections_environment_value_is_written_as_text(tmp_path: Pat
     config.save(target, exclude_unset=True)
 
     loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert loaded["scanners"]["u35-external-tool"]["options"]["token_name"] == VALUE
+    assert loaded["scanners"]["one-external-tool"]["options"]["token_name"] == VALUE
 
 
 def test_a_value_left_as_text_when_saving_as_written_is_refused_by_its_variable(

@@ -27,7 +27,7 @@ from automated_security_helper.core.exceptions import ASHConfigSourceError
 
 pytestmark = pytest.mark.unit
 
-MARKER = "sekrit-value-u35"
+MARKER = "sekrit-value-one"
 
 
 def _config_sources_frames(traceback):
