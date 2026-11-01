@@ -13,7 +13,9 @@ decides that), or from a file an MCP client delivered (``untrusted_config``), th
 options come from the trusted base instead: the defaults, an operator config
 outside the tree, and ``--config-overrides``. Each section a reporter reads under
 any spelling ``AshConfig.get_plugin_config`` accepts is covered, except a section
-named exactly as another loaded reporter, which is that reporter's own. The values
+named exactly as another loaded reporter, which is that reporter's own. A reporter
+with no section of its own name, whose lookup would read such a section, is given
+an empty one first (``_pin_to_an_exact_section``). The values
 that are not honored are named in one warning. Under the MCP server the default
 ``denied_paths`` refuse a client's file that sets one of them, and the overrides
 ``resolve_config`` is handed there are the client's, so none is replayed.
@@ -711,7 +713,9 @@ def _confine(
         *whole_sections,
         *off_host,
     }
+    covered = tuple(dict.fromkeys([*destinations, *enabled_defaults, *whole_sections]))
     for target in targets:
+        _pin_to_an_exact_section(target, covered, loaded)
         found = _confine_options(
             target,
             trusted_config,
@@ -787,6 +791,40 @@ def _operator_view(config: "AshConfig") -> Optional["AshConfig"]:
         f"the operator view recorded on the config is a {type(view).__name__}, "
         "not an AshConfig"
     )
+
+
+def _pin_to_an_exact_section(
+    config: "AshConfig", plugins: Iterable[str], loaded: Collection[str] = ()
+) -> None:
+    """Give each of ``plugins`` a section of its own name when its lookup would
+    read the section of another loaded reporter.
+
+    A plugin's lookup takes the section named exactly as it, and only when there
+    is none a section whose name reduces to the same string. When that section is
+    named exactly as another reporter of *loaded*, ``_sections_of`` leaves it out,
+    since it is that reporter's own, and the plugin would be built from it with
+    nothing confined. An empty section named as the plugin is what its lookup
+    reads instead; the confinement then fills in the trusted base's values as it
+    does for any section of the plugin's own. The other reporter's section is not
+    touched.
+    """
+    from automated_security_helper.config.ash_config import (
+        plugin_key_lookup_names,
+        reduced_plugin_name,
+    )
+
+    extras = config.reporters.__pydantic_extra__
+    if extras is None:
+        return
+    for plugin in plugins:
+        if plugin in extras:
+            continue
+        reduced = reduced_plugin_name(plugin)
+        if any(
+            key != plugin and key in loaded and reduced in plugin_key_lookup_names(key)
+            for key in extras
+        ):
+            extras[plugin] = {}
 
 
 def _sections_of(

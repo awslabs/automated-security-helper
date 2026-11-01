@@ -97,6 +97,49 @@ def test_each_reporter_gets_its_own_trusted_region():
     )
 
 
+class _WideOptions(ReporterOptionsBase):
+    region: str = "default-region"
+    bucket: str = "default-bucket"
+
+
+class _WideConfig(ReporterPluginConfigBase):
+    name: Literal["sample-feed-reporter"] = "sample-feed-reporter"
+    options: _WideOptions = _WideOptions()
+
+
+class _WideReporter(ReporterPluginBase[_WideConfig]):
+    """Declares a bucket besides the region, which the shorter name's reporter
+    does not: the shorter name's confinement leaves the bucket as written."""
+
+    destination_options: ClassVar[Tuple[str, ...]] = ("region", "bucket")
+
+    def report(self, model):
+        return None
+
+
+def test_a_reporter_without_a_section_of_its_name_does_not_read_the_others():
+    """Both reporters are loaded and the file writes only the shorter name's
+    section, with a bucket that only the longer name's reporter declares. The
+    longer name's lookup falls through to that section when it has none of its
+    own, and the shorter name's confinement leaves the bucket as written, so the
+    longer name's reporter is given an empty section of its own name."""
+    config = AshConfig.model_validate(
+        {"reporters": {"sample-feed": {"options": {"bucket": "file-bucket"}}}}
+    )
+    config._trusted_reporter_base = AshConfig.model_validate({})
+    config._in_tree_config_files = (CONFIG_FILE,)
+
+    confine_declared_reporter_destinations(config, [_ShortReporter, _WideReporter])
+
+    wide_section = config.get_plugin_config("reporter", "sample-feed-reporter") or {}
+    assert (wide_section.get("options") or {}).get("bucket") != "file-bucket", (
+        wide_section
+    )
+    # Control: the shorter name's own section is not touched by the longer's.
+    short_section = config.get_plugin_config("reporter", "sample-feed")
+    assert short_section["options"]["bucket"] == "file-bucket", short_section
+
+
 def test_a_section_no_loaded_reporter_owns_is_still_confined():
     """Control: with only the shorter name loaded, the longer name's section is
     one its lookup could read and no other reporter reads it by name."""
