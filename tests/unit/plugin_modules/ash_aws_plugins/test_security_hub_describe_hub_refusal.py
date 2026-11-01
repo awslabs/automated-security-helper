@@ -22,7 +22,9 @@ import pytest
 
 from tests.unit.plugin_modules.ash_aws_plugins.security_hub_reporter_doubles import (
     caller_identity as _caller,
+    isolated_aws_environment,  # noqa: F401  (autouse fixture)
     make_reporter as _reporter,
+    no_retry_sleep,  # noqa: F401  (autouse fixture)
     stubbed_client as _stubbed_client,
     validate_with as _validate_with,
 )
