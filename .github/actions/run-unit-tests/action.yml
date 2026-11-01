@@ -196,13 +196,13 @@ runs:
     # read once and removed from the environment in pytest_configure, like
     # ASH_TEST_SHARD.
     #
-    # The value is 1 on the unit and integration legs, where the floor fails the leg. It
-    # is warn on the e2e legs: the floor prints its line with a warning prefix and the
-    # exit status is left alone. The e2e legs stay in warn mode until the hosted run
-    # shows every e2e leg executing a real test with the scanners installed, and then the
-    # expression below is replaced by 1. A leg whose every skip is a skipif condition
-    # that held is admitted in both modes: under 1 with a notice annotation, and in warn
-    # mode with a warning annotation, because an admitted leg executed no test either.
+    # The value is 1 on every leg, so the floor fails any tier leg that executed no
+    # test. The e2e legs ran in a temporary warn mode (the floor printed its line with
+    # a warning prefix and left the exit status alone) until the e2e scanner install
+    # landed in this action; with the tools installed, an e2e leg that still executes
+    # no test is a defect the floor has to fail, not annotate. A leg whose every skip
+    # is a skipif condition that held is admitted with a notice annotation, because an
+    # admitted leg executed no test either.
     #
     # --junit-xml names test-results/pytest.junit.xml; the report step's glob matches it.
     #
@@ -224,13 +224,10 @@ runs:
         ASH_REQUIRE_CDK_EXTRA: "1"
         PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
         ASH_TEST_SHARD: ${{ inputs.shard }}
-        # 1 on the unit and integration legs, warn on the e2e legs until the hosted run
-        # shows each of them executing a real test; see the comment block above. The
-        # warn mode is temporary. The expression becomes 1 when a run shows neither
-        # a "tier run executed no test" warning nor a "tier run admitted on skipif
-        # skips" warning on any e2e leg: either title on the run page means that leg
-        # still executed no test.
-        ASH_TEST_TIER_FLOOR: ${{ inputs.marker == 'e2e' && 'warn' || '1' }}
+        # 1 on every leg; see the comment block above. The e2e legs' temporary warn
+        # mode ended with the e2e scanner install: an e2e leg that executes no test
+        # now fails the leg, under the same floor as the other tiers.
+        ASH_TEST_TIER_FLOOR: "1"
         MARKER: ${{ inputs.marker }}
       run: |
         args=(-m "$MARKER" --junit-xml=test-results/pytest.junit.xml)

@@ -215,6 +215,22 @@ class TestTheUnitTestStepCannotPassBySkipping:
             self.test_it_turns_a_missing_extra_into_a_failure(REQUIRE_CDK_EXTRA_ENV)
         assert "The step sets: ['OTHER', True]" in str(raised.value)
 
+    @pytest.mark.unit
+    def test_the_executed_test_floor_is_strict_on_every_leg(self):
+        """``ASH_TEST_TIER_FLOOR`` is the literal ``"1"``: a tier leg that
+        selected tests and executed none of them fails on every tier, the e2e
+        legs included. The e2e legs' temporary warn mode was a per-marker
+        expression choosing ``'warn'``; an expression or ``warn`` here would
+        let an e2e leg read green while executing nothing."""
+        env = _step("Run PyTest").get("env") or {}
+        value = env.get("ASH_TEST_TIER_FLOOR")
+        assert str(value).strip() == "1", (
+            f"'Run PyTest' sets ASH_TEST_TIER_FLOOR to {value!r}: the "
+            "executed-test floor has to fail every leg that executed no "
+            "test, the e2e legs included, not warn. The step sets: "
+            f"{sorted(env, key=str)}"
+        )
+
 
 @pytest.mark.unit
 class TestTheCdkGuard:
