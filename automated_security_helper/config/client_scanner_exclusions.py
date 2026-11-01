@@ -2340,17 +2340,19 @@ def parse_trivy_ignore_file(
 
 _PLAIN_EXPIRY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 
-#: A YAML ``expired_at`` written as a string: a date, or an RFC 3339 timestamp
-#: (``T``, a time of day with seconds in range, then ``Z`` or a ``+hh:mm``
-#: offset in range). trivy decodes a quoted field as RFC 3339 text and fails
-#: the file on anything else, so a time of day that does not exist
+#: A YAML ``expired_at`` written as a string (quoted, or text PyYAML does not
+#: read as a timestamp): an RFC 3339 timestamp, ``T``, a time of day with
+#: seconds in range, then ``Z`` or a ``+hh:mm`` offset in range. trivy decodes
+#: a string field as RFC 3339 text and fails the file on anything else, so a
+#: date alone (``'2099-01-01'``), a time of day that does not exist
 #: (``T99:99``), one without seconds, a space in place of the ``T`` and a zone
 #: that is missing or out of range are text that is not a timestamp, as
-#: ``2099-01-01x`` is. The day itself is checked by ``date.fromisoformat``.
+#: ``2099-01-01x`` is. An unquoted date is a ``_BareTimestamp`` instead. The day
+#: itself is checked by ``date.fromisoformat``.
 _YAML_EXPIRY = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
-    r"(?:T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]+)?"
-    r"(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9]))?\Z"
+    r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]+)?"
+    r"(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])\Z"
 )
 
 
@@ -2463,8 +2465,9 @@ def _expired(value: Any, today: date, whole_field: bool = False) -> bool:
                     <= today
                 )
             # A string, or any other value, is cut to its first ten characters
-            # only once it is a date or a timestamp, so ``2099-01-01x`` is not
-            # read as a date either.
+            # only once it is an RFC 3339 timestamp, so ``2099-01-01x`` and a
+            # quoted ``'2099-01-01'`` are not read as a date either: trivy's
+            # decoder fails the file on both.
             if _YAML_EXPIRY.match(text) is None:
                 raise ValueError(text)
             text = text[:10]

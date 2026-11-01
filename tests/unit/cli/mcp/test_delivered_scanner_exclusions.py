@@ -22,6 +22,7 @@ import io
 import json
 import zipfile
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 from unittest.mock import patch
@@ -642,7 +643,10 @@ def test_a_delivered_yaml_trivy_ignore_file_keeps_its_paths(
                 {
                     "vulnerabilities": [
                         {"id": "CVE-2020-0001", "paths": ["vendor/**"]},
-                        {"id": "CVE-2020-0009", "expired_at": "2000-01-01"},
+                        # A date object, which safe_dump writes unquoted as a
+                        # real ignore file does; a quoted date is not a time
+                        # to trivy.
+                        {"id": "CVE-2020-0009", "expired_at": date(2000, 1, 1)},
                     ]
                 }
             ),
