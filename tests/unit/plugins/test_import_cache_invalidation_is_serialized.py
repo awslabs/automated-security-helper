@@ -127,9 +127,7 @@ def test_the_bare_stdlib_call_loses_the_planted_entry_race(racing_importer_cache
     raises ``KeyError`` with the planted key.
     """
     errors = _run_in_two_threads(importlib.invalidate_caches)
-    assert len(errors) == 1, (
-        f"expected exactly one losing thread, got {errors!r}"
-    )
+    assert len(errors) == 1, f"expected exactly one losing thread, got {errors!r}"
     assert isinstance(errors[0], KeyError)
     assert racing_importer_cache._planted_key in str(errors[0])
 
