@@ -18,8 +18,11 @@ with only its dependency probe and subprocess boundary faked:
 
 from __future__ import annotations
 
+import errno
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -99,7 +102,9 @@ def _deep_directory(root: Path, levels: int = 5, width: int = 60) -> Path:
 
     The chain is about 300 characters on top of the temporary directory. A Windows
     host without long path support refuses it, and that is the host's limit, not a
-    result for the name budget these tests pin, so the test is skipped there.
+    result for the name budget these tests pin, so the test is skipped there. On any
+    other host a failure to make the directory (a full disk, a permission) is an
+    error: a skip would leave the name budget unguarded without anyone seeing it.
     """
     directory = root
     for level in range(levels):
@@ -107,8 +112,48 @@ def _deep_directory(root: Path, levels: int = 5, width: int = 60) -> Path:
     try:
         directory.mkdir(parents=True)
     except OSError as error:
+        if sys.platform != "win32":
+            raise
         pytest.skip(f"this host cannot make a path this long: {type(error).__name__}")
     return directory
+
+
+def _mkdir_fails(monkeypatch, platform: str) -> None:
+    """``Path.mkdir`` fails with a full disk, on the host named ``platform``.
+
+    Only this module reads the platform as ``platform``: its own name for ``sys`` is
+    replaced, not the process's."""
+
+    def _full_disk(self, *args, **kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(Path, "mkdir", _full_disk)
+    monkeypatch.setattr(
+        sys.modules[__name__], "sys", SimpleNamespace(platform=platform)
+    )
+
+
+def test_a_directory_that_cannot_be_made_off_windows_is_an_error_not_a_skip(
+    tmp_path, monkeypatch
+):
+    """The deep tests skip for a Windows host that refuses a long path. A full disk
+    or a permission error elsewhere used to skip them too, which left the name
+    budget unguarded with nothing but a skip in the report."""
+    _mkdir_fails(monkeypatch, "linux")
+
+    with pytest.raises(OSError) as raised:
+        _deep_directory(tmp_path)
+
+    assert raised.value.errno == errno.ENOSPC, raised.value
+
+
+def test_control_a_long_path_a_windows_host_refuses_is_skipped(tmp_path, monkeypatch):
+    _mkdir_fails(monkeypatch, "win32")
+
+    with pytest.raises(pytest.skip.Exception) as raised:
+        _deep_directory(tmp_path)
+
+    assert "cannot make a path this long" in str(raised.value), raised.value
 
 
 def test_two_templates_that_differ_in_case_alone_get_directories_that_do_not(
