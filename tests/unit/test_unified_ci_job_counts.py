@@ -60,6 +60,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 UNIFIED_CI = WORKFLOWS / "ash-unified-ci.yml"
 IAC_DRIFT = WORKFLOWS / "ash-iac-drift.yml"
+INSTALL_METHODS = WORKFLOWS / "ash-install-methods.yml"
 
 RUN_UNIT_TESTS_USES = "./.github/actions/run-unit-tests"
 
@@ -644,3 +645,92 @@ class TestEnsureCache:
         assert unit_extras, "the unit-test sync installs no extras to compare"
         assert "--no-install-project" in ensure_syncs[0]
         assert "--frozen" in ensure_syncs[0]
+
+
+# --------------------------------------------------------------------------- #
+# ash-install-methods.yml carries the same pull-request cover
+# --------------------------------------------------------------------------- #
+
+IM_VALIDATE = _jobs(INSTALL_METHODS)["validate"]
+
+
+class TestInstallMethodsPullRequestCover:
+    """The install-methods workflow thins its pull-request matrix the way this one does.
+
+    One difference governs what its cover may drop: ash-install-methods.yml triggers on
+    pull_request and workflow_dispatch ONLY, so a dropped cell has no merge_group or
+    push run of its own to fall back on. A cell may leave the pull request only when
+    another surface still runs it -- the (os, python-version) cells of pip, pipx, uvx,
+    pre-commit and mcp are deliberately identical to install-validation's ``bundle``
+    steps, and homebrew's ubuntu-latest leg also runs there, all in full on the
+    merge-queue entry that gates main and on the push to main -- or when an equivalent
+    image keeps it (macos-15 for the macos-latest alias, the same Apple-silicon pool).
+    nix has no other surface anywhere, so it keeps a leg on every pool it covers.
+    """
+
+    def test_every_overlay_entry_has_the_one_shape(self):
+        """An exclude value with an expression is either the overlay or a defect.
+
+        Doubles as the positive control that the cover exists at all: a zero here is
+        the cover deleted, not a clean bill.
+        """
+        matrix = (IM_VALIDATE.get("strategy") or {}).get("matrix") or {}
+        overlay_entries = 0
+        for entry in matrix.get("exclude") or []:
+            for key, value in entry.items():
+                if isinstance(value, str) and "${{" in value:
+                    assert PULL_REQUEST_OVERLAY.match(value), (key, value)
+                    overlay_entries += 1
+        assert overlay_entries, "no overlay entry: the pull-request cover is gone"
+
+    def test_a_dispatch_runs_the_full_matrix(self):
+        """The overlay is void off a pull request; the static axes are the dispatch."""
+        assert (
+            _legs(IM_VALIDATE, "workflow_dispatch") == _legs(IM_VALIDATE, "push") == 116
+        )
+
+    def test_what_a_pull_request_runs_method_by_method(self):
+        by_method = Counter(c["method"] for c in _cells(IM_VALIDATE, "pull_request"))
+        assert by_method == {
+            "pip": 9,
+            "pipx": 9,
+            "pre-commit": 9,
+            "mcp": 9,
+            "uvx": 3,
+            "homebrew": 1,
+            "podman": 2,
+            "finch": 1,
+            "nerdctl": 1,
+            "nix": 3,
+        }, by_method
+        assert sum(by_method.values()) == 47
+
+    def test_a_pull_request_leaves_the_saturated_labels_except_sole_coverage(self):
+        cells = _cells(IM_VALIDATE, "pull_request")
+        on_ubuntu_latest = {c["method"] for c in cells if c["os"] == "ubuntu-latest"}
+        # The x86-pinned container runtimes (install-validation's exemption) and nix,
+        # whose x86_64 Linux leg exists on no other surface.
+        assert on_ubuntu_latest == {"podman", "finch", "nerdctl", "nix"}
+        assert not [c for c in cells if c["os"] == "macos-latest"]
+
+    def test_the_backstopped_methods_keep_the_cover_pools_and_pythons(self):
+        cells = _cells(IM_VALIDATE, "pull_request")
+        for method in ("pip", "pipx", "pre-commit", "mcp"):
+            mine = [c for c in cells if c["method"] == method]
+            assert {c["os"] for c in mine} == PR_COVER_IMAGES, method
+            assert {str(c["python-version"]) for c in mine} == PR_COVER_PYTHONS, method
+        assert {c["os"] for c in cells if c["method"] == "uvx"} == PR_COVER_IMAGES
+        assert [c["os"] for c in cells if c["method"] == "homebrew"] == ["macos-15"]
+
+    def test_a_method_with_no_other_surface_loses_only_the_macos_alias(self):
+        """podman, finch and nerdctl are not thinned; nix loses macos-latest alone."""
+        full = _cells(IM_VALIDATE, "push")
+        pr = _cells(IM_VALIDATE, "pull_request")
+        for method in ("podman", "finch", "nerdctl", "nix"):
+            lost = [c for c in full if c["method"] == method and c not in pr]
+            if method == "nix":
+                assert lost == [
+                    {"os": "macos-latest", "python-version": "3.12", "method": "nix"}
+                ], lost
+            else:
+                assert lost == [], (method, lost)

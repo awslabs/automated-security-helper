@@ -70,6 +70,59 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, nerdctl, mcp, nix]
         exclude:
+          # THE PULL REQUEST COVER (the note on ensure-cache in ash-unified-ci.yml).
+          #
+          # On a pull_request event each entry below evaluates to its quoted value and
+          # drops the combinations it matches; on workflow_dispatch, the only other
+          # event this workflow runs on, each evaluates to '' and matches nothing, so
+          # a dispatch runs the full matrix above. Why: the saturated hosted pools --
+          # ubuntu-latest and the macos-latest alias -- were the whole wall clock, the
+          # same measurement the cover note on ensure-cache records; this workflow's
+          # pull-request matrix put 49 of its 116 legs onto those two labels.
+          #
+          # This workflow has no merge_group or push trigger, so a cell dropped here
+          # has no later run of its own to fall back on. A cell may therefore leave
+          # the pull request only when another surface still runs it, or when an
+          # equivalent image keeps it:
+          #
+          # - pip, pipx, uvx, pre-commit and mcp leave ubuntu-latest, and Python 3.11
+          #   and 3.13 leave everywhere: their (os, python-version) cells are
+          #   deliberately identical to the `bundle` steps of ash-unified-ci.yml's
+          #   install-validation (the note on that job), which the merge_group entry
+          #   that gates main and the push to main run in full. homebrew leaves
+          #   ubuntu-latest on the same grounds (its ubuntu-latest leg runs there on
+          #   both of those events).
+          # - Every method leaves macos-latest; macos-15 is the same Apple silicon
+          #   pool (the cover note) and stays. The recorded cost, same as the unified
+          #   cover's: the pre-commit hooks run for real only on the windows-latest
+          #   cell of a pull request here, since the run-hooks expression keys on
+          #   ubuntu-latest and macos-latest.
+          # - The container runtimes -- podman, finch, nerdctl -- keep every leg, the
+          #   same exemption install-validation gives them: finch and nerdctl are
+          #   x86_64-pinned, so ubuntu-latest is their only image.
+          # - nix keeps ubuntu-latest, ubuntu-24.04-arm and macos-15: this workflow is
+          #   the only surface that runs nix anywhere, so its legs have no backstop;
+          #   it loses only the macos-latest alias, which macos-15 still covers.
+          #
+          # tests/unit/test_unified_ci_job_counts.py expands this overlay for both
+          # events and pins what a pull request keeps; the static axes above stay the
+          # truth tests/unit/test_ci_matrix_agreement.py and
+          # tests/unit/docs/test_page_claims.py read.
+          - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
+            method: pip
+          - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
+            method: pipx
+          - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
+            method: uvx
+          - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
+            method: pre-commit
+          - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
+            method: mcp
+          - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}
+            method: homebrew
+          - os: ${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}
+          - python-version: ${{ github.event_name == 'pull_request' && '3.11' || '' }}
+          - python-version: ${{ github.event_name == 'pull_request' && '3.13' || '' }}
           # Native Windows Nix cannot supply the toolchain: it has no fixed-output
           # derivations, which is the mechanism by which the scanners are fetched, and no
           # build sandbox. Windows users go through WSL2, covered by the Linux entries.
