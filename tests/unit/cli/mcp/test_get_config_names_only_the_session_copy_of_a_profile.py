@@ -13,14 +13,18 @@ never the file the operator registered with ``--profile``.
 
 A copy that is gone is not an error, and not the end of the binding either:
 ``resolve_session_config_path`` writes the bound profile's file again from the
-registered profile, and the delivered config resolves against that base, as it
-did before the copy went. (A profile that is no longer registered, or a
-workspace that cannot be written, is the session's own refusal; the tests at
-the end pin those.)
+registered profile, and that file is the trusted base the delivered config is
+checked against, as it was before the copy went. The base gives the delivered
+file its grants, not its values: a delivered file replaces the profile rather
+than overlaying it (``client_config_policy``, "Rejected alternatives"), so a
+field the file leaves out returns to its default. (A profile that is no longer
+registered, or a workspace that cannot be written, is the session's own
+refusal; the tests at the end pin those.)
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -28,6 +32,17 @@ import pytest
 pytestmark = pytest.mark.unit
 
 SESSION = "session-a"
+
+
+def _default_threshold() -> str:
+    from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+
+    return ASH_DEFAULT_SEVERITY_LEVEL
+
+
+#: The profile's threshold: never the default's, whatever the environment sets
+#: it to, so the answer cannot match both.
+_PROFILE_THRESHOLD = "LOW" if _default_threshold() == "CRITICAL" else "CRITICAL"
 
 
 @pytest.fixture(autouse=True)
@@ -61,11 +76,12 @@ def bound(tmp_path):
     operator_dir = tmp_path / "operator-profiles"
     operator_dir.mkdir()
     profile = operator_dir / "strict.ash.yaml"
-    # A field the delivered config does not set, so a result that carries it
-    # was resolved against the profile (written again when its copy is gone),
-    # not against the defaults.
+    # A field the delivered config does not set, and a value that is not the
+    # default's: the rewritten copy's text shows the profile was written again,
+    # and the answer shows which of the two the delivered config resolved to.
     profile.write_text(
-        "project_name: strict-profile\nglobal_settings:\n  severity_threshold: CRITICAL\n",
+        "project_name: strict-profile\n"
+        f"global_settings:\n  severity_threshold: {_PROFILE_THRESHOLD}\n",
         encoding="utf-8",
     )
     set_profile_registry(register_profiles([f"strict={profile}"]))
@@ -120,7 +136,13 @@ def test_a_bound_profile_copy_that_is_gone_is_written_again(bound):
     """The copy is gone while the profile stays registered: the call writes it
     again and resolves the delivered config against it. ``project_name`` alone
     could not tell a rewritten base from the defaults (the delivered file sets
-    it either way); the profile's threshold can."""
+    it either way); the profile's threshold can.
+
+    The answer's threshold is pinned to the default itself, not to "anything
+    but the profile's". This test used to expect the profile's threshold; that
+    expectation failed on a correct answer, because a delivered file replaces
+    the profile, and the decision recorded for it is that the answer is the
+    default (the value ``ASH_DEFAULT_SEVERITY_LEVEL`` gives the field)."""
     _, session_copy, delivered = bound
     session_copy.unlink()
 
@@ -128,7 +150,13 @@ def test_a_bound_profile_copy_that_is_gone_is_written_again(bound):
 
     assert result.get("project_name") == "delivered", result
     assert session_copy.is_file(), "the bound profile's copy was not written again"
-    assert result["global_settings"]["severity_threshold"] == "CRITICAL", result
+    assert re.search(
+        rf"severity_threshold:\s*['\"]?{_PROFILE_THRESHOLD}",
+        session_copy.read_text("utf-8"),
+    ), "the rewritten copy does not hold the profile's threshold"
+    assert result["global_settings"]["severity_threshold"] == _default_threshold(), (
+        result
+    )
 
 
 def test_a_bound_profile_that_cannot_be_written_again_is_the_sessions_refusal(
