@@ -680,6 +680,43 @@ def test_a_double_star_between_directories_draws_no_crossing_warning(
     assert repr("src/**/tests") not in told[0]
 
 
+def test_a_double_star_between_directories_warns_that_adjacent_ones_are_kept(
+    tmp_path, caplog
+):
+    """``src/**/tests`` is passed to bandit as ``src/*/tests``, which needs a
+    directory between ``src`` and ``tests``: ``src/a/tests/x.py`` is skipped and
+    ``src/tests/y.py`` is not, though ``**`` in ASH's own globs also matches no
+    directory. The crossing warning was the only notice that touched this
+    entry and the exemption for a middle ``**`` removed it, so the entry is told
+    once, with the spelling that covers the adjacent case. A trailing ``**`` and
+    a plain path have no such gap and draw nothing."""
+    ini = tmp_path / ".bandit"
+    ini.write_text("[bandit]\nexclude = src/**/tests,docs/**,lib\n", encoding="utf-8")
+    source = _tree(
+        tmp_path,
+        ["app.py", "src/a/tests/x.py", "src/tests/y.py", "docs/z.py", "lib/w.py"],
+    )
+    scanner = _scanner(
+        source, tmp_path, BanditScannerConfigOptions(config_file=str(ini))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+        scanner._execute_scan(source, "source", [])
+
+    root = source.as_posix()
+    entries = _entries(argv)
+    assert _covers(entries, f"{root}/src/a/tests/x.py"), entries
+    assert not _covers(entries, f"{root}/src/tests/y.py"), entries
+    messages = [r.getMessage() for r in caplog.records]
+    told = [m for m in messages if "'**' between directories" in m]
+    assert len(told) == 1, messages
+    assert repr("src/**/tests") in told[0]
+    assert repr("src/tests") in told[0]
+    assert repr("docs/**") not in told[0]
+    assert repr("lib") not in told[0]
+
+
 def test_a_star_slash_entry_and_a_plain_path_draw_no_crossing_warning(
     tmp_path, caplog
 ):

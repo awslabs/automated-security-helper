@@ -1559,11 +1559,30 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             # Every component holding a '*' or '?' crosses a '/' in bandit's
             # fnmatch, a middle one too (src/*/tests skips src/a/b/tests/x.py).
             # A bare '*' or '**' as the first or the last component is the usual
-            # idiom (*/tests/*) and draws no warning, nor does a bare '**' in
-            # a middle one (src/**/tests): crossing directories is what its
-            # author asked for. A bare '*' in the middle (src/*/tests) reads as
-            # one directory level and still draws it.
+            # idiom (*/tests/*) and draws no crossing warning, nor does a bare
+            # '**' in a middle one (src/**/tests): crossing directories is what
+            # its author asked for. A bare '*' in the middle (src/*/tests) reads
+            # as one directory level and still draws it. A middle '**' reads as
+            # '*' in the globs, which leaves a directory between its neighbours:
+            # src/**/tests skips src/a/tests/x.py and not src/tests/x.py, and
+            # the entry draws its own warning for that.
             parts = spelled.rstrip("/").split("/")
+            adjacent = [
+                part
+                for index, part in enumerate(parts)
+                if not (part == "**" and 0 < index < len(parts) - 1)
+            ]
+            if len(adjacent) < len(parts):
+                self._warn_about_ini_once(
+                    entry,
+                    "adjacent",
+                    f"The .bandit exclude entry {entry!r} has a '**' between "
+                    "directories, which is passed to bandit as '*' and so needs "
+                    "at least one directory between its neighbours. It does not "
+                    "skip what the entry would with the '**' left out "
+                    f"({'/'.join(adjacent)!r}); add that as an entry of its own "
+                    "to skip it too.",
+                )
             if any(
                 ("*" in part or "?" in part)
                 and part != "**"
