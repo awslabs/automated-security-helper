@@ -589,9 +589,11 @@ class ConvertPhase(EnginePhase):
         instance whose own enabled or Python-only check raised, by ``id``
         (redacted by the filter, and redacted again when the row is written, with
         the home directory written as ``~``). Such an instance was dropped without any question
-        answered, so its row is a failure that says which check raised, and it
-        says nothing about the converter's tool unless a dependency answer was
-        recorded for it.
+        answered, so its row carries a failure that says which check raised, and
+        it says nothing about the converter's tool unless a dependency answer
+        was recorded for it. A Python-only answer recorded for it still decides
+        ``excluded`` (``_unproductive_reason``'s rule); the raise only skips
+        asking again.
 
         ``python_only_answers`` is the one Python-only answer each converter the
         config left on gave on a Python-only run, by ``id``. An instance it does
@@ -618,17 +620,17 @@ class ConvertPhase(EnginePhase):
             enabled = section_enabled(getattr(plugin_instance, "config", None))
             declined_by_python_only = False
             raised = filter_failures.get(id(plugin_instance))
-            # A converter whose check raised is a failure, whatever else was
-            # recorded for it: it is not asked again, and an answer recorded
-            # before (or after) the raise does not turn the failure into an
-            # exclusion, which the completeness gate and the unproductive-run
-            # reason skip without reading the failure.
-            if python_based_plugins_only and enabled and raised is None:
+            # A recorded Python-only answer decides, as ``_unproductive_reason``'s
+            # docstring says: a converter the run declined is excluded whatever
+            # else its row carries. A recorded raise only skips asking
+            # ``is_python_only()`` again; the failure text stays on the row
+            # either way (read below from ``filter_failures``).
+            if python_based_plugins_only and enabled:
                 if id(plugin_instance) in python_only_answers:
                     declined_by_python_only = not python_only_answers[
                         id(plugin_instance)
                     ]
-                else:
+                elif raised is None:
                     try:
                         declined_by_python_only = not plugin_instance.is_python_only()
                     except Exception:

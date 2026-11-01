@@ -1109,6 +1109,10 @@ class _TreeScope:
     # which refusals happened while it was looking (recording_in_tree_refusals).
     events: List[str] = field(default_factory=list)
     warned: set = field(default_factory=set)
+    # The transient sandbox answers this scan keeps, by probe cache key
+    # (scope.resolve_backend). Shared with nested scopes the way ``warned`` is,
+    # and dropped with the scan.
+    probe_answers: dict = field(default_factory=dict)
 
     @property
     def key(self) -> Tuple[Tuple[str, ...], bool]:
@@ -1145,6 +1149,7 @@ def scanning_tree(root: "str | os.PathLike[str]") -> Iterator[_TreeScope]:
             refusals=parent.refusals,
             events=parent.events,
             warned=parent.warned,
+            probe_answers=parent.probe_answers,
         )
     token = _TREE_SCOPE.set(scope)
     try:

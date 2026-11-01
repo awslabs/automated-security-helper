@@ -24,7 +24,6 @@ import platform
 import shlex
 import threading
 import time
-import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -188,7 +187,7 @@ class TransientProbeFailure(SandboxUnavailable):
     backend sets the fact where the exception was caught
     (``probe_was_transient``); nothing here reads the reason's wording. Under auto, a fallback chosen because the
     preferred backend met such a failure is remembered for the scan that chose
-    it (``_ScanAnswers``), so a scan never switches backend partway. The
+    it (``_scan_probe_answers``), so a scan never switches backend partway. The
     refusal itself is remembered for ``_TRANSIENT_RETRY_SECONDS`` (within a
     scan, for that scan only), so a condition that passes does not refuse every
     later scanner of a long scan; a missing program or kernel feature, and a
@@ -200,7 +199,7 @@ class TransientProbeFailure(SandboxUnavailable):
 #: any answer reached through one is kept when no scan is running (a probe made
 #: outside any scan: ``ash dependencies``, a plugin probe before the scan opens).
 #: Inside a scan a working fallback is kept for the scan, not for a time
-#: (``_ScanAnswers``): a scan asks once per scanner, serialized by
+#: (``_scan_probe_answers``): a scan asks once per scanner, serialized by
 #: ``_probe_lock``, and scanners start as the pool frees up, so a clock window
 #: that ended mid-scan gave its later scanners another backend than its first. A
 #: refusal has no backend to stay consistent with, so it is probed again once the
@@ -243,45 +242,22 @@ class _HeldAnswer(NamedTuple):
         return self.until is not None and now >= self.until
 
 
-class _ScanAnswers:
-    """The transient answers one scan keeps, by cache key.
+def _scan_probe_answers() -> Optional[Dict[Any, _HeldAnswer]]:
+    """The transient answers the active scan keeps, by cache key; None outside one.
 
     Two scans of one tree can run in one process (an MCP server), and they share
     a cache key, so one slot per key made each evict the other's answer: each
     read the other's as not its own and probed again, holding ``_probe_lock``
     for a probe timeout, and an answer one scan reached could replace another
-    scan's mid-scan. The answers of a scan are kept apart, in an object that
-    lives in the scan's own notes set (``_scan_notes``) and goes with it, so the
-    process keeps no reference to a finished scan.
+    scan's mid-scan. The answers of a scan are kept apart, in the scan's own
+    tree scope (``_TreeScope.probe_answers``, shared with nested scopes the way
+    its notes set is), and dropped with it, so the process keeps no reference to
+    a finished scan.
     """
+    from automated_security_helper.utils.subprocess_utils import _TREE_SCOPE
 
-    __slots__ = ("answers", "__weakref__")
-
-    def __init__(self) -> None:
-        self.answers: Dict[Any, _HeldAnswer] = {}
-
-
-#: The answers object of each live scan, by the id of the scan's notes set. Weak
-#: values: the scan's notes set is the only strong reference to its object, so an
-#: entry disappears with the scan.
-_scan_answers: "weakref.WeakValueDictionary[int, _ScanAnswers]" = (
-    weakref.WeakValueDictionary()
-)
-
-
-def _answers_of(scan: Set[Any]) -> _ScanAnswers:
-    """The answers object kept in ``scan``'s notes set, made on the first call.
-
-    Looked up by the set's id, and accepted only when the set holds the object
-    itself: an id left by a finished scan and reused by a new set finds an
-    object the new set does not hold, and gets a new one.
-    """
-    state = _scan_answers.get(id(scan))
-    if state is None or state not in scan:
-        state = _ScanAnswers()
-        scan.add(state)
-        _scan_answers[id(scan)] = state
-    return state
+    tree = _TREE_SCOPE.get()
+    return tree.probe_answers if tree is not None else None
 
 
 def _scan_notes() -> Optional[Set[Any]]:
@@ -334,7 +310,6 @@ def clear_backend_cache() -> None:
     with _probe_lock:
         _resolved.clear()
         _transient_holds.clear()
-        _scan_answers.clear()
     # The set has a lock of its own (see above); nothing takes it while holding
     # the probe lock, so taking it after the probe state is cleared cannot invert.
     with _withheld_lock:
@@ -381,7 +356,7 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     ask at the same moment and each probe starts a process. An answer reached
     through a transient condition (``_probe_failure_is_transient``: the refusal
     itself, or under auto a fallback taken because the preferred backend met one)
-    is kept for the scan that reached it (``_ScanAnswers``, one per scan, so two
+    is kept for the scan that reached it (``_scan_probe_answers``, one per scan, so two
     scans of one tree do not replace each other's) and probed again by the next
     scan. Within the scan a fallback backend is kept to its end, so a scan never
     switches backend partway, and a refusal for ``_TRANSIENT_RETRY_SECONDS``;
@@ -396,10 +371,9 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     cache_key = (mode_value, tree_scope_key())
     with _probe_lock:
         now = time.monotonic()
-        scan = _scan_notes()
         # A transient answer this scan reached comes first: the scan keeps it
         # whatever another scan of the same tree has been told since.
-        held = _answers_of(scan).answers if scan is not None else None
+        held = _scan_probe_answers()
         entry = held.get(cache_key) if held is not None else None
         if held is not None and entry is not None and entry.lapsed(now):
             # A refusal the scan has kept for the window, and the window has
@@ -617,101 +591,113 @@ def scanner_sandbox_scope(
     # Registered before the scanner runs anything, so even ASH's first write
     # there (a worker's request file) is guarded, and released with the scope.
     results_root = register_writable_root(results_dir)
-    network_scanners = getattr(settings, "network_scanners", None)
-    if (
-        requirements.network
-        and requirements.network_requires_grant
-        and network_scanners is None
-        and not is_offline_mode()
-    ):
-        _warn_withheld_once(
-            name,
-            "network",
-            f"{name}'s settings ask for a network, and those settings can come from "
-            "the scanned repository, so the sandbox does not grant it. To allow it, "
-            f"add {name} to sandbox.network_scanners with --config-overrides or a "
-            "config file outside every git checkout and the scanned directory.",
-        )
-    elif (
-        requirements.network
-        and network_scanners is not None
-        and name not in network_scanners
-        and not is_offline_mode()
-    ):
-        # The operator's list replaces every declared need, so this is their
-        # choice; said once at INFO rather than withheld in silence.
-        _warn_withheld_once(
-            name,
-            "network_list",
-            f"{name} declares a network need, and sandbox.network_scanners does "
-            "not name it, so the sandbox withholds the network from it.",
-            level=logging.INFO,
-        )
-    read_path_scanners = list(getattr(settings, "read_path_scanners", []) or [])
-    env_scanners = list(getattr(settings, "env_scanners", []) or [])
-    # A list, even an empty one (nothing beyond the fixed baseline), replaces the
-    # shipped default; settings that carry no list leave the default in place.
-    configured_environment = getattr(settings, "environment", None)
-    environment = (
-        list(configured_environment)
-        if isinstance(configured_environment, (list, tuple))
-        else None
-    )
-    # read_paths alone: cache_paths that follow a scanner's options are never
-    # mounted, granted or not (the policy gives such a tool a private cache), so
-    # the read_path_scanners advice would not change what a cache-only scanner
-    # gets.
-    for withheld, key in (
-        (
-            requirements.read_paths
-            and requirements.read_paths_require_grant
-            and name not in read_path_scanners,
-            "read_path_scanners",
-        ),
-        (
-            (requirements.env_prefixes or requirements.env_names)
-            and requirements.env_requires_grant
-            and name not in env_scanners,
-            "env_scanners",
-        ),
-    ):
-        if withheld:
+    try:
+        # Everything between the registration above and release_with_holder
+        # below runs under this guard: a raise anywhere in the span (a settings
+        # read, a logging call, the SandboxScope construction) would otherwise
+        # leave the root registered, the shape the registration loop in
+        # _spawn's plan build already releases the same way.
+        network_scanners = getattr(settings, "network_scanners", None)
+        if (
+            requirements.network
+            and requirements.network_requires_grant
+            and network_scanners is None
+            and not is_offline_mode()
+        ):
             _warn_withheld_once(
                 name,
-                key,
-                f"{name}'s settings ask for "
-                f"{'host paths' if key == 'read_path_scanners' else 'environment variables'}"
-                " the default policy does not allow, and those settings can come "
-                "from the scanned repository, so the sandbox does not grant them. "
-                f"To allow them, add {name} to sandbox.{key} with "
-                "--config-overrides or a config file outside every git checkout "
-                "and the scanned directory.",
+                "network",
+                f"{name}'s settings ask for a network, and those settings can come from "
+                "the scanned repository, so the sandbox does not grant it. To allow it, "
+                f"add {name} to sandbox.network_scanners with --config-overrides or a "
+                "config file outside every git checkout and the scanned directory.",
             )
-    scope = SandboxScope(
-        backend=backend,
-        scanner_name=name,
-        requirements=requirements,
-        source_dir=Path(context.source_dir),
-        output_dir=Path(context.output_dir),
-        results_dir=Path(results_dir),
-        scan_target=Path(scan_target) if scan_target else None,
-        offline=is_offline_mode(),
-        network_scanners=list(network_scanners)
-        if network_scanners is not None
-        else None,
-        extra_read_paths=list(getattr(settings, "extra_read_paths", []) or []),
-        network_limit=list(settings.network_limit)
-        if settings.network_limit is not None
-        else None,
-        read_path_scanners=read_path_scanners,
-        env_scanners=env_scanners,
-        environment=environment,
-        environment_values=environment_values,
-        environment_values_unread=environment_values_unread,
-        class_scope=isinstance(scanner_plugin, type),
-        plugin_inputs=plugin_inputs,
-        command=command,
-    )
+        elif (
+            requirements.network
+            and network_scanners is not None
+            and name not in network_scanners
+            and not is_offline_mode()
+        ):
+            # The operator's list replaces every declared need, so this is their
+            # choice; said once at INFO rather than withheld in silence.
+            _warn_withheld_once(
+                name,
+                "network_list",
+                f"{name} declares a network need, and sandbox.network_scanners does "
+                "not name it, so the sandbox withholds the network from it.",
+                level=logging.INFO,
+            )
+        read_path_scanners = list(getattr(settings, "read_path_scanners", []) or [])
+        env_scanners = list(getattr(settings, "env_scanners", []) or [])
+        # A list, even an empty one (nothing beyond the fixed baseline), replaces the
+        # shipped default; settings that carry no list leave the default in place.
+        configured_environment = getattr(settings, "environment", None)
+        environment = (
+            list(configured_environment)
+            if isinstance(configured_environment, (list, tuple))
+            else None
+        )
+        # read_paths alone: cache_paths that follow a scanner's options are never
+        # mounted, granted or not (the policy gives such a tool a private cache), so
+        # the read_path_scanners advice would not change what a cache-only scanner
+        # gets.
+        for withheld, key in (
+            (
+                requirements.read_paths
+                and requirements.read_paths_require_grant
+                and name not in read_path_scanners,
+                "read_path_scanners",
+            ),
+            (
+                (requirements.env_prefixes or requirements.env_names)
+                and requirements.env_requires_grant
+                and name not in env_scanners,
+                "env_scanners",
+            ),
+        ):
+            if withheld:
+                _warn_withheld_once(
+                    name,
+                    key,
+                    f"{name}'s settings ask for "
+                    f"{'host paths' if key == 'read_path_scanners' else 'environment variables'}"
+                    " the default policy does not allow, and those settings can come "
+                    "from the scanned repository, so the sandbox does not grant them. "
+                    f"To allow them, add {name} to sandbox.{key} with "
+                    "--config-overrides or a config file outside every git checkout "
+                    "and the scanned directory.",
+                )
+        scope = SandboxScope(
+            backend=backend,
+            scanner_name=name,
+            requirements=requirements,
+            source_dir=Path(context.source_dir),
+            output_dir=Path(context.output_dir),
+            results_dir=Path(results_dir),
+            scan_target=Path(scan_target) if scan_target else None,
+            offline=is_offline_mode(),
+            network_scanners=list(network_scanners)
+            if network_scanners is not None
+            else None,
+            extra_read_paths=list(getattr(settings, "extra_read_paths", []) or []),
+            network_limit=list(settings.network_limit)
+            if settings.network_limit is not None
+            else None,
+            read_path_scanners=read_path_scanners,
+            env_scanners=env_scanners,
+            environment=environment,
+            environment_values=environment_values,
+            environment_values_unread=environment_values_unread,
+            class_scope=isinstance(scanner_plugin, type),
+            plugin_inputs=plugin_inputs,
+            command=command,
+        )
+    except BaseException:
+        # The root registered above, released here because the release step
+        # below never ran: without this every raise in the span left it
+        # registered for the process.
+        release_writable_root(results_root)
+        raise
     # Released when the scope is collected, or when the scan ends (run_roots).
     release_with_holder(scope, results_root)
     return scope
@@ -735,9 +721,10 @@ def _warn_withheld_once(
     scopes at the same moment, and ``_probe_lock`` is held across a backend
     probe, which can run to the probe timeout. ``level`` is INFO for the
     operator's own choice (the network list that omits
-    the scanner) and WARNING, the default, for a withheld grant; the note goes
-    through the logger's own ``info`` or ``warning`` method, the methods the
-    tests of these notes read.
+    the scanner) and WARNING, the default, for a withheld grant; an INFO or
+    WARNING note goes through the logger's own ``info`` or ``warning`` method,
+    the methods the tests of these notes read, and any other level through
+    ``log``.
     """
     from automated_security_helper.utils.subprocess_utils import tree_scope_key
 
@@ -754,9 +741,9 @@ def _warn_withheld_once(
         ASH_LOGGER.warning(message)
     else:
         # A level the notes do not use is written at the level given. It is not
-        # refused: the callers sit in the scope build, after the results root is
-        # registered and before it is released, so a raise here would leave the
-        # root registered and fail the scanner over a log line.
+        # refused: the callers sit in the scope build's register-to-release
+        # span, whose guard would release the root, but a raise here would
+        # still fail the scanner over a log line.
         ASH_LOGGER.log(level, message)
 
 

@@ -113,8 +113,10 @@ class TestTheFilterFailureTextIsShownLikeEveryOtherFailureText:
         assert "RuntimeError" in row.failure
 
 
-class TestAConverterWhoseFilterCheckRaisedIsAFailureNotAnExclusion:
-    def test_a_recorded_python_only_answer_does_not_exclude_it(self, plugin_context):
+class TestARecordedPythonOnlyAnswerDecidesTheExclusion:
+    def test_a_recorded_python_only_answer_excludes_it_and_the_failure_stays(
+        self, plugin_context
+    ):
         instance = _RaisedConverter(context=plugin_context)
 
         rows = _record(
@@ -126,10 +128,14 @@ class TestAConverterWhoseFilterCheckRaisedIsAFailureNotAnExclusion:
         )
 
         row = rows["filter-raised-converter"]
-        # Red at the base: the recorded answer made the row ``excluded``, and the
-        # completeness gate and the unproductive-run reason skip excluded rows
-        # first, so the failure was dropped without a word.
-        assert row.excluded is False
+        # Red at the base: the raise was read first, so the recorded answer no
+        # longer decided and the row read ``excluded`` False, which made the
+        # completeness gate count a converter the run deliberately left out.
+        # The recorded answer decides (``_unproductive_reason``'s rule: an
+        # excluded row wins whatever else it carries); the raise only skips
+        # asking ``is_python_only()`` again, and the failure text stays on the
+        # row for a reader of the results file.
+        assert row.excluded is True
         assert row.failure and "RuntimeError" in row.failure
 
 
