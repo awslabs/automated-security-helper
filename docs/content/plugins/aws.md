@@ -10,10 +10,11 @@ they use.
 | `s3` | An S3 bucket | The scan summary, the resolved ASH configuration, and the SARIF report with the findings |
 | `cloudwatch-logs` | A CloudWatch Logs log group | The scan summary and the resolved ASH configuration |
 | `bedrock-summary-reporter` | Amazon Bedrock | Finding messages, file paths, and severity counts |
-| `aws-security-hub` | AWS Security Hub | Nothing yet: the reporter checks its connection and writes a placeholder file ([details](#aws-security-hub)) |
+| `aws-security-hub` | AWS Security Hub | Every finding in the scan results, one record each: the rule, scanner, file and line, severity, the finding message with ASH's secret masking applied and code blocks removed, and the justification of a suppressed finding ([details](#aws-security-hub)) |
 
 The CloudWatch Logs reporter does not send individual findings. The S3 reporter sends them
-only as the SARIF report inside its object. To collect findings centrally in another form,
+only as the SARIF report inside its object. The Security Hub reporter sends each finding as
+its own record. To collect findings centrally in another form,
 copy a findings file such as `reports/ash.ocsf.json` or `reports/ash.sarif` to your storage
 yourself ([Export reports](../how-to/export-reports.md)).
 
@@ -153,8 +154,12 @@ Of `aws-security-hub`:
 | `aws_region` | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `null` |
 | `aws_profile` | from `AWS_PROFILE`, else `null` |
 | `account_id` | `null` |
+| `findings_scope` | `null` |
+| `archive_resolved_findings` | `false` |
 
 With no `account_id`, the Security Hub reporter uses the account of its credentials.
+`findings_scope` is required: the reporter refuses to import until the operator sets it
+([what it names](#aws-security-hub)).
 Turning a reporter on, `enabled`, is the operator's too ([above](#enable)).
 
 When a config file inside any git checkout or the scanned directory sets one of these
@@ -181,7 +186,7 @@ use `--offline`, or a network that blocks the metadata service, if that matters.
 
 The S3, CloudWatch Logs, and Bedrock reporters first call `sts:GetCallerIdentity`, which
 needs no IAM permission. The Security Hub reporter calls it in its pre-flight check when
-`account_id` is not set.
+`account_id` is not set, and always before it imports.
 
 ### `s3` {#s3}
 
@@ -274,17 +279,42 @@ reporters:
     enabled: true
     options:
       aws_region: us-east-1
+      findings_scope: my-repository
 ```
 
-This version of the reporter does not import findings yet. Its pre-flight check needs
-the Region, calls `DescribeHub`, and calls `sts:GetCallerIdentity` when `account_id` is not
-set; when one fails, ASH logs an error and the reporter does not run. When the checks pass,
-`report()` logs a warning that the Security Hub import is not implemented, sends nothing to
-Security Hub, and writes a placeholder file, `reports/ash.aws-security-hub.asff.json`,
-that holds a message and the number of findings in the results. In a workspace scan the
-reporter runs once per project.
+The reporter imports every finding in the scan results into Security Hub with
+`BatchImportFindings`, in requests of at most 100 findings, under the account's default
+product ARN. A finding carries the rule, the scanner, the file and line, ASH's severity,
+and the result message with ASH's secret masking applied and its code blocks removed. No
+code snippet is sent. A suppressed finding is sent too, with the record state `ARCHIVED`
+and its suppression justification, so a finding imported before it was suppressed is
+archived by the next scan.
 
-IAM: `securityhub:DescribeHub`.
+Security Hub keys a finding on its `Id`. ASH derives the `Id` from `findings_scope` and the
+finding's identity, so a re-scan updates a finding and does not add a second one.
+`findings_scope` names the findings this scan owns, and it must be unique among the
+repositories that import into the same account and Region. It is required: without it the
+reporter refuses to import, before it calls AWS. Like the Region and the account, it is the
+operator's to set.
+
+With `archive_resolved_findings: true`, a finding that an earlier scan of the same scope
+imported and this scan no longer reports is imported again as `ARCHIVED`, for the scanners
+that lost no target in this run. The option is off by default, because a finding a scan did
+not report is not always fixed.
+
+The pre-flight check of a scan needs the Region, calls `DescribeHub`, and calls
+`sts:GetCallerIdentity` when `account_id` is not set; when one fails, ASH logs an error and
+the reporter does not run. A refusal of `DescribeHub` for lack of permission only logs a
+warning, and the import reports its own refusal. Before it imports, the reporter calls
+`sts:GetCallerIdentity` whether or not `account_id` is set, and refuses to import when
+`account_id` names any other account than the credentials'. If Security Hub does not import every finding, the reporter fails
+with the counts and the reason, and `ash report` exits non-zero. The file the reporter
+writes, `reports/ash.aws-security-hub.asff.json`, is a receipt with the number of findings
+imported and archived, plus the findings as they were sent. In a workspace scan the reporter
+runs once per project.
+
+IAM: `securityhub:BatchImportFindings`, `securityhub:DescribeHub` for the pre-flight check,
+and `securityhub:GetFindings` when `archive_resolved_findings` is on.
 
 ## Rendering a reporter from saved results {#ash-report}
 
