@@ -130,6 +130,7 @@ def _scan_resolution(target: Path, config_path: str | None) -> Any:
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.config import resolve_config as rc
     from automated_security_helper.core import orchestrator
+    from automated_security_helper.core.resource_management import scan_management
     from automated_security_helper.core.resource_management.scan_registry import (
         ScanRegistry,
     )
@@ -147,14 +148,22 @@ def _scan_resolution(target: Path, config_path: str | None) -> Any:
 
     output = target / ".ash" / "ash_output"
     output.mkdir(parents=True, exist_ok=True)
+    # Registered as the SESSION's scan, on the one registry every reader of
+    # this run sees: the scan's own snapshot of the bound profile is the
+    # server's only when "the scan id is one this session's registry holds"
+    # (cli/mcp/sandbox._is_a_live_scan_copy_of_this_sessions_file, which asks
+    # scan_management.session_holds_scan). A scan registered without the
+    # session, or on a registry only mcp_tools reads, makes the snapshot read
+    # as client-delivered and the trusted base collapse to the defaults.
     registry = ScanRegistry()
     scan_id = registry.register_scan(
-        directory_path=str(target), output_directory=str(output)
+        directory_path=str(target), output_directory=str(output), session_id=SESSION
     )
     with (
         patch.object(ras, "_setup_logger", lambda opts: _QuietLogger()),
         patch.object(orchestrator, "resolve_config", recording),
         patch.object(mcp_tools, "get_scan_registry", return_value=registry),
+        patch.object(scan_management, "get_scan_registry", return_value=registry),
     ):
         asyncio.run(
             mcp_tools._run_scan_async(
