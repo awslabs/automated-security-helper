@@ -93,9 +93,6 @@ from automated_security_helper.config.ash_config import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
-    from automated_security_helper.config.environment_record import (
-        EnvironmentReference,
-    )
     from automated_security_helper.config.operator_only_options import (
         RepositorySettings,
     )
@@ -753,7 +750,6 @@ def client_file_denials(
     all_delivered: bool = False,
     names: Optional[Mapping[Path, Sequence[Path]]] = None,
     moved_exclusions: bool = False,
-    references: Sequence["EnvironmentReference"] = (),
 ) -> List[Tuple[Path, List[Any]]]:
     """(file, denials) for each client-delivered file in ``documents`` that sets a denied field.
 
@@ -775,11 +771,6 @@ def client_file_denials(
     (``client_scanner_exclusions.moved_exclusion_pointers``,
     ``runtime_patch.config_document_denials``). A caller whose files are not
     resolved that way leaves it off and refuses them as written.
-
-    ``references`` are the chain's environment references
-    (``AshConfig._environment_references``); each document is checked with the
-    ones its own file wrote (``runtime_patch.config_document_denials``'s
-    ``own_references``).
 
     Raises:
         ASHConfigPolicyUnreadableError: A file is delivered and ``rules`` are
@@ -823,7 +814,6 @@ def client_file_denials(
                 moved=moved_exclusion_pointers(document) if moved_exclusions else (),
                 inert=INERT_PATHS,
                 repeats_trusted=session_config_was_patched(path),
-                own_references=_own_references(references, path),
             )
             if not _writes_plugin_default(document, denial, rules.base)
             and not _writes_a_tightening(document, denial)
@@ -843,23 +833,6 @@ def _as_reached(path: Path, names: Optional[Mapping[Path, Sequence[Path]]]) -> P
     """The path a chain file was first reached by, which a message names."""
     reached = (names or {}).get(path)
     return Path(reached[0]) if reached else path
-
-
-def _own_references(
-    references: Sequence["EnvironmentReference"], path: Path
-) -> Tuple["EnvironmentReference", ...]:
-    """The members of ``references`` whose ``origin`` names ``path``'s file.
-
-    ``origin[0]`` is the file that wrote the reference, resolved
-    (``environment_record.EnvironmentReference``); ``path`` is the ``documents``
-    key, resolved for the compare.
-    """
-    return tuple(
-        reference
-        for reference in references
-        if reference.origin is not None
-        and Path(reference.origin[0]).resolve() == Path(path).resolve()
-    )
 
 
 def _with_own_patch(document: Any, base: AshConfig) -> Any:
@@ -1256,7 +1229,6 @@ def apply_client_config_rules(
     all_delivered: bool = False,
     client_overrides: bool = False,
     names: Optional[Mapping[Path, Sequence[Path]]] = None,
-    references: Optional[Sequence["EnvironmentReference"]] = None,
 ) -> AshConfig:
     """``config``, checked for denied fields its client-delivered files set.
 
@@ -1316,11 +1288,6 @@ def apply_client_config_rules(
         all_delivered=all_delivered,
         names=names,
         moved_exclusions=True,
-        references=tuple(
-            references
-            if references is not None
-            else (getattr(config, "_environment_references", None) or ())
-        ),
     )
     if found and DENIED_FIELD_HANDLING == "refuse":
         from automated_security_helper.core.exceptions import (
