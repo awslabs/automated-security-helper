@@ -26,6 +26,7 @@ a host without the tools would, so nothing starts here.
 from __future__ import annotations
 
 import logging
+import platform
 from pathlib import Path
 
 import pytest
@@ -228,6 +229,9 @@ def test_a_scanner_left_at_its_default_notes_the_file_only_where_it_is_enabled(
     (source / ".semgrepignore").write_text("tests/\n", encoding="utf-8")
     warnings = test_plugin_context.config._resolution_warnings
     config = SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=False))
+    # The default itself: if semgrep gains a Windows build and the default changes,
+    # this is the line that fails, and the docstring above is updated with it.
+    assert config.enabled is (platform.system().lower() != "windows")
 
     SemgrepScanner(context=test_plugin_context, config=config)
 
