@@ -434,8 +434,7 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_baseline_as_written(
     monkeypatch.chdir(tmp_path)
     # A baseline_file a repository config writes is left out at load
     # (config/tool_config_trust.py), so the value is handed over directly and
-    # declared the context's, which the scanner refuses as a derived product
-    # that is not the operator's own.
+    # declared the context's.
     ash_config = resolve_config(source_dir=source)
     ctx = PluginContext(
         source_dir=source, output_dir=output, work_dir=work, config=ash_config
@@ -444,6 +443,20 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_baseline_as_written(
         options=module.DetectSecretsScannerConfigOptions(
             baseline_file=derived.as_posix()
         )
+    )
+    # The refusal under test fires only for a value that is not the operator's
+    # own (config/path_trust.py, refused_derived_product returns False on
+    # operator_written). resolve_config over a tree with no config file
+    # returns on the wholly-operator early path before any operator view is
+    # recorded, and with no view recorded operator_wrote_value reads every
+    # value as the operator's, so the fixture has to establish the
+    # non-operator provenance directly, as the environment-reference sibling
+    # below does. The patch precedes construction because the scanner decides
+    # the refusal in _process_config_options, which runs at construction.
+    from automated_security_helper.config import operator_only_options
+
+    monkeypatch.setattr(
+        operator_only_options, "operator_wrote_value", lambda *_a, **_k: False
     )
     scanner = module.DetectSecretsScanner(
         context=ctx, config=config, config_from_context=True
