@@ -301,14 +301,18 @@ class TestAFileTheSameInstructionRunsIsCommands:
             "RUN cat > /tmp/i.sh <<'EOF' && find . -name x -exec sh /tmp/i.sh {} \\;",
             "RUN cat > /tmp/i.sh <<'EOF' && parallel sh /tmp/i.sh ::: jq git",
             # The run is the arm of a case, which opens with a pattern, no keyword.
-            "RUN cat > /tmp/i.sh <<'EOF' && "
-            'case "$(dpkg --print-architecture)" in amd64) sh /tmp/i.sh jq;; esac',
+            (
+                "RUN cat > /tmp/i.sh <<'EOF' && "
+                'case "$(dpkg --print-architecture)" in amd64) sh /tmp/i.sh jq;; esac'
+            ),
             # The file is run under the name another command gave it.
             "RUN cat > /tmp/i.sh <<'EOF' && mv /tmp/i.sh /bin/inst && inst jq",
             "RUN cat > /tmp/i.sh <<'EOF' && cp /tmp/i.sh /bin/inst && inst jq",
             "RUN cat > /tmp/i.sh <<'EOF' && ln -s /tmp/i.sh /bin/inst && inst jq",
-            "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh | tee /bin/inst >/dev/null "
-            "&& inst jq",
+            (
+                "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh | tee /bin/inst >/dev/null "
+                "&& inst jq"
+            ),
         ],
     )
     def test_a_positional_parameter_in_a_script_the_run_executes_is_refused(
@@ -521,27 +525,37 @@ class TestAFileALaterInstructionRunsIsCommands:
             # The script is run by a second script that a later RUN runs.
             "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/i.sh jq\nEOF2\nRUN sh /tmp/j.sh",
             # And that one by a third, and the file is moved on the way.
-            "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/i.sh jq\nEOF2\n"
-            "RUN cat > /tmp/k.sh <<'EOF3'\nsh /tmp/j.sh\nEOF3\n"
-            "RUN sh /tmp/k.sh",
-            "RUN cat > /tmp/j.sh <<'EOF2'\ninst jq\nEOF2\n"
-            "RUN mv /tmp/i.sh /bin/inst\nRUN sh /tmp/j.sh",
+            (
+                "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/i.sh jq\nEOF2\n"
+                "RUN cat > /tmp/k.sh <<'EOF3'\nsh /tmp/j.sh\nEOF3\n"
+                "RUN sh /tmp/k.sh"
+            ),
+            (
+                "RUN cat > /tmp/j.sh <<'EOF2'\ninst jq\nEOF2\n"
+                "RUN mv /tmp/i.sh /bin/inst\nRUN sh /tmp/j.sh"
+            ),
             # A later stage copies the file under another name, and a RUN runs that.
             "COPY --from=core /tmp/i.sh /bin/inst\nRUN inst jq",
             "COPY --from=core --chmod=755 /tmp/i.sh /bin/inst\nRUN inst jq",
             'COPY --from=core ["/tmp/i.sh", "/bin/inst"]\nRUN inst jq',
             "copy --from=core /tmp/i.sh /bin/inst\nRUN inst jq",
-            "COPY --from=core /tmp/i.sh \\\n    # a comment inside the instruction\n"
-            "    /bin/inst\nRUN inst jq",
+            (
+                "COPY --from=core /tmp/i.sh \\\n    # a comment inside the instruction\n"
+                "    /bin/inst\nRUN inst jq"
+            ),
             "COPY --from=core /tmp/i.sh /bin/inst\nRUN sh /bin/inst jq",
             # A directory keeps the file's name; a copy then a move; two copies.
             "COPY --from=core /tmp/i.sh /bin/\nRUN sh /bin/i.sh jq",
             "COPY --from=core /tmp/i.sh /bin/a\nRUN mv /bin/a /bin/b\nRUN b jq",
-            "COPY --from=core /tmp/i.sh /bin/a\n"
-            "COPY --from=core /bin/a /bin/b\nRUN b jq",
+            (
+                "COPY --from=core /tmp/i.sh /bin/a\n"
+                "COPY --from=core /bin/a /bin/b\nRUN b jq"
+            ),
             # The renamed file is run by a second script that a later RUN runs.
-            "RUN cat > /tmp/j.sh <<'EOF2'\ninst jq\nEOF2\n"
-            "COPY --from=core /tmp/i.sh /bin/inst\nRUN sh /tmp/j.sh",
+            (
+                "RUN cat > /tmp/j.sh <<'EOF2'\ninst jq\nEOF2\n"
+                "COPY --from=core /tmp/i.sh /bin/inst\nRUN sh /tmp/j.sh"
+            ),
         ],
     )
     def test_a_positional_parameter_in_a_script_a_later_run_executes_is_refused(
