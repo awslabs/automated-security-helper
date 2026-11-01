@@ -276,6 +276,21 @@ def _carries_skip_flag(arguments: List[str]) -> bool:
     )
 
 
+def _ash_could_add_skip_token(
+    global_ignore_paths: Optional[List[IgnorePathWithReason]],
+) -> bool:
+    """Whether ASH could have given trivy a skip token for an ignored path.
+
+    ``trivy_skip_dirs`` and ``trivy_skip_files`` build one only for an ignored path
+    and only where ``os.sep`` is ``/``; they return nothing otherwise, as for a
+    run with no ignored path. The links leaving the tree are no reason to ask: trivy
+    skips every link itself, so a token for one is a second guard and leaving it out
+    drops no finding. The answer needs no walk of the tree, which is the point of
+    asking before one.
+    """
+    return bool(global_ignore_paths) and os.sep == "/"
+
+
 def _skip_tokens_size(arguments: List[str]) -> int:
     """``_skip_token_size`` summed over the ``--skip-dirs`` and ``--skip-files``
     tokens among ``arguments``."""
@@ -1154,11 +1169,18 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         would have been blamed. The argv is the same either way: no skip token of
         ASH's, and trivy reads its own list from the variable or the config file.
         trivy reads the ignored paths and ASH drops their findings after the scan.
+
+        The warning is said only where ASH could have built a token for an ignored
+        path (``_ash_could_add_skip_token``): with no ignored path, or where
+        ``os.sep`` is not ``/`` and no such token is ever built, nothing is left
+        out and there is nothing to report.
         """
         if not operator_skips.defer_to_trivy:
             return self._link_skip_args(
                 target, global_ignore_paths, reserved=operator_skips.reserved
             )
+        if not _ash_could_add_skip_token(global_ignore_paths):
+            return []
         refusal = f"operator-skip:deferred:{target_type}:{Path(target).as_posix()}"
         if refusal not in self._warned_inputs:
             self._warned_inputs.add(refusal)

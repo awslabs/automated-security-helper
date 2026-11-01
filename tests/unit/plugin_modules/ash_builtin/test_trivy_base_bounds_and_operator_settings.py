@@ -65,6 +65,7 @@ from automated_security_helper.base import scanner_plugin
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     _trivy_scanner_base as trivy_base,
 )
@@ -2042,6 +2043,11 @@ _SHORT_ENTRY = "aaaa"
 _LONG_ENTRY = "x" * 40
 _SHORT_ENTRY_TOKEN = len(f"--skip-dirs={_SHORT_ENTRY}") + 1
 
+#: A global ignore path, so ASH could have built a skip token for it. The two walks
+#: are replaced in the tests that use this, so only that the list is not empty
+#: matters to them.
+_IGNORED_PATHS = [IgnorePathWithReason(path="ignored/*", reason="test")]
+
 
 def _leave_room_for_one_ignored_file_after_the_short_entry(monkeypatch) -> None:
     """Forty ignored files and a budget that holds the short entry, not the long
@@ -2079,7 +2085,7 @@ def test_an_operator_list_that_does_not_fit_is_left_to_trivy_not_cut_by_the_left
 
     with logging_patch:
         argv, _, _ = scanner._execute_scan(
-            Path(scanner.context.source_dir), "source", []
+            Path(scanner.context.source_dir), "source", _IGNORED_PATHS
         )
 
     assert _skip_tokens(argv) == [], argv
@@ -2129,7 +2135,7 @@ def test_an_operator_list_left_to_trivy_does_not_walk_the_ignored_paths(
 
     with logging_patch:
         argv, _, _ = scanner._execute_scan(
-            Path(scanner.context.source_dir), "source", []
+            Path(scanner.context.source_dir), "source", _IGNORED_PATHS
         )
 
     assert walks == [], walks
@@ -2149,6 +2155,90 @@ def test_control_a_list_that_fits_still_walks_the_ignored_paths(tmp_path, monkey
 
     assert set(walks) == {"dirs", "files"}, walks
     assert f"--skip-dirs={_SHORT_ENTRY}" in argv, argv
+
+
+def test_control_an_operator_list_left_to_trivy_says_nothing_when_no_path_is_ignored(
+    tmp_path, monkeypatch
+):
+    """The deferral warning says trivy reads the ignored paths and ASH drops their
+    findings. With no ignored path ASH had no token to add, nothing is left out and
+    there is nothing to report, the rule the control test for a line-break entry
+    below pins for a scan with no skip flag of ASH's."""
+    scanner = _builtin_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": f"{_SHORT_ENTRY},{_LONG_ENTRY}"}
+    _leave_room_for_one_ignored_file_after_the_short_entry(monkeypatch)
+    walks = _count_the_ignored_path_walks(monkeypatch)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        argv, _, _ = scanner._execute_scan(
+            Path(scanner.context.source_dir), "source", []
+        )
+
+    assert walks == [], walks
+    assert _skip_tokens(argv) == [], argv
+    assert not [m for m in messages if "ignored path(s)" in m], messages
+    assert not _operator_warnings(messages), messages
+
+
+def test_an_operator_list_left_to_trivy_says_nothing_where_ash_builds_no_skip_token(
+    tmp_path, monkeypatch
+):
+    """Where ``os.sep`` is not ``/`` the helpers that make ASH's tokens answer
+    nothing, so ignored paths or not, no token was ever to be added and the
+    deferral warning would report a loss that cannot happen. With ``/`` the same
+    call, the control below the assertion, says it once."""
+    scanner = _builtin_scanner(tmp_path)
+    walks = _count_the_ignored_path_walks(monkeypatch)
+    plan = trivy_base._OperatorSkips([], 2, ("TRIVY_SKIP_DIRS", 2), [], 1_000, True)
+    target = Path(scanner.context.source_dir)
+    messages, logging_patch = _logged(scanner)
+
+    with logging_patch:
+        monkeypatch.setattr(link_exclusions.os, "sep", "\\")
+        tokens = scanner._ashs_skip_args(
+            target, _IGNORED_PATHS, plan, target_type="source"
+        )
+        assert tokens == [], tokens
+        assert not messages, messages
+
+        monkeypatch.setattr(link_exclusions.os, "sep", "/")
+        tokens = scanner._ashs_skip_args(
+            target, _IGNORED_PATHS, plan, target_type="source"
+        )
+
+    assert tokens == [], tokens
+    assert walks == [], walks
+    (deferred_warning,) = [m for m in messages if "ignored path(s)" in m]
+    _assert_the_warning_blames_the_operators_list(deferred_warning)
+
+
+def test_the_deferral_warning_is_said_once_for_each_scan_of_the_scanner(
+    tmp_path, monkeypatch
+):
+    """One scanner object scans the source and then the converted copy, and each
+    scan that leaves the operator's list to trivy says so once, naming itself: a
+    repeat of a scan says nothing, and the first scan's line does not stand for the
+    second."""
+    scanner = _builtin_scanner(tmp_path)
+    scanner.extra_env = {"TRIVY_SKIP_DIRS": f"{_SHORT_ENTRY},{_LONG_ENTRY}"}
+    _leave_room_for_one_ignored_file_after_the_short_entry(monkeypatch)
+    messages, logging_patch = _logged(scanner)
+
+    with (
+        logging_patch,
+        patch.object(TrivyScannerBase, "_output_dir_skip_args", return_value=[]),
+    ):
+        for target_type in ("source", "converted"):
+            for _ in range(2):
+                scanner._execute_scan(
+                    Path(scanner.context.source_dir), target_type, _IGNORED_PATHS
+                )
+
+    first, second = [m for m in messages if "ignored path(s)" in m]
+    adds_none = "ASH adds no --skip-dirs or --skip-files for the "
+    assert f"{adds_none}source scan" in first, first
+    assert f"{adds_none}converted scan" in second, second
 
 
 def test_trivy_repo_also_leaves_an_operator_list_that_does_not_fit_to_trivy(
@@ -2183,7 +2273,11 @@ def test_trivy_repo_also_leaves_an_operator_list_that_does_not_fit_to_trivy(
         logging_patch,
     ):
         double.side_effect = _run
-        scanner.scan(target=Path(scanner.context.source_dir), target_type="source")
+        scanner.scan(
+            target=Path(scanner.context.source_dir),
+            target_type="source",
+            global_ignore_paths=_IGNORED_PATHS,
+        )
 
     assert argv, "the double was not run"
     assert _skip_tokens(argv) == [], argv
