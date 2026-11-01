@@ -2470,9 +2470,10 @@ def _remove_if_still_stale(
     between two workspaces) skips this removal and is reported through the
     process-wide latch (:func:`_warn_guard_refused_once`). A guard another server
     holds for the whole bounded wait raises :class:`_PresenceLockHeld`, which the
-    sweep takes as the end of its pass; an end of this session that was refused
-    while the sweep held its change is still completed, off the sweep
-    (:func:`_complete_a_pending_end_off_the_sweep`).
+    sweep takes as the end of its pass, whether the guard was met by the
+    removal or by the end of a session this call released; an end of this
+    session that was refused while the sweep held its change is still
+    completed, off the sweep (:func:`_complete_a_pending_end_off_the_sweep`).
     """
 
     try:
@@ -2495,11 +2496,14 @@ def _remove_if_still_stale(
     # thread of its own, as above. The bound is on the request that takes the
     # guard for the removal, not on an earlier question about it: a server that
     # took the guard between the two would hold this sweep's thread for as long
-    # as it kept it.
+    # as it kept it. The raise goes on to the sweep, as the one above does: a
+    # guard held for the whole bound ends the pass, so the next stale session
+    # does not wait out a bound of its own (k sessions would take k bounds).
     try:
         finish_ended_session(session_id, guard_wait=_SWEEP_LOCK_WAIT_SECONDS)
     except _PresenceLockHeld:
         _complete_a_pending_end_off_the_sweep(session_id)
+        raise
     return False
 
 
