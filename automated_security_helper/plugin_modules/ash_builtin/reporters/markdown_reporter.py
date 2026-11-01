@@ -643,20 +643,19 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             left_out = emitter.get_policy_not_gating_findings(
                 options.max_detailed_findings
             )
-            if left_out:
-                parts.extend(
-                    [
-                        "## Not gating (workspace policy)\n",
-                        (
-                            f"Showing {len(left_out)} of "
-                            f"{summary['policy_not_gating']} findings reported and "
-                            "left out of the outcome because "
-                            "`policy_scanners_gate` is off.\n"
-                        ),
-                    ]
-                )
-                parts.extend(_findings_table(left_out))
-                parts.append("")
+            # A limit of 0 lists none of them, yet the summary still counts
+            # them, so the section and the pointer follow the count.
+            if summary["policy_not_gating"]:
+                parts.append("## Not gating (workspace policy)\n")
+                if left_out:
+                    parts.append(
+                        f"Showing {len(left_out)} of "
+                        f"{summary['policy_not_gating']} findings reported and "
+                        "left out of the outcome because "
+                        "`policy_scanners_gate` is off.\n"
+                    )
+                    parts.extend(_findings_table(left_out))
+                    parts.append("")
                 # The table stops at the same limit as the list above, so
                 # say where the rest is, as that list does.
                 if len(left_out) < summary["policy_not_gating"]:

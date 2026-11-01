@@ -564,6 +564,66 @@ class TestTheCutListPointsToTheRest:
             assert '"Not gating" scope' not in out, out
             assert "'Not gating' scope" not in out, out
 
+    def test_the_markdown_report_at_a_limit_of_zero_still_says_where_they_are(
+        self, tmp_path, test_plugin_context
+    ):
+        """RED at the base: a limit of 0 lists none of them, and both the section
+        and the pointer sat inside ``if left_out:``, so the summary counted three
+        findings and the report named none and said nowhere to find them."""
+        reporter = MarkdownReporter(
+            context=test_plugin_context,
+            config=MarkdownReporterConfig(
+                options=MarkdownReporterConfigOptions(max_detailed_findings=0)
+            ),
+        )
+
+        out = reporter.report(_three_left_out(tmp_path))
+
+        assert "3 not gating (workspace policy)" in out, out
+        section = _markdown_not_gating_section(out)
+        assert (
+            "> Showing 0 of 3 findings left out of the outcome. Open the HTML report "
+            'and choose the "Not gating" scope to review the full set.'
+        ) in section, section
+        # Nothing is listed, so no table and no row of one.
+        assert "| Severity |" not in section, section
+        assert "POLICY-" not in section, section
+
+    def test_the_text_report_at_a_limit_of_zero_still_says_where_they_are(
+        self, tmp_path, test_plugin_context
+    ):
+        """RED at the base, as for the Markdown report: the heading and the note
+        were both inside ``if left_out:``."""
+        out = _text_reporter(test_plugin_context, 0).report(_three_left_out(tmp_path))
+
+        assert "3 not gating (workspace policy)" in out, out
+        section = _text_not_gating_section(out)
+        assert (
+            "Note: Showing 0 of 3 findings left out of the outcome. The HTML report "
+            "lists the rest under its 'Not gating' scope."
+        ) in section, section
+        assert "Severity" not in section, section
+        assert "POLICY-" not in section, section
+
+    def test_a_limit_of_zero_adds_nothing_when_none_is_left_out(
+        self, gating_model, test_plugin_context
+    ):
+        """The control: with no finding left out a limit of 0 writes neither the
+        section nor a pointer, as at any other limit."""
+        markdown = MarkdownReporter(
+            context=test_plugin_context,
+            config=MarkdownReporterConfig(
+                options=MarkdownReporterConfigOptions(max_detailed_findings=0)
+            ),
+        ).report(gating_model)
+        text = _text_reporter(test_plugin_context, 0).report(gating_model)
+
+        assert "Not gating (workspace policy)" not in markdown, markdown
+        assert "NOT GATING (WORKSPACE POLICY)" not in text, text
+        for out in (markdown, text):
+            assert '"Not gating" scope' not in out, out
+            assert "'Not gating' scope" not in out, out
+
 
 def test_the_not_gating_rows_are_the_overview_rows_of_the_same_findings(tmp_path):
     """The two lists share one row shape and one severity order (a pin, green

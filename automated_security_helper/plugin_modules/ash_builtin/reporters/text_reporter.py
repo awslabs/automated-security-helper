@@ -442,15 +442,18 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             left_out = emitter.get_policy_not_gating_findings(
                 self.config.options.max_detailed_findings
             )
-            if left_out:
+            # A limit of 0 lists none of them, yet the summary still counts
+            # them, so the section and the note follow the count.
+            if summary["policy_not_gating"]:
                 text_parts.append("NOT GATING (WORKSPACE POLICY)")
                 text_parts.append("-----------------------------")
-                text_parts.append(
-                    f"Showing {len(left_out)} of {summary['policy_not_gating']} "
-                    "findings reported and left out of the outcome because "
-                    "policy_scanners_gate is off."
-                )
-                text_parts.extend(_findings_table(left_out))
+                if left_out:
+                    text_parts.append(
+                        f"Showing {len(left_out)} of {summary['policy_not_gating']} "
+                        "findings reported and left out of the outcome because "
+                        "policy_scanners_gate is off."
+                    )
+                    text_parts.extend(_findings_table(left_out))
                 # The list stops at the same limit as the one above, so say
                 # where the rest is, as that list does.
                 if len(left_out) < summary["policy_not_gating"]:
