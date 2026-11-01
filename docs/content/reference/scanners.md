@@ -28,8 +28,8 @@ ASH ships 19 scanners. The built-in ones are loaded on every scan. The others ar
 | [`gitleaks`](#gitleaks) | SECRETS | yes | built in | `gitleaks` | no |
 | [`grype`](#grype) | SCA | yes | built in | `grype` | no |
 | [`npm-audit`](#npm-audit) | SCA | yes | built in | `npm` | no |
-| [`opengrep`](#opengrep) | SAST | depends on the platform | built in | `opengrep` | no |
-| [`semgrep`](#semgrep) | SAST | depends on the platform | built in | `semgrep` | yes |
+| [`opengrep`](#opengrep) | SAST | yes on Linux and macOS; no on Windows | built in | `opengrep` | no |
+| [`semgrep`](#semgrep) | SAST | yes on Linux and macOS; no on Windows | built in | `semgrep` | yes |
 | [`syft`](#syft) | SBOM | yes | built in | `syft` | no |
 | [`trivy`](#trivy) | SCA | yes | built in | `trivy` | no |
 | [`zizmor`](#zizmor) | SAST | yes | built in | `zizmor` | yes |
@@ -337,7 +337,7 @@ Options, under `scanners.npm-audit.options`. An option not listed here refuses t
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner.OpengrepScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: depends on the platform
+- Enabled by default: yes on Linux and macOS; no on Windows
 - Tool type: SAST
 - Command: `opengrep`
 - Install: pinned, checksum-verified release of `opengrep` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
@@ -367,7 +367,7 @@ Options, under `scanners.opengrep.options`. An option not listed here refuses th
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner.SemgrepScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: depends on the platform
+- Enabled by default: yes on Linux and macOS; no on Windows
 - Tool type: SAST
 - Command: `semgrep`
 - Install: `uv tool install` on first use (`semgrep>=1.125.0,<2.0.0`)
