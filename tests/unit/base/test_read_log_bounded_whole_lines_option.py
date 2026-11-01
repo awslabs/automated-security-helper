@@ -30,7 +30,8 @@ BOUND = len(WHOLE_LINES) + 10
 
 def _log(tmp_path, text: str):
     path = tmp_path / "tool.stderr.log"
-    path.write_text(text, encoding="utf-8")
+    # Bytes, so no platform rewrites the line breaks the tests count on.
+    path.write_bytes(text.encode("utf-8"))
     return path
 
 
@@ -49,6 +50,21 @@ def test_without_the_option_a_cut_read_keeps_the_partial_line(tmp_path):
     text, cut = read_log_bounded(log, BOUND, VALUES)
 
     assert (text, cut) == (WHOLE_LINES + "g" * 10, True)
+
+
+@pytest.mark.parametrize(
+    "frames",
+    ["frame one\rframe two\r", "frame one\r\nframe two\r\n"],
+    ids=["carriage return", "carriage return and line feed"],
+)
+def test_a_carriage_return_ends_a_line_too(tmp_path, frames):
+    """A tool that redraws a progress line ends each frame with a carriage
+    return and no line feed, so its frames before the cut are whole lines."""
+    log = _log(tmp_path, frames + PARTIAL_LINE)
+
+    text, cut = read_log_bounded(log, len(frames) + 10, VALUES, whole_lines=True)
+
+    assert (text, cut) == (frames, True)
 
 
 def test_a_cut_read_with_no_line_break_is_empty(tmp_path):
