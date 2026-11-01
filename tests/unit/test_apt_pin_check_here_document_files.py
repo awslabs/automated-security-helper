@@ -297,8 +297,7 @@ class TestAFileTheSameInstructionRunsIsCommands:
             "RUN cat > /tmp/i.sh <<'EOF' && stdbuf -oL sh /tmp/i.sh jq",
             "RUN cat > /tmp/i.sh <<'EOF' && flock /tmp/l sh /tmp/i.sh jq",
             "RUN cat > /tmp/i.sh <<'EOF' && cat /tmp/i.sh | timeout 5 sh -s jq",
-            # Another command hands the file's name on to a shell.
-            "RUN cat > /tmp/i.sh <<'EOF' && echo jq | xargs sh /tmp/i.sh",
+            # Another command hands the file's name on to a shell (xargs: see below).
             "RUN cat > /tmp/i.sh <<'EOF' && find . -name x -exec sh /tmp/i.sh {} \\;",
             "RUN cat > /tmp/i.sh <<'EOF' && parallel sh /tmp/i.sh ::: jq git",
             # The run is the arm of a case, which opens with a pattern, no keyword.
@@ -320,6 +319,26 @@ class TestAFileTheSameInstructionRunsIsCommands:
         body = f'{first_line}\napt-get install -y "$@"\nEOF\n'
         with pytest.raises(
             checker.PinEnumerationError, match=r"Dockerfile:3 installs '\$@'"
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_a_script_xargs_runs_is_refused_by_either_reading(self, tmp_path):
+        # The script's body is joined to the RUN's text, so `xargs sh /tmp/i.sh` is
+        # followed on the same logical line by `apt-get install -y "$@"`, and the xargs
+        # refusal (packages read from a pipe) comes before the positional parameter's.
+        # Either way the install is refused at the RUN's line: the requirement is that
+        # the `jq` xargs passes is not installed unpinned with the check green.
+        body = (
+            "RUN cat > /tmp/i.sh <<'EOF' && echo jq | xargs sh /tmp/i.sh\n"
+            'apt-get install -y "$@"\n'
+            "EOF\n"
+        )
+        with pytest.raises(
+            checker.PinEnumerationError,
+            match=(
+                r"Dockerfile:3 installs "
+                r"(?:'\$@'|packages with apt-get through xargs)"
+            ),
         ):
             checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
 
