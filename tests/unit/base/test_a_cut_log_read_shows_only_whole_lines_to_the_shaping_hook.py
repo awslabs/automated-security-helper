@@ -88,6 +88,53 @@ def test_a_cut_read_with_no_line_break_shows_the_marker_alone(
     assert "No stderr captured" not in detail, detail[-400:]
 
 
+def _results_file_bytes(tmp_path, log_bytes):
+    """As :func:`_results_file`, written as bytes: a platform that rewrites
+    line feeds on a text write cannot change which line breaks the log holds."""
+    results = tmp_path / "scanners" / "stub" / "results.json"
+    results.parent.mkdir(parents=True)
+    (results.parent / "StubScanner.stderr.log").write_bytes(log_bytes)
+    return results
+
+
+def _progress_frames_whose_last_crosses_the_bound() -> bytes:
+    """Frames separated only by carriage returns (a tool redrawing a progress
+    line), the last one holding the planted string with the bound landing
+    after its first eight characters; no line feed anywhere in the read."""
+    whole = ("f" * 99 + "\r") * ((BOUND - 40) // 100)
+    pad = BOUND - len(whole) - len(KEPT)
+    assert pad >= 0
+    tail = "z" * pad + PLANTED + " rest of the frame\rlater frame\r"
+    return (whole + tail).encode("utf-8")
+
+
+def test_a_cut_read_of_carriage_return_frames_keeps_the_earlier_frames(
+    plugin_context, tmp_path, monkeypatch
+):
+    """The whole-line cut treats a carriage return as a line break: the frames
+    read to their end are shown, and the frame the bound landed in is dropped
+    with the piece of the hidden string it held. Under a line-feed-only cut
+    this read holds no line feed at all, so the cut kept nothing and the
+    message named the log alone."""
+    scanner = build_scanner(plugin_context)
+    _hiding_the_planted(scanner, monkeypatch)
+    results = _results_file_bytes(
+        tmp_path, _progress_frames_whose_last_crosses_the_bound()
+    )
+
+    detail = scanner._describe_scan_failure(RuntimeError("broke"), results)
+
+    assert KEPT not in detail, detail[-400:]
+    assert PLANTED not in detail, detail[-400:]
+    # The frame the bound landed in is dropped whole.
+    assert "zzzz" not in detail, detail[-400:]
+    # The earlier frames are kept, and the message still says the log
+    # continues and names it.
+    assert "f" * 50 in detail, detail[-400:]
+    assert MARKER in detail, detail[-400:]
+    assert "StubScanner.stderr.log" in detail, detail[-400:]
+
+
 @pytest.mark.parametrize(
     "log_text",
     ["first line\nlast line, no final line break", "first line\nlast line\n"],
