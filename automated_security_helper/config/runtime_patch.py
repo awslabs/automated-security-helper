@@ -70,6 +70,7 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
+    EnvironmentReference,
     with_environment_values_shown,
 )
 from automated_security_helper.utils.error_text import error_text
@@ -903,6 +904,7 @@ def config_document_denials(
     inert: Sequence[str] = (),
     repeats_trusted: bool = False,
     moved: Sequence[str] = (),
+    own_references: Sequence["EnvironmentReference"] = (),
 ) -> List[DocumentDenial]:
     """The fields ``document`` sets that ``allowlist``'s denials refuse.
 
@@ -931,6 +933,16 @@ def config_document_denials(
     scanner runs (``client_scanner_exclusions.moved_exclusion_pointers``): the
     entries that cover a whole scanner section (``SECTION_FLOOR_ENTRIES``) do not
     refuse it, and every other entry and value pattern still does.
+
+    ``own_references`` are the references ``document``'s own file read from the
+    environment (``EnvironmentReference``, with ``origin`` naming that file).
+    With ``repeats_trusted``, a leaf at or over an environment-read pointer of
+    ``config`` that repeats the trusted value is admitted when every such
+    pointer it covers was written by the document itself as the same reference
+    text the trusted config's record holds there: the client can read that
+    reference in its own copy already, so the leaf answers nothing. A document
+    with no record of its own (a client-delivered file loaded with
+    ``refuse_env``) is refused as before.
     """
     plugin_keys = known_plugin_keys(config)
     # The policy's entries as each refusal names them (``_PolicyNames``): a
@@ -949,6 +961,8 @@ def config_document_denials(
         if config is not None and dump is not None
         else []
     )
+    trusted_written = _written_at_pointers(config, dump) if config is not None and dump is not None else {}
+    own_written = _own_written_at_pointers(config, dump, own_references) if config is not None and dump is not None else {}
     # A client-patched copy is the trusted profile written whole, so a leaf it
     # repeats can differ from ``dump`` only in how it is written: a defaulted key
     # the writer left out, a spelling the model normalizes. Such a leaf is also
@@ -1033,6 +1047,15 @@ def config_document_denials(
                 )
             ):
                 continue
+            if (
+                present
+                and environment_read
+                and kind == "leaf"
+                and repeats_trusted
+                and _same_json_value(value, _as_json(op["value"]))
+                and _repeats_own_references(path, own_written, trusted_written, plugin_keys)
+            ):
+                continue
             if present and not environment_read and kind != "key" and repeats_trusted:
                 read_present, read_value = as_read(path)
                 if read_present and _same_json_value(value, read_value):
@@ -1070,6 +1093,97 @@ def _environment_read_pointers(config: AshConfig, dump: Dict[str, Any]) -> List[
                 "/" + "/".join(_escape_pointer_segment(str(segment)) for segment in at)
             )
     return list(dict.fromkeys(pointers))
+
+
+def _written_at_pointers(config: AshConfig, dump: Dict[str, Any]) -> Dict[str, str]:
+    """The JSON pointers, in ``dump``'s keys, of the values ``config``'s files
+    read from the environment, each mapped to the reference text the file wrote
+    there (``written``).
+
+    The same walk as ``_environment_read_pointers``: the record's value rewrites
+    (``_written_references``, ``kind`` "value") and the non-key references the
+    load kept (``_environment_references``), each placed in the dump
+    (config_validator.dumped_path). A path with no place in the dump maps
+    nothing; the first writer of a pointer wins.
+    """
+    from automated_security_helper.config.config_validator import dumped_path
+
+    written: List[Tuple[Tuple[Any, ...], str]] = []
+    for rewrite in getattr(config, "_written_references", None) or []:
+        if getattr(rewrite, "kind", None) == "value":
+            written.append((tuple(rewrite.path), rewrite.written))
+    for reference in getattr(config, "_environment_references", None) or ():
+        if not getattr(reference, "key", False):
+            written.append(
+                (tuple(getattr(reference, "path", ()) or ()), reference.written)
+            )
+    pointers: Dict[str, str] = {}
+    for path, text in written:
+        if not path:
+            continue
+        at = dumped_path(config, dump, path)
+        if not at:
+            continue
+        pointer = "/" + "/".join(
+            _escape_pointer_segment(str(segment)) for segment in at
+        )
+        if pointer not in pointers:
+            pointers[pointer] = text
+    return pointers
+
+
+def _own_written_at_pointers(
+    config: AshConfig,
+    dump: Dict[str, Any],
+    own_references: Sequence["EnvironmentReference"],
+) -> Dict[str, str]:
+    """As ``_written_at_pointers``, over ``own_references`` only (every one;
+    ``key`` references excluded)."""
+    from automated_security_helper.config.config_validator import dumped_path
+
+    pointers: Dict[str, str] = {}
+    for reference in own_references:
+        if getattr(reference, "key", False):
+            continue
+        path = tuple(getattr(reference, "path", ()) or ())
+        if not path:
+            continue
+        at = dumped_path(config, dump, path)
+        if not at:
+            continue
+        pointer = "/" + "/".join(
+            _escape_pointer_segment(str(segment)) for segment in at
+        )
+        if pointer not in pointers:
+            pointers[pointer] = reference.written
+    return pointers
+
+
+def _repeats_own_references(
+    path: str,
+    own_written: Dict[str, str],
+    trusted_written: Dict[str, str],
+    plugin_keys: PluginKeys,
+) -> bool:
+    """Whether every environment-read pointer at, under or above leaf ``path``
+    was written by the document's own file as the same reference text the
+    trusted config's record holds there.
+
+    ``covered`` is the environment pointers at, under or above the leaf, under
+    every spelling (``_covered`` in both directions). True only when ``covered``
+    is non-empty and every covered pointer is in ``own_written`` with the same
+    ``written`` text ``trusted_written`` holds for it.
+    """
+    covered = [
+        pointer
+        for pointer in trusted_written
+        if _covered([pointer], path, plugin_keys)
+        or _covered([path], pointer, plugin_keys)
+    ]
+    return bool(covered) and all(
+        pointer in own_written and own_written[pointer] == trusted_written[pointer]
+        for pointer in covered
+    )
 
 
 def _built_in_reporter_names() -> frozenset:
