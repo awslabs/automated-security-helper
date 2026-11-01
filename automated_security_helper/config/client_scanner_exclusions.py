@@ -1733,6 +1733,47 @@ def _operator_fields(source: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _merged_field_by_field(template: BaseModel, fields: Dict[str, Any]) -> BaseModel:
+    """``template`` with each of the operator's ``fields`` the model takes on its own.
+
+    The base is the client's model without its expiration. A field goes in only
+    when the model validates with it, so a reason that is not text is left out
+    and the client's stays, while an operator reason that is text replaces the
+    client's even when another field of the same entry is refused. The operator
+    names no expiration when it writes none, so the client's never stands.
+
+    An expiration the model refuses (``2099-01-01T00:00:00``, which
+    ``_entry_expired`` reads as a live day through its ``[:10]`` cut) is not
+    written as it is. It goes through the model's own validation under the
+    tolerance a results file's kept entries use, which keeps the text and notes
+    it as unreadable: the entry reads as expired and the scanner does not apply
+    it.
+    """
+    from automated_security_helper.utils.unknown_keys import TOLERATE_STORED_CONFIG
+
+    model = type(template)
+    merged: Dict[str, Any] = {**template.model_dump(), "expiration": None}
+    for key, value in fields.items():
+        if key == "expiration":
+            continue
+        try:
+            model.model_validate({**merged, key: value})
+        except Exception:  # noqa: BLE001 -- this field alone is not the model's
+            continue
+        merged[key] = value
+    expiration = fields.get("expiration")
+    if expiration is not None:
+        try:
+            model.model_validate({**merged, "expiration": expiration})
+        except Exception:  # noqa: BLE001 -- an expiration the model refuses
+            return model.model_validate(
+                {**merged, "expiration": str(expiration)},
+                context={TOLERATE_STORED_CONFIG: []},
+            )
+        merged["expiration"] = expiration
+    return model.model_validate(merged)
+
+
 def _spelled_like(template: Any, source: Any) -> Any:
     """The operator's entry ``source`` in the shape ``template`` has in the option.
 
@@ -1743,8 +1784,8 @@ def _spelled_like(template: Any, source: Any) -> Any:
     its path, an operator string under a mapping or model option is an entry of
     that path alone, and a model the operator's fields do not validate as on
     their own keeps the template's other fields under the operator's, validated
-    as a whole; fields refused even then leave the template with only the
-    operator's expiration (``model_copy``). The client's own copy was kept
+    as a whole; fields refused even then are taken one at a time
+    (``_merged_field_by_field``). The client's own copy was kept
     whenever the shapes
     differed or the model refused the fields, so a client string stood in for an
     operator mapping with the operator's expiration lost, and a client model
@@ -1769,14 +1810,11 @@ def _spelled_like(template: Any, source: Any) -> Any:
                 )
             except Exception:  # noqa: BLE001 -- the fields are refused on any base
                 try:
-                    # Not a model on any base: only the operator's expiration is
-                    # taken over, as it is (an unreadable day reads as expired,
-                    # ``_entry_expired``), so the client's expiration never
-                    # stands and none of the operator's refused values is
-                    # written into the model.
-                    return template.model_copy(
-                        update={"expiration": fields.get("expiration")}
-                    )
+                    # Not a model on any base: each operator field the model
+                    # takes on its own is taken over, so the client's expiration
+                    # never stands and none of the operator's refused values is
+                    # written into the model unvalidated.
+                    return _merged_field_by_field(template, fields)
                 except Exception:  # noqa: BLE001 -- keep the option well typed
                     return template
     if isinstance(template, Mapping):

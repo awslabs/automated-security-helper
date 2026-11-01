@@ -44,6 +44,7 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.client_scanner_exclusions import (
     SCANNER_EXCLUSION_OPTIONS,
     ClientScannerExclusion,
+    _entry_expired,
     _entry_fields,
     _pattern_of,
     _same_trivy_id,
@@ -577,8 +578,10 @@ def test_an_operator_mapping_the_model_refuses_is_not_written_in_unvalidated():
     of the client's fields and validated, so the option holds a well-typed
     model with the operator's expiration and not the client's. A mapping that
     is refused on that base too (a reason that is not text) was copied into the
-    model unvalidated, a number where a string belongs; now only the
-    operator's expiration is taken over and the client's reason stays."""
+    model unvalidated, a number where a string belongs; now each field the
+    model takes on its own is taken over (the operator's expiration, and its
+    reason when that is text) and the client's reason stays for one that is
+    not."""
     client = IgnorePathWithReason(
         path="legacy", reason="client", expiration="2088-01-01"
     )
@@ -599,6 +602,44 @@ def test_an_operator_mapping_the_model_refuses_is_not_written_in_unvalidated():
     )
     assert unreadable.expiration == "soon"
     assert unreadable.expiration != client.expiration
+    assert unreadable.reason == "op"
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["2099-01-01T00:00:00", "2099-01-01 00:00", "2099-01-01x"],
+)
+def test_a_live_looking_expiration_the_model_refuses_keeps_the_operators_reason(
+    written,
+):
+    """``_entry_expired`` reads an expiration through its first ten characters,
+    so these three pass it as a live day while the model refuses them whole
+    and the entry reaches the last fallback of ``_spelled_like``. That fallback
+    kept the client's reason and wrote the operator's expiration into the model
+    as it came, and the test above passed on either branch. The operator's
+    reason, which validates on its own, is the one that stands; the expiration
+    is recorded as the unreadable text it is, so the entry reads as expired
+    and is not applied. The control is the same entry with a day the model
+    takes."""
+    client = IgnorePathWithReason(
+        path="legacy", reason="client", expiration="2088-01-01"
+    )
+    assert not _entry_expired(written)
+
+    refused = _spelled_like(
+        client, {"path": "legacy", "reason": "operator", "expiration": written}
+    )
+    control = _spelled_like(
+        client, {"path": "legacy", "reason": "operator", "expiration": "2099-01-01"}
+    )
+
+    assert isinstance(refused, IgnorePathWithReason)
+    assert refused.reason == "operator"
+    assert refused.expiration == written
+    assert refused.is_expired
+    assert control.reason == "operator"
+    assert control.expiration == "2099-01-01"
+    assert not control.is_expired
 
 
 @pytest.mark.parametrize(
