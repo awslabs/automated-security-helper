@@ -66,7 +66,6 @@ Rejected alternatives
 from __future__ import annotations
 
 import copy
-import importlib
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -90,6 +89,7 @@ from automated_security_helper.config.ash_config import (
     AshConfig,
     RuntimeOverridesConfig,
 )
+from automated_security_helper.utils.import_caches import invalidate_import_caches
 from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
@@ -1194,7 +1194,7 @@ def _widenings(
         trusted_names = set(split_plugin_modules(base.ash_plugin_modules))
         refused: List[str] = []
         # Once for the whole list, not once per name.
-        importlib.invalidate_caches()
+        invalidate_import_caches()
         for name in split_plugin_modules(named):
             if name in trusted_names:
                 continue

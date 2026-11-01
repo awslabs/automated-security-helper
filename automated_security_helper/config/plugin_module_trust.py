@@ -119,6 +119,7 @@ from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
 )
+from automated_security_helper.utils.import_caches import invalidate_import_caches
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
@@ -549,7 +550,7 @@ def refusal_reason(
     # installed since the process started. This lookup does the same, or it
     # would refuse a module the scan then imports.
     if invalidate_caches:
-        importlib.invalidate_caches()
+        invalidate_import_caches()
     own = _own_package_dir()
     parts = name.split(".")
     spec: Optional[ModuleSpec] = None
@@ -898,7 +899,7 @@ def confine_plugin_modules(
     # import state, and the lookup of each would drop the caches again.
     to_judge = [] if rootless_checked else listed
     if not rootless_checked:
-        importlib.invalidate_caches()
+        invalidate_import_caches()
     for name in to_judge:
         # Kept for the scan's namespace refusal, which imports nothing and
         # refuses the scan with exit 3.

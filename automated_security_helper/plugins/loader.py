@@ -30,6 +30,7 @@ from automated_security_helper.plugins.plugin_manager import (
     masked_form_identity,
     masked_module_names,
 )
+from automated_security_helper.utils.import_caches import invalidate_import_caches
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -1173,7 +1174,7 @@ def load_additional_plugin_modules(
         # the operator installs what one needs. The import system caches a miss
         # for a sys.path entry it could not read, so a module installed into a
         # directory that did not exist at startup is never found without this.
-        importlib.invalidate_caches()
+        invalidate_import_caches()
 
     # A masked module's forms are needles for the WHOLE load, not only for
     # its own failure: a value that splits into several module names (a
@@ -1859,7 +1860,7 @@ def refuse_unfindable_plugin_imports(
     # invalidation a long-lived process (the MCP server) keeps refusing a
     # module installed after its first answer while the scan's loader imports
     # it.
-    importlib.invalidate_caches()
+    invalidate_import_caches()
     failed = []
     failed_entries: List[str] = []
     for name in names:

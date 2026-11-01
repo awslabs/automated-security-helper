@@ -29,6 +29,7 @@ from typing import (
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 from automated_security_helper.plugins.events import AshEventType
+from automated_security_helper.utils.import_caches import invalidate_import_caches
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 
@@ -1168,7 +1169,7 @@ class AshPluginManager(BaseModel):
             # installed into a new site directory, a plugin file written
             # beside the config); the finders' directory caches are dropped so
             # the retry sees it.
-            importlib.invalidate_caches()
+            invalidate_import_caches()
 
         plugins: List[type] = []
         failed: List[str] = []
