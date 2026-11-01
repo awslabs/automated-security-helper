@@ -268,8 +268,8 @@ The scanners ASH declares a configuration for. Other scanner names are accepted 
 | <a id="scanners.gitleaks"></a>`gitleaks` | yes | [`gitleaks` options](scanners.md#gitleaks) |
 | <a id="scanners.grype"></a>`grype` | yes | [`grype` options](scanners.md#grype) |
 | <a id="scanners.npm-audit"></a>`npm-audit` | yes | [`npm-audit` options](scanners.md#npm-audit) |
-| <a id="scanners.opengrep"></a>`opengrep` | yes on Linux and macOS; no on Windows | [`opengrep` options](scanners.md#opengrep) |
-| <a id="scanners.semgrep"></a>`semgrep` | yes on Linux and macOS; no on Windows | [`semgrep` options](scanners.md#semgrep) |
+| <a id="scanners.opengrep"></a>`opengrep` | depends on the platform | [`opengrep` options](scanners.md#opengrep) |
+| <a id="scanners.semgrep"></a>`semgrep` | depends on the platform | [`semgrep` options](scanners.md#semgrep) |
 | <a id="scanners.syft"></a>`syft` | yes | [`syft` options](scanners.md#syft) |
 | <a id="scanners.trivy"></a>`trivy` | yes | [`trivy` options](scanners.md#trivy) |
 | <a id="scanners.zizmor"></a>`zizmor` | yes | [`zizmor` options](scanners.md#zizmor) |
