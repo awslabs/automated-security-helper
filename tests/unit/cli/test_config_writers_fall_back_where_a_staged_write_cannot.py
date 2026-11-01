@@ -261,7 +261,12 @@ def test_lint_fix_reports_a_write_it_cannot_make_without_a_traceback(
             self._inner = inner
 
         def write(self, text):
-            if "full-disk-probe" in text:
+            probe = (
+                b"full-disk-probe"
+                if isinstance(text, (bytes, bytearray))
+                else "full-disk-probe"
+            )
+            if probe in text:
                 raise OSError(errno.ENOSPC, "No space left on device")
             return self._inner.write(text)
 
@@ -277,7 +282,7 @@ def test_lint_fix_reports_a_write_it_cannot_make_without_a_traceback(
 
     def opening(file, mode="r", *args, **kwargs):
         handle = real_open(file, mode, *args, **kwargs)
-        if "w" in mode and "b" not in mode:
+        if "w" in mode:
             return _RefusingHandle(handle)
         return handle
 
