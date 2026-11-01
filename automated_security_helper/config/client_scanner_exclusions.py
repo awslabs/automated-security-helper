@@ -656,9 +656,10 @@ class _EvaluationWorker:
             if not connection.poll(wait):
                 raise EvaluationTimedOut(
                     f"A regular expression from {source} did not finish matching "
-                    f"within {timeout} seconds, the pattern time limit. Its "
-                    "evaluation was stopped, and the scan fails rather than wait on "
-                    "it."
+                    f"within {timeout} seconds, the pattern time limit (the "
+                    "scanner's scan_timeout, or the scan_timeout default where the "
+                    "scanner's is null). Its evaluation was stopped, and the scan "
+                    "fails rather than wait on it."
                 )
             answered, payload = connection.recv()
         except EvaluationTimedOut:
