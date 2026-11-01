@@ -1064,6 +1064,21 @@ def _confine_settings_files(
             )
             if not entries:
                 continue
+            list_path = ("scanners", key, "options", "scan_settings", list_name)
+            # An override the trusted base could not take set the list, or
+            # appended to it: what it set is the operator's own, and what it
+            # appended stays beside the entries the file wrote, which are
+            # confined below. Judged at the scan_settings path alone, an
+            # appended entry was dropped as the file's and the warning named
+            # the file.
+            if _covered(landings, list_path, except_appends=True):
+                continue
+            appended = _with_appended(_MISSING, _appended(landings, list_path))
+            operator_entries = [
+                _entry_dump(item)
+                for item in (appended if isinstance(appended, list) else [])
+                if isinstance(item, dict)
+            ]
             trusted_entries = [
                 _entry_dump(entry)
                 for entry in (
@@ -1080,6 +1095,7 @@ def _confine_settings_files(
                     isinstance(path, str)
                     and path.startswith("file://")
                     and _entry_dump(entry) not in trusted_entries
+                    and _entry_dump(entry) not in operator_entries
                 ):
                     ignored.append(
                         f"scanners.{key}.options.scan_settings.{list_name}[].path"
