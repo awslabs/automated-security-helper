@@ -159,6 +159,7 @@ from automated_security_helper.config.sandbox_grants import (
     repository_written,
     scanned_trees,
     tree_holding,
+    unplaced_by_an_unfinished_walk,
     untrusted_path,
     working_directory,
 )
@@ -7410,7 +7411,18 @@ def _refuse_unless_the_operators(
     """
     trees = scanned_trees(Path(scanned_root))
     others = _not_the_operators(overlay.chain, trees, overlay.names)
-    if not others:
+    # A file no tree holds because the walk of one of its names stopped before
+    # the end: nothing was found, and the walk could not say there is nothing, so
+    # it is read as the repository's, as every other check of the load reads it
+    # (sandbox_grants.confined_files). Accepting it would make the settings of a
+    # file that may be inside the tree final over the tree that wrote it.
+    unplaced = [
+        path
+        for path in overlay.chain
+        if path not in others
+        and unplaced_by_an_unfinished_walk(path, trees, overlay.names)
+    ]
+    if not others and not unplaced:
         return
     root = overlay.chain[-1]
     reasons = []
@@ -7434,12 +7446,29 @@ def _refuse_unless_the_operators(
     of_the_repository = any(
         tree_holding(path, trees, overlay.names) is not None for path in others
     )
+    for path in unplaced:
+        shown = (
+            ENVIRONMENT_VALUE_SHOWN
+            if path in hidden or Path(path).resolve() in hidden
+            else f"'{describe_config_path(path)}'"
+        )
+        reasons.append(
+            f"{shown} could not be placed: resolving its name stopped before the "
+            "walk finished, which is read as the repository's"
+        )
+    remedies = []
+    if places:
+        remedies.append(
+            "Move the config, and every base it extends, outside "
+            f"{' and outside '.join(places)}."
+            + (f" {KEEP_A_SETTING}" if of_the_repository else "")
+        )
+    if unplaced:
+        remedies.append(f"For a file that could not be placed, {LET_THE_WALK_FINISH}.")
     raise ASHConfigValidationError(
         f"The operator config '{describe_config_path(root)}' is layered over each "
         "project's own config, so every file it is built from must be the "
-        f"operator's, and {'; '.join(reasons)}. Move the config, and every base "
-        f"it extends, outside {' and outside '.join(places)}."
-        + (f" {KEEP_A_SETTING}" if of_the_repository else "")
+        f"operator's, and {'; '.join(reasons)}. {' '.join(remedies)}"
     )
 
 

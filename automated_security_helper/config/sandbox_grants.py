@@ -1197,6 +1197,31 @@ def tree_holding(
     return None
 
 
+def unplaced_by_an_unfinished_walk(
+    path: Path,
+    trees: Iterable[Path],
+    names: Optional[Mapping[Path, Sequence[Path]]] = None,
+) -> bool:
+    """Whether no tree holds ``path`` (``tree_holding``) because a walk stopped.
+
+    ``tree_holding`` answers None both for a file no tree holds and for one whose
+    name walk stopped before the end without finding a tree, and the second is
+    not an answer: the walk could not say there is no link into a tree. A caller
+    that decides whether a file is the operator's reads this too, and treats such
+    a file as not the operator's, as ``confined_files`` does. False for a file a
+    tree holds, however the walk of another of its names ended.
+    """
+    trees = list(trees)
+    unfinished = False
+    for name in (path, *(names or {}).get(path, ())):
+        links, decided = _walk_links(name)
+        places = [name, *(link.parent for link in links)]
+        if any(is_within(place, tree) for place in places for tree in trees):
+            return False
+        unfinished = unfinished or not decided
+    return unfinished
+
+
 def membership_clause(
     *,
     checkout_membership: bool,
