@@ -594,19 +594,26 @@ def test_detect_secrets_timeout_warning_prints_its_limit_whole(
     work_dir.mkdir()
     debug_logged.clear()
 
-    scanned = scanner._scan_in_worker(
-        baseline=None,
-        scan_paths=[str(ctx.source_dir / "app.py")],
-        scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
-        work_dir=work_dir,
-        scan_timeout=limit,
-    )
+    # A killed worker wrote no results, so the scan fails: the WARNING is
+    # logged and ScannerError is raised (a None return graded a never-scanned
+    # tree as clean).
+    with pytest.raises(ScannerError) as excinfo:
+        scanner._scan_in_worker(
+            baseline=None,
+            scan_paths=[str(ctx.source_dir / "app.py")],
+            scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
+            work_dir=work_dir,
+            scan_timeout=limit,
+        )
 
-    assert scanned is None
     text = "\n".join(debug_logged)
     assert "timed out after" in text, text
     assert f"timed out after {token}" in text, text
     assert "1e+06" not in text, text
+    # The raised text is the logged line plus advice; the same token, so the
+    # two surfaces cannot drift.
+    assert f"timed out after {token}" in str(excinfo.value)
+    assert "1e+06" not in str(excinfo.value)
 
 
 def test_grype_db_settings_read(tmp_path, debug_logged):
@@ -939,19 +946,23 @@ def test_a_timeout_warning_names_the_option_for_an_env_typed_limit(
     """
     scanner, work_dir = _timeout_scanner(tmp_path, monkeypatch, "067")
 
-    out = scanner._scan_in_worker(
-        baseline=None,
-        scan_paths=[],
-        scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
-        work_dir=work_dir,
-        scan_timeout=67.0,
-    )
+    # The WARNING is recorded on the scanner's errors, then the failed scan
+    # is raised (a None return graded a never-scanned tree as clean).
+    with pytest.raises(ScannerError) as excinfo:
+        scanner._scan_in_worker(
+            baseline=None,
+            scan_paths=[],
+            scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
+            work_dir=work_dir,
+            scan_timeout=67.0,
+        )
 
-    assert out is None
     text = "\n".join(scanner.errors)
     assert "timed out" in text, text
     assert "the configured scan_timeout" in text, text
     assert "67" not in text, text
+    assert "the configured scan_timeout" in str(excinfo.value)
+    assert "67" not in str(excinfo.value)
 
 
 def _without_embedded_paths(text: str, tmp_path) -> str:
@@ -1011,15 +1022,17 @@ def test_the_runner_s_own_timeout_line_names_the_option_for_an_env_typed_limit(
     work_dir.mkdir()
     debug_logged.clear()
 
-    out = scanner._scan_in_worker(
-        baseline=None,
-        scan_paths=[],
-        scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
-        work_dir=work_dir,
-        scan_timeout=67.0,
-    )
+    # The runner's own line is logged before the scanner fails the scan with
+    # ScannerError (a None return graded a never-scanned tree as clean).
+    with pytest.raises(ScannerError):
+        scanner._scan_in_worker(
+            baseline=None,
+            scan_paths=[],
+            scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
+            work_dir=work_dir,
+            scan_timeout=67.0,
+        )
 
-    assert out is None
     runner_lines = [line for line in debug_logged if "Command timed out" in line]
     # The control: the real runner logged its own timeout line.
     assert runner_lines, debug_logged
