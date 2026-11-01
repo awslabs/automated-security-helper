@@ -2281,26 +2281,20 @@ class TestTheActionRunsATier:
     def test_the_step_opts_the_run_in_to_the_executed_test_floor(self):
         """Without the variable the floor never runs, on any leg.
 
-        The value is read the way GitHub reads ``cond && a || b``: ``warn`` on the e2e
-        legs, until a hosted run shows each of them executing a real test, and ``1``
-        everywhere else. When the e2e legs switch to ``1`` the expression becomes the
-        literal ``"1"``, which this ``re.fullmatch`` pattern does not match, so the
-        pattern and the expectation change together with the expression. The pin stays
-        on the current expression until then.
+        The value is the literal ``"1"`` on every leg. The e2e legs ran under a
+        per-marker ``cond && a || b`` expression choosing ``warn`` until the e2e
+        scanner install landed in the action; with the tools installed the
+        expression became this literal, and the ``re.fullmatch`` pattern and the
+        expectation here changed together with it. An expression would reach the
+        loader as the raw ``${{ ... }}`` string and fail the pattern.
         """
         step = _action_step("Run PyTest")
         assert sharding.FLOOR_ENV_VAR == "ASH_TEST_TIER_FLOOR"
         value = str(step["env"][sharding.FLOOR_ENV_VAR])
-        match = re.fullmatch(
-            r"\$\{\{ inputs\.marker == '(\w+)' && '(\w+)' \|\| '(\w+)' \}\}", value
-        )
+        match = re.fullmatch(r"1", value)
         assert match is not None, value
-        tier, when_true, otherwise = match.groups()
-        by_tier = {
-            marker: when_true if marker == tier else otherwise
-            for marker in ("unit", "integration", "e2e")
-        }
-        assert by_tier == {"unit": "1", "integration": "1", "e2e": "warn"}, value
+        by_tier = {marker: value for marker in ("unit", "integration", "e2e")}
+        assert by_tier == {"unit": "1", "integration": "1", "e2e": "1"}, value
         assert sharding.FLOOR_WARN_VALUE == "warn"
 
     def test_the_step_names_no_test_file_on_the_command_line(self):
