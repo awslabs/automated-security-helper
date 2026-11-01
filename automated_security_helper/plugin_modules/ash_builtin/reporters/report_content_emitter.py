@@ -790,9 +790,12 @@ class ReportContentEmitter:
             if not isinstance(raw_data, dict):
                 return None
 
-            # Try to find snippet in common locations
-            if "snippet" in raw_data:
-                return _snippet_text(raw_data["snippet"])
+            # Try to find snippet in common locations. A ``snippet`` key with
+            # no text in it (an empty object, a number) ends nothing: the
+            # locations and the code flows below may still carry the text.
+            found = _snippet_text(raw_data.get("snippet"))
+            if found:
+                return found
 
             # SARIF puts a snippet in a location's physicalLocation, under its
             # context region (or its region), never on the result or on a
@@ -811,8 +814,9 @@ class ReportContentEmitter:
                         for thread in flow["threadFlows"]:
                             if "locations" in thread and thread["locations"]:
                                 for loc in thread["locations"]:
-                                    if "snippet" in loc:
-                                        return _snippet_text(loc["snippet"])
+                                    found = _snippet_text(loc.get("snippet"))
+                                    if found:
+                                        return found
                                     # A thread-flow location wraps a SARIF
                                     # location: ``{"location": {...}}``.
                                     found = _location_snippet(loc.get("location"))

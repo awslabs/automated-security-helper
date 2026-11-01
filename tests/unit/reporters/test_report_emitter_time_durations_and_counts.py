@@ -894,6 +894,99 @@ class TestASnippetIsFoundWhereSarifPutsIt:
     def test_a_result_with_no_snippet_is_none(self):
         assert self._snippet({"locations": [{"physicalLocation": {}}]}) is None
 
+    @staticmethod
+    def _marker_location() -> dict:
+        return {
+            "physicalLocation": {
+                "artifactLocation": {"uri": "app.py"},
+                "region": {"startLine": 3, "snippet": {"text": "MARKER"}},
+            }
+        }
+
+    @pytest.mark.parametrize(
+        "empty", [{}, {"text": 5}, {"binary": "AA=="}, 5, ""], ids=repr
+    )
+    def test_a_snippet_key_with_no_text_does_not_hide_the_locations(self, empty):
+        """A ``snippet`` key whose value holds no text ended the search.
+
+        RED at the base: ``if "snippet" in raw_data: return _snippet_text(...)``
+        returned the key's own None (or empty string) as soon as the key was
+        there, so the result's location, which carries the text, was never read
+        and the report showed no snippet where the result has one.
+        """
+        raw = {"snippet": empty, "locations": [self._marker_location()]}
+
+        assert self._snippet(raw) == "MARKER"
+
+    def test_a_snippet_key_with_no_text_does_not_hide_the_message(self):
+        raw = {
+            "snippet": {},
+            "message": {"text": "Found:\n```python\nMARKER\n```\n"},
+        }
+
+        assert self._snippet(raw) == "MARKER"
+
+    def test_a_thread_flow_snippet_with_no_text_does_not_hide_the_nested_location(
+        self,
+    ):
+        """RED at the base: the thread-flow location's empty ``snippet`` returned
+        None before the ``location`` beside it was read."""
+        raw = {
+            "codeFlows": [
+                {
+                    "threadFlows": [
+                        {
+                            "locations": [
+                                {"snippet": {}, "location": self._marker_location()}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+
+        assert self._snippet(raw) == "MARKER"
+
+    def test_a_thread_flow_snippet_with_no_text_does_not_hide_a_later_flow(self):
+        """RED at the base: the first location's empty ``snippet`` ended the
+        walk, so the second thread flow was never read."""
+        raw = {
+            "codeFlows": [
+                {
+                    "threadFlows": [
+                        {"locations": [{"snippet": {"text": 5}}]},
+                        {"locations": [{"snippet": {"text": "MARKER"}}]},
+                    ]
+                }
+            ]
+        }
+
+        assert self._snippet(raw) == "MARKER"
+
+    def test_a_snippet_with_text_is_still_returned_first(self):
+        """The control: a text at the top level wins over the locations, and a
+        thread-flow location's own text over its nested location, as before."""
+        top = {"snippet": {"text": "TOP"}, "locations": [self._marker_location()]}
+        flow = {
+            "codeFlows": [
+                {
+                    "threadFlows": [
+                        {
+                            "locations": [
+                                {
+                                    "snippet": {"text": "FLOW"},
+                                    "location": self._marker_location(),
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+
+        assert self._snippet(top) == "TOP"
+        assert self._snippet(flow) == "FLOW"
+
     def test_a_fenced_message_yields_the_code_without_its_info_string(self):
         """The fence's language name is not code. The flattener's reader leaves it
         out; the emitter's own read of the same message kept it, and the trailing
