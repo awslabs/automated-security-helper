@@ -570,9 +570,7 @@ class TestALinkOnTheOutputPathIsNotFollowed:
         assert not output.exists()
 
     @pytest.mark.skipif(sys.platform != "win32", reason="junctions are a Windows form")
-    def test_a_real_junction_is_left_in_place_with_its_target(
-        self, registry, tmp_path
-    ):
+    def test_a_real_junction_is_left_in_place_with_its_target(self, registry, tmp_path):
         import _winapi
 
         source = tmp_path / "src"

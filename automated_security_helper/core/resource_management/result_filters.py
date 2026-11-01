@@ -130,8 +130,7 @@ def _total_of_known(counts: Dict[str, Any]) -> Optional[int]:
     reads 0, as in a recorded summary, which writes all six.
     """
     if any(
-        bucket in counts and counts[bucket] is None
-        for bucket in _COUNTED_SEVERITY_KEYS
+        bucket in counts and counts[bucket] is None for bucket in _COUNTED_SEVERITY_KEYS
     ):
         return None
     return _total_of(counts)

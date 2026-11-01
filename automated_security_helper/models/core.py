@@ -177,8 +177,8 @@ IGNORE_PATH_LISTS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
 #: ``excluded_paths``, checkov ``skip_path``, syft ``exclude``) reaches the tool as
 #: its argument whether or not the flag is set, so the flag leaves it alone. The
 #: scan-start expiry check read this from the first key being ``scanners``.
-IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS: FrozenSet[Tuple[str, ...]] = (
-    frozenset({("global_settings", "ignore_paths")})
+IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS: FrozenSet[Tuple[str, ...]] = frozenset(
+    {("global_settings", "ignore_paths")}
 )
 
 

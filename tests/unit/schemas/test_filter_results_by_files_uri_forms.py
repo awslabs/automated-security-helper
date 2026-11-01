@@ -273,9 +273,7 @@ class TestWindowsForms:
         )
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-rooted paths")
-    def test_a_result_under_a_linked_top_level_is_kept_by_the_filter(
-        self, monkeypatch
-    ):
+    def test_a_result_under_a_linked_top_level_is_kept_by_the_filter(self, monkeypatch):
         """The same fact end to end: the listed file is kept when the scanner's
         URI is the link's spelling of the resolved source directory."""
         original = Path.resolve

@@ -332,9 +332,7 @@ class TestUnusedReport:
 
         monkeypatch.setattr(Path, "stat", stat)
 
-    def test_a_report_that_cannot_be_statted_is_no_report(
-        self, tmp_path, monkeypatch
-    ):
+    def test_a_report_that_cannot_be_statted_is_no_report(self, tmp_path, monkeypatch):
         """Red at the base: ``report_path.exists()`` re-raises every error but
         "not found" before Python 3.14, so ``lint --source-dir`` on a tree whose
         output directory the user cannot search ended in a PermissionError

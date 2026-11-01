@@ -76,9 +76,7 @@ class DirectoryRefusal(str):
     kind: str
     error_number: Optional[int]
 
-    def __new__(
-        cls, text: str, kind: str, error_number: Optional[int] = None
-    ) -> Self:
+    def __new__(cls, text: str, kind: str, error_number: Optional[int] = None) -> Self:
         refusal = super().__new__(cls, text)
         refusal.kind = kind
         refusal.error_number = error_number

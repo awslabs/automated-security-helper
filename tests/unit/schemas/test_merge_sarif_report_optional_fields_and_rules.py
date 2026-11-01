@@ -1321,9 +1321,7 @@ class TestFoldedResultsLeaveTheirRunsTablesBehind:
                                 ],
                             )
                         ],
-                        steps=[
-                            {"module": "m", "kinds": ["call"], "executionOrder": 3}
-                        ],
+                        steps=[{"module": "m", "kinds": ["call"], "executionOrder": 3}],
                     )
                 ]
             )

@@ -661,9 +661,7 @@ def test_a_whitespace_only_ini_entry_names_no_path_and_draws_no_warning(
     assert not any("surrounding whitespace" in m for m in messages), messages
 
 
-def test_a_double_star_between_directories_draws_no_crossing_warning(
-    tmp_path, caplog
-):
+def test_a_double_star_between_directories_draws_no_crossing_warning(tmp_path, caplog):
     """``src/**/tests`` asks for the crossing the warning describes, so telling
     its author that the glob "also takes a '/'" was noise. A bare ``*`` in the
     same place (``src/*/lib``) reads as one directory level and still draws the
@@ -722,9 +720,7 @@ def test_a_double_star_between_directories_warns_that_adjacent_ones_are_kept(
     assert repr("lib") not in told[0]
 
 
-def test_a_star_slash_entry_and_a_plain_path_draw_no_crossing_warning(
-    tmp_path, caplog
-):
+def test_a_star_slash_entry_and_a_plain_path_draw_no_crossing_warning(tmp_path, caplog):
     ini = tmp_path / ".bandit"
     ini.write_text("[bandit]\nexclude = */tests/*,src/tests\n", encoding="utf-8")
     source = _tree(tmp_path, ["app.py", "src/tests/y.py"])

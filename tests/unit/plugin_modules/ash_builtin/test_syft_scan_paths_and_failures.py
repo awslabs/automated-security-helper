@@ -257,9 +257,7 @@ def test_syft_is_asked_for_the_cyclonedx_version_the_model_reads(tmp_path):
 
     (command,) = commands
     (requested,) = [
-        value
-        for value in _output_values(command)
-        if value.startswith("cyclonedx-json")
+        value for value in _output_values(command) if value.startswith("cyclonedx-json")
     ]
     spec, _, destination = requested.partition("=")
     assert spec == "cyclonedx-json@1.6", requested

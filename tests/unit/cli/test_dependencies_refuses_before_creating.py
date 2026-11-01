@@ -345,7 +345,8 @@ def test_a_known_tool_with_an_unusable_bin_path_is_still_refused_before_it_is_bu
     occupied.write_text("a file\n", encoding="utf-8")
 
     result = runner.invoke(
-        dependencies_app, ["--bin-path", str(occupied / "bin"), "--tool", "builds-a-probe"]
+        dependencies_app,
+        ["--bin-path", str(occupied / "bin"), "--tool", "builds-a-probe"],
     )
 
     assert result.exit_code == EXIT_INVALID_CONFIG, result.output
@@ -365,7 +366,8 @@ def test_the_mkdir_after_the_builds_refuses_in_the_same_words(
     occupied.write_text("a file\n", encoding="utf-8")
 
     result = runner.invoke(
-        dependencies_app, ["--bin-path", str(occupied / "bin"), "--tool", "builds-a-probe"]
+        dependencies_app,
+        ["--bin-path", str(occupied / "bin"), "--tool", "builds-a-probe"],
     )
 
     assert result.exit_code == EXIT_INVALID_CONFIG, result.output

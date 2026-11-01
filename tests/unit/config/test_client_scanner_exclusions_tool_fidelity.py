@@ -345,9 +345,9 @@ def test_a_plain_expiry_field_is_read_whole_not_cut_at_ten_characters(field):
         )
 
     plain = "CVE-3 exp:2099-01-01\n"
-    assert parse_trivy_ignore_file(plain, yaml_format=False, today=date(2026, 1, 1)) == [
-        ("CVE-3", ())
-    ]
+    assert parse_trivy_ignore_file(
+        plain, yaml_format=False, today=date(2026, 1, 1)
+    ) == [("CVE-3", ())]
 
 
 def test_a_hash_later_in_a_plain_ignore_line_is_text_not_a_comment():
@@ -691,9 +691,7 @@ def test_a_bandit_entry_for_a_directory_hides_none_of_its_namesakes(sibling):
         reason="r",
     )
     assert not entry.hides(relative=sibling, absolute=f"/s/{sibling}", rule_id=None)
-    assert entry.hides(
-        relative="vendor/x.py", absolute="/s/vendor/x.py", rule_id=None
-    )
+    assert entry.hides(relative="vendor/x.py", absolute="/s/vendor/x.py", rule_id=None)
     assert entry.hides(
         relative="pkg/vendor/x.py", absolute="/s/pkg/vendor/x.py", rule_id=None
     )

@@ -2559,9 +2559,7 @@ def _top_level_link_leads_under(
     # A relative target is relative to the directory holding the link, "/".
     absolute_target = posixpath.normpath(posixpath.join("/", target))
     leads_to = _first_segment(absolute_target, fold_case)
-    return leads_to is not None and leads_to == _first_segment(
-        resolved_root, fold_case
-    )
+    return leads_to is not None and leads_to == _first_segment(resolved_root, fold_case)
 
 
 def _resolved_relative_text(
@@ -3422,8 +3420,7 @@ def _keep_the_rule_by_id(dumped: Dict, result: "Result", report_tool: "Tool") ->
             kept.get("id") is None
             and kept.get("guid") is None
             and "toolComponent" in kept
-            and _referenced_tool_component(component_reference, report_tool)
-            is not None
+            and _referenced_tool_component(component_reference, report_tool) is not None
         ):
             # A reference that named its rule by index alone, in an extension
             # the incoming run carries. Dropped whole, the rule would read as

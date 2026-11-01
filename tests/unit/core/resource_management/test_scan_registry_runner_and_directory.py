@@ -494,9 +494,7 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert removed is False
         assert ran == []
 
-    def test_the_age_sweep_of_a_finished_inner_scan_keeps_the_tree_held(
-        self, tmp_path
-    ):
+    def test_the_age_sweep_of_a_finished_inner_scan_keeps_the_tree_held(self, tmp_path):
         registry = ScanRegistry()
         old, project_scan, _project, _inner = self._root_scan_and_inner_project(
             registry, tmp_path
@@ -684,9 +682,7 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         registry.update_scan_status(second_root, MCScanStatus.COMPLETED)
         return old, second_root, project_scan, tree
 
-    def test_a_root_scan_cleaned_up_first_hands_its_record_to_the_other(
-        self, tmp_path
-    ):
+    def test_a_root_scan_cleaned_up_first_hands_its_record_to_the_other(self, tmp_path):
         """The usual order of a cleanup sweep: the first root scan is cleaned up
         (its own removal was refused, and a refused removal still leaves the
         registry) before the second one is removed. The record of the project's
@@ -708,9 +704,7 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert ran == []
         assert registry.get_scan(second_root).removed_nested_scan_ids == [project_scan]
 
-    def test_the_age_sweep_of_a_root_scan_hands_its_record_to_the_other(
-        self, tmp_path
-    ):
+    def test_the_age_sweep_of_a_root_scan_hands_its_record_to_the_other(self, tmp_path):
         registry = ScanRegistry()
         old, second_root, _project_scan, _tree = (
             self._two_root_scans_and_a_project_left_with_its_files(registry, tmp_path)
@@ -798,9 +792,7 @@ class TestRemovingAnOutputDirectoryAsksTheRegistry:
         assert ran == []
         assert registry.get_scan(old).removed_nested_scan_ids == [project_scan]
 
-    def test_an_entry_that_ran_at_the_recorded_directory_still_frees_it(
-        self, tmp_path
-    ):
+    def test_an_entry_that_ran_at_the_recorded_directory_still_frees_it(self, tmp_path):
         """The control: this entry ran and wrote over the earlier scan's files,
         so its removal deletes only its own."""
         registry = ScanRegistry()

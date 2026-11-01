@@ -695,9 +695,7 @@ class TestTotalFollowsOneRule:
             pytest.param({"weird": 4}, id="a-key-the-summary-has-no-bucket-for"),
         ],
     )
-    def test_a_row_with_no_usable_bucket_keeps_its_finding_count(
-        self, severity_counts
-    ):
+    def test_a_row_with_no_usable_bucket_keeps_its_finding_count(self, severity_counts):
         results = _results(with_summary_stats=False)
         results["raw_results"]["scanner_results"] = {
             "bandit": {

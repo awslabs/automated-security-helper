@@ -168,9 +168,7 @@ def _flag_names(node: ast.AST, frames: List[Bindings], seen=frozenset()):
         return set() if node.value == 0 else None
     if isinstance(node, ast.Attribute):
         return (
-            {node.attr}
-            if _is_os(node.value) and node.attr.startswith("O_")
-            else None
+            {node.attr} if _is_os(node.value) and node.attr.startswith("O_") else None
         )
     if isinstance(node, ast.Name):
         if node.id in seen:

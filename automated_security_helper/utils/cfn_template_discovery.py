@@ -280,9 +280,7 @@ def discover_templates(
             # could not build, or that is nested deeper than ASH reads, is a
             # failed target, as cfn-nag counts the same file; a file that is not
             # YAML or JSON at all is not a template.
-            unmodelable_reason = unevaluable_template_reason(
-                path, scan_root, text=text
-            )
+            unmodelable_reason = unevaluable_template_reason(path, scan_root, text=text)
             if unmodelable_reason is not None:
                 result.unmodelable.append((path, unmodelable_reason))
                 continue

@@ -2315,9 +2315,7 @@ def _apply_unused_fixes(
         UnusedSuppressionsNotEditable,
     )
 
-    no_report = (
-        "⚠️  No unused suppressions report found. Run a scan first to generate the report."
-    )
+    no_report = "⚠️  No unused suppressions report found. Run a scan first to generate the report."
     if report_path is None:
         secho(no_report, fg=typer.colors.YELLOW)
         return False

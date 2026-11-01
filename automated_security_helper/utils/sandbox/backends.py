@@ -841,9 +841,7 @@ class BwrapBackend(SandboxBackend):
         returns at once while a probe runs.
         """
         return (
-            self._overlay
-            and bool(self._overlay_devices)
-            and not self._overlay_refused
+            self._overlay and bool(self._overlay_devices) and not self._overlay_refused
         )
 
     def _probe(self) -> Optional[str]:

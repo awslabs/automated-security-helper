@@ -3001,6 +3001,8 @@ def _remember_scoped_miss(miss_key: str, scope: Any) -> None:
     for stale in [k for k, r in _uv_scoped_probe_misses.items() if r() is None]:
         _uv_scoped_probe_misses.pop(stale, None)
     _uv_scoped_probe_misses[miss_key] = reference
+
+
 #: The retry window a timed-out ``get_uv_tool_command`` probe opened for its key:
 #: the monotonic time until which the uv probe is skipped for that key. Guarded
 #: by ``_uv_tool_runner_cache_lock``; cleared with the caches.
