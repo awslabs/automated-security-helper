@@ -6,6 +6,8 @@
 ``trivy_bin_dir`` finds the pinned trivy release or installs it through ASH's own
 verified installer, and a failure to provision it FAILS the test rather than skipping
 it, so a test that uses it cannot pass in CI without running trivy.
+It has session scope, so a host without the pinned release downloads and verifies it
+once for the whole run, not once for each module that uses the fixture.
 ``trivy_on_path`` puts that directory first on PATH for one test and clears the
 process-wide cache of executable lookups, which holds a miss as well as a hit.
 """
@@ -26,9 +28,9 @@ from tests.utils.trivy_fixture import (
 )
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def trivy_bin_dir(tmp_path_factory) -> Path:
-    """A directory holding the pinned trivy, provisioned if need be."""
+    """A directory holding the pinned trivy, provisioned if need be, once per run."""
     on_path = shutil.which("trivy")
     if on_path and version_of(on_path) == PINNED_TRIVY:
         return Path(on_path).parent
