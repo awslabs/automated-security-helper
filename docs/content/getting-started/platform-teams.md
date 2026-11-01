@@ -254,9 +254,11 @@ place your team works:
       "s3://example-security-scan-results/$REPOSITORY_NAME/$(date -u +%Y%m%dT%H%M%SZ).ocsf.json"
     ```
 
-- AWS services: ASH's AWS reporters are loaded by the operator only. The S3 and CloudWatch
-  Logs reporters send the scan summary and configuration, not individual findings; read
-  [AWS reporters](../plugins/aws.md) for what each one sends before you turn it on.
+- AWS services: ASH's AWS reporters are loaded by the operator only. The CloudWatch Logs
+  reporter sends the scan summary and configuration, not individual findings. The S3
+  reporter sends the same two, and it sends the findings as the SARIF report inside its
+  object. Read [AWS reporters](../plugins/aws.md) for what each one sends before you turn
+  it on.
 
 Next, set the threshold and failure rules for your organization in
 [Set the gate](../how-to/set-the-gate.md).
