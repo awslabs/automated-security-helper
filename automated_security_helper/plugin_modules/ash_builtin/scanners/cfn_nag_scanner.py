@@ -1109,7 +1109,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                             f"{tool_output_excerpt(raised[0], 200)}"
                         )
                         ASH_LOGGER.error(
-                            f"CFN Nag did not evaluate {cfn_file}: {reason}"
+                            f"CFN Nag did not evaluate {cfn_file}: "
+                            f"{len(raised)} cfn_nag rule(s) raised and were "
+                            "isolated"
                         )
                         self.targets_failed += 1
                         self.errors.append(f"{cfn_file}: {reason}")

@@ -5709,9 +5709,9 @@ def _refuse_a_results_file_the_shell_cannot_be_handed(
         logger,
         3,
         "Scan refused: --mode nix reads existing results from the output "
-        f"directory's own file, {shown_on_one_line(str(own))}, which is all the "
+        f"directory's own file, {own}, which is all the "
         "scan inside the shell can be told; the results file named, "
-        f"{shown_on_one_line(str(named))}, is another file. Pass the output "
+        f"{named}, is another file. Pass the output "
         "directory that holds the file, or run the report phase with --mode local.",
     )
 

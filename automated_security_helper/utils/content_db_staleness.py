@@ -141,6 +141,7 @@ from automated_security_helper.utils.output_excerpt import (
 )
 from automated_security_helper.utils.subprocess_utils import spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
     from automated_security_helper.schemas.sarif_schema_model import Notification
@@ -517,12 +518,15 @@ def _policy_for(
         if chosen not in STALENESS_POLICIES:
             break
         # The reason is a config field, which an operator can fill from the
-        # environment: escapes removed, controls escaped, cut to a line's worth.
-        reason = tool_output_excerpt(str(override.reason), 300)
+        # environment: cut to a line's worth here and shown once, controls
+        # escaped, by the line that logs it.
+        reason = head_and_tail(str(override.reason), 300)
         ASH_LOGGER.info(
-            f"Content database {entry.name} is held to {chosen} rather than "
-            f"{held_to} by a content_db_staleness_overrides entry until {expires}: "
-            f"{reason}"
+            shown_on_one_line(
+                f"Content database {entry.name} is held to {chosen} rather than "
+                f"{held_to} by a content_db_staleness_overrides entry "
+                f"until {expires}: {reason}"
+            )
         )
         return chosen, (
             f"content_db_staleness_overrides entry for {entry.name}, which expires at "

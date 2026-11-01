@@ -1678,10 +1678,12 @@ class AshAggregatedResults(RecordModel):
                         # flat report. It is skipped and named by its scanner and
                         # position only: its content can hold a secret.
                         ASH_LOGGER.warning(
-                            f"Entry {index} of the additional report of scanner "
-                            f"{shown_on_one_line(str(scanner_name))} could not be "
-                            f"read ({type(error).__name__}), so it is left out of "
-                            "the flat findings",
+                            shown_on_one_line(
+                                f"Entry {index} of the additional report of scanner "
+                                f"{scanner_name} could not be "
+                                f"read ({type(error).__name__}), so it is left out of "
+                                "the flat findings"
+                            ),
                             extra=NO_MARKUP,
                         )
                         continue

@@ -992,6 +992,8 @@ def _bound_profile_unavailable(error: Exception, operation: str) -> Dict[str, An
     nothing in the log. An error that is not a ``BoundProfileUnavailableError``
     is the first kind.
     """
+    from automated_security_helper.utils.terminal_text import shown_on_one_line
+
     if not getattr(error, "workspace_unwritable", False):
         return with_exit_code(
             {
@@ -1004,8 +1006,10 @@ def _bound_profile_unavailable(error: Exception, operation: str) -> Dict[str, An
             REFUSED_CONFIG_EXIT_CODE,
         )
     _logger.warning(
-        "The session's bound profile could not be written to its workspace, so "
-        f"{operation} was refused: {raw_controls_on_one_line(str(error))}"
+        shown_on_one_line(
+            "The session's bound profile could not be written to its workspace, so "
+            f"{operation} was refused: {error}"
+        )
     )
     return with_exit_code(
         {

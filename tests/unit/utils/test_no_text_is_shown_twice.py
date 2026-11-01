@@ -197,6 +197,24 @@ _BY_DESIGN: Dict[Site, str] = {
         "apply_content_filters(results, scanners, severities)",
     ): "by design: no shown text reaches the filter, the guard after the producer "
     "call returns an error-holding result first",
+    # (1) The sink is handed a helper's ShownText whole. The check reads the
+    # helper's result as shown text given to secho, since the argument it sees is
+    # not a shown_on_one_line call; at run time secho's _shown keeps a ShownText
+    # as it is (utils/console.py), so the line is shown once.
+    (
+        "automated_security_helper/cli/config.py",
+        "_apply_unused_fixes",
+        "_config_unreadable_for_fix(config_path)",
+    ): "the helper returns shown_on_one_line's ShownText whole and secho keeps a "
+    "ShownText as it is: one pass, which the check judges by the call's shape",
+    # (2) refusal is the scan's own refusal text; the wizard puts it inside its
+    # one-line message, which shown_on_one_line escapes as a whole.
+    (
+        "automated_security_helper/cli/config.py",
+        "wizard",
+        "The module is not added",
+    ): "refusal is the scan's refusal text, formatted into the wizard's own "
+    "one-line message, which shown_on_one_line escapes again",
 }
 
 
