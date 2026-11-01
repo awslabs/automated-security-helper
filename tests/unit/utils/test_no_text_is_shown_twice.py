@@ -1224,8 +1224,7 @@ _SIZE_READ_CASES = {
         False,
     ),
     "the-size-in-a-local": (
-        "size = len(message)\n"
-        "        ASH_LOGGER.warning(f'Failed to send {level} message ({size} chars)')",
+        "size = len(message)\n        ASH_LOGGER.warning(f'Failed to send {level} message ({size} chars)')",
         False,
     ),
     "the-size-and-the-text": (
@@ -1233,8 +1232,7 @@ _SIZE_READ_CASES = {
         True,
     ),
     "the-text-in-a-local": (
-        "text = str(message)\n"
-        "        ASH_LOGGER.warning(f'Failed to send {level} message: {text}')",
+        "text = str(message)\n        ASH_LOGGER.warning(f'Failed to send {level} message: {text}')",
         True,
     ),
     "the-text-beside-its-size-in-a-local": (

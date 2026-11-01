@@ -948,8 +948,7 @@ def test_an_allowance_does_not_excuse_the_next_line_of_a_block_script(text):
     [
         f"- run: |\n    git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git\n",
         f"- run: |\n    {ASH_CLONE}\n    git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git\n",
-        f"- run: |\n    git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git \\\n"
-        "      --depth 1\n",
+        f"- run: |\n    git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git \\\n      --depth 1\n",
     ],
     ids=["one line", "after a line of this repository", "a continued clone"],
 )

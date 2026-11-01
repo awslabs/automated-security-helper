@@ -1995,7 +1995,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 # below; one where it parsed some passed with no word about the
                 # rest, so the two cases were told differently. The notices
                 # reach the SARIF only, and nothing else names the files.
-                example = sorted(skipped_all)[0]
+                example = min(skipped_all)
                 ASH_LOGGER.warning(
                     f"bandit could not parse {len(skipped_all)} Python file"
                     f"{'' if len(skipped_all) == 1 else 's'} under "

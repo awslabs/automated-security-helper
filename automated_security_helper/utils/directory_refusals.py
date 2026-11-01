@@ -48,6 +48,8 @@ import secrets
 import stat
 from typing import Optional, Union
 
+from typing_extensions import Self
+
 PathLike = Union[str, "os.PathLike[str]"]
 
 #: What a :class:`DirectoryRefusal` says went wrong with an output directory.
@@ -69,12 +71,14 @@ class DirectoryRefusal(str):
     permission.
     """
 
+    __slots__ = ("kind", "error_number")
+
     kind: str
     error_number: Optional[int]
 
     def __new__(
         cls, text: str, kind: str, error_number: Optional[int] = None
-    ) -> "DirectoryRefusal":
+    ) -> Self:
         refusal = super().__new__(cls, text)
         refusal.kind = kind
         refusal.error_number = error_number

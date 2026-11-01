@@ -81,7 +81,7 @@ def test_the_one_group_pattern_matches_the_language_of_the_two_group_pattern():
     two_groups = re.compile(r"v?[0-9]+(\.[0-9]+)*([-.][0-9A-Za-z]+)*")
     alphabet = "1av.-_\n"
     checked = 0
-    for length in range(0, 6):
+    for length in range(6):
         for chars in itertools.product(alphabet, repeat=length):
             text = "".join(chars)
             assert bool(_RELEASE_TAG.fullmatch(text)) == bool(
@@ -92,4 +92,4 @@ def test_the_one_group_pattern_matches_the_language_of_the_two_group_pattern():
     # A control for the oracle itself: it accepts and refuses something.
     assert two_groups.fullmatch("v1.2.3-rc1")
     assert not two_groups.fullmatch("1..2")
-    assert checked == sum(len(alphabet) ** n for n in range(0, 6))
+    assert checked == sum(len(alphabet) ** n for n in range(6))
