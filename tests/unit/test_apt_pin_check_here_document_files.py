@@ -493,6 +493,18 @@ class TestAFileALaterInstructionRunsIsCommands:
             "RUN mv /tmp/i.sh /bin/inst && inst jq",
             # The later instruction is a shell whose body runs the script.
             "RUN bash <<'EOF2'\nsh /tmp/i.sh jq\nEOF2",
+            # The file is moved by one RUN and run under its new name by a later one.
+            "RUN mv /tmp/i.sh /bin/inst\nRUN inst jq",
+            "RUN cp /tmp/i.sh /bin/inst\nRUN sh /bin/inst jq",
+            "RUN cp /tmp/i.sh /bin/a\nRUN mv /bin/a /bin/b\nRUN b jq",
+            # The script is run by a second script that a later RUN runs.
+            "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/i.sh jq\nEOF2\nRUN sh /tmp/j.sh",
+            # And that one by a third, and the file is moved on the way.
+            "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/i.sh jq\nEOF2\n"
+            "RUN cat > /tmp/k.sh <<'EOF3'\nsh /tmp/j.sh\nEOF3\n"
+            "RUN sh /tmp/k.sh",
+            "RUN cat > /tmp/j.sh <<'EOF2'\ninst jq\nEOF2\n"
+            "RUN mv /tmp/i.sh /bin/inst\nRUN sh /tmp/j.sh",
         ],
     )
     def test_a_positional_parameter_in_a_script_a_later_run_executes_is_refused(
@@ -518,11 +530,66 @@ class TestAFileALaterInstructionRunsIsCommands:
             "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/i.sh jq\nEOF2",
             # The same name written again is not a run of it.
             "RUN tee /tmp/i.sh <<'EOF2'\necho ok\nEOF2",
+            # A move or copy that nothing runs afterwards.
+            "RUN mv /tmp/i.sh /bin/inst",
+            "RUN mv /tmp/i.sh /bin/inst\nRUN echo inst",
+            # Another file is moved, so the name the next RUN runs is not this one's.
+            "RUN mv /tmp/other.sh /bin/inst\nRUN inst jq",
+            # The name is run before the move gives it to the file.
+            "RUN inst jq\nRUN mv /tmp/i.sh /bin/inst",
+            # A second script that names this one, run by nothing or naming another.
+            "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/i.sh jq\nEOF2\nRUN echo done",
+            "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/i.sh jq\nEOF2\nRUN sh /tmp/k.sh",
+            # A second script that runs another file, not this one, and is run.
+            "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/k.sh jq\nEOF2\nRUN sh /tmp/j.sh",
         ],
     )
     def test_a_script_no_later_run_executes_stays_a_file_body(self, tmp_path, later):
         """Control: green before and after."""
         assert _pins(tmp_path, f"{self.SCRIPT}{later}\n") == {}
+
+    def test_a_script_a_second_script_runs_is_refused_whichever_is_written_first(
+        self, tmp_path
+    ):
+        # Red before: j.sh is read as commands (the last RUN runs it), but i.sh is
+        # written after it, and only the instructions after i.sh were looked at, so
+        # the `"$@"` of the file j.sh runs was skipped.
+        body = (
+            "RUN cat > /tmp/j.sh <<'EOF2'\n"
+            "sh /tmp/i.sh jq\n"
+            "EOF2\n"
+            "RUN cat > /tmp/i.sh <<'EOF'\n"
+            'apt-get install -y "$@"\n'
+            "EOF\n"
+            "RUN sh /tmp/j.sh\n"
+        )
+        with pytest.raises(
+            checker.PinEnumerationError, match=r"Dockerfile:7 installs '\$@'"
+        ):
+            checker.enumerate_apt_pins(_dockerfile(tmp_path, body))
+
+    def test_a_script_written_after_the_run_that_runs_the_second_script_is_a_file(
+        self, tmp_path
+    ):
+        """Control: j.sh runs before i.sh exists, so it runs nothing of it."""
+        body = (
+            "RUN cat > /tmp/j.sh <<'EOF2'\n"
+            "sh /tmp/i.sh jq\n"
+            "EOF2\n"
+            "RUN sh /tmp/j.sh\n"
+            f"{self.SCRIPT}"
+        )
+        assert _pins(tmp_path, body) == {}
+
+    def test_a_script_two_scripts_deep_is_commands_in_the_blocks(self):
+        """The flag is set on every file body in the chain, not on the nearest."""
+        chain = (
+            f"{self.SCRIPT}"
+            "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/i.sh jq\nEOF2\n"
+            "RUN sh /tmp/j.sh\n"
+        )
+        blocks = checker._run_blocks(chain)
+        assert [block.file_content for block in blocks] == [False] * len(blocks)
 
     def test_a_run_before_the_script_is_written_runs_nothing_of_it(self, tmp_path):
         """Control: only the instructions after the one that wrote the file count."""

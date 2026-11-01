@@ -1577,7 +1577,18 @@ def _other_pipelines(
 
 
 def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
+    """Whether a command of the pipelines runs one of the files (``_follow_a_file``)."""
+    return _follow_a_file(pipelines, files)[0]
+
+
+def _follow_a_file(
+    pipelines: list[list[str]], files: set[str]
+) -> tuple[bool, set[str]]:
     """Whether a command of the pipelines runs one of the files, by its name or path.
+
+    Also the names the files have at the end of the pipelines (the files' own names and
+    any ``mv`` or ``cp`` gave them), for the instructions that come after: a file moved
+    by one RUN is run under its new name by the next.
 
     A file is run when it is the program (``x.sh``, ``./x.sh``, ``sudo /tmp/x.sh``), or
     when a shell, ``.`` or ``source`` has its name among the words (``sh x.sh``,
@@ -1610,17 +1621,17 @@ def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
             words = words[lead:]
             program = _program(words)
             if program in wanted:
-                return True
+                return True, wanted
             named = _base_names(words)
             piped = _base_names(fed)
             if program in _SHELLS or program in {".", "source"}:
                 if (named | piped) & wanted:
-                    return True
+                    return True, wanted
                 # A script given as a string names the file somewhere in it, as a name
                 # of its own: `x` is in `. /x` and `chmod +x /x && /x`, not in `exit`.
                 script = words[words.index("-c") + 1 :] if "-c" in words else []
                 if any(_names_it(word, name) for word in script for name in wanted):
-                    return True
+                    return True, wanted
             elif program in _GIVES_A_FILE_ANOTHER_NAME:
                 if _base_names(words[:-1]) & wanted:
                     wanted |= _base_names(words[-1:])
@@ -1631,9 +1642,9 @@ def _runs_a_file(pipelines: list[list[str]], files: set[str]) -> bool:
                     after_tee = words[tails.index("tee") + 1 :]
                     wanted |= _base_names(w for w in after_tee if not w.startswith("-"))
             elif program not in _NEVER_RUNS_A_FILE and (named | piped) & wanted:
-                return True
+                return True, wanted
             fed.extend(words)
-    return False
+    return False, wanted
 
 
 def _names_it(word: str, name: str) -> bool:
@@ -1717,22 +1728,54 @@ def _file_bodies_a_later_run_runs(blocks: list[_RunBlock]) -> list[_RunBlock]:
     ``RUN cat > /tmp/i.sh <<'EOF'`` in one instruction and ``RUN sh /tmp/i.sh jq`` in
     another: the second is the caller of the script, so a ``"$@"`` in the body is the
     package it passes, installed while the image builds. The same rule as for a script
-    the instruction itself runs (``_runs_a_file``), over the instructions after the one
-    that wrote it. The file bodies of other instructions are not looked at: they are
-    files too, run by nothing yet.
+    the instruction itself runs (``_follow_a_file``), over the instructions after the
+    one that wrote it, in the order the build runs them, so a file moved by one RUN
+    (``mv /tmp/i.sh /bin/inst``) is run under its new name by the next (``inst jq``).
+
+    A file body that a later RUN runs is commands, and commands can run another file:
+    ``RUN sh /tmp/j.sh`` runs a ``j.sh`` whose body is ``sh /tmp/i.sh jq``, which runs
+    ``i.sh`` at that point of the build. So the blocks are read again while one more
+    body turns into commands, each body counted at the point of the build where it
+    runs (the RUN that runs it), and a file written before that point is its callee
+    whether the body stands before or after it in the file. A file body no command
+    runs stays a file body.
     """
     result = list(blocks)
-    for index, block in enumerate(blocks):
-        if not (block.file_content and block.files):
-            continue
-        for later in blocks[index + 1 :]:
-            if later.file_content or later.instruction == block.instruction:
+    # Where in the build each block's commands run: a RUN's own at its place, a script
+    # body's where the RUN (or the script) that runs it does.
+    runs_at = list(range(len(blocks)))
+    cleaned_pipelines: dict[int, list[list[str]]] = {}
+
+    def pipelines_of(at: int) -> list[list[str]]:
+        if at not in cleaned_pipelines:
+            cleaned = _ARITHMETIC.sub(" ", _block_text(result[at].lines))
+            segments = _command_segments(cleaned)
+            cleaned_pipelines[at] = _other_pipelines(cleaned, segments, [])
+        return cleaned_pipelines[at]
+
+    changed = True
+    while changed:  # each pass turns at least one body into commands: bounded by them
+        changed = False
+        for index, block in enumerate(result):
+            if not (block.file_content and block.files):
                 continue
-            cleaned = _ARITHMETIC.sub(" ", _block_text(later.lines))
-            pipelines = _other_pipelines(cleaned, _command_segments(cleaned), [])
-            if _runs_a_file(pipelines, set(block.files)):
-                result[index] = replace(block, file_content=False)
-                break
+            callers = sorted(
+                (runs_at[at], at)
+                for at, other in enumerate(result)
+                if not other.file_content
+                and runs_at[at] > index
+                # The instruction's own commands are read with the file (_scan_markers);
+                # a body of it that a later RUN runs is another caller.
+                and (other.instruction != block.instruction or runs_at[at] != at)
+            )
+            names = set(block.files)
+            for when, at in callers:
+                runs, names = _follow_a_file(pipelines_of(at), names)
+                if runs:
+                    result[index] = replace(block, file_content=False)
+                    runs_at[index] = when
+                    changed = True
+                    break
     return result
 
 
