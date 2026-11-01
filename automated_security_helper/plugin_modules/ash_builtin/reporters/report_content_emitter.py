@@ -40,11 +40,16 @@ def coverage_shortfall_text(attempted: int | None, failed: int | None) -> str:
     whole document was lost, for the one scanner whose coverage most needs
     stating. The console renderer already printed "unknown" for it; this is
     the same reading for the files.
+
+    Two causes land on an unknown-size row: stored counters that cannot be
+    read, and a coverage claim filed under another scanner's key, whose
+    counters are perfectly readable. The sentence names neither, so it is true
+    of both.
     """
     if attempted is None or failed is None:
         return (
-            "coverage unknown; its recorded target counters could not be read, "
-            "so how many targets it evaluated is not known"
+            "coverage unknown; how many targets it evaluated could not be "
+            "determined, so that count is not known"
         )
     # A record whose failed count exceeds its attempted count is inconsistent;
     # the evaluated count is never printed below zero.

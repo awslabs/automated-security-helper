@@ -58,6 +58,13 @@ PARTIAL = {
     "cdk-nag": {"source": _report("PASSED", targets_attempted=3, targets_failed=2)}
 }
 
+#: A report that names cdk-nag, filed under bandit's key. Its counters are
+#: perfectly readable (four attempted, one failed), but no scanner is credited
+#: with them, so cdk-nag is listed with a shortfall of unknown size.
+MISFILED = {
+    "bandit": {"source": _report("ERROR", targets_attempted=4, targets_failed=1)}
+}
+
 
 #: How the renderer's sentence for an unknown size ends (coverage_shortfall_text).
 SENTENCE_END = "is not known"
@@ -69,6 +76,13 @@ class TestTheSharedRenderer:
         assert "coverage unknown" in text
         assert text.endswith(SENTENCE_END)
         assert "None" not in text
+
+    def test_the_sentence_does_not_name_a_cause(self):
+        """Unreadable counters and a misfiled claim both land on this sentence,
+        so it must not say the counters could not be read."""
+        text = coverage_shortfall_text(None, None)
+        assert "counter" not in text
+        assert "read" not in text
 
     def test_real_counters_keep_their_numbers(self):
         assert coverage_shortfall_text(3, 2) == (
@@ -108,3 +122,26 @@ def test_a_sized_shortfall_still_states_its_counts(name, test_plugin_context):
 
     assert "evaluated 1 of 3 target(s); 2 could not be evaluated" in document
     assert "coverage unknown" not in document
+
+
+@pytest.mark.parametrize("name", sorted(REPORTERS))
+def test_a_misfiled_claim_is_not_blamed_on_unreadable_counters(
+    name, test_plugin_context
+):
+    """A report filed under another scanner's key has readable counters. Every
+    report names the scanner it belongs to, says its coverage is unknown, and
+    does not give unreadable counters as the reason."""
+    document = REPORTERS[name](context=test_plugin_context).report(_model(MISFILED))
+
+    assert "cdk-nag" in document
+    start = 0
+    found = 0
+    while (index := document.find("coverage unknown", start)) != -1:
+        sentence_end = document.find(SENTENCE_END, index)
+        assert sentence_end != -1, document[index : index + 200]
+        sentence = document[index : sentence_end + len(SENTENCE_END)]
+        assert "counter" not in sentence, sentence
+        found += 1
+        start = index + 1
+    # The row is written at least once, so the loop above checked a sentence.
+    assert found >= 1
