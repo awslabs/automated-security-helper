@@ -755,6 +755,11 @@ _default_registry_lock = threading.Lock()
 #: once the removal is done.
 _ended_while_scanning: Set[str] = set()
 _ended_lock = threading.Lock()
+#: Sessions whose pending end a thread started by the sweep is completing now
+#: (:func:`_complete_a_pending_end_off_the_sweep`); guarded by ``_ended_lock``.
+#: A sweep pass that meets the held presence guard for the same session again
+#: starts no second thread to wait on it.
+_completing_off_the_sweep: Set[str] = set()
 
 
 def get_default_registry() -> MCPSessionRegistry:
@@ -2467,20 +2472,40 @@ def _complete_a_pending_end_off_the_sweep(session_id: str) -> None:
     thread runs :func:`finish_ended_session`, whose ``end_session`` waits for
     the guard for as long as the other server keeps it, as the request that
     ended the session would have waited; the sweep itself waits for nothing. A
-    session whose end is not pending needs no thread. Daemon: a removal still
+    session whose end is not pending needs no thread, and neither does one
+    whose end a thread of this kind is already completing: each sweep pass that
+    meets the held guard would otherwise start another thread blocked on it
+    (``_completing_off_the_sweep``). Daemon: a removal still
     running when the process exits leaves what it had not removed under the
     hidden delete name, which the TTL sweep clears.
     """
     with _ended_lock:
-        pending = session_id in _ended_while_scanning
-    if not pending:
-        return
-    threading.Thread(
-        target=finish_ended_session,
-        args=(session_id,),
-        name=f"ash-mcp-finish-ended-session-{session_id}",
-        daemon=True,
-    ).start()
+        if (
+            session_id not in _ended_while_scanning
+            or session_id in _completing_off_the_sweep
+        ):
+            return
+        _completing_off_the_sweep.add(session_id)
+    try:
+        threading.Thread(
+            target=_finish_ended_session_off_the_sweep,
+            args=(session_id,),
+            name=f"ash-mcp-finish-ended-session-{session_id}",
+            daemon=True,
+        ).start()
+    except BaseException:
+        with _ended_lock:
+            _completing_off_the_sweep.discard(session_id)
+        raise
+
+
+def _finish_ended_session_off_the_sweep(session_id: str) -> None:
+    """The body of the thread :func:`_complete_a_pending_end_off_the_sweep` starts."""
+    try:
+        finish_ended_session(session_id)
+    finally:
+        with _ended_lock:
+            _completing_off_the_sweep.discard(session_id)
 
 
 def _remove_stale_session_state(
