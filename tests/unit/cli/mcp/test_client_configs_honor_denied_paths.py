@@ -1216,10 +1216,24 @@ def test_the_run_ash_scan_tool_keeps_the_refusals_error_type(_server) -> None:
 def test_validate_config_on_stdio_does_not_flag_the_callers_own_content(
     _server,
 ) -> None:
+    """On stdio the content is the caller's own, so the session's policy denies
+    nothing in it: valid, no error, and no line names DENIED_KEY as denied. The
+    one warning is the check's ignored-value note on the off-host reporter's
+    region: client content is checked as a repository file (untrusted_config),
+    and a scan of such a file takes the region from the trusted base."""
     from automated_security_helper.cli.mcp_tools import mcp_validate_config
 
     result = mcp_validate_config(config_content=BEDROCK_REGION, session_id=None)
-    assert result == {"valid": True, "errors": [], "warnings": []}, result
+    ignored = (
+        f"{DENIED_KEY} is set in a config file inside the scanned tree, and a "
+        "scan ignores that value: only --config-overrides or a config file "
+        "outside the tree set it."
+    )
+    assert result["valid"] is True, result
+    assert result["errors"] == [], result
+    assert result["warnings"] == [
+        {"field": "", "message": ignored, "type": "validation_error"},
+    ], result
 
 
 def test_validate_config_checks_a_delivered_base_too(_server) -> None:
