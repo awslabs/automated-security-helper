@@ -1342,6 +1342,9 @@ _NODESOURCE_URL_MAJOR = re.compile(
 )
 # Docker reads instruction names without regard to case.
 _RUN_INSTRUCTION = re.compile(r"^RUN\s", re.IGNORECASE)
+# The instructions that copy a file from another stage, which can give a file a RUN
+# wrote a second name (see _copy_as_command).
+_COPY_INSTRUCTION = re.compile(r"^(?:COPY|ADD)\s", re.IGNORECASE)
 # A here-document marker on a RUN line: <<EOF, <<-EOF, <<"EOF", <<\EOF. Not a
 # here-string (<<<), and not a name that goes on into a call. A quote around the name,
 # or a backslash before it, stops the shell expanding the body (see _heredoc_markers).
@@ -1720,6 +1723,9 @@ class _RunBlock:
     # file body, the names of the files the instruction writes it to.
     instruction: int = 0
     files: frozenset[str] = frozenset()
+    # Not a RUN: the ``cp`` a ``COPY --from`` instruction amounts to, kept only so the
+    # file bodies a later RUN runs can be followed through it. It is not returned.
+    copy: bool = False
 
 
 def _file_bodies_a_later_run_runs(blocks: list[_RunBlock]) -> list[_RunBlock]:
@@ -1731,6 +1737,8 @@ def _file_bodies_a_later_run_runs(blocks: list[_RunBlock]) -> list[_RunBlock]:
     the instruction itself runs (``_follow_a_file``), over the instructions after the
     one that wrote it, in the order the build runs them, so a file moved by one RUN
     (``mv /tmp/i.sh /bin/inst``) is run under its new name by the next (``inst jq``).
+    So is a file renamed by ``COPY --from=builder /tmp/i.sh /bin/inst``, which
+    ``_run_blocks`` hands over as the ``cp`` it amounts to.
 
     A file body that a later RUN runs is commands, and commands can run another file:
     ``RUN sh /tmp/j.sh`` runs a ``j.sh`` whose body is ``sh /tmp/i.sh jq``, which runs
@@ -1776,7 +1784,34 @@ def _file_bodies_a_later_run_runs(blocks: list[_RunBlock]) -> list[_RunBlock]:
                     runs_at[index] = when
                     changed = True
                     break
-    return result
+    return [block for block in result if not block.copy]
+
+
+def _copy_as_command(lines: list[tuple[int, str]]) -> str:
+    """The ``cp`` a ``COPY --from`` or ``ADD --from`` instruction amounts to, or "".
+
+    ``COPY --from=builder --chmod=755 /tmp/i.sh /bin/inst`` puts the file under a second
+    name as ``cp /tmp/i.sh /bin/inst`` does, which ``_follow_a_file`` follows. Only an
+    instruction that copies from another stage can name a file a RUN wrote, so one with
+    no ``--from`` (a file of the build context) is left out. Both the shell form and
+    the JSON array form are read.
+    """
+    words = " ".join(part for _, part in lines).split()[1:]
+    flags = [word for word in words if word.startswith("--")]
+    if not any(flag.lower().startswith("--from") for flag in flags):
+        return ""
+    rest = " ".join(word for word in words if not word.startswith("--"))
+    if rest.startswith("["):
+        try:
+            parsed = json.loads(rest)
+        except ValueError:
+            parsed = None
+        if not (isinstance(parsed, list) and all(isinstance(w, str) for w in parsed)):
+            return ""
+        paths = parsed
+    else:
+        paths = [word.strip("'\"") for word in rest.split()]
+    return "cp " + " ".join(paths) + " ;"
 
 
 def _run_blocks(text: str) -> list[_RunBlock]:
@@ -1804,8 +1839,23 @@ def _run_blocks(text: str) -> list[_RunBlock]:
     skip_bodies = False  # a skip comment stands above the next RUN
     run_skips_bodies = False  # the RUN being read has one
     instruction = 0  # the RUN being read, counted from 1
+    copying: list[tuple[int, str]] | None = None  # a COPY or ADD being read
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
+        if current is None and copying is None and _COPY_INSTRUCTION.match(line):
+            skip_bodies = False
+            copying = []
+        if current is None and copying is not None:
+            # Docker skips a blank line and a comment inside a continued instruction.
+            if line and not line.startswith("#"):
+                continued = line.endswith("\\")
+                copying.append((number, line[:-1] if continued else line))
+                if not continued:
+                    command = _copy_as_command(copying)
+                    if command:
+                        blocks.append(_RunBlock([(copying[0][0], command)], copy=True))
+                    copying = None
+            continue
         if current is not None and terminators:
             if line == terminators[0][0]:
                 if terminators[0][1] and file_body and not run_skips_bodies:

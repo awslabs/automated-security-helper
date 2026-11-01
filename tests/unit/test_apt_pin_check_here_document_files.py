@@ -26,8 +26,10 @@ that writes nothing, or to a redirection that keeps nothing (``/dev/null``, ``2>
 is commands run now, and an expansion in it is refused as before. So is the body of a
 file the same ``RUN`` goes on to run (``&& sh /tmp/install.sh jq``, ``&& chmod +x
 /tmp/install.sh && /tmp/install.sh jq``): its caller is on the line, and a ``"$@"`` in
-it is a package installed now that no lookup can see. A file that is only written, or
-run by a later instruction, stays a file body. A comment
+it is a package installed now that no lookup can see. So is the body of a file a later
+instruction runs, by its name, a name ``mv`` or ``cp`` gave it, or one a ``COPY
+--from`` gave it, directly or through another script. A file that is only written, or
+that nothing runs, stays a file body. A comment
 ``# apt-pin-check: skip`` directly above a ``RUN`` drops the file bodies of that
 instruction, for a file that is not a script (a motd, a README).
 
@@ -505,6 +507,22 @@ class TestAFileALaterInstructionRunsIsCommands:
             "RUN sh /tmp/k.sh",
             "RUN cat > /tmp/j.sh <<'EOF2'\ninst jq\nEOF2\n"
             "RUN mv /tmp/i.sh /bin/inst\nRUN sh /tmp/j.sh",
+            # A later stage copies the file under another name, and a RUN runs that.
+            "COPY --from=core /tmp/i.sh /bin/inst\nRUN inst jq",
+            "COPY --from=core --chmod=755 /tmp/i.sh /bin/inst\nRUN inst jq",
+            'COPY --from=core ["/tmp/i.sh", "/bin/inst"]\nRUN inst jq',
+            "copy --from=core /tmp/i.sh /bin/inst\nRUN inst jq",
+            "COPY --from=core /tmp/i.sh \\\n    # a comment inside the instruction\n"
+            "    /bin/inst\nRUN inst jq",
+            "COPY --from=core /tmp/i.sh /bin/inst\nRUN sh /bin/inst jq",
+            # A directory keeps the file's name; a copy then a move; two copies.
+            "COPY --from=core /tmp/i.sh /bin/\nRUN sh /bin/i.sh jq",
+            "COPY --from=core /tmp/i.sh /bin/a\nRUN mv /bin/a /bin/b\nRUN b jq",
+            "COPY --from=core /tmp/i.sh /bin/a\n"
+            "COPY --from=core /bin/a /bin/b\nRUN b jq",
+            # The renamed file is run by a second script that a later RUN runs.
+            "RUN cat > /tmp/j.sh <<'EOF2'\ninst jq\nEOF2\n"
+            "COPY --from=core /tmp/i.sh /bin/inst\nRUN sh /tmp/j.sh",
         ],
     )
     def test_a_positional_parameter_in_a_script_a_later_run_executes_is_refused(
@@ -542,6 +560,15 @@ class TestAFileALaterInstructionRunsIsCommands:
             "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/i.sh jq\nEOF2\nRUN sh /tmp/k.sh",
             # A second script that runs another file, not this one, and is run.
             "RUN cat > /tmp/j.sh <<'EOF2'\nsh /tmp/k.sh jq\nEOF2\nRUN sh /tmp/j.sh",
+            # A copy that nothing runs afterwards, or that copies another file.
+            "COPY --from=core /tmp/i.sh /bin/inst",
+            "COPY --from=core /tmp/i.sh /bin/inst\nRUN echo inst",
+            "COPY --from=core /tmp/other.sh /bin/inst\nRUN inst jq",
+            # A COPY with no --from copies a file of the build context, not this one.
+            "COPY /tmp/i.sh /bin/inst\nRUN inst jq",
+            "COPY i.sh /bin/inst\nRUN inst jq",
+            # The name is run before the copy gives it to the file.
+            "RUN inst jq\nCOPY --from=core /tmp/i.sh /bin/inst",
         ],
     )
     def test_a_script_no_later_run_executes_stays_a_file_body(self, tmp_path, later):
@@ -612,6 +639,24 @@ class TestAFileALaterInstructionRunsIsCommands:
         kept = checker._run_blocks(f"{self.SCRIPT}RUN sh /tmp/other.sh jq\n")
         assert [block.file_content for block in run] == [False, False, False]
         assert [block.file_content for block in kept] == [True, False, False]
+
+    def test_a_copy_instruction_is_followed_but_is_not_a_block_of_the_result(self):
+        """The renaming COPY turns the body into commands and is not returned itself."""
+        blocks = checker._run_blocks(
+            f"{self.SCRIPT}COPY --from=core /tmp/i.sh /bin/inst\nRUN inst jq\n"
+        )
+        assert [block.file_content for block in blocks] == [False, False, False]
+        # The body, then its RUN, then the RUN that runs the renamed file.
+        assert [block.lines[0][0] for block in blocks] == [2, 1, 5]
+
+    def test_a_pin_after_a_copy_instruction_keeps_its_line(self, tmp_path):
+        """Control: a COPY --from between two RUNs moves no line number."""
+        body = (
+            f"{self.SCRIPT}"
+            "COPY --from=core /tmp/i.sh /bin/inst\n"
+            f"RUN apt-get install -y {CURL}\n"
+        )
+        assert _pins(tmp_path, body) == {"curl": ("7.88.1-10+deb12u15", (7,))}
 
 
 class TestAShellBodyIsStillCommands:
