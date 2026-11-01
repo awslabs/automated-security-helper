@@ -8481,6 +8481,24 @@
   trailing slash now logs one warning per run; the warning does not quote the
   prefix, which can come from the environment. End the prefix with `/`, as the
   default `ash-reports/` does, to place the report in a directory.
+- **The Bedrock summary reporter reads a blank model id as unset and trims a
+  padded one, from the environment and from a config file alike.** A blank
+  `ASH_BEDROCK_MODEL_ID`, or a blank `model_id` in a config file or
+  `--config-overrides` (such as `${ASH_BEDROCK_MODEL_ID}` with the variable blank),
+  used to be sent to Bedrock as a model named by spaces. It now falls back to the
+  reporter's built-in model. A padded id such as `" eu.example.model-v1:0 "` is
+  used without the whitespace around it, so the two sources give one id. A blank
+  `ASH_BEDROCK_MODEL_ID`, `ASH_BEDROCK_TEMPERATURE` or `ASH_BEDROCK_MAX_TOKENS` is
+  also no longer masked in the reporter's log lines and error text, where a
+  value of spaces rewrote every run of spaces.
+- **The documentation now says the S3 reporter's object carries the findings.** The
+  reporters page described the object as holding no individual findings. When the
+  scan produced a SARIF report, the object holds that report under the `sarif` key,
+  and the report lists the individual findings. The reporter did not change; the
+  page now matches it. If you judged what the S3 reporter exposes from the earlier
+  wording, review who can read the bucket and how long the objects are kept with
+  the findings in mind. The CloudWatch Logs reporter's event does not carry the
+  SARIF report.
 - **Every finding's `id` in `ash.flat.json`, `ash.csv` and the MCP tools changes
   once.** It was `<scanner>-<rule>-<8 hex digits of a hash of the message>`, so
   two findings of one rule with one message shared an `id`, and rewording a
