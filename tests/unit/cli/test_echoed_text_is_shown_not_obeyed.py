@@ -229,7 +229,9 @@ def test_the_wizards_questions_show_what_they_quote(tmp_path, monkeypatch):
     """typer.prompt and typer.confirm write their text, and a prompt its default,
     through click's echo as given. The wizard asks about the configuration it
     edits: the project name is the first prompt's default, and each plugin module
-    is named in a question of its own."""
+    is named in a question of its own. Such a module is outside ASH's plugin
+    namespace (no dotted path of identifiers), so after the questions the wizard
+    refuses to write it, exit 3, and the refusal quotes the module too."""
     monkeypatch.chdir(tmp_path)
     config_file = tmp_path / ".ashrc.yaml"
     # No backslash in the names: the rule doubles one that comes before a shown
@@ -244,14 +246,21 @@ def test_the_wizards_questions_show_what_they_quote(tmp_path, monkeypatch):
 
     result = _wizard(config_file)
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 3, result.output
     assert "Keep module 'mod" in result.output, result.output
     assert "Project name [p" in result.output, result.output
     _assert_shown(result.output)
     assert "\\x1b]52;c;ZXZpbA==\\x07" in result.output, result.output
     assert "\\x1b]8;;https://example.invalid" in result.output, result.output
-    # Each control shown once: the list of modules is not shown again.
-    assert "\\\\x" not in result.output, result.output
+    # The module is outside ASH's plugin namespace, so after the questions the
+    # wizard refuses to write it. The refusal quotes the module by its repr,
+    # whose escapes are text: shown, each has its backslash doubled, there only.
+    refusal = [line for line in result.output.splitlines() if "Not writing" in line]
+    assert len(refusal) == 1, result.output
+    assert "not a dotted path of Python identifiers" in refusal[0], refusal[0]
+    # Each control shown once anywhere else: the list of modules is not shown
+    # again, and the refusal line is the one place a repr's escape is text.
+    assert "\\\\x" not in result.output.replace(refusal[0], ""), result.output
 
 
 @pytest.mark.parametrize(
@@ -264,7 +273,11 @@ def test_the_wizards_questions_show_what_they_quote(tmp_path, monkeypatch):
 def test_the_wizard_lists_the_configured_modules_as_written(
     tmp_path, monkeypatch, module
 ):
-    """The list of modules is printed by rich, which read the names as markup."""
+    """The list of modules is printed by rich, which read the names as markup.
+
+    A bracket is no identifier character, so such a module is outside ASH's
+    plugin namespace and the wizard refuses to write it, exit 3, after the list
+    quoted it as written."""
     monkeypatch.chdir(tmp_path)
     config_file = tmp_path / ".ashrc.yaml"
     config_file.write_text(
@@ -273,8 +286,11 @@ def test_the_wizard_lists_the_configured_modules_as_written(
 
     result = _wizard(config_file)
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 3, result.output
     assert f"Currently configured: ['{module}']" in result.output, result.output
+    refusal = f"ash_plugin_modules names '{module}' (not a dotted path"
+    assert refusal in result.output, result.output
+    assert "Not writing" in result.output, result.output
 
 
 @posix_names
