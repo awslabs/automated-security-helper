@@ -321,7 +321,7 @@ def test_evaluated_within_fails_at_the_deadline_naming_the_source():
 
     assert time.monotonic() - started < 5
     assert "the slow thing" in str(raised.value)
-    assert "scan_timeout" in str(raised.value)
+    assert "pattern time limit" in str(raised.value)
 
 
 def test_a_search_that_holds_the_interpreter_lock_is_stopped_at_the_bound():
