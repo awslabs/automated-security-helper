@@ -161,6 +161,14 @@ def test_the_check_s_header_names_the_file_on_one_line(
     _assert_one_line(result.output, "checked.yaml")
 
 
+#: TOML with a fix to make (a bare line_start): --fix refuses a TOML file only
+#: when it would rewrite it; one with nothing to fix passes `lint --fix`.
+REFUSED_TOML = (
+    'project_name = "t"\n\n[[global_settings.suppressions]]\n'
+    'rule_id = "B101"\npath = "app.py"\nreason = "r"\nline_start = 3\n'
+)
+
+
 @pytest.mark.parametrize(
     "name,flag", [("a\nrefused.toml", "--fix"), ("a\nrefused.json", "--fix-unused")]
 )
@@ -171,7 +179,7 @@ def test_lint_s_rewrite_refusals_name_the_file_on_one_line(
     monkeypatch.chdir(tmp_path)
     config = tmp_path / name
     config.write_text(
-        '{"project_name": "t"}\n' if name.endswith(".json") else 'project_name = "t"\n',
+        '{"project_name": "t"}\n' if name.endswith(".json") else REFUSED_TOML,
         encoding="utf-8",
     )
 
