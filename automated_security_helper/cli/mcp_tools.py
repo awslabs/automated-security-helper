@@ -1127,16 +1127,17 @@ def _config_pre_check(
             path, session_id=session_id
         )
         try:
-            settings = scan_repository_settings(
-                scanned_trees(source_dir), every_file=every_file
-            )
+            trees = scanned_trees(source_dir)
         except OSError:
             # A failed walk of the SOURCE tree (a link loop, a directory the
             # server cannot read above it) says nothing about the named file,
             # and reporting it as that file's read failure would blame the
             # config for the tree. The scan walks the same tree and reports
-            # its own failure.
+            # its own failure. Only the walk is covered: a read failure raised
+            # by anything after it, the settings built from the trees included,
+            # may be the config's own and keeps its load refusal below.
             return _ConfigPreCheck(None, None, ())
+        settings = scan_repository_settings(trees, every_file=every_file)
         resolved = resolve_config_document(
             path,
             confine_to=default_confinement_root(path, source_dir),

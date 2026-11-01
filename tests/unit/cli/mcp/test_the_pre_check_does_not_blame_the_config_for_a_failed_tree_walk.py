@@ -60,6 +60,35 @@ def test_a_failed_walk_of_the_source_tree_leaves_the_config_unblamed(
     assert pre_check.environment_values == ()
 
 
+def test_a_read_failure_after_the_walk_keeps_the_load_refusal(
+    layout: Path, monkeypatch
+) -> None:
+    """The handler covers the walk and nothing after it. The settings built from
+    the trees are the next step, and an OSError raised there is not a tree walk:
+    it may be a chain file's read, so the pre-check keeps the refusal that names
+    the file instead of answering nothing."""
+    from automated_security_helper.cli.mcp_tools import _config_pre_check
+    from automated_security_helper.config import operator_only_options
+
+    named = layout / "elsewhere" / "ash.yaml"
+
+    def a_chain_file_that_cannot_be_read(trees, every_file=False):
+        raise OSError(errno.EACCES, "Permission denied", str(named))
+
+    monkeypatch.setattr(
+        operator_only_options,
+        "scan_repository_settings",
+        a_chain_file_that_cannot_be_read,
+    )
+
+    pre_check = _config_pre_check(named, layout / "scan", SESSION)
+
+    assert pre_check.load_refusal is not None, (
+        "a read failure after the walk was answered as no refusal at all"
+    )
+    assert "could not read" in str(pre_check.load_refusal[1])
+
+
 def test_a_failed_read_of_the_named_file_is_still_its_load_refusal(
     layout: Path, monkeypatch
 ) -> None:
