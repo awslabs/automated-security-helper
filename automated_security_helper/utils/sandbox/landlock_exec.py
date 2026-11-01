@@ -533,12 +533,13 @@ def _refuse_unusable_path(key: str, path: str) -> None:
 
     JSON admits a NUL (``\\u0000``) and a lone surrogate (``\\ud800``) in a string,
     and ``os.path.isabs`` looks at the leading ``/`` only. Both make ``os.chdir``
-    and ``os.open`` raise ValueError or UnicodeEncodeError, not the OSError the
-    callers read. For ``cwd``, which ``main`` changes into before the fork, that
-    ends in the interpreter's traceback and exit 1, which scanners use for
-    "findings found"; for the path lists, which the forked child applies, its
-    catch-all already reports the failure and exits 126. These paths are refused
-    here, before the fork, with the key named, whichever list holds them.
+    and ``os.open`` raise ValueError or UnicodeEncodeError, not the OSError a
+    caller reading only OSError would catch. ``_enter_policy_cwd``, which changes
+    into ``cwd`` before the fork, and the forked child that applies the path
+    lists both catch those errors and exit 126, so neither route ends in the
+    interpreter's traceback and exit 1 (which scanners use for "findings
+    found"). The paths are refused here instead, before the fork, so the line
+    names the key whichever list holds them.
     """
     if "\0" in path:
         fail(f"--policy key {key!r} must name paths without a NUL byte, not {path!r}")

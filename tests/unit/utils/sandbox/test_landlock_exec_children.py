@@ -1278,10 +1278,11 @@ def test_the_socket_filter_route_reports_an_exec_refused_for_its_value(monkeypat
 def test_a_policy_path_the_filesystem_cannot_be_given_is_refused(key, value, capsys):
     """JSON admits a NUL and a lone surrogate in a string, and a path that starts
     with ``/`` is absolute whatever follows: ``os.chdir`` and ``os.open`` raise
-    ValueError or UnicodeEncodeError for them. For ``cwd`` that ends in the
-    interpreter's traceback and exit 1, which scanners use for "findings found";
-    the path lists reach the forked child, which reports and exits 126. Every one
-    is refused before the fork with exit 126, naming the key."""
+    ValueError or UnicodeEncodeError for them. The working directory is changed
+    into before the fork and the path lists are applied in the forked child; both
+    routes catch those errors and exit 126, never the interpreter's traceback and
+    exit 1. Every one is refused earlier still, before the fork, with exit 126,
+    naming the key."""
     base = {"read_only": ["/usr"], "writable": ["/var/out"], "network": False}
 
     with pytest.raises(SystemExit) as refused:
