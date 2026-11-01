@@ -911,7 +911,7 @@ class CdkNagPacks(RedactedSection):
                 flag = _PACK_FLAG.validate_python(value)
             except ValidationError:
                 raise ValueError(
-                    f"nag_packs.{key} must be true or false, not "
+                    "an undeclared nag_packs entry must be true or false, not "
                     f"{type(value).__name__}: a pack is either run or not"
                 ) from None
             checked[key] = flag
