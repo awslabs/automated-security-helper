@@ -29,7 +29,7 @@ from typing import (
 import boto3
 import botocore.exceptions
 from markdown_it import MarkdownIt
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from automated_security_helper.base.options import (
     ReporterOptionsBase,
@@ -743,6 +743,11 @@ NOT_SENT_SECTION_HEADER = (
     "Amazon Bedrock for it."
 )
 
+#: The model a blank ``model_id`` falls back to. The same id is the second
+#: argument of the ``ASH_BEDROCK_MODEL_ID`` read in the option's default
+#: factory, which stays a literal: the reference pages are generated from it.
+_BUILT_IN_MODEL_ID = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+
 
 class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     # The environment defaults are read when the options are built, not when this
@@ -801,6 +806,19 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
             description="Bedrock model ID to use for generating summaries.",
         ),
     ]
+
+    @field_validator("model_id", mode="before")
+    @classmethod
+    def _model_id_is_read_as_the_environment_reads_it(cls, value: Any) -> Any:
+        """A model id from a config file or ``--config-overrides`` is read as the
+        default factory reads ``ASH_BEDROCK_MODEL_ID``: without the whitespace
+        around it, and a blank one is unset, so it is the built-in model id and
+        not a model named by spaces. Both sources then give one id. Any other
+        type is left for the field to refuse."""
+        if isinstance(value, str):
+            return value.strip() or _BUILT_IN_MODEL_ID
+        return value
+
     # The ranges are Converse's own (InferenceConfiguration: temperature "Minimum
     # value of 0. Maximum value of 1."; maxTokens "Minimum value of 1."), read
     # from https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InferenceConfiguration.html.
