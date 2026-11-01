@@ -903,9 +903,7 @@ def test_the_committed_output_refusal_names_the_output_dir_on_one_line(
     _assert_one_line(printed, "out")
 
 
-def test_the_sandbox_refusal_names_the_output_dir_on_one_line(
-    tmp_path, _wide, capsys
-):
+def test_the_sandbox_refusal_names_the_output_dir_on_one_line(tmp_path, _wide, capsys):
     """The refusal of an output directory reached through a symlink names that
     directory, whose path is the caller's text: one line. The check refuses in
     every run mode and reads no config (the sandbox-era check this test's name
