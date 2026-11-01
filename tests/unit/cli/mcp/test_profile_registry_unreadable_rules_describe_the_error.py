@@ -14,7 +14,7 @@ error text the tools return.
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_all_session_state,
@@ -22,7 +22,6 @@ from automated_security_helper.cli.mcp.profile_registry import (
     session_client_rules,
 )
 from automated_security_helper.config import client_config_policy
-from automated_security_helper.config.ash_config import AshConfig
 
 pytestmark = pytest.mark.unit
 
@@ -38,13 +37,28 @@ def _no_binding():
     clear_all_session_state()
 
 
+class _AConfigQuotingItsInput(BaseModel):
+    """A stand-in config model whose own error text quotes the refused input.
+
+    ``AshConfig`` hides its inputs (``hide_input_in_errors=True``), so an error
+    from it quotes nothing wherever it is shown, and a test built on it would
+    prove nothing about the described reason. The input stays in ``errors()``
+    either way, which is what ``error_text`` reads.
+    """
+
+    model_config = ConfigDict(hide_input_in_errors=False)
+
+    global_settings: dict
+
+
 def _a_validation_error_quoting(value: str) -> ValidationError:
     try:
-        AshConfig.model_validate({"global_settings": value})
+        _AConfigQuotingItsInput.model_validate({"global_settings": value})
     except ValidationError as exc:
         assert value in str(exc), "the stand-in error does not quote its input"
+        assert value in str(exc.errors()), "the stand-in's errors() lose the input"
         return exc
-    raise AssertionError("AshConfig accepted a string for global_settings")
+    raise AssertionError("the stand-in accepted a string for global_settings")
 
 
 def test_the_unreadable_reason_leaves_the_refused_input_out(monkeypatch) -> None:
