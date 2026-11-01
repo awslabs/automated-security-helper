@@ -765,6 +765,10 @@ def test_a_pin_in_a_shape_no_pattern_knows_fails_the_check(form, text):
         assert "no allowance can excuse it" in problems[0], problems
         assert "KNOWN_THIRD_PARTY_PINS" not in problems[0], problems
         assert "INSTALL_REF_FORMS" in problems[0], problems
+    elif manager.names_this_repository(text):
+        # The entry names this repository, so no allowance can excuse it either.
+        assert "KNOWN_THIRD_PARTY_PINS" not in problems[0], problems
+        assert "names this repository" in problems[0], problems
     else:
         assert "KNOWN_THIRD_PARTY_PINS" in problems[0]
         # An allowance matches the entry cut at the nearest separator, which the
@@ -1027,6 +1031,40 @@ def test_an_allowance_never_excuses_an_entry_that_names_this_repository(text, al
     # The allowance cannot fix this entry, so it is not offered as the way out.
     assert "add it to KNOWN_THIRD_PARTY_PINS" not in problems[0], problems
     assert "add its shape to scripts/version_template_manager.py" in problems[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"- rev: v3.3.0\n  repo: {REPO_URL}\n",
+        f"- {{repo: {REPO_URL}, rev: v3.3.0}}\n",
+        f"git clone --branch  v3.3.0 {REPO_URL}.git\n",
+    ],
+    ids=["rev-before-repo", "flow-style", "clone-with-two-spaces"],
+)
+def test_an_entry_that_names_this_repository_is_not_told_to_add_an_allowance(text):
+    """Red before: the message said "add it to KNOWN_THIRD_PARTY_PINS" whenever no
+    allowance matched the entry, even when the entry names this repository. The reader
+    added the allowance, and the next run refused the entry anyway; the message must
+    already say that only the shape can fix it."""
+    manager = _manager()
+    problems = dv.unrecognized_pin_problems(manager, text, "page/", ())
+    assert len(problems) == 1, problems
+    assert "its entry names this repository, which no allowance excuses" in problems[0]
+    assert "KNOWN_THIRD_PARTY_PINS" not in problems[0], problems
+    assert "add its shape to scripts/version_template_manager.py" in problems[0]
+
+
+@pytest.mark.unit
+def test_another_projects_unreadable_pin_is_still_told_to_add_an_allowance():
+    """The control: an entry that does not name this repository keeps the advice."""
+    manager = _manager()
+    text = f"git clone --branch v2.0.0 {OTHER_PROJECT_URL}.git\n"
+    problems = dv.unrecognized_pin_problems(manager, text, "page/", ())
+    assert len(problems) == 1, problems
+    assert "add it to KNOWN_THIRD_PARTY_PINS" in problems[0], problems
+    assert "names this repository" not in problems[0], problems
 
 
 # An allowance names a project as `<owner>/<name>`: both parts, no scheme or host.

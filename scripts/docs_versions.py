@@ -688,17 +688,22 @@ def unrecognized_pin_problems(
         if named and not manager.names_this_repository(pin.entry):
             continue
         shape = "add its shape to scripts/version_template_manager.py"
+        entry_is_ours = (
+            f"its entry names this repository, which no allowance excuses; {shape}"
+        )
         if named:
             # The allowance matched, and the entry names this repository: only the
             # shape can fix it, so the allowance is not offered as the way out.
-            advice = (
-                f"its entry names this repository, which no allowance excuses; {shape}"
-            )
+            advice = entry_is_ours
         elif manager.form_names_this_repository(pin.form):
             advice = (
                 f"this form names this repository itself, so no allowance can excuse "
                 f"it; {shape}, widening the form's prefix in INSTALL_REF_FORMS"
             )
+        elif manager.names_this_repository(pin.entry):
+            # No allowance matched, but the entry names this repository: an allowance
+            # added now would still not excuse it, so it is not offered either.
+            advice = entry_is_ours
         else:
             advice = (
                 "if it is another project's, add it to KNOWN_THIRD_PARTY_PINS in "
