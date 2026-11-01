@@ -31,6 +31,18 @@ def _results_file_only_in_the_directory_itself(mock_output_dir: MagicMock) -> No
     mock_output_dir.joinpath.side_effect = joinpath
 
 
+def _presence_of_a_mocked_candidate(candidate: MagicMock) -> bool:
+    """What ``_presence`` answers for a candidate the mocked ``Path`` returned.
+
+    The command reads each candidate's presence with ``os.stat`` (``_presence``
+    in cli/report.py), not ``Path.exists``. A MagicMock is an ``os.PathLike``
+    whose ``__fspath__`` names a file that does not exist, so every candidate
+    read as absent and the command refused before the reporter ran. Patched in
+    for ``_presence``, this reads the ``exists`` answer set above instead.
+    """
+    return candidate.exists()
+
+
 def _declares_name(mock_plugin_class: MagicMock, name: str) -> None:
     """Give the mock reporter class the name the command looks ``--format`` up by.
 
@@ -55,6 +67,10 @@ def _declares_name(mock_plugin_class: MagicMock, name: str) -> None:
     mock_plugin_class.return_value.companion_file_names.return_value = ()
 
 
+@patch(
+    "automated_security_helper.cli.report._presence",
+    new=_presence_of_a_mocked_candidate,
+)
 @patch("automated_security_helper.cli.report.load_plugins")
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
@@ -126,6 +142,10 @@ def test_report_command_basic(
     assert "Error" not in err, err
 
 
+@patch(
+    "automated_security_helper.cli.report._presence",
+    new=_presence_of_a_mocked_candidate,
+)
 @patch("automated_security_helper.cli.report.load_plugins")
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
@@ -229,6 +249,10 @@ def test_report_command_with_nonexistent_file(tmp_path, monkeypatch, capfd):
     ) in _squeezed(err), err
 
 
+@patch(
+    "automated_security_helper.cli.report._presence",
+    new=_presence_of_a_mocked_candidate,
+)
 @patch("automated_security_helper.cli.report.load_plugins")
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
