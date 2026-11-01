@@ -2293,7 +2293,7 @@ class TestTheActionRunsATier:
         value = str(step["env"][sharding.FLOOR_ENV_VAR])
         match = re.fullmatch(r"1", value)
         assert match is not None, value
-        by_tier = {marker: value for marker in ("unit", "integration", "e2e")}
+        by_tier = dict.fromkeys(("unit", "integration", "e2e"), value)
         assert by_tier == {"unit": "1", "integration": "1", "e2e": "1"}, value
         assert sharding.FLOOR_WARN_VALUE == "warn"
 
