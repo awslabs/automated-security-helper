@@ -597,7 +597,7 @@ def test_detect_secrets_timeout_warning_prints_its_limit_whole(
     # A killed worker wrote no results, so the scan fails: the WARNING is
     # logged and ScannerError is raised (a None return graded a never-scanned
     # tree as clean).
-    with pytest.raises(ScannerError) as excinfo:
+    with pytest.raises(ScannerError, match="timed out") as excinfo:
         scanner._scan_in_worker(
             baseline=None,
             scan_paths=[str(ctx.source_dir / "app.py")],
@@ -948,7 +948,7 @@ def test_a_timeout_warning_names_the_option_for_an_env_typed_limit(
 
     # The WARNING is recorded on the scanner's errors, then the failed scan
     # is raised (a None return graded a never-scanned tree as clean).
-    with pytest.raises(ScannerError) as excinfo:
+    with pytest.raises(ScannerError, match="timed out") as excinfo:
         scanner._scan_in_worker(
             baseline=None,
             scan_paths=[],
@@ -1024,7 +1024,7 @@ def test_the_runner_s_own_timeout_line_names_the_option_for_an_env_typed_limit(
 
     # The runner's own line is logged before the scanner fails the scan with
     # ScannerError (a None return graded a never-scanned tree as clean).
-    with pytest.raises(ScannerError):
+    with pytest.raises(ScannerError, match="timed out"):
         scanner._scan_in_worker(
             baseline=None,
             scan_paths=[],
