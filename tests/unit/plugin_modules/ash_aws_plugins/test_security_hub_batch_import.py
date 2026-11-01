@@ -13,8 +13,8 @@ pattern test_bedrock_summary_reporter.py uses. A MagicMock accepts any parameter
 so a finding missing a required ASFF field would pass a mocked test and fail only
 against the service; a real client validates every request against the
 Security Hub service model before the Stubber answers it. Nothing is signed and
-no request leaves the process: the ``no_network`` fixture fails any request that
-reaches the send stage.
+no request leaves the process: ``block_network`` (in
+security_hub_reporter_doubles.py) fails any request that reaches the send stage.
 
 The limits the reporter is built on, quoted from the AWS documentation:
 
