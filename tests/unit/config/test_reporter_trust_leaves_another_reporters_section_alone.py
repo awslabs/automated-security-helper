@@ -140,6 +140,32 @@ def test_a_reporter_without_a_section_of_its_name_does_not_read_the_others():
     assert short_section["options"]["bucket"] == "file-bucket", short_section
 
 
+def test_a_reporter_with_a_section_of_its_reduced_name_is_not_pinned():
+    """Control: the file writes the longer name's section under its reduced
+    spelling, beside the shorter name's own section, and both reporters are
+    loaded. The longer name's lookup reads the reduced-name section, which no
+    loaded reporter owns by name, so no empty section of the exact name is
+    added to shadow it, and an option written there that names no destination
+    survives."""
+    config = AshConfig.model_validate(
+        {
+            "reporters": {
+                "sample-feed": {"options": {"region": "file-short"}},
+                "samplefeed": {"options": {"local_opt": "kept"}},
+            }
+        }
+    )
+    config._trusted_reporter_base = AshConfig.model_validate({})
+    config._in_tree_config_files = (CONFIG_FILE,)
+
+    confine_declared_reporter_destinations(config, [_ShortReporter, _WideReporter])
+
+    extras = config.reporters.__pydantic_extra__
+    assert "sample-feed-reporter" not in extras, extras
+    wide_section = config.get_plugin_config("reporter", "sample-feed-reporter") or {}
+    assert (wide_section.get("options") or {}).get("local_opt") == "kept", wide_section
+
+
 def test_a_section_no_loaded_reporter_owns_is_still_confined():
     """Control: with only the shorter name loaded, the longer name's section is
     one its lookup could read and no other reporter reads it by name."""

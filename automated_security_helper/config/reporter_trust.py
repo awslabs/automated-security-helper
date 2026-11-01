@@ -809,7 +809,7 @@ def _pin_to_an_exact_section(
     touched.
     """
     from automated_security_helper.config.ash_config import (
-        plugin_key_lookup_names,
+        plugin_section_key,
         reduced_plugin_name,
     )
 
@@ -820,10 +820,8 @@ def _pin_to_an_exact_section(
         if plugin in extras:
             continue
         reduced = reduced_plugin_name(plugin)
-        if any(
-            key != plugin and key in loaded and reduced in plugin_key_lookup_names(key)
-            for key in extras
-        ):
+        read = plugin_section_key(extras, reduced)
+        if read is not None and read != plugin and read in loaded:
             extras[plugin] = {}
 
 
