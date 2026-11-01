@@ -22,6 +22,7 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.base.uv_tool_mixin import guarded_values_read
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
@@ -424,6 +425,11 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             )
             return False
 
+        # The refusal ScannerPluginBase._refuse_flagged_response raises for a run the
+        # subprocess layer flagged, once it has. Its text was shaped through the
+        # one guarded read of the values hook, so the handler below re-raises it
+        # as it is instead of building a second message from it.
+        flagged_refusal: ScannerError | None = None
         try:
             # Absolute, because syft runs from outside the source directory
             # (_working_directory), where a relative path names something else.
@@ -509,7 +515,11 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 target=target,
                 target_type=target_type,
             )
-            self._refuse_flagged_response(response, effective_timeout)
+            try:
+                self._refuse_flagged_response(response, effective_timeout)
+            except ScannerError as refusal:
+                flagged_refusal = refusal
+                raise
             self._record_target_exit_code(response)
             self._refuse_rejected_exit_code(results_file)
 
@@ -537,21 +547,40 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             # records end_time, and one left from the previous target would give
             # this one an end before its start.
             self.end_time = datetime.now(timezone.utc)
+            # A flagged run is reported as the base method worded it: building a
+            # message from it here would read the values hook a second time, and a
+            # hook that raises would replace "timed out" with its own failure.
+            if e is flagged_refusal:
+                raise
             # Redacted, as the module's other error paths are: the text can quote
-            # a path the configuration read from the environment.
-            values = self._values_to_redact()
-            failure = text_without_values(
-                f"{self.__class__.__name__} scan failed: {str(e)}", values
-            )
-            # The new error carries no traceback (below), so a bug inside the try
-            # (an AttributeError in ASH's own code, say) would leave only the
-            # one-line message. The stack goes to the debug log, redacted the way
-            # the message is.
-            ASH_LOGGER.debug(
-                f"{self.__class__.__name__} scan failed; the original traceback:\n"
-                + traceback_text(e, values=values),
-                extra=NO_MARKUP,
-            )
+            # a path the configuration read from the environment. Through the one
+            # guarded read of the values hook, so a hook that raises does not
+            # replace this error with its own; with no usable answer nothing can
+            # be redacted, and the error text is not shown.
+            read = guarded_values_read(self)
+            if read.values is None:
+                failure = (
+                    f"{self.__class__.__name__} scan failed (the error text is not "
+                    f"shown: the plugin's values hook {read.failure()})"
+                )
+                ASH_LOGGER.debug(
+                    f"{self.__class__.__name__} scan failed; the original traceback "
+                    f"is not shown: the plugin's values hook {read.failure()}",
+                    extra=NO_MARKUP,
+                )
+            else:
+                failure = text_without_values(
+                    f"{self.__class__.__name__} scan failed: {str(e)}", read.values
+                )
+                # The new error carries no traceback (below), so a bug inside the
+                # try (an AttributeError in ASH's own code, say) would leave only
+                # the one-line message. The stack goes to the debug log, redacted
+                # the way the message is.
+                ASH_LOGGER.debug(
+                    f"{self.__class__.__name__} scan failed; the original "
+                    "traceback:\n" + traceback_text(e, values=read.values),
+                    extra=NO_MARKUP,
+                )
         # Raised outside the except block, so the original exception, whose text
         # is not redacted, is attached to the new one neither as __context__ nor
         # as __cause__: `raise ... from None` would only hide it from the default

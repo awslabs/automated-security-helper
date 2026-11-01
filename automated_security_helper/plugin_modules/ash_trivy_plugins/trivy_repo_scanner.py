@@ -362,6 +362,11 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         # Set by the except block below; declared here so a way out of the try body
         # that neither returns nor raises cannot reach the final raise unbound.
         failure: Optional[str] = None
+        # The refusal ScannerPluginBase._refuse_flagged_response raises for a run the
+        # subprocess layer flagged, once it has. Its text was shaped through the
+        # one guarded read of the values hook, so the handler below re-raises it
+        # as it is instead of building a second message from it.
+        flagged_refusal: Optional[ScannerError] = None
         try:
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
@@ -475,7 +480,11 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             # A run the subprocess layer flagged (timed out, could not start, its
             # output not recorded, ended by a foreign signal) is refused before its
             # file is read, whatever exit code it carries.
-            self._refuse_flagged_response(response, effective_timeout)
+            try:
+                self._refuse_flagged_response(response, effective_timeout)
+            except ScannerError as refusal:
+                flagged_refusal = refusal
+                raise
             self._record_target_exit_code(response)
             self._refuse_rejected_exit_code(results_file)
 
@@ -550,6 +559,11 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             # records end_time, and one left from the previous target would give
             # this one an end before its start.
             self.end_time = datetime.now(timezone.utc)
+            # A flagged run is reported as the base method worded it: building a
+            # message from it here would swap its value-free headline for the
+            # generic failed text when the values hook gave no usable answer.
+            if e is flagged_refusal:
+                raise
             # Redacted, as the syft scanner's catch-all is: the text can quote a
             # path the configuration read from the environment (an OSError naming
             # the TRIVY_SECRET_CONFIG or TRIVY_IGNOREFILE file). Through the same
