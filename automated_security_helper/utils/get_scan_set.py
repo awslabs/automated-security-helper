@@ -59,7 +59,10 @@ from automated_security_helper.utils.scanned_tree import (
     relative_display,
     resolves_inside,
 )
-from automated_security_helper.utils.terminal_text import shown_not_obeyed
+from automated_security_helper.utils.terminal_text import (
+    shown_not_obeyed,
+    shown_on_one_line,
+)
 
 ASH_INCLUSIONS = [
     ".git",
@@ -1914,14 +1917,19 @@ def get_ash_ignorespec_with_attribution(
             # One pattern the parser refuses used to raise out of here and abort
             # the scan, while the pruning pre-pass tolerated the same pattern.
             # Skipped and said: the rule applies to nothing, so the scan set is
-            # larger, never smaller. The rule is the repository's text, which
-            # the log sinks show and do not obey: it goes in raw, quoted so its
-            # edges are visible, and the sink writes its controls as escapes
-            # once. Shown here first (or as its repr), the sink showed the shown
-            # text again, with the escapes' backslashes doubled.
+            # larger, never smaller. The rule is the repository's text, shown
+            # and not obeyed. The whole message is shown here, once, on one
+            # line, with the rule quoted so its edges are visible: the sinks
+            # keep tab, newline and carriage return of a plain message as they
+            # are, so a rule holding one would lay out, overwrite or add lines
+            # to the log. The sinks leave a message shown already as it is;
+            # shown in parts (or as its repr) and then shown again by the sink,
+            # the escapes' backslashes were doubled.
             ASH_LOGGER.warning(
-                f'Skipped ignore rule "{rule}" from {current_marker}: '
-                f"it could not be compiled ({error})",
+                shown_on_one_line(
+                    f'Skipped ignore rule "{rule}" from {current_marker}: '
+                    f"it could not be compiled ({error})"
+                ),
                 extra=NO_MARKUP,
             )
             continue
