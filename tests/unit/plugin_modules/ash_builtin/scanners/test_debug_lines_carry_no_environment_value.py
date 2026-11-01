@@ -66,6 +66,17 @@ def _no_value(lines, control: str) -> None:
     assert CANARY_DIR not in text, text
 
 
+def _dump_text(line: str) -> str:
+    """The text a plugin log line carries after its caller prefix.
+
+    ``_plugin_log`` escapes each part for Rich (utils/log.py ``escape_markup``),
+    which closes a value holding a colon off with an empty style at both ends,
+    so the text after the tab reads ``[none][/none]self.config: ...``. The
+    breaks render as nothing on the console; the match drops them.
+    """
+    return line.partition("\t")[2].replace("[none][/none]", "")
+
+
 def test_detect_secrets_baseline_lookup(tmp_path, debug_logged):
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
         DetectSecretsScanner,
@@ -385,7 +396,7 @@ def test_detect_secrets_scan_config_dumps_show_env_value_as_written(
     dumps = [
         line
         for line in debug_logged
-        if line.partition("\t")[2].startswith(("self.config: ", "config: "))
+        if _dump_text(line).startswith(("self.config: ", "config: "))
     ]
     assert len(dumps) == 2, debug_logged
     for line in dumps:
@@ -453,7 +464,7 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_baseline_as_written(
     dumps = [
         line
         for line in debug_logged
-        if line.partition("\t")[2].startswith(("self.config: ", "config: "))
+        if _dump_text(line).startswith(("self.config: ", "config: "))
     ]
     assert len(dumps) == 2, debug_logged
     for line in dumps:
@@ -535,7 +546,7 @@ def test_detect_secrets_scan_config_dumps_show_a_refused_env_baseline_as_written
     dumps = [
         line
         for line in debug_logged
-        if line.partition("\t")[2].startswith(("self.config: ", "config: "))
+        if _dump_text(line).startswith(("self.config: ", "config: "))
     ]
     assert len(dumps) == 2, debug_logged
     for line in dumps:
