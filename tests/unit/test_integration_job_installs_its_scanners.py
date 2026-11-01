@@ -159,6 +159,11 @@ class TestTheScannerInstallingBanditFailsTheRun:
     @pytest.fixture(autouse=True)
     def _no_bandit_here(self, monkeypatch):
         monkeypatch.setattr(UVToolRunner, "is_uv_available", lambda self: True)
+        # The mixin's gates read the two-valued `uv_availability` first and fall
+        # back to `is_uv_available` only when a runner lacks it; the unit tests'
+        # tool guard stubs it to (False, None), so it is patched to the green
+        # shape here, or every gate reads uv as absent and nothing installs.
+        monkeypatch.setattr(UVToolRunner, "uv_availability", lambda self: (True, None))
         # With uv present, building the scanner asks it for bandit's version
         # (`uv tool run --from bandit... bandit --version`), which the unit tests'
         # tool guard records as a start; the version is not this class's subject.
