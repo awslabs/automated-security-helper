@@ -1074,8 +1074,14 @@ def _confine_settings_files(
             if _covered(landings, list_path, except_appends=True):
                 continue
             appended = _with_appended(_MISSING, _appended(landings, list_path))
-            operator_entries = [
-                _entry_dump(item)
+            # Compared by path alone: the risk is which file gets loaded, and
+            # an operator-approved path is approved whatever the other fields
+            # are. The raw appended item and the validated entry of the
+            # resolved list hold the same entry in two forms (defaults,
+            # coerced values), so a dump comparison would drop the operator's
+            # own entry as the file's.
+            operator_paths = [
+                _entry_path(item)
                 for item in (appended if isinstance(appended, list) else [])
                 if isinstance(item, dict)
             ]
@@ -1095,7 +1101,7 @@ def _confine_settings_files(
                     isinstance(path, str)
                     and path.startswith("file://")
                     and _entry_dump(entry) not in trusted_entries
-                    and _entry_dump(entry) not in operator_entries
+                    and path not in operator_paths
                 ):
                     ignored.append(
                         f"scanners.{key}.options.scan_settings.{list_name}[].path"
