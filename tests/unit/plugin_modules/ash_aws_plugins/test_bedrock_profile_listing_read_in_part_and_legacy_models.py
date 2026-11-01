@@ -234,11 +234,11 @@ def test_a_raw_id_the_listing_names_as_profile_routed_is_unchecked_when_profiles
     """The control: the foundation-model listing says this id is reached through a
     profile, so the failed profile listing leaves it unchecked."""
     control = _control_plane(
-        [_model("anthropic.test-model-v1:0", types=["INFERENCE_PROFILE"])],
+        [_model("test-vendor.test-model-v1:0", types=["INFERENCE_PROFILE"])],
         [_refused("AccessDeniedException")],
     )
 
-    check = validate_bedrock_model(control, "anthropic.test-model-v1:0")
+    check = validate_bedrock_model(control, "test-vendor.test-model-v1:0")
 
     assert check_listing_failure(check) == "AccessDeniedException"
 
