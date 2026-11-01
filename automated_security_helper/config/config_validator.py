@@ -3232,9 +3232,11 @@ def record_of_config(
             # The mapping already holds an entry under the written key: the
             # rename would overwrite it, and the record would lose that
             # entry. A file written to be loaded again keeps the resolved key,
-            # which the writer refuses to write as text. A record never holds
-            # the value, so there the entry stays under the reference with a
-            # number after it.
+            # and config_writer._refuse_a_value_left_as_text then refuses to
+            # write it: a key left in the mapping is the variable's value as
+            # text, and a reference with a number after it would load back as
+            # another key. A record never holds the value, so there the entry
+            # stays under the reference with a number after it.
             if mark is not None:
                 continue
             target = _unused_key(container, written_key)

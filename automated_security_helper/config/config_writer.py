@@ -171,6 +171,14 @@ def _refuse_a_value_left_as_text(data: Any, ash_config: AshConfig) -> None:
     from the environment. A value at such a location that is not a string (a
     list the model made of one reference's string) is one when the reference's
     text loads as it (reads_back_as), whatever its length.
+
+    A key is looked at the same way. record_of_config renames a key its files
+    read from the environment to the reference they wrote, and for a file
+    written to be loaded again it leaves the key as the environment gave it
+    where the mapping already holds an entry under the reference (a rename
+    would overwrite that entry, and a reference with a number after it would
+    load back as another key). That key is the variable's value written as
+    text, so it is refused here too.
     """
     from automated_security_helper.config.config_validator import (
         reads_back_as,
@@ -178,6 +186,20 @@ def _refuse_a_value_left_as_text(data: Any, ash_config: AshConfig) -> None:
     )
 
     rewrites = getattr(ash_config, "_written_references", None) or []
+    for rewrite in rewrites:
+        if rewrite.kind != "key" or rewrite.written == rewrite.resolved:
+            continue
+        mapping = None
+        for place in _paths_in_record(rewrites, rewrite.path):
+            mapping = recorded_value_at(ash_config, data, place) if place else data
+            if mapping is not None:
+                break
+        if isinstance(mapping, dict) and rewrite.resolved in mapping:
+            raise RuntimeError(
+                "the configuration was not written: it would hold a key its "
+                "files read from the environment as text, where they wrote a "
+                "reference to the variable"
+            )
     dumped = None
     for rewrite in rewrites:
         if rewrite.kind != "value" or not rewrite.path:
