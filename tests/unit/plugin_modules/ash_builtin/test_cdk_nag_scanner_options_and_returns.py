@@ -161,7 +161,9 @@ def test_an_undeclared_pack_set_to_yes_is_on():
 def test_an_undeclared_pack_with_a_value_that_is_not_a_boolean_is_refused():
     with pytest.raises(ValidationError) as excinfo:
         CdkNagPacks.model_validate({"ServerlessChecks": "maybe"})
-    assert "an undeclared nag_packs entry must be true or false, not str" in str(excinfo.value)
+    assert "an undeclared nag_packs entry must be true or false, not str" in str(
+        excinfo.value
+    )
     assert "nag_packs.ServerlessChecks" not in str(excinfo.value)
 
 
