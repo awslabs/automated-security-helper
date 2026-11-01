@@ -233,6 +233,82 @@ class TestRebuildNote:
         environment(pip=True)
         assert python_installer.environment_rebuild_note(["x"]) is None
 
+    def test_a_uv_project_environment_is_told_uv_sync_removes_them(
+        self, tmp_path, monkeypatch
+    ):
+        project = tmp_path / "src"
+        (project / ".venv").mkdir(parents=True)
+        (project / "uv.lock").write_text("version = 1\n")
+        monkeypatch.setattr(sys, "prefix", str(project / ".venv"))
+        from automated_security_helper.utils import python_installer
+
+        assert python_installer.uv_project_directory() == project
+        note = python_installer.environment_rebuild_note(["cdk-nag>=3"])
+        assert note is not None and "`uv sync`" in note
+        assert str(project) in note
+        # And what keeps them.
+        assert "uv sync --inexact" in note
+        assert "declaring them in that project's dependencies" in note
+
+    @pytest.mark.parametrize(
+        ("venv_name", "lockfile"),
+        [(".venv", False), ("env", True)],
+        ids=["no-lockfile", "not-the-project-venv"],
+    )
+    def test_only_a_projects_dot_venv_beside_its_lockfile_is_a_uv_project_environment(
+        self, tmp_path, monkeypatch, venv_name, lockfile
+    ):
+        project = tmp_path / "src"
+        (project / venv_name).mkdir(parents=True)
+        if lockfile:
+            (project / "uv.lock").write_text("version = 1\n")
+        monkeypatch.setattr(sys, "prefix", str(project / venv_name))
+        from automated_security_helper.utils import python_installer
+
+        assert python_installer.uv_project_directory() is None
+        assert python_installer.environment_rebuild_note(["x"]) is None
+
+
+def test_dependencies_install_in_a_uv_synced_project_venv_notes_uv_sync(
+    environment, plugin_context, tmp_path, monkeypatch
+):
+    """Through the CLI, in the layout of a container that ran ``uv sync``.
+
+    The project's ``.venv`` has no pip and no uv receipt: the install runs with uv,
+    and the note says a later ``uv sync`` removes what it installed.
+    """
+    from automated_security_helper.cli import dependencies
+
+    environment(pip=False)
+    project = tmp_path / "project"
+    (project / ".venv").mkdir(parents=True)
+    (project / "uv.lock").write_text("version = 1\n")
+    monkeypatch.setattr(sys, "prefix", str(project / ".venv"))
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(
+        uv_tool_runner.UVToolRunner, "is_uv_available", lambda self: False
+    )
+    monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
+    monkeypatch.chdir(plugin_context.source_dir)
+    ran = []
+    monkeypatch.setattr(
+        dependencies, "run_command", lambda cmd, shell=False: ran.append(cmd) or 0
+    )
+    printed = io.StringIO()
+    monkeypatch.setattr(
+        dependencies, "print", Console(file=printed, width=300, no_color=True).print
+    )
+    monkeypatch.setattr(
+        dependencies, "console", Console(file=io.StringIO(), width=300, no_color=True)
+    )
+    result = CliRunner().invoke(
+        dependencies.dependencies_app,
+        ["--tool", "cdk-nag", "--bin-path", str(tmp_path / "bin")],
+    )
+    assert ran, result.output
+    assert ran[0][:3] == ["uv", "pip", "install"]
+    assert "A plain `uv sync` there removes" in printed.getvalue()
+
 
 def test_dependencies_install_runs_uv_pip_in_a_pip_less_environment(
     environment, plugin_context, tmp_path, monkeypatch

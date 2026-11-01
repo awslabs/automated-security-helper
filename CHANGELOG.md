@@ -5359,6 +5359,15 @@
 
 ### Fixes
 
+- **`ash dependencies install` says when a later `uv sync` removes what it
+  installed.** Run from a uv project's `.venv` (the layout of a container that runs
+  `RUN uv sync`), the install adds cdk-nag's packages, and any other package it
+  installs into ASH's environment, and a plain `uv sync` of that project then removes
+  them, because its lockfile does not list them. The command now ends with a note
+  saying so, as it already did for uv tool and uvx installs: `uv run` and
+  `uv sync --inexact` keep the packages, and declaring them in the project keeps
+  them through `uv sync`.
+
 - **ASH now requires uv 0.13.4 or later, and the container image pins uv
   0.13.4.** uv before 0.13.4 is affected by GHSA-hq85-5cpj-mr62 (critical). The
   requirement is `uv>=0.13.4,<0.14`, and the image installs the 0.13.4 release

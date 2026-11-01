@@ -27,8 +27,10 @@ that name to the same uv when it runs it.
 
 Limits: ``uv tool upgrade`` and ``uv tool install --force`` rebuild a tool's
 environment from its receipt and remove packages added this way (measured with uv
-0.12), and uvx builds a new environment when its cache entry is gone or ASH
-changes. :func:`environment_rebuild_note` says so where the install runs.
+0.12), uvx builds a new environment when its cache entry is gone or ASH
+changes, and a plain ``uv sync`` of a uv project removes them from the project's
+``.venv`` (measured with uv 0.13). :func:`environment_rebuild_note` says so where
+the install runs.
 """
 
 from __future__ import annotations
@@ -61,6 +63,20 @@ def is_uvx_environment() -> bool:
     return (
         prefix.parent.name == "archive-v0" and prefix.joinpath("pyvenv.cfg").is_file()
     )
+
+
+def uv_project_directory() -> Optional[Path]:
+    """The uv project whose ``uv sync`` manages this environment, or None.
+
+    ``uv sync`` keeps a project's environment in ``.venv`` beside its ``uv.lock``
+    (the layout of a container that runs ``RUN uv sync``), and a plain sync removes
+    every package the lockfile does not list. An environment moved elsewhere with
+    ``UV_PROJECT_ENVIRONMENT`` is not recognized; only the rebuild note is lost.
+    """
+    prefix = _prefix()
+    if prefix.name == ".venv" and prefix.parent.joinpath("uv.lock").is_file():
+        return prefix.parent
+    return None
 
 
 def pip_is_importable() -> bool:
@@ -122,5 +138,14 @@ def environment_rebuild_note(requirements: Sequence[str]) -> Optional[str]:
             "This ASH runs under uvx, which builds a new environment when its cache "
             "entry is gone or ASH changes. To keep these packages, add "
             f"{withs} to the uvx command that runs ASH."
+        )
+    project = uv_project_directory()
+    if project is not None:
+        return (
+            f"This ASH runs from the environment of the uv project at {project}. A "
+            "plain `uv sync` there removes every package the project's lockfile does "
+            "not list, these included (`uv run` and `uv sync --inexact` keep them); "
+            "run `ash dependencies install` again after it, or keep them by "
+            "declaring them in that project's dependencies."
         )
     return None
