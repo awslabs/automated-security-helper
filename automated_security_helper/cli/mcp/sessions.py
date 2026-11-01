@@ -874,7 +874,7 @@ def _remove_set_aside_tree(doomed: Optional[Path]) -> None:
         _remove_tree(doomed)
 
 
-def end_session(session_id: str) -> bool:
+def end_session(session_id: str, *, guard_wait: Optional[float] = None) -> bool:
     """Remove everything the server holds for ``session_id``, which has ended.
 
     The session's sandbox (``<workspace root>/<session id>``: the delivered
@@ -907,6 +907,14 @@ def end_session(session_id: str) -> bool:
     workspace is past its TTL; every request that names the session refreshes
     that clock (:func:`touch_session_workspace`).
 
+    ``guard_wait`` is None for a caller that can wait for the scan presence
+    lock as long as another server keeps it (the request that ended the
+    session). The TTL sweep passes its own bound: a lock still held at the end
+    of it raises :class:`_PresenceLockHeld`, with the end still pending, for the
+    sweep to complete off its own thread. The wait belongs to the one request
+    for the lock this function makes, so a server that takes the lock between
+    an earlier question and this request cannot hold the caller past the bound.
+
     Returns:
         True when everything was removed now, False when it waits for a scan or
         the tree stays for the sweep.
@@ -924,7 +932,9 @@ def end_session(session_id: str) -> bool:
     if session is not None and session.try_begin_change() is not None:
         return False
     try:
-        outcome = _remove_unless_a_scan_elsewhere_holds(session_id)
+        outcome = _remove_unless_a_scan_elsewhere_holds(
+            session_id, guard_wait=guard_wait
+        )
     finally:
         if session is not None:
             session.end_change()
@@ -936,7 +946,9 @@ def end_session(session_id: str) -> bool:
     return outcome is True
 
 
-def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
+def _remove_unless_a_scan_elsewhere_holds(
+    session_id: str, *, guard_wait: Optional[float] = None
+) -> Optional[bool]:
     """Remove the session's state unless a scan in any server sharing the root holds it.
 
     Run with the session's change held, which covers scans of this process. A scan
@@ -981,6 +993,11 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
     An ``OSError`` after the lock was taken (the check for a scan, the removal) is
     logged with one warning and ends the call as a refused lock does.
 
+    ``guard_wait`` bounds the request for the presence lock, in seconds; None
+    waits for as long as it takes. A lock another server still holds at the end
+    of the bound raises :class:`_PresenceLockHeld` and changes nothing: the
+    caller's pending mark and the session's entry are as they were.
+
     Returns:
         True when the state was removed, False when the removal must wait for a
         scan, None when the lock could not be taken or the check or removal
@@ -1017,7 +1034,10 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
     try:
         with contextlib.ExitStack() as stack:
             try:
-                stack.enter_context(_scan_presence_guard(root))
+                if guard_wait is None:
+                    stack.enter_context(_scan_presence_guard(root))
+                else:
+                    stack.enter_context(_scan_presence_guard(root, wait=guard_wait))
             except OSError as exc:
                 if _is_the_stdio_session(session_id):
                     # Nothing registers a scan on a root whose registry is
@@ -1081,8 +1101,16 @@ def _forget_session_in_memory(session_id: str) -> None:
     get_default_registry().forget(session_id)
 
 
-def finish_ended_session(session_id: Optional[str]) -> None:
+def finish_ended_session(
+    session_id: Optional[str], *, guard_wait: Optional[float] = None
+) -> None:
     """Complete the removal of a session that ended while its scan or write ran.
+
+    ``guard_wait`` is the bound the TTL sweep puts on its request for the
+    presence lock (:func:`end_session`); a lock still held at the end of it
+    raises :class:`_PresenceLockHeld` with the end still pending. The stdio
+    session is not bounded: the sweep never visits it, and its completion asks
+    the presence registry's own lock.
 
     The stdio session is shared by every stdio server of one user, and its end
     is decided by the exiting server under the presence registry's lock, when no
@@ -1098,7 +1126,10 @@ def finish_ended_session(session_id: Optional[str]) -> None:
     if not pending:
         return
     if not _is_the_stdio_session(session_id):
-        end_session(session_id)
+        if guard_wait is None:
+            end_session(session_id)
+        else:
+            end_session(session_id, guard_wait=guard_wait)
         return
     # The end runs under the registry's lock, where the question is answered,
     # so a server registering between the answer and the removal is counted or
@@ -2457,7 +2488,18 @@ def _remove_if_still_stale(
         # request would have.
         _complete_a_pending_end_off_the_sweep(session_id)
         raise
-    finish_ended_session(session_id)
+    # Every other False return reaches here with the session released. An end
+    # that is pending is completed by end_session. The end's own request for
+    # the presence guard carries the sweep's bound, so a guard another server
+    # keeps raises, with the end still pending, and the end is completed on a
+    # thread of its own, as above. The bound is on the request that takes the
+    # guard for the removal, not on an earlier question about it: a server that
+    # took the guard between the two would hold this sweep's thread for as long
+    # as it kept it.
+    try:
+        finish_ended_session(session_id, guard_wait=_SWEEP_LOCK_WAIT_SECONDS)
+    except _PresenceLockHeld:
+        _complete_a_pending_end_off_the_sweep(session_id)
     return False
 
 
