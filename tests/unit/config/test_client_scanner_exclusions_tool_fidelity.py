@@ -255,6 +255,74 @@ def test_a_yaml_expiry_string_is_read_whole_not_cut_at_ten_characters(field):
 
 
 @pytest.mark.parametrize(
+    "bare",
+    [
+        # PyYAML loads each of these as a datetime. trivy leaves the scalar text,
+        # because its resolver wants a zone on a ``T`` form and has no zone on
+        # the space form, and then fails to decode that text as a time.
+        "2099-01-01T00:00:00",
+        "2099-01-01T00:00:00.5",
+        "2099-01-01t00:00:00",
+        "2099-01-01 00:00:00 +05:30",
+        "2099-01-01 00:00:00Z",
+        "2099-01-01T00:00:00 Z",
+        "2099-01-01T00:00:00+05",
+    ],
+)
+def test_an_unquoted_yaml_timestamp_trivy_cannot_read_makes_the_file_unreadable(bare):
+    """An unquoted ``expired_at`` that PyYAML loads as a ``datetime`` was cut to
+    its day and applied without a look at its text, where trivy keeps the text
+    of a scalar its resolver does not read as a time and fails the whole file.
+    The loader now keeps an unquoted timestamp as written and the text is judged
+    against what trivy resolves. The forms trivy reads too (a date, a space
+    form without a zone, a ``T`` form with ``Z`` or an offset) still apply."""
+    today = date(2026, 1, 1)
+    with pytest.raises(ValueError, match="not a YYYY-MM-DD date"):
+        parse_trivy_ignore_file(
+            f"vulnerabilities:\n  - id: CVE-1\n    expired_at: {bare}\n",
+            yaml_format=True,
+            today=today,
+        )
+
+    for kept in (
+        "2099-01-01",
+        "2099-01-01T00:00:00Z",
+        "2099-01-01T23:59:59.5+05:30",
+        "2099-01-01 00:00:00",
+        "2099-01-01 00:00:00.5",
+    ):
+        assert parse_trivy_ignore_file(
+            f"vulnerabilities:\n  - id: CVE-2\n    expired_at: {kept}\n",
+            yaml_format=True,
+            today=today,
+        ) == [("CVE-2", ())]
+    assert (
+        parse_trivy_ignore_file(
+            "vulnerabilities:\n  - id: CVE-3\n    expired_at: 2000-01-01 00:00:00\n",
+            yaml_format=True,
+            today=today,
+        )
+        == []
+    )
+
+
+def test_an_unquoted_timestamp_is_still_not_a_path_or_a_second_kind_of_value():
+    """The timestamp the loader keeps is not a string, so a ``paths`` item that
+    is one is refused as a date object was, and an unquoted date as an ``id``
+    reads as its text."""
+    today = date(2026, 1, 1)
+    with pytest.raises(ValueError, match="not a string"):
+        parse_trivy_ignore_file(
+            "vulnerabilities:\n  - id: CVE-1\n    paths: [2099-01-01]\n",
+            yaml_format=True,
+            today=today,
+        )
+    assert parse_trivy_ignore_file(
+        "vulnerabilities:\n  - id: 2099-01-01\n", yaml_format=True, today=today
+    ) == [("2099-01-01", ())]
+
+
+@pytest.mark.parametrize(
     "field",
     ["2099-01-01T00:00", "2099-01-01x", "2099-1-1", "2099-01-011", "2099.01.01"],
 )

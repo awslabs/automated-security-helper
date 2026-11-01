@@ -2278,14 +2278,13 @@ def parse_trivy_ignore_file(
     if yaml_format:
         import yaml
 
-        from automated_security_helper.config.ash_config import load_config_yaml
-
         # ASH applies these entries itself, so the file is parsed as ASH parses
         # its own configuration: no aliases. An entry list of aliases to one
         # entry whose paths are aliases to one list is read as every entry
-        # times every path.
+        # times every path. A bare timestamp is kept as written (see
+        # ``_trivy_ignore_loader``) so its text is judged as trivy judges it.
         try:
-            document = load_config_yaml(text) or {}
+            document = _load_trivy_ignore_yaml(text) or {}
         except yaml.YAMLError as exc:
             raise ValueError(str(exc)) from exc
         if not isinstance(document, dict):
@@ -2355,6 +2354,67 @@ _YAML_EXPIRY = re.compile(
 )
 
 
+class _BareTimestamp:
+    """The text of an unquoted YAML scalar that PyYAML reads as a timestamp.
+
+    Not a ``str`` on purpose: a ``paths`` item that is one is still not a string
+    and is refused as before.
+    """
+
+    __slots__ = ("text",)
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def __str__(self) -> str:
+        return self.text
+
+    def __repr__(self) -> str:
+        return f"_BareTimestamp({self.text!r})"
+
+
+#: An unquoted ``expired_at`` that trivy's YAML decoder reads as a time. It
+#: resolves a plain scalar as a timestamp through four layouts: a date, a
+#: date and time with a space and no zone, and ``T`` forms that carry a
+#: ``Z`` or ``+hh:mm`` zone. PyYAML resolves more: a ``T`` form with no zone,
+#: a space form with a zone, a zone of an hour alone or after a space. Those
+#: stay text in trivy, which then fails the file; the pattern below is the part
+#: both resolve, written with two-digit fields, so the rest is refused here.
+_BARE_TIME = r"(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]+)?"
+_BARE_TIMESTAMP = re.compile(
+    r"(?P<year>[0-9]{4})-(?P<month>[0-9]{2})-(?P<day>[0-9]{2})"
+    rf"(?:[Tt]{_BARE_TIME}(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])"
+    rf"|\x20{_BARE_TIME})?\Z"
+)
+
+
+@functools.lru_cache(maxsize=1)
+def _trivy_ignore_loader() -> type:
+    """ASH's no-alias YAML loader, with a bare timestamp kept as ``_BareTimestamp``.
+
+    PyYAML turns an unquoted timestamp into a ``date`` or ``datetime``, and the
+    text it was written as is gone. Whether trivy reads that text as a time
+    depends on the text, so the loader keeps it and ``_expired`` judges it.
+    """
+    from automated_security_helper.config.ash_config import _NoAliasSafeLoader
+
+    class _TrivyIgnoreLoader(_NoAliasSafeLoader):
+        pass
+
+    def as_written(loader: Any, node: Any) -> _BareTimestamp:
+        return _BareTimestamp(loader.construct_scalar(node))
+
+    _TrivyIgnoreLoader.add_constructor("tag:yaml.org,2002:timestamp", as_written)
+    return _TrivyIgnoreLoader
+
+
+def _load_trivy_ignore_yaml(text: str) -> Any:
+    """``load_config_yaml`` for a trivy ignore file: no aliases, timestamps as written."""
+    from automated_security_helper.config.ash_config import _load_single_document
+
+    return _load_single_document(_trivy_ignore_loader(), text)
+
+
 def _expired(value: Any, today: date, whole_field: bool = False) -> bool:
     """Whether a trivy ignore entry with this expiry no longer applies on ``today``.
 
@@ -2390,10 +2450,22 @@ def _expired(value: Any, today: date, whole_field: bool = False) -> bool:
             if _PLAIN_EXPIRY.match(text) is None:
                 raise ValueError(text)
         else:
-            # A YAML date or timestamp object is its first ten characters. A
-            # string is cut the same way only once it is a date or a
-            # timestamp, so ``2099-01-01x`` is not read as a date either.
-            if isinstance(value, str) and _YAML_EXPIRY.match(text) is None:
+            if isinstance(value, _BareTimestamp):
+                # An unquoted scalar PyYAML reads as a timestamp, kept as
+                # written. trivy resolves only some of those (see
+                # ``_BARE_TIMESTAMP``); the rest stay text, which its decoder
+                # then fails on.
+                found = _BARE_TIMESTAMP.match(text)
+                if found is None:
+                    raise ValueError(text)
+                return (
+                    date(int(found["year"]), int(found["month"]), int(found["day"]))
+                    <= today
+                )
+            # A string, or any other value, is cut to its first ten characters
+            # only once it is a date or a timestamp, so ``2099-01-01x`` is not
+            # read as a date either.
+            if _YAML_EXPIRY.match(text) is None:
                 raise ValueError(text)
             text = text[:10]
         return date.fromisoformat(text) <= today
