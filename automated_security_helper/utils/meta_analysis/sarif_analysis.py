@@ -525,7 +525,7 @@ def _messages_agree(original_result: Dict, agg_result: Dict) -> bool:
     return get_message_text(original_result) == get_message_text(agg_result)
 
 
-def _start_column(result: Dict):
+def _start_column(result: Dict) -> Optional[int]:
     """The ``startColumn`` of a result's first location, else None."""
     locations = result.get("locations")
     if not (isinstance(locations, list) and locations):

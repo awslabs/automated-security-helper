@@ -550,9 +550,9 @@ def severity_fails_threshold(severity: str, threshold: Optional[str]) -> bool:
     if not on_the_ladder:
         _warn_off_table_threshold(threshold)
     rank = _SEVERITY_RANK.get(severity.upper(), _UNKNOWN_SEVERITY_RANK)
-    minimum = (
-        _THRESHOLD_MIN_RANK[threshold] if on_the_ladder else _UNKNOWN_THRESHOLD_MIN_RANK
-    )
+    minimum = _UNKNOWN_THRESHOLD_MIN_RANK
+    if isinstance(threshold, str) and on_the_ladder:
+        minimum = _THRESHOLD_MIN_RANK[threshold]
     return rank >= minimum
 
 

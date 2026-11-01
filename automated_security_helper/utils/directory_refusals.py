@@ -46,7 +46,7 @@ import errno
 import os
 import secrets
 import stat
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from typing_extensions import Self
 
@@ -82,7 +82,7 @@ class DirectoryRefusal(str):
         refusal.error_number = error_number
         return refusal
 
-    def __getnewargs__(self) -> tuple:  # type: ignore[override]
+    def __getnewargs__(self) -> tuple[Any, ...]:
         # So a copy or a pickle of the refusal rebuilds it with its reason.
         return (str(self), self.kind, self.error_number)
 

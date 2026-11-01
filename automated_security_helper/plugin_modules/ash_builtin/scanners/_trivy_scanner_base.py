@@ -777,7 +777,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         except (
             OSError,
             # spawn_run raises it when the probe outlives its bound.
-            subprocess_utils.subprocess.TimeoutExpired,
+            subprocess.TimeoutExpired,
         ) as exc:
             self._plugin_log(
                 text_without_values(

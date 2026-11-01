@@ -991,15 +991,15 @@ def confine_plugin_modules(
         # were instead of the new list beside the old indices.
         # The trusted references are planned first, for the reason the merge
         # branch above gives: a refusal must come before the swap.
-        carried_references = (
+        planned_references = (
             _carried_module_references(trusted_config, kept, only=carried)
             if carried
             else None
         )
         reindex_plugin_module_references(config, original_entries, kept)
         config.ash_plugin_modules = kept
-        if carried_references is not None:
-            _apply_carried_module_references(config, carried_references)
+        if planned_references is not None:
+            _apply_carried_module_references(config, planned_references)
     if not refused:
         return
     # The names and paths are the repository's: the whole message is shown, once

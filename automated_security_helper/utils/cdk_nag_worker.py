@@ -380,7 +380,7 @@ def _raise_as_reported(answer: Dict[str, Any]) -> None:
             winerror = answer.get("winerror")
             filename2 = answer.get("filename2")
             has_winerror = isinstance(winerror, int) and not isinstance(winerror, bool)
-            fields: tuple = (
+            fields: tuple[Any, ...] = (
                 errno,
                 str(answer.get("strerror") or message),
                 answer.get("filename"),

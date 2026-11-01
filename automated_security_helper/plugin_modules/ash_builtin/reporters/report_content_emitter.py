@@ -699,7 +699,7 @@ class ReportContentEmitter:
         }
 
     @staticmethod
-    def _severity_sort_key(vuln: FlatVulnerability) -> tuple:
+    def _severity_sort_key(vuln: FlatVulnerability) -> tuple[Any, ...]:
         """Most severe first, then by file, line and rule."""
         return (
             _SEVERITY_ORDER.get(str(vuln.severity).upper(), _UNLISTED_SEVERITY_PLACE),
