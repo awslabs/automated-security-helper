@@ -199,13 +199,38 @@ def test_an_empty_plain_expiry_field_makes_the_file_unreadable():
     ]
 
 
-@pytest.mark.parametrize("field", ["2099-01-01x", "2099-01-011", "2099-1-1", "soon"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "2099-01-01x",
+        "2099-01-011",
+        "2099-1-1",
+        "soon",
+        # Text that has the shape of a timestamp but is not one: a time of day
+        # that does not exist, no seconds, a zone out of range or without its
+        # colon or missing, a stray tail, and a space for the ``T``.
+        "2099-01-01T99:99",
+        "2099-01-01T00:00",
+        "2099-01-01T24:00:00Z",
+        "2099-01-01T00:60:00Z",
+        "2099-01-01T00:00:60Z",
+        "2099-01-01T00:00:00+99",
+        "2099-01-01T00:00:00+99:00",
+        "2099-01-01T00:00:00+0100",
+        "2099-01-01T00:00:00",
+        "2099-01-01T00:00:::",
+        "2099-01-01T00:00:00.Z",
+        "2099-01-01 00:00:00",
+    ],
+)
 def test_a_yaml_expiry_string_is_read_whole_not_cut_at_ten_characters(field):
     """A string ``expired_at`` is read as a date or a timestamp, not by its
     first ten characters: cut there, ``2099-01-01x`` read as a date in the
     future, so the entry applied where trivy fails the file. A string holding a
-    date, or a date with a time, and the date and datetime objects a bare YAML
-    value loads as, are still cut to their day."""
+    date, or an RFC 3339 timestamp, and the date and datetime objects a bare
+    YAML value loads as, are still cut to their day. A string that only looks
+    like a timestamp (``2099-01-01T99:99`` and the rows above) is refused with
+    the rest: cut to its day it applied where trivy fails the file."""
     today = date(2026, 1, 1)
     document = yaml.safe_dump(
         {"vulnerabilities": [{"id": "CVE-1", "expired_at": field}]}
@@ -216,6 +241,8 @@ def test_a_yaml_expiry_string_is_read_whole_not_cut_at_ten_characters(field):
     kept_forms = (
         "'2099-01-01'",
         "'2099-01-01T00:00:00Z'",
+        "'2099-01-01T23:59:59.5+05:30'",
+        "'2099-12-31T23:59:59-08:00'",
         "2099-01-01",
         "2099-01-01T00:00:00Z",
     )

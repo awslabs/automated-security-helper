@@ -2341,11 +2341,17 @@ def parse_trivy_ignore_file(
 
 _PLAIN_EXPIRY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 
-#: A YAML ``expired_at`` written as a string: a date, or a date followed by a
-#: time of day and an optional zone.
+#: A YAML ``expired_at`` written as a string: a date, or an RFC 3339 timestamp
+#: (``T``, a time of day with seconds in range, then ``Z`` or a ``+hh:mm``
+#: offset in range). trivy decodes a quoted field as RFC 3339 text and fails
+#: the file on anything else, so a time of day that does not exist
+#: (``T99:99``), one without seconds, a space in place of the ``T`` and a zone
+#: that is missing or out of range are text that is not a timestamp, as
+#: ``2099-01-01x`` is. The day itself is checked by ``date.fromisoformat``.
 _YAML_EXPIRY = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
-    r"(?:[Tt ][0-9]{2}:[0-9]{2}[0-9:.]*(?:[Zz]|[+-][0-9]{2}(?::?[0-9]{2})?)?)?\Z"
+    r"(?:T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]+)?"
+    r"(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9]))?\Z"
 )
 
 
