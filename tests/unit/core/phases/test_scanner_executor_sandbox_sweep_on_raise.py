@@ -192,11 +192,12 @@ class TestASweepFailureKeepsTheExceptionAlreadyPropagating:
 
 
 class TestARefusalBeforeTheScanIsRedacted:
-    """``refuse_links_below`` takes no redaction values, so its refusal reaches the
-    row as the walk worded it, and whatever it names (a path under the results
-    directory, the error the walk met) can hold a value the configuration read
-    from the environment. The per-target handler redacts the exception with the
-    plugin's environment values, as it redacts the sweep's, and this pins it."""
+    """A refusal that ``refuse_links_below`` raises reaches the row as the walk
+    worded it (a caller passing no values gets it unredacted), and whatever it
+    names (a path under the results directory, the error the walk met) can hold a
+    value the configuration read from the environment. The per-target handler
+    redacts the exception with the plugin's environment values, as it redacts the
+    sweep's, and this pins it."""
 
     CANARY = "env-read-canary-u18x-link-value"
 
@@ -205,7 +206,9 @@ class TestARefusalBeforeTheScanIsRedacted:
     ):
         plugin_context.config._environment_values = [self.CANARY]
 
-        def refuse(root):
+        # The executor hands the pre-check the plugin's values as well as the
+        # root, as the walk's own signature takes them.
+        def refuse(root, values=None, *, values_unread=False):
             raise OSError(f"link {self.CANARY}/results/out refused below {root}")
 
         monkeypatch.setattr(scanner_executor, "refuse_links_below", refuse)
@@ -216,3 +219,32 @@ class TestARefusalBeforeTheScanIsRedacted:
         assert "refused below" in _reason(row), row.errors
         assert self.CANARY not in _reason(row), row.errors
         assert self.CANARY not in str(row.raw_results), row.raw_results
+
+    def test_the_pre_check_is_given_the_scopes_values(
+        self, plugin_context, monkeypatch
+    ):
+        """The pre-check runs before any scope is active, so it is handed the same
+        values the sweep after the scan redacts with, and the word that they could
+        not be read, rather than left to raise an unredacted refusal."""
+        results_dir = plugin_context.output_dir / "pre-check-results"
+        results_dir.mkdir()
+        scope = SimpleNamespace(
+            results_dir=results_dir,
+            environment_values=(self.CANARY,),
+            environment_values_unread=True,
+            backend=SimpleNamespace(name="fake"),
+        )
+        calls: list[tuple] = []
+
+        def refuse(root, values=None, *, values_unread=False):
+            calls.append((Path(root), values, values_unread))
+
+        monkeypatch.setattr(
+            scanner_executor, "scanner_sandbox_scope", lambda *args, **kwargs: scope
+        )
+        monkeypatch.setattr(scanner_executor, "refuse_links_below", refuse)
+        monkeypatch.setattr(scanner_executor, "sweep_writable", lambda *a, **k: 0)
+
+        _row(plugin_context, None)
+
+        assert calls == [(results_dir, (self.CANARY,), True)], calls
