@@ -164,10 +164,12 @@ def _outcome_of(
                 # holds the grandchildren it started.
                 try:
                     os.killpg(child.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    # No group yet: the limit ran out before the child reached
-                    # ``os.setsid()``, so it leads none and is still alive, and
-                    # the ``join`` below would wait on it for good.
+                except (ProcessLookupError, PermissionError):
+                    # No group to signal: the limit ran out before the child
+                    # reached ``os.setsid()`` (it leads none and is still alive,
+                    # and the ``join`` below would wait on it for good), or the
+                    # child exited between ``is_alive`` and the kill (macOS
+                    # answers a kill of an exited leader's group with EPERM).
                     child.kill()
             else:
                 child.kill()
