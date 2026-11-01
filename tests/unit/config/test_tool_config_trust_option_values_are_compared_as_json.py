@@ -221,12 +221,15 @@ def test_a_value_that_is_not_json_is_compared_with_equality() -> None:
     assert _same_option_value(day, datetime.date(2026, 1, 2)) is False
 
 
-def test_a_value_nested_too_deep_is_not_the_same_and_does_not_raise() -> None:
+def test_a_value_nested_too_deep_does_not_raise_and_is_never_a_match_for_none() -> None:
     def nested() -> Any:
         deep: Any = []
         for _ in range(10 * sys.getrecursionlimit()):
             deep = [deep]
         return deep
 
-    assert _same_option_value(nested(), nested()) is False
+    # An encoder that stops at the interpreter's recursion limit (3.10, 3.12)
+    # answers False for two equal deep values; one that follows them (3.14)
+    # answers True. Either way the comparison returns a bool and never raises.
+    assert _same_option_value(nested(), nested()) in (True, False)
     assert _same_option_value(nested(), None) is False
