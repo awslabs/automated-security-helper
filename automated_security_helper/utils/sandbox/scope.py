@@ -24,6 +24,7 @@ import platform
 import shlex
 import threading
 import time
+import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -183,48 +184,104 @@ class TransientProbeFailure(SandboxUnavailable):
 
     Raised when ``SandboxBackend.probe`` met a condition that can be gone by the
     next request: the probe process ran past the backend's probe timeout, or the
-    system refused a resource for now (``EAGAIN``, ``EBUSY``). The backend sets
-    the fact where the exception was caught (``probe_was_transient``); nothing
-    here reads the reason's wording. An answer reached through such a failure
-    (the refusal itself, or under auto a fallback chosen because the preferred
-    backend met one) is remembered for the scan only (``_TransientHold``); a
-    missing program or kernel feature, and a backend found with no transient
-    skip, are remembered for the process.
+    system refused a resource for now (``EAGAIN``, ``EBUSY``, ``ENOMEM``). The
+    backend sets the fact where the exception was caught
+    (``probe_was_transient``); nothing here reads the reason's wording. Under auto, a fallback chosen because the
+    preferred backend met such a failure is remembered for the scan that chose
+    it (``_ScanAnswers``), so a scan never switches backend partway. The
+    refusal itself is remembered for ``_TRANSIENT_RETRY_SECONDS`` (within a
+    scan, for that scan only), so a condition that passes does not refuse every
+    later scanner of a long scan; a missing program or kernel feature, and a
+    backend found with no transient skip, are remembered for the process.
     """
 
 
-#: How long an answer reached through a transient condition is kept when no scan
-#: is running (a probe made outside any scan: ``ash dependencies``, a plugin
-#: probe before the scan opens). Inside a scan the answer is kept for the scan,
-#: not for a time (``_TransientHold``): a scan asks once per scanner, serialized
-#: by ``_probe_lock``, and scanners start as the pool frees up, so a clock window
-#: that ended mid-scan gave its later scanners another answer than its first.
+#: How long a refusal reached through a transient condition is kept, and how long
+#: any answer reached through one is kept when no scan is running (a probe made
+#: outside any scan: ``ash dependencies``, a plugin probe before the scan opens).
+#: Inside a scan a working fallback is kept for the scan, not for a time
+#: (``_ScanAnswers``): a scan asks once per scanner, serialized by
+#: ``_probe_lock``, and scanners start as the pool frees up, so a clock window
+#: that ended mid-scan gave its later scanners another backend than its first. A
+#: refusal has no backend to stay consistent with, so it is probed again once the
+#: window has passed, as it is outside a scan: under an explicit
+#: ``--sandbox bwrap`` one probe timeout early in a long scan would otherwise
+#: refuse every later scanner of that scan.
 _TRANSIENT_RETRY_SECONDS = 60.0
 
 
 class _TransientHold(NamedTuple):
-    """How long one transient answer is kept.
+    """How long one transient answer reached outside any scan is kept.
 
-    ``scan`` is the notes set of the scan that was running when the answer was
-    reached (``_scan_notes``), held by reference so that "the same scan" is an
-    identity test; the answer is served to that scan only and is probed again by
-    the next scan, or by a request outside any scan. With ``scan`` None the
-    answer was reached outside a scan and ``until`` is the monotonic time from
-    which it is probed again.
+    ``until`` is the monotonic time from which it is probed again. The process
+    keeps one such answer per cache key in ``_resolved``.
     """
 
-    scan: Optional[Set[Any]]
     until: float
 
-    def lapsed(self, now: float, scan: Optional[Set[Any]]) -> bool:
-        if self.scan is not None:
-            return scan is not self.scan
+    def lapsed(self, now: float) -> bool:
         return now >= self.until
 
 
-#: Cache keys whose answer was reached through a transient condition, and how
-#: long each is kept.
+#: Cache keys whose answer, reached outside any scan through a transient
+#: condition, is kept for a time, and how long each is kept.
 _transient_holds: Dict[Any, _TransientHold] = {}
+
+
+class _HeldAnswer(NamedTuple):
+    """One transient answer a scan keeps.
+
+    ``until`` is None for a backend (a fallback chosen past a transient skip),
+    which the scan keeps to its end; for a refusal it is the monotonic time from
+    which the scan probes again.
+    """
+
+    answer: "SandboxBackend | SandboxUnavailable"
+    until: Optional[float]
+
+    def lapsed(self, now: float) -> bool:
+        return self.until is not None and now >= self.until
+
+
+class _ScanAnswers:
+    """The transient answers one scan keeps, by cache key.
+
+    Two scans of one tree can run in one process (an MCP server), and they share
+    a cache key, so one slot per key made each evict the other's answer: each
+    read the other's as not its own and probed again, holding ``_probe_lock``
+    for a probe timeout, and an answer one scan reached could replace another
+    scan's mid-scan. The answers of a scan are kept apart, in an object that
+    lives in the scan's own notes set (``_scan_notes``) and goes with it, so the
+    process keeps no reference to a finished scan.
+    """
+
+    __slots__ = ("answers", "__weakref__")
+
+    def __init__(self) -> None:
+        self.answers: Dict[Any, _HeldAnswer] = {}
+
+
+#: The answers object of each live scan, by the id of the scan's notes set. Weak
+#: values: the scan's notes set is the only strong reference to its object, so an
+#: entry disappears with the scan.
+_scan_answers: "weakref.WeakValueDictionary[int, _ScanAnswers]" = (
+    weakref.WeakValueDictionary()
+)
+
+
+def _answers_of(scan: Set[Any]) -> _ScanAnswers:
+    """The answers object kept in ``scan``'s notes set, made on the first call.
+
+    Looked up by the set's id, and accepted only when the set holds the object
+    itself: an id left by a finished scan and reused by a new set finds an
+    object the new set does not hold, and gets a new one.
+    """
+    state = _scan_answers.get(id(scan))
+    if state is None or state not in scan:
+        state = _ScanAnswers()
+        scan.add(state)
+        _scan_answers[id(scan)] = state
+    return state
 
 
 def _scan_notes() -> Optional[Set[Any]]:
@@ -277,6 +334,7 @@ def clear_backend_cache() -> None:
     with _probe_lock:
         _resolved.clear()
         _transient_holds.clear()
+        _scan_answers.clear()
     # The set has a lock of its own (see above); nothing takes it while holding
     # the probe lock, so taking it after the probe state is cleared cannot invert.
     with _withheld_lock:
@@ -323,9 +381,12 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     ask at the same moment and each probe starts a process. An answer reached
     through a transient condition (``_probe_failure_is_transient``: the refusal
     itself, or under auto a fallback taken because the preferred backend met one)
-    is kept for the scan that reached it (``_TransientHold``), so every scanner of
-    one scan gets one answer, and probed again by the next scan; reached outside
-    any scan, it is kept for ``_TRANSIENT_RETRY_SECONDS``.
+    is kept for the scan that reached it (``_ScanAnswers``, one per scan, so two
+    scans of one tree do not replace each other's) and probed again by the next
+    scan. Within the scan a fallback backend is kept to its end, so a scan never
+    switches backend partway, and a refusal for ``_TRANSIENT_RETRY_SECONDS``;
+    reached outside any scan, either is kept for that window
+    (``_TransientHold``).
     """
     from automated_security_helper.utils.subprocess_utils import tree_scope_key
 
@@ -336,12 +397,23 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     with _probe_lock:
         now = time.monotonic()
         scan = _scan_notes()
-        cached = _resolved.get(cache_key)
-        hold = _transient_holds.get(cache_key)
-        if cached is not None and hold is not None and hold.lapsed(now, scan):
-            # Reached through a transient condition, and the scan it was kept
-            # for is over (or the window outside a scan has passed).
-            cached = None
+        # A transient answer this scan reached comes first: the scan keeps it
+        # whatever another scan of the same tree has been told since.
+        held = _answers_of(scan).answers if scan is not None else None
+        entry = held.get(cache_key) if held is not None else None
+        if held is not None and entry is not None and entry.lapsed(now):
+            # A refusal the scan has kept for the window, and the window has
+            # passed: probed again, as a refusal outside a scan is.
+            del held[cache_key]
+            entry = None
+        cached = entry.answer if entry is not None else None
+        if cached is None:
+            cached = _resolved.get(cache_key)
+            hold = _transient_holds.get(cache_key)
+            if cached is not None and hold is not None and hold.lapsed(now):
+                # Reached outside a scan through a transient condition, and
+                # the window has passed.
+                cached = None
         if cached is None:
             transient = False
             try:
@@ -359,17 +431,27 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
                 cached = e.with_traceback(None)
                 cached.__context__ = None
                 transient = _probe_failure_is_transient(cached)
-            _resolved[cache_key] = cached
-            if transient:
-                # Kept for the scan that asked. Outside a scan the window is
-                # counted from the end of the probe: a probe that ran to its own
-                # timeout used up part of the window if it started from ``now``,
-                # and two such probes under auto left it already past.
+            if transient and held is not None:
+                # Kept for the scan that asked, and for no other: the process
+                # slot is left as it was. A backend is kept to the scan's end; a
+                # refusal for the window, counted as below.
+                refused = isinstance(cached, SandboxUnavailable)
+                held[cache_key] = _HeldAnswer(
+                    cached,
+                    time.monotonic() + _TRANSIENT_RETRY_SECONDS if refused else None,
+                )
+            elif transient:
+                # Outside a scan the window is counted from the end of the
+                # probe: a probe that ran to its own timeout used up part of the
+                # window if it started from ``now``, and two such probes under
+                # auto left it already past.
+                _resolved[cache_key] = cached
                 probed_at = time.monotonic()
                 _transient_holds[cache_key] = _TransientHold(
-                    scan, probed_at + _TRANSIENT_RETRY_SECONDS
+                    probed_at + _TRANSIENT_RETRY_SECONDS
                 )
             else:
+                _resolved[cache_key] = cached
                 _transient_holds.pop(cache_key, None)
     if isinstance(cached, SandboxUnavailable):
         # Classified at the raise, not in the cache, so a cached refusal is
@@ -659,10 +741,6 @@ def _warn_withheld_once(
     """
     from automated_security_helper.utils.subprocess_utils import tree_scope_key
 
-    if level not in (logging.INFO, logging.WARNING):
-        # Only the two levels the notes use have a method here; any other was
-        # written as a warning without a word.
-        raise ValueError(f"a withheld-grant note is INFO or WARNING, not {level}")
     entry = (tree_scope_key(), name, key)
     notes = _scan_notes()
     written = notes if notes is not None else _WARNED_WITHHELD
@@ -670,8 +748,16 @@ def _warn_withheld_once(
         if entry in written:
             return
         written.add(entry)
-    write = ASH_LOGGER.info if level == logging.INFO else ASH_LOGGER.warning
-    write(message)
+    if level == logging.INFO:
+        ASH_LOGGER.info(message)
+    elif level == logging.WARNING:
+        ASH_LOGGER.warning(message)
+    else:
+        # A level the notes do not use is written at the level given. It is not
+        # refused: the callers sit in the scope build, after the results root is
+        # registered and before it is released, so a raise here would leave the
+        # root registered and fail the scanner over a log line.
+        ASH_LOGGER.log(level, message)
 
 
 def sandbox_refusal_grades_missing(refusal: SandboxUnavailable) -> bool:

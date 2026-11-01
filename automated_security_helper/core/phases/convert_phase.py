@@ -587,7 +587,8 @@ class ConvertPhase(EnginePhase):
 
         ``filter_failures`` is what ``filter_enabled_plugins`` recorded for each
         instance whose own enabled or Python-only check raised, by ``id``
-        (already redacted). Such an instance was dropped without any question
+        (redacted by the filter, and redacted again when the row is written, with
+        the home directory written as ``~``). Such an instance was dropped without any question
         answered, so its row is a failure that says which check raised, and it
         says nothing about the converter's tool unless a dependency answer was
         recorded for it.
@@ -616,12 +617,18 @@ class ConvertPhase(EnginePhase):
             row_key = row_keys.get(id(plugin_instance), display_name)
             enabled = section_enabled(getattr(plugin_instance, "config", None))
             declined_by_python_only = False
-            if python_based_plugins_only and enabled:
+            raised = filter_failures.get(id(plugin_instance))
+            # A converter whose check raised is a failure, whatever else was
+            # recorded for it: it is not asked again, and an answer recorded
+            # before (or after) the raise does not turn the failure into an
+            # exclusion, which the completeness gate and the unproductive-run
+            # reason skip without reading the failure.
+            if python_based_plugins_only and enabled and raised is None:
                 if id(plugin_instance) in python_only_answers:
                     declined_by_python_only = not python_only_answers[
                         id(plugin_instance)
                     ]
-                elif id(plugin_instance) not in filter_failures:
+                else:
                     try:
                         declined_by_python_only = not plugin_instance.is_python_only()
                     except Exception:
@@ -631,7 +638,6 @@ class ConvertPhase(EnginePhase):
                         # that asked recorded it, redacted, in ``filter_failures``,
                         # which is read below.
                         declined_by_python_only = False
-            raised = filter_failures.get(id(plugin_instance))
             # The pre-filter loop asks the dependency question of an enabled
             # converter that the Python-only filter keeps, and of no other. A
             # converter the config turned off, one a Python-only run declined, and
@@ -666,9 +672,24 @@ class ConvertPhase(EnginePhase):
                 # for the same entry names only is_python_only(): the dict also
                 # holds what the filter's own enabled check raised, and the row
                 # cannot tell the two apart, so it names both.
+                #
+                # Shown as every other failure text of this phase is: redacted
+                # with the run's values and the converter's own, and with the
+                # home directory written as ``~``. The text reaches the results
+                # file, ``to_simple_dict`` (sent off-host by some reporters) and
+                # the HTML report.
+                run_config = getattr(self.plugin_context, "config", None)
+                shown = _shown_loss(
+                    raised,
+                    _redaction_values_or(
+                        plugin_instance,
+                        run_config,
+                        config_environment_values(run_config),
+                    ),
+                )
                 failure = (
                     "dropped by the filter: its enabled or is_python_only() check "
-                    f"raised {raised}"
+                    f"raised {shown}"
                 )
             elif not drop_is_explained:
                 # Dropped although every predicate this method can evaluate says it
@@ -1044,7 +1065,7 @@ class ConvertPhase(EnginePhase):
                     phase=ExecutionPhase.CONVERT,
                     # Each name a description quotes is escaped once: the live
                     # display renders it as markup.
-                    description=f"Starting converter: {escape_markup(plugin_name)}",
+                    description=f"Starting converter: {escape_markup(row_key)}",
                     total=100,
                 )
 

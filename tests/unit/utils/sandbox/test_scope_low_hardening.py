@@ -13,12 +13,11 @@ second tree in the same process gets its own); a converter's offline option is
 read from the converters section; the probe directory is removed when the scope
 build raises anything; any planning failure is counted on the scope as a failure,
 apart from the refusals; a registration that raises runs the plan's cleanup; the
-sweep is the cleanup's first step and passes over the plan's private directories; a
-record that raises releases
-each root once; and a DEBUG record names no argv when the plugin's values could not
-be read, saying for a class scope that none exist; and the scope carries the
-sandbox settings' environment list to the policy of every spawn. Nothing runs a
-backend.
+sweep is the cleanup's first step and passes over the plan's private directories;
+a record that raises releases each root once; and a DEBUG record names no argv
+when the plugin's values could not be read, saying for a class scope that none
+exist; and the scope carries the sandbox settings' environment list to the
+policy of every spawn. Nothing runs a backend.
 """
 
 from __future__ import annotations
@@ -94,6 +93,10 @@ class _Logger:
             self.lines.append((level, message % args if args else message))
 
         return record
+
+    def log(self, level, message, *args, **kwargs):
+        # The logging module's own method: the level is a number.
+        self._record(logging.getLevelName(level).lower())(message, *args)
 
     def __getattr__(self, name):
         if name in ("debug", "info", "warning", "error"):
@@ -247,14 +250,26 @@ def test_a_withheld_note_has_a_level_it_can_be_written_at(fresh, monkeypatch):
 
     scope._warn_withheld_once("tool", "info-note", "said at info", level=logging.INFO)
     scope._warn_withheld_once("tool", "default-note", "said at the default")
-    # Red at the base: written as a warning, with no word that the level was wrong.
-    with pytest.raises(ValueError, match="INFO or WARNING"):
-        scope._warn_withheld_once("tool", "odd", "never said", level=logging.ERROR)
 
     assert logger.lines == [
         ("info", "said at info"),
         ("warning", "said at the default"),
     ]
+
+
+def test_a_withheld_note_at_another_level_is_written_not_refused(fresh, monkeypatch):
+    """The callers sit in the scope build, between registering the results root
+    and releasing it: a note at a level the notes do not use must not raise
+    there, which left the root registered and failed the scanner over a log
+    line."""
+    logger = _Logger()
+    monkeypatch.setattr(scope, "ASH_LOGGER", logger)
+
+    # Red at the base: ValueError, "a withheld-grant note is INFO or WARNING".
+    scope._warn_withheld_once("tool", "odd", "said at error", level=logging.ERROR)
+    scope._warn_withheld_once("tool", "odd", "said at error", level=logging.ERROR)
+
+    assert logger.lines == [("error", "said at error")]
 
 
 def test_clearing_the_notes_takes_the_lock_that_guards_them(monkeypatch):

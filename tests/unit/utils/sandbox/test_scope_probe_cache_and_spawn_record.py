@@ -29,12 +29,14 @@ from __future__ import annotations
 
 import contextvars
 import errno
+import gc
 import os
 import platform
 import shlex
 import subprocess
 import threading
 import time
+import weakref
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -214,24 +216,32 @@ def test_the_window_runs_from_the_end_of_a_slow_probe(fresh_cache, monkeypatch, 
     assert probes == ["bwrap", "bwrap"]
 
 
-def test_inside_a_scan_a_transient_answer_is_kept_for_the_whole_scan(
+def test_inside_a_scan_a_refusal_is_probed_again_after_the_window(
     fresh_cache, monkeypatch, clock, tmp_path
 ):
-    """Scanners start as the pool frees up, so one scan can outlast any window:
-    a scanner that asks late must get the answer the first one got."""
+    """A refusal has no backend to stay consistent with. Under `--sandbox bwrap`
+    one probe timeout early in a long scan must not refuse every later scanner:
+    inside the window the refusal is served from memory, past it the next request
+    probes again."""
+    backend = _backend("bwrap")
     probes = _probe_answers(
-        monkeypatch, [scope.TransientProbeFailure(TIMED_OUT), _backend("bwrap")]
+        monkeypatch, [scope.TransientProbeFailure(TIMED_OUT), backend]
     )
 
     with subprocess_utils.scanning_tree(tmp_path):
         with pytest.raises(scope.SandboxBackendUnavailable):
             scope.resolve_backend("bwrap")
-        # Red at the base: a request past the window probed again and ran.
-        clock.advance(PAST_THE_WINDOW * 10)
+        clock.advance(scope._TRANSIENT_RETRY_SECONDS - 1.0)
         with pytest.raises(scope.SandboxBackendUnavailable):
             scope.resolve_backend("bwrap")
+        assert probes == ["bwrap"]
 
-    assert probes == ["bwrap"]
+        # Red at the base: the refusal was kept for the whole scan, so a request
+        # past the window was refused again with no probe.
+        clock.advance(2.0)
+        assert scope.resolve_backend("bwrap") is backend
+
+    assert probes == ["bwrap", "bwrap"]
 
 
 def test_the_next_scan_of_the_same_tree_probes_again(
@@ -308,6 +318,95 @@ def test_two_scanner_threads_of_one_scan_share_one_probe(
     assert probes == ["bwrap"]
 
 
+def _open_scan(root, notes=None):
+    """A context holding an open scan of *root*, as ``scanning_tree`` opens one.
+
+    Each call runs in a context of its own, so two of these are two scans of one
+    tree in one process, and a test interleaves their requests in a fixed order
+    with no thread and no clock. Every scan has a notes set of its own.
+    """
+    scan_context = contextvars.copy_context()
+    scan_context.run(
+        subprocess_utils._TREE_SCOPE.set,
+        subprocess_utils._TreeScope(
+            roots=(os.fspath(root),),
+            allow=False,
+            warned=set() if notes is None else notes,
+        ),
+    )
+    return scan_context
+
+
+def test_two_scans_of_one_tree_do_not_evict_each_others_answer(
+    fresh_cache, monkeypatch, tmp_path
+):
+    """The scans share a cache key. Each keeps the answer it reached, so each
+    probes once; one slot per key made each read the other's answer as not its
+    own, and every request after a switch probed again (a probe timeout, with
+    every other scan's requests queued behind `_probe_lock`)."""
+    probes = _probe_answers(monkeypatch, [scope.TransientProbeFailure(TIMED_OUT)])
+    first, second = _open_scan(tmp_path), _open_scan(tmp_path)
+
+    for scan_context in (first, second, first, second):
+        with pytest.raises(scope.SandboxBackendUnavailable):
+            scan_context.run(scope.resolve_backend, "bwrap")
+
+    # Red at the base: four probes, one per request, the hold passing between
+    # the scans each time.
+    assert probes == ["bwrap", "bwrap"]
+
+
+def test_a_scan_keeps_its_fallback_when_another_scan_finds_the_first_choice(
+    fresh_cache, monkeypatch, tmp_path
+):
+    """Under auto, bwrap times out for the first scan, which takes firejail. The
+    second scan probes bwrap a moment later and it works. The first scan must not
+    be handed bwrap partway through."""
+    monkeypatch.setattr(
+        scope, "AUTO_ORDER", {platform.system().lower(): ("bwrap", "firejail")}
+    )
+    bwrap, firejail = _backend("bwrap"), _backend("firejail")
+    probes = _probe_answers(
+        monkeypatch,
+        {
+            "bwrap": [scope.TransientProbeFailure(TIMED_OUT), bwrap],
+            "firejail": [firejail],
+        },
+    )
+    first, second = _open_scan(tmp_path), _open_scan(tmp_path)
+
+    assert first.run(scope.resolve_backend, "auto") is firejail
+    assert second.run(scope.resolve_backend, "auto") is bwrap
+    # Red at the base: the second scan's working answer replaced the first scan's
+    # held one in the shared slot, so this request got bwrap.
+    assert first.run(scope.resolve_backend, "auto") is firejail
+    assert probes == ["bwrap", "firejail", "bwrap"]
+
+
+class _WeaklyReferencableNotes(set):
+    """A notes set that a test can hold a weak reference to; a plain set cannot."""
+
+
+def test_a_finished_scans_notes_are_not_kept_alive_by_its_answer(
+    fresh_cache, monkeypatch, tmp_path
+):
+    _probe_answers(monkeypatch, [scope.TransientProbeFailure(TIMED_OUT)])
+    notes = _WeaklyReferencableNotes()
+    scan_context = _open_scan(tmp_path, notes)
+    try:
+        scan_context.run(scope.resolve_backend, "bwrap")
+    except scope.SandboxBackendUnavailable:
+        pass
+    reference = weakref.ref(notes)
+
+    del notes, scan_context
+    gc.collect()
+
+    # Red at the base: the hold named the scan's notes set, so the process kept
+    # the set of every scan that met a passing condition.
+    assert reference() is None
+
+
 class _OneProbeCommand(SandboxBackend):
     """A backend with the real ``probe()``: its one probe command goes through
     the module's own process helper, so what the patched ``subprocess.run``
@@ -342,6 +441,9 @@ PASSING_CONDITIONS = [
         BlockingIOError(errno.EAGAIN, os.strerror(errno.EAGAIN)), id="no-process-yet"
     ),
     pytest.param(OSError(errno.EBUSY, os.strerror(errno.EBUSY)), id="resource-busy"),
+    # Red at the base: a fork refused for memory was remembered as a lasting
+    # refusal, although the comment on the set names "no memory to give".
+    pytest.param(OSError(errno.ENOMEM, os.strerror(errno.ENOMEM)), id="no-memory"),
 ]
 
 LASTING_CONDITIONS = [

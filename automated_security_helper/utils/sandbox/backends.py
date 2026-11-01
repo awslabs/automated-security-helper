@@ -273,7 +273,9 @@ class SpawnPlan:
 #: The errnos that name a resource refused for now: the system had no process or
 #: memory to give, or the resource was busy. EWOULDBLOCK is EAGAIN on Linux and
 #: a different number elsewhere.
-_TRANSIENT_PROBE_ERRNOS = frozenset({errno.EAGAIN, errno.EWOULDBLOCK, errno.EBUSY})
+_TRANSIENT_PROBE_ERRNOS = frozenset(
+    {errno.EAGAIN, errno.EWOULDBLOCK, errno.EBUSY, errno.ENOMEM}
+)
 
 
 def _is_transient_probe_error(error: BaseException) -> bool:
