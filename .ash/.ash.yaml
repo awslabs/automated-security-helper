@@ -3558,6 +3558,83 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/utils/tool_guard.py
       reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    # === The #865 chain's test files: bandit ===
+    # The unified bug-fixes chain added test files whose fixtures trip the same
+    # bandit rules the sorted test-code section above already covers. Per-file
+    # entries, never a glob, one rule and one file each, with that section's
+    # established reasons; an entry the base already carries is not repeated.
+    - rule_id: B102
+      path: tests/unit/test_a_leaked_run_scope_fails_its_test.py
+      reason: "Test code. exec of source text the test itself holds, in the test's own namespace."
+    - rule_id: B102
+      path: tests/unit/utils/test_tool_downloads_refusals_and_the_rules_probe.py
+      reason: "Test code. exec of source text the test itself holds, in the test's own namespace."
+    - rule_id: B103
+      path: tests/unit/cli/mcp/test_session_paths_workspace_is_private.py
+      reason: "Test code. The test sets file modes on files and directories it creates, to check how ASH reads, removes or refuses them."
+    - rule_id: B108
+      path: tests/unit/config/test_sandbox_environment_setting.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/schemas/test_filter_results_by_files_uri_forms.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/scripts/test_verify_external_target_scan.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/utils/test_child_tool_starts_record_what_a_child_starts.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/utils/test_content_db_refresh_resolves_caches_and_locks_as_the_tools_do.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/utils/test_link_chain.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B108
+      path: tests/unit/utils/test_normalizers_injective.py
+      reason: "Test code. A fixed temporary path appears as an expected value, as an input the code under test must refuse or report, or as a harness fallback."
+    - rule_id: B301
+      path: tests/unit/core/resource_management/test_one_category_per_lookup_error_and_full_disk.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B301
+      path: tests/unit/core/test_exceptions_low_unset_variable_error_copy.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B301
+      path: tests/unit/utils/sandbox/test_scope_low_hardening.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B301
+      path: tests/unit/utils/test_redacted_model_record_and_scalar_maker.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B301
+      path: tests/unit/utils/test_report_path_links_names_and_pickling.py
+      reason: "Test code. Pickle round trip of objects the test creates."
+    - rule_id: B310
+      path: tests/unit/utils/conftest.py
+      reason: >-
+        Test code. The conftest helper restores the real urlopen behind
+        download_utils' _open_url seam for tests that opt into a real local
+        fetch; the URLs it receives are the tests' own loopback addresses.
+    - rule_id: B506
+      path: tests/unit/utils/test_yaml_aliases_refuse_a_document_past_the_expansion_bound.py
+      reason: "Test code. yaml.load with the bounded NoRecursiveAliasLoader under test, on documents the test builds."
+    - rule_id: B506
+      path: tests/unit/utils/test_yaml_aliases_refuse_a_document_past_the_node_bound.py
+      reason: "Test code. yaml.load with the bounded NoRecursiveAliasLoader under test, on documents the test builds."
+    - rule_id: B604
+      path: tests/unit/base/test_a_custom_install_command_keeps_its_shell_flag.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/cli/test_dependencies_a_shell_command_is_one_command_line.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/cli/test_dependencies_install_passes_the_shell_flag.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/cli/test_dependencies_refuses_before_creating.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    - rule_id: B604
+      path: tests/unit/utils/test_subprocess_utils_stops_resolution_and_records_edges.py
+      reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
     # No GitHub Actions entries. `yaml.github-actions.security.*` was suppressed
     # over every workflow on the claim that interpolations were author-defined;
     # removing it surfaced shell injection through `${{ inputs.* }}` in
