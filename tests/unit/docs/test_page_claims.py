@@ -17111,10 +17111,12 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
     home = tmp_path / "home"
     absolute = str(tmp_path / "absolute" / "docker")
     user = getpass.getuser()
-    # The passwd entry's home directory, which ``~user`` names, and ``~`` too when
-    # HOME is unset.
+    # What ``~user`` names in the child: on POSIX the passwd entry's home (and
+    # ``~`` too when HOME is unset); on Windows the child's profile itself, since
+    # the profile points at the fixture home and ``~<the current user>`` resolves
+    # to the profile directory.
     user_home = (
-        os.path.expanduser(f"~{user}")
+        str(home)
         if os.name == "nt"
         else importlib.import_module("pwd").getpwnam(user).pw_dir
     )
@@ -17126,7 +17128,14 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
         # Windows path's backslashes would be invalid escapes inside it.
         if isinstance(value, str):
             return (
-                value.replace("CWD", str(cwd))
+                # A typed relative path is read against the working directory
+                # and comes back OS-normalized, so the expected value is built
+                # with the same resolution.
+                value.replace(
+                    "CWD/bin/docker",
+                    os.path.abspath(os.path.join(str(cwd), "bin", "docker")),
+                )
+                .replace("CWD", str(cwd))
                 .replace("ABSOLUTE", absolute)
                 .replace("USERHOME", user_home)
                 .replace("HOME", str(home))
