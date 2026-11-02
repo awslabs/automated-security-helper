@@ -757,8 +757,6 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
     # spelling for versions) and a path or rule_id can be a bare number;
     # without the coercion "|".join or "@".join raises a TypeError where the
     # lint should report a finding.
-    path = suppression.get("path")
-    rule_id = suppression.get("rule_id")
     parts = [
         _text(suppression.get("path"), ""),
         _text(suppression.get("rule_id"), "*"),

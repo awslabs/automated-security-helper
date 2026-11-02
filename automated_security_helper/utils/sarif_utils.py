@@ -2345,7 +2345,9 @@ def _apply_suppressions_within_budget(
                         title=message_text or "Unknown Issue",
                         description=message_text or "No description available",
                         severity="MEDIUM",
-                        scanner=_suppression_scanner_identity(result, run, scanner_name),
+                        scanner=_suppression_scanner_identity(
+                            result, run, scanner_name
+                        ),
                         scanner_type="SAST",
                         rule_id=result.ruleId,
                         file_path=uri,
