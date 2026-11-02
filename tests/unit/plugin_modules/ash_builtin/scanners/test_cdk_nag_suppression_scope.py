@@ -3,10 +3,10 @@
 
 """cdk-nag's suppression-scope block: validation, matching, qualifier split.
 
-``scope.engines.cdk-nag`` carries ``applies_to`` (matched against the granular
-qualifier cdk-nag appends to a rule id) and ``resource_path`` (matched against
-the CDK construct path). The plugin owns both: ASH's core dispatches the block
-here and never reads its keys.
+``scope.engines.cdk-nag`` carries ``applies_to`` (compared exactly against the
+granular qualifier cdk-nag appends to a rule id, as cdk-nag's own appliesTo)
+and ``resource_path`` (matched against the CDK construct path). The plugin owns
+both: ASH's core dispatches the block here and never reads its keys.
 """
 
 import pytest
@@ -103,6 +103,41 @@ class TestEndToEndMatching:
     def test_a_block_is_never_consulted_for_another_scanner(self):
         entry = _entry({"resource_path": "Stack/CollectorTaskRole/*"})
         assert not entry.matches(_finding(scanner="checkov"))
+
+
+class TestAppliesToIsExact:
+    """``applies_to`` is exact membership, as cdk-nag's own appliesTo.
+
+    A literal ported from a cdk-nag config often contains ``*`` (IAM action
+    and resource wildcards are part of the qualifier's own text); read as a
+    glob it would silently widen the suppression to every finding the wildcard
+    happens to cover.
+    """
+
+    def test_a_star_in_the_value_does_not_widen_to_other_qualifiers(self):
+        # Glob reading would make "Resource::*" cover this differently
+        # qualified finding; exact membership must not.
+        entry = _entry({"applies_to": "Resource::*"})
+        assert not entry.matches(
+            _finding(rule_id="AwsSolutions-IAM5[Resource::arn:aws:s3:::logs/key]")
+        )
+
+    def test_the_identical_literal_still_matches_its_own_finding(self):
+        entry = _entry({"applies_to": "Resource::*"})
+        assert entry.matches(_finding(rule_id="AwsSolutions-IAM5[Resource::*]"))
+
+    def test_resource_id_scope_keeps_its_documented_glob(self):
+        # Pin the shared scope matching the fix must not narrow: a
+        # scope.resource_id pattern is still literal-first, then glob.
+        entry = AshSuppression.model_validate(
+            {
+                "rule_id": "AwsSolutions-IAM5",
+                "path": "cdk.out/*.template.json",
+                "reason": "test",
+                "scope": {"resource_id": "Stack/CollectorTaskRole/*"},
+            }
+        )
+        assert entry.matches(_finding())
 
 
 class TestBlockValidation:
