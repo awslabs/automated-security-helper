@@ -847,10 +847,13 @@ def test_scoped_entries_change_no_rendered_output_shape(tmp_path):
     bag = applied.properties
     assert bag is not None
     assert getattr(bag, "ashApplied", None) is True, bag
+    # Shape-unchanged relative to MAIN (ffl93's WORD on the R14 composition):
+    # a scoped entry adds only its scope keys (scope_resource_id,
+    # scope_engines) BESIDE the marker bag an unscoped entry also carries, so
+    # the unscoped bag is exactly MAIN's: the marker and the model's tags
+    # default, nothing scope-shaped. Never a revert to properties is None.
     bag_dump = bag.model_dump(exclude_none=True)
-    assert "scope_resource_id" not in bag_dump, bag_dump
-    assert "scope_engines" not in bag_dump, bag_dump
-    assert "scope" not in bag_dump, bag_dump
+    assert set(bag_dump) == {"tags", "ashApplied"}, bag_dump
 
     # The unused report: all three entries render with ONE key set.
     rendered = UnusedSuppressionsReporter(context=context).report(
