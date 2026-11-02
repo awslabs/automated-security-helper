@@ -387,6 +387,9 @@ def _expiring_within(
 
 
 #: The fields of a suppression that the reports and warnings quoting it show.
+#: Flat fields only: resource_id is the entry-level sugar, whose written form
+#: covers the folded scope.resource_id too; the nested scope model itself is
+#: not shown (the environment record works over these flat values).
 SHOWN_SUPPRESSION_FIELDS = (
     "path",
     "rule_id",
@@ -396,6 +399,7 @@ SHOWN_SUPPRESSION_FIELDS = (
     "expiration",
     *PACKAGE_SUPPRESSION_FIELDS,
     "symbol",
+    "resource_id",
 )
 
 

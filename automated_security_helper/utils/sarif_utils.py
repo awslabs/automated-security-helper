@@ -708,10 +708,25 @@ def _apply_config_suppression(
         applied_properties["clientSupplied"] = True
     applied_scope = getattr(matching_suppression, "scope", None)
     if applied_scope is not None:
-        if applied_scope.resource_id is not None:
-            applied_properties["scope_resource_id"] = applied_scope.resource_id
-        if applied_scope.resource_type is not None:
-            applied_properties["scope_resource_type"] = applied_scope.resource_type
+        # Recorded by the WRITTEN form, as the reason is. The entry-level
+        # sugar is a shown field (recorded_suppressions), so an entry whose
+        # resource_id the config read from the environment records the
+        # reference as the file wrote it, never the resolved value. A scope
+        # written in the canonical spelling alone has no written record, so
+        # its value keys are LEFT OUT (fail safe); the engine names, which are
+        # structural keys of the config file, are kept either way.
+        sugar_resource_id = getattr(matching_suppression, "resource_id", None)
+        if sugar_resource_id is not None:
+            written_resource_id = (
+                (recorded_fields or {})
+                .get(id(matching_suppression), {})
+                .get("resource_id")
+            )
+            applied_properties["scope_resource_id"] = (
+                written_resource_id
+                if isinstance(written_resource_id, str)
+                else sugar_resource_id
+            )
         if applied_scope.engines:
             applied_properties["scope_engines"] = sorted(applied_scope.engines)
     result.suppressions.append(
