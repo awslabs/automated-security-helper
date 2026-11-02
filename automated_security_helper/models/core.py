@@ -1077,8 +1077,12 @@ class AshSuppression(IgnorePathWithReason):
                 # The scope was validated before the fold wrote into it, so
                 # its own validator never sees the empty value: record the
                 # note it would have recorded. selects_nothing keeps the
-                # entry inert at match time.
-                tolerated_notes(info).append(EMPTY_SCOPE_NOTE)
+                # entry inert at match time. The empty check above raised
+                # unless the tolerance is present, so the list is never None
+                # on a reachable path; the narrowing satisfies the checker.
+                notes = tolerated_notes(info)
+                if notes is not None:
+                    notes.append(EMPTY_SCOPE_NOTE)
             self.scope.resource_id = self.resource_id
         elif self.scope.resource_id != self.resource_id:
             notes = tolerated_notes(info)
