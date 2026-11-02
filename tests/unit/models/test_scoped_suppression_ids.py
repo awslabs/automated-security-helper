@@ -98,3 +98,17 @@ class TestScopedIds:
             "scope": {"resource_id": 123, "engines": {1: {}, "cdk-nag": {}}},
         }
         assert suppression_id(raw).endswith("|scope=123@*@1,cdk-nag")
+
+    def test_non_string_flat_raw_values_are_coerced_not_a_traceback(self):
+        """An unquoted ``package_version: 1.2`` is a float in raw YAML (the
+        common spelling for versions), and path or rule_id can be bare
+        numbers; every flat piece is coerced as the scope part already is,
+        so the linter gets an id (and so a lint finding), never a TypeError."""
+        raw = {
+            "rule_id": 1234,
+            "path": 2024,
+            "reason": "r",
+            "package_name": "requests",
+            "package_version": 1.2,
+        }
+        assert suppression_id(raw) == "2024|1234|*|*|requests@1.2@*"

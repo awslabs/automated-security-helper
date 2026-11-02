@@ -661,16 +661,26 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
     line_start = suppression.get("line_start")
     line_end = suppression.get("line_end")
     line_end_val = line_end if line_end is not None else line_start
+    # str() on every raw piece, as in _scope_id_part: the linter hands this
+    # raw YAML, where an unquoted package_version: 1.2 is a float (the common
+    # spelling for versions) and a path or rule_id can be a bare number;
+    # without the coercion "|".join or "@".join raises a TypeError where the
+    # lint should report a finding.
+    path = suppression.get("path")
+    rule_id = suppression.get("rule_id")
     parts = [
-        suppression.get("path") or "",
-        suppression.get("rule_id") or "*",
+        str(path) if path else "",
+        str(rule_id) if rule_id else "*",
         str(line_start) if line_start is not None else "*",
         str(line_end_val) if line_end_val is not None else "*",
     ]
     symbol = suppression.get("symbol")
     if symbol or any(suppression.get(f) for f in PACKAGE_SUPPRESSION_FIELDS):
         parts.append(
-            "@".join(suppression.get(f) or "*" for f in PACKAGE_SUPPRESSION_FIELDS)
+            "@".join(
+                str(value) if value else "*"
+                for value in (suppression.get(f) for f in PACKAGE_SUPPRESSION_FIELDS)
+            )
         )
     # A symbol is a sixth part, and its presence always brings the fifth, so a
     # symbol can never be read as a package. With the scope part below, a part
@@ -680,7 +690,7 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
     # part, never split by position. No consumer in this repository parses an
     # id by position; the linter and the reports compare ids whole.
     if symbol:
-        parts.append(symbol)
+        parts.append(str(symbol))
     # A scoped entry gets a last part so two entries that differ only by scope
     # (the demo shape: one rule, one path, 26 resource_ids) do not share an id,
     # which collapsed them in the unused-suppressions report and the linter.
