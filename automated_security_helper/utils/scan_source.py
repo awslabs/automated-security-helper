@@ -847,13 +847,24 @@ def _registered_worktree(root: Path, common: Path) -> bool:
     recorded = _read_gitdir_record(git_dir / "gitdir")
     if recorded is None:
         return False
-    # git ends the line with a newline. Reading it back, it trims any run of
-    # carriage returns and newlines at the end, and no other whitespace (measured
-    # with git 2.50), so this trims the same: what is left is the path git lists.
-    recorded = recorded.rstrip("\r\n")
-    if not recorded:
+    # git ends the line with a newline. Reading it back (worktree.c, git 2.50),
+    # it trims the line twice: the path it lists is the record with any trailing
+    # run of git's whitespace dropped (strbuf_rtrim in get_linked_worktree;
+    # git's own isspace is _GIT_SPACE, so a vertical tab or form feed stays),
+    # while the worktree is prunable -- registered nowhere -- unless the record
+    # trimmed of carriage returns and newlines only (should_prune_worktree)
+    # still names an entry. Without probing the filesystem, a residue of other
+    # whitespace between the two trims decides that the way the platform names
+    # files: no POSIX entry made by git carries it, and Windows drops trailing
+    # spaces of a final component but admits no other whitespace in a name, so
+    # only an all-space residue there still names the worktree's .git.
+    listed = recorded.rstrip(_GIT_SPACE)
+    if not listed:
         return False
-    named = os.path.normpath(os.path.join(git_dir, recorded))
+    residue = recorded.rstrip("\r\n")[len(listed) :]
+    if residue and (os.name != "nt" or residue.strip(" ")):
+        return False
+    named = os.path.normpath(os.path.join(git_dir, listed))
     # Compared as the platform compares paths (``os.path.normcase``: without
     # regard to case on Windows), as ``_WorktreeCheck.of`` compares the listed
     # worktree paths; a text comparison refused a record spelled in another case
