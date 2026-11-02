@@ -38,7 +38,7 @@ import sys
 import types
 import zipfile
 import zlib
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
@@ -576,6 +576,47 @@ def _wheel_record(prepared) -> dict:
         "url": uri,
         "archive_info": {"hashes": {"sha256": prepared.under_test.wheel_sha256}},
     }
+
+
+HOST_WHEEL_NAME = "automated_security_helper-3.7.0-py3-none-any.whl"
+#: The wheel as a host holds it, for each kind of path a host has, with the file URI
+#: that path has. The runners that install on the host are given that URI
+#: (rewrite.install_spec), so it is what the record they print is checked against.
+HOST_WHEELS = {
+    "a POSIX host": (
+        PurePosixPath("/home/runner/work/dist") / HOST_WHEEL_NAME,
+        f"file:///home/runner/work/dist/{HOST_WHEEL_NAME}",
+    ),
+    "a Windows host": (
+        PureWindowsPath("C:/Users/runner/work/dist") / HOST_WHEEL_NAME,
+        f"file:///C:/Users/runner/work/dist/{HOST_WHEEL_NAME}",
+    ),
+}
+#: The runners that run their jobs in containers, with the wheel's directory mounted.
+MOUNTED_WHEEL_RUNNERS = ("gitlab-ci-local", "circleci")
+
+
+@pytest.mark.parametrize("host", sorted(HOST_WHEELS))
+@pytest.mark.parametrize("runner", RUNNERS)
+def test_the_wheel_is_seen_at_the_path_its_runner_installs_it_from(
+    tmp_path, runner, host
+):
+    """act and Jenkinsfile Runner install from the host's own path, so the wheel is
+    seen at that path whatever kind it is; a Windows drive path read as a POSIX path
+    is not absolute and has no file URI. The runners that mount the wheel's directory
+    see it at the mount, a POSIX path inside the container, on any host."""
+    pipelines = _module("pipelines")
+    wheel, host_uri = HOST_WHEELS[host]
+    under_test = pipelines.UnderTest(
+        wheel=wheel, wheel_sha256="a" * 64, head_sha=HEAD, repository=REPOSITORY
+    )
+    seen = pipelines._wheel_seen_as(_prepared(tmp_path, runner, under_test=under_test))
+    expected = (
+        f"file:///ash-wheel/{HOST_WHEEL_NAME}"
+        if runner in MOUNTED_WHEEL_RUNNERS
+        else host_uri
+    )
+    assert _api("provenance", "file_uri")(seen) == expected
 
 
 CALLER = """\

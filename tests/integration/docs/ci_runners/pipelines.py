@@ -59,7 +59,7 @@ import re
 import shutil
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Any
 
 import yaml
@@ -995,11 +995,18 @@ def _launch_circleci(prepared: Prepared, session: Session) -> Launched:
 # ---------------------------------------------------------------------------
 
 
-def _wheel_seen_as(prepared: Prepared) -> PurePosixPath:
-    """The wheel's path as the installer in the pipeline sees it."""
+def _wheel_seen_as(prepared: Prepared) -> PurePath:
+    """The wheel's path as the installer in the pipeline sees it.
+
+    A runner that mounts the wheel's directory shows the installer a POSIX path inside
+    its container. Every other runner installs from the host's own path, the one the
+    rewrite put in the install URL (rewrite.install_spec), so it is returned as the
+    path of the host's kind it is: ``as_posix()`` of a Windows drive path is not an
+    absolute POSIX path, and a path that is not absolute has no file URI.
+    """
     if prepared.run.runner in ("gitlab-ci-local", "circleci"):
         return WHEEL_MOUNT / prepared.under_test.wheel.name
-    return PurePosixPath(prepared.under_test.wheel.as_posix())
+    return prepared.under_test.wheel
 
 
 def wheel_hash_problems(prepared: Prepared) -> list[str]:
