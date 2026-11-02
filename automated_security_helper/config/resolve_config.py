@@ -698,6 +698,10 @@ def _validated_with_overrides(
                     retyped = True
         if not retyped:
             raise
+        # The failed attempt's unknown-key warnings would double-count after
+        # the retry re-walks the same entries.
+        if context and isinstance(context.get(WARN_UNKNOWN_KEYS), list):
+            context[WARN_UNKNOWN_KEYS].clear()
         return AshConfig.model_validate(config_dict, context=context)
 
 
