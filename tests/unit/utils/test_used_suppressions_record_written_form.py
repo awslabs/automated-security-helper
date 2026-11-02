@@ -793,7 +793,9 @@ def test_scoped_entries_change_no_rendered_output_shape(tmp_path):
     unscoped entry's key set (no "scope" key, no injected resource_id or
     resource_type, so an engines-only scope adds no None values either), and
     the SARIF justification for a match in the same config keeps its exact
-    wording with no properties bag. Pins the consumer audit: every record
+    wording, carrying only the ashApplied marker bag every ASH suppression
+    gets (ash_applied_properties) with no scope-provenance keys for an
+    unscoped entry. Pins the consumer audit: every record
     consumer reads named flat keys (the reporter's _suppression_to_dict, the
     expiration checker's _shown), never the record's items."""
     import json
@@ -832,7 +834,8 @@ def test_scoped_entries_change_no_rendered_output_shape(tmp_path):
     context = _context(tmp_path, loaded)
 
     # The SARIF side: a match in this config renders exactly the unscoped
-    # wording, with no properties bag.
+    # wording, with main's ashApplied marker bag (ash_applied_properties) and
+    # no scope-provenance key for an unscoped entry.
     out = apply_suppressions_to_sarif(
         _sarif_with_finding("u/app.py"), context, used_suppressions=set()
     )
@@ -841,7 +844,13 @@ def test_scoped_entries_change_no_rendered_output_shape(tmp_path):
         "(ASH) Suppressing finding for rule 'SECRET-AWS-ACCESS-KEY' in "
         "'u/app.py' with reason: unscoped entry"
     )
-    assert applied.properties is None
+    bag = applied.properties
+    assert bag is not None
+    assert getattr(bag, "ashApplied", None) is True, bag
+    bag_dump = bag.model_dump(exclude_none=True)
+    assert "scope_resource_id" not in bag_dump, bag_dump
+    assert "scope_engines" not in bag_dump, bag_dump
+    assert "scope" not in bag_dump, bag_dump
 
     # The unused report: all three entries render with ONE key set.
     rendered = UnusedSuppressionsReporter(context=context).report(
