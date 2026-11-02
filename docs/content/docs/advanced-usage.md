@@ -195,8 +195,8 @@ ASH does not install scanners during a scan when:
 
 Every uv subcommand but `uv tool` reads a `uv.toml`, or the `[tool.uv]` table of a
 `pyproject.toml`, from the working directory and its parents, and ASH's working
-directory is usually the repository you scan. So ASH runs `uv pip install` with uv's
-`--no-config` option, and an install command that a plugin declares gets
+directory is usually the repository you scan. So ASH runs
+`uv pip install --no-config`, and an install command that a plugin declares gets
 `UV_NO_CONFIG=1` when it runs a uv subcommand other than `uv tool`. Those commands then
 read no `uv.toml`, neither the repository's nor your own nor the system one.
 `uv cache dir`, which names the cache the `uv tool` commands use, runs from the
