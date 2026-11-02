@@ -696,7 +696,8 @@ def test_an_unavailable_named_sandbox_is_an_error_and_never_runs_the_scanner(
     unavailable = "bwrap" if sys.platform == "darwin" else "sandbox-exec"
     outcomes, _, result = _scan(tmp_path, listeners, unavailable)
     # Whitespace collapsed: the console wraps long log lines at the terminal width.
-    output = " ".join((result.stdout + result.stderr).split())
+    # None-safe: on Windows result.stdout can be None here.
+    output = " ".join(((result.stdout or "") + (result.stderr or "")).split())
     assert outcomes is None, f"the scanner ran under an unavailable sandbox: {outcomes}"
     assert result.returncode == 1, output[-4000:]
     assert "sandbox-escape: ERROR" in output, output[-4000:]
