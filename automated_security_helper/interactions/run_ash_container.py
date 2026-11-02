@@ -48,8 +48,11 @@ from packaging.version import InvalidVersion, Version
 from automated_security_helper.core.constants import (
     ASH_ASSETS_DIR,
     ASH_REPO_LATEST_REVISION,
+    expand_home,
+    is_anchored,
     is_readable_environment_name,
     is_secret_shaped_environment_name,
+    warn_relative_value_once,
 )
 from automated_security_helper.core.enums import (
     AshLogLevel,
@@ -1059,12 +1062,65 @@ def _resolve_oci_runner(oci_runner: str | None, quiet: bool = False) -> str:
     raise RuntimeError("Unable to resolve an OCI runner")
 
 
+def _is_relative_path(value: str) -> bool:
+    """Whether ``value`` is a path with a directory part that names no place by itself.
+
+    Such a path is read against the working directory, which for a scan is usually
+    the repository being scanned. A bare name (``docker``) is a command looked up
+    on ``PATH``, not a path, and an anchored path (``/opt/bin/docker``, or one with a
+    drive or share on Windows) names its place. Read as written: a ``$`` is not
+    expanded, so ``$HOME/bin/docker`` is a relative path.
+    """
+    return bool(os.path.dirname(value)) and not is_anchored(value)
+
+
+def oci_runner_for_this_run(value: str | None, from_environment: bool) -> str | None:
+    """The OCI runner for this run, from the option's ``value`` and where it came from.
+
+    A leading ``~`` or ``~user`` is expanded; ``~`` and ``~/...`` need a usable home
+    directory, and without one the value is not used (None, after the warning about
+    ``HOME``), so a runner is found as if none were named. A command name or an
+    absolute path is used as given.
+
+    A relative path with a directory part is read against the working directory when
+    it was typed (the option, or the ``oci_runner`` of a ``--cli-json-input``
+    document, which the CLI reads as typed). Taken from ``OCI_RUNNER``
+    (``from_environment``) it names a file under whatever directory ASH runs from,
+    usually the repository being scanned, so it is not run: a warning names it and
+    None is returned.
+    """
+    if not value:
+        return value
+    expanded = expand_home(value)
+    if expanded is None:
+        return None
+    if not _is_relative_path(expanded):
+        return expanded
+    if from_environment:
+        warn_relative_value_once(
+            "OCI_RUNNER",
+            value,
+            f"OCI_RUNNER is the relative path {value!r}, which names a file under "
+            "the working directory (usually the repository being scanned), so ASH "
+            "does not run it and finds a runner as if none were named. Set "
+            "OCI_RUNNER to a command name or an absolute path.",
+        )
+        return None
+    return os.path.abspath(expanded)
+
+
 def _get_oci_wrapper_prefix() -> List[str]:
     """Return the OCI_RUNNER_WRAPPER as a list suitable for command prefix.
 
     Split on space, tab and newline only, as ./ash's prefix line splits it (bash's
     IFS): any other character, a vertical tab or a carriage return included, is part
     of a word there, so it is here too, and a wrapper of only those three is none.
+
+    A leading ``~`` or ``~user`` of the first word is expanded. The runtime starts
+    without a wrapper when that word needs a home directory that is unusable (the
+    warning about ``HOME``), or is a relative path with a directory part: it names a
+    file under the working directory, usually the repository being scanned, and a
+    warning says so. A command name or an absolute path is used as given.
     """
     oci_wrapper = os.environ.get("OCI_RUNNER_WRAPPER", "").strip(" \t\n")
     if not oci_wrapper:
@@ -1074,7 +1130,22 @@ def _get_oci_wrapper_prefix() -> List[str]:
     # lost its separators), read quotes as grouping (a quoted word differed from
     # ./ash's) and raised ValueError on an unbalanced quote, which escaped
     # run_ash_container after the previous run's output had been cleared.
-    return [word for word in re.split(r"[ \t\n]+", oci_wrapper) if word]
+    words = [word for word in re.split(r"[ \t\n]+", oci_wrapper) if word]
+    first = expand_home(words[0])
+    if first is None:
+        return []
+    if _is_relative_path(first):
+        warn_relative_value_once(
+            "OCI_RUNNER_WRAPPER",
+            words[0],
+            f"OCI_RUNNER_WRAPPER starts with the relative path {words[0]!r}, which "
+            "names a file under the working directory (usually the repository being "
+            "scanned), so ASH does not run it and runs the OCI runner without a "
+            "wrapper. Start OCI_RUNNER_WRAPPER with a command name or an absolute "
+            "path.",
+        )
+        return []
+    return [first, *words[1:]]
 
 
 def sweep_leftovers_before_run(oci_runner: str | None) -> List[str]:

@@ -3298,6 +3298,20 @@
   is looked up on `PATH` as before. `./ash` (`OCI_RUNNER`) and `ash --mode container`
   (`--oci-runner`) already ran the path they were given, and now have tests that
   pin it.
+- **A relative `OCI_RUNNER` or `OCI_RUNNER_WRAPPER` is no longer run, and a leading
+  `~` is expanded.** A runner or wrapper path with a directory part, such as
+  `bin/docker`, was read against the working directory, usually the repository being
+  scanned, so a repository that committed `bin/docker` had that file run as the
+  container runtime, or in front of it as the wrapper. From `OCI_RUNNER` a relative
+  path is now not run: ASH logs a warning that names it and picks a runtime as if none
+  were named. As the first word of `OCI_RUNNER_WRAPPER` it is not used either, and the
+  runtime starts without a wrapper, with a warning. Given to `--oci-runner`, or as the
+  `oci_runner` of a `--cli-json-input` document, a relative path is read against the
+  directory you run ASH in, as you typed it. A leading `~` or `~user` is expanded,
+  and in `OCI_RUNNER_WRAPPER` that applies to the first word; a `$` is not. With no
+  usable home directory a value that starts with `~/` is not used, with a warning
+  about `HOME`: the runtime is picked as if none were named, or starts without the
+  wrapper. A command name and an absolute path are used as given.
 - **A container workspace scan limits a `--config` the repository could have written.**
   A one-directory container scan marks a config from outside `--source-dir` that the
   scanned tree holds, or that a link there leads to (`--config-from-scanned-repository`),

@@ -19,6 +19,9 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_TERMINATED,
 )
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
+from automated_security_helper.interactions.run_ash_container import (
+    oci_runner_for_this_run,
+)
 from automated_security_helper.interactions.run_ash_scan import (
     resolved_console_log_level,
     run_ash_scan,
@@ -186,6 +189,15 @@ def build_ash_image_cli_command(
             quiet=quiet,
             simple=False,
         ).value
+    )
+
+    # A relative path is read against the working directory where it was typed, and
+    # not run when it came from OCI_RUNNER (oci_runner_for_this_run). After the gate
+    # above, so that its warning is shown at the verbosity the flags ask for.
+    oci_runner = oci_runner_for_this_run(
+        oci_runner,
+        from_environment=getattr(ctx.get_parameter_source("oci_runner"), "name", None)
+        == "ENVIRONMENT",
     )
 
     # Call run_ash_scan with all parameters, inside a scope the entry point's

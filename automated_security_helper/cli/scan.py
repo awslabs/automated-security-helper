@@ -48,6 +48,9 @@ from automated_security_helper.core.exceptions import (
     WorkspacePathNotUtf8Error,
 )
 from automated_security_helper.core.sharding import validate_shard_selection
+from automated_security_helper.interactions.run_ash_container import (
+    oci_runner_for_this_run,
+)
 from automated_security_helper.interactions.run_ash_scan import (
     PRECOMMIT_MODE_SCANNERS,
     resolve_workspace_execution_config,
@@ -1739,7 +1742,12 @@ def run_ash_scan_cli_command(
                 build=build,
                 run=run,
                 force=force,
-                oci_runner=oci_runner,
+                # A relative path is read against the working directory where it
+                # was typed (the option, or a --cli-json-input document), and not
+                # run when it came from OCI_RUNNER: oci_runner_for_this_run.
+                oci_runner=oci_runner_for_this_run(
+                    oci_runner, from_environment=_from_environment(ctx, "oci_runner")
+                ),
                 build_target=build_target,
                 offline_semgrep_rulesets=offline_semgrep_rulesets,
                 container_uid=container_uid,
