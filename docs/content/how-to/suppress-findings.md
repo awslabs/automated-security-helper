@@ -37,7 +37,7 @@ global_settings:
 - A file whose name is not valid UTF-8 is reported with each such byte written as `\udcNN` (a latin-1 `secr\xe9t.py` as `secr\udce9t.py`). A `path` matches it written that way, since the `\` of a `\udcNN` escape is part of the name and not a separator, or with `?` for that `\` (`secr?udce9t.py`), or by a glob such as `secr*t.py`. An ignore path matches such a file the same way when ASH lists the files to scan. A UTF-8 file name that spells the same `\udcNN` text reads as the same name, so in a tree that holds both files, both are reported under that name, and a path that matches one matches both.
 - `rule_id` is a case-insensitive pattern with no scanner prefix. It matches any scanner that reports that rule ID.
 - Quote the `expiration` date. YAML reads an unquoted `2027-01-31` as a date, not a string, and ASH then refuses the whole config (exit 3). `ash config lint` and `ash config get` name the problem.
-- A key that is not in the table makes the config invalid (exit 3), and when a known key is close, the error names it: `ruleId` fails with `Unknown key 'ruleId' (did you mean 'rule_id'?)`. The same holds for an ignore path.
+- A key that is not in the table warns at config load, and when a known key is close, the warning names it: `ruleId` warns with `Unknown key 'ruleId' (did you mean 'rule_id'?)`, and the entry suppresses nothing until the key is fixed, so a typo can only narrow what is suppressed. Set `fail_on_unknown_keys: true` to make it an error (exit 3) instead; ASH v4 makes that the default. The same holds for an ignore path.
 
 To try a suppression before you write it into the file, pass it for one run. In a repository where detect-secrets reports `SECRET-SECRET-KEYWORD` in `app.py`, this run passes:
 
@@ -46,9 +46,9 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 
-With `rule_id` misspelled, the same run is refused instead of suppressing every rule in `app.py`:
+With `rule_id` misspelled, the entry suppresses nothing instead of suppressing every rule in `app.py`: the run warns, naming the key, and fails on the finding the entry was meant to suppress (exit 2). Set `fail_on_unknown_keys: true` to refuse the config outright (exit 3); ASH v4 makes that the default.
 
-<!-- doctest: run expect-exit=3 -->
+<!-- doctest: run expect-exit=2 -->
 ```bash
 ash --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "ruleId": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
