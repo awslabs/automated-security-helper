@@ -576,6 +576,37 @@ def scope_value_matches(value: str, pattern: str, *, case_sensitive: bool) -> bo
     return fnmatch.fnmatchcase(value, pattern.replace("[", "[[]"))
 
 
+def _scope_id_part(suppression: Dict[str, Any]) -> Optional[str]:
+    """The canonical scope part of a suppression's id, or None without a scope.
+
+    Reads the raw dict shapes the id is built from: a model dump (sugar folded,
+    ``scope`` a nested dict) and the linter's raw YAML (possibly sugar only).
+    The top-level ``resource_id`` is preferred over ``scope.resource_id``: the
+    fold keeps them equal, the linter's raw dict may hold only the top-level
+    one, and a written-form copy (``written_suppression_id``) rewrites the
+    top-level field to the reference the file wrote, which the id must carry
+    rather than the resolved value. Engine blocks contribute their NAMES only:
+    two entries that differ only inside one engine's block share an id, a
+    known limit.
+    """
+    scope = suppression.get("scope")
+    if not isinstance(scope, dict):
+        scope = {}
+    resource_id = suppression.get("resource_id") or scope.get("resource_id")
+    resource_type = scope.get("resource_type")
+    engines = scope.get("engines")
+    engine_names = sorted(engines) if isinstance(engines, dict) and engines else []
+    if not (resource_id or resource_type or engine_names):
+        return None
+    return "scope=" + "@".join(
+        [
+            resource_id or "*",
+            resource_type or "*",
+            ",".join(engine_names) or "*",
+        ]
+    )
+
+
 def suppression_id(suppression: Dict[str, Any]) -> str:
     """Identifier for a suppression given as a dict of its fields.
 
@@ -601,6 +632,15 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
     # read as a package.
     if symbol:
         parts.append(symbol)
+    # A scoped entry gets a last part so two entries that differ only by scope
+    # (the demo shape: one rule, one path, 26 resource_ids) do not share an id,
+    # which collapsed them in the unused-suppressions report and the linter.
+    # The part starts "scope=", which no symbol can ('=' is not a dotted name
+    # character) and no package part position can reach, so part counts stay
+    # readable. Entries without a scope keep the id they always had.
+    scope_part = _scope_id_part(suppression)
+    if scope_part is not None:
+        parts.append(scope_part)
     return "|".join(parts)
 
 
