@@ -276,12 +276,11 @@ ash report --no-color
 ...
 ### Finding 1: B324
 
-- **Severity**: HIGH
-- **Scanner**: bandit
-- **Rule ID**: B324
-- **Location**: app.py:7
+- Severity: HIGH
+- Scanner: bandit
+- Rule ID: B324
+- Location: app.py:7
 
-**Description**:
 Use of weak MD5 hash for security. Consider usedforsecurity=False
 ...
 ```

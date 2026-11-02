@@ -41,10 +41,10 @@ prints a version number.
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+uv tool install --python 3.12 'automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.1'
 ```
 
-This installs ASH `v3.7.0` from GitHub, with the `cdk` extra that the
+This installs ASH `v3.7.1` from GitHub, with the `cdk` extra that the
 cdk-nag scanner needs, into its own environment. `--python 3.12` keeps uv from
 choosing a Python newer than ASH's dependencies support; uv downloads 3.12 if you do
 not have it. ASH is not published on PyPI: the PyPI project named
@@ -60,7 +60,7 @@ ash --version
 
 <!-- doctest: output -->
 ```text
-awslabs/automated-security-helper v3.7.0
+awslabs/automated-security-helper v3.7.1
 ```
 
 ## 3. Install the scanner tools
@@ -276,12 +276,11 @@ ash report --no-color
 ...
 ### Finding 1: B324
 
-- **Severity**: HIGH
-- **Scanner**: bandit
-- **Rule ID**: B324
-- **Location**: app.py:7
+- Severity: HIGH
+- Scanner: bandit
+- Rule ID: B324
+- Location: app.py:7
 
-**Description**:
 Use of weak MD5 hash for security. Consider usedforsecurity=False
 ...
 ```

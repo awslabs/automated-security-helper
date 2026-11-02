@@ -43,9 +43,10 @@ net, not a security boundary, and the distinction matters: it declines the
 handful of directories that hold host configuration and kernel interfaces rather
 than source code, and it says nothing whatever about the rest of the filesystem.
 Home directories, ``/usr``, ``/var`` and everything else stay accepted, because
-that is where code lives. An operator who wants the scan surface actually bounded
-sets ``ASH_MCP_ALLOWED_ROOTS``; on a network transport the sandbox bounds it
-without one.
+that is where code lives, except an ancestor of the session workspace root,
+whether or not that root is on disk yet. An operator who wants the scan surface
+actually bounded sets ``ASH_MCP_ALLOWED_ROOTS``; on a network transport the
+sandbox bounds it without one.
 
 Setting the variable replaces the default list rather than adding to it, which
 is also how a deliberate scan of a system directory is arranged: name it as a
@@ -87,6 +88,7 @@ from automated_security_helper.core.resource_management.exceptions import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.path_containment import (
+    PathContainmentViolation,
     validate_contained_path,
 )
 
@@ -337,13 +339,18 @@ def resolve_scan_target(
 
     # The permit/refuse decision is the sandbox's (#665); this function adds only
     # the canonical path, so a caller building paths under the target builds them
-    # from what was authorised rather than from the caller's text. The sandbox
-    # resolves with the same Path.resolve() call, so both name the same target.
-    resolved = Path(directory_path).resolve()
-    error = validate_scan_target_in_sandbox(directory_path, session_id=session_id)
+    # from what was authorised rather than from the caller's text. The path
+    # returned is the one the sandbox judged, taken from the sandbox itself: a
+    # second Path.resolve() of the caller's text here could lead elsewhere than
+    # the first by the time it ran (a link re-pointed between the two), and the
+    # scan would then write under a target no gate permitted.
+    judged: List[Path] = []
+    error = validate_scan_target_in_sandbox(
+        directory_path, session_id=session_id, resolved_out=judged
+    )
     if error is not None:
         return ScanTargetResolution(error=error)
-    return ScanTargetResolution(resolved=resolved)
+    return ScanTargetResolution(resolved=judged[0])
 
 
 def validate_scan_target(
@@ -399,6 +406,22 @@ def validate_output_tree(
 
     relative = Path(".")
     for part in relative_parts:
+        if "/" in part or "\\" in part:
+            # Each part is one component. The containment check reads a
+            # backslash as a separator on every platform, so a part holding
+            # one was checked as a nested path while the directory later made
+            # from it on POSIX is one flat name holding the backslash: the
+            # path checked was not the path created.
+            return MCPResourceError(
+                "Scan output directory is not inside the scan target: "
+                f"component {part!r} contains a path separator",
+                context={
+                    "scan_target": str(resolved_target),
+                    "output_component": str(relative / part),
+                    "violation": PathContainmentViolation.PARENT_TRAVERSAL.value,
+                    "error_category": ErrorCategory.INVALID_PATH.value,
+                },
+            )
         relative = relative / part
         result = validate_contained_path(relative, resolved_target)
         if result.error is None:

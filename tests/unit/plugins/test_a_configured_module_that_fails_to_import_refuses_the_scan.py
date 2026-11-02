@@ -127,6 +127,8 @@ def _ash(packages: Path, args, cwd: Path):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
         env=env,
         cwd=cwd,

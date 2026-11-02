@@ -3,7 +3,7 @@ version: 0.2
 env:
   variables:
     # The ASH release to install. `cz bump` moves this to each new release.
-    RELEASE_TAG: v3.7.0
+    RELEASE_TAG: v3.7.1
     ASH_MODE: container
     ASH_REPO_CLONE_URL: https://github.com/awslabs/automated-security-helper.git
     COLUMNS: '140'

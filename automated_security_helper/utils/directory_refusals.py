@@ -46,9 +46,45 @@ import errno
 import os
 import secrets
 import stat
-from typing import Optional, Union
+from typing import Any, Optional, Union
+
+from typing_extensions import Self
 
 PathLike = Union[str, "os.PathLike[str]"]
+
+#: What a :class:`DirectoryRefusal` says went wrong with an output directory.
+REFUSED_NOT_A_DIRECTORY = "not_a_directory"
+REFUSED_CANNOT_BE_ENTERED = "cannot_be_entered"
+REFUSED_CANNOT_BE_CREATED = "cannot_be_created"
+REFUSED_CANNOT_BE_WRITTEN = "cannot_be_written"
+
+
+class DirectoryRefusal(str):
+    """The text of an output directory's refusal, which also says why.
+
+    A ``str`` equal to the one-line message every surface shows, so each caller
+    that prints, compares or joins it is unchanged. ``kind`` is one of the
+    ``REFUSED_*`` words and ``error_number`` the errno of the system error behind
+    it, or None when none was involved. A caller that must tell a full disk from
+    a missing permission reads these; before them it could only look at the path
+    again and guess, and ``ENOSPC`` on a directory that exists read as a refused
+    permission.
+    """
+
+    __slots__ = ("kind", "error_number")
+
+    kind: str
+    error_number: Optional[int]
+
+    def __new__(cls, text: str, kind: str, error_number: Optional[int] = None) -> Self:
+        refusal = super().__new__(cls, text)
+        refusal.kind = kind
+        refusal.error_number = error_number
+        return refusal
+
+    def __getnewargs__(self) -> tuple[Any, ...]:
+        # So a copy or a pickle of the refusal rebuilds it with its reason.
+        return (str(self), self.kind, self.error_number)
 
 
 def source_dir_refusal(source_dir: PathLike) -> Optional[str]:
@@ -57,6 +93,9 @@ def source_dir_refusal(source_dir: PathLike) -> Optional[str]:
     try:
         mode = os.stat(path).st_mode
     except (FileNotFoundError, NotADirectoryError):
+        return f"Source directory does not exist: {path}"
+    except ValueError:
+        # A path the OS cannot take at all (an embedded NUL) names nothing.
         return f"Source directory does not exist: {path}"
     except OSError as error:
         # A link that leads back to itself names nothing, as a link to nothing does.
@@ -82,38 +121,93 @@ def output_dir_refusal(output_dir: PathLike) -> Optional[str]:
     way that cannot be searched (``Permission denied``). One that is simply not
     there is not checked further: whether it can be made is known only by making
     it, so the caller that makes it refuses it with :func:`output_dir_unmakeable`.
+    An empty path is refused as mkdir refuses it (``No such file or directory``):
+    stat answers the same, and nothing was about to make it, while the run that
+    took it would have written into the current directory. A path the OS cannot
+    take (an embedded NUL) is refused with the reason Python gives.
     """
     path = os.fspath(output_dir)
     try:
         mode = os.stat(path).st_mode
-    except FileNotFoundError:
-        return _link_to_nothing_on_the_way(path)
+    except FileNotFoundError as error:
+        if not path:
+            return output_dir_unmakeable(
+                path, error.strerror or "No such file", error.errno
+            )
+        return _obstacle_on_the_way(path)
+    except ValueError as error:
+        return output_dir_unmakeable(path, str(error) or type(error).__name__)
     except OSError as error:
-        return output_dir_unmakeable(path, error.strerror or type(error).__name__)
+        return output_dir_unmakeable(
+            path, error.strerror or type(error).__name__, error.errno
+        )
     if not stat.S_ISDIR(mode):
-        return f"Output directory is not a directory: {path}"
+        return DirectoryRefusal(
+            f"Output directory is not a directory: {path}", REFUSED_NOT_A_DIRECTORY
+        )
     if not os.access(path, os.X_OK):
-        return f"Output directory cannot be entered: {path}"
-    reason = _write_refused(path)
-    if reason is not None:
-        return output_dir_unwritable(path, reason)
+        return DirectoryRefusal(
+            f"Output directory cannot be entered: {path}",
+            REFUSED_CANNOT_BE_ENTERED,
+            errno.EACCES,
+        )
+    failed = _write_refused(path)
+    if failed is not None:
+        return output_dir_unwritable(
+            path, failed.strerror or type(failed).__name__, failed.errno
+        )
     return None
 
 
-def _link_to_nothing_on_the_way(path: str) -> Optional[str]:
-    """The refusal of *path*, which is not there, when making it would fail on a link
-    to nothing: the path itself, or the nearest part of it that is there. mkdir
-    cannot make a directory where a link is, and fails with EEXIST, as mkdir -p
-    does in ./ash. None when there is no such link."""
-    current = os.path.abspath(path)
+def _obstacle_on_the_way(path: str) -> Optional[str]:
+    """The refusal of *path*, which is not there, when making it would fail on what
+    is already on the way to it: the nearest part of it that is there. None when
+    that is a directory, so the path can be made.
+
+    - A link to nothing, a Windows junction to a removed directory included:
+      mkdir cannot make a directory where a link is, and fails with EEXIST, as
+      mkdir -p does in ./ash.
+    - Something that is not a directory, such as a file: ``Not a directory``
+      (ENOTDIR). POSIX stat says this itself for ``<file>/x``, before this runs.
+      Windows stat only says that ``<file>\\x`` is not found, and mkdir then
+      fails with "Cannot create a file when that file already exists", for a
+      scan that was already registered. Walking up to the first part that is
+      there gives every platform the same reason, and the same stage, which is
+      before anything is registered.
+
+    The path is walked as written, made absolute with the working directory and
+    no more: ``os.path.abspath`` folds a ``..`` lexically, so after a symbolic
+    link to a directory it named a sibling of the link, not of the directory
+    the link leads to, which is the one mkdir reaches. Each ``lexists`` here
+    hands the path to the OS, which resolves such a ``..`` as mkdir does."""
+    current = path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
     while not os.path.lexists(current):
         parent = os.path.dirname(current)
         if parent == current:
             return None
         current = parent
-    if os.path.islink(current) and not os.path.exists(current):
-        return output_dir_unmakeable(path, os.strerror(errno.EEXIST))
+    if not os.path.exists(current) and _is_a_link(current):
+        return output_dir_unmakeable(path, os.strerror(errno.EEXIST), errno.EEXIST)
+    if not os.path.isdir(current):
+        return output_dir_unmakeable(path, os.strerror(errno.ENOTDIR), errno.ENOTDIR)
     return None
+
+
+def _is_a_link(path: str) -> bool:
+    """Whether *path* is a link, a Windows directory junction included.
+
+    ``os.path.islink`` is False for a junction, a reparse point that is no symbolic
+    link, so one that leads to a removed directory would read as a plain
+    non-directory. ``os.path.isjunction`` is Python 3.12 and later, so the
+    reparse-point attribute of ``lstat`` is read instead (``st_file_attributes``
+    exists on Windows only, and is 0 here elsewhere)."""
+    if os.path.islink(path):
+        return True
+    try:
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    except (OSError, ValueError):
+        return False
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 #: The start of the name of the file :func:`_write_refused` makes and removes. It is
@@ -124,8 +218,8 @@ def _link_to_nothing_on_the_way(path: str) -> Optional[str]:
 WRITE_CHECK_PREFIX = ".ash-write-check."
 
 
-def _write_refused(directory: str) -> Optional[str]:
-    """Why a file cannot be made in *directory*, as its strerror, or None when one can.
+def _write_refused(directory: str) -> Optional[OSError]:
+    """Why a file cannot be made in *directory*, as the error, or None when one can.
 
     Made with ``O_CREAT | O_EXCL`` and not through a link, under a name of its own,
     and removed at once. ``os.access(W_OK)`` is not asked: it answers for the real
@@ -140,7 +234,7 @@ def _write_refused(directory: str) -> Optional[str]:
         except FileExistsError:
             continue
         except OSError as error:
-            return error.strerror or type(error).__name__
+            return error
         try:
             os.close(descriptor)
         finally:
@@ -150,23 +244,43 @@ def _write_refused(directory: str) -> Optional[str]:
     return None
 
 
-def output_dir_unmakeable(output_dir: PathLike, reason: str) -> str:
+def output_dir_unmakeable(
+    output_dir: PathLike, reason: str, error_number: Optional[int] = None
+) -> DirectoryRefusal:
     """The refusal for *output_dir* when making it failed with *reason*.
 
     *reason* is the error's strerror alone, never its message, which names the path
     again: ``Output directory cannot be created: blocker/out (Not a directory)``.
+    *error_number* is the error's errno, kept on the refusal for a caller that
+    sorts refusals (:class:`DirectoryRefusal`).
     """
-    return f"Output directory cannot be created: {os.fspath(output_dir)} ({reason})"
+    return DirectoryRefusal(
+        f"Output directory cannot be created: {os.fspath(output_dir)} ({reason})",
+        REFUSED_CANNOT_BE_CREATED,
+        error_number,
+    )
 
 
-def output_dir_unwritable(output_dir: PathLike, reason: str) -> str:
+def output_dir_unwritable(
+    output_dir: PathLike, reason: str, error_number: Optional[int] = None
+) -> DirectoryRefusal:
     """The refusal for *output_dir* when no file could be made in it, *reason* being
-    the error's strerror, such as ``Permission denied``."""
-    return f"Output directory cannot be written: {os.fspath(output_dir)} ({reason})"
+    the error's strerror, such as ``Permission denied``, and *error_number* its
+    errno (``ENOSPC`` for a full disk, which is not a permission)."""
+    return DirectoryRefusal(
+        f"Output directory cannot be written: {os.fspath(output_dir)} ({reason})",
+        REFUSED_CANNOT_BE_WRITTEN,
+        error_number,
+    )
 
 
 __all__ = [
+    "REFUSED_CANNOT_BE_CREATED",
+    "REFUSED_CANNOT_BE_ENTERED",
+    "REFUSED_CANNOT_BE_WRITTEN",
+    "REFUSED_NOT_A_DIRECTORY",
     "WRITE_CHECK_PREFIX",
+    "DirectoryRefusal",
     "output_dir_refusal",
     "output_dir_unmakeable",
     "output_dir_unwritable",

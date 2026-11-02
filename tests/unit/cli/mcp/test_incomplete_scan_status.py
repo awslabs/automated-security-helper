@@ -391,7 +391,7 @@ class TestTheExitCodeAndTheStatusShareOneVerdict:
 
 
 class TestWorkspaceProjectsFollowTheSameRule:
-    def _close(self, tmp_path, **outcome_fields):
+    def _close(self, tmp_path, remote: bool = False, **outcome_fields):
         from automated_security_helper.cli.mcp import workspace as ws
         from automated_security_helper.models.workspace import (
             ProjectRunStatus,
@@ -412,9 +412,49 @@ class TestWorkspaceProjectsFollowTheSameRule:
             **outcome_fields,
         )
         payload = WorkspaceResults.model_construct(projects=[outcome])
-        with patch.object(ws, "get_scan_registry", return_value=registry):
-            ws._close_registrations({"app": scan_id}, payload)
+        asked: Dict[str, Any] = {}
+
+        def caller_is_remote(session_id):
+            asked["session_id"] = session_id
+            return remote
+
+        # Red at the base: the store read the process-wide transport (stdio here,
+        # so "not networked"), not the caller, and kept the pid for a remote
+        # caller; the module no longer imports that reading, so it is not patched.
+        with (
+            patch.object(ws, "get_scan_registry", return_value=registry),
+            patch.object(ws, "caller_is_remote", side_effect=caller_is_remote),
+        ):
+            ws._close_registrations(
+                {"app": scan_id}, payload, session_id="the-calling-session"
+            )
+        if "could_not_stop" in (registry.get_scan(scan_id).coverage or {}):
+            assert asked.get("session_id") == "the-calling-session", asked
         return registry.get_scan(scan_id)
+
+    def test_for_a_remote_caller_the_stored_reason_names_no_pid(self, tmp_path):
+        """Red at the base: the coverage kept on the registry entry, read back by
+        any later progress call, decided whether to name the pid by the
+        process-wide transport, while the response decided by the request-scoped
+        ``caller_is_remote`` (which honours the operator's every-caller-remote
+        override). On stdio under that override the response withheld the pid,
+        the stored coverage kept it, and a later progress call returned it."""
+        reason = "bandit's tool was still running after the stop (pid 7)"
+        entry = self._close(
+            tmp_path,
+            remote=True,
+            scanners={"bandit": "PASSED"},
+            unstoppable_tools={"bandit": reason},
+            scan_incomplete=True,
+        )
+
+        assert entry.status.value == "incomplete"
+        assert entry.coverage["could_not_stop"] == [
+            {
+                "scanner": "bandit",
+                "reason": "bandit's tool was still running after the stop",
+            }
+        ]
 
     def test_a_project_whose_gate_fired_is_incomplete(self, tmp_path):
         entry = self._close(
@@ -447,3 +487,42 @@ class TestWorkspaceProjectsFollowTheSameRule:
         entry = self._close(tmp_path, scanners={"bandit": "PASSED"})
 
         assert entry.status.value == "completed"
+
+    def test_a_project_failing_only_on_an_unevaluated_rule_names_it(self, tmp_path):
+        """The arm no setting silences reaches the client in the single-scan shape.
+
+        Every scanner ran and the gate is irrelevant; the project is incomplete
+        on the rule alone, and the coverage says which rule, as a single scan's
+        ``unevaluated_rules`` does. It used to say nothing: the projection
+        hardcoded the list empty.
+        """
+        entry = self._close(
+            tmp_path,
+            scanners={"cdk-nag": "PASSED"},
+            unevaluated_rules=["AwsSolutions-S1"],
+            scan_incomplete=True,
+        )
+
+        assert entry.status.value == "incomplete"
+        assert entry.coverage["incomplete_scanners"] == []
+        assert entry.coverage["unevaluated_rules"] == ["AwsSolutions-S1"]
+        assert entry.coverage["could_not_stop"] == []
+
+    def test_a_tool_ash_could_not_stop_is_named_in_the_single_scans_shape(
+        self, tmp_path
+    ):
+        """A local caller (the default here) reads the stored reason as recorded,
+        pid included, in the shape a single scan's progress gives it."""
+        reason = "bandit's tool was still running after the stop (pid 7)"
+        entry = self._close(
+            tmp_path,
+            scanners={"bandit": "PASSED"},
+            unstoppable_tools={"bandit": reason},
+            scan_incomplete=True,
+        )
+
+        assert entry.status.value == "incomplete"
+        assert entry.coverage["could_not_stop"] == [
+            {"scanner": "bandit", "reason": reason}
+        ]
+        assert entry.coverage["unevaluated_rules"] == []

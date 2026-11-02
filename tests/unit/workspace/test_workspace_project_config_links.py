@@ -50,14 +50,16 @@ class _Stop(Exception):
     pass
 
 
-#: On Windows a project's discovery under an MCP session's gate refuses any linked
-#: config source before it opens it (``config_sources._permitted``: resolving a
-#: link there can open a connection to the host a UNC target names), so a test
-#: that needs the link followed to the host file cannot reach what it asserts.
+#: On Windows a project's discovery under an MCP session's gate refuses a linked
+#: config source whose chain leads to a network share before it opens it
+#: (``config_sources._permitted``: resolving a link there can open a connection
+#: to the host a UNC target names), and judges a link that leads to a local file
+#: as the file it names, as on POSIX. The tests that need the link followed have
+#: not been measured on a Windows host with links, so they stay skipped there.
 #: The refusals this file pins (``_assert_refused_unread``) hold on every platform.
 follows_a_link = pytest.mark.skipif(
     sys.platform == "win32",
-    reason="an MCP session refuses a linked config source on Windows before reading it",
+    reason="not yet measured on a Windows host with links (see config_sources._permitted)",
 )
 
 

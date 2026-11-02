@@ -102,6 +102,12 @@ _OUTCOME_TYPES = (RUN_COMPLETED_CHECKPOINT, REPORT_PATH_REFUSED_CHECKPOINT)
 _RUN_RECORD_TYPES = (*_OUTCOME_TYPES, REPORTS_WRITTEN_CHECKPOINT)
 _RUN_ID = re.compile(r"[0-9a-f]{32}")
 
+#: Names this process. The ``reports_written`` record it writes carries it, and
+#: ``record_reports_written`` extends only a record that does: one an earlier run
+#: wrote into results this process loaded is replaced, whether or not the loader
+#: stripped the run records first.
+_PROCESS_TOKEN = uuid.uuid4().hex
+
 #: The last ASH release whose inner run does not record its completion. v3.7.1 and
 #: every release before it write no marker, so an image built from one of them is
 #: never read back.
@@ -191,12 +197,40 @@ def record_reports_written(
     """List in ``results`` the report files this run wrote, each with its reporter's format.
 
     ``written`` holds ``(file name, format)`` pairs, the format being the name
-    ``--output-formats`` selects the reporter by (``reporter_format_name``). An
-    empty ``written`` records that the run wrote no report file.
+    ``--output-formats`` selects the reporter by (``reporter_format_name``).
+
+    A record an earlier report phase of the same run left in ``results`` is kept
+    and extended, not replaced: ``ash merge`` runs a second phase over the same
+    results for an off-host reporter, and the first phase's entries (the
+    ``ash.sarif`` the exit code is read from among them) are still this run's.
+    So an empty ``written`` adds nothing to an earlier record, and records that
+    the run wrote no report file only when there is none yet (run_ash_scan calls
+    it that way for a run whose report phase did not run).
+
+    Only this process's own record is ever extended. The record carries a
+    token for the process that wrote it, and a record with another token, or
+    none, is replaced: results read back from a file carry an earlier run's
+    record unless the loader stripped the run records first
+    (:func:`without_run_records`, which the orchestrator does for
+    ``--use-existing`` and ``ash merge`` for each shard and the merged model),
+    and a loader that did not would otherwise hand this function that run's
+    files as this run's.
     """
     if results is None:
         return
-    formats = {name: format_name or None for name, format_name in written}
+    earlier = _reports_written(results)
+    if earlier is not None and earlier.get("run_token") != _PROCESS_TOKEN:
+        earlier = None
+    formats: Dict[str, Optional[str]] = {}
+    if earlier is not None and isinstance(earlier.get("formats"), dict):
+        formats.update(
+            {
+                name: (format_name if isinstance(format_name, str) else None)
+                for name, format_name in earlier["formats"].items()
+                if isinstance(name, str)
+            }
+        )
+    formats.update({name: format_name or None for name, format_name in written})
     checkpoints = [
         checkpoint
         for checkpoint in getattr(results, "validation_checkpoints", None) or []
@@ -211,6 +245,7 @@ def record_reports_written(
             "severity": "info",
             "message": "The report files this run wrote.",
             "metadata": {
+                "run_token": _PROCESS_TOKEN,
                 "files": sorted(formats),
                 "formats": {name: formats[name] for name in sorted(formats)},
             },
@@ -358,19 +393,40 @@ def read_refusal_outcome(
 
     None when there is no record, when it is another run's or carries no run ID,
     and when it cannot be read as one. The caller checks ``not_a_regular_file``
-    first.
+    first; the open here repeats that check on the file it actually opened, so a
+    link or a FIFO put at the name in between is neither followed nor waited on.
     """
     path = Path(output_dir) / INNER_RUN_OUTCOME_FILE
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
     try:
-        with open(path, encoding="utf-8") as handle:
-            text = handle.read(_MAX_OUTCOME_BYTES + 1)
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        with open(fd, "rb") as handle:
+            fd = -1
+            # Read as bytes, so the cap is the bytes it names: a text-mode read
+            # of the same count took characters, up to four bytes each.
+            data = handle.read(_MAX_OUTCOME_BYTES + 1)
     except (OSError, ValueError):
         return None
-    if len(text) > _MAX_OUTCOME_BYTES:
+    finally:
+        if fd != -1:
+            os.close(fd)
+    if len(data) > _MAX_OUTCOME_BYTES:
         return None
     try:
-        record = json.loads(text)
-    except ValueError:
+        record = json.loads(data.decode("utf-8"))
+    except (ValueError, RecursionError):
+        # ValueError: not UTF-8, or not JSON. RecursionError: a record nested
+        # deeper than the parser can follow, which is no record this ASH wrote.
         return None
     if not (
         isinstance(record, dict)
@@ -470,7 +526,11 @@ def as_seen_from_the_host(message: str, inner_dir: Optional[str], host_dir: str)
     # Only where the inner directory starts a path: not inside another one, such as
     # /src/out for an inner /out, and not as the start of a longer name such as
     # /out-dir, /out.bak or /out:/y, so only a separator, whitespace, a quote or
-    # closing punctuation may follow it. The host directory is inserted as written,
-    # not read as a replacement template.
-    pattern = r"(?<![^\s'\"(])" + re.escape(inner_dir) + r"(?=[/\s'\"),;]|$)"
+    # closing punctuation may follow it, or a period or a colon that ends a
+    # sentence or a clause (followed by whitespace or the end), as a message
+    # writes "cannot write /out." or "/out: denied". The host directory is
+    # inserted as written, not read as a replacement template.
+    pattern = (
+        r"(?<![^\s'\"(])" + re.escape(inner_dir) + r"(?=[/\s'\"),;]|[.:](?:\s|$)|$)"
+    )
     return re.sub(pattern, lambda _match: host_dir, message)

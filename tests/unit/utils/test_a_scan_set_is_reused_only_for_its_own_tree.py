@@ -315,9 +315,13 @@ def test_threads_that_finish_walking_together_write_the_pair_once(
             pass
         return answer
 
-    def recording_write(output_path, ignore_lines, scan_set_lines, run_id, inputs=None):
+    def recording_write(
+        output_path, ignore_lines, scan_set_lines, run_id, inputs=None, settings=None
+    ):
         writes.append(inputs["source"])
-        return real_write(output_path, ignore_lines, scan_set_lines, run_id, inputs)
+        return real_write(
+            output_path, ignore_lines, scan_set_lines, run_id, inputs, settings
+        )
 
     monkeypatch.setattr(gss, "_collect_ignorefiles_and_all_files", walking_together)
     monkeypatch.setattr(gss, "_record_names_other_inputs", checking_together)

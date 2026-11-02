@@ -22,7 +22,7 @@ Install the required dependencies:
 <!-- doctest: illustrative reason="installs from the network" -->
 ```bash
 # ASH
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
 
 # Streamlit
 pip install streamlit
@@ -45,7 +45,7 @@ streamlit run https://raw.githubusercontent.com/awslabs/automated-security-helpe
 
 <!-- doctest: illustrative reason="clones from the network and needs Streamlit" -->
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.7.0
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.7.1
 streamlit run ./automated-security-helper/examples/streamlit_ui/ash_ui.py
 ```
 

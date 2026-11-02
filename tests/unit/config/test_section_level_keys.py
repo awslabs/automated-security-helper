@@ -423,7 +423,11 @@ class TestStoredResults:
             "severity_threshold": "HIGH"
         }
         warnings = [str(c.args[0]) for c in log.warning.call_args_list]
-        assert any("severity_threshold" in w for w in warnings), warnings
+        # Named by the section that holds it, never by the key: a stored key is
+        # the results file's data (utils/unknown_keys.UNKNOWN_KEY_NOTE).
+        located = [w for w in warnings if "unknown key <key> in 'scanners.bandit'" in w]
+        assert located, warnings
+        assert not [w for w in warnings if "severity_threshold" in w], warnings
 
     def test_a_community_plugin_section_in_results_loads_without_warnings(self):
         """A results file cannot know a community plugin's own config class, so

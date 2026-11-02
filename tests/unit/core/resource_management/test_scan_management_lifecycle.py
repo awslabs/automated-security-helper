@@ -17,6 +17,7 @@ caplog installs, and a caplog-based assertion here would read an empty string.
 """
 
 import asyncio
+import os
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -49,8 +50,22 @@ _MODULE = "automated_security_helper.core.resource_management.scan_management"
 
 @pytest.fixture
 def registry():
-    """A registry double restricted to ScanRegistry's real method surface."""
-    return MagicMock(spec=ScanRegistry)
+    """A registry double restricted to ScanRegistry's real method surface.
+
+    The output delete goes through the registry: ``cleanup_scan_resources``
+    hands ``remove_output_of_scan`` the remover and reads back ``(reason,
+    removed)``. The double runs the remover and answers as a registry that
+    found no other scan on the directory does, so the rmtree the tests patch
+    is reached and its outcome is what the tool reports. A bare MagicMock
+    there unpacked into nothing, and every removal read as a failure to
+    unpack rather than the outcome under test.
+    """
+    registry = MagicMock(spec=ScanRegistry)
+    registry.remove_output_of_scan.side_effect = lambda entry, remover: (
+        None,
+        remover(),
+    )
+    return registry
 
 
 @contextmanager
@@ -327,34 +342,67 @@ class TestCleanupScanResources:
         ):
             result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
 
-        # Registry removal still succeeded, so the operation as a whole did too.
-        assert result["success"] is True
+        # The output could not be removed, so the scan stays in the registry
+        # (the entry is what still names the directory for a retry) and the
+        # operation as a whole did not succeed.
+        assert result["success"] is False
         assert result["removed_output"] is False
+        assert result["removed_from_registry"] is False
+        registry.cleanup_scan.assert_not_called()
         assert "Permission denied" in result["output_dir_error"]
         assert "read-only" in result["output_dir_error"]
         assert result["warnings"] == [
-            "Output directory could not be removed, but scan was removed from registry"
+            "Output directory could not be removed; the scan was kept in the registry"
         ]
         assert "Permission denied" in logger.error.call_args[0][0]
 
     def test_already_missing_output_directory_counts_as_removed(
         self, registry, tmp_path
     ):
-        """FileNotFoundError means someone else got there first, not a failure."""
+        """FileNotFoundError with the directory gone means someone else got
+        there first, not a failure. The directory is checked afterwards: the
+        error alone used to count as removed even when part of the tree was
+        still there (see the test below)."""
         output_dir = tmp_path / "out"
         output_dir.mkdir()
         registry.get_scan.return_value = _entry(tmp_path, status=MCScanStatus.COMPLETED)
         registry.cleanup_scan.return_value = True
 
+        def someone_else_removed_it(path, *args, **kwargs):
+            os.rmdir(path)
+            raise FileNotFoundError("gone")
+
         with (
             _use(registry),
-            patch(f"{_MODULE}.shutil.rmtree", side_effect=FileNotFoundError("gone")),
+            patch(f"{_MODULE}.shutil.rmtree", side_effect=someone_else_removed_it),
         ):
             result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
 
         assert result["removed_output"] is True
         assert "output_dir_error" not in result
         assert "warnings" not in result
+
+    def test_a_file_not_found_with_the_tree_still_there_is_a_failure(
+        self, registry, tmp_path
+    ):
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        (output_dir / "left-behind.txt").write_text("x", encoding="utf-8")
+        registry.get_scan.return_value = _entry(tmp_path, status=MCScanStatus.COMPLETED)
+        registry.cleanup_scan.return_value = True
+
+        with (
+            _use(registry),
+            patch(f"{_MODULE}.shutil.rmtree", side_effect=FileNotFoundError("gone")),
+            patch(f"{_MODULE}._logger", MagicMock(spec=ASHLogger)),
+        ):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["success"] is False
+        assert result["removed_output"] is False
+        assert result["removed_from_registry"] is False
+        assert "part of the tree remains" in result["output_dir_error"]
+        registry.cleanup_scan.assert_not_called()
 
     def test_other_output_removal_errors_are_reported_without_the_permission_wording(
         self, registry, tmp_path
@@ -376,6 +424,34 @@ class TestCleanupScanResources:
             "Failed to remove output directory: device busy"
         )
         assert "Permission denied" not in result["output_dir_error"]
+        # A failed removal of any kind keeps the entry for a retry, not only a
+        # permission failure.
+        assert result["success"] is False
+        assert result["removed_from_registry"] is False
+        registry.cleanup_scan.assert_not_called()
+
+    def test_an_output_path_that_is_not_a_directory_is_a_failed_removal(
+        self, registry, tmp_path
+    ):
+        """The remover returns False without raising when the output path is
+        there but is not a directory (or the tree was re-created while it came
+        down). That counted as a clean success with removed_output False and no
+        warning, and the entry was unregistered; the docstring promises the
+        entry stays for a retry whenever the directory could not be removed."""
+        entry = _entry(tmp_path, status=MCScanStatus.COMPLETED)
+        (tmp_path / "out").write_text("not a directory", encoding="utf-8")
+        registry.get_scan.return_value = entry
+        registry.cleanup_scan.return_value = True
+
+        with _use(registry), patch(f"{_MODULE}._logger", MagicMock(spec=ASHLogger)):
+            result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
+
+        assert result["success"] is False
+        assert result["removed_output"] is False
+        assert result["removed_from_registry"] is False
+        assert "still present" in result["output_dir_error"]
+        registry.cleanup_scan.assert_not_called()
+        assert (tmp_path / "out").is_file()
 
     def test_a_nonexistent_output_directory_is_left_alone(self, registry, tmp_path):
         """rmtree must not be called for a path that is not there."""
@@ -388,7 +464,11 @@ class TestCleanupScanResources:
             result = asyncio.run(cleanup_scan_resources("scan-1", remove_output=True))
 
         rmtree.assert_not_called()
-        assert result["removed_output"] is False
+        # removed_output says whether the output is absent after the call, the
+        # same answer a directory that vanished during the call gets; it used
+        # to be False here and True there.
+        assert result["removed_output"] is True
+        assert result["success"] is True
 
     def test_unexpected_error_during_cleanup_is_typed(self, registry, tmp_path):
         registry.get_scan.return_value = _entry(tmp_path, status=MCScanStatus.COMPLETED)
@@ -604,18 +684,23 @@ class TestCleanupOldScans:
 
 class TestScanStatistics:
     def test_statistics_are_read_from_the_registry(self, registry):
-        registry.get_scan_count.return_value = 7
-        registry.get_active_scan_count.return_value = 2
-        registry.get_scan_status_counts.return_value = {
-            "pending": 1,
-            "running": 1,
-            "completed": 4,
-            "failed": 1,
-            "cancelled": 0,
+        # One registry read for the three counts, so they cannot disagree.
+        registry.get_scan_statistics.return_value = {
+            "total_scans": 7,
+            "active_scans": 2,
+            "status_counts": {
+                "pending": 1,
+                "running": 1,
+                "completed": 4,
+                "failed": 1,
+                "cancelled": 0,
+            },
         }
 
         with _use(registry):
             result = asyncio.run(get_scan_statistics())
+
+        registry.get_scan_statistics.assert_called_once_with()
 
         assert result["total_scans"] == 7
         assert result["active_scans"] == 2
@@ -681,7 +766,11 @@ class TestCheckScanProgress:
             result = asyncio.run(check_scan_progress("scan-1"))
 
         assert result == progress
-        registry.check_scan_progress.assert_called_once_with("scan-1")
+        # The transport's word travels with the read (its default names the
+        # process ids); the progress itself comes back untouched.
+        registry.check_scan_progress.assert_called_once_with(
+            "scan-1", name_process_ids=True
+        )
 
     def test_resource_error_becomes_an_error_response(self, registry):
         registry.check_scan_progress.side_effect = MCPResourceError(

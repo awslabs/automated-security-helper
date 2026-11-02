@@ -142,6 +142,11 @@ class TestReportPhaseNoConvertedFiles:
         fake_instance.config = fake_config
         fake_instance.is_python_only.return_value = True
         fake_instance.report.return_value = "no findings"
+        # A reporter without companion files answers none. Left unset, the
+        # MagicMock answer is os.PathLike (it configures __fspath__) and would be
+        # read as a file named after the mock, which the report-file-name check
+        # refuses for its separators.
+        fake_instance.companion_file_names.return_value = ()
         fake_reporter_cls.return_value = fake_instance
 
         phase = ReportPhase(

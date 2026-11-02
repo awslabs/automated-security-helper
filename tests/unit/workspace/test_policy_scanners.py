@@ -640,6 +640,73 @@ def test_the_policy_origin_count_is_reported_separately(tmp_path):
     )
 
 
+def _level_only(scanner):
+    """A finding judged from its SARIF level alone, with no issue_severity."""
+    finding = _finding(scanner)
+    del finding["properties"]["issue_severity"]
+    return finding
+
+
+def _tightened_project(tmp_path, policy_body):
+    """A project declaring CRITICAL, tightened to MEDIUM by a workspace ceiling.
+
+    The ceiling is set on the plan by hand, as the ceiling tests in
+    test_execution.py do, so what varies between the two tests below is only
+    whether the policy scanner's findings reach the project's exit code.
+    """
+    _project(
+        tmp_path,
+        "api",
+        f"global_settings:\n  severity_threshold: CRITICAL\n"
+        f"scanners:\n  {SCANNER}:\n    enabled: false\n",
+    )
+    _policy(tmp_path, policy_body)
+    plan = resolve_workspace(_workspace(tmp_path, ["api"]))
+    project = plan.projects[0]
+    assert project.severity_threshold == "CRITICAL"
+    assert project.policy_scanners, "the fixture must leave the scanner to the policy"
+    project.effective_severity_threshold = "MEDIUM"
+    project.threshold_tightened_by_policy = True
+    return plan
+
+
+def test_the_ceiling_disclosure_leaves_out_a_scanner_the_gate_ignores(tmp_path):
+    """Findings the exit code never counted are not ones the ceiling missed.
+
+    With policy_scanners_gate off, the policy scanner's level-only finding is
+    judged at no threshold. Counting it under "the ceiling could not reach this"
+    told the operator the ceiling had failed on a finding that never took part.
+    The project's own level-only finding is still disclosed.
+    """
+    plan = _tightened_project(
+        tmp_path, f"workspace:\n  additional_scanners:\n    - {SCANNER}\n"
+    )
+
+    RecordingOrchestrator.sarif_results = [_level_only("bandit"), _level_only(SCANNER)]
+    entry = _results_of(_run(tmp_path, plan))
+
+    # Control: the policy finding is present and tagged, so the absence below is
+    # a decision of the disclosure and not a missing input.
+    assert entry.finding_count == 2
+    assert entry.policy_origin_finding_count == 1
+    assert entry.ceiling_unreachable_findings == {"bandit": 1}
+
+
+def test_the_ceiling_disclosure_keeps_a_scanner_the_gate_counts(tmp_path):
+    """The other direction: with the gate on the policy finding was judged."""
+    plan = _tightened_project(
+        tmp_path,
+        f"workspace:\n  additional_scanners:\n    - {SCANNER}\n"
+        f"  policy_scanners_gate: true\n",
+    )
+    assert plan.projects[0].policy_scanners_gate is True
+
+    RecordingOrchestrator.sarif_results = [_level_only("bandit"), _level_only(SCANNER)]
+    entry = _results_of(_run(tmp_path, plan))
+
+    assert entry.ceiling_unreachable_findings == {"bandit": 1, SCANNER: 1}
+
+
 def test_a_suppressed_policy_finding_is_not_counted_as_one(tmp_path):
     """Suppression is upstream of the origin split, as it is everywhere else."""
     _project(tmp_path, "api", f"scanners:\n  {SCANNER}:\n    enabled: false\n")

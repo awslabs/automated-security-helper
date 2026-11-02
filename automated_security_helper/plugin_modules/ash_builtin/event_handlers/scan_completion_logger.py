@@ -21,19 +21,37 @@ def handle_scan_completion_logging(*args, **kwargs) -> bool:
             - remaining_count: Number of scanners still running
             - remaining_scanners: List of remaining scanner names
             - message: Human-readable summary message
+            - succeeded: Whether the completed scanner's turn succeeded. An
+              emitter that passes False for the last turn gets the all-done
+              line naming the failure; absent, the line is unchanged.
 
     Returns:
         bool: True to indicate successful handling of the event
     """
     remaining_count = kwargs.get("remaining_count", 0)
-    remaining_scanners = kwargs.get("remaining_scanners", [])
-    message = kwargs.get(
-        "message",
-        f"Remaining scanners ({remaining_count}): {','.join(remaining_scanners)}",
-    )
+    # The default message is built only when the emitter gave none: built
+    # eagerly as the default argument of kwargs.get, its join ran on every
+    # event, so a None or non-list remaining_scanners raised TypeError although
+    # the emitter had supplied a message the join never reached.
+    message = kwargs.get("message")
+    if not isinstance(message, str):
+        remaining_scanners = kwargs.get("remaining_scanners") or []
+        if isinstance(remaining_scanners, (str, bytes)):
+            remaining_scanners = [str(remaining_scanners)]
+        names = ",".join(str(name) for name in remaining_scanners)
+        message = f"Remaining scanners ({remaining_count}): {names}"
     # Log information about remaining scanners
-    if remaining_count > 0:
+    if isinstance(remaining_count, (int, float)) and remaining_count > 0:
         ASH_LOGGER.info(message)
+    elif kwargs.get("succeeded") is False:
+        # SCAN_COMPLETE is announced for every recorded turn, a recorded turn
+        # whose scanner_succeeded is False included, so the last event of a
+        # scan can be a failed scanner's. "All scanners completed!" read as
+        # "all succeeded" then; the line names the failure when the emitter
+        # says so.
+        scanner = kwargs.get("scanner")
+        who = f"the last, {scanner}," if scanner else "the last"
+        ASH_LOGGER.info(f"All scanners completed; {who} ended with a failure.")
     else:
         ASH_LOGGER.info("All scanners completed!")
 

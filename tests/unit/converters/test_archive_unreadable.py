@@ -15,6 +15,12 @@ tarfile ends its member list without an error when a header after the first is
 damaged, or the archive stops at a member boundary or inside a header, so those
 tars extracted their first members and recorded nothing. A tar whose members do
 not end at an end-of-archive block is now unreadable too.
+
+An archive whose members collide (a file where an earlier member made a directory,
+or the reverse) is no longer unreadable: the admission check refuses the later
+member alone before anything is written, and the rest is extracted (REFUSED_MEMBER
+below). The extraction-time fallback for a pair the check misses is tested in
+test_archive_failures_are_input_errors.py.
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ from automated_security_helper.models.asharp_model import (
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverter,
 )
+from automated_security_helper.utils.scan_output_dirs import CONVERTED_SOURCES_FILE_NAME
 from tests.utils.archive_builders import tar_bytes
 
 pytestmark = pytest.mark.unit
@@ -175,17 +182,41 @@ UNREADABLE = [
     ),
     pytest.param("empty.zip", b"", id="empty-file"),
     pytest.param("noise.tar.gz", b"\x1f\x8b" + b"\x00" * 64, id="damaged-gzip"),
+]
+
+#: Archives whose members collide (a file where an earlier member made a directory,
+#: or a member under a path an earlier member made a file). These used to fail the
+#: whole archive at extraction; the admission check now refuses the later member
+#: alone, before anything is written, and the rest of the archive is extracted and
+#: scanned. (refused member, the files extracted) beside each.
+REFUSED_MEMBER = [
     pytest.param(
-        "clash.zip", zip_of(FILE_OVER_DIRECTORY), id="zip-file-over-a-directory"
+        "clash.zip",
+        zip_of(FILE_OVER_DIRECTORY),
+        "d.py",
+        ["a.py", "z.py"],
+        id="zip-file-over-a-directory",
     ),
     pytest.param(
-        "clash.tar", tar_of(FILE_OVER_DIRECTORY), id="tar-file-over-a-directory"
+        "clash.tar",
+        tar_of(FILE_OVER_DIRECTORY),
+        "d.py",
+        ["a.py", "z.py"],
+        id="tar-file-over-a-directory",
     ),
     pytest.param(
-        "clash.zip", zip_of(DIRECTORY_OVER_FILE), id="zip-directory-over-a-file"
+        "clash.zip",
+        zip_of(DIRECTORY_OVER_FILE),
+        "d.py/a.py",
+        ["d.py", "z.py"],
+        id="zip-directory-over-a-file",
     ),
     pytest.param(
-        "clash.tar", tar_of(DIRECTORY_OVER_FILE), id="tar-directory-over-a-file"
+        "clash.tar",
+        tar_of(DIRECTORY_OVER_FILE),
+        "d.py/a.py",
+        ["d.py", "z.py"],
+        id="tar-directory-over-a-file",
     ),
 ]
 
@@ -232,10 +263,15 @@ def convert(context, monkeypatch, name: str, data: bytes):
 
 
 def files_under(converter) -> List[str]:
+    """Every file the converter extracted; its record of the sources is not one."""
     root = Path(converter.results_dir)
     if not root.exists():
         return []
-    return sorted(p.name for p in root.rglob("*") if p.is_file())
+    return sorted(
+        p.name
+        for p in root.rglob("*")
+        if p.is_file() and p != root / CONVERTED_SOURCES_FILE_NAME
+    )
 
 
 @pytest.mark.parametrize("name, data", UNREADABLE)
@@ -315,32 +351,59 @@ def test_a_valid_empty_zip_is_not_refused(test_plugin_context, monkeypatch):
     assert converter.failed_inputs == []
 
 
-@pytest.mark.parametrize(
-    "name, data",
-    [
-        pytest.param("clash.zip", zip_of(FILE_OVER_DIRECTORY), id="zip-is-a-directory"),
-        pytest.param("clash.tar", tar_of(FILE_OVER_DIRECTORY), id="tar-is-a-directory"),
-        pytest.param(
-            "clash.zip", zip_of(DIRECTORY_OVER_FILE), id="zip-not-a-directory"
-        ),
-        pytest.param(
-            "clash.tar", tar_of(DIRECTORY_OVER_FILE), id="tar-not-a-directory"
-        ),
-    ],
-)
-def test_a_write_error_is_reported_by_member_not_by_work_directory_path(
-    name, data, test_plugin_context, monkeypatch
+@pytest.mark.parametrize("name, data, refused_member, extracted", REFUSED_MEMBER)
+def test_a_colliding_member_is_refused_alone_and_the_rest_is_extracted(
+    name, data, refused_member, extracted, test_plugin_context, monkeypatch
 ):
-    """The OS error's path is the work directory's, so the member's path is shown."""
+    """The later member of a colliding pair is refused by name before anything is
+    written; the archive is not a failed input, its other members are scanned, and
+    it is not recorded as extracted whole. Before, the extractor raised on the
+    pair and the whole archive was one failed input with nothing left behind."""
+    from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+        archives_extracted_whole,
+    )
+
+    converter, results = convert(test_plugin_context, monkeypatch, name, data)
+
+    assert len(results) == 1
+    assert files_under(converter) == extracted
+    assert converter.failed_inputs == []
+    (refused,) = converter.refused_inputs
+    assert (refused.path, refused.member) == (name, refused_member)
+    assert archives_extracted_whole(test_plugin_context) == set()
+
+
+@pytest.mark.parametrize("name, data, refused_member, extracted", REFUSED_MEMBER)
+def test_a_refused_member_leaves_the_completeness_gate_alone(
+    name, data, refused_member, extracted, test_plugin_context, monkeypatch
+):
+    """A refusal without a limit is not lost coverage the gate counts: the member
+    the extractor could not have written is named in the results, and the archive's
+    other members were scanned."""
+    converter, _ = convert(test_plugin_context, monkeypatch, name, data)
+    model = AshAggregatedResults()
+    model.converter_results["archive"] = ConverterStatusInfo(
+        converted_paths=[], failed_inputs=list(converter.failed_inputs)
+    )
+
+    assert incomplete_converters(model) == []
+
+
+@pytest.mark.parametrize("name, data, refused_member, extracted", REFUSED_MEMBER)
+def test_a_collision_is_reported_by_member_not_by_work_directory_path(
+    name, data, refused_member, extracted, test_plugin_context, monkeypatch
+):
+    """The refusal names the member by its name in the archive, and its reason
+    carries no path of the work directory (the earlier shape quoted the OS
+    error's path, which was the work directory's, so the member's path was
+    substituted; the refusal is built from the names alone)."""
     converter, _ = convert(test_plugin_context, monkeypatch, name, data)
 
-    (failed,) = converter.failed_inputs
-    assert str(Path(converter.results_dir)) not in failed.reason, failed.reason
-    assert str(Path(test_plugin_context.work_dir)) not in failed.reason, failed.reason
-    assert "/" not in failed.reason.replace("d.py/a.py", ""), failed.reason
-    assert failed.reason.endswith(": d.py") or failed.reason.endswith(": d.py/a.py"), (
-        failed.reason
-    )
+    (refused,) = converter.refused_inputs
+    assert refused.member == refused_member
+    assert str(Path(converter.results_dir)) not in refused.reason, refused.reason
+    assert str(Path(test_plugin_context.work_dir)) not in refused.reason, refused.reason
+    assert "/" not in refused.reason.replace("d.py/a.py", ""), refused.reason
 
 
 def test_a_readable_archive_is_extracted_as_before(test_plugin_context, monkeypatch):
@@ -390,3 +453,38 @@ def test_a_tar_of_end_blocks_only_is_an_empty_archive(test_plugin_context, monke
     assert len(results) == 1
     assert converter.failed_inputs == []
     assert converter.refused_inputs == []
+
+
+def empty_tar_bytes() -> bytes:
+    """What ``tar -cf empty.tar -T /dev/null`` writes: end blocks only, a record long."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w"):
+        pass
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("name", "data"),
+    [
+        pytest.param("empty.tar", empty_tar_bytes(), id="tar"),
+        pytest.param("empty.tar.gz", gzip.compress(empty_tar_bytes()), id="tar-gz"),
+    ],
+)
+def test_a_real_empty_tar_is_an_empty_archive_recorded_whole(
+    name, data, test_plugin_context, monkeypatch
+):
+    """A valid archive with no members: tarfile.open opens it, so the converter
+    extracts it to nothing, records no failure and counts it as extracted whole;
+    reading its first block of zeros as "not a tar" made it fail the completeness
+    gate with a false reason."""
+    from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+        archives_extracted_whole,
+    )
+
+    converter, results = convert(test_plugin_context, monkeypatch, name, data)
+
+    assert len(results) == 1
+    assert files_under(converter) == []
+    assert converter.failed_inputs == []
+    assert converter.refused_inputs == []
+    assert archives_extracted_whole(test_plugin_context) == {name}

@@ -7,7 +7,9 @@ from typing import Iterable, List, Mapping, Optional
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-def shown_import_failure(error: BaseException, name: str, label: str) -> str:
+def shown_import_failure(
+    error: BaseException, name: str, label: str, values: Iterable[str] = ()
+) -> str:
     """Why importing or looking up ``name`` failed, as a log line about it says it.
 
     ``label`` is how the line names the module: the masked form for a name a
@@ -15,13 +17,15 @@ def shown_import_failure(error: BaseException, name: str, label: str) -> str:
     masked name the error's own text is left out with it, because that text
     quotes the name (``No module named '...'``); only its kind is said. For a
     literal name the text is shown through ``error_text``, which redacts the
-    env-read values the loader carried onto the error: an import error can
-    quote any of them, not only the module's own name.
+    env-read values the loader carried onto the error and the ``values`` given
+    here: an import error can quote any of them, not only the module's own
+    name, and an error raised afresh by this module's own import carries none,
+    so its caller passes the run's values.
     """
     if label == name:
         from automated_security_helper.utils.error_text import error_text
 
-        return error_text(error)
+        return error_text(error, values)
     return masked_failure_kind(type(error).__name__)
 
 
@@ -84,6 +88,7 @@ def discover_plugins(
     plugin_modules: List[str] | None = None,
     shown: Optional[Mapping[str, str]] = None,
     failed: Iterable[str] = (),
+    values: Iterable[str] = (),
 ):
     """Import the top-level plugin packages *plugin_modules* names.
 
@@ -105,7 +110,16 @@ def discover_plugins(
     error's text with nothing to redact it by, and, for a module whose
     declarations were what failed, register its plugins again. The run refuses
     such a module on its record (``refuse_failed_plugin_imports``).
+
+    ``values`` are the values the run's configuration read from the environment
+    (``error_text.config_environment_values``). A failure raised by the import
+    here is a new exception object: nothing was carried onto it, so without them
+    its warning line printed a value the loader had redacted from the same
+    failure.
     """
+    from automated_security_helper.utils.redacted_model import value_tuple
+
+    values = value_tuple(values)
     from automated_security_helper.plugins.loader import (
         _is_allowed_module_path,
         _namespace_rule,
@@ -164,7 +178,8 @@ def discover_plugins(
             # must not escape as an unexpected failure (exit 1) past the
             # recorded, exit-3 refusal refuse_failed_plugin_imports raises next.
             ASH_LOGGER.warning(
-                f"Failed to import plugin {label}: {shown_import_failure(e, name, label)}"
+                f"Failed to import plugin {label}: "
+                f"{shown_import_failure(e, name, label, values)}"
             )
 
     return discovered

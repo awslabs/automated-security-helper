@@ -34,7 +34,8 @@ from tests.unit import test_ash_output_dirs_are_not_scanned as named
 AshConfig.model_rebuild()
 PluginContext.model_rebuild()
 
-capture = named.capture
+# ``capture`` is the ``caplog`` fixture tests/unit/conftest.py defines for every
+# unit test; it is no longer re-exported through test_ash_output_dirs_are_not_scanned.
 
 #: The scanners built here start no tool (tests/unit/conftest.py).
 pytestmark = pytest.mark.usefixtures("no_tool_probes")

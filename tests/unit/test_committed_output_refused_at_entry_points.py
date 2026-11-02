@@ -143,6 +143,7 @@ def test_nix_mode_stops_before_the_host_clears_the_output_directory(
         return create_completed_process(args=["nix"], returncode=0)
 
     monkeypatch.setattr(run_ash_scan_module, "run_ash_nix", _nix)
+    monkeypatch.setattr(run_ash_scan_module, "nix_preflight", lambda: None)
 
     with pytest.raises(SystemExit) as exited:
         run_ash_scan(

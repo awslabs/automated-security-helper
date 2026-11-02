@@ -16,7 +16,7 @@ name: CDK Extra Drift
 # aws-cdk-lib in pyproject.toml alone, and every dependabot bump since has done
 # the same. dependabot/uv/scanner-minor broke that test on every unit-test leg --
 # 18 of them at the time, 25 since ash-unified-ci.yml gained Python 3.14 and
-# dropped its macos-14 exclusions; dependabot/uv/engine-minor broke it twice
+# dropped its macOS 14 exclusions; dependabot/uv/engine-minor broke it twice
 # before that. Each time a human edited the constant by hand.
 #
 # The leg count is written as "every leg" plus the figures because the bare "18"

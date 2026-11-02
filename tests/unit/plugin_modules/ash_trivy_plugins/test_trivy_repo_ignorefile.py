@@ -64,7 +64,7 @@ def _argv(tmp_path: Path, source: Path, options=None) -> list:
     scanner.dependencies_satisfied = True
     with (
         patch.object(scanner, "_pre_scan", return_value=True),
-        patch.object(scanner, "_run_subprocess", return_value={}) as run,
+        patch.object(scanner, "_run_subprocess", return_value={"returncode": 0}) as run,
     ):
         scanner.scan(target=source, target_type="source")
     return [str(a) for a in run.call_args.kwargs["command"]]
@@ -323,16 +323,19 @@ def test_the_flags_follow_the_subcommand_however_the_target_is_spelled(tmp_path)
     with (
         patch.object(scanner, "_pre_scan", return_value=True),
         patch.object(scanner, "_resolve_arguments", return_value=list(resolved)),
-        patch.object(scanner, "_run_subprocess", return_value={}) as run,
+        patch.object(scanner, "_run_subprocess", return_value={"returncode": 0}) as run,
     ):
         scanner.scan(target=source, target_type="source")
     argv = run.call_args.kwargs["command"]
     assert argv[:2] == ["trivy", "repository"]
     assert argv[2].startswith("--ignorefile=")
     assert argv[3].startswith("--secret-config=")
-    # The config and modules directory trivy-repo also pins are the only additions.
+    # The config and modules directory trivy-repo also pins, and the deadline it
+    # matches to ASH's scan timeout, are the only additions.
     assert [
-        a for a in argv[4:] if not a.startswith(("--config=", "--module-dir="))
+        a
+        for a in argv[4:]
+        if not a.startswith(("--config=", "--module-dir=", "--timeout="))
     ] == resolved[2:]
 
 
@@ -368,10 +371,14 @@ def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_updat
         "prepare_content_db",
         lambda tool, *a, **k: prepared.append((tool, k)),
     )
+    # A completed run carries its exit code; a response without one is a tool
+    # that never ran, which the scanner refuses before grading.
     monkeypatch.setattr(
         trivy_base.ScannerPluginBase,
         "_run_subprocess",
-        lambda self, command, *a, **k: commands.append(list(command)) or {},
+        lambda self, command, *a, **k: (
+            commands.append(list(command)) or {"returncode": 0}
+        ),
     )
     with patch.object(scanner, "_pre_scan", return_value=True):
         scanner.scan(target=source, target_type="source")
@@ -438,7 +445,7 @@ def _scan_recording_command_lines(tmp_path):
         results = Path(command[command.index("--output") + 1])
         results.parent.mkdir(parents=True, exist_ok=True)
         results.write_text(json.dumps(EMPTY_SARIF))
-        return {}
+        return {"returncode": 0}
 
     capture = _CapturedRecords()
     previous_level = ASH_LOGGER.level

@@ -27,7 +27,7 @@ This page is generated from the reporter plugins in the ASH source code by `scri
 | [HTML](#html) (`html`) | `.html` | yes | Interactive browser-based reports | -- |
 | [JUnit XML](#junitxml) (`junitxml`) | `.junit.xml` | yes | CI/CD test result reporting | [JUnit XML](https://llg.cubic.org/docs/junit/) |
 | [Markdown](#markdown) (`markdown`) | `.summary.md` | yes | Pull request comments, documentation | CommonMark |
-| [OCSF](#ocsf) (`ocsf`) | `.ocsf.json` | yes | Security data lakes, SIEM ingestion | [OCSF 1.0](https://schema.ocsf.io/) |
+| [OCSF](#ocsf) (`ocsf`) | `.ocsf.json` | yes | Security data lakes, SIEM ingestion | [OCSF 1.1.0](https://schema.ocsf.io/) |
 | [SARIF](#sarif) (`sarif`) | `.sarif` | yes | IDE integration, GitHub/GitLab code scanning | [OASIS SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) |
 | [SPDX](#spdx) (`spdx`) | `.spdx.json` | no | License compliance, SBOM | [SPDX 2.3](https://spdx.dev/specifications/) |
 | [Text](#text) (`text`) | `.summary.txt` | yes | Console output, logs | -- |
@@ -109,6 +109,7 @@ Options, under `reporters.github-ghas.options`. An option not listed here refuse
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | <a id="reporters.github-ghas.options.exclude_suppressed"></a>`exclude_suppressed` | boolean | `true` | When true (default), suppressed findings are excluded from the GHAS report. GitHub has its own dismissal workflow so suppressed findings are typically not needed. |
+| <a id="reporters.github-ghas.options.emit_automation_details"></a>`emit_automation_details` | boolean | `false` | When true, a workspace project's own report carries runAutomationDetails.id ash/&lt;project key&gt;/, the category GitHub files the upload under, so the per-project reports of one repository are kept apart. Off by default: an id in the file takes precedence over the category the upload-sarif action is given, so an upload that already names its category would be moved to a new one, leaving the old analysis's alerts open. |
 
 ## `gitlab-cyclonedx`
 
@@ -301,7 +302,7 @@ Options, under `reporters.aws-security-hub.options`. An option not listed here r
 <!-- doctest: options of=reporters.aws-security-hub -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.aws-security-hub.options.aws_region"></a>`aws_region` | string or null | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `null` | AWS Region for Security Hub integration |
+| <a id="reporters.aws-security-hub.options.aws_region"></a>`aws_region` | string or null | from `AWS_REGION`, else `null` | AWS Region for Security Hub integration |
 | <a id="reporters.aws-security-hub.options.aws_profile"></a>`aws_profile` | string or null | from `AWS_PROFILE`, else `null` | AWS Profile to use for authentication |
 | <a id="reporters.aws-security-hub.options.account_id"></a>`account_id` | string or null | `null` | AWS account ID the findings are imported into. Looked up from the credentials if not set; when set, it must be the credentials' account, because Security Hub accepts findings sent with the account's default product ARN only from the account they name |
 | <a id="reporters.aws-security-hub.options.max_retries"></a>`max_retries` | integer, at most 10 | `3` | Maximum number of retries for a throttled or failed BatchImportFindings request |
@@ -325,14 +326,14 @@ Options, under `reporters.bedrock-summary-reporter.options`. An option not liste
 <!-- doctest: options of=reporters.bedrock-summary-reporter -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.bedrock-summary-reporter.options.aws_region"></a>`aws_region` | string or null, matches `(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}` | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `us-east-1` | AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests. |
+| <a id="reporters.bedrock-summary-reporter.options.aws_region"></a>`aws_region` | string or null, matches `^(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1,2}$` | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `us-east-1` | AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests. |
 | <a id="reporters.bedrock-summary-reporter.options.aws_profile"></a>`aws_profile` | string or null | from `AWS_PROFILE`, else `null` | AWS profile to use for Bedrock. If not specified, the default profile will be used. |
 | <a id="reporters.bedrock-summary-reporter.options.model_id"></a>`model_id` | string | from `ASH_BEDROCK_MODEL_ID`, else `us.anthropic.claude-3-7-sonnet-20250219-v1:0` | Bedrock model ID to use for generating summaries. |
-| <a id="reporters.bedrock-summary-reporter.options.temperature"></a>`temperature` | number | from `ASH_BEDROCK_TEMPERATURE`, else `0.5` | Temperature parameter for the Bedrock model. Higher values make output more random. |
-| <a id="reporters.bedrock-summary-reporter.options.max_tokens"></a>`max_tokens` | integer | from `ASH_BEDROCK_MAX_TOKENS`, else `4000` | Maximum number of tokens to generate in the response. |
-| <a id="reporters.bedrock-summary-reporter.options.top_p"></a>`top_p` | number | `0.9` | Top-p parameter for the Bedrock model. Controls diversity of generated text. |
-| <a id="reporters.bedrock-summary-reporter.options.max_findings_to_analyze"></a>`max_findings_to_analyze` | integer | `10` | Maximum number of findings to include in the analysis. |
-| <a id="reporters.bedrock-summary-reporter.options.max_findings_per_severity"></a>`max_findings_per_severity` | integer | `5` | Maximum number of findings to include per severity level when grouping by severity. |
+| <a id="reporters.bedrock-summary-reporter.options.temperature"></a>`temperature` | number, at least 0, at most 1 | from `ASH_BEDROCK_TEMPERATURE`, else `0.5` | Temperature parameter for the Bedrock model, 0 to 1 (Converse's range). Higher values make output more random. |
+| <a id="reporters.bedrock-summary-reporter.options.max_tokens"></a>`max_tokens` | integer, at least 1 | from `ASH_BEDROCK_MAX_TOKENS`, else `4000` | Maximum number of tokens to generate in the response, at least 1 (Converse's range). |
+| <a id="reporters.bedrock-summary-reporter.options.top_p"></a>`top_p` | number, at least 0, at most 1 | `0.9` | Top-p parameter for the Bedrock model. Controls diversity of generated text. |
+| <a id="reporters.bedrock-summary-reporter.options.max_findings_to_analyze"></a>`max_findings_to_analyze` | integer, at least 1 | `10` | Maximum number of findings to include in the analysis. At least 1; a smaller value is refused as a configuration error. |
+| <a id="reporters.bedrock-summary-reporter.options.max_findings_per_severity"></a>`max_findings_per_severity` | integer, at least 1 | `5` | Maximum number of findings to include per severity level when grouping by severity. At least 1; a smaller value is refused as a configuration error. |
 | <a id="reporters.bedrock-summary-reporter.options.group_by_severity"></a>`group_by_severity` | boolean | `true` | Whether to group findings by severity level in the report. |
 | <a id="reporters.bedrock-summary-reporter.options.add_section_headers"></a>`add_section_headers` | boolean | `true` | Whether to add section headers to the report for better organization. |
 | <a id="reporters.bedrock-summary-reporter.options.add_table_of_contents"></a>`add_table_of_contents` | boolean | `true` | Whether to add a table of contents to the report. |
@@ -373,7 +374,7 @@ Options, under `reporters.cloudwatch-logs.options`. An option not listed here re
 <!-- doctest: options of=reporters.cloudwatch-logs -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.cloudwatch-logs.options.aws_region"></a>`aws_region` | string or null, matches `(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}` | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `null` | AWS region for CloudWatch Logs |
+| <a id="reporters.cloudwatch-logs.options.aws_region"></a>`aws_region` | string or null, matches `^(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1,2}$` | from `AWS_REGION`, else `null` | AWS region for CloudWatch Logs |
 | <a id="reporters.cloudwatch-logs.options.log_group_name"></a>`log_group_name` | string or null | from `ASH_CLOUDWATCH_LOG_GROUP_NAME`, else `null` | CloudWatch Logs group name to publish results to |
 | <a id="reporters.cloudwatch-logs.options.log_stream_name"></a>`log_stream_name` | string | `ASHScanResults` | CloudWatch Logs stream name to publish results to |
 | <a id="reporters.cloudwatch-logs.options.max_retries"></a>`max_retries` | integer, at most 10 | `3` | Maximum number of retry attempts for CloudWatch API calls |
@@ -395,10 +396,10 @@ Options, under `reporters.s3.options`. An option not listed here refuses the con
 <!-- doctest: options of=reporters.s3 -->
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| <a id="reporters.s3.options.aws_region"></a>`aws_region` | string or null, matches `(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}` | from `AWS_REGION`, else from `AWS_DEFAULT_REGION`, else `null` | AWS region to use for S3 operations |
+| <a id="reporters.s3.options.aws_region"></a>`aws_region` | string or null, matches `^(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1,2}$` | from `AWS_REGION`, else `null` | AWS region to use for S3 operations |
 | <a id="reporters.s3.options.aws_profile"></a>`aws_profile` | string or null | from `AWS_PROFILE`, else `null` | AWS profile to use for authentication |
 | <a id="reporters.s3.options.bucket_name"></a>`bucket_name` | string or null | from `ASH_S3_BUCKET_NAME`, else `null` | Name of the S3 bucket to store reports |
-| <a id="reporters.s3.options.key_prefix"></a>`key_prefix` | string | `ash-reports/` | Prefix for S3 object keys |
+| <a id="reporters.s3.options.key_prefix"></a>`key_prefix` | string | `ash-reports/` | Prefix for S3 object keys, used as written: the object name follows it directly, so end it with '/' to place the report in a directory. A prefix that does not end in '/' is warned about once per run |
 | <a id="reporters.s3.options.file_format"></a>`file_format` | one of `json`, `yaml` | `json` | Format to use for the report file |
 | <a id="reporters.s3.options.max_retries"></a>`max_retries` | integer, at most 10 | `3` | Maximum number of retry attempts for S3 operations |
 | <a id="reporters.s3.options.base_delay"></a>`base_delay` | number, at most 60 | `1.0` | Base delay in seconds between retry attempts |

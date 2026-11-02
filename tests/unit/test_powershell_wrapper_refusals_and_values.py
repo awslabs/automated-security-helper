@@ -744,6 +744,113 @@ def test_a_link_below_the_working_directory_on_the_way_to_the_output_is_refused(
 
 
 @pytest.mark.integration
+@_POSIX_ONLY
+@pytest.mark.parametrize("output", ["the-default", "given-through-the-source"])
+def test_a_linked_source_directory_is_the_operators_own_spelling(
+    output, pwsh, recording_docker, tmp_path
+):
+    """-SourceDir is a link below the working directory, as `Invoke-ASH -SourceDir
+    linked` from a checkout root spells it. The default output directory sits inside
+    the source, so its path runs through that link; the link is the operator's own
+    spelling of the source, as `./ash --source-dir linked` takes it, and is not
+    refused. Before, the walk counted it as a link below the working directory and
+    refused the default with 3. A link below the source still counts (the tests
+    above)."""
+    (tmp_path / "real").mkdir()
+    (tmp_path / "linked").symlink_to(tmp_path / "real", target_is_directory=True)
+    arguments = "-SourceDir linked"
+    if output == "given-through-the-source":
+        arguments += " -OutputDir linked/.ash/ash_output"
+
+    result = _invoke(pwsh, tmp_path, recording_docker, arguments)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "real" / ".ash" / "ash_output").is_dir()
+    assert (tmp_path / "docker-args.txt").exists()
+
+
+@pytest.mark.integration
+@_POSIX_ONLY
+@pytest.mark.parametrize("run", ["-NoRun", "a-run"])
+def test_the_linked_source_itself_as_the_output_directory_is_refused(
+    run, pwsh, recording_docker, tmp_path
+):
+    """-OutputDir names the same link -SourceDir does. The link is the operator's
+    spelling of the source, but the output directory itself is never written through
+    a link, as `./ash` refuses a linked output directory wherever it is: the scan's
+    output and the cleanup of the previous run's would go where the link points.
+    Before, the exemption of the source link covered this case too; a run was still
+    refused as the source directory itself, but -NoRun skips that check, so -NoRun
+    accepted the output and the write check made and deleted a file in the link's
+    target. Refused as a link with 3 either way now, before anything runs."""
+    (tmp_path / "real").mkdir()
+    (tmp_path / "linked").symlink_to(tmp_path / "real", target_is_directory=True)
+    arguments = "-SourceDir linked -OutputDir linked"
+    if run == "-NoRun":
+        arguments = "-NoRun " + arguments
+
+    result = _invoke(pwsh, tmp_path, recording_docker, arguments)
+
+    stderr = " ".join(result.stderr.split())
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "reached through a link" in stderr, result.stderr
+    assert "is the source directory" not in stderr, result.stderr
+    assert not (tmp_path / "docker-args.txt").exists()
+
+
+@pytest.mark.integration
+def test_an_output_directory_above_the_source_is_refused_without_the_hint(
+    pwsh, recording_docker, tmp_path
+):
+    """-OutputDir names a directory above -SourceDir: refused with 3 as the source
+    directory or a directory above it, and the refusal does not name -OutputDir,
+    since the output was given. The same refusal in ./ash carries the hint when the
+    default reaches it (a committed `.ash/ash_output -> ..` resolves the default to
+    the source); in Invoke-ASH the default cannot reach it, because a default that
+    resolves to the source or above it runs through a link below the source, which
+    the link walk refuses first, with the hint. The refusal text carries the hint
+    variable all the same, so the two wrappers' refusals read alike."""
+    (tmp_path / "src" / "sub").mkdir(parents=True)
+
+    result = _invoke(
+        pwsh, tmp_path, recording_docker, "-SourceDir src/sub -OutputDir src"
+    )
+
+    stderr = " ".join(result.stderr.split())
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "is the source directory" in stderr, result.stderr
+    assert "or a directory above it" in stderr, result.stderr
+    assert "pass -OutputDir to write elsewhere" not in stderr, result.stderr
+    assert not (tmp_path / "docker-args.txt").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("output", ["the-default", "given"])
+def test_a_refused_default_output_directory_names_the_parameter(
+    output, pwsh, recording_docker, tmp_path
+):
+    """A file sits where the output directory would be. The refusal of the default
+    names -OutputDir as the way to write elsewhere, as ./ash names --output-dir
+    (tests/unit/test_ash_bash_entrypoint_refusals.py); the refusal of an -OutputDir
+    that was given does not, since the choice was already made."""
+    (tmp_path / "src" / ".ash").mkdir(parents=True)
+    (tmp_path / "src" / ".ash" / "ash_output").write_text("", encoding="utf-8")
+    (tmp_path / "a-file").write_text("", encoding="utf-8")
+    arguments = "-SourceDir src"
+    if output == "given":
+        arguments += " -OutputDir a-file"
+
+    result = _invoke(pwsh, tmp_path, recording_docker, arguments)
+
+    stderr = " ".join(result.stderr.split())
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert "Output directory is not a directory:" in stderr, result.stderr
+    hinted = "pass -OutputDir to write elsewhere" in stderr
+    assert hinted == (output == "the-default"), result.stderr
+    assert not (tmp_path / "docker-args.txt").exists()
+
+
+@pytest.mark.integration
 @pytest.mark.skipif(
     os.name == "nt",
     reason="the recording runner is a POSIX shell script; Windows gets a .cmd stub",
@@ -867,6 +974,64 @@ def test_an_explicit_runner_path_runs_that_path(given, pwsh, tmp_path):
         assert calls == [f"{explicit} run"]
     else:
         assert calls == [f"wrap {explicit}", f"{explicit} run"]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.name == "nt", reason="the stand-in runners are POSIX shell scripts"
+)
+@pytest.mark.parametrize(
+    "wrapper_value", ["bin/wrap -n", "~/bin/wrap -n"], ids=["relative", "tilde"]
+)
+def test_a_relative_runner_wrapper_is_refused_and_nothing_runs(
+    pwsh, tmp_path, wrapper_value
+):
+    """A relative first word of OCI_RUNNER_WRAPPER names a file under the working
+    directory, usually the repository being scanned. Invoke-ASH refuses it with exit
+    3 and the variable named, as ./ash and the ash CLI do: the wrapper is not run and
+    the runner does not start without it. It does not expand a leading ~ (the ash CLI
+    does), so ~/bin/wrap is refused as a relative path, as ./ash refuses it; the
+    docs page for the container runtime says so."""
+    (tmp_path / "src").mkdir()
+    log = tmp_path / "runner-calls.txt"
+    runner = _self_recording_runner(tmp_path / "path-bin", log)
+    wrapper = tmp_path / "bin" / "wrap"
+    wrapper.parent.mkdir()
+    wrapper.write_text(
+        f"#!/bin/sh\nprintf 'wrap %s\\n' \"$1\" >> '{log}'\nexec \"$@\"\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    script = (
+        f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
+        f"try {{ Invoke-ASH -OCIRunner '{runner.as_posix()}' -NoBuild "
+        "-SourceDir src -OutputDir out } "
+        "catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; "
+        "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
+        "exit [int]$LASTEXITCODE"
+    )
+    env = inherited_env("PATH", "ASH_CONFIG", "OCI_RUNNER_WRAPPER")
+    env["PATH"] = os.pathsep.join(
+        [runner.parent.as_posix(), Path(pwsh).resolve().parent.as_posix()]
+    )
+    env.update(scratch_home(tmp_path))
+    env["OCI_RUNNER_WRAPPER"] = wrapper_value
+
+    result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
+        [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 3, shown
+    assert "OCI_RUNNER_WRAPPER starts with the relative path" in " ".join(shown.split())
+    assert not log.exists(), log.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

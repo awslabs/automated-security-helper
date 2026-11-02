@@ -37,6 +37,7 @@ _SCANNER = (
 )
 GEM_PROBE = f"{_SCANNER}.find_executable"
 PLATFORM_PROBE = f"{_SCANNER}.platform.system"
+HEADERS_PROBE = f"{_SCANNER}._ruby_headers_present"
 
 
 @pytest.fixture
@@ -50,8 +51,14 @@ def context(tmp_path: Path) -> PluginContext:
     )
 
 
-def _commands(context, *, gem=None, compiler=None, system="Linux"):
+def _commands(context, *, gem=None, compiler=None, system="Linux", headers=True):
     """Build a scanner with `gem` and a C compiler each present or absent.
+
+    ``headers`` pins the Ruby development-headers probe (``ruby.h`` beside the
+    ``ruby`` on PATH), which otherwise reads the real filesystem of whatever host
+    runs the tests: a Linux runner with a ruby but no ruby-dev package would declare
+    no install command and fail every positive case here for a reason that is not
+    the gate under test.
 
     ``system`` is pinned rather than inherited, and that is load-bearing rather than
     tidiness. The gate branches on the host platform: Windows keys on RI_DEVKIT and
@@ -74,9 +81,73 @@ def _commands(context, *, gem=None, compiler=None, system="Linux"):
     with (
         patch(GEM_PROBE, side_effect=probe),
         patch(PLATFORM_PROBE, return_value=system),
+        patch(HEADERS_PROBE, return_value=headers),
     ):
         scanner = CfnNagScanner(context=context)
     return scanner.get_installation_commands("linux", "amd64")
+
+
+def test_missing_ruby_headers_on_linux_declare_no_install_command(context):
+    """gem and a compiler present, ruby.h absent: psych's extension cannot build.
+
+    A Linux host with ruby but no ruby-dev package passes the gem and compiler
+    probes and then fails inside psych's extconf on the missing header, which would
+    fail `ash dependencies install` for every scanner at once. The gate declares
+    nothing instead, and its warning names the headers.
+    """
+    assert (
+        _commands(context, gem="/usr/bin/gem", compiler="/usr/bin/cc", headers=False)
+        == []
+    )
+
+
+def _headers_probe(tmp_path: Path, layout: str) -> bool:
+    """``_ruby_headers_present`` against a fake ruby under ``tmp_path/prefix``.
+
+    ``layout``: ``versioned`` (Debian: include/ruby-3.3.0/ruby.h), ``flat``
+    (Fedora, RHEL, Amazon Linux: include/ruby.h), ``no-header`` (an include
+    directory with no ruby.h: the dev package is missing) or ``shim`` (no include
+    directory at all: a version manager's shim on PATH).
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cfn_nag_scanner,
+    )
+
+    prefix = tmp_path / "prefix"
+    (prefix / "bin").mkdir(parents=True)
+    ruby = prefix / "bin" / "ruby"
+    ruby.write_text("#!/bin/sh\n", encoding="utf-8")
+    if layout == "versioned":
+        (prefix / "include" / "ruby-3.3.0").mkdir(parents=True)
+        (prefix / "include" / "ruby-3.3.0" / "ruby.h").write_text("", encoding="utf-8")
+    elif layout == "flat":
+        (prefix / "include").mkdir()
+        (prefix / "include" / "ruby.h").write_text("", encoding="utf-8")
+    elif layout == "no-header":
+        (prefix / "include").mkdir()
+    # A system include directory that holds nothing, so only the prefix decides.
+    system_include = tmp_path / "system-include"
+    system_include.mkdir()
+    with patch(GEM_PROBE, return_value=str(ruby)):
+        return cfn_nag_scanner._ruby_headers_present(system_include=system_include)
+
+
+@pytest.mark.parametrize(
+    "layout, present",
+    [
+        pytest.param("versioned", True, id="debian-versioned-dir"),
+        pytest.param("flat", True, id="fedora-flat-ruby-h"),
+        pytest.param("no-header", False, id="dev-package-missing"),
+        pytest.param("shim", True, id="version-manager-shim-undecided"),
+    ],
+)
+def test_the_headers_probe_reads_both_layouts_and_is_undecided_for_a_shim(
+    tmp_path, layout, present
+):
+    """At the base only ``include/ruby-*/ruby.h`` counted, so a Fedora-style
+    ``include/ruby.h`` and an rbenv shim both read as headers missing and cfn-nag
+    as having no install path on hosts where the install succeeds."""
+    assert _headers_probe(tmp_path, layout) is present
 
 
 def test_no_gem_means_no_install_command(context):

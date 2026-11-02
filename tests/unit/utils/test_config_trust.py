@@ -366,7 +366,15 @@ def test_a_client_override_is_not_the_operators(repo, tmp_path, monkeypatch, whe
 def test_a_client_override_leaves_the_operators_own_values_the_operators(
     repo, tmp_path, monkeypatch
 ):
-    """The operator's file outside the tree still vouches for what it sets."""
+    """The operator's file, named as the trusted base, vouches for what it sets
+    beside a client's override.
+
+    ``trusted_config_path`` is the operator's own file; ``config_path`` is the
+    config the scan selected, which a client's upload or a project's own file
+    can replace. With a client's overrides present, a load with ``config_path``
+    alone resolves on the defaults (or ASH_CONFIG's file) as the trusted base, as
+    the MCP flow's callers pass both (``cli/mcp/workspace.py``'s session binding).
+    """
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     operator = tmp_path / "operator.yaml"
     operator.write_text(
@@ -380,6 +388,7 @@ def test_a_client_override_leaves_the_operators_own_values_the_operators(
 
     config = resolve_config(
         config_path=operator,
+        trusted_config_path=operator,
         source_dir=repo,
         config_overrides=[f"{KEY}=sh"],
         client_overrides=True,
@@ -392,12 +401,15 @@ def test_a_client_override_leaves_the_operators_own_values_the_operators(
 def test_a_client_override_that_changes_the_operators_value_is_not_the_operators(
     repo, tmp_path, monkeypatch
 ):
+    """A client's override of a value the operator's trusted base sets is the
+    client's; the operator's own value stays the operator's."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     operator = tmp_path / "operator.yaml"
     operator.write_text(_config_text())
 
     config = resolve_config(
         config_path=operator,
+        trusted_config_path=operator,
         source_dir=repo,
         config_overrides=[f"{KEY}=client-sh"],
         client_overrides=True,

@@ -15,6 +15,12 @@ codebuild_build.sh builds its ``docker run`` command line as one string and runs
 with ``eval``, so every value it is given is read as shell a second time. The paths
 are therefore refused unless they hold only letters, digits and ``._/-``, and the
 images unless they are digest references made of the same characters and ``:@``.
+
+The script runs on a Linux runner, so the paths it is given are POSIX paths. Each is
+read as the string it is, whichever kind of PurePath it is, and none is turned into the
+host's kind on the way. A path of Windows' kind (a drive letter, backslashes) is refused
+like any other path the script would misread; it is not rewritten into a POSIX path to
+get past that check, because the agent does not run on Windows.
 """
 
 from __future__ import annotations
@@ -23,8 +29,8 @@ import re
 import shlex
 import subprocess
 from collections.abc import Callable, Mapping
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePath
+from typing import Any, TypeVar
 
 from .env import launch, launch_env, run_in_new_session
 from .manifest import image_ref
@@ -39,8 +45,11 @@ EVAL_SAFE_PATH = re.compile(r"[A-Za-z0-9._/-]+")
 #: A digest reference made of characters the script's eval reads as themselves.
 EVAL_SAFE_DIGEST_REF = re.compile(r"[A-Za-z0-9._/:-]+@sha256:[0-9a-f]{64}")
 
+#: A path of any kind: a Path of the host, or a PurePosixPath that stays one on Windows.
+_PathT = TypeVar("_PathT", bound=PurePath)
 
-def _eval_safe_path(name: str, path: Path) -> str:
+
+def _eval_safe_path(name: str, path: PurePath) -> str:
     text = str(path)
     if not EVAL_SAFE_PATH.fullmatch(text):
         raise ValueError(
@@ -60,18 +69,27 @@ def _eval_safe_image(manifest: Mapping[str, Any], key: str) -> str:
     return ref
 
 
-def codebuild_dirs(out_dir: Path) -> tuple[Path, Path]:
-    """The artifact and the report directory the agent writes under ``out_dir``."""
-    return Path(out_dir) / "codebuild-artifacts", Path(out_dir) / "codebuild-reports"
+def codebuild_dirs(out_dir: _PathT) -> tuple[_PathT, _PathT]:
+    """The artifact and the report directory the agent writes under ``out_dir``.
+
+    They are paths of the kind ``out_dir`` is. ``Path(out_dir)`` would turn a
+    PurePosixPath into the host's kind, which on Windows is backslashes and a drive.
+    """
+    return out_dir / "codebuild-artifacts", out_dir / "codebuild-reports"
 
 
 def codebuild_argv(
-    manifest: Mapping[str, Any], *, script: Path, source: Path, out_dir: Path
+    manifest: Mapping[str, Any],
+    *,
+    script: PurePath,
+    source: PurePath,
+    out_dir: PurePath,
 ) -> list[str]:
     """``script -q -e -c '<codebuild_build.sh ...>' /dev/null``.
 
     Raises ValueError, naming ``script``, ``source`` or ``out_dir``, for a path the
     script's eval would misread, and for an image that is not a plain digest reference.
+    The paths are read as they are written, so a POSIX path is the same on every host.
     """
     artifacts, reports = codebuild_dirs(out_dir)
     command = shlex.join(

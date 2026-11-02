@@ -327,6 +327,12 @@ def test_an_operator_pointer_folds_as_the_scan_folds_it_when_the_twin_is_in_anot
 
     monkeypatch.setenv("ASH_PRE_CHECK_CELL", _VALUE)
     operator = tmp_path / "operator"
+    # The named config is the operator's: in a configured config root. A named
+    # file the operator did not set aside is the client's to the scan, read
+    # with every chain file confined (client_named_config_is_untrusted), and
+    # the pre-check reads it the same way; the control below is the operator
+    # read, so the file is made the operator's here.
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(operator))
     source = operator / "repo"
     source.mkdir(parents=True)
     ops = operator / "ops"

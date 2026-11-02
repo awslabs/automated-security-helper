@@ -26,22 +26,25 @@ The key of a result is:
   as sorted ``[key, value]`` pairs under the kind's name, so that an edit above the
   finding does not re-key it. A value counts as absent when it is the placeholder
   ``"requires login"``, in any case (semgrep writes ``"matchBasedId/v1": "requires
-  login"`` on every result), or when results of the run with the same scanner,
-  rule, file, package, project and tree carry it at more than one location, a
+  login"`` on every result), when it is empty, or when results of the run with the
+  same scanner, rule, file, package, project and tree carry it at more than one location, a
   location being the lines and the start column, since then it does not tell
   those findings apart. The same value in another file or from another scanner
   does not count: the rest of the key tells those findings apart, and fixing one
   of them would otherwise re-key the other;
-* without fingerprints, its start and end line. Results of the run that share all
-  of that (two secrets on one line) each get an ``occurrence``: the first 8 hex
-  digits of ``sha256(json.dumps([start column or -1, message]))``, with ``json``'s
-  default separators, where the message is the masked one (with a converted
-  file's path replaced by the key's file). Taken from the finding's own content,
-  so a newcomer never takes an existing finding's id and removing one never hands
-  its id to another. Exact duplicates, with the same column and message, also get
-  an ``ordinal`` in the order the scanner listed them: none for the first, then 1,
-  2. A finding alone with its key carries no occurrence, so rewording its message
-  does not re-key it.
+* without fingerprints, its start and end line.
+
+Results of the run that share all of the above, fingerprinted or not (two secrets
+on one line; two results of one scanner and rule carrying one fingerprint value at
+one place), each get an ``occurrence``: the first 8 hex digits of
+``sha256(json.dumps([start column or -1, message]))``, with ``json``'s default
+separators, where the message is the masked one (with a converted file's path
+replaced by the key's file). Taken from the finding's own content, so a newcomer
+never takes an existing finding's id and removing one never hands its id to
+another. Exact duplicates, with the same column and message, also get an
+``ordinal`` in the order the scanner listed them: none for the first, then 1, 2.
+A finding alone with its key carries no occurrence, so rewording its message does
+not re-key it.
 
 The project is the result's workspace project, or failing that the one the run's
 results were written for.
@@ -94,8 +97,10 @@ FINDING_ID_DIGEST_LENGTH = 12
 OCCURRENCE_DIGEST_LENGTH = 8
 
 #: Fingerprint values that do not identify anything, compared stripped and in
-#: lower case.
-PLACEHOLDER_FINGERPRINT_VALUES = frozenset({"requires login"})
+#: lower case. An empty value is one too (:func:`result_fingerprints`): a lone
+#: result whose only fingerprint is "" was keyed by scanner, rule and file alone,
+#: and a later, different finding of that rule in that file took its id.
+PLACEHOLDER_FINGERPRINT_VALUES = frozenset({"requires login", ""})
 
 #: The fingerprint kinds, in the order they are preferred.
 FINGERPRINT_KINDS = ("fingerprints", "partialFingerprints")
@@ -174,7 +179,12 @@ def relative_path(
 
 
 def result_fingerprints(result: Any) -> Fingerprints:
-    """The result's SARIF fingerprints of each kind, sorted, placeholders removed."""
+    """The result's SARIF fingerprints of each kind, sorted, placeholders removed.
+
+    A value that is empty, or only whitespace, identifies nothing and is left
+    out like the ``"requires login"`` placeholder; a kind whose every value is
+    one is absent, so the result is keyed by its lines instead.
+    """
     found = []
     for kind in FINGERPRINT_KINDS:
         values = getattr(result, kind, None)
@@ -184,7 +194,8 @@ def result_fingerprints(result: Any) -> Fingerprints:
             sorted(
                 (str(k), str(v))
                 for k, v in values.items()
-                if str(v).strip().lower() not in PLACEHOLDER_FINGERPRINT_VALUES
+                if v is not None
+                and str(v).strip().lower() not in PLACEHOLDER_FINGERPRINT_VALUES
             )
         )
         if pairs:
@@ -292,11 +303,11 @@ def identity_keys(
 
     Returned in the order given. The run matters three times: a fingerprint value
     that results with the same scanner, rule, file, package, project and tree
-    carry at more than one location counts as absent, results keyed by their
-    lines that share a key get an ``occurrence``, and exact duplicates among
-    those an ``ordinal``. *default_project* is the workspace project the run's
-    results were written for, used for a result that names none, before the
-    fingerprint values are counted.
+    carry at more than one location counts as absent, results that share a key,
+    fingerprinted or keyed by their lines, get an ``occurrence``, and exact
+    duplicates among those an ``ordinal``. *default_project* is the workspace
+    project the run's results were written for, used for a result that names
+    none, before the fingerprint values are counted.
     """
     bases: List[Dict[str, Any]] = []
     for identity in identities:
@@ -321,7 +332,11 @@ def identity_keys(
                 break
         else:
             key["startLine"], key["endLine"] = identity.lines
-            by_location[canonical(key)].append(index)
+        # Every key, fingerprinted or not: two results of one scanner and rule
+        # that carry the same fingerprint value at the same lines and column are
+        # not told apart by the value (it is shared only across locations), so
+        # without this they got one key, one finding id and one Security Hub Id.
+        by_location[canonical(key)].append(index)
         keys.append(key)
     for members in by_location.values():
         if len(members) < 2:

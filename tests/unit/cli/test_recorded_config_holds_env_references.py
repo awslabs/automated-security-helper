@@ -39,7 +39,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import pytest
 from typer.testing import CliRunner
@@ -270,7 +270,12 @@ def test_the_shard_records_each_reference_as_written(runs):
     assert options["language_override"] == "!ENV ${ASH_PROBE_CANARY}"
     assert options["package_manager_override"] == "${ASH_PROBE_CANARY:fallback}"
     assert "${ASH_PROBE_CANARY}" in config["scanners"]
-    assert "${ASH_PROBE_CANARY}" in data["metadata"]["expected_scanners"]
+    # The section is disabled and still listed: the roster is what the
+    # configuration declares, and the record holds the key as the file wrote it,
+    # not as the environment resolved it.
+    expected = data["metadata"]["expected_scanners"]
+    assert "${ASH_PROBE_CANARY}" in expected
+    assert CANARY not in expected
 
 
 def test_the_results_files_hold_no_env_value(runs):
@@ -345,11 +350,44 @@ def test_no_output_holds_an_env_value(runs, command, directory):
     assert leaked == [], leaked
 
 
+def _report_document(stdout: str) -> Tuple[dict, str]:
+    """The JSON document ``ash report`` writes to stdout when no output file is
+    asked for, and the rest of stdout around it.
+
+    The document may be printed on one line or pretty-printed over many: it runs
+    from the first line that opens an object to the last line that closes one,
+    and a log line printed before it starts with its level, not with a brace."""
+    lines = stdout.splitlines(keepends=True)
+    opens = [index for index, line in enumerate(lines) if line.lstrip().startswith("{")]
+    closes = [index for index, line in enumerate(lines) if line.rstrip().endswith("}")]
+    assert opens and closes, stdout
+    first, last = opens[0], closes[-1]
+    document = json.loads("".join(lines[first : last + 1]))
+    return document, "".join(lines[:first] + lines[last + 1 :])
+
+
 @pytest.mark.parametrize(
     "command, directory", [("merge", "merged"), ("report", "shard/reports")]
 )
 def test_no_output_holds_an_override_value(runs, command, directory):
     channels = _channels(runs, command, runs["root"] / directory)
+    if command == "report":
+        # The report command prints the gitlab-cyclonedx document itself on
+        # stdout, and the document carries the reporter's category option as
+        # the GitLab property it is required to write, an empty inventory
+        # included. The override's value may stand there, once, and nowhere
+        # else on stdout.
+        document, rest = _report_document(channels.pop("report stdout"))
+        channels["report stdout outside the document"] = rest
+        holders = [
+            entry
+            for entry in document["metadata"]["properties"]
+            if OVERRIDE_VALUE in str(entry.get("value", ""))
+        ]
+        assert holders == [
+            {"name": "gitlab:dependency_scanning:category", "value": OVERRIDE_VALUE}
+        ], holders
+        assert json.dumps(document).count(OVERRIDE_VALUE) == 1
     leaked = [name for name, text in channels.items() if OVERRIDE_VALUE in text]
     assert leaked == [], leaked
     # The control: the merge applied the override, so its value was there to
@@ -595,7 +633,7 @@ def test_ash_config_get_shows_the_reference(tmp_path, probe_env):
     assert "${ASH_PROBE_CANARY}" in result.output
 
 
-def test_ash_config_update_keeps_the_reference(tmp_path, probe_env):
+def test_ash_config_update_refuses_a_file_with_references(tmp_path, probe_env):
     """``ash config update`` writes the whole resolved config back, which would
     replace each reference with its value, so a file with environment references
     is refused with exit 1 and left as written (cli/config.py, _rewrite_refusal);

@@ -161,6 +161,8 @@ def _scan(tmp_path: Path, mode: str) -> dict:
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
         check=False,
     )

@@ -24,6 +24,11 @@ from automated_security_helper.utils.workspace_paths import (
     to_project_pattern,
     to_workspace_pattern,
 )
+from tests.unit.utils.workspace_path_contract import (
+    MATCHERS as _MATCHERS,
+    assert_contract,
+    disagreeing_paths,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -276,7 +281,9 @@ class TestDownConversionAnchored:
             ("project-a/src/x.py", "project-a", "src/x.py"),
             ("project-a/tests/**/*.py", "project-a", "tests/**/*.py"),
             ("apps/web/src/x.py", "apps/web", "src/x.py"),
-            ("/project-a/src/x.py", "project-a", "src/x.py"),
+            # "/project-a/src/x.py" is not here: the matcher reads its leading
+            # separator literally, so it matches no workspace-relative path, and
+            # down-conversion refuses it (test_workspace_paths_down_conversion_edges).
             ("project-a/a/b/c.py", "project-a", "a/b/c.py"),
         ],
     )
@@ -476,18 +483,7 @@ class TestDownConversionContract:
         except WorkspacePatternError:
             pytest.skip("fail-closed class; covered by TestFailClosedIsNecessary")
 
-        for path in self.PATHS:
-            in_project = (
-                False
-                if project_pattern is None
-                else file_path_matches(path, project_pattern)
-            )
-            in_workspace = file_path_matches(f"{prefix}/{path}", pattern)
-            assert in_project == in_workspace, (
-                f"pattern={pattern!r} prefix={prefix!r} "
-                f"rewritten={project_pattern!r} path={path!r}: "
-                f"project says {in_project}, workspace says {in_workspace}"
-            )
+        assert_contract(pattern, prefix, SUPPRESSION, self.PATHS, project_pattern)
 
     def test_the_reported_regression(self):
         """The exact case from review: "*/src/x.py" over project "api"."""
@@ -564,12 +560,9 @@ class TestFailClosedIsNecessary:
 
         # Prove the raise is earned: every candidate rewrite is wrong somewhere.
         for rewrite in self.CANDIDATE_REWRITES(pattern):
-            wrong = [
-                path
-                for path in self.PROBE_PATHS
-                if (False if rewrite is None else file_path_matches(path, rewrite))
-                != file_path_matches(f"{prefix}/{path}", pattern)
-            ]
+            wrong = disagreeing_paths(
+                pattern, prefix, SUPPRESSION, self.PROBE_PATHS, rewrite
+            )
             assert wrong, (
                 f"rewrite {rewrite!r} actually satisfies the contract for "
                 f"{pattern!r} over {prefix!r} -- the fail-closed is unnecessary"
@@ -696,8 +689,6 @@ class TestNoConcatenationArtefacts:
 # Tests: the contract for each kind of policy entry
 # ---------------------------------------------------------------------------
 
-_MATCHERS = {IGNORE_PATH: ignore_path_matches, SUPPRESSION: file_path_matches}
-
 #: Every project path of one to three components from these names.
 _PATHS = [
     "/".join(parts)
@@ -711,10 +702,12 @@ _PATHS = [
 _PATTERN_PARTS = ["x", "X", "sub", "y.py", "*", "**", "?", "x*", "*.py", "[xX]", "."]
 
 #: The shapes named for this contract, over the project "x" and from the top,
-#: and the two reported defects.
+#: and the two reported defects. The anchors "/" and "/**/" put a leading
+#: separator in front of each shape, so both matchers decide it: a rooted pattern
+#: is refused for each kind, and "/**/" is the one the matcher absorbs.
 _NAMED_SHAPES = [
     anchor + shape
-    for anchor in ("", "x/", "X/", "*/", "**/", "x/sub/")
+    for anchor in ("", "x/", "X/", "*/", "**/", "x/sub/", "/", "/**/")
     for shape in ("x/", "x/**", "./x", "x/./y", "x", "", "X", "X/", "x//y", "**/")
 ] + ["api/vendor/", "./api/x.py"]
 
@@ -733,18 +726,11 @@ _PREFIXES = ["x", "X", "x/sub", "api", "sub/x", "a/b"]
 
 def _outcome(kind, pattern, prefix):
     """``(rewritten, disagreeing paths)``, or ``None`` when the pattern is refused."""
-    matches = _MATCHERS[kind]
     try:
         rewritten = to_project_pattern(pattern, prefix, kind=kind)
     except WorkspacePatternError:
         return None
-    disagreeing = [
-        path
-        for path in _PATHS
-        if (False if rewritten is None else matches(path, rewritten))
-        != matches(f"{prefix}/{path}", pattern)
-    ]
-    return rewritten, disagreeing
+    return rewritten, disagreeing_paths(pattern, prefix, kind, _PATHS, rewritten)
 
 
 class TestDownConversionPerKind:
@@ -770,8 +756,8 @@ class TestDownConversionPerKind:
     def test_the_sweep_is_not_vacuous(self, kind):
         """Hundreds of pairs convert, and both verdicts occur among them.
 
-        Of the 1,764 pairs, 379 suppressions and 427 ignore paths convert; the
-        floor is below both, so a change that refused or dropped everything
+        Of the 1,878 pairs, hundreds of suppressions and of ignore paths convert;
+        the floor is below both, so a change that refused or dropped everything
         fails here instead of passing the agreement cells by having no answers.
         """
         outcomes = [
@@ -780,7 +766,7 @@ class TestDownConversionPerKind:
             for prefix in _PREFIXES
         ]
         converted = [o for o in outcomes if o is not None and o[0] is not None]
-        assert len(_PATTERNS) == 294
+        assert len(_PATTERNS) == 313
         assert len(converted) >= 350
         verdicts = {
             _MATCHERS[kind](path, rewritten)

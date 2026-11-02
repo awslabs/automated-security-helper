@@ -494,7 +494,7 @@ class TestRunCmdDirectInterruption:
         assert process.signals == [signal.SIGINT]
         assert process.terminated is False
         assert process.killed is True
-        assert process.wait_timeouts == [5, None]
+        assert process.wait_timeouts == [5, _REAP]
 
     def test_ctrl_c_does_not_kill_a_runtime_that_stops_on_the_interrupt(
         self, stub_process
@@ -524,7 +524,7 @@ class TestRunCmdDirectInterruption:
             run_cmd_direct(["ignored"], check=False)
 
         assert process.killed is True
-        assert process.wait_timeouts == [5, None]
+        assert process.wait_timeouts == [5, _REAP]
 
     def test_a_terminals_ctrl_c_is_not_sent_to_the_runtime_twice(
         self, stub_process, monkeypatch
@@ -558,6 +558,17 @@ _SLICES = [INTERRUPT_WAIT_SLICE_SECONDS] * round(
     INTERRUPT_GRACE_SECONDS / INTERRUPT_WAIT_SLICE_SECONDS
 )
 
+#: The wait after a kill: bounded, so a runtime SIGKILL did not end (in
+#: uninterruptible sleep, say) is not waited for without end.
+_REAP = subprocess_utils._REAP_SECONDS
+
+
+@pytest.mark.unit
+def test_the_wait_after_a_kill_is_a_number_not_unbounded():
+    """The expectations above read ``_REAP`` from the product, so a product that
+    went back to waiting without end (None) would still satisfy all of them."""
+    assert isinstance(_REAP, (int, float)) and 0 < _REAP <= 30, _REAP
+
 
 @pytest.mark.unit
 class TestRunCmdDirectInterruptionOnWindows:
@@ -583,7 +594,7 @@ class TestRunCmdDirectInterruptionOnWindows:
 
         assert process.terminated is False
         assert process.signals == []
-        assert process.wait_timeouts == _SLICES + [None]
+        assert process.wait_timeouts == _SLICES + [_REAP]
         assert process.killed is True, "a runtime still running after the grace"
 
     def test_with_a_console_a_runtime_that_stops_in_the_grace_is_not_killed(
@@ -618,7 +629,7 @@ class TestRunCmdDirectInterruptionOnWindows:
 
         assert process.terminated is False
         assert process.killed is True
-        assert process.wait_timeouts == _SLICES[:1] + [None]
+        assert process.wait_timeouts == _SLICES[:1] + [_REAP]
 
     def test_without_a_console_the_runtime_is_terminated(
         self, stub_process, monkeypatch
@@ -1572,19 +1583,33 @@ class TestExecuteContainer:
         self, monkeypatch, capfd
     ):
         """The caller inspects returncode; raising here would lose the stderr."""
-        failure = CalledProcessError(
-            2, ["docker", "run"], output="out", stderr="scan failed"
-        )
+        command = [
+            "docker",
+            "run",
+            "img",
+            "ash",
+            "--config-overrides",
+            "project_name=hunter2",
+        ]
+        failure = CalledProcessError(2, command, output="out", stderr="scan failed")
 
         def explode(cmd, debug=False, env=None):
             raise failure
 
         monkeypatch.setattr(rac, "run_cmd_direct", explode)
 
-        result = _execute_container(["docker", "run"], debug=True)
+        result = _execute_container(command, debug=True)
 
         assert result is failure
-        assert "Container execution failed with error:" in capfd.readouterr().out
+        out = capfd.readouterr().out
+        # The line names the status and the command in its shown form, each
+        # override value as its key, never the raw argv.
+        assert "hunter2" not in out, out
+        (failure_line,) = [
+            line for line in out.splitlines() if "Container execution failed" in line
+        ]
+        assert "code 2" in failure_line, failure_line
+        assert "project_name" in failure_line, failure_line
 
     def test_without_debug_nothing_extra_is_printed(self, monkeypatch, capfd):
         expected = create_completed_process(args=["docker"], returncode=0)

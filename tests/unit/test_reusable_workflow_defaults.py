@@ -206,7 +206,7 @@ class TestTheResolutionStep:
     def test_explicit_inputs_win(self, tmp_path):
         result, github_env, _ = _run_resolve(
             tmp_path,
-            CHECKED_ASH_VERSION="v3.7.0",
+            CHECKED_ASH_VERSION="v3.7.1",
             CHECKED_ASH_REPO="a-fork/automated-security-helper",
             JOB_CONTEXT=_job_context(
                 workflow_sha=SHA,
@@ -217,7 +217,7 @@ class TestTheResolutionStep:
         assert result.returncode == 0, result.stderr
         assert (
             "ASH_UVX_SOURCE=automated-security-helper[cdk] @ "
-            "git+https://github.com/a-fork/automated-security-helper@v3.7.0"
+            "git+https://github.com/a-fork/automated-security-helper@v3.7.1"
         ) in github_env.splitlines()
 
     def test_without_the_job_context_it_fails_instead_of_guessing(self, tmp_path):
@@ -233,7 +233,7 @@ class TestTheResolutionStep:
     @pytest.mark.parametrize(
         "given, missing",
         [
-            ({"CHECKED_ASH_VERSION": "v3.7.0"}, "ash-repo"),
+            ({"CHECKED_ASH_VERSION": "v3.7.1"}, "ash-repo"),
             ({"CHECKED_ASH_REPO": "awslabs/automated-security-helper"}, "ash-version"),
         ],
         ids=["only-ash-version", "only-ash-repo"],
@@ -256,14 +256,14 @@ class TestTheResolutionStep:
     def test_without_the_job_context_both_inputs_are_enough(self, tmp_path):
         result, github_env, _ = _run_resolve(
             tmp_path,
-            CHECKED_ASH_VERSION="v3.7.0",
+            CHECKED_ASH_VERSION="v3.7.1",
             CHECKED_ASH_REPO="awslabs/automated-security-helper",
         )
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert (
             "ASH_UVX_SOURCE=automated-security-helper[cdk] @ "
-            "git+https://github.com/awslabs/automated-security-helper@v3.7.0"
+            "git+https://github.com/awslabs/automated-security-helper@v3.7.1"
         ) in github_env.splitlines()
 
     def test_another_repository_without_a_version_is_refused(self, tmp_path):
@@ -332,7 +332,7 @@ class TestTheResolutionStep:
         "field, value",
         [
             ("CHECKED_ASH_VERSION", "main\nPATH=/tmp/evil"),
-            ("CHECKED_ASH_VERSION", "v3.7.0 extra"),
+            ("CHECKED_ASH_VERSION", "v3.7.1 extra"),
             ("CHECKED_ASH_VERSION", "feat..x"),
             ("CHECKED_ASH_VERSION", "feat.lock"),
             ("CHECKED_ASH_VERSION", "feat:x"),
@@ -374,7 +374,7 @@ class TestTheResolutionStep:
         """
         result, github_env, github_output = _run_resolve(
             tmp_path,
-            CHECKED_ASH_VERSION="v3.7.0",
+            CHECKED_ASH_VERSION="v3.7.1",
             CHECKED_ASH_REPO=repo,
             JOB_CONTEXT=_job_context(
                 workflow_sha=SHA,
@@ -421,7 +421,7 @@ class TestTheResolutionStep:
         """
         result, github_env, github_output = _run_resolve(
             tmp_path,
-            CHECKED_ASH_VERSION="v3.7.0",
+            CHECKED_ASH_VERSION="v3.7.1",
             JOB_CONTEXT=_job_context(
                 workflow_sha=SHA, workflow_repository="a/b\nINJECTED=1"
             ),

@@ -211,9 +211,16 @@ class TestWizardCommand:
         assert "ASH_OFFLINE" not in raw
 
     def test_wizard_adds_community_plugin_modules(self, cli_runner, config_path):
-        """New community plugin modules are written to the config."""
+        """New community plugin modules are written to the config.
+
+        The typed module's top-level package ends in ``_ash_plugins``, which puts
+        it inside ASH's plugin namespace (plugins/loader.py's rule): the wizard
+        refuses a module outside the namespace before writing, as a scan of the
+        written file would, and writes one inside it whether or not a package
+        provides it yet.
+        """
         user_input = self._build_input(
-            new_modules=["my_company.ash_plugins.scanners"],
+            new_modules=["my_company_ash_plugins.scanners"],
         )
         result = cli_runner.invoke(
             config_app,
@@ -225,7 +232,7 @@ class TestWizardCommand:
         with open(config_path) as f:
             data = yaml.safe_load(f)
 
-        assert "my_company.ash_plugins.scanners" in data.get("ash_plugin_modules", [])
+        assert "my_company_ash_plugins.scanners" in data.get("ash_plugin_modules", [])
 
     def test_the_wizard_keeps_a_listed_module_and_adds_one(
         self, cli_runner, config_path, root
@@ -242,19 +249,21 @@ class TestWizardCommand:
             )
         )
 
+        # Inside ASH's plugin namespace by its top-level package, as the planted
+        # names are; the wizard refuses a typed module outside it before writing.
         result = cli_runner.invoke(
             config_app,
             ["wizard", "--config", str(config_path)],
             input=self._build_input(
                 project_name="seed-project",
                 existing_module_keeps=[False, True],
-                new_modules=["my_company.ash_plugins.extra"],
+                new_modules=["my_company_ash_plugins.extra"],
             ),
         )
         assert result.exit_code == 0, f"wizard failed: {result.output}"
 
         data = yaml.safe_load(config_path.read_text())
-        assert data["ash_plugin_modules"] == [SEC_ONE, "my_company.ash_plugins.extra"]
+        assert data["ash_plugin_modules"] == [SEC_ONE, "my_company_ash_plugins.extra"]
 
     def test_wizard_keeps_output_formats_loadable(self, cli_runner, config_path):
         """An existing output_formats list comes back as names, not Python tags.

@@ -397,6 +397,7 @@ _CONTENT_KEYWORDS = {"content", "label", "message", "prompt", "renderable", "tit
 #: reads as markup.
 _TEXT_HELPERS = {
     "_shown",
+    "_shown_prose",
     "_shown_one_line",
     "_cell",
     "_snippet",
@@ -420,7 +421,7 @@ _STR_HELPER = "_text"
 #: The markup-reading calls and assignments the package holds, the app's
 #: ``self.title = _text(title)`` included. Change it with each one added or removed; any
 #: other change means a call left the guard's view.
-CHECKED_CALLS = 60
+CHECKED_CALLS = 62
 
 
 def _safe(node: ast.AST, *, str_ok: bool = False) -> bool:

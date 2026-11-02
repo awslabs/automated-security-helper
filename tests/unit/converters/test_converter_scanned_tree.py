@@ -466,8 +466,10 @@ class TestArchiveMembers:
     def test_members_without_a_scannable_extension_are_left_out_silently(
         self, tree, test_plugin_context, monkeypatch, ash_warnings
     ):
-        """Only a member that would otherwise have been extracted is reported."""
-        link = tarfile.TarInfo("README")
+        """Only a member that would otherwise have been extracted is reported. The
+        link is named as an image no scanner reads: a README is scanned by the
+        secret scanners and is extracted, so a link by that name is refused aloud."""
+        link = tarfile.TarInfo("logo.png")
         link.type = tarfile.SYMTYPE
         link.linkname = "/etc/hostname"
         archive = self._tar_with(tree / "a.tar", link)

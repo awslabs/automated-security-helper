@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 from automated_security_helper.cli import dependencies
@@ -256,6 +257,8 @@ def test_a_blank_ash_bin_path_does_not_point_into_the_working_directory(
         cwd=project,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     expected = repr(str(home / ".ash" / "bin"))
@@ -274,6 +277,8 @@ def _install_in_a_new_process(tmp_path, blank, *args):
         cwd=project,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     return home, project, result, _flat(result.stdout + result.stderr)
@@ -376,7 +381,11 @@ def test_the_powershell_line_doubles_every_quote_powershell_ends_a_string_on(
     hint = dependencies._bin_path_hint(directory, None)
     assert hint is not None
     doubled = str(directory).replace(quote, quote * 2)
-    assert f"$env:ASH_BIN_PATH = '{doubled}'" in hint, hint
+    # The hint is Rich markup: the escape closes a value holding a colon off with
+    # empty style tags, which every absolute Windows path (its drive colon) gets,
+    # so the line is read as it renders, the text a user sees.
+    rendered = Text.from_markup(hint).plain
+    assert f"$env:ASH_BIN_PATH = '{doubled}'" in rendered, hint
 
 
 @pytest.mark.unit

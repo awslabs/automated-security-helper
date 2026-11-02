@@ -189,7 +189,22 @@
       "network_scanners": null,
       "extra_read_paths": [],
       "read_path_scanners": [],
-      "env_scanners": []
+      "env_scanners": [],
+      "environment": [
+        "ALL_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "NO_PROXY",
+        "all_proxy",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_DIR"
+      ]
     },
     "content_db_staleness": "fail",
     "content_db_staleness_overrides": [],
@@ -242,7 +257,7 @@
           "ignore_nosec": false,
           "excluded_paths": [],
           "additional_formats": [],
-          "tool_version": ">=1.7.0,<2.0.0",
+          "tool_version": ">=1.7.8,<2.0.0",
           "install_timeout": 300
         }
       },
@@ -512,7 +527,8 @@
         "name": "github-ghas",
         "enabled": true,
         "options": {
-          "exclude_suppressed": true
+          "exclude_suppressed": true,
+          "emit_automation_details": false
         },
         "extension": "ghas.sarif"
       },
@@ -625,7 +641,7 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": null,
-      "duration": 0.0,
+      "duration": null,
       "missing_reason": "its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message",
       "skipped_reason": null
     },
@@ -645,7 +661,7 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": null,
-      "duration": 0.0,
+      "duration": null,
       "missing_reason": null,
       "skipped_reason": "left out of this run"
     },
@@ -911,10 +927,10 @@
                   "tool_name": "bandit",
                   "tool_version": "1.8.6",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 1.25,
                     "start_time": "2026-01-15T12:00:00+00:00",
-                    "end_time": "2026-01-15T12:00:01.250000+00:00"
+                    "end_time": "2026-01-15T12:00:01.250000+00:00",
+                    "exit_code": 0,
+                    "duration": 1.25
                   }
                 }
               }
@@ -1039,10 +1055,10 @@
                   "tool_name": "checkov",
                   "tool_version": "3.2.469",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 7.5,
                     "start_time": "2026-01-15T12:00:01.250000+00:00",
-                    "end_time": "2026-01-15T12:00:08.750000+00:00"
+                    "end_time": "2026-01-15T12:00:08.750000+00:00",
+                    "exit_code": 0,
+                    "duration": 7.5
                   }
                 }
               }
@@ -1127,10 +1143,10 @@
                   "tool_name": "semgrep",
                   "tool_version": "1.140.0",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 4.0,
                     "start_time": "2026-01-15T12:00:08.750000+00:00",
-                    "end_time": "2026-01-15T12:00:12.750000+00:00"
+                    "end_time": "2026-01-15T12:00:12.750000+00:00",
+                    "exit_code": 0,
+                    "duration": 4.0
                   }
                 }
               }
@@ -1195,10 +1211,10 @@
                   "tool_name": "detect-secrets",
                   "tool_version": "1.5.0",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 0.5,
                     "start_time": "2026-01-15T12:00:12.750000+00:00",
-                    "end_time": "2026-01-15T12:00:13.250000+00:00"
+                    "end_time": "2026-01-15T12:00:13.250000+00:00",
+                    "exit_code": 0,
+                    "duration": 0.5
                   }
                 }
               }
@@ -1289,10 +1305,10 @@
                   "tool_name": "grype",
                   "tool_version": "0.100.0",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 3.0,
                     "start_time": "2026-01-15T12:00:13.250000+00:00",
-                    "end_time": "2026-01-15T12:00:16.250000+00:00"
+                    "end_time": "2026-01-15T12:00:16.250000+00:00",
+                    "exit_code": 0,
+                    "duration": 3.0
                   }
                 }
               }
@@ -1336,10 +1352,10 @@
                   "tool_name": "cfn-nag",
                   "tool_version": "0.8.10",
                   "tool_invocation": {
-                    "exit_code": 1,
-                    "duration": 0.25,
                     "start_time": "2026-01-15T12:00:18.250000+00:00",
-                    "end_time": "2026-01-15T12:00:18.500000+00:00"
+                    "end_time": "2026-01-15T12:00:18.500000+00:00",
+                    "exit_code": 1,
+                    "duration": 0.25
                   }
                 }
               }
@@ -1444,10 +1460,10 @@
                 "tool_name": "bandit",
                 "tool_version": "1.8.6",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 1.25,
                   "start_time": "2026-01-15T12:00:00+00:00",
-                  "end_time": "2026-01-15T12:00:01.250000+00:00"
+                  "end_time": "2026-01-15T12:00:01.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 1.25
                 }
               }
             }
@@ -1535,10 +1551,10 @@
                 "tool_name": "bandit",
                 "tool_version": "1.8.6",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 1.25,
                   "start_time": "2026-01-15T12:00:00+00:00",
-                  "end_time": "2026-01-15T12:00:01.250000+00:00"
+                  "end_time": "2026-01-15T12:00:01.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 1.25
                 }
               }
             }
@@ -1625,10 +1641,10 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
                 }
               }
             }
@@ -1715,10 +1731,10 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
                 }
               }
             }
@@ -1805,10 +1821,10 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
                 }
               }
             }
@@ -1895,10 +1911,10 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 7.5,
                   "start_time": "2026-01-15T12:00:01.250000+00:00",
-                  "end_time": "2026-01-15T12:00:08.750000+00:00"
+                  "end_time": "2026-01-15T12:00:08.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 7.5
                 }
               }
             }
@@ -1985,10 +2001,10 @@
                 "tool_name": "semgrep",
                 "tool_version": "1.140.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 4.0,
                   "start_time": "2026-01-15T12:00:08.750000+00:00",
-                  "end_time": "2026-01-15T12:00:12.750000+00:00"
+                  "end_time": "2026-01-15T12:00:12.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 4.0
                 }
               }
             }
@@ -2075,10 +2091,10 @@
                 "tool_name": "semgrep",
                 "tool_version": "1.140.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 4.0,
                   "start_time": "2026-01-15T12:00:08.750000+00:00",
-                  "end_time": "2026-01-15T12:00:12.750000+00:00"
+                  "end_time": "2026-01-15T12:00:12.750000+00:00",
+                  "exit_code": 0,
+                  "duration": 4.0
                 }
               }
             }
@@ -2150,7 +2166,10 @@
                 "state": null,
                 "justification": "(ASH) Suppressing finding for rule 'SECRET-SECRET-KEYWORD' in 'app/app.py' with reason: Fixture placeholder credential, not a real secret",
                 "location": null,
-                "properties": null
+                "properties": {
+                  "tags": [],
+                  "ashApplied": true
+                }
               }
             ],
             "baselineState": null,
@@ -2174,10 +2193,10 @@
                 "tool_name": "detect-secrets",
                 "tool_version": "1.5.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 0.5,
                   "start_time": "2026-01-15T12:00:12.750000+00:00",
-                  "end_time": "2026-01-15T12:00:13.250000+00:00"
+                  "end_time": "2026-01-15T12:00:13.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 0.5
                 }
               }
             }
@@ -2264,10 +2283,10 @@
                 "tool_name": "grype",
                 "tool_version": "0.100.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 3.0,
                   "start_time": "2026-01-15T12:00:13.250000+00:00",
-                  "end_time": "2026-01-15T12:00:16.250000+00:00"
+                  "end_time": "2026-01-15T12:00:16.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 3.0
                 }
               }
             }
@@ -2354,10 +2373,10 @@
                 "tool_name": "grype",
                 "tool_version": "0.100.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 3.0,
                   "start_time": "2026-01-15T12:00:13.250000+00:00",
-                  "end_time": "2026-01-15T12:00:16.250000+00:00"
+                  "end_time": "2026-01-15T12:00:16.250000+00:00",
+                  "exit_code": 0,
+                  "duration": 3.0
                 }
               }
             }
@@ -2417,7 +2436,7 @@
             "name": "syft",
             "version": "1.33.0",
             "description": null,
-            "scope": "required",
+            "scope": null,
             "hashes": null,
             "licenses": null,
             "copyright": null,
@@ -2457,7 +2476,7 @@
         "name": "snapshot-fixture",
         "version": null,
         "description": null,
-        "scope": "required",
+        "scope": null,
         "hashes": null,
         "licenses": null,
         "copyright": null,
@@ -2498,12 +2517,19 @@
         "name": "requests",
         "version": "2.19.1",
         "description": null,
-        "scope": "required",
+        "scope": null,
         "hashes": null,
         "licenses": [
           {
             "license": {
-              "id": "Apache-2.0"
+              "bom-ref": null,
+              "id": "Apache-2.0",
+              "name": null,
+              "acknowledgement": null,
+              "text": null,
+              "url": null,
+              "licensing": null,
+              "properties": null
             }
           }
         ],
@@ -2548,7 +2574,7 @@
         "name": "python",
         "version": "3.12-slim",
         "description": null,
-        "scope": "required",
+        "scope": null,
         "hashes": null,
         "licenses": null,
         "copyright": null,

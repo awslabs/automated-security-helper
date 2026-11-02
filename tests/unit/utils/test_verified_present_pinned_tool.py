@@ -103,6 +103,13 @@ def _tarball(member_bytes: bytes) -> bytes:
 
 
 class _FakeResponse(io.BytesIO):
+    """A urlopen response: a context manager with the headers the body copy
+    reads (``_copy_whole_body`` checks the copied bytes against Content-Length)."""
+
+    def __init__(self, payload: bytes = b""):
+        super().__init__(payload)
+        self.headers = {"Content-Length": str(len(payload))}
+
     def __enter__(self):
         return self
 
@@ -159,8 +166,17 @@ def on_path(tmp_path, monkeypatch):
     def find_executable(command, *args, **kwargs):
         return str(resolved.grype) if command == "grype" and resolved.grype else None
 
+    def find_executable_for_scan(command, root, *args, **kwargs):
+        # The install command looks a tool up as a scan of the source tree
+        # does (find_executable_for_scan, bound by name on its module); the
+        # scope is ignored here, so the command resolves the same copy the
+        # rest of the test sees.
+        return find_executable(command)
+
     monkeypatch.setattr(subprocess_utils, "find_executable", find_executable)
-    monkeypatch.setattr(dependencies_module, "find_executable", find_executable)
+    monkeypatch.setattr(
+        dependencies_module, "find_executable_for_scan", find_executable_for_scan
+    )
     monkeypatch.setattr(
         subprocess_utils,
         "path_independent_dirs",
@@ -378,6 +394,41 @@ class TestADifferentBinaryIsStillInstalled:
         assert len(downloads.urls) == 1
         assert installed == bin_dir / "grype"
         assert not installed.is_symlink()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="O_NOFOLLOW is 0 on Windows, so the open follows the link there",
+    )
+    def test_a_link_swapped_in_after_the_by_name_check_is_refused(
+        self, tmp_path, pins, on_path, monkeypatch
+    ):
+        """The candidate is judged on the descriptor that is hashed, not by name.
+
+        A plain file is at the destination when ``is_symlink`` answers, and a link
+        to a file holding the pinned bytes is there by the time the candidate is
+        opened. Judged by name and then hashed through a plain open, that link was
+        accepted and its target left to change later; opened once without following
+        a link, it is refused.
+        """
+        pinned_elsewhere = _binary(tmp_path / "writable-elsewhere", PINNED_GRYPE)
+        bin_dir = tmp_path / "ash-bin"
+        at_destination = _binary(bin_dir, OTHER_VERSION_GRYPE)
+        real_is_symlink = Path.is_symlink
+
+        def swap_then_answer(self):
+            if self != at_destination:
+                return real_is_symlink(self)
+            # The by-name check saw a plain file; the link lands after it.
+            at_destination.unlink()
+            at_destination.symlink_to(pinned_elsewhere)
+            return False
+
+        monkeypatch.setattr(Path, "is_symlink", swap_then_answer)
+        assert (
+            find_verified_pinned_executable("grype", "linux", "amd64", bin_dir) is None
+        )
+        # The link's target is untouched, and still what it was.
+        assert pinned_elsewhere.read_bytes() == PINNED_GRYPE
 
     def test_a_non_executable_copy_is_reinstalled(
         self, tmp_path, pins, on_path, downloads

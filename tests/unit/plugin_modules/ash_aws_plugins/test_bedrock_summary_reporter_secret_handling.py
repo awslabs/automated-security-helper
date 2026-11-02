@@ -30,10 +30,10 @@ import json
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
-    BedrockSummaryReporter,
-    BedrockSummaryReporterConfig,
-    BedrockSummaryReporterConfigOptions,
+from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
+    MODULE,
+    make_reporter,
+    plugin_context_in,
 )
 from tests.utils.secret_bearing_scan import (
     RUN_LINE,
@@ -44,23 +44,12 @@ from tests.utils.secret_bearing_scan import (
     scanner_shaped_report,
 )
 
-MODULE = (
-    "automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter"
-)
-
-# An opaque placeholder; the reporter only forwards it.
-MODEL_ID = "test-vendor.test-model-v1:0"
-
 # Every detect-secrets message starts with this (detect_secrets_scanner.py).
 DETECTOR_MESSAGE_START = "Secret of type "
 
 # Bandit's B105, B106 and B107 messages start with this; the value that follows
 # is masked.
 HARDCODED_VALUE_MESSAGE = "Possible hardcoded " + "pass" + "word: '"
-
-AshAggregatedResults.model_rebuild()
-BedrockSummaryReporterConfig.model_rebuild()
-BedrockSummaryReporter.model_rebuild()
 
 
 class RuntimeDouble:
@@ -110,26 +99,6 @@ def runtime(monkeypatch):
 @pytest.fixture(scope="module")
 def scan_output(tmp_path_factory):
     return run_secret_bearing_scan(tmp_path_factory.mktemp("bedrock-secret-scan"))
-
-
-def make_reporter(output_dir, **options):
-    from automated_security_helper.base.plugin_context import PluginContext
-    from automated_security_helper.config.ash_config import AshConfig
-
-    context = PluginContext(
-        source_dir=output_dir,
-        output_dir=output_dir,
-        work_dir=output_dir / "work",
-        config=AshConfig(),
-    )
-    return BedrockSummaryReporter(
-        context=context,
-        config=BedrockSummaryReporterConfig(
-            options=BedrockSummaryReporterConfigOptions(
-                aws_region="us-east-1", model_id=MODEL_ID, **options
-            )
-        ),
-    )
 
 
 def _result(rule_id, message, uri="src/app.py", line=4, snippet_text=None, tags=None):
@@ -201,7 +170,9 @@ class TestNoSecretValueLeavesTheReporter:
         self, scan_output, runtime, tmp_path, add_section_headers
     ):
         reporter = make_reporter(
-            tmp_path, add_section_headers=add_section_headers, **self.CONTENT_OPTIONS
+            plugin_context_in(tmp_path),
+            add_section_headers=add_section_headers,
+            **self.CONTENT_OPTIONS,
         )
 
         reporter.report(load_results(scan_output))
@@ -211,7 +182,7 @@ class TestNoSecretValueLeavesTheReporter:
         assert SECRETS.found_in(sent) == []
 
     def test_local_markdown_holds_no_secret_value(self, scan_output, runtime, tmp_path):
-        reporter = make_reporter(tmp_path, **self.CONTENT_OPTIONS)
+        reporter = make_reporter(plugin_context_in(tmp_path), **self.CONTENT_OPTIONS)
 
         reporter.report(load_results(scan_output))
 
@@ -229,7 +200,7 @@ class TestNoSecretValueLeavesTheReporter:
         self, scan_output, runtime, tmp_path
     ):
         """Control: masking and the secret exclusion leave other snippets alone."""
-        reporter = make_reporter(tmp_path, **self.CONTENT_OPTIONS)
+        reporter = make_reporter(plugin_context_in(tmp_path), **self.CONTENT_OPTIONS)
 
         reporter.report(load_results(scan_output))
 
@@ -258,7 +229,7 @@ class TestSecretScannerFindingsAreCountedNotSent:
         model = load_results(scan_output)
         count = _detect_secrets_count(model)
         assert count >= 3, "the scan's detect-secrets findings are missing"
-        reporter = make_reporter(tmp_path, **options)
+        reporter = make_reporter(plugin_context_in(tmp_path), **options)
 
         reporter.report(model)
 
@@ -271,7 +242,7 @@ class TestSecretScannerFindingsAreCountedNotSent:
         self, scan_output, runtime, tmp_path
     ):
         """Control: the exclusion only removes secrets-scanner findings."""
-        reporter = make_reporter(tmp_path)
+        reporter = make_reporter(plugin_context_in(tmp_path))
 
         reporter.report(load_results(scan_output))
 
@@ -291,7 +262,7 @@ class TestSecretScannerFindingsAreCountedNotSent:
         ferret = scanner_shaped_report(
             "ferret-scan", [_result("SECRETS", marker, uri="deploy/config.yaml")]
         )
-        reporter = make_reporter(tmp_path)
+        reporter = make_reporter(plugin_context_in(tmp_path))
 
         reporter.report(model_of(bandit_report(), ferret))
 
@@ -312,7 +283,7 @@ class TestSecretScannerFindingsAreCountedNotSent:
             "acme-secret-scanner",
             [_result("ACME-KEY", marker, tags=["acme-secret-scanner", tool_type_tag])],
         )
-        reporter = make_reporter(tmp_path)
+        reporter = make_reporter(plugin_context_in(tmp_path))
 
         reporter.report(model_of(bandit_report(), acme))
 
@@ -352,7 +323,7 @@ class TestSecretScannerFindingsAreCountedNotSent:
         ]
         unknown = scanner_shaped_report("acme-linter", [result])
         reporter = make_reporter(
-            tmp_path,
+            plugin_context_in(tmp_path),
             include_code_snippets=True,
             actionable_only=False,
             output_markdown=True,
@@ -397,7 +368,9 @@ class TestLocalSummaryFollowsIncludeCodeSnippets:
     def test_summary_holds_no_snippet_when_snippets_are_off(
         self, scan_output, runtime, tmp_path
     ):
-        reporter = make_reporter(tmp_path, include_code_snippets=False, **self.OPTIONS)
+        reporter = make_reporter(
+            plugin_context_in(tmp_path), include_code_snippets=False, **self.OPTIONS
+        )
 
         reporter.report(load_results(scan_output))
 
@@ -410,7 +383,9 @@ class TestLocalSummaryFollowsIncludeCodeSnippets:
         self, scan_output, runtime, tmp_path
     ):
         """Control: with the option on, a snippet with no secret in it is shown."""
-        reporter = make_reporter(tmp_path, include_code_snippets=True, **self.OPTIONS)
+        reporter = make_reporter(
+            plugin_context_in(tmp_path), include_code_snippets=True, **self.OPTIONS
+        )
 
         reporter.report(load_results(scan_output))
 
@@ -441,7 +416,7 @@ class TestSastSecretFindingsAreCountedNotSent:
             scanner_name=scanner_name,
             scanner_version="1.0.0",
         )
-        reporter = make_reporter(tmp_path)
+        reporter = make_reporter(plugin_context_in(tmp_path))
 
         reporter.report(model_of(bandit_report(), grep))
 
@@ -479,7 +454,7 @@ class TestHardCodedPasswordFindingsAreSentMasked:
 
         value = getattr(SECRETS, name)
         masked_message = HARDCODED_VALUE_MESSAGE + _mask_secret_value(value) + "'"
-        reporter = make_reporter(tmp_path, **self.OPTIONS)
+        reporter = make_reporter(plugin_context_in(tmp_path), **self.OPTIONS)
 
         reporter.report(load_results(scan_output))
 

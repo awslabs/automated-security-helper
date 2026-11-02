@@ -1038,10 +1038,14 @@ def test_the_version_match_is_a_whole_version(output, version, expected):
     os.name == "nt",
     reason="runs only in the Linux image build; the fixtures are POSIX executables",
 )
-@pytest.mark.unit
+@pytest.mark.integration
 class TestVerifyThirdParty:
     """The last step of the image build. Each negative case is one mutation of a
-    tree on which the positive case passes, so a failure is about that mutation."""
+    tree on which the positive case passes, so a failure is about that mutation.
+
+    Integration tier: ``_tree`` writes ``#!/bin/sh`` scripts that
+    ``verify_third_party`` runs to read their versions, so every test here starts
+    child processes."""
 
     @pytest.fixture(autouse=True)
     def _bundled_components(self, tmp_path, monkeypatch):

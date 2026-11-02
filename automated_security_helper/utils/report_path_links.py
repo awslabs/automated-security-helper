@@ -53,8 +53,9 @@ from __future__ import annotations
 
 import os
 import stat
+import unicodedata
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, Optional, Tuple, Union
 
 from automated_security_helper.core.exceptions import ASHValidationError
 
@@ -64,6 +65,11 @@ PathLike = Union[str, "os.PathLike[str]"]
 #: and MCP scans alike.
 REMEDY = (
     "ASH does not write a report through a link. Remove the link and run ASH again."
+)
+
+#: Ends a refusal of a reports directory that is a file.
+FILE_REMEDY = (
+    "ASH writes its reports into a directory. Remove the file and run ASH again."
 )
 
 # Values from the Windows SDK, for an interpreter whose stat module lacks them.
@@ -101,7 +107,14 @@ class ReportPathRefused(ASHValidationError):
 
     def __init__(self, found: str, remedy: str = NAME_REMEDY):
         self.found = found
+        self.remedy = remedy
         super().__init__(f"{found[0].upper()}{found[1:]}. {remedy}")
+
+    def __reduce__(self) -> Tuple[type, Tuple[Any, ...]]:
+        # Rebuilt from its own arguments. Rebuilt from ``args``, as an Exception is
+        # by default, a pickle or deepcopy round trip fed the formatted message
+        # back as ``found`` and appended the remedy a second time.
+        return (type(self), (self.found, self.remedy))
 
 
 class ReportPathLinkRefused(ReportPathRefused):
@@ -130,7 +143,10 @@ def _is_junction(path: Path) -> bool:
         return bool(isjunction(path))
     try:
         found = os.lstat(path)
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError: a NUL in the path, which lstat raises as one rather than
+        # as an OSError. A path that cannot be named is no junction, as one that
+        # does not exist is none.
         return False
     attributes = getattr(found, "st_file_attributes", 0)
     tag = getattr(found, "st_reparse_tag", 0)
@@ -152,12 +168,34 @@ def _link_kind(path: Path) -> Optional[str]:
     return None
 
 
+#: The names Windows reserves for devices, compared without regard to case and
+#: before the first dot: ``nul.json`` opens the NUL device there, not a file.
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10))}
+    | {f"LPT{n}" for n in range(1, 10)}
+)
+
+
+def _names_a_windows_device(name: str) -> bool:
+    return name.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_DEVICE_NAMES
+
+
 def is_report_file_name(name: object) -> bool:
-    """Whether ``name`` is a single path component, the only kind of name ASH writes."""
+    """Whether ``name`` is a single path component, the only kind of name ASH writes.
+
+    A colon is refused as well: on NTFS ``report.json:stream`` is the alternate
+    data stream ``stream`` of ``report.json``, so such a name passed every pre-run
+    refusal and collision check while naming another reporter's file, and the
+    write path then wrote into that file. So is a name Windows reserves for a
+    device (``nul.json``, ``con``, ``com1.txt``), which opens the device there
+    instead of a file. The rule is the same on every platform, so a configuration
+    is accepted or refused alike wherever it is read.
+    """
     return (
         isinstance(name, str)
         and name not in ("", ".", "..")
-        and not any(part in name for part in ("/", "\\", "\x00"))
+        and not any(part in name for part in ("/", "\\", ":", "\x00"))
+        and not _names_a_windows_device(name)
     )
 
 
@@ -210,15 +248,27 @@ def refuse_a_linked_reports_dir(report_dir: PathLike) -> None:
 
 
 def ensure_reports_dir(report_dir: PathLike) -> Path:
-    """Create the reports directory, after refusing it if it is a link.
+    """Create the reports directory, after refusing it if it is a link or a file.
 
     ``mkdir`` on a dangling link fails with ``FileExistsError``, and on a link to a
     directory succeeds and keeps the link, so creating the directory first would end
-    in a crash or a write through the link instead of the refusal. Every place that
-    sets up ``reports/`` for a run creates it through this.
+    in a crash or a write through the link instead of the refusal. A regular file
+    (or anything else that is not a directory) at the path makes ``mkdir`` raise
+    the same ``FileExistsError``, so it is refused with the module's own error
+    too, naming what is there. Every place that sets up ``reports/`` for a run
+    creates it through this.
     """
     directory = Path(report_dir)
     refuse_a_linked_reports_dir(directory)
+    try:
+        found = os.lstat(directory)
+    except OSError:
+        found = None
+    if found is not None and not stat.S_ISDIR(found.st_mode):
+        raise ReportPathRefused(
+            f"the reports directory {directory.as_posix()} is a file, not a directory",
+            FILE_REMEDY,
+        )
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
@@ -252,8 +302,19 @@ def refuse_report_names_outside(
 
 
 def _same_file_key(name: str) -> str:
-    """``name`` as a case-insensitive file system, or Windows, compares it."""
-    return name.rstrip(". ").casefold()
+    """``name`` as a case-insensitive file system, or Windows, compares it.
+
+    Trailing dots and spaces are dropped, as Windows drops them; the case is
+    folded one character at a time (``str.lower``), as NTFS's case table folds
+    it, and not with ``str.casefold``, which folds the sharp s to ``ss`` and
+    refused two names every file system keeps apart; and the text is put in
+    Unicode normalization form C, since macOS opens one file for a name spelled
+    in form C and in form D. A name that is nothing but dots and spaces keeps its
+    own text as its key: on POSIX ``...`` and a single space are two files, and
+    the empty key made them one.
+    """
+    stripped = name.rstrip(". ")
+    return unicodedata.normalize("NFC", stripped or name).lower()
 
 
 def refuse_colliding_report_names(
@@ -264,19 +325,27 @@ def refuse_colliding_report_names(
     ``writers`` are ``(who, names)`` pairs, such as ``("the sarif reporter",
     reporter_file_names(instance))``: the files each writer puts in the reports
     directory. The writer that runs last would replace the other's file, so the run
-    is refused before either writes. Names are compared case-folded and without
-    trailing dots and spaces, since case-insensitive file systems and Windows open
-    the same file for both. One writer naming a file twice is not a collision.
+    is refused before either writes. Names are compared as ``_same_file_key``
+    compares them, since case-insensitive file systems and Windows open the same
+    file for both. One writer naming a file twice, by the same text, is not a
+    collision; one writer naming two different texts that are one file there is,
+    since its second write would replace its first.
     """
     directory = Path(report_dir).as_posix()
     seen: Dict[str, Tuple[int, str, str]] = {}
     for index, (who, names) in enumerate(writers):
         for name in names:
             first = seen.setdefault(_same_file_key(name), (index, who, name))
-            if first[0] == index:
-                continue
             _, first_who, first_name = first
-            if first_name == name:
+            if first[0] == index and first_name == name:
+                continue
+            if first[0] == index:
+                found = (
+                    f"{who} would write both {first_name!r} and {name!r} in "
+                    f"{directory}, which name one file where file names ignore "
+                    "case and trailing dots and spaces"
+                )
+            elif first_name == name:
                 found = (
                     f"{first_who} and {who} would both write {name!r} in {directory}"
                 )

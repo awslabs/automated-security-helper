@@ -10,7 +10,7 @@ class Ash < Formula
   #
   # CI installs a copy of this formula in which only this line differs: it points
   # at a tarball of the commit under test (.github/scripts/render-homebrew-formula.py).
-  url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.7.0"
+  url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.7.1"
   license "Apache-2.0"
 
   # After the build, Homebrew rewrites every dylib ID in the keg to the library's

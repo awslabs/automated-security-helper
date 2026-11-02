@@ -138,14 +138,26 @@ class TestValidateOpengrepOfflineMode:
 class TestValidateGrypeOfflineMode:
     """Tests for validate_grype_offline_mode function."""
 
-    def test_missing_cache_dir_env_var(self):
-        """Test validation fails when GRYPE_DB_CACHE_DIR is not set."""
-        with patch.dict(os.environ, {}, clear=True):
+    def test_missing_cache_dir_env_var(self, tmp_path):
+        """Without GRYPE_DB_CACHE_DIR the default cache the scan reads is checked.
+
+        The scan itself never required the variable: grype reads its default
+        cache directory when it is unset, so the validator inspects that one
+        and says so, instead of reporting the database missing for want of a
+        variable. Here the default cache (under XDG_CACHE_HOME) does not exist.
+        """
+        with patch.dict(
+            os.environ, {"XDG_CACHE_HOME": str(tmp_path / "xdg")}, clear=True
+        ):
             is_valid, messages = validate_grype_offline_mode()
 
             assert not is_valid
-            assert len(messages) == 1
-            assert "GRYPE_DB_CACHE_DIR environment variable not set" in messages[0]
+            assert len(messages) == 2
+            assert (
+                "GRYPE_DB_CACHE_DIR not set; checking the default cache"
+                in (messages[0])
+            )
+            assert "Cache directory does not exist" in messages[1]
 
     def test_cache_dir_does_not_exist(self, tmp_path):
         """Test validation fails when cache directory doesn't exist."""
@@ -219,12 +231,17 @@ class TestValidateGrypeOfflineMode:
                 in messages[0]
             )
 
-    def test_multiple_database_file_types(self, tmp_path):
-        """Test validation with different database file types."""
+    def test_other_files_in_the_cache_are_not_the_database(self, tmp_path):
+        """Only grype's vulnerability.db counts; other names never did hold it.
+
+        Any ``.db``, any ``.sqlite`` and any name holding "vulnerability" used to
+        count, so a cache holding only grype's listing metadata and an unrelated
+        database passed as valid, and a fresh unrelated file hid a stale
+        vulnerability database from the age check.
+        """
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
 
-        # Create different types of database files
         (cache_dir / "grype.db").write_text("database")
         (cache_dir / "data.sqlite").write_text("sqlite database")
         (cache_dir / "vulnerability-data.json").write_text("{}")
@@ -232,9 +249,23 @@ class TestValidateGrypeOfflineMode:
         with patch.dict(os.environ, {"GRYPE_DB_CACHE_DIR": str(cache_dir)}):
             is_valid, messages = validate_grype_offline_mode()
 
+            assert not is_valid
+            assert len(messages) == 1
+            assert "No database files found in cache directory" in messages[0]
+
+    def test_the_database_under_a_schema_directory_counts(self, tmp_path):
+        """The control: grype keeps the database under a schema-version directory."""
+        cache_dir = tmp_path / "cache"
+        (cache_dir / "5").mkdir(parents=True)
+        (cache_dir / "5" / "vulnerability.db").write_text("database")
+        (cache_dir / "5" / "metadata.json").write_text("{}")
+
+        with patch.dict(os.environ, {"GRYPE_DB_CACHE_DIR": str(cache_dir)}):
+            is_valid, messages = validate_grype_offline_mode()
+
             assert is_valid
             assert len(messages) == 1
-            assert "Found 3 database files" in messages[0]
+            assert "Found 1 database files" in messages[0]
 
 
 class TestValidateNpmAuditOfflineMode:

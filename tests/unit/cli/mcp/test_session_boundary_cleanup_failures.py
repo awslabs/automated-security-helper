@@ -19,6 +19,7 @@ retried on every request.
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from pathlib import Path
@@ -123,11 +124,32 @@ def _drive(boundary: SessionBoundary, scope: Dict[str, Any]) -> List[Dict[str, A
     return sent
 
 
-def _later_sweep_removes(session_id: str, root: Path) -> None:
-    assert (root / session_id).is_dir(), "the failed removal should leave the tree"
-    removed = sessions.sweep_stale_workspaces(24 * 3600, now=time.time() + LONG_AGO)
-    assert removed == [session_id], removed
-    assert not (root / session_id).exists()
+def _age(workspace: Path, seconds: float) -> None:
+    then = time.time() - seconds
+    for path in (workspace, *workspace.iterdir()):
+        os.utime(path, (then, then))
+
+
+def _later_sweep_removes(
+    boundary: SessionBoundary, session_id: str, root: Path
+) -> None:
+    """The boundary's own sweep, run as the server runs it before a request,
+    removes what the failed removal left. Being issued keeps nothing by itself:
+    only an open event stream does (``_sweep_if_due``), so what the sweep needs
+    is that the session has none open. That is what is asserted, not that the id
+    stays issued: for a shutdown or a finished sse stream nothing can send the
+    removal again, and a DELETE that can (the tests above) pins the issued id
+    itself. A sweep called directly with no ``in_use`` would show a removal the
+    server never makes."""
+    workspace = root / session_id
+    assert workspace.is_dir(), "the failed removal should leave the tree"
+    assert session_id not in boundary._open_streams, (
+        "the failed removal should leave no event stream open"
+    )
+    _age(workspace, 2 * boundary.session_workspace_ttl)
+    boundary._next_sweep = 0.0
+    anyio.run(boundary._sweep_if_due)
+    assert not workspace.exists(), "the boundary's sweep kept the ended session"
 
 
 def _delete(session_id: str) -> Dict[str, Any]:
@@ -200,7 +222,7 @@ def test_a_failed_removal_at_shutdown_still_reports_shutdown(
     assert sent == [{"type": "lifespan.shutdown.complete"}]
     assert failing_end == [session_id]
     assert len(log.warnings) == 1 and session_id in log.warnings[0], log.warnings
-    _later_sweep_removes(session_id, root)
+    _later_sweep_removes(boundary, session_id, root)
 
 
 def test_a_failed_removal_when_an_sse_stream_ends_still_finishes_it(
@@ -217,13 +239,13 @@ def test_a_failed_removal_when_an_sse_stream_ends_still_finishes_it(
     assert sent[0]["status"] == 200
     assert failing_end == [session_id]
     assert len(log.warnings) == 1 and session_id in log.warnings[0], log.warnings
-    _later_sweep_removes(session_id, root)
+    _later_sweep_removes(boundary, session_id, root)
 
 
 def test_a_failing_sweep_does_not_fail_the_request(root, log, monkeypatch) -> None:
     calls: List[float] = []
 
-    def sweep_stale_workspaces(ttl_seconds: float, now=None):
+    def sweep_stale_workspaces(ttl_seconds: float, now=None, *, in_use=None):
         calls.append(ttl_seconds)
         raise RuntimeError("simulated sweep failure")
 

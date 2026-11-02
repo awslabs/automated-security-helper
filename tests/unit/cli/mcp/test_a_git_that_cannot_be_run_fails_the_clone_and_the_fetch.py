@@ -141,7 +141,7 @@ def test_git_that_cannot_be_run_for_a_step_fails_the_delivery_as_a_failed_clone(
     real_run_git = sd._run_git
     on_disk_when_git_failed: List[bool] = []
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         if _subcommand(cmd) == step:
             # What the delivery has to remove: the staging directory it made
             # before the clone (the last argument of `git clone`), and at the fetch
@@ -187,7 +187,7 @@ def test_a_fetch_that_exits_non_zero_is_still_tolerated(delivery, monkeypatch) -
     real_run_git = sd._run_git
     ran: List[str] = []
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         step = _subcommand(cmd)
         ran.append(step)
         if step == "fetch":
@@ -211,7 +211,7 @@ def test_a_delivery_git_can_run_for_is_delivered(delivery, monkeypatch) -> None:
     real_run_git = sd._run_git
     ran: List[str] = []
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         ran.append(_subcommand(cmd))
         return real_run_git(cmd, env=env)
 
@@ -230,7 +230,7 @@ def test_a_step_that_runs_past_its_time_is_still_a_timeout(
     """Catching the error of starting git does not take over the timeout's."""
     real_run_git = sd._run_git
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         if _subcommand(cmd) == step:
             raise sd.GitTimeoutError(f"git {step} did not finish and was stopped")
         return real_run_git(cmd, env=env)

@@ -121,8 +121,10 @@ class TestInAggregatePercentage:
     aggregated, and 1 excluded field printed -11.1%.
     """
 
-    # Nine fields that survive should_include_field, plus ruleIndex, which is
-    # intentionally excluded from the comparison.
+    # Ten field paths that survive should_include_field, plus ruleIndex, which is
+    # intentionally excluded from the comparison. Ten, not nine: ``message`` is a
+    # path of its own and so is the ``message.text`` it holds, on purpose (see
+    # test_a_container_is_counted_with_the_fields_it_holds).
     SCANNER_RESULT = {
         "ruleId": "B1",
         "ruleIndex": 0,
@@ -174,19 +176,64 @@ class TestInAggregatePercentage:
     def test_nothing_aggregated_is_zero_not_negative(
         self, tmp_path, monkeypatch, capsys
     ):
-        cells = self._percentage(tmp_path, monkeypatch, capsys, {"foo": "bar"})
-        assert cells[1:] == ["9", "9", "9", "1", "0.0%"]
+        columns = self._percentage(tmp_path, monkeypatch, capsys, {"foo": "bar"})
+        assert columns[1:] == ["10", "10", "10", "1", "0.0%"]
 
     def test_everything_aggregated_is_one_hundred(self, tmp_path, monkeypatch, capsys):
         aggregate = {k: v for k, v in self.SCANNER_RESULT.items() if k != "ruleIndex"}
-        cells = self._percentage(tmp_path, monkeypatch, capsys, aggregate)
-        assert cells[1:] == ["9", "0", "0", "1", "100.0%"]
+        columns = self._percentage(tmp_path, monkeypatch, capsys, aggregate)
+        # Unique Fields counts the scanners that emit a field; the aggregate
+        # carries every field this scanner emits, so it is not one of them.
+        assert columns[1:] == ["10", "10", "0", "1", "100.0%"]
 
     def test_partial_aggregation_counts_only_included_fields(
         self, tmp_path, monkeypatch, capsys
     ):
-        cells = self._percentage(tmp_path, monkeypatch, capsys, {"ruleId": "B1"})
-        assert cells[1:] == ["9", "8", "8", "1", "11.1%"]
+        columns = self._percentage(tmp_path, monkeypatch, capsys, {"ruleId": "B1"})
+        assert columns[1:] == ["10", "10", "9", "1", "10.0%"]
+
+
+@pytest.mark.unit
+def test_a_container_is_counted_with_the_fields_it_holds():
+    """A container and each field it holds are all counted, on purpose.
+
+    ``flatten_sarif_results`` records every field under its own path, a container
+    as well as a scalar: the loss of a whole ``message`` or ``region`` in
+    aggregation is then reported under its own name, and an empty ``locations``
+    and a filled one are one field. A list is written ``name[]`` for the fields of
+    its elements and is not a path of its own. Counting leaf fields only would
+    drop the container paths and with them that report."""
+    from automated_security_helper.utils.sarif_field_analysis import (
+        flatten_sarif_results,
+    )
+
+    sarif = {
+        "runs": [
+            {
+                "results": [
+                    {
+                        "message": {"text": "m"},
+                        "locations": [
+                            {"physicalLocation": {"region": {"startLine": 1}}}
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+
+    included, excluded = flatten_sarif_results(sarif)
+
+    prefix = "runs[].results[]"
+    assert set(included) == {
+        f"{prefix}.message",
+        f"{prefix}.message.text",
+        f"{prefix}.locations",
+        f"{prefix}.locations[].physicalLocation",
+        f"{prefix}.locations[].physicalLocation.region",
+        f"{prefix}.locations[].physicalLocation.region.startLine",
+    }
+    assert excluded == {}
 
 
 @pytest.mark.unit

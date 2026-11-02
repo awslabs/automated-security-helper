@@ -14,14 +14,20 @@ the redaction runs on the unstripped text and the strip comes after. The
 one-line control shows a value with no break and no whitespace edge
 survives the cut whole, where a downstream redaction can still match it;
 redaction here hides it already.
+
+The uv these cells run is a stand-in program that prints a fixed text, made by
+``tests/utils/stand_ins.py`` so the host can start it. ``CreateProcess`` never
+starts a file that begins with a shebang line, so on Windows the stand-in is a
+``.py`` script with a ``.bat`` launcher and a cell starts the launcher; on POSIX
+it is the script itself. A shebang file written by hand made the probe's spawn
+raise ``OSError`` on Windows, which ``get_tool_version`` answers as ``None``, so
+the cells below read an empty version there.
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
-import stat
-import sys
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -30,22 +36,22 @@ from automated_security_helper.utils import uv_tool_runner
 from tests.unit.base.test_failure_lines_carry_no_environment_value import _context
 from tests.unit.base.test_scanner_plugin_coverage import _scanner
 from tests.unit.base.test_uv_tool_mixin import FakePlugin
+from tests.utils.stand_ins import write_stand_in
 
 HEAD = "ASH_CANARY_Zq7Kx9LmHead"
 TAIL = "ASH_CANARY_Pw4Nv2RtTail"
 
 
-def _fake_uv(path, stdout_text):
-    """An executable that writes *stdout_text* and exits 0, whatever its argv."""
+def _fake_uv(path, stdout_text, *, before=""):
+    """A uv stand-in that writes *stdout_text* and exits 0, whatever its argv.
+
+    Returns the file a spawn starts: the script on POSIX, the ``.bat`` launcher on
+    Windows (see the module docstring). *before* is Python source that runs ahead of
+    the write, one statement per line, each ending in a newline.
+    """
     data = stdout_text.encode("utf-8").hex()
-    path.write_text(
-        f"#!{sys.executable}\n"
-        "import sys\n"
-        f"sys.stdout.buffer.write(bytes.fromhex('{data}'))\n",
-        encoding="utf-8",
-    )
-    path.chmod(path.stat().st_mode | stat.S_IXUSR)
-    return path
+    source = f"import sys\n{before}sys.stdout.buffer.write(bytes.fromhex('{data}'))\n"
+    return write_stand_in(path.parent, path.name, source).files[-1]
 
 
 @pytest.mark.integration
@@ -208,16 +214,11 @@ def test_a_reader_that_waited_on_the_probe_lock_gets_the_answer_redacted(
     """
     value = f"{HEAD}{TAIL}"
     ran = tmp_path / "ran"
-    data = f"1.2.3 {value}\n".encode("utf-8").hex()
-    fake = tmp_path / "fake-uv"
-    fake.write_text(
-        f"#!{sys.executable}\n"
-        "import sys\n"
-        f"open({str(ran)!r}, 'a').write('x')\n"
-        f"sys.stdout.buffer.write(bytes.fromhex('{data}'))\n",
-        encoding="utf-8",
+    fake = _fake_uv(
+        tmp_path / "fake-uv",
+        f"1.2.3 {value}\n",
+        before=f"open({str(ran)!r}, 'a').write('x')\n",
     )
-    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     runner = uv_tool_runner.UVToolRunner(uv_executable=str(fake))
     runner._uv_available_cache = True
     tool = f"vwait{os.getpid()}"

@@ -72,6 +72,11 @@ def _make_plugin_class(name="MockPlugin"):
     instance.validate_plugin_dependencies.return_value = True
     instance.convert.return_value = []
     instance.report.return_value = None
+    # A reporter without companion files answers none. Left unset, the
+    # MagicMock answer is os.PathLike (it configures __fspath__) and would be
+    # read as a file named after the mock, which the report-file-name check
+    # refuses for its separators.
+    instance.companion_file_names.return_value = ()
     instance.dependencies_satisfied = True
     cls.return_value = instance
     return cls

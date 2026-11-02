@@ -286,7 +286,7 @@ describe('install modes', () => {
 
     expect(spec.phases.install.commands.join('\n')).toContain(
       'pip install --no-cache-dir --disable-pip-version-check ' +
-        '"git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"',
+        '"git+https://github.com/awslabs/automated-security-helper.git@v3.7.1"',
     );
   });
 
@@ -353,7 +353,7 @@ describe('install modes', () => {
 
     expect(spec.phases.install.commands).toEqual([]);
     expect(spec.phases.build.commands.join('\n')).toContain(
-      'uvx --from "git+https://github.com/awslabs/automated-security-helper.git@v3.7.0" ash scan',
+      'uvx --from "git+https://github.com/awslabs/automated-security-helper.git@v3.7.1" ash scan',
     );
   });
 

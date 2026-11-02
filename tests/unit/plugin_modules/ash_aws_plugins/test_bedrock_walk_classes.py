@@ -17,14 +17,13 @@ import botocore.exceptions
 import pytest
 
 from automated_security_helper.plugin_modules.ash_aws_plugins import bedrock_pipeline
-from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_paths import (
+from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     FALLBACK_ONE,
     MODULE,
     PRIMARY_MODEL,
-    _ControlPlaneSessions,
-    _client_error,
-    _default_session_client,
-    context,  # noqa: F401  (fixture)
+    ControlPlaneSessions,
+    client_error,
+    default_session_client,
     make_reporter,
     sarif_model,
 )
@@ -133,8 +132,8 @@ def _walk_setup(context, monkeypatch, **options):  # noqa: F811
         f"{MODULE}.validate_bedrock_model",
         lambda client, model, values=(): (model == FALLBACK_ONE, "unavailable"),
     )
-    monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-    monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+    monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+    monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
     return reporter
 
 
@@ -148,7 +147,7 @@ def test_a_model_specific_code_walks_to_the_next_model(context, monkeypatch, cod
     # with retries the configured model is repeated before the walk (the
     # retried shape is test_a_failure_after_connecting_walks_to_the_next_model's).
     reporter = _walk_setup(context, monkeypatch, max_retries=0)
-    runtime = _Runtime({PRIMARY_MODEL: _client_error(code, "it failed")})
+    runtime = _Runtime({PRIMARY_MODEL: client_error(code, "it failed")})
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
     assert (out, runtime.models) == (
         "fallback content",
@@ -162,7 +161,7 @@ def test_another_code_comes_back_as_it_is(context, monkeypatch, code):  # noqa: 
     reporter = _walk_setup(
         context, monkeypatch, max_retries=2, base_delay=0.0, max_delay=0.0
     )
-    runtime = _Runtime({PRIMARY_MODEL: _client_error(code, "it failed")})
+    runtime = _Runtime({PRIMARY_MODEL: client_error(code, "it failed")})
     out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
     calls = 3 if code in RETRIED_CODES else 1
     assert (out, runtime.models) == ("*Error: it failed*", [PRIMARY_MODEL] * calls)
@@ -233,7 +232,7 @@ def test_every_parameter_refused_in_turn_walks_to_the_next_model(context, monkey
     validation error walks to the next model."""
     reporter = _walk_setup(context, monkeypatch)
     refusals = [
-        _client_error("ValidationException", f"`{name}` is deprecated")
+        client_error("ValidationException", f"`{name}` is deprecated")
         for name in ("temperature", "maxTokens", "topP")
     ]
     runtime = _Runtime({PRIMARY_MODEL: refusals + [refusals[-1]]})
@@ -249,7 +248,7 @@ def test_a_named_parameter_is_retried_without_walking(context, monkeypatch):  # 
     runtime = _Runtime(
         {
             PRIMARY_MODEL: [
-                _client_error("ValidationException", "`temperature` is deprecated"),
+                client_error("ValidationException", "`temperature` is deprecated"),
                 OK,
             ]
         }

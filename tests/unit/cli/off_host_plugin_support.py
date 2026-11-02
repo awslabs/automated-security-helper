@@ -19,7 +19,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Sequence
 
 from tests.utils.helpers import importing_this_checkout
 
@@ -295,6 +295,7 @@ def run_merge(
     overrides: List[str],
     plugin: str = PLUGIN,
     reporter: str = REPORTER,
+    extra_args: Sequence[str] = (),
 ) -> Dict:
     """``ash merge --config <file outside every tree>`` over two shards.
 
@@ -302,7 +303,8 @@ def run_merge(
     endpoint and a title. It lives in ``tmp_path/operator``, and the command runs
     in ``tmp_path/collector``, a directory in no git checkout. ``plugin`` and
     ``reporter`` name the stand-in, which must take the two options ``endpoint``
-    and ``title``.
+    and ``title``. ``extra_args`` are appended to the command line after the
+    overrides, for a test that passes another option (``--output-formats``).
     """
     from tests.unit.cli.merge_shard_support import build_shards, write_shards
 
@@ -331,6 +333,7 @@ def run_merge(
     args += ["--config", str(operator)]
     for override in overrides:
         args += ["--config-overrides", override]
+    args += list(extra_args)
     spec = {"cwd": str(collector), "args": args, "output": str(output)}
     result = subprocess.run(
         [

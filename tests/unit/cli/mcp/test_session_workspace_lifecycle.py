@@ -209,7 +209,7 @@ def test_a_request_does_not_wait_for_another_requests_sweep(monkeypatch) -> None
     started = threading.Event()
     release = threading.Event()
 
-    def slow_sweep(ttl_seconds, now=None):
+    def slow_sweep(ttl_seconds, now=None, *, in_use=None):
         started.set()
         release.wait(30)
         return []

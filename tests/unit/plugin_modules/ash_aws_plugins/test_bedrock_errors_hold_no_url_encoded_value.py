@@ -37,13 +37,13 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_re
     BedrockSummaryReporterConfigOptions,
 )
 from automated_security_helper.utils.error_text import text_without_values
-from tests.unit.plugin_modules.ash_aws_plugins.test_bedrock_summary_reporter_paths import (
+from tests.unit.plugin_modules.ash_aws_plugins.bedrock_reporter_doubles import (
     FALLBACK_ONE,
     FALLBACK_TWO,
     MODULE,
-    _ControlPlaneSessions,
-    _client_error,
-    _default_session_client,
+    ControlPlaneSessions,
+    client_error,
+    default_session_client,
     sarif_model,
 )
 
@@ -245,8 +245,8 @@ def _canary_reporter(tmp_path, monkeypatch, chain, valid):
         context=ctx, config=BedrockSummaryReporterConfig(options=options)
     )
     _chain(monkeypatch, chain, valid)
-    monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
-    monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+    monkeypatch.setattr(f"{MODULE}.boto3.Session", ControlPlaneSessions())
+    monkeypatch.setattr(f"{MODULE}.boto3.client", default_session_client)
     return reporter
 
 
@@ -357,8 +357,8 @@ def test_a_resumed_exhaustion_after_a_timeout_holds_no_form_of_the_value(
     runtime = _Runtime(
         {
             CANARY: botocore.exceptions.ReadTimeoutError(endpoint_url=url),
-            FALLBACK_ONE: [OK, _client_error("ThrottlingException", "slowed")],
-            FALLBACK_TWO: _client_error("ThrottlingException", "slowed too"),
+            FALLBACK_ONE: [OK, client_error("ThrottlingException", "slowed")],
+            FALLBACK_TWO: client_error("ThrottlingException", "slowed too"),
         }
     )
     reporter._run_simple_report(runtime, sarif_model([]), [], [])

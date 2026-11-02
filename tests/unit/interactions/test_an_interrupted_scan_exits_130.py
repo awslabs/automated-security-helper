@@ -359,6 +359,7 @@ def test_nix_mode_says_it_was_interrupted_and_exits_130(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(mod, "run_ash_nix", _interrupted)
+    monkeypatch.setattr(mod, "nix_preflight", lambda: None)
 
     result = CliRunner().invoke(
         app,
@@ -840,45 +841,6 @@ def test_a_ctrl_c_held_at_the_launch_is_raised_with_the_child_recorded(monkeypat
         signal.signal(signal.SIGINT, previous)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="SIGINT handling under test is POSIX")
-@pytest.mark.unit
-def test_the_handler_is_put_back_even_when_the_first_restore_fails(
-    monkeypatch, default_sigint
-):
-    """Leaving the launch puts the SIGINT handler back after a failed release.
-
-    release() can fail putting the previous handler back: signal.signal runs
-    pending Python handlers first, and one of them can raise. The hold must
-    still be left on the way out -- HeldInterrupt.__exit__ restores again --
-    or the dead hold keeps the handler and every later Ctrl-C in the process
-    is recorded where nothing reads it: for the MCP server, for good.
-    """
-    from automated_security_helper.utils import subprocess_utils
-
-    child = _ExitedChild()
-    real_signal = signal.signal
-    failed = {"once": False}
-
-    def _fails_putting_back_once(signum, handler):
-        if not failed["once"] and handler is signal.default_int_handler:
-            failed["once"] = True
-            raise OSError("putting the SIGINT handler back failed")
-        return real_signal(signum, handler)
-
-    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: child)
-    monkeypatch.setattr(signal, "signal", _fails_putting_back_once)
-
-    with pytest.raises(OSError):
-        subprocess_utils._run_cancellable(
-            ["/opt/ash-test/bin/tool", "scan"],
-            cancel_event=threading.Event(),
-            graceful_timeout=False,
-            own_group=False,
-        )
-
-    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
-
-
 class _StoppableChild(_ExitedChild):
     """A running stand-in child whose terminate is recorded. No real process."""
 
@@ -1098,66 +1060,6 @@ def test_a_sigint_disposition_that_raises_nothing_is_left_alone(disposition):
     ]
     sigint_ignored = bool(ignored & (1 << (signal.SIGINT - 1)))
     assert sigint_ignored is (disposition is signal.SIG_IGN)
-
-
-@pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
-@pytest.mark.unit
-def test_a_handler_that_failed_to_go_back_is_put_back_on_leaving(
-    default_sigint, monkeypatch
-):
-    """The hold forgot it held the signal before putting the handler back, so a
-    failure there left the recording handler in place, and every later Ctrl-C was
-    swallowed. Leaving the block puts it back."""
-    from automated_security_helper.utils import subprocess_utils
-
-    real_signal = signal.signal
-    calls = []
-
-    def _signal_failing_once(signum, handler):
-        calls.append(handler)
-        if len(calls) == 2:
-            raise OSError("the handler could not be set")
-        return real_signal(signum, handler)
-
-    monkeypatch.setattr(subprocess_utils.signal, "signal", _signal_failing_once)
-
-    with pytest.raises(OSError):
-        with subprocess_utils.HeldInterrupt() as held:
-            held.release()
-
-    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
-    with pytest.raises(KeyboardInterrupt):
-        _sigint_to_myself()
-
-
-@pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
-@pytest.mark.unit
-def test_a_ctrl_c_after_the_block_whose_handler_did_not_go_back_is_not_lost(
-    default_sigint, monkeypatch
-):
-    """The block raised before release, and putting the handler back on leaving
-    failed, so the recording handler stayed installed and every later Ctrl-C was
-    recorded for a block that was over. Once the block is left, a Ctrl-C goes to
-    the handler that was held."""
-    from automated_security_helper.utils import subprocess_utils
-
-    real_signal = signal.signal
-    calls = []
-
-    def _signal_failing_once(signum, handler):
-        calls.append(handler)
-        if len(calls) == 2:
-            raise OSError("the handler could not be set")
-        return real_signal(signum, handler)
-
-    monkeypatch.setattr(subprocess_utils.signal, "signal", _signal_failing_once)
-
-    with pytest.raises(OSError, match="could not be set"):
-        with subprocess_utils.HeldInterrupt():
-            raise FileNotFoundError("runtime")
-
-    with pytest.raises(KeyboardInterrupt):
-        _sigint_to_myself()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")

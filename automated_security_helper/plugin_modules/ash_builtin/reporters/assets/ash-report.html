@@ -33,7 +33,7 @@
         <div><dl><dt>Actionable findings</dt><dd class="metric-accent">$actionable<span class="metric-description">At or above scanner thresholds</span></dd></dl></div>
         <div><dl><dt>Below threshold</dt><dd>$below_threshold<span class="metric-description">Active findings for context</span></dd></dl></div>
         <div><dl><dt>Suppressed</dt><dd>$suppressed<span class="metric-description">Excluded from actionable counts</span></dd></dl></div>
-        <div><dl><dt>Scanners completed</dt><dd>$completed<span> / $scanners</span><span class="metric-description">$skipped disabled · $unavailable unavailable</span></dd></dl></div>
+        <div><dl><dt>Scanners completed</dt><dd>$completed<span> / $scanners</span><span class="metric-description">$skipped skipped · $unavailable unavailable</span></dd></dl></div>$policy_not_gating_tile
       </div>
       <div class="severity-strip" aria-label="Active findings by severity">$severity_counts</div>
       $coverage_notices
@@ -49,9 +49,9 @@
       <div class="section-heading"><h2 id="findings-title">Findings</h2><p>Sorted by severity</p></div>
       <div class="finding-controls js-only">
         <div class="search-control"><label for="finding-search">Search findings</label><input id="finding-search" type="search" placeholder="Rule, file, message, or scanner…" autocomplete="off"></div>
-        <div><label for="finding-scope">Show</label><select id="finding-scope"><option value="actionable">Actionable</option><option value="active">All active</option><option value="suppressed">Suppressed</option><option value="all">All findings</option></select></div>
+        <div><label for="finding-scope">Show</label><select id="finding-scope"><option value="actionable">Actionable</option><option value="policy-not-gating">Not gating</option><option value="active">All active</option><option value="suppressed">Suppressed</option><option value="all">All findings</option></select></div>
         <div><label for="finding-severity">Severity</label><select id="finding-severity"><option value="all">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option><option value="unknown">Unknown</option></select></div>
-        <div><label for="finding-scanner">Scanner</label><select id="finding-scanner"><option value="all">All scanners</option>$scanner_options</select></div>
+        <div><label for="finding-scanner">Scanner</label><select id="finding-scanner"><option value="">All scanners</option>$scanner_options</select></div>
         <button type="button" id="reset-filters" class="quiet-button">Reset</button>
       </div>
       <p id="finding-count" class="result-count" role="status" aria-live="polite">$finding_count findings in this report</p>
@@ -62,7 +62,7 @@
     <section id="scanner-results" aria-labelledby="scanner-title" class="report-section">
       <div class="section-heading"><h2 id="scanner-title">Scanner results</h2><p>Per-scanner thresholds</p></div>
       <div class="table-scroll" role="region" aria-label="Scanner results table" tabindex="0">$scanner_results_table</div>
-      <details class="reference"><summary>How to read scanner results</summary><p><strong>Actionable</strong> means a finding meets or exceeds its scanner's configured threshold. Suppressed findings do not contribute to this count.</p><p><strong>PASSED</strong> has no actionable findings. <strong>FAILED</strong> exceeds the threshold. <strong>MISSING</strong> needs dependencies. <strong>SKIPPED</strong> is disabled. <strong>ERROR</strong> could not complete. Coverage notices above explain partial results.</p><p>Threshold sources: <code>global</code> settings, scanner <code>config</code>, or the <code>scanner</code> default.</p></details>
+      <details class="reference"><summary>How to read scanner results</summary><p><strong>Actionable</strong> means a finding meets or exceeds its scanner's configured threshold. Suppressed findings do not contribute to this count.</p><p><strong>PASSED</strong> has no actionable findings. <strong>FAILED</strong> exceeds the threshold. <strong>MISSING</strong> needs dependencies. <strong>SKIPPED</strong> did not run (disabled, or nothing to scan). <strong>ERROR</strong> could not complete. Coverage notices above explain partial results.</p><p>Threshold sources: <code>global</code> settings, scanner <code>config</code>, or the <code>scanner</code> default.</p></details>
       $hotspots_section
     </section>
     <section id="scan-metadata" aria-labelledby="metadata-title" class="report-section">

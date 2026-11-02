@@ -111,7 +111,9 @@ REPORTER_DOCS: dict[str, dict] = {
     "ocsf": {
         "title": "OCSF",
         "use_case": "Security data lakes, SIEM ingestion",
-        "standard": "[OCSF 1.0](https://schema.ocsf.io/)",
+        # The schema version the OCSF reporter stamps on every document
+        # (ocsf_reporter.py, `version="1.1.0"`); the table said 1.0.
+        "standard": "[OCSF 1.1.0](https://schema.ocsf.io/)",
     },
     "sarif": {
         "title": "SARIF",
@@ -141,37 +143,108 @@ REPORTER_DOCS: dict[str, dict] = {
 }
 
 
+#: The package whose reporters are the built-in set; a reporter registered from
+#: anywhere else (``ash_aws_plugins``, a test's plugin) is not one of them.
+BUILTIN_REPORTERS_PACKAGE = "automated_security_helper.plugin_modules.ash_builtin."
+
+
+def is_builtin_reporter(cls: type) -> bool:
+    """Whether ``cls`` is defined under the built-in reporters package.
+
+    The plugin registry is process-global, so an in-process caller that imported
+    another plugin package first (``check_plugin_option_keys`` walks every plugin
+    module) saw its reporters in the "built-in" rows, or hit the editorial
+    coverage check's SystemExit for them.
+    """
+    return (getattr(cls, "__module__", "") or "").startswith(BUILTIN_REPORTERS_PACKAGE)
+
+
+def config_class_of(annotation) -> type | None:
+    """The config model class of a reporter's ``config`` field annotation.
+
+    The annotation is ``Config``, ``Optional[Config]`` or a union; the member
+    that is a class with ``model_fields`` is the config model. ``args[0]`` was
+    taken before, which is wrong for a reordered union and raises TypeError for
+    an unparametrized subclass whose first member is a TypeVar.
+    """
+    import typing
+
+    candidates = [annotation, *typing.get_args(annotation)]
+    for candidate in candidates:
+        if isinstance(candidate, type) and hasattr(candidate, "model_fields"):
+            return candidate
+    return None
+
+
+def config_defaults(config_cls: type) -> dict:
+    """``{name, extension, enabled}`` of a reporter config, from its defaults.
+
+    Read from the field defaults, so a config class with a required field does
+    not crash the generator; instantiating with no arguments is tried first,
+    because it is what ASH does when a user names no reporter options and it
+    resolves validators and default factories.
+    """
+    try:
+        config = config_cls()
+    except Exception:
+        config = None
+    if config is not None:
+        return {
+            "name": config.name,
+            "extension": getattr(config, "extension", None),
+            "enabled": bool(config.enabled),
+        }
+    fields = getattr(config_cls, "model_fields", {})
+
+    def default_of(field_name):
+        field = fields.get(field_name)
+        if field is None:
+            return None
+        if field.default_factory is not None:
+            try:
+                return field.default_factory()
+            except Exception:
+                return None
+        default = field.default
+        return None if repr(default) == "PydanticUndefined" else default
+
+    return {
+        "name": default_of("name"),
+        "extension": default_of("extension"),
+        "enabled": bool(default_of("enabled")),
+    }
+
+
 def registered_reporters() -> list[dict]:
-    """Return {name, extension, enabled, class_name} for every registered reporter.
+    """Return {name, extension, enabled, class_name} for every built-in reporter.
 
     Importing the reporters package fires the ``@ash_reporter_plugin``
     decorators, so the plugin manager's reporter inventory after this import is
-    the set a scan would run. Each reporter's defaults come from instantiating
-    its config class with no arguments, which is exactly what ASH does when a
-    user names no reporter options.
+    the set a scan would run; only the classes defined under the built-in
+    package count, whatever else the process imported. Each reporter's defaults
+    come from its config class with no arguments, which is exactly what ASH does
+    when a user names no reporter options.
     """
     import automated_security_helper.plugin_modules.ash_builtin.reporters  # noqa: F401
     from automated_security_helper.plugins import ash_plugin_manager
 
-    import typing
-
     rows = []
     for cls in ash_plugin_manager.plugin_modules("reporter"):
+        if not is_builtin_reporter(cls):
+            continue
         field = getattr(cls, "model_fields", {}).get("config")
         if field is None:
             raise RuntimeError(f"{cls.__name__} has no `config` model field")
-        annotation = field.annotation
-        args = [a for a in typing.get_args(annotation) if a is not type(None)]
-        config_cls = args[0] if args else annotation
-        config = config_cls()
-        rows.append(
-            {
-                "name": config.name,
-                "extension": getattr(config, "extension", None),
-                "enabled": bool(config.enabled),
-                "class_name": cls.__name__,
-            }
-        )
+        config_cls = config_class_of(field.annotation)
+        if config_cls is None:
+            raise RuntimeError(
+                f"{cls.__name__}: no config model class in the annotation of its "
+                f"`config` field ({field.annotation!r})"
+            )
+        defaults = config_defaults(config_cls)
+        if not defaults["name"]:
+            raise RuntimeError(f"{cls.__name__}: its config declares no name default")
+        rows.append({**defaults, "class_name": cls.__name__})
     rows.sort(key=lambda r: r["name"])
     return rows
 
@@ -197,8 +270,15 @@ def _check_editorial_coverage(rows: list[dict]) -> None:
 
 
 def _prose_list(names: list[str]) -> str:
-    """Render names as `a`, `b`, and `c`."""
+    """Render names as `a`, `b`, and `c`; an empty list renders as ``none``.
+
+    The three-way split used to fall through to ``ticked[-1]`` on an empty list
+    and raise IndexError, so the page could not render when no reporter was
+    enabled by default.
+    """
     ticked = [f"`{n}`" for n in names]
+    if not ticked:
+        return "none"
     if len(ticked) == 1:
         return ticked[0]
     if len(ticked) == 2:
@@ -206,18 +286,24 @@ def _prose_list(names: list[str]) -> str:
     return ", ".join(ticked[:-1]) + f", and {ticked[-1]}"
 
 
+def _are(count: int) -> str:
+    return "is" if count == 1 else "are"
+
+
 def defaults_sentence(rows: list[dict]) -> str:
     """Which built-in reporters run by default, as one sentence."""
     on = [r["name"] for r in rows if r["enabled"]]
     off = [r["name"] for r in rows if not r["enabled"]]
-    sentence = (
-        f"Of the {len(rows)} built-in reporters, {len(on)} are enabled by default: "
-        f"{_prose_list(on)}."
-    )
+    if on:
+        sentence = (
+            f"Of the {len(rows)} built-in reporters, {len(on)} {_are(len(on))} "
+            f"enabled by default: {_prose_list(on)}."
+        )
+    else:
+        sentence = f"Of the {len(rows)} built-in reporters, none is enabled by default."
     if off:
         sentence += (
-            f" {_prose_list(off)} "
-            f"{'is' if len(off) == 1 else 'are'} available but disabled by default."
+            f" {_prose_list(off)} {_are(len(off))} available but disabled by default."
         )
     return sentence
 
@@ -269,8 +355,11 @@ def _reference_table(rows: list[dict]) -> list[str]:
     ]
     for r in rows:
         doc = REPORTER_DOCS[r["name"]]
+        # A reporter whose config declares no extension writes no report file of
+        # its own; the entry says so instead of rendering the literal `.None`.
+        extension = f"`.{r['extension']}`" if r["extension"] else "none"
         lines.append(
-            f"| [{doc['title']}](#{r['name']}) (`{r['name']}`) | `.{r['extension']}` | "
+            f"| [{doc['title']}](#{r['name']}) (`{r['name']}`) | {extension} | "
             f"{'yes' if r['enabled'] else 'no'} | {doc['use_case']} | {doc['standard']} |"
         )
     return lines

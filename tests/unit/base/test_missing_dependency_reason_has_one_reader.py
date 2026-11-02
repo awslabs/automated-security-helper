@@ -137,10 +137,52 @@ def test_the_reader_module_is_where_the_hook_is_read() -> None:
 @pytest.mark.parametrize(
     "module", [scan_phase, scanner_executor, dependencies], ids=lambda m: m.__name__
 )
-def test_each_caller_quotes_the_hook_through_the_reader(module) -> None:
-    assert "plugin_missing_dependency_reason" in inspect.getsource(module), (
-        module.__name__
+def test_each_caller_binds_the_reader_itself(module) -> None:
+    """The name each caller reads is the reader function, not a copy. A
+    source-text check of the name was satisfied by a comment; this reads the
+    binding, and the behavioral checks below drive the calls."""
+    assert (
+        module.plugin_missing_dependency_reason
+        is scanner_plugin.plugin_missing_dependency_reason
+    ), module.__name__
+
+
+def test_the_scan_phase_s_missing_reason_asks_the_one_reader(monkeypatch) -> None:
+    asked = []
+
+    def reader(plugin, values=(), **_kwargs):
+        asked.append((plugin, tuple(values)))
+        return "the plugin's own reason"
+
+    monkeypatch.setattr(scan_phase, "plugin_missing_dependency_reason", reader)
+    plugin = object()
+
+    reason = scan_phase._missing_dependency_reason(plugin, values=("a-value",))
+
+    assert reason == "the plugin's own reason"
+    assert asked == [(plugin, ("a-value",))]
+
+
+def test_the_install_command_s_refusal_reason_asks_the_one_reader(
+    monkeypatch,
+) -> None:
+    asked = []
+
+    def reader(plugin, values=(), **_kwargs):
+        asked.append((plugin, tuple(values)))
+        return "the plugin's own reason"
+
+    monkeypatch.setattr(dependencies, "plugin_missing_dependency_reason", reader)
+    monkeypatch.setattr(
+        dependencies, "plugin_explains_its_own_refusal", lambda _plugin, _reason: True
     )
+    plugin = object()
+
+    reason = dependencies._refusal_reason(plugin, values=("a-value",))
+
+    assert reason == "the plugin's own reason"
+    assert len(asked) == 1 and asked[0][0] is plugin, asked
+    assert "a-value" in asked[0][1], asked
 
 
 def test_the_executor_s_reason_after_a_scan_asks_the_one_reader(monkeypatch) -> None:
@@ -159,10 +201,3 @@ def test_the_executor_s_reason_after_a_scan_asks_the_one_reader(monkeypatch) -> 
 
     assert reason == "the plugin's own reason"
     assert asked == [(plugin, ("a-value",))]
-
-
-def test_the_scan_phase_and_the_cli_ask_the_same_reader() -> None:
-    reader = scanner_plugin.plugin_missing_dependency_reason
-    assert scan_phase.plugin_missing_dependency_reason is reader
-    assert scanner_executor.plugin_missing_dependency_reason is reader
-    assert dependencies.plugin_missing_dependency_reason is reader
