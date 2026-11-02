@@ -22,6 +22,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     ValidationInfo,
     field_validator,
     model_validator,
@@ -598,6 +599,11 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
     return "|".join(parts)
 
 
+#: What a disagreeing resource_id / scope.resource_id pair records under
+#: TOLERATE_STORED_CONFIG. The entry is kept but never applies
+#: (AshSuppression._scope_conflict): which value was meant cannot be known.
+RESOURCE_ID_CONFLICT_NOTE = "a resource_id that disagrees with its scope"
+
 #: What an empty scope, an empty ``engines`` map or an empty engine block
 #: records under TOLERATE_STORED_CONFIG. The matcher never applies a scope
 #: that selects nothing, so a stored results file keeps loading.
@@ -836,6 +842,48 @@ class AshSuppression(IgnorePathWithReason):
             ),
         ),
     ] = None
+    resource_id: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Sugar for scope.resource_id: the entry-level "
+                "spelling users reach for on their own. Folded into scope at "
+                "validation; setting both to different values is an error."
+            ),
+        ),
+    ] = None
+
+    #: A conflicting resource_id pair kept from a results file written by
+    #: another version (TOLERATE_STORED_CONFIG): which value was meant cannot
+    #: be known, so the entry never applies (checked by _scope_matches).
+    _scope_conflict: bool = PrivateAttr(default=False)
+
+    @model_validator(mode="after")
+    def _fold_resource_id_sugar(self, info: ValidationInfo):
+        """Fold entry-level ``resource_id`` into ``scope.resource_id``.
+
+        An equal duplicate is accepted; a disagreement is refused with which
+        key to keep. Under TOLERATE_STORED_CONFIG a disagreement is recorded
+        and the entry kept but never applied, as every other unreadable stored
+        entry is.
+        """
+        if self.resource_id is None:
+            return self
+        if self.scope is None:
+            self.scope = SuppressionScope(resource_id=self.resource_id)
+        elif self.scope.resource_id is None:
+            self.scope.resource_id = self.resource_id
+        elif self.scope.resource_id != self.resource_id:
+            notes = tolerated_notes(info)
+            if notes is not None:
+                notes.append(RESOURCE_ID_CONFLICT_NOTE)
+                self._scope_conflict = True
+                return self
+            raise ValueError(
+                "resource_id and scope.resource_id disagree; keep one"
+            )
+        return self
 
     @field_validator("line_end")
     @classmethod
@@ -972,6 +1020,8 @@ class AshSuppression(IgnorePathWithReason):
         ``resource_type`` case-insensitive; both are literal-first, then glob
         with brackets escaped (``scope_value_matches``).
         """
+        if self._scope_conflict:
+            return False
         scope = self.scope
         if scope is None:
             return True
