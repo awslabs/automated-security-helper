@@ -601,9 +601,10 @@ def scope_value_matches(value: str, pattern: str, *, case_sensitive: bool) -> bo
     """Whether a scope pattern covers a finding's value: literal first, then glob.
 
     Literal equality is checked before any glob reading, and the glob escapes
-    ``[`` first, so a cdk-nag construct path or a granular rule qualifier that
-    contains brackets (``AwsSolutions-IAM5[Resource::...]``) is matched as
-    written rather than read as a character class that matches nothing.
+    ``[`` first, so a cdk-nag construct path or another value that contains
+    brackets is matched as written rather than read as a character class that
+    matches nothing. Not used for cdk-nag ``applies_to``, which is exact
+    string membership (the scanner's module).
     """
     if not case_sensitive:
         value = value.lower()

@@ -51,7 +51,7 @@ A scope may also carry per-engine blocks, keyed by scanner name and owned by tha
             resource_path: "Stack/CollectorTaskRole/DefaultPolicy/Resource"
 ```
 
-Listing engines enumerates the engines the entry covers: a finding from a scanner not listed does not match the entry, and a listed scanner's finding matches only when its plugin accepts the block. A listed scanner whose plugin is not installed or enabled this run suppresses nothing, with a warning naming it. cdk-nag's block takes `applies_to` (matched against the granular qualifier cdk-nag appends to rule ids, so `rule_id: AwsSolutions-IAM5` plus a scope also covers `AwsSolutions-IAM5[Action::logs:*]` findings) and `resource_path` (a glob over the construct path).
+Listing engines enumerates the engines the entry covers: a finding from a scanner not listed does not match the entry, and a listed scanner's finding matches only when its plugin accepts the block. A listed scanner whose plugin is not installed or enabled this run suppresses nothing, with a warning naming it. cdk-nag's block takes `applies_to` (compared exactly, as cdk-nag's own `appliesTo`, against the granular qualifier cdk-nag appends to rule ids, so `rule_id: AwsSolutions-IAM5` plus a scope also covers `AwsSolutions-IAM5[Action::logs:*]` findings; the value is never read as a glob, so a literal ported from a cdk-nag config covers only its own qualifier) and `resource_path` (a glob over the construct path).
 
 Everything about a scope fails closed. An empty `scope`, an empty `engines` map and an empty engine block are refused: match-all is the absence of the field, never an empty dict.
 

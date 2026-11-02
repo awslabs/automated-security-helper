@@ -691,8 +691,9 @@ class CdkNagScopeBlock(RedactedSection):
     """What a suppression's ``scope.engines.cdk-nag`` block may say.
 
     Owned by this plugin (utils/suppression_scope_registry.py); ASH's core
-    never reads the keys. Both fields are literal-first, then glob with ``[``
-    escaped, so cdk-nag's own bracketed spellings match as written.
+    never reads the keys. ``applies_to`` is exact string membership, as
+    cdk-nag's own appliesTo; ``resource_path`` is literal-first, then glob
+    with ``[`` escaped, so bracketed spellings match as written.
     """
 
     model_config = ConfigDict(
@@ -711,7 +712,8 @@ class CdkNagScopeBlock(RedactedSection):
                 "(Optional) Only cover findings whose granular qualifier -- the "
                 "bracketed tail cdk-nag appends to a rule id, e.g. "
                 "'Action::logs:*' in 'AwsSolutions-IAM5[Action::logs:*]' -- "
-                "matches one of these. A finding with no qualifier never "
+                "equals one of these exactly, as cdk-nag's own appliesTo "
+                "(no glob reading). A finding with no qualifier never "
                 "matches an applies_to block."
             ),
         ),
@@ -812,15 +814,16 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             _, qualifier = cls.split_rule_qualifier(finding.rule_id or "")
             if qualifier is None:
                 return False
-            patterns = (
+            values = (
                 [model.applies_to]
                 if isinstance(model.applies_to, str)
                 else model.applies_to
             )
-            if not any(
-                scope_value_matches(qualifier, pattern, case_sensitive=True)
-                for pattern in patterns
-            ):
+            # Exact membership, as cdk-nag's own appliesTo: a literal ported
+            # from a cdk-nag config, such as "Resource::*", covers only the
+            # finding with that exact qualifier, never every Resource::-
+            # qualified finding of the rule. No glob reading here.
+            if qualifier not in values:
                 return False
         if model.resource_path is not None:
             if finding.resource_id is None:
