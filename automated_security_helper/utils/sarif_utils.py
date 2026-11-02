@@ -2356,6 +2356,14 @@ def _apply_suppressions_within_budget(
                     )
 
                 if flat_finding:
+                    # The run's engine-owned warn-once set for fail-closed
+                    # engine blocks; a context without one (a test double)
+                    # falls back to the registry's no-engine set. Bound once:
+                    # the two attempts below must judge against the same run
+                    # state.
+                    warned_engines = getattr(
+                        plugin_context, "warned_unmatched_engines", None
+                    )
                     config_suppressed = _apply_config_suppression(
                         result,
                         suppressions,
@@ -2365,10 +2373,7 @@ def _apply_suppressions_within_budget(
                         written_reasons,
                         recorded_fields,
                         written_ids,
-                        # The run's engine-owned warn-once set for fail-closed
-                        # engine blocks; a context without one (a test double)
-                        # falls back to the registry's no-engine set.
-                        getattr(plugin_context, "warned_unmatched_engines", None),
+                        warned_engines=warned_engines,
                     )
                     if not config_suppressed and uri_as_written is not None:
                         config_suppressed = _apply_config_suppression(
@@ -2382,6 +2387,7 @@ def _apply_suppressions_within_budget(
                             written_reasons,
                             recorded_fields,
                             written_ids,
+                            warned_engines=warned_engines,
                         )
                     if config_suppressed and suppressions_in_effect(
                         result.suppressions
