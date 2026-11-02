@@ -976,6 +976,57 @@ def test_an_explicit_runner_path_runs_that_path(given, pwsh, tmp_path):
         assert calls == [f"wrap {explicit}", f"{explicit} run"]
 
 
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.name == "nt", reason="the stand-in runners are POSIX shell scripts"
+)
+def test_a_relative_runner_wrapper_is_refused_and_nothing_runs(pwsh, tmp_path):
+    """A relative first word of OCI_RUNNER_WRAPPER names a file under the working
+    directory, usually the repository being scanned. Invoke-ASH refuses it with exit
+    3 and the variable named, as ./ash and the ash CLI do: the wrapper is not run and
+    the runner does not start without it."""
+    (tmp_path / "src").mkdir()
+    log = tmp_path / "runner-calls.txt"
+    runner = _self_recording_runner(tmp_path / "path-bin", log)
+    wrapper = tmp_path / "bin" / "wrap"
+    wrapper.parent.mkdir()
+    wrapper.write_text(
+        f"#!/bin/sh\nprintf 'wrap %s\\n' \"$1\" >> '{log}'\nexec \"$@\"\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    script = (
+        f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
+        f"try {{ Invoke-ASH -OCIRunner '{runner.as_posix()}' -NoBuild "
+        "-SourceDir src -OutputDir out } "
+        "catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; "
+        "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
+        "exit [int]$LASTEXITCODE"
+    )
+    env = inherited_env("PATH", "ASH_CONFIG", "OCI_RUNNER_WRAPPER")
+    env["PATH"] = os.pathsep.join(
+        [runner.parent.as_posix(), Path(pwsh).resolve().parent.as_posix()]
+    )
+    env.update(scratch_home(tmp_path))
+    env["OCI_RUNNER_WRAPPER"] = "bin/wrap -n"
+
+    result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
+        [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 3, shown
+    assert "OCI_RUNNER_WRAPPER starts with the relative path" in " ".join(shown.split())
+    assert not log.exists(), log.read_text(encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # What reaches the run command: the config, the stage, the scanner lists
 # ---------------------------------------------------------------------------

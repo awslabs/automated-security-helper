@@ -52,7 +52,6 @@ from automated_security_helper.core.constants import (
     is_anchored,
     is_readable_environment_name,
     is_secret_shaped_environment_name,
-    warn_relative_value_once,
 )
 from automated_security_helper.core.enums import (
     AshLogLevel,
@@ -124,6 +123,21 @@ RUNNER_MARKERS_ON_ARGV = ("GITHUB_ACTIONS", "TF_BUILD", "TEAMCITY_VERSION")
 
 class RunnerMarkerRefused(ValueError):
     """A runner marker whose value cannot go on the runner's command line."""
+
+
+class OciValueRefused(ValueError):
+    """An ``OCI_RUNNER`` or ``OCI_RUNNER_WRAPPER`` value ASH will not run.
+
+    The message names the variable (or the option) and what is wrong with the value.
+    A value like this is refused, never run as given, never replaced by looking for
+    another runtime, and never dropped so that the runtime starts without the wrapper
+    the operator asked for.
+
+    ``exit_code`` is the usage-error code ``./ash`` and ``Invoke-ASH`` refuse the same
+    values with.
+    """
+
+    exit_code = _WRAPPER_REFUSAL_EXIT
 
 
 def _runner_marker_args(
@@ -1078,34 +1092,39 @@ def oci_runner_for_this_run(value: str | None, from_environment: bool) -> str | 
     """The OCI runner for this run, from the option's ``value`` and where it came from.
 
     A leading ``~`` or ``~user`` is expanded; ``~`` and ``~/...`` need a usable home
-    directory, and without one the value is not used (None, after the warning about
-    ``HOME``), so a runner is found as if none were named. A command name or an
-    absolute path is used as given.
+    directory, and without one the value is refused (``OciValueRefused``). A command
+    name or an absolute path is used as given.
 
     A relative path with a directory part is read against the working directory when
     it was typed (the option, or the ``oci_runner`` of a ``--cli-json-input``
     document, which the CLI reads as typed). Taken from ``OCI_RUNNER``
     (``from_environment``) it names a file under whatever directory ASH runs from,
-    usually the repository being scanned, so it is not run: a warning names it and
-    None is returned.
+    usually the repository being scanned, so it is refused (``OciValueRefused``):
+    not run, and not replaced by looking for another runtime.
+
+    Raises:
+        OciValueRefused: For a value of either kind above; the message names
+            ``OCI_RUNNER`` (or ``--oci-runner``) and the value.
     """
     if not value:
         return value
-    expanded = expand_home(value)
+    name = "OCI_RUNNER" if from_environment else "--oci-runner"
+    expanded = expand_home(value, warn=False)
     if expanded is None:
-        return None
+        raise OciValueRefused(
+            f"{name} is {value!r}, which starts with ~ and needs a usable home "
+            "directory: HOME is empty or relative, or unset with no absolute home in "
+            f"the passwd entry. Set {name} to a command name or an absolute path."
+        )
     if not _is_relative_path(expanded):
         return expanded
     if from_environment:
-        warn_relative_value_once(
-            "OCI_RUNNER",
-            value,
+        raise OciValueRefused(
             f"OCI_RUNNER is the relative path {value!r}, which names a file under "
             "the working directory (usually the repository being scanned), so ASH "
-            "does not run it and finds a runner as if none were named. Set "
-            "OCI_RUNNER to a command name or an absolute path.",
+            "does not run it, and does not look for another runtime in its place. "
+            "Set OCI_RUNNER to a command name or an absolute path."
         )
-        return None
     return os.path.abspath(expanded)
 
 
@@ -1116,11 +1135,16 @@ def _get_oci_wrapper_prefix() -> List[str]:
     IFS): any other character, a vertical tab or a carriage return included, is part
     of a word there, so it is here too, and a wrapper of only those three is none.
 
-    A leading ``~`` or ``~user`` of the first word is expanded. The runtime starts
-    without a wrapper when that word needs a home directory that is unusable (the
-    warning about ``HOME``), or is a relative path with a directory part: it names a
-    file under the working directory, usually the repository being scanned, and a
-    warning says so. A command name or an absolute path is used as given.
+    A leading ``~`` or ``~user`` of the first word is expanded. A first word that
+    needs a home directory that is unusable, or is a relative path with a directory
+    part (it names a file under the working directory, usually the repository being
+    scanned), is refused: the runtime does not start without the wrapper the operator
+    asked for, and the wrapper is not run as given. A command name or an absolute
+    path is used as given.
+
+    Raises:
+        OciValueRefused: For a first word of either kind above; the message names
+            ``OCI_RUNNER_WRAPPER`` and the word.
     """
     oci_wrapper = os.environ.get("OCI_RUNNER_WRAPPER", "").strip(" \t\n")
     if not oci_wrapper:
@@ -1131,21 +1155,38 @@ def _get_oci_wrapper_prefix() -> List[str]:
     # ./ash's) and raised ValueError on an unbalanced quote, which escaped
     # run_ash_container after the previous run's output had been cleared.
     words = [word for word in re.split(r"[ \t\n]+", oci_wrapper) if word]
-    first = expand_home(words[0])
+    first = expand_home(words[0], warn=False)
     if first is None:
-        return []
+        raise OciValueRefused(
+            f"OCI_RUNNER_WRAPPER starts with {words[0]!r}, which needs a usable home "
+            "directory: HOME is empty or relative, or unset with no absolute home in "
+            "the passwd entry. ASH does not start the OCI runner without the wrapper. "
+            "Start OCI_RUNNER_WRAPPER with a command name or an absolute path, or "
+            "unset it."
+        )
     if _is_relative_path(first):
-        warn_relative_value_once(
-            "OCI_RUNNER_WRAPPER",
-            words[0],
+        raise OciValueRefused(
             f"OCI_RUNNER_WRAPPER starts with the relative path {words[0]!r}, which "
             "names a file under the working directory (usually the repository being "
-            "scanned), so ASH does not run it and runs the OCI runner without a "
-            "wrapper. Start OCI_RUNNER_WRAPPER with a command name or an absolute "
-            "path.",
+            "scanned), so ASH does not run it, and does not start the OCI runner "
+            "without the wrapper. Start OCI_RUNNER_WRAPPER with a command name or an "
+            "absolute path."
         )
-        return []
     return [first, *words[1:]]
+
+
+def oci_wrapper_refusal() -> tuple[int, str] | None:
+    """The exit code and message for an ``OCI_RUNNER_WRAPPER`` ASH refuses, else None.
+
+    The same refusal ``run_ash_container`` makes before it builds, asked early by a
+    caller that clears the previous run's output first, so a refused run deletes
+    nothing.
+    """
+    try:
+        _get_oci_wrapper_prefix()
+    except OciValueRefused as e:
+        return _WRAPPER_REFUSAL_EXIT, str(e)
+    return None
 
 
 def sweep_leftovers_before_run(oci_runner: str | None) -> List[str]:
@@ -5411,7 +5452,17 @@ def run_ash_container(
             create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
         )
 
-    oci_command_prefix = _get_oci_wrapper_prefix()
+    # A wrapper ASH will not run is refused, with exit 3 as ./ash refuses it, rather
+    # than the runtime starting without it.
+    try:
+        oci_command_prefix = _get_oci_wrapper_prefix()
+    except OciValueRefused as e:
+        secho(str(e), fg=typer.colors.RED)
+        return _not_started(
+            create_completed_process(
+                args=[], returncode=_WRAPPER_REFUSAL_EXIT, stdout="", stderr=str(e)
+            )
+        )
 
     if run:
         # A runner marker the wrapper's command line cannot take is refused here,

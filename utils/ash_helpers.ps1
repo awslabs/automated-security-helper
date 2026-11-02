@@ -1950,6 +1950,21 @@ function Invoke-ASH {
                 # into words at whitespace, as ./ash splits it.
                 $OCI_WRAPPER = @("$env:OCI_RUNNER_WRAPPER" -split '\s+' | Where-Object { $_ })
 
+                # A first word with a directory part that is not rooted names a file under
+                # the working directory, usually the repository being scanned. It is
+                # refused, as ./ash and the ash CLI refuse it: not run, and the runtime
+                # does not start without the wrapper the operator asked for. A command
+                # name and a rooted path are used as given. Thrown from a variable, with
+                # $LASTEXITCODE set first, as the runner refusal above.
+                if ($OCI_WRAPPER.Count -gt 0) {
+                    $wrapperWord = [string]$OCI_WRAPPER[0]
+                    if ($wrapperWord -match '[\\/]' -and -not [System.IO.Path]::IsPathRooted($wrapperWord)) {
+                        $wrapperRefusal = "OCI_RUNNER_WRAPPER starts with the relative path $(Format-AshShownValue $wrapperWord), which names a file under the working directory (usually the repository being scanned), so it is not run, and the OCI runner does not start without the wrapper. Start OCI_RUNNER_WRAPPER with a command name or an absolute path."
+                        $global:LASTEXITCODE = $refusalExitCode
+                        throw $wrapperRefusal
+                    }
+                }
+
                 # The build and run commands are argument arrays, and the runner is called
                 # with them directly (& $command @arguments), so every value reaches it as
                 # one argument, exactly as written, and nothing is passed through

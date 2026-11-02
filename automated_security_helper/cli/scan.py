@@ -47,8 +47,10 @@ from automated_security_helper.core.exceptions import (
     WorkspaceDefinitionError,
     WorkspacePathNotUtf8Error,
 )
+from automated_security_helper.cli.params import from_environment as _from_environment
 from automated_security_helper.core.sharding import validate_shard_selection
 from automated_security_helper.interactions.run_ash_container import (
+    OciValueRefused,
     oci_runner_for_this_run,
 )
 from automated_security_helper.interactions.run_ash_scan import (
@@ -97,9 +99,27 @@ from automated_security_helper.workspace.workspace_file import (
 )
 
 
-def _from_environment(ctx: typer.Context, param: str) -> bool:
-    """Whether click took *param*'s value from its ``envvar``."""
-    return getattr(ctx.get_parameter_source(param), "name", None) == "ENVIRONMENT"
+def _oci_runner_for_this_run(
+    ctx: typer.Context, oci_runner: Optional[str], mode: RunMode | str | None
+) -> Optional[str]:
+    """The runner ``run_ash_scan`` is given, read only in a mode that starts one.
+
+    Container and nix mode use the runner (nix mode to remove containers an earlier
+    container run left); any other mode never does, so a scan in one reads no
+    ``OCI_RUNNER`` and refuses nothing about it, whatever the environment holds.
+    Where the runner is used its value is read as ``oci_runner_for_this_run`` reads
+    it, and one ASH will not run ends the command with that refusal's usage-error
+    exit, before anything is cleared or started.
+    """
+    if (mode or RunMode.local) not in (RunMode.container, RunMode.nix):
+        return oci_runner
+    try:
+        return oci_runner_for_this_run(
+            oci_runner, from_environment=_from_environment(ctx, "oci_runner")
+        )
+    except OciValueRefused as refusal:
+        echo(shown_on_one_line(str(refusal)), err=True)
+        raise typer.Exit(refusal.exit_code) from None
 
 
 def _fail_config_mark(message: str) -> NoReturn:
@@ -1701,6 +1721,7 @@ def run_ash_scan_cli_command(
     # entered here and not inside run_ash_scan because the MCP runner calls
     # run_ash_scan inside a scope of its own, whose event its registry stops; a
     # scope installed below the shared frame would shadow it.
+    runner_for_the_run = _oci_runner_for_this_run(ctx, oci_runner, mode)
     cancel_event = CancelEvent()
     try:
         with shutdown_cancels(cancel_event), cancel_scope(cancel_event):
@@ -1742,12 +1763,11 @@ def run_ash_scan_cli_command(
                 build=build,
                 run=run,
                 force=force,
-                # A relative path is read against the working directory where it
-                # was typed (the option, or a --cli-json-input document), and not
-                # run when it came from OCI_RUNNER: oci_runner_for_this_run.
-                oci_runner=oci_runner_for_this_run(
-                    oci_runner, from_environment=_from_environment(ctx, "oci_runner")
-                ),
+                # Read only in a mode that starts a runner. A relative path is read
+                # against the working directory where it was typed (the option, or
+                # a --cli-json-input document) and refused when it came from
+                # OCI_RUNNER: oci_runner_for_this_run.
+                oci_runner=runner_for_the_run,
                 build_target=build_target,
                 offline_semgrep_rulesets=offline_semgrep_rulesets,
                 container_uid=container_uid,

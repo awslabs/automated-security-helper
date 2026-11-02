@@ -16484,16 +16484,21 @@ _HOW_THE_RUNTIME_VALUE_IS_READ = [
     ),
     (
         "With no usable home directory (`HOME` empty or relative, or unset with no "
-        "absolute home in the passwd entry), a value that starts with `~/` is not used: "
-        "ASH logs a warning about `HOME` and picks a runtime as if none were named, or, "
-        "for the wrapper, starts the runtime without one."
+        "absolute home in the passwd entry), a value that starts with `~/` is refused: "
+        "ASH exits with code 3 and a message that names the variable, and it neither "
+        "picks another runtime nor starts the runtime without the wrapper."
     ),
     (
         "A relative path with a directory part, such as `bin/docker`, is read against "
         "the directory you run ASH in when you pass it to `--oci-runner` or give it in "
-        "the document. In `OCI_RUNNER` it is not run: ASH logs a warning and picks a "
-        "runtime as if none were named. As the first word of `OCI_RUNNER_WRAPPER` it is "
-        "not used either, and the runtime starts without a wrapper, with a warning."
+        "the document. In `OCI_RUNNER` it is refused the same way, and so it is as the "
+        "first word of `OCI_RUNNER_WRAPPER`: it names a file under the directory you "
+        "run ASH from, usually the repository being scanned, so ASH does not run it."
+    ),
+    (
+        "`./ash` refuses a relative `OCI_RUNNER` and `OCI_RUNNER_WRAPPER` the same "
+        "way, and `Invoke-ASH` a relative `OCI_RUNNER_WRAPPER`. A scan in local mode "
+        "reads neither variable."
     ),
 ]
 
@@ -16530,18 +16535,34 @@ print(json.dumps({name: find_executable(name) for name in sys.argv[1:]}))
 """
 
 #: Asks for the runtime and the wrapper as a container scan does, with the runtime
-#: from OCI_RUNNER and as typed on the command line, and prints them as JSON.
+#: from OCI_RUNNER and as typed on the command line, and prints what each gave as
+#: JSON: {"value": ...}, or {"refused": <the refusal's message>}.
 _RESOLVE_THE_RUNTIME = """\
 import json, os
 
 from automated_security_helper.interactions import run_ash_container as container
 
+
+def asked(call):
+    try:
+        return {"value": call()}
+    except container.OciValueRefused as refusal:
+        return {"refused": str(refusal)}
+
+
 print(json.dumps({
-    "environment": container.oci_runner_for_this_run(os.environ["OCI_RUNNER"], True),
-    "typed": container.oci_runner_for_this_run(os.environ["OCI_RUNNER"], False),
-    "wrapper": container._get_oci_wrapper_prefix(),
+    "environment": asked(
+        lambda: container.oci_runner_for_this_run(os.environ["OCI_RUNNER"], True)
+    ),
+    "typed": asked(
+        lambda: container.oci_runner_for_this_run(os.environ["OCI_RUNNER"], False)
+    ),
+    "wrapper": asked(container._get_oci_wrapper_prefix),
 }))
 """
+
+#: What ``expected`` holds for an answer the child refused.
+_REFUSED = "REFUSED"
 
 
 def _child_answer(
@@ -16961,7 +16982,11 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
             "bin/docker",
             "bin/sudo -n",
             "absolute",
-            {"environment": None, "typed": "CWD/bin/docker", "wrapper": []},
+            {
+                "environment": _REFUSED,
+                "typed": "CWD/bin/docker",
+                "wrapper": _REFUSED,
+            },
             id="relative-paths",
         ),
         pytest.param(
@@ -17001,14 +17026,14 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
             "~/bin/docker",
             "~/bin/sudo -n",
             "empty",
-            {"environment": None, "typed": None, "wrapper": []},
+            {"environment": _REFUSED, "typed": _REFUSED, "wrapper": _REFUSED},
             id="a-leading-tilde-an-empty-home",
         ),
         pytest.param(
             "~/bin/docker",
             "~/bin/sudo -n",
             "relative",
-            {"environment": None, "typed": None, "wrapper": []},
+            {"environment": _REFUSED, "typed": _REFUSED, "wrapper": _REFUSED},
             id="a-leading-tilde-a-relative-home",
         ),
         pytest.param(
@@ -17040,14 +17065,13 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
     A process asks for the container runtime as a container scan does, from
     ``OCI_RUNNER`` and as typed after ``--oci-runner``, and for the wrapper from
     ``OCI_RUNNER_WRAPPER``. A relative path with a directory part must be read
-    against the working directory when typed, and from ``OCI_RUNNER`` must not be
-    used, so a runtime is picked as if none were named; as the wrapper's first word
-    it must not be used either, so there is no wrapper. Each relative value gets a
-    warning that names it. A leading ``~`` must name the home directory, ``HOME``'s or,
-    with ``HOME`` unset, the passwd entry's, and a leading ``~user`` that user's. With
-    ``HOME`` empty or relative a ``~/`` value must not be used, with a warning about
-    ``HOME`` and none about a relative path. A command name and an absolute path are
-    used as given, with no warning.
+    against the working directory when typed, and from ``OCI_RUNNER`` must be
+    refused; as the wrapper's first word it must be refused too. Each refusal's
+    message names the variable and the value. A leading ``~`` must name the home
+    directory, ``HOME``'s or, with ``HOME`` unset, the passwd entry's, and a leading
+    ``~user`` that user's. With ``HOME`` empty or relative a ``~/`` value must be
+    refused, with a message that says ``HOME`` is the problem. A command name and an
+    absolute path are used as given.
     """
     for sentence in _HOW_THE_RUNTIME_VALUE_IS_READ:
         assert_on_page(RUN_IN_A_CONTAINER, sentence)
@@ -17082,12 +17106,30 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
         OCI_RUNNER_WRAPPER=wrapper,
     )
 
-    assert answer == expected, answer
-    relative = runner.startswith("bin/")
+    refusals = {
+        which: reply["refused"] for which, reply in answer.items() if "refused" in reply
+    }
+    read = {
+        which: _REFUSED if "refused" in reply else reply["value"]
+        for which, reply in answer.items()
+    }
+    assert read == expected, answer
+    # What each refusal is about: the wrapper's first word, or the runner as given,
+    # named with its variable (the option, for the value typed).
     first_word = shlex.split(wrapper)[0]
-    assert _warns_naming(stderr, "OCI_RUNNER", runner) is relative, stderr
-    assert _warns_naming(stderr, "OCI_RUNNER_WRAPPER", first_word) is relative, stderr
-    assert _warns_about_home(stderr) is (home_kind in ("empty", "relative")), stderr
+    names = {
+        "environment": ("OCI_RUNNER", runner),
+        "typed": ("--oci-runner", runner),
+        "wrapper": ("OCI_RUNNER_WRAPPER", first_word),
+    }
+    for which, message in refusals.items():
+        variable, value = names[which]
+        assert _warns_naming(message, variable, value), (which, message)
+        # Refused, not warned about and carried on: nothing is logged in its place.
+        assert not _warns_naming(stderr, variable, value), stderr
+    home_is_named = home_kind in ("empty", "relative") and bool(refusals)
+    assert _warns_about_home("".join(refusals.values())) is home_is_named, refusals
+    assert not _warns_about_home(stderr), stderr
 
 
 #: A container runtime that records the path it was run as, then fails.
@@ -17110,15 +17152,15 @@ _RECORDING_RUNTIME_SCRIPT = (
         pytest.param(
             {"oci_runner": "~/bin/docker"},
             "empty",
-            "path",
-            id="tilde-with-an-empty-home",
+            None,
+            id="tilde-with-an-empty-home-is-refused",
         ),
         pytest.param({}, "absolute", "path", id="control-no-runner-named"),
     ],
 )
 @pytest.mark.integration
 def test_a_documents_oci_runner_is_read_as_typed(
-    tmp_path: Path, document: Dict[str, str], home_kind: str, runs: str
+    tmp_path: Path, document: Dict[str, str], home_kind: str, runs: Optional[str]
 ) -> None:
     """run-in-a-container.md (Choose the container runtime).
 
@@ -17129,9 +17171,10 @@ def test_a_documents_oci_runner_is_read_as_typed(
     literally, and finch on ``PATH``, which a scan picks when no runtime is named. A
     relative value must run the working directory's, ``~/`` the home directory's, and
     ``$HOME/...`` the literal one under the working directory. With ``HOME`` empty, a
-    ``~/`` value must not be used: the scan runs finch from ``PATH``, as with no
-    runtime named (the control), and logs a warning about ``HOME``. Windows has no
-    shell for the recording runtime, so there only the pages are checked.
+    ``~/`` value must be refused: the command exits 3 with a message that names the
+    option and says ``HOME`` is the problem, and no runtime runs, finch on ``PATH``
+    included. Windows has no shell for the recording runtime, so there only the
+    pages are checked.
     """
     for sentence in _HOW_THE_RUNTIME_VALUE_IS_READ:
         assert_on_page(RUN_IN_A_CONTAINER, sentence)
@@ -17175,7 +17218,14 @@ def test_a_documents_oci_runner_is_read_as_typed(
     )
 
     ran = set(record.read_text(encoding="utf-8").split()) if record.exists() else set()
-    assert ran == {str(places[runs])}, (ran, _output_tail(result))
+    if runs is None:
+        assert ran == set(), (ran, _output_tail(result))
+        assert result.returncode == 3, _output_tail(result)
+        assert _warns_naming(
+            result.stdout + result.stderr, "--oci-runner", "~/bin/docker"
+        ), _output_tail(result)
+    else:
+        assert ran == {str(places[runs])}, (ran, _output_tail(result))
     assert _warns_about_home(result.stdout + result.stderr) is (home_kind == "empty"), (
         _output_tail(result)
     )

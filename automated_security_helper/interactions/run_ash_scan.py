@@ -120,6 +120,7 @@ from automated_security_helper.interactions.run_ash_container import (
     container_input_refusal,
     container_output_dir_refusal,
     container_was_started,
+    oci_wrapper_refusal,
     run_ash_container,
     sweep_leftovers_before_run,
 )
@@ -5400,6 +5401,14 @@ def _run_container_mode(
             if build_refusal is not None:
                 secho(build_refusal[1], fg=typer.colors.RED)
                 sys.exit(build_refusal[0])
+        # An OCI_RUNNER_WRAPPER ASH will not run (a relative path, or a ~ with no
+        # usable home) is refused here too, before the previous run's output is
+        # cleared below; run_ash_container refuses it for a caller that reaches it
+        # directly.
+        wrapper_refusal = oci_wrapper_refusal()
+        if wrapper_refusal is not None:
+            secho(wrapper_refusal[1], fg=typer.colors.RED)
+            sys.exit(wrapper_refusal[0])
         # Only when a scan is actually being asked for. --no-run builds an image and
         # stops; it never claims to have scanned anything, so it has no business
         # discarding a report from a run that did.
@@ -6072,8 +6081,7 @@ def _changed_file_set_for(
         (
             candidate
             for candidate in (
-                resolve_uri_reading(str(p), base=repository_root)
-                for p in changed_paths
+                resolve_uri_reading(str(p), base=repository_root) for p in changed_paths
             )
             if candidate is not None
         ),

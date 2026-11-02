@@ -18,8 +18,10 @@ from automated_security_helper.core.constants import (
     ASH_EXIT_INTERRUPTED,
     ASH_EXIT_TERMINATED,
 )
+from automated_security_helper.cli.params import from_environment
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
 from automated_security_helper.interactions.run_ash_container import (
+    OciValueRefused,
     oci_runner_for_this_run,
 )
 from automated_security_helper.interactions.run_ash_scan import (
@@ -28,6 +30,7 @@ from automated_security_helper.interactions.run_ash_scan import (
 )
 from automated_security_helper.utils.console import echo
 from automated_security_helper.utils.log import configure_last_resort_level
+from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 
 def build_ash_image_cli_command(
@@ -192,13 +195,16 @@ def build_ash_image_cli_command(
     )
 
     # A relative path is read against the working directory where it was typed, and
-    # not run when it came from OCI_RUNNER (oci_runner_for_this_run). After the gate
-    # above, so that its warning is shown at the verbosity the flags ask for.
-    oci_runner = oci_runner_for_this_run(
-        oci_runner,
-        from_environment=getattr(ctx.get_parameter_source("oci_runner"), "name", None)
-        == "ENVIRONMENT",
-    )
+    # refused when it came from OCI_RUNNER (oci_runner_for_this_run): not run, and
+    # not replaced by looking for another runtime. build-image always starts a
+    # runner, so the value is always read.
+    try:
+        oci_runner = oci_runner_for_this_run(
+            oci_runner, from_environment=from_environment(ctx, "oci_runner")
+        )
+    except OciValueRefused as refusal:
+        echo(shown_on_one_line(str(refusal)), err=True)
+        raise typer.Exit(refusal.exit_code) from None
 
     # Call run_ash_scan with all parameters, inside a scope the entry point's
     # SIGTERM handler cancels, as ash scan runs it (cli/scan.py;

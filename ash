@@ -34,6 +34,10 @@ OFFLINE="NO"
 OFFLINE_SEMGREP_RULESETS="p/ci"
 TARGET_STAGE="non-root"
 INSTALL_ASH_REVISION="LOCAL"
+# YES once --oci-runner (or -o) named the runner: a relative path typed there is run
+# from the directory the command was typed in, as the ash CLI reads it, while one from
+# the OCI_RUNNER environment variable is refused.
+OCI_RUNNER_FROM_OPTION="NO"
 
 # A refusal is this script declining its own arguments or environment, before anything
 # is built or run. Every wrapper (this one, utils/ash_helpers.sh and Invoke-ASH) exits 3
@@ -56,6 +60,23 @@ refuse() {
 refuse_usage() {
   echo "ERROR: $*" >&2
   exit "${USAGE_ERROR_EXIT}"
+}
+
+# Whether $1 is a path with a directory part that names no place by itself: it is read
+# against the working directory, usually the repository being scanned. A bare command
+# name (docker) is looked up on PATH, and a path that starts with / (or a drive or share
+# under Git Bash) names its place. A leading ~ is not expanded by this script, so a word
+# that starts with ~/ counts here: running it would look for a directory named ~ under
+# the working directory. The same rule as the ash CLI's (oci_runner_for_this_run).
+is_relative_path() {
+  local word="$1" separators="/"
+  case "${OSTYPE:-}" in
+    msys* | cygwin* | win32*) separators='/\' ;;
+  esac
+  case "${word}" in
+    '' | /* | [A-Za-z]:[/\\]* | \\\\*) return 1 ;;
+  esac
+  [[ "${word}" == *["${separators}"]* ]]
 }
 
 # A value from the command line or the environment, as this script prints it: as
@@ -1018,6 +1039,7 @@ while (("$#")); do
       own_value "$1" "$#" "${2-}"
       shift "${OWN_SHIFT}"
       OCI_RUNNER="${OWN_VALUE}"
+      OCI_RUNNER_FROM_OPTION="YES"
       ;;
     -o)
       # -o is this script's --oci-runner with no subcommand and after scan or
@@ -1033,6 +1055,7 @@ while (("$#")); do
         own_value "$1" "$#" "${2-}"
         shift "${OWN_SHIFT}"
         OCI_RUNNER="${OWN_VALUE}"
+        OCI_RUNNER_FROM_OPTION="YES"
       fi
       ;;
     --container-uid | --container-uid=* | -u)
@@ -1063,6 +1086,7 @@ while (("$#")); do
       else
         require_value "-o" 2 "${1:2}"
         OCI_RUNNER="${1:2}"
+        OCI_RUNNER_FROM_OPTION="YES"
       fi
       ;;
     -u?*)
@@ -1692,6 +1716,13 @@ else
     # it can carry arguments of its own.
     if [[ -n "${OCI_RUNNER:-}" ]]; then
         read -r -d '' -a RUNNER_WORDS <<< "${OCI_RUNNER}"
+        # A relative path from the OCI_RUNNER environment variable names a file under
+        # the working directory, usually the repository being scanned. It is refused:
+        # not run, and not replaced by looking for another runtime, as the ash CLI
+        # refuses it.
+        if [[ "${OCI_RUNNER_FROM_OPTION}" != "YES" ]] && is_relative_path "${RUNNER_WORDS[0]}"; then
+            refuse "OCI_RUNNER starts with the relative path $(shown "${RUNNER_WORDS[0]}"), which names a file under the working directory (usually the repository being scanned), so it is not run, and no other runtime is looked for in its place. Set OCI_RUNNER to a command name or an absolute path."
+        fi
     else
         RUNNER_WORDS=("${RESOLVED_OCI_RUNNER}")
     fi
@@ -1702,8 +1733,14 @@ else
     # OCI_RUNNER_WRAPPER prefixes all OCI commands (like RUSTC_WRAPPER for cargo)
     # Example: OCI_RUNNER_WRAPPER=sudo makes all finch/docker calls use sudo
     if [[ -n "${OCI_RUNNER_WRAPPER:-}" ]]; then
-        RESOLVED_OCI_RUNNER="${OCI_RUNNER_WRAPPER} ${RESOLVED_OCI_RUNNER}"
         read -r -d '' -a WRAPPER_WORDS <<< "${OCI_RUNNER_WRAPPER}"
+        # A relative first word names a file under the working directory, usually the
+        # repository being scanned. It is refused, as the ash CLI refuses it: not run,
+        # and the runtime does not start without the wrapper the operator asked for.
+        if is_relative_path "${WRAPPER_WORDS[0]:-}"; then
+            refuse "OCI_RUNNER_WRAPPER starts with the relative path $(shown "${WRAPPER_WORDS[0]}"), which names a file under the working directory (usually the repository being scanned), so it is not run, and the OCI runner does not start without the wrapper. Start OCI_RUNNER_WRAPPER with a command name or an absolute path."
+        fi
+        RESOLVED_OCI_RUNNER="${OCI_RUNNER_WRAPPER} ${RESOLVED_OCI_RUNNER}"
         RUNNER_WORDS=("${WRAPPER_WORDS[@]}" "${RUNNER_WORDS[@]}")
     fi
     # Under a runner that reads workflow commands from the job's output (GitHub

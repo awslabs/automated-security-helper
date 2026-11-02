@@ -608,3 +608,77 @@ def test_a_link_whose_target_ends_in_a_slash_is_followed_on_the_mark_walk(
     assert "--config-from-scanned-repository" in inner, inner
     mounted = Path(_mounts(run)["/ash-config/cfg.yaml"]["source"])
     assert mounted.resolve() == config.resolve(), run
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["bin/relative-runner", "./relative-runner", "~/bin/relative-runner"],
+    ids=["directory-part", "dot-slash", "tilde"],
+)
+def test_a_relative_oci_runner_from_the_environment_is_refused(
+    runner, source, tmp_path, value
+):
+    """A relative OCI_RUNNER names a file under the working directory, usually the
+    repository being scanned. It is refused with exit 3 and the variable named, as the
+    ash CLI refuses it: never run, and no runner found on PATH runs in its place."""
+    _executable(tmp_path / "bin" / "relative-runner", RECORDING_RUNNER)
+    _executable(tmp_path / "relative-runner", RECORDING_RUNNER)
+
+    result, calls = _run(
+        runner,
+        ["--no-build", "--source-dir", str(source)],
+        cwd=tmp_path,
+        env={"OCI_RUNNER": value},
+    )
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 3, shown
+    assert "OCI_RUNNER starts with the relative path" in result.stderr, shown
+    assert value in result.stderr, shown
+    assert "guard runner" not in shown, shown
+    assert calls == [], calls
+
+
+def test_a_relative_runner_typed_after_the_option_runs_from_the_working_directory(
+    runner, source, tmp_path
+):
+    """Typed, a relative path is read against the directory the command was typed in,
+    as the ash CLI reads --oci-runner: it is what the operator named."""
+    _executable(tmp_path / "bin" / "relative-runner", RECORDING_RUNNER)
+
+    result, calls = _run(
+        runner,
+        [
+            "--no-build",
+            "--oci-runner",
+            "bin/relative-runner",
+            "--source-dir",
+            str(source),
+        ],
+        cwd=tmp_path,
+        name_the_runner=False,
+    )
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 0, shown
+    _only(calls, "run", shown)
+
+
+def test_a_relative_oci_runner_wrapper_is_refused(runner, source, tmp_path):
+    """A relative first word of OCI_RUNNER_WRAPPER names a file under the working
+    directory. It is refused with exit 3 and the variable named, and the runtime does
+    not start without the wrapper."""
+    _executable(tmp_path / "bin" / "relative-wrapper", RECORDING_RUNNER)
+
+    result, calls = _run(
+        runner,
+        ["--no-build", "--source-dir", str(source)],
+        cwd=tmp_path,
+        env={"OCI_RUNNER_WRAPPER": "bin/relative-wrapper -n"},
+    )
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 3, shown
+    assert "OCI_RUNNER_WRAPPER starts with the relative path" in result.stderr, shown
+    assert "bin/relative-wrapper" in result.stderr, shown
+    assert calls == [], calls
