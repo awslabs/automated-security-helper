@@ -155,9 +155,12 @@ def test_a_real_junction_to_a_removed_directory_is_a_link_to_nothing(tmp_path):
     _winapi.CreateJunction(str(target), str(junction))
     target.rmdir()
 
-    refusal = output_dir_refusal(junction)
+    # Below the junction, so the first stat goes through it and the walk ascends.
+    output = junction / "ash_output"
+
+    refusal = output_dir_refusal(output)
 
     assert refusal == (
-        f"Output directory cannot be created: {junction} ({os.strerror(errno.EEXIST)})"
+        f"Output directory cannot be created: {output} ({os.strerror(errno.EEXIST)})"
     )
     assert refusal.error_number == errno.EEXIST
