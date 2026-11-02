@@ -2250,6 +2250,21 @@ class AshConfig(RedactedSection):
         ),
     ] = True
 
+    fail_on_unknown_keys: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether an unknown key in a suppression or ignore-path entry "
+                "refuses the config at load. False (the default) loads the "
+                "config with a warning that names the key, with a did-you-mean, "
+                "and the entry it sits in suppresses nothing until it is fixed, "
+                "so a typo can never widen a suppression. True refuses the "
+                "config, naming the same key. ASH v4 flips the default to True; "
+                "set it True now to adopt the error early."
+            )
+        ),
+    ] = False
+
     honor_ignore_files: Annotated[
         bool,
         Field(

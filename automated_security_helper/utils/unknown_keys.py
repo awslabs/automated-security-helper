@@ -49,6 +49,26 @@ from pydantic import AliasChoices, BaseModel, ValidationInfo
 #: ``AshAggregatedResults.validate_ash_config``.
 TOLERATE_STORED_CONFIG = "tolerate_stored_config"
 
+#: Validation-context key for the warn-then-refuse rollout. Bound to a list, it
+#: makes :func:`refuse_unknown_keys` record the refusal's own message there as a
+#: warning and keep the data, instead of raising, for ENTRY models only (the
+#: suppression and ignore-path family, which allow extras and mark themselves
+#: ``has_unknown_keys`` so an entry that kept a key never applies). Passed by
+#: ``build_config`` (config/resolve_config.py) unless ``fail_on_unknown_keys``
+#: is set: the warn is the 3.x default, the refusal returns as the default at
+#: v4. Plugin options and every other model that refuses unknown keys are not
+#: covered: they cannot mark themselves inert, so a kept key there would be
+#: silently unread, the original defect class.
+WARN_UNKNOWN_KEYS = "warn_unknown_keys"
+
+#: What the warn-mode warning appends to the refusal's message, so the operator
+#: knows the entry is disabled rather than partially applied, and how to get
+#: the error now.
+WARN_UNKNOWN_KEYS_TAIL = (
+    " The entry is kept but applies to nothing until the key is fixed. Set "
+    "fail_on_unknown_keys: true to make this an error."
+)
+
 #: What a kept unknown key records under TOLERATE_STORED_CONFIG, once per key.
 #: Not the key: a stored key is the results file's data, so the results loader
 #: names the section that holds it instead (models/asharp_model.py). A config
@@ -109,6 +129,29 @@ def tolerated_notes(info: Optional[ValidationInfo]) -> Optional[List[str]]:
         return None
     notes = info.context.get(TOLERATE_STORED_CONFIG)
     return notes if isinstance(notes, list) else None
+
+
+def warned_notes(info: Optional[ValidationInfo]) -> Optional[List[str]]:
+    """The list to record a warning in, when validation is under warn mode."""
+    if info is None or not info.context:
+        return None
+    notes = info.context.get(WARN_UNKNOWN_KEYS)
+    return notes if isinstance(notes, list) else None
+
+
+def _warnable_entry_model(model_cls: type[BaseModel]) -> bool:
+    """Whether warn mode may keep ``model_cls``'s unknown keys instead of raising.
+
+    Only an entry model can be warned about safely: one that allows extras (so
+    the key is kept, and ``has_unknown_keys`` marks the entry as one that never
+    applies) and that names itself as an entry kind (the suppression and
+    ignore-path family). A plugin options model fails both: a kept option would
+    be silently unread, which is the defect the refusal exists for.
+    """
+    return (
+        getattr(model_cls, "ENTRY_KIND", None) is not None
+        and model_cls.model_config.get("extra") == "allow"
+    )
 
 
 def known_keys(model_cls: type[BaseModel]) -> Set[str]:
@@ -275,5 +318,16 @@ def refuse_unknown_keys(
     notes = tolerated_notes(info)
     if notes is not None:
         notes.extend(UNKNOWN_KEY_NOTE for _ in unknown)
+        return data
+    warnings = warned_notes(info)
+    if warnings is not None and _warnable_entry_model(model_cls):
+        # The warn-then-refuse rollout (fail_on_unknown_keys, off by default on
+        # 3.x): the refusal's own message, as a warning, and the data kept. The
+        # model keeps the keys as extras, which marks the entry as one that
+        # never applies (IgnorePathWithReason.has_unknown_keys), the same
+        # fail-closed direction the stored-config tolerance takes.
+        warnings.append(
+            unknown_keys_message(unknown, known, where) + WARN_UNKNOWN_KEYS_TAIL
+        )
         return data
     raise ValueError(unknown_keys_message(unknown, known, where))

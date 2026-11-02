@@ -37,6 +37,7 @@ from automated_security_helper.config.ash_config import (
     SandboxConfig,
     sandbox_mode_in_document,
 )
+from automated_security_helper.utils.unknown_keys import WARN_UNKNOWN_KEYS
 from automated_security_helper.config.plugin_section_names import (
     fold_known_plugin_sections,
 )
@@ -542,9 +543,17 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
                 f"{type(e).__name__}"
             ) from e
 
-    # Convert back to AshConfig
+    # Convert back to AshConfig. An entry warn mode kept at load (an unknown
+    # suppression key under fail_on_unknown_keys: false) still carries its key
+    # as an extra, which this rebuild would otherwise refuse; the warning was
+    # recorded at load, so the list here is discarded.
+    rebuild_context = (
+        {WARN_UNKNOWN_KEYS: []}
+        if config_dict.get("fail_on_unknown_keys") is not True
+        else None
+    )
     try:
-        rebuilt = AshConfig.model_validate(config_dict)
+        rebuilt = AshConfig.model_validate(config_dict, context=rebuild_context)
     except ValidationError as e:
         # Not chained: see ASHConfigValidationError.validation_error. Without
         # the values and keys the configuration's files read from the
@@ -709,6 +718,27 @@ def lint_hint(config_path: Path | str, source_dir: Path | str | None = None) -> 
     return f"Run: {command}"
 
 
+def _unknown_entry_keys_are_fatal(
+    data: Any, config_overrides: Optional[List[str]]
+) -> bool:
+    """Whether this load refuses an unknown suppression key (fail_on_unknown_keys).
+
+    Read from the raw document before the model is built, because the entry
+    validators run inside that build: the flag's own field is still validated
+    strictly, so a value that is not a bool refuses the config either way (a
+    non-bool read here only chooses warn mode, the direction that marks the
+    entry inert). An override that sets the flag counts too, last one wins, so
+    ``--config-overrides fail_on_unknown_keys=true`` adopts the refusal for one
+    run.
+    """
+    fatal = isinstance(data, dict) and data.get("fail_on_unknown_keys") is True
+    for override in config_overrides or []:
+        key_path, separator, value = override.partition("=")
+        if separator and key_path.strip().removesuffix("+") == "fail_on_unknown_keys":
+            fatal = value.strip().lower() in ("true", "1", "yes")
+    return fatal
+
+
 def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> AshConfig:
     """The AshConfig a scan builds from a resolved document.
 
@@ -720,9 +750,20 @@ def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> Ash
     # environment reference (RedactedSection's validator): a strict load
     # refuses the reference text at the field either way, but pydantic's own
     # message calls the resolved text not-an-integer and names no variable.
-    config = AshConfig.model_validate(
-        data, strict=True, context={"strict_file_load": True}
-    )
+    context: Dict[str, Any] = {"strict_file_load": True}
+    warned: List[str] = []
+    if not _unknown_entry_keys_are_fatal(data, config_overrides):
+        # Warn-then-refuse rollout: an unknown key in a suppression or
+        # ignore-path entry warns and disables the entry instead of refusing
+        # the config (utils/unknown_keys.py WARN_UNKNOWN_KEYS). The refusal
+        # returns as the default at v4.
+        context[WARN_UNKNOWN_KEYS] = warned
+    config = AshConfig.model_validate(data, strict=True, context=context)
+    if warned:
+        # Logged where every other resolution warning is (the orchestrator
+        # reads _resolution_warnings). Extended before the overrides are
+        # applied, so the rebuilt model's deep-copied private state keeps them.
+        config._resolution_warnings.extend(warned)
     if config_overrides:
         config = apply_config_overrides(config, config_overrides)
     return config
