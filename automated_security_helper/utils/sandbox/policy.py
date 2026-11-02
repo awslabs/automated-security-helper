@@ -1112,6 +1112,37 @@ def _screened_declared_paths(
     return kept
 
 
+#: The extended-length prefixes Windows puts on a path it spells in full, and what
+#: each is replaced with: ``\\?\C:\dir`` is ``C:\dir`` and ``\\?\UNC\host\share`` is
+#: ``\\host\share``. ``\??\`` is the same prefix in the NT namespace.
+_EXTENDED_PATH_PREFIXES = (
+    ("\\\\?\\UNC\\", "\\\\"),
+    ("\\??\\UNC\\", "\\\\"),
+    ("\\\\?\\", ""),
+    ("\\??\\", ""),
+)
+
+
+def _readlink(path: Path) -> Path:
+    """The target of the symlink at ``path``, without a Windows path prefix.
+
+    ``os.readlink`` returns a Windows link's target as the link stores it, with the
+    extended-length prefix in front (``_EXTENDED_PATH_PREFIXES``), and
+    ``os.path.realpath`` keeps that prefix on a path that arrives with one. A
+    directory read from a link then never equalled the same directory spelled
+    without it: a home reached through a link was not the home, and the spawn that
+    passed through it was not refused. The prefix is removed here, so a hop is
+    spelled as every other path in this module is. On other platforms the target is
+    returned as read.
+    """
+    target = os.readlink(path)
+    if os.name == "nt":
+        for prefix, replacement in _EXTENDED_PATH_PREFIXES:
+            if target.startswith(prefix):
+                return Path(replacement + target[len(prefix) :])
+    return Path(target)
+
+
 def _symlink_hops(path: Path) -> List[Path]:
     """``path`` and every path its symlink chain passes through, as spelled.
 
@@ -1131,7 +1162,7 @@ def _symlink_hops(path: Path) -> List[Path]:
     for _ in range(40):  # the kernel's own limit on symlink depth
         if not current.is_symlink():
             break
-        target = Path(os.readlink(current))
+        target = _readlink(current)
         if target.is_absolute():
             current = target
         else:
