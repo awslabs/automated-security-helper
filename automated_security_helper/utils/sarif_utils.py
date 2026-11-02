@@ -699,6 +699,21 @@ def _apply_config_suppression(
         extra=MARKUP,
     )
     client_supplied = getattr(matching_suppression, "client_supplied", False) is True
+    # A suppression from the config of a tree an MCP client delivered is
+    # marked so a reader can tell it from the operator's; a scoped entry
+    # records what it was scoped to, so merge and report readers can say WHY
+    # this result was suppressed without re-matching the config.
+    applied_properties: Dict[str, Any] = {}
+    if client_supplied:
+        applied_properties["clientSupplied"] = True
+    applied_scope = getattr(matching_suppression, "scope", None)
+    if applied_scope is not None:
+        if applied_scope.resource_id is not None:
+            applied_properties["scope_resource_id"] = applied_scope.resource_id
+        if applied_scope.resource_type is not None:
+            applied_properties["scope_resource_type"] = applied_scope.resource_type
+        if applied_scope.engines:
+            applied_properties["scope_engines"] = sorted(applied_scope.engines)
     result.suppressions.append(
         Suppression(
             kind=Kind1.inSource,
@@ -707,9 +722,9 @@ def _apply_config_suppression(
                 f"Suppressing finding for rule '{result.ruleId}' in "
                 f"'{flat_finding.file_path}' with reason: {reason}"
             ),
-            # A suppression from the config of a tree an MCP client delivered,
-            # marked so a reader can tell it from the operator's.
-            properties=PropertyBag(clientSupplied=True) if client_supplied else None,
+            properties=(
+                PropertyBag(**applied_properties) if applied_properties else None
+            ),
         )
     )
     return True

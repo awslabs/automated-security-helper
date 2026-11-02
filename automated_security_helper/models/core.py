@@ -34,6 +34,11 @@ from automated_security_helper.utils.path_matching import (
     ignore_path_pattern,
 )
 from automated_security_helper.utils.redacted_model import RedactedSection
+from automated_security_helper.utils.suppression_scope_registry import (
+    engine_hooks_for,
+    split_rule_qualifier_for,
+    warn_once_unmatched_engine,
+)
 from automated_security_helper.utils.symbol_spans import is_valid_symbol
 from automated_security_helper.utils.unknown_keys import (
     refuse_unknown_keys,
@@ -983,7 +988,20 @@ class AshSuppression(IgnorePathWithReason):
                 return False
             # Case-insensitive glob match for OS portability
             if not fnmatch.fnmatch(finding.rule_id.lower(), self.rule_id.lower()):
-                return False
+                # A scoped entry also matches on the engine's BASE rule id
+                # (split_rule_qualifier), so `rule_id: AwsSolutions-IAM5` plus
+                # a scope covers the granular `AwsSolutions-IAM5[Resource::..]`
+                # finding without a hand-written bracket-escaped glob. Only
+                # with a scope: an unscoped entry keeps today's comparison.
+                if self.scope is None:
+                    return False
+                base, qualifier = split_rule_qualifier_for(
+                    finding.scanner, finding.rule_id
+                )
+                if qualifier is None or not fnmatch.fnmatch(
+                    base.lower(), self.rule_id.lower()
+                ):
+                    return False
 
         if not _path_pattern_matches(finding.file_path, self.path):
             return False
@@ -1055,12 +1073,17 @@ class AshSuppression(IgnorePathWithReason):
     ) -> bool:
         """Whether the named scanner's plugin accepts ``block`` for ``finding``.
 
-        Fails closed: with no plugin registered for ``scanner_name`` (not
-        installed, not enabled, or one that does not support engine-scoped
-        suppressions), the block matches nothing. The dispatch arrives with the
-        plugin hooks; until a plugin registers, every block is unmatched.
+        Dispatched through the suppression-scope registry
+        (utils/suppression_scope_registry.py). Fails closed, with a warn-once
+        note naming the engine: with no plugin registered for ``scanner_name``
+        (not installed, not enabled, or one that does not support engine-scoped
+        suppressions), the block matches nothing.
         """
-        return False
+        hooks = engine_hooks_for(scanner_name)
+        if hooks is None:
+            warn_once_unmatched_engine(scanner_name)
+            return False
+        return hooks.suppression_scope_matches(block, finding)
 
     def _package_matches(self, finding: "FlatVulnerability") -> bool:
         """Return True if every package field set here matches ``finding``."""

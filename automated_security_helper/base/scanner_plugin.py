@@ -48,6 +48,7 @@ from automated_security_helper.utils.subprocess_utils import (
 
 from pydantic import Field, PrivateAttr, ValidatorFunctionWrapHandler, field_validator
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
@@ -63,6 +64,9 @@ from typing import (
     TypeVar,
 )
 from abc import abstractmethod
+
+if TYPE_CHECKING:
+    from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
 # Pattern for valid CLI flag keys: one or two leading dashes followed by
 # a letter, then alphanumerics/underscores/hyphens. Optionally followed by
@@ -438,6 +442,54 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     #: Files this scanner asked ASH to own (``_neutral_tool_file``), by path, with
     #: the text each holds. Written when the arguments are resolved.
     _neutral_files: Dict[str, str] = PrivateAttr(default_factory=dict)
+
+    # --- Suppression-scope hooks (utils/suppression_scope_registry.py) ---
+    # A suppression's scope.engines block for this scanner is opaque to ASH's
+    # core; these three hooks are how the scanner owns it. Classmethods,
+    # because they are consulted where no plugin instance exists (the config
+    # checks and the suppression matcher), and a block's meaning cannot depend
+    # on instance state anyway: the same entry must suppress the same finding
+    # on every run. A plugin that implements them registers itself with
+    # register_suppression_scope_engine when its module loads. The defaults
+    # are "not supported": every block is refused at validation and matches
+    # nothing, the fail-closed direction.
+
+    @classmethod
+    def validate_suppression_scope(cls, block: Dict[str, Any]) -> List[str]:
+        """Problems with a scope.engines block addressed to this scanner.
+
+        An empty list accepts the block. The default refuses it whole: a
+        scanner that never registered cannot be scoped to, and saying so at
+        config time beats a suppression that silently never applies.
+        """
+        name = getattr(cls, "__name__", "this scanner")
+        return [
+            f"{name} does not support engine-scoped suppressions; "
+            "remove the block or upgrade the plugin."
+        ]
+
+    @classmethod
+    def suppression_scope_matches(
+        cls, block: Dict[str, Any], finding: "FlatVulnerability"
+    ) -> bool:
+        """Whether this scanner's ``block`` covers ``finding``.
+
+        Called only for findings this scanner produced, and only after the
+        entry's other constraints matched. The default never matches.
+        """
+        return False
+
+    @classmethod
+    def split_rule_qualifier(cls, rule_id: str) -> Tuple[str, Optional[str]]:
+        """``(base, qualifier)`` for a rule id this scanner mints.
+
+        For an engine that appends a granular qualifier to its rule ids
+        (cdk-nag's ``AwsSolutions-IAM5[Resource::...]``), the split lets a
+        scoped entry's plain ``rule_id`` match the qualified finding without
+        the author hand-writing a bracket-escaped glob. The default is no
+        split.
+        """
+        return rule_id, None
 
     command: Annotated[
         str | None,

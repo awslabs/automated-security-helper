@@ -62,7 +62,7 @@ from automated_security_helper.utils.error_text import (
     config_environment_values,
     error_text,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 
 class ScanExecutionEngine:
@@ -603,8 +603,45 @@ class ScanExecutionEngine:
                     self._selection_origin,
                 )
 
+            self._check_suppression_scope_engines()
+
             # Mark initialization complete
             self._initialized = True
+
+    def _check_suppression_scope_engines(self) -> None:
+        """Check every suppression's ``scope.engines`` against this run's scanners.
+
+        Here rather than at config load, because a config loads before its
+        plugin modules do, so the registered scanner names are only known once
+        the engine holds its plugins. The problems follow the same
+        warn-then-refuse policy as unknown keys: refused under
+        ``fail_on_unknown_keys``, otherwise warned, and the entry's listed
+        engine suppresses nothing either way (the matcher fails closed).
+        """
+        from automated_security_helper.utils.suppression_scope_registry import (
+            suppression_scope_problems,
+        )
+
+        config = self._context.config
+        suppressions = getattr(config.global_settings, "suppressions", None)
+        if not suppressions:
+            return
+        problems = suppression_scope_problems(
+            suppressions,
+            {
+                plugin_config_key(plugin_class)
+                for plugin_class in self.plugins.get("scanner", [])
+            },
+        )
+        if not problems:
+            return
+        if getattr(config, "fail_on_unknown_keys", False):
+            raise ValueError(
+                "Suppression scope validation failed: " + " ".join(problems)
+            )
+        for problem in problems:
+            ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {problem}", extra=NO_MARKUP)
+        config._resolution_warnings.extend(problems)
 
     def restrict_to_changed_files(self, changed_files: Optional[Set[Path]]) -> None:
         """Set the changed-file filter after construction; ``None`` means none.
