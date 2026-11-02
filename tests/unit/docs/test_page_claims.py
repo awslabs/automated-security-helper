@@ -328,6 +328,23 @@ def _tree_with_config(parent: Path, config: Dict[str, Any] | str) -> Path:
     return tree
 
 
+def _mark_git_checkout(root: Path) -> None:
+    """Make ``root`` a git checkout the way git's own discovery sees one: a ``.git``
+    directory that holds ``HEAD``.
+
+    ASH counts a ``.git`` entry as a checkout boundary only when it is git-shaped (a
+    gitfile, a link, or a directory with ``HEAD``). A bare empty ``.git`` directory,
+    which is what a stray ``mkdir`` or a transient mount point leaves in a shared
+    parent, bounds nothing, so a fixture that planted one made no checkout and every
+    cell below that rests on one tested a tree without it. A directory holding
+    ``HEAD`` is a checkout in code that counts any ``.git`` directory as well, so
+    the marker also serves a run against another tree's code.
+    """
+    git_dir = root / ".git"
+    git_dir.mkdir(parents=True, exist_ok=True)
+    (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+
 def _document_setting(pointer: str, value: Any) -> Dict[str, Any]:
     """A config document that sets only the field at JSON ``pointer`` to ``value``."""
     document: Any = value
@@ -1098,9 +1115,9 @@ def _home_with_a_project(tmp_path: Path, home_is_a_checkout: bool) -> Tuple[Path
     """(the home directory, a project under it that is a checkout of its own)."""
     home = tmp_path / "home"
     project = home / "work" / "app"
-    (project / ".git").mkdir(parents=True)
+    _mark_git_checkout(project)
     if home_is_a_checkout:
-        (home / ".git").mkdir()
+        _mark_git_checkout(home)
     return home, project
 
 
@@ -1305,7 +1322,7 @@ def test_who_names_a_tool_config_path_decides_where_it_may_be(
 
     key = "scanners.checkov.options.config_file"
     tool_file = tmp_path / "ops" / "checkov.yaml"
-    (tool_file.parent / ".git").mkdir(parents=True)
+    _mark_git_checkout(tool_file.parent)
     tool_file.write_text("framework: [terraform]\n", encoding="utf-8")
     naming = {
         "project_name": "app",
@@ -1327,7 +1344,7 @@ def test_who_names_a_tool_config_path_decides_where_it_may_be(
         overrides = [f"{key}={tool_file}"]
     if config_path is not None:
         config_path.write_text(yaml.safe_dump(naming), encoding="utf-8")
-    (project / ".git").mkdir()
+    _mark_git_checkout(project)
 
     resolved = resolve_config(
         config_path=config_path, source_dir=project, config_overrides=overrides
@@ -1397,11 +1414,11 @@ def test_a_config_in_an_ops_checkout_cannot_set_the_aws_reporters(
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     project = tmp_path / "project"
-    (project / ".git").mkdir(parents=True)
+    _mark_git_checkout(project)
     directory = tmp_path / ("ops" if in_a_checkout else "etc")
     directory.mkdir()
     if in_a_checkout:
-        (directory / ".git").mkdir()
+        _mark_git_checkout(directory)
     section: Dict[str, Any] = (
         {"options": {"bucket_name": "page-claims-bucket"}}
         if setting == "bucket_name"
@@ -4594,7 +4611,7 @@ def test_the_operators_workspace_config_is_final_over_a_projects_own(
     directory = tmp_path / ("ops" if in_a_checkout else "etc")
     directory.mkdir()
     if in_a_checkout:
-        (directory / ".git").mkdir()
+        _mark_git_checkout(directory)
     operator = directory / "ash.yaml"
     operator.write_text(
         yaml.safe_dump(
@@ -11935,10 +11952,10 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
         return resolved.sandbox, warnings
 
     repository = _tree_with_config(tmp_path / "repository", _SANDBOX_GRANTS)
-    (repository / ".git").mkdir()
+    _mark_git_checkout(repository)
     in_repository = repository / ".ash" / ".ash.yaml"
     ops = tmp_path / "ops" / "ash.yaml"
-    (ops.parent / ".git").mkdir(parents=True)
+    _mark_git_checkout(ops.parent)
     ops.write_text(yaml.safe_dump(_SANDBOX_GRANTS), encoding="utf-8")
     for config_path, source_dir, named in (
         (None, repository, in_repository),
@@ -11963,7 +11980,7 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
     # A base has to sit in the root file's own directory, so the checkout it is in is
     # one inside that directory.
     base = outside.parent / "ops" / "base.yaml"
-    (base.parent / ".git").mkdir(parents=True)
+    _mark_git_checkout(base.parent)
     base.write_text(
         yaml.safe_dump({"sandbox": {"extra_read_paths": ["/srv/ash/semgrep-rules"]}}),
         encoding="utf-8",
