@@ -194,9 +194,14 @@ class TestBlockValidation:
             assert not CdkNagScanner.suppression_scope_matches(block, _finding())
 
     def test_a_mixed_list_with_one_empty_element_still_validates_and_matches(self):
-        # The refusal is for ALL-empty lists only: a list with any real
-        # element still says something, so it validates and matches on the
-        # non-empty element.
+        """A mixed list is ADMITTED: that is the contract, not an accident.
+
+        A list with empty members beside non-empty ones validates, and its
+        empty members are inert at match time (the matcher's ``qualifier not
+        in values`` treats them as non-matching, since no real qualifier is
+        blank), so the entry matches on its live members. Only an ALL-empty
+        list is refused.
+        """
         block = {"applies_to": ["", "Action::logs:*"]}
         assert CdkNagScanner.validate_suppression_scope(block) == []
         assert CdkNagScanner.suppression_scope_matches(block, _finding())
