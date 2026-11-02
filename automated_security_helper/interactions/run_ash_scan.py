@@ -5903,6 +5903,15 @@ def _run_nix_mode(
     # Before the preflight and the clear: a refused run deletes nothing.
     _refuse_a_results_file_the_shell_cannot_be_handed(opts, logger)
 
+    # The sweep below runs the container runtime through OCI_RUNNER_WRAPPER, and a
+    # wrapper ASH will not run is a refusal, not a sweep that is skipped with a
+    # warning. run_ash_scan asks first, ahead of the log; this is for a caller that
+    # reaches this function directly.
+    wrapper_refusal = oci_wrapper_refusal()
+    if wrapper_refusal is not None:
+        secho(wrapper_refusal[1], fg=typer.colors.RED)
+        sys.exit(wrapper_refusal[0])
+
     try:
         # The two refusals of Nix mode (`nix` missing, the recursion guard), asked
         # first: a refused run starts no shell, so it must not delete the reports of a
@@ -7869,6 +7878,17 @@ def run_ash_scan(
     _refuse_a_source_dir_that_is_not_utf8(opts)
     _refuse_a_container_mount_that_is_not_utf8(opts)
     _refuse_a_container_mount_the_runner_cannot_carry(opts)
+    if opts.mode == RunMode.nix or (opts.mode == RunMode.container and opts.run):
+        # An OCI_RUNNER_WRAPPER ASH will not run, judged before ash.log is opened
+        # (the logger makes the output directory and truncates the log) for every
+        # scan that uses the wrapper: a container run, and a nix run, whose sweep of
+        # leftover containers goes through it. A workspace scan included.
+        # _run_container_mode and _run_nix_mode check again, for a caller that
+        # reaches them directly.
+        wrapper_refusal = oci_wrapper_refusal()
+        if wrapper_refusal is not None:
+            secho(wrapper_refusal[1], fg=typer.colors.RED)
+            sys.exit(wrapper_refusal[0])
     # What this scan reads of the operator's config, read once for every
     # container-mode check that asks (see OperatorConfigReads). The exit-code
     # fields below keep their own load.

@@ -70,7 +70,9 @@ directory you run ASH in when you pass it to `--oci-runner` or give it in the do
 `OCI_RUNNER_WRAPPER`: it names a file under the directory you run ASH from, usually the
 repository being scanned, so ASH does not run it. `./ash` refuses a relative `OCI_RUNNER`
 and `OCI_RUNNER_WRAPPER` the same way, and `Invoke-ASH` a relative `OCI_RUNNER_WRAPPER`.
-A scan in local mode reads neither variable.
+Neither script expands a leading `~`, so there a value that starts with `~/` is refused
+as a relative path: your shell expands it when you write `export OCI_RUNNER=~/bin/docker`,
+or you can spell the path out. A scan in local mode reads neither variable.
 
 ## Root and non-root images {#build-target}
 

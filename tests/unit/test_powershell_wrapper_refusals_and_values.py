@@ -980,11 +980,18 @@ def test_an_explicit_runner_path_runs_that_path(given, pwsh, tmp_path):
 @pytest.mark.skipif(
     os.name == "nt", reason="the stand-in runners are POSIX shell scripts"
 )
-def test_a_relative_runner_wrapper_is_refused_and_nothing_runs(pwsh, tmp_path):
+@pytest.mark.parametrize(
+    "wrapper_value", ["bin/wrap -n", "~/bin/wrap -n"], ids=["relative", "tilde"]
+)
+def test_a_relative_runner_wrapper_is_refused_and_nothing_runs(
+    pwsh, tmp_path, wrapper_value
+):
     """A relative first word of OCI_RUNNER_WRAPPER names a file under the working
     directory, usually the repository being scanned. Invoke-ASH refuses it with exit
     3 and the variable named, as ./ash and the ash CLI do: the wrapper is not run and
-    the runner does not start without it."""
+    the runner does not start without it. It does not expand a leading ~ (the ash CLI
+    does), so ~/bin/wrap is refused as a relative path, as ./ash refuses it; the
+    docs page for the container runtime says so."""
     (tmp_path / "src").mkdir()
     log = tmp_path / "runner-calls.txt"
     runner = _self_recording_runner(tmp_path / "path-bin", log)
@@ -1008,7 +1015,7 @@ def test_a_relative_runner_wrapper_is_refused_and_nothing_runs(pwsh, tmp_path):
         [runner.parent.as_posix(), Path(pwsh).resolve().parent.as_posix()]
     )
     env.update(scratch_home(tmp_path))
-    env["OCI_RUNNER_WRAPPER"] = "bin/wrap -n"
+    env["OCI_RUNNER_WRAPPER"] = wrapper_value
 
     result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
         [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],

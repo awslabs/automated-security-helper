@@ -23,6 +23,7 @@ from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMo
 from automated_security_helper.interactions.run_ash_container import (
     OciValueRefused,
     oci_runner_for_this_run,
+    oci_wrapper_refusal,
 )
 from automated_security_helper.interactions.run_ash_scan import (
     resolved_console_log_level,
@@ -205,6 +206,10 @@ def build_ash_image_cli_command(
     except OciValueRefused as refusal:
         echo(shown_on_one_line(str(refusal)), err=True)
         raise typer.Exit(refusal.exit_code) from None
+    wrapper_refusal = oci_wrapper_refusal()
+    if wrapper_refusal is not None:
+        echo(shown_on_one_line(wrapper_refusal[1]), err=True)
+        raise typer.Exit(wrapper_refusal[0])
 
     # Call run_ash_scan with all parameters, inside a scope the entry point's
     # SIGTERM handler cancels, as ash scan runs it (cli/scan.py;

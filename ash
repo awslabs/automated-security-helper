@@ -64,17 +64,25 @@ refuse_usage() {
 
 # Whether $1 is a path with a directory part that names no place by itself: it is read
 # against the working directory, usually the repository being scanned. A bare command
-# name (docker) is looked up on PATH, and a path that starts with / (or a drive or share
-# under Git Bash) names its place. A leading ~ is not expanded by this script, so a word
-# that starts with ~/ counts here: running it would look for a directory named ~ under
-# the working directory. The same rule as the ash CLI's (oci_runner_for_this_run).
+# name (docker) is looked up on PATH, and a path that starts with / names its place.
+# Under Git Bash (OSTYPE msys, cygwin or win32) a drive (C:/ or C:\) or a share (\\)
+# names its place too and \ separates directories; anywhere else C:/docker is a
+# directory C: under the working directory, and counts as relative. A leading ~ is not
+# expanded by this script, so a word that starts with ~/ counts here: running it would
+# look for a directory named ~ under the working directory. The ash CLI expands ~; the
+# docs page for the container runtime says that ./ash does not.
 is_relative_path() {
   local word="$1" separators="/"
-  case "${OSTYPE:-}" in
-    msys* | cygwin* | win32*) separators='/\' ;;
-  esac
   case "${word}" in
-    '' | /* | [A-Za-z]:[/\\]* | \\\\*) return 1 ;;
+    '' | /*) return 1 ;;
+  esac
+  case "${OSTYPE:-}" in
+    msys* | cygwin* | win32*)
+      separators='/\'
+      case "${word}" in
+        [A-Za-z]:[/\\]* | \\\\*) return 1 ;;
+      esac
+      ;;
   esac
   [[ "${word}" == *["${separators}"]* ]]
 }

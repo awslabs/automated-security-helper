@@ -639,6 +639,37 @@ def test_a_relative_oci_runner_from_the_environment_is_refused(
     assert calls == [], calls
 
 
+@pytest.mark.parametrize(
+    "variable, value",
+    [
+        ("OCI_RUNNER", "C:/relative-runner"),
+        ("OCI_RUNNER_WRAPPER", "C:/relative-wrapper -n"),
+    ],
+    ids=["runner-drive-slash", "wrapper-drive-slash"],
+)
+def test_a_drive_letter_path_is_relative_outside_git_bash(
+    runner, source, tmp_path, variable, value
+):
+    """C:/docker names no drive on Linux or macOS: it is the directory C: under the
+    working directory, which runs a file from the scanned repository. The drive and
+    share forms are anchored only under Git Bash (OSTYPE msys, cygwin or win32), which
+    the POSIX-only marks of this module never run on."""
+    _executable(tmp_path / "C:" / "relative-runner", RECORDING_RUNNER)
+    _executable(tmp_path / "C:" / "relative-wrapper", RECORDING_RUNNER)
+
+    result, calls = _run(
+        runner,
+        ["--no-build", "--source-dir", str(source)],
+        cwd=tmp_path,
+        env={variable: value},
+    )
+
+    shown = result.stdout + result.stderr
+    assert result.returncode == 3, shown
+    assert f"{variable} starts with the relative path" in result.stderr, shown
+    assert calls == [], calls
+
+
 def test_a_relative_runner_typed_after_the_option_runs_from_the_working_directory(
     runner, source, tmp_path
 ):

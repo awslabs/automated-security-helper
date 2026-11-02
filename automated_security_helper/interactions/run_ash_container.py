@@ -1200,7 +1200,8 @@ def sweep_leftovers_before_run(oci_runner: str | None) -> List[str]:
     The runtime is looked for only once there is a record to act on, so a host
     with none starts nothing and logs nothing. The whole step is best effort:
     anything that goes wrong in it is one warning, and the scan goes on. A cancel
-    or an interrupt is not an ``Exception`` and still ends the run.
+    or an interrupt is not an ``Exception`` and still ends the run, and so does an
+    ``OCI_RUNNER_WRAPPER`` ASH refuses (``OciValueRefused``, raised).
 
     Returns:
         The names of the containers removed.
@@ -1220,6 +1221,11 @@ def sweep_leftovers_before_run(oci_runner: str | None) -> List[str]:
                 f"{', '.join(removed)}"
             )
         return removed
+    except OciValueRefused:
+        # A wrapper ASH will not run is a refusal, not a step that goes on with a
+        # warning. The callers ask oci_wrapper_refusal first; this is for one that
+        # does not.
+        raise
     except Exception as e:
         ASH_LOGGER.warning(f"Could not sweep leftover containers: {e}")
         return []

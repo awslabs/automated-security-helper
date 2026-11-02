@@ -52,6 +52,7 @@ from automated_security_helper.core.sharding import validate_shard_selection
 from automated_security_helper.interactions.run_ash_container import (
     OciValueRefused,
     oci_runner_for_this_run,
+    oci_wrapper_refusal,
 )
 from automated_security_helper.interactions.run_ash_scan import (
     PRECOMMIT_MODE_SCANNERS,
@@ -104,22 +105,28 @@ def _oci_runner_for_this_run(
 ) -> Optional[str]:
     """The runner ``run_ash_scan`` is given, read only in a mode that starts one.
 
-    Container and nix mode use the runner (nix mode to remove containers an earlier
-    container run left); any other mode never does, so a scan in one reads no
-    ``OCI_RUNNER`` and refuses nothing about it, whatever the environment holds.
-    Where the runner is used its value is read as ``oci_runner_for_this_run`` reads
-    it, and one ASH will not run ends the command with that refusal's usage-error
+    Container and nix mode use the runner and the wrapper (nix mode to remove
+    containers an earlier container run left); any other mode never does, so a scan
+    in one reads neither ``OCI_RUNNER`` nor ``OCI_RUNNER_WRAPPER`` and refuses
+    nothing about them, whatever the environment holds. Where they are used their
+    values are read as ``oci_runner_for_this_run`` and ``oci_wrapper_refusal`` read
+    them, and one ASH will not run ends the command with the refusal's usage-error
     exit, before anything is cleared or started.
     """
     if (mode or RunMode.local) not in (RunMode.container, RunMode.nix):
         return oci_runner
     try:
-        return oci_runner_for_this_run(
+        runner = oci_runner_for_this_run(
             oci_runner, from_environment=_from_environment(ctx, "oci_runner")
         )
     except OciValueRefused as refusal:
         echo(shown_on_one_line(str(refusal)), err=True)
         raise typer.Exit(refusal.exit_code) from None
+    wrapper_refusal = oci_wrapper_refusal()
+    if wrapper_refusal is not None:
+        echo(shown_on_one_line(wrapper_refusal[1]), err=True)
+        raise typer.Exit(wrapper_refusal[0])
+    return runner
 
 
 def _fail_config_mark(message: str) -> NoReturn:
@@ -1416,6 +1423,9 @@ def run_ash_scan_cli_command(
         mode,
         from_environment=_from_environment(ctx, "changed_files_only"),
     )
+    # With the other early refusals, so the workspace dry run below refuses what the
+    # run refuses and names the same first problem.
+    runner_for_the_run = _oci_runner_for_this_run(ctx, oci_runner, mode)
 
     # Container mode's marks for the scan inside, which cannot see where the host
     # found the --config it mounted at /ash-config: --config-from-scanned-repository
@@ -1721,7 +1731,6 @@ def run_ash_scan_cli_command(
     # entered here and not inside run_ash_scan because the MCP runner calls
     # run_ash_scan inside a scope of its own, whose event its registry stops; a
     # scope installed below the shared frame would shadow it.
-    runner_for_the_run = _oci_runner_for_this_run(ctx, oci_runner, mode)
     cancel_event = CancelEvent()
     try:
         with shutdown_cancels(cancel_event), cancel_scope(cancel_event):

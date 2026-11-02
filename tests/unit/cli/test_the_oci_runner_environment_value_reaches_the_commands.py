@@ -120,6 +120,51 @@ def test_scan_in_nix_mode_refuses_a_relative_oci_runner_from_the_environment():
     run.assert_not_called()
 
 
+def test_a_workspace_dry_run_refuses_what_the_run_refuses():
+    """The refusal comes before the workspace block, so the dry run names the same
+    first problem as the real run instead of exiting 0 on it."""
+    result, run = _scan(
+        "--mode",
+        "container",
+        "--workspace",
+        "auto",
+        "--dry-run",
+        OCI_RUNNER="bin/docker",
+    )
+
+    assert result.exit_code == REFUSED, result.output
+    assert "OCI_RUNNER" in result.output, result.output
+    run.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["container", "nix"])
+def test_scan_refuses_a_relative_oci_runner_wrapper_in_a_mode_that_uses_it(mode):
+    # Nix mode runs the wrapper only to sweep containers an earlier run left, which
+    # is skipped when there are none: the refusal does not wait for one.
+    result, run = _scan("--mode", mode, OCI_RUNNER_WRAPPER="bin/sudo")
+
+    assert result.exit_code == REFUSED, result.output
+    assert "OCI_RUNNER_WRAPPER" in result.output, result.output
+    assert repr("bin/sudo") in result.output, result.output
+    run.assert_not_called()
+
+
+def test_scan_in_local_mode_never_reads_oci_runner_wrapper():
+    result, run = _scan(OCI_RUNNER_WRAPPER="bin/sudo")
+
+    assert result.exit_code == 0, result.output
+    run.assert_called_once()
+    assert "OCI_RUNNER_WRAPPER" not in result.output, result.output
+
+
+def test_build_image_refuses_a_relative_oci_runner_wrapper():
+    result, run = _build_image(OCI_RUNNER_WRAPPER="bin/sudo")
+
+    assert result.exit_code == REFUSED, result.output
+    assert "OCI_RUNNER_WRAPPER" in result.output, result.output
+    run.assert_not_called()
+
+
 def test_scan_in_local_mode_never_reads_oci_runner(scan_reads_the_runner):
     result, run = _scan(OCI_RUNNER="bin/docker")
 

@@ -3308,8 +3308,11 @@
   runtime in its place. As the first word of `OCI_RUNNER_WRAPPER` it is refused the
   same way, and the runtime does not start without the wrapper. `./ash` refuses a
   relative `OCI_RUNNER` and `OCI_RUNNER_WRAPPER` with exit code 3, and `Invoke-ASH` a
-  relative `OCI_RUNNER_WRAPPER`. A scan in local mode reads neither variable, so an
-  exported `OCI_RUNNER` no longer makes it warn. Given to `--oci-runner`, or as the
+  relative `OCI_RUNNER_WRAPPER`; neither expands a leading `~`, so a value that starts
+  with `~/` is refused there as relative. The refusal comes before the log is opened
+  and before the previous run output is cleared, also with `--dry-run` and in nix
+  mode. A scan in local mode reads neither variable, so an exported `OCI_RUNNER` no
+  longer makes it warn. Given to `--oci-runner`, or as the
   `oci_runner` of a `--cli-json-input` document, a relative path is read against the
   directory you run ASH in, as you typed it. A leading `~` or `~user` is expanded,
   and in `OCI_RUNNER_WRAPPER` that applies to the first word; a `$` is not. With no

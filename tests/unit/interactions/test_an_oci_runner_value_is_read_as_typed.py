@@ -320,3 +320,52 @@ def test_a_refused_wrapper_stops_the_container_run_before_anything_starts(
     assert "OCI_RUNNER_WRAPPER" in result.stderr
     assert not rac.container_was_started(result)
     assert commands == []
+
+
+def test_the_leftover_sweep_raises_a_refused_wrapper_instead_of_warning(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sweep is best effort for everything but a wrapper ASH refuses: that ends
+    the run, as it does in container mode, and is not one warning among others (nix
+    mode runs the wrapper only here)."""
+    monkeypatch.setattr(rac, "leftover_records", lambda: ["a record"])
+    monkeypatch.setattr(
+        rac, "_resolve_oci_runner", lambda runner, quiet=False: "/nonexistent/docker"
+    )
+    monkeypatch.setenv("OCI_RUNNER_WRAPPER", "bin/sudo")
+
+    with pytest.raises(rac.OciValueRefused) as refused:
+        rac.sweep_leftovers_before_run(None)
+
+    assert "OCI_RUNNER_WRAPPER" in str(refused.value)
+
+
+def test_the_leftover_sweep_with_no_record_starts_and_reads_nothing(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(rac, "leftover_records", lambda: [])
+    monkeypatch.setenv("OCI_RUNNER_WRAPPER", "bin/sudo")
+
+    assert rac.sweep_leftovers_before_run(None) == []
+
+
+def test_a_nix_run_refuses_a_wrapper_before_the_log_is_opened(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run_ash_scan asks for the wrapper ahead of the logger, which makes the output
+    directory and truncates ash.log, so a refused run leaves no trace there."""
+    from automated_security_helper.core.enums import RunMode
+    from automated_security_helper.interactions import run_ash_scan as scan_module
+
+    monkeypatch.setenv("OCI_RUNNER_WRAPPER", "bin/sudo")
+    source = tmp_path / "project"
+    source.mkdir()
+    output = tmp_path / "out"
+
+    with pytest.raises(SystemExit) as exited:
+        scan_module.run_ash_scan(
+            source_dir=str(source), output_dir=str(output), mode=RunMode.nix
+        )
+
+    assert exited.value.code == 3
+    assert not output.exists()

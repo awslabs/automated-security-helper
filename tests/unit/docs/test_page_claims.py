@@ -16497,8 +16497,11 @@ _HOW_THE_RUNTIME_VALUE_IS_READ = [
     ),
     (
         "`./ash` refuses a relative `OCI_RUNNER` and `OCI_RUNNER_WRAPPER` the same "
-        "way, and `Invoke-ASH` a relative `OCI_RUNNER_WRAPPER`. A scan in local mode "
-        "reads neither variable."
+        "way, and `Invoke-ASH` a relative `OCI_RUNNER_WRAPPER`. Neither script "
+        "expands a leading `~`, so there a value that starts with `~/` is refused as "
+        "a relative path: your shell expands it when you write `export "
+        "OCI_RUNNER=~/bin/docker`, or you can spell the path out. A scan in local "
+        "mode reads neither variable."
     ),
 ]
 
