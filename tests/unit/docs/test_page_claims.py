@@ -3538,7 +3538,7 @@ def _container_scan(
             *args,
         ],
         cwd=tmp_path,
-        OCI_RUNNER_WRAPPER=shlex.join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
     )
     if not record.is_file():
         return result, None
@@ -3824,7 +3824,7 @@ def test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is(
                 "--no-progress",
             ],
             cwd=tmp_path,
-            OCI_RUNNER_WRAPPER=shlex.join([sys.executable, str(runtime)]),
+            OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
         )
 
     # A refusal must come before the image build, so only an allowed config skips it.
@@ -4077,7 +4077,7 @@ def test_an_unusable_ash_config_file_beside_a_valid_config_is_refused_on_the_hos
         runtime.write_text(
             _RECORDING_RUNTIME.format(record=str(record)), encoding="utf-8"
         )
-        env["OCI_RUNNER_WRAPPER"] = shlex.join([sys.executable, str(runtime)])
+        env["OCI_RUNNER_WRAPPER"] = " ".join([sys.executable, str(runtime)])
         mode_args = ["--mode", "container", "--oci-runner", sys.executable]
     else:
         mode_args = ["--mode", "nix"]
@@ -4301,7 +4301,7 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
         ],
         cwd=tmp_path,
         ASH_CONFIG=str(env_config),
-        OCI_RUNNER_WRAPPER=shlex.join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
     )
     scans = [call for call in _runtime_calls(record) if "ash" in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
@@ -4487,7 +4487,7 @@ def test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own(
             "--no-progress",
         ],
         cwd=tmp_path,
-        OCI_RUNNER_WRAPPER=shlex.join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
     )
     scans = [call for call in _runtime_calls(record) if "ash" in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
@@ -7708,7 +7708,7 @@ def _interrupt_scan(
     if mode == "container":
         script, log = _interrupt_stand_in(tmp_path, "run", behavior, console)
         args += ["--mode", "container", "--no-build", "--oci-runner", sys.executable]
-        wrapper = shlex.join([sys.executable, str(script)])
+        wrapper = " ".join([sys.executable, str(script)])
         return args, (log, "started"), {"OCI_RUNNER_WRAPPER": wrapper}, log
     script, log = _interrupt_stand_in(tmp_path, "develop", behavior)
     bin_dir = tmp_path / "bin"
@@ -8004,7 +8004,7 @@ def test_ctrl_c_ends_ash_build_image_with_exit_code_130(
     args = ["build-image", "--oci-runner", sys.executable, "--offline"]
     if no_run:
         args.append("--no-run")
-    wrapper = shlex.join([sys.executable, str(script)])
+    wrapper = " ".join([sys.executable, str(script)])
     result = _run_interrupted(
         tmp_path,
         args,
@@ -12618,7 +12618,7 @@ def test_the_ci_variables_do_not_choose_the_image_stage(
             _CI_ENV_RECORDING_RUNTIME.format(record=str(record)), encoding="utf-8"
         )
         monkeypatch.setenv(
-            "OCI_RUNNER_WRAPPER", shlex.join([sys.executable, str(runtime)])
+            "OCI_RUNNER_WRAPPER", " ".join([sys.executable, str(runtime)])
         )
         result = container.run_ash_container(
             source_dir=str(source),
