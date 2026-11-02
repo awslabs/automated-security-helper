@@ -70,3 +70,27 @@ class TestPlacementSuggestions:
             ["applies_to"], ["severity_threshold"], "these plugin options"
         )
         assert "move it under scope.engines.cdk-nag" not in message
+
+    def test_hints_do_not_fire_for_ignore_paths(self):
+        """An ignore path has no resource_id and no scope, so a suppression
+        placement hint there would send the author to another unknown key;
+        the ordinary did-you-mean applies instead."""
+        message = unknown_keys_message(
+            ["resource", "applies_to"],
+            ["path", "reason", "expiration"],
+            "an ignore path",
+        )
+        assert "did you mean 'resource_id'?" not in message
+        assert "scope.engines" not in message
+
+    def test_an_ignore_path_entry_with_resource_gets_no_placement_advice(self):
+        from automated_security_helper.models.core import IgnorePathWithReason
+
+        with pytest.raises(ValidationError) as excinfo:
+            IgnorePathWithReason.model_validate(
+                {"path": "a", "reason": "r", "resource": "Stack/Thing"}
+            )
+        message = str(excinfo.value)
+        assert "Unknown key 'resource'" in message
+        assert "did you mean 'resource_id'?" not in message
+        assert "scope.engines" not in message

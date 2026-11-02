@@ -203,33 +203,44 @@ def closest_key(key: str, known: Iterable[str]) -> Optional[str]:
     return None
 
 
-#: Tier-0 placement map, consulted before edit-distance for suppression and
-#: ignore-path entry kinds: a known misplacement gets a shaped suggestion
-#: naming where the key belongs, not merely the nearest spelling. Core seeds
-#: the spellings it owns; a scanner plugin registers its own keys at load
-#: (register_placement_hint), so an engine-specific key typed at the wrong
-#: level points at that engine's block. Hints cover only engines whose plugin
-#: module has loaded.
-_PLACEMENT_HINTS: Dict[str, str] = {
-    "resource": "did you mean 'resource_id'?",
+#: Tier-0 placement map, consulted before edit-distance: a known misplacement
+#: gets a shaped suggestion naming where the key belongs, not merely the
+#: nearest spelling. Each hint carries the entry-kind words it applies to
+#: (substrings of the ``where`` wording): the spellings here are suppression
+#: vocabulary, and an ignore path has no ``resource_id`` and no ``scope``, so
+#: advice pointing at either must not fire there (following it would only
+#: produce another unknown-key error). A plugin may register its own keys
+#: (register_placement_hint).
+_PLACEMENT_HINTS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
+    "resource": ("did you mean 'resource_id'?", ("suppression",)),
 }
 
 
-def register_placement_hint(key: str, suggestion: str) -> None:
-    """Register what to suggest for ``key`` typed where an entry refuses it."""
-    _PLACEMENT_HINTS[key] = suggestion
+def register_placement_hint(
+    key: str, suggestion: str, kinds: Tuple[str, ...] = ("suppression",)
+) -> None:
+    """Register what to suggest for ``key`` typed where an entry refuses it.
+
+    ``kinds`` are the entry-kind words (substrings of the ``where`` wording)
+    the hint applies to; the default covers suppressions and their scopes
+    and nothing else.
+    """
+    _PLACEMENT_HINTS[key] = (suggestion, tuple(kinds))
 
 
 def _placement_hint(key: str, where: str) -> Optional[str]:
-    """The placement suggestion for ``key``, for entry kinds only.
+    """The placement suggestion for ``key``, for the hint's own entry kinds.
 
-    The map's spellings are suppression vocabulary; a plugin option of the
-    same name must keep its ordinary did-you-mean, so the hint fires only
-    where the entry kind says suppression or ignore path.
+    A plugin option of the same name, and an entry kind the hint does not
+    name, keep their ordinary did-you-mean.
     """
-    if "suppression" not in where and "ignore path" not in where:
+    hint = _PLACEMENT_HINTS.get(key)
+    if hint is None:
         return None
-    return _PLACEMENT_HINTS.get(key)
+    suggestion, kinds = hint
+    if any(kind in where for kind in kinds):
+        return suggestion
+    return None
 
 
 def unknown_keys_message(
