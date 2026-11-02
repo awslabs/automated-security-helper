@@ -50,11 +50,7 @@ def _fake_uv(path, stdout_text, *, before=""):
     the write, one statement per line, each ending in a newline.
     """
     data = stdout_text.encode("utf-8").hex()
-    source = (
-        "import sys\n"
-        f"{before}"
-        f"sys.stdout.buffer.write(bytes.fromhex('{data}'))\n"
-    )
+    source = f"import sys\n{before}sys.stdout.buffer.write(bytes.fromhex('{data}'))\n"
     return write_stand_in(path.parent, path.name, source).files[-1]
 
 
