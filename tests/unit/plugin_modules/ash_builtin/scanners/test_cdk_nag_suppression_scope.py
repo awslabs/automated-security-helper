@@ -174,6 +174,42 @@ class TestBlockValidation:
         assert "resource_path" in problems[0]
         assert "selects nothing" in problems[0]
 
+    def test_an_all_empty_elements_applies_to_list_is_refused(self):
+        # At fbb38db4 only the bare [] was classed empty, so [""] validated
+        # clean yet could never match (no real qualifier is blank): the same
+        # silently inert shape, one element deep.
+        problems = CdkNagScanner.validate_suppression_scope({"applies_to": [""]})
+        assert problems
+        assert "applies_to" in problems[0]
+        assert "selects nothing" in problems[0]
+
+    def test_a_whitespace_only_applies_to_list_is_refused(self):
+        problems = CdkNagScanner.validate_suppression_scope({"applies_to": ["  "]})
+        assert problems
+        assert "applies_to" in problems[0]
+        assert "selects nothing" in problems[0]
+
+    def test_an_all_empty_applies_to_list_matches_nothing(self):
+        for block in ({"applies_to": [""]}, {"applies_to": ["  "]}):
+            assert not CdkNagScanner.suppression_scope_matches(block, _finding())
+
+    def test_a_mixed_list_with_one_empty_element_still_validates_and_matches(self):
+        # The refusal is for ALL-empty lists only: a list with any real
+        # element still says something, so it validates and matches on the
+        # non-empty element.
+        block = {"applies_to": ["", "Action::logs:*"]}
+        assert CdkNagScanner.validate_suppression_scope(block) == []
+        assert CdkNagScanner.suppression_scope_matches(block, _finding())
+
+    def test_resource_path_behavior_is_unchanged_by_the_list_widening(self):
+        # resource_path is a single string: blank still refused, a real glob
+        # still validates and matches.
+        problems = CdkNagScanner.validate_suppression_scope({"resource_path": " "})
+        assert problems and "resource_path" in problems[0]
+        block = {"resource_path": "Stack/CollectorTaskRole/*"}
+        assert CdkNagScanner.validate_suppression_scope(block) == []
+        assert CdkNagScanner.suppression_scope_matches(block, _finding())
+
     def test_an_empty_valued_block_matches_nothing(self):
         # Match time agrees with validation: the same model refuses the block,
         # so the matcher fails closed.

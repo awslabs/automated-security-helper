@@ -749,20 +749,30 @@ class CdkNagScopeBlock(RedactedSection):
     @field_validator("applies_to", "resource_path")
     @classmethod
     def _refuse_an_empty_value(cls, v, info):
-        """Refuse ``""`` and ``[]``: they read as "any" but can never match.
+        """Refuse ``""`` and lists that say nothing: they can never match.
 
         ``applies_to`` is exact membership and ``resource_path`` needs a
         non-blank pattern, so an empty value makes the entry silently inert,
         the defect class the suppression-scope feature exists to surface
-        (EMPTY_SCOPE_RULE: match-all is the ABSENCE of the field). Both the
-        config checks (validate_suppression_scope) and the matcher
+        (EMPTY_SCOPE_RULE: match-all is the ABSENCE of the field). A list
+        counts empty when it is ``[]`` OR every element is an empty or
+        whitespace string: ``qualifier not in values`` can never hit on one
+        (no real qualifier is blank), so ``[""]`` is as inert as ``[]``. Both
+        the config checks (validate_suppression_scope) and the matcher
         (suppression_scope_matches) validate the block through this model, so
         validation and match time agree: the checks report the field by name
         and the matcher fails closed.
         """
         if v is None:
             return v
-        empty = (not v.strip()) if isinstance(v, str) else v == []
+        # all() over [] is True, so the bare-[] case rides the same test; a
+        # list holding a non-string element keeps its current handling (not
+        # classed empty here).
+        empty = (
+            (not v.strip())
+            if isinstance(v, str)
+            else all(isinstance(e, str) and not e.strip() for e in v)
+        )
         if empty:
             raise ValueError(
                 EMPTY_SCOPE_RULE.format(
