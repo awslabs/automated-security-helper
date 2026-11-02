@@ -793,6 +793,9 @@ def _zip_with(name: str) -> bytes:
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    os.name == "nt", reason="Windows does not rename over a file that is open"
+)
 def test_a_finalize_extracts_the_bytes_it_hashed_when_the_path_is_renamed_over(
     workspace, tmp_path: Path, monkeypatch
 ) -> None:

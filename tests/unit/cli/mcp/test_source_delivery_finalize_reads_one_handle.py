@@ -15,6 +15,9 @@ zip waits for its own finalize instead of vanishing.
 Each test swaps a different zip onto the path from inside the member validation,
 the point of the finalize at which the archive is open and a chunk's rename is
 admitted, and then reads what is left at the path.
+
+Windows does not rename over a file that is open, so the two cells that swap the
+zip skip there, as the matching cell in test_zip_finalize_handle_and_lock.py does.
 """
 
 from __future__ import annotations
@@ -36,6 +39,11 @@ pytestmark = pytest.mark.unit
 
 SESSION = "one-handle-session"
 UPLOAD = "upload"
+
+#: The cells that swap a zip onto the path while the finalize holds it open.
+swaps_over_an_open_file = pytest.mark.skipif(
+    os.name == "nt", reason="Windows does not rename over a file that is open"
+)
 
 
 def _zip_bytes(entries: dict) -> bytes:
@@ -95,6 +103,7 @@ def _forget_sessions():
 
 
 class TestANewerZipOutlivesTheFinalizeThatDidNotReadIt:
+    @swaps_over_an_open_file
     def test_a_zip_assembled_during_a_refused_validation_is_kept(self, tmp_path):
         """Red at the base: the refusal unlinked the path, newer zip and all."""
         hostile = _zip_bytes({"../escape.py": b"x"})
@@ -112,6 +121,7 @@ class TestANewerZipOutlivesTheFinalizeThatDidNotReadIt:
 
         assert final.read_bytes() == newer
 
+    @swaps_over_an_open_file
     def test_the_delivered_tree_is_the_hashed_zip_and_a_newer_zip_is_kept(
         self, tmp_path
     ):
