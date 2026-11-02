@@ -106,9 +106,9 @@ def test_an_unknown_policy_key_is_refused():
         (
             (
                 "ignore_paths:\n    - path: vendor/\n      reason: r\n"
-                "      expires: 2030-01-01"
+                "      expiry_date: 2030-01-01"
             ),
-            "expires",
+            "expiry_date",
         ),
     ],
 )
