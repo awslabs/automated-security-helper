@@ -18,6 +18,7 @@ from typing import (
     TYPE_CHECKING,
 )
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -192,9 +193,15 @@ class IgnorePathWithReason(RedactedSection):
         str | None,
         Field(
             None,
+            # "expires" is accepted when a config is read (the spelling users
+            # reach for on their own); the field is still written and stored as
+            # "expiration", so results files do not churn. The name itself is
+            # the first choice, so no populate_by_name is needed.
+            validation_alias=AliasChoices("expiration", "expires"),
             description=(
                 "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying "
-                "on this date, by the local clock of the host running the scan."
+                "on this date, by the local clock of the host running the scan. "
+                "'expires' is accepted as an alias when a config is read."
             ),
         ),
     ] = None

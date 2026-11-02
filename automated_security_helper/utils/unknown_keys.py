@@ -42,7 +42,7 @@ from typing import (
     Tuple,
 )
 
-from pydantic import BaseModel, ValidationInfo
+from pydantic import AliasChoices, BaseModel, ValidationInfo
 
 #: Validation-context key. Bound to a list, it makes the checks that honor it
 #: record a note there and keep the data rather than refuse it. Passed only by
@@ -120,6 +120,13 @@ def known_keys(model_cls: type[BaseModel]) -> Set[str]:
             keys.add(field.alias)
         if isinstance(field.validation_alias, str):
             keys.add(field.validation_alias)
+        elif isinstance(field.validation_alias, AliasChoices):
+            # An AliasChoices field accepts each string choice as a key
+            # ("expiration" and its alias "expires"); a path-shaped choice
+            # (AliasPath) names no single key and is left out.
+            for choice in field.validation_alias.choices:
+                if isinstance(choice, str):
+                    keys.add(choice)
     return keys
 
 
