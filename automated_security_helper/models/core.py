@@ -582,6 +582,160 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
     return "|".join(parts)
 
 
+#: What an empty scope, an empty ``engines`` map or an empty engine block
+#: records under TOLERATE_STORED_CONFIG. The matcher never applies a scope
+#: that selects nothing, so a stored results file keeps loading.
+EMPTY_SCOPE_NOTE = "an empty suppression scope"
+
+#: The one wording for a scope shape that selects nothing. A suppression is a
+#: security-relevant widening, so match-all must be the ABSENCE of the field,
+#: never an empty dict (the k8s empty-selector-matches-all semantics are
+#: deliberately not followed).
+EMPTY_SCOPE_RULE = "an empty {what} selects nothing; omit {omit} instead"
+
+
+class SuppressionScope(RedactedSection):
+    """What a suppression is scoped to beyond path, lines and package fields.
+
+    The universal keys (``resource_id``, ``resource_type``) are evaluated by
+    ASH's own matcher against the resource identity a finding carries, whatever
+    engine produced it. ``engines`` carries per-engine blocks, keyed by scanner
+    name, whose contents are opaque to ASH's core and owned by the named
+    scanner plugin (the way a k8s object carries per-controller blocks under
+    one metadata envelope).
+    """
+
+    # Extras allowed only so a results file written by another ASH version
+    # keeps its keys (utils/unknown_keys.py); a config file refuses them
+    # through _refuse_unknown_keys, and the schema forbids them.
+    model_config = ConfigDict(
+        extra="allow",
+        hide_input_in_errors=True,
+        json_schema_extra={"additionalProperties": False},
+    )
+
+    ENTRY_KIND: ClassVar[str] = "a suppression scope"
+
+    resource_id: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Only suppress findings about the resource with this "
+                "identity, as the producing engine reports it (for cdk-nag, the "
+                "CDK construct path). Literal match first, then glob; "
+                "case-sensitive. Findings that carry no resource identity never "
+                "match."
+            ),
+        ),
+    ] = None
+    resource_type: Annotated[
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Only suppress findings about resources of this type "
+                "(e.g. 'AWS::IAM::Policy'). Literal match first, then glob; "
+                "case-insensitive. Findings that carry no resource type never "
+                "match."
+            ),
+        ),
+    ] = None
+    engines: Annotated[
+        Dict[str, Dict[str, Any]] | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Per-engine blocks, keyed by scanner name (e.g. "
+                "'cdk-nag'). Listing engines ENUMERATES the engines the entry "
+                "covers: a finding from a scanner not listed here does not match "
+                "this entry, and a listed scanner's finding matches only when "
+                "that scanner's plugin accepts its block. A listed scanner whose "
+                "plugin is not installed or enabled suppresses nothing (fail "
+                "closed). The block's keys belong to the named plugin."
+            ),
+        ),
+    ] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_unknown_keys(cls, data: Any, info: ValidationInfo) -> Any:
+        """Refuse a key the scope does not declare; see IgnorePathWithReason."""
+        return refuse_unknown_keys(cls, data, info, cls.ENTRY_KIND)
+
+    @model_validator(mode="after")
+    def _refuse_a_scope_that_selects_nothing(self, info: ValidationInfo):
+        """Refuse an empty scope, an empty ``engines`` map and an empty block.
+
+        Under TOLERATE_STORED_CONFIG (a results file written by another ASH
+        version) the shape is recorded instead and the entry kept; the matcher
+        never applies a scope that selects nothing, so keeping it loses no
+        safety.
+        """
+        problem = None
+        if (
+            self.resource_id is None
+            and self.resource_type is None
+            and self.engines is None
+            and not self.model_extra
+        ):
+            problem = EMPTY_SCOPE_RULE.format(what="scope", omit="scope")
+        for key in ("resource_id", "resource_type"):
+            value = getattr(self, key)
+            if problem is None and value is not None and not value.strip():
+                problem = EMPTY_SCOPE_RULE.format(
+                    what=f"scope.{key}", omit="the key"
+                )
+        if problem is None and self.engines is not None:
+            if not self.engines:
+                problem = EMPTY_SCOPE_RULE.format(
+                    what="scope.engines", omit="engines"
+                )
+            else:
+                for name, block in self.engines.items():
+                    if not block:
+                        problem = EMPTY_SCOPE_RULE.format(
+                            what=f"engine block under scope.engines ('{name}')",
+                            omit="the block",
+                        )
+                        break
+        if problem is None:
+            return self
+        notes = tolerated_notes(info)
+        if notes is not None:
+            notes.append(EMPTY_SCOPE_NOTE)
+            return self
+        raise ValueError(problem)
+
+    @property
+    def has_unknown_keys(self) -> bool:
+        """True for a scope kept from a results file with a key it does not declare."""
+        return bool(self.model_extra)
+
+    @property
+    def selects_nothing(self) -> bool:
+        """True for a scope shape a config refuses, kept from a results file.
+
+        The matcher reads it to fail closed: such a scope matches no finding.
+        """
+        if (
+            self.resource_id is None
+            and self.resource_type is None
+            and self.engines is None
+            and not self.model_extra
+        ):
+            return True
+        for key in ("resource_id", "resource_type"):
+            value = getattr(self, key)
+            if value is not None and not value.strip():
+                return True
+        if self.engines is not None and (
+            not self.engines or any(not block for block in self.engines.values())
+        ):
+            return True
+        return False
+
+
 class AshSuppression(IgnorePathWithReason):
     """Represents a finding suppression rule."""
 
@@ -651,6 +805,18 @@ class AshSuppression(IgnorePathWithReason):
                 "with tree-sitter (Python, JavaScript, TypeScript, Java), which "
                 "needs the 'symbols' extra; a finding whose file cannot be "
                 "parsed never matches."
+            ),
+        ),
+    ] = None
+    scope: Annotated[
+        SuppressionScope | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Scope the suppression to a resource identity, a "
+                "resource type, or named engines' findings; see "
+                "SuppressionScope. Omit it to keep today's matching. An empty "
+                "scope is refused: match-all is the absence of the field."
             ),
         ),
     ] = None
