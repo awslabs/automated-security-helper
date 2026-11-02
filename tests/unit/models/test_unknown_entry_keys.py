@@ -12,8 +12,10 @@ the whole file, an ``expiraton`` would make it permanent.
 Every entry built on ``IgnorePathWithReason`` refuses a key it does not
 declare, with "did you mean" when one is close: global suppressions and ignore
 paths, a workspace policy's, and the scanner options of the same type (bandit
-``excluded_paths``, checkov ``skip_path``, syft ``exclude``). A config file
-with one exits 3; a workspace policy with one exits 4.
+``excluded_paths``, checkov ``skip_path``, syft ``exclude``). Constructing a
+model directly refuses. A config file loads by default, warns, and leaves the
+entry inert; with ``fail_on_unknown_keys: true`` it exits 3. A workspace policy
+with one exits 4.
 
 A results file is a record of a past scan, not a config to apply, so one that
 holds such a key still loads: the key is kept, a warning names it, and an entry
@@ -162,15 +164,62 @@ class TestConfigFiles:
         (source / ".ash.yaml").write_text(body, encoding="utf-8")
         return source
 
-    def test_config_with_a_misspelled_rule_id_exits_3(self, tmp_path):
-        source = self._source(
-            tmp_path,
+    @staticmethod
+    def _suppression_config(key="ruleId", header=""):
+        return (
             "project_name: demo\n"
+            f"{header}"
             "global_settings:\n"
             "  suppressions:\n"
-            "    - ruleId: B101\n"
-            "      path: 'tests/**'\n"
-            "      reason: asserts in tests\n",
+            f"    - {key}: B101\n"
+            "      path: 'tests/test_a.py'\n"
+            "      reason: asserts in tests\n"
+        )
+
+    @staticmethod
+    def _ignore_path_config(key, header=""):
+        return (
+            "project_name: demo\n"
+            f"{header}"
+            "global_settings:\n"
+            "  ignore_paths:\n"
+            "    - path: 'vendor/**'\n"
+            "      reason: vendored\n"
+            f"      {key}: '2099-01-01'\n"
+        )
+
+    def test_a_misspelled_rule_id_warns_and_is_inert_by_default(self, tmp_path):
+        source = self._source(tmp_path, self._suppression_config())
+        config = resolve_config(source_dir=source)
+        # The warning is recorded on the config for the orchestrator to log,
+        # not emitted by a logging call here, so it is read from the config.
+        warnings = [w for w in config._resolution_warnings if "ruleId" in w]
+        assert len(warnings) == 1, config._resolution_warnings
+        assert "did you mean 'rule_id'" in warnings[0]
+        suppressions = config.global_settings.suppressions
+        (entry,) = [s for s in suppressions if s.path == "tests/test_a.py"]
+        assert entry.has_unknown_keys
+        for rule_id in ("B101", "B602"):
+            suppressed, matched = should_suppress_finding(
+                _finding(rule_id, "tests/test_a.py"), [entry]
+            )
+            assert suppressed is False and matched is None, rule_id
+
+    def test_a_correctly_spelled_rule_id_applies_and_does_not_warn(self, tmp_path):
+        source = self._source(tmp_path, self._suppression_config(key="rule_id"))
+        config = resolve_config(source_dir=source)
+        assert not [w for w in config._resolution_warnings if "Unknown key" in w]
+        suppressions = config.global_settings.suppressions
+        (entry,) = [s for s in suppressions if s.path == "tests/test_a.py"]
+        assert not entry.has_unknown_keys
+        suppressed, matched = should_suppress_finding(
+            _finding("B101", "tests/test_a.py"), [entry]
+        )
+        assert suppressed is True and matched is entry
+
+    def test_a_misspelled_rule_id_raises_under_fail_on_unknown_keys(self, tmp_path):
+        source = self._source(
+            tmp_path, self._suppression_config(header="fail_on_unknown_keys: true\n")
         )
         with pytest.raises(ASHConfigValidationError) as excinfo:
             resolve_config(source_dir=source)
@@ -182,20 +231,45 @@ class TestConfigFiles:
             "the error should say which entry"
         )
 
-    def test_config_with_a_bad_ignore_path_key_exits_3(self, tmp_path):
+    def test_a_misspelled_ignore_path_key_warns_and_is_inert_by_default(
+        self, tmp_path
+    ):
+        source = self._source(tmp_path, self._ignore_path_config("expiraton"))
+        config = resolve_config(source_dir=source)
+        warnings = [w for w in config._resolution_warnings if "expiraton" in w]
+        assert len(warnings) == 1, config._resolution_warnings
+        assert "did you mean 'expiration'" in warnings[0]
+        (entry,) = [
+            p for p in config.global_settings.ignore_paths if p.path == "vendor/**"
+        ]
+        assert entry.has_unknown_keys
+        assert entry not in active_ignore_paths([entry])
+
+    def test_a_misspelled_ignore_path_key_raises_under_fail_on_unknown_keys(
+        self, tmp_path
+    ):
         source = self._source(
             tmp_path,
-            "project_name: demo\n"
-            "global_settings:\n"
-            "  ignore_paths:\n"
-            "    - path: 'vendor/**'\n"
-            "      reason: vendored\n"
-            "      expires: '2099-01-01'\n",
+            self._ignore_path_config(
+                "expiraton", header="fail_on_unknown_keys: true\n"
+            ),
         )
         with pytest.raises(ASHConfigValidationError) as excinfo:
             resolve_config(source_dir=source)
-        assert "expires" in str(excinfo.value)
+        assert "expiraton" in str(excinfo.value)
         assert "did you mean 'expiration'" in str(excinfo.value)
+
+    def test_expires_is_accepted_on_an_ignore_path_without_a_warning(self, tmp_path):
+        """``expires`` is an alias of ``expiration``, so it is neither refused
+        nor warned about, and the entry stays applicable."""
+        source = self._source(tmp_path, self._ignore_path_config("expires"))
+        config = resolve_config(source_dir=source)
+        assert not [w for w in config._resolution_warnings if "Unknown key" in w]
+        (entry,) = [
+            p for p in config.global_settings.ignore_paths if p.path == "vendor/**"
+        ]
+        assert entry.expiration == "2099-01-01"
+        assert not entry.has_unknown_keys
 
     def test_workspace_policy_with_one_is_refused(self, tmp_path):
         from automated_security_helper.workspace.resolver import resolve_workspace
