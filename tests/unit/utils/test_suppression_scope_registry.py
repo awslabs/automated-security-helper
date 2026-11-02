@@ -100,7 +100,7 @@ class TestDispatch:
         assert not entry.matches(_finding())
 
     def test_an_unregistered_engine_fails_closed_and_warns_once(self, caplog):
-        registry._WARNED_ENGINES.discard("ghost-engine")
+        registry.reset_unmatched_engine_warnings()
         entry = _entry({"ghost-engine": {"marker": "RULE-1"}})
         with caplog.at_level(logging.WARNING):
             assert not entry.matches(_finding(scanner="ghost-engine"))
@@ -129,7 +129,7 @@ class TestDispatch:
 
 class TestWarnOnceResets:
     def test_a_reset_makes_the_warning_fire_again(self, caplog):
-        registry._WARNED_ENGINES.discard("reset-engine")
+        registry.reset_unmatched_engine_warnings()
         entry = _entry({"reset-engine": {"marker": "RULE-1"}})
         with caplog.at_level(logging.WARNING):
             entry.matches(_finding(scanner="reset-engine"))
@@ -140,6 +140,29 @@ class TestWarnOnceResets:
             record
             for record in caplog.records
             if "reset-engine" in record.getMessage()
+        ]
+        assert len(warnings) == 2
+
+    def test_two_engine_contexts_each_warn_once_independently(self, caplog):
+        """Workspace mode runs engines concurrently: one project's reset must
+        not swallow another's receipt. Each context that initialized gets its
+        own warned set, so the same missing engine warns once per context."""
+        import contextvars
+
+        entry = _entry({"ctx-engine": {"marker": "RULE-1"}})
+        finding = _finding(scanner="ctx-engine")
+        ctx_a = contextvars.copy_context()
+        ctx_b = contextvars.copy_context()
+        with caplog.at_level(logging.WARNING):
+            ctx_a.run(registry.reset_unmatched_engine_warnings)
+            ctx_b.run(registry.reset_unmatched_engine_warnings)
+            ctx_a.run(entry.matches, finding)
+            # A's second match stays deduplicated inside A.
+            ctx_a.run(entry.matches, finding)
+            # B's reset and match must not be absorbed by A's warning.
+            ctx_b.run(entry.matches, finding)
+        warnings = [
+            record for record in caplog.records if "ctx-engine" in record.getMessage()
         ]
         assert len(warnings) == 2
 

@@ -25,6 +25,7 @@ once per name so an entry that silently stopped suppressing is visible.
 
 from __future__ import annotations
 
+import contextvars
 from typing import Any, Dict, List, Optional, Protocol, Set, Tuple
 
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -51,9 +52,23 @@ class SupportsSuppressionScope(Protocol):
 #: manager's own registry.
 _ENGINE_HOOKS: Dict[str, SupportsSuppressionScope] = {}
 
-#: Engine names already warned about this process, so a scan with many
-#: findings logs each missing engine once.
-_WARNED_ENGINES: Set[str] = set()
+#: Engine names already warned about in the current scan context, so a scan
+#: with many findings logs each missing engine once. Per context, not module
+#: state: workspace mode builds several engines on several threads at once,
+#: and a process-global set let one project's reset swallow another's receipt.
+_WARNED_ENGINES: contextvars.ContextVar[Optional[Set[str]]] = contextvars.ContextVar(
+    "ash_warned_unmatched_engines", default=None
+)
+
+#: The fallback for a context no engine initialized (a bare matcher call, a
+#: worker thread that inherited no scan context): process-global and never
+#: cleared, so the receipt still appears at least once per process there.
+_FALLBACK_WARNED_ENGINES: Set[str] = set()
+
+
+def _warned_engines() -> Set[str]:
+    warned = _WARNED_ENGINES.get()
+    return warned if warned is not None else _FALLBACK_WARNED_ENGINES
 
 
 def register_suppression_scope_engine(
@@ -78,25 +93,29 @@ def registered_engine_names() -> Set[str]:
 
 
 def reset_unmatched_engine_warnings() -> None:
-    """Forget which engines were warned about, so the next scan warns again.
+    """Give the calling scan context a fresh warned set, so its scan warns again.
 
-    The set is per process, and a long-lived process (the MCP server, a
-    workspace scan) runs many scans: without the reset only the first scan got
-    the receipt that a listed engine's blocks suppress nothing. The execution
-    engine calls this as it initializes.
+    A long-lived process (the MCP server, a workspace scan) runs many scans:
+    without the reset only the first scan got the receipt that a listed
+    engine's blocks suppress nothing. Each execution engine calls this as it
+    initializes, in its own thread, and the set is scoped to that context
+    (contextvars), so one project's reset never clears what another project's
+    scan is yet to warn about.
     """
-    _WARNED_ENGINES.clear()
+    _WARNED_ENGINES.set(set())
 
 
 def warn_once_unmatched_engine(scanner_name: str) -> None:
-    """Warn, once per name, that a listed engine's blocks suppress nothing.
+    """Warn, once per name per scan context, that a listed engine's blocks
+    suppress nothing.
 
     Fail closed is the safe direction, and this is its receipt: without it an
     entry whose plugin went missing would stop suppressing with no sign.
     """
-    if scanner_name in _WARNED_ENGINES:
+    warned = _warned_engines()
+    if scanner_name in warned:
         return
-    _WARNED_ENGINES.add(scanner_name)
+    warned.add(scanner_name)
     ASH_LOGGER.warning(
         f"A suppression lists '{scanner_name}' under scope.engines, but no "
         "loaded scanner plugin of that name supports engine-scoped "
