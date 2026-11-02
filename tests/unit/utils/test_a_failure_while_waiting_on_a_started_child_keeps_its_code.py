@@ -73,6 +73,22 @@ RUNNERS = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked spawn on every platform.
+
+    Many cells below replace the process boundary (``_runner``) and pass it
+    "stub-tool", a program installed nowhere. On Windows ASH refuses a bare name
+    its lookup cannot resolve before it spawns anything
+    (``subprocess_utils._refuse_unresolved_on_windows``), so the stand-in runner
+    was never called and each cell read the refusal's spawn-failure response, not
+    the behavior it pins. Those cells are about what happens after the spawn, so
+    that decision is set aside here. Only a bare name that resolves nowhere
+    reaches that check.
+    """
+    monkeypatch.setattr(subprocess_utils, "_refuse_unresolved_on_windows", False)
+
+
 @contextlib.contextmanager
 def _runner(kind: Optional[str]) -> Iterator[None]:
     if kind == "cancel-scope":

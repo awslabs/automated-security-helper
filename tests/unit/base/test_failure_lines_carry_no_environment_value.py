@@ -52,6 +52,24 @@ _POSIX_SIGNAL = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked spawn on every platform.
+
+    The cells below replace the process boundary and pass it "stub-tool", a
+    program installed nowhere. On Windows ASH refuses a bare name its lookup
+    cannot resolve before it spawns anything
+    (``subprocess_utils._refuse_unresolved_on_windows``), so the stand-in runner
+    was never called and each cell read the refusal's spawn-failure response and
+    log lines, not the ones it pins. These cells are about what a run logs and
+    returns after the spawn, so that decision is set aside here. Only a bare
+    name that resolves nowhere reaches that check.
+    """
+    from automated_security_helper.utils import subprocess_utils
+
+    monkeypatch.setattr(subprocess_utils, "_refuse_unresolved_on_windows", False)
+
+
 def _context(tmp_path, environment_values):
     source_dir = tmp_path / "source"
     source_dir.mkdir(exist_ok=True)
