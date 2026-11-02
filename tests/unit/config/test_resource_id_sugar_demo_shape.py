@@ -4,11 +4,14 @@
 """Entry-level ``resource_id`` is first-class sugar for ``scope.resource_id``.
 
 The key users invented on their own is the key ASH accepts: the demo-file
-shape (cdk-nag suppressions carrying a top-level ``resource_id``, one of them
-``expires``) loads with zero warnings and suppresses exactly the intended
-findings. The fixture here reconstructs that shape (25 entries, one
-``expires``); it is pinned to the reported shape of the one-observability-demo
-``.ash/.ash.yaml``, which is not in this repository.
+shape loads with zero warnings and suppresses exactly the intended findings.
+The fixture here reconstructs that shape, pinned to the real
+one-observability-demo ``.ash/.ash.yaml`` (not in this repository): 25 cdk-nag
+suppressions carrying a top-level ``resource_id`` (keys
+``rule_id``/``path``/``resource_id``/``reason``), and the file's ONE
+``expires`` sitting on a dependency-advisory entry WITHOUT ``resource_id``
+(keys ``rule_id``/``path``/``reason``/``expires``), never on a
+resource-scoped entry.
 """
 
 import pytest
@@ -33,15 +36,24 @@ STACK = "ObservabilityDemoStack"
 def _demo_entries():
     entries = []
     for index in range(25):
-        entry = {
-            "rule_id": "AwsSolutions-IAM5",
-            "path": "cdk.out/*.template.json",
-            "reason": f"demo suppression {index}",
-            "resource_id": f"{STACK}/Construct{index}/DefaultPolicy/Resource",
+        entries.append(
+            {
+                "rule_id": "AwsSolutions-IAM5",
+                "path": "cdk.out/*.template.json",
+                "reason": f"demo suppression {index}",
+                "resource_id": f"{STACK}/Construct{index}/DefaultPolicy/Resource",
+            }
+        )
+    # The real file's one `expires` sits on a dependency-advisory rule for a
+    # lockfile, WITHOUT a resource_id, not on a resource-scoped entry.
+    entries.append(
+        {
+            "rule_id": "GHSA-demo-advisory",
+            "path": "package-lock.json",
+            "reason": "accepted dependency advisory",
+            "expires": "2099-12-31",
         }
-        if index == 0:
-            entry["expires"] = "2099-12-31"
-        entries.append(entry)
+    )
     # The control: a resource_id that matches no finding, so it must stay
     # un-applied while its siblings apply.
     entries.append(
@@ -128,8 +140,42 @@ class TestDemoShapeEndToEnd:
             }
         )
         assert config._resolution_warnings == []
-        assert len(config.global_settings.suppressions) == 26
-        assert config.global_settings.suppressions[0].expiration == "2099-12-31"
+        suppressions = config.global_settings.suppressions
+        assert len(suppressions) == 27
+        # The one expiring entry is the dependency rule with no resource_id,
+        # as in the real file.
+        expiring = [s for s in suppressions if s.expiration is not None]
+        assert len(expiring) == 1
+        assert expiring[0].expiration == "2099-12-31"
+        assert expiring[0].rule_id == "GHSA-demo-advisory"
+        assert expiring[0].scope is None
+
+    def test_expires_on_a_sugar_entry_also_loads(self):
+        """NOT the demo shape (the real file's one expires entry carries no
+        resource_id); this fixture's own extra coverage of the expires alias
+        combined with the sugar key on one entry."""
+        config = build_config(
+            {
+                "project_name": "demo-shape",
+                "global_settings": {
+                    "suppressions": [
+                        {
+                            "rule_id": "AwsSolutions-IAM5",
+                            "path": "cdk.out/*.template.json",
+                            "reason": "r",
+                            "resource_id": (
+                                f"{STACK}/Construct0/DefaultPolicy/Resource"
+                            ),
+                            "expires": "2099-12-31",
+                        }
+                    ]
+                },
+            }
+        )
+        assert config._resolution_warnings == []
+        (entry,) = config.global_settings.suppressions
+        assert entry.expiration == "2099-12-31"
+        assert entry.scope is not None and entry.scope.resource_id
 
     def test_it_suppresses_exactly_the_intended_findings(self):
         config = build_config(
