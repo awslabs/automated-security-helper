@@ -67,11 +67,11 @@ class _NamedScanner:
 def one_declared_scanner(monkeypatch):
     """The registry read of the pre-check sees one declared scanner, ``bandit``."""
 
-    def plugin_modules(plugin_type, filter_callback=None):
+    def plugin_modules(self, plugin_type, filter_callback=None):
         assert plugin_type == "scanner"
         return [_NamedScanner]
 
-    monkeypatch.setattr(ash_plugin_manager, "plugin_modules", plugin_modules)
+    monkeypatch.setattr(type(ash_plugin_manager), "plugin_modules", plugin_modules)
     return [_NamedScanner]
 
 
