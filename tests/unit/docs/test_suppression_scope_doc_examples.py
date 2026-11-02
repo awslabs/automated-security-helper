@@ -7,6 +7,7 @@ Docs that show YAML a reader will paste must validate against the models that
 read it; a drifted example teaches a refused config.
 """
 
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -53,5 +54,10 @@ def test_the_scope_examples_validate():
     assert suppression.scope is not None
     assert suppression.scope.resource_id
     for fence in fences[1:]:
-        fragment = yaml.safe_load("rule_id: R\npath: a\nreason: r\n" + fence)
+        # The continuation fences keep the indentation of the entry they sit
+        # inside; dedent before completing them, or the composed document
+        # reads the indented keys as a continuation of the ``reason`` scalar.
+        fragment = yaml.safe_load(
+            "rule_id: R\npath: a\nreason: r\n" + textwrap.dedent(fence)
+        )
         AshSuppression.model_validate(fragment)
