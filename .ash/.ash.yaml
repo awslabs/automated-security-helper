@@ -3750,6 +3750,30 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/workspace/test_a_reduction_that_raises_keeps_the_values_the_scan_exposed.py
       reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    # === The #865 chain's test files: gitleaks ===
+    # Per-file entries naming the flagged value, as the gitleaks fixture-token
+    # section above does.
+    - rule_id: "generic-api-key"
+      path: "tests/unit/base/test_uv_tool_mixin_guards_and_decisions.py"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: "generic-api-key"
+      path: "tests/unit/core/test_orchestrator_project_name_holding_an_environment_value.py"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: "generic-api-key"
+      path: "tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_probe_selection_and_report_shapes.py"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: "generic-api-key"
+      path: "tests/unit/plugin_modules/ash_builtin/scanners/test_npm_audit_response_logging.py"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: "generic-api-key"
+      path: "tests/unit/utils/test_ash_install_failures_are_logged_redacted.py"
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: "private-key"
+      path: "tests/unit/interactions/test_run_ash_container_input_and_run_edges.py"
+      reason: >-
+        False positive. The flagged lines plant a PEM header string and then
+        assert it is ABSENT from the container run's output; redaction is the
+        assertion. No key body exists.
     # No GitHub Actions entries. `yaml.github-actions.security.*` was suppressed
     # over every workflow on the claim that interpolations were author-defined;
     # removing it surfaced shell injection through `${{ inputs.* }}` in
