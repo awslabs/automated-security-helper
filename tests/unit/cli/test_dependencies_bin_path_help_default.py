@@ -50,6 +50,8 @@ def test_the_help_default_is_the_same_for_any_home(tmp_path, home_name, bin_path
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
         timeout=120,
     )
