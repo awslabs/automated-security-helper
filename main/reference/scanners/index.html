@@ -3690,7 +3690,7 @@ SOFTWARE.
 </table>
 <p>Tool type is the scanner's own <code>ScannerToolType</code>. <code>--python-only</code> keeps a scanner when its <code>is_python_only()</code> is true: the scanner class's own <code>python_only</code> when it states one; otherwise only when the scanner runs its tool through uv, declares no install commands, and has only pip dependencies. A scanner it does not keep is SKIPPED.</p>
 <h2 id="environment-in-the-sandbox">Environment in the sandbox<a class="headerlink" href="#environment-in-the-sandbox" title="Permanent link">&para;</a></h2>
-<p>When <code>sandbox.mode</code> confines scanners, a scanner process receives only an allowlist of the environment ASH was started with. Every sandboxed scanner gets these names: <code>COLUMNS</code>, <code>CURL_CA_BUNDLE</code>, <code>FORCE_COLOR</code>, <code>GEM_HOME</code>, <code>GEM_PATH</code>, <code>JAVA_HOME</code>, <code>LANG</code>, <code>LANGUAGE</code>, <code>NODE_EXTRA_CA_CERTS</code>, <code>NO_COLOR</code>, <code>PATH</code>, <code>REQUESTS_CA_BUNDLE</code>, <code>SSL_CERT_DIR</code>, <code>SSL_CERT_FILE</code>, <code>SYSTEMROOT</code>, <code>TERM</code>, <code>TZ</code>, <code>VIRTUAL_ENV</code>; and names starting with <code>LC_</code>, <code>ASH_</code>, <code>UV_</code>, <code>PYTHON</code>. A scanner's own prefixes and names, listed with each scanner below, are added to that. A name containing <code>TOKEN</code>, <code>PASSWORD</code>, <code>PASSWD</code>, <code>SECRET</code>, <code>CREDENTIAL</code>, <code>AUTH</code>, <code>APIKEY</code>, <code>API_KEY</code>, <code>PRIVATE_KEY</code>, <code>SESSION</code> is dropped even under an allowed prefix, unless the scanner names it exactly. The proxy variables <code>HTTPS_PROXY</code>, <code>HTTP_PROXY</code>, <code>NO_PROXY</code>, <code>http_proxy</code>, <code>https_proxy</code>, <code>no_proxy</code> are passed only to a scanner that has a network. The lists are in <code>automated_security_helper/utils/sandbox/policy.py</code>.</p>
+<p>When <code>sandbox.mode</code> confines scanners, a scanner process receives only an allowlist of the environment ASH was started with. Every sandboxed scanner gets these names: <code>COLUMNS</code>, <code>FORCE_COLOR</code>, <code>GEM_HOME</code>, <code>GEM_PATH</code>, <code>JAVA_HOME</code>, <code>LANG</code>, <code>LANGUAGE</code>, <code>NO_COLOR</code>, <code>PATH</code>, <code>SYSTEMROOT</code>, <code>TERM</code>, <code>TZ</code>, <code>VIRTUAL_ENV</code>; and names starting with <code>LC_</code>, <code>ASH_</code>, <code>UV_</code>, <code>PYTHON</code>. The proxy variables <code>ALL_PROXY</code>, <code>HTTPS_PROXY</code>, <code>HTTP_PROXY</code>, <code>NO_PROXY</code>, <code>all_proxy</code>, <code>http_proxy</code>, <code>https_proxy</code>, <code>no_proxy</code> and the certificate variables <code>SSL_CERT_FILE</code>, <code>REQUESTS_CA_BUNDLE</code>, <code>CURL_CA_BUNDLE</code>, <code>NODE_EXTRA_CA_CERTS</code>, <code>SSL_CERT_DIR</code> are the default of <code>sandbox.environment</code>, a docker-compose style list that replaces them when it is set. A proxy variable is passed only to a scanner that has a network. A scanner's own prefixes and names, listed with each scanner below, are added to all of that. A name containing <code>TOKEN</code>, <code>PASSWORD</code>, <code>PASSWD</code>, <code>SECRET</code>, <code>CREDENTIAL</code>, <code>AUTH</code>, <code>APIKEY</code>, <code>API_KEY</code>, <code>PRIVATE_KEY</code>, <code>SESSION</code> is dropped even under an allowed prefix, unless the scanner names it exactly. The lists are in <code>automated_security_helper/utils/sandbox/policy.py</code>.</p>
 <p>The network entry of each scanner below is its default. <code>sandbox.network_scanners</code>, when it is set, replaces every scanner's declared need: only the scanners it names get a network. A config file inside a git checkout or the scanned directory can only take network away, and an offline scan gives no scanner a network.</p>
 <h2 id="actionlint"><code>actionlint</code><a class="headerlink" href="#actionlint" title="Permanent link">&para;</a></h2>
 <ul>
@@ -3764,7 +3764,7 @@ SOFTWARE.
 <li>Enabled by default: yes</li>
 <li>Tool type: SAST</li>
 <li>Command: <code>bandit</code></li>
-<li>Install: <code>uv tool install</code> on first use (<code>bandit[sarif,toml]&gt;=1.7.0,&lt;2.0.0</code>)</li>
+<li>Install: <code>uv tool install</code> on first use (<code>bandit[sarif,toml]&gt;=1.7.8,&lt;2.0.0</code>)</li>
 <li>Offline strategy: <code>bundled</code></li>
 <li>Network in the sandbox, by default: no</li>
 <li>Environment passed into the sandbox: <code>BANDIT_*</code></li>
@@ -3828,13 +3828,13 @@ SOFTWARE.
 <td><a id="scanners.bandit.options.additional_formats"></a><code>additional_formats</code></td>
 <td>list of string</td>
 <td><code>[]</code></td>
-<td>Additional output formats to generate (e.g., html, csv, xml)</td>
+<td>Additional output formats (e.g., html, csv, xml). bandit writes one format per run through a single --format option, and ASH needs that run's output to be SARIF, so these formats are not produced: a value here is accepted and logged as a warning. Convert the SARIF results with ASH's reporters instead.</td>
 </tr>
 <tr>
 <td><a id="scanners.bandit.options.tool_version"></a><code>tool_version</code></td>
 <td>string or null</td>
-<td><code>"&gt;=1.7.0,&lt;2.0.0"</code></td>
-<td>Version constraint for bandit tool installation (e.g., '&gt;=1.7.0'). If not specified, uses '&gt;=1.7.0,&lt;2.0.0' for stability.</td>
+<td><code>"&gt;=1.7.8,&lt;2.0.0"</code></td>
+<td>Version constraint for bandit tool installation (e.g., '&gt;=1.7.8'). If not specified, uses '&gt;=1.7.8,&lt;2.0.0' for stability.</td>
 </tr>
 <tr>
 <td><a id="scanners.bandit.options.install_timeout"></a><code>install_timeout</code></td>
@@ -3898,7 +3898,7 @@ SOFTWARE.
 <td><a id="scanners.cdk-nag.options.include_compliant_checks"></a><code>include_compliant_checks</code></td>
 <td>boolean</td>
 <td><code>false</code></td>
-<td>Include INFO-level findings for compliant resources in the report.</td>
+<td>Kept for configuration compatibility; it changes nothing. cdk-nag 3 reports violations only, so there is no compliant-resource finding for this option to include, and a scan with it set says so.</td>
 </tr>
 </tbody>
 </table>
@@ -4014,7 +4014,7 @@ SOFTWARE.
 <td><a id="scanners.cfn-lint.options.regions"></a><code>regions</code></td>
 <td>list of string</td>
 <td><code>[]</code></td>
-<td>AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read.</td>
+<td>AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.</td>
 </tr>
 <tr>
 <td><a id="scanners.cfn-lint.options.ignore_checks"></a><code>ignore_checks</code></td>
@@ -4103,7 +4103,7 @@ SOFTWARE.
 <li>Install: <code>uv tool install</code> on first use (<code>checkov&gt;=3.2.0,&lt;4.0.0</code>)</li>
 <li>Offline strategy: <code>cache_flags</code></li>
 <li>Network in the sandbox, by default: no</li>
-<li>Environment passed into the sandbox: <code>CHECKOV_*</code></li>
+<li>Environment passed into the sandbox: <code>CHECKOV_*</code>, <code>CKV_*</code></li>
 <li>Environment set under sandbox-exec: none</li>
 </ul>
 <p>Options, under <code>scanners.checkov.options</code>. An option not listed here refuses the configuration.</p>
@@ -4140,13 +4140,13 @@ SOFTWARE.
 <td><a id="scanners.checkov.options.config_file"></a><code>config_file</code></td>
 <td>path, string, or null</td>
 <td><code>null</code></td>
-<td>Path to Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for <code>.checkov.yaml</code> and <code>.checkov.yml</code> in the root of the source directory.</td>
+<td>Path to a Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Only a file the operator names and that lies outside the scanned tree is passed to Checkov; a <code>.checkov.yaml</code> or <code>.checkov.yml</code> found in the scanned tree is not read, and the scan tells Checkov to read none from its working directory either, because such a file can change what is reported.</td>
 </tr>
 <tr>
 <td><a id="scanners.checkov.options.skip_path"></a><code>skip_path</code></td>
 <td>list of mapping</td>
 <td><code>[]</code></td>
-<td>Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times.</td>
+<td>Path (file or directory) to skip, as a regular expression Checkov searches for in each path it walks, and also as a substring of that path. The paths Checkov walks start with the absolute path of the scanned directory. Word boundaries are not implicit: "dir1" skips any directory or subdirectory whose path holds "dir1". An entry whose path is empty is ignored (it would skip every file). Can be specified multiple times.</td>
 </tr>
 <tr>
 <td><a id="scanners.checkov.options.additional_formats"></a><code>additional_formats</code></td>
@@ -4417,7 +4417,7 @@ SOFTWARE.
 <td><a id="scanners.npm-audit.options.offline"></a><code>offline</code></td>
 <td>boolean</td>
 <td><code>false</code></td>
-<td>Treat this scanner as offline even if ASH is not. npm, yarn and pnpm audit by asking the registry, so offline npm-audit does not run: it is MISSING for a project with a lockfile and SKIPPED for one without. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.</td>
+<td>Treat this scanner as offline. npm, pnpm and yarn audit only against the package registry's advisory service, so offline npm-audit audits nothing: each lockfile is listed as not scanned, with a lockfile the scanner is reported MISSING, and with none it is SKIPPED. When true, this scanner is offline even if ASH is not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.</td>
 </tr>
 </tbody>
 </table>
@@ -4813,7 +4813,7 @@ SOFTWARE.
 <td><a id="scanners.zizmor.options.online_audits"></a><code>online_audits</code></td>
 <td>boolean</td>
 <td><code>false</code></td>
-<td>Allow zizmor's online audits. Off by default: ASH runs <code>zizmor --offline</code> and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass <code>zizmor --offline</code>, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode.</td>
+<td>Allow zizmor's online audits. Off by default: ASH runs <code>zizmor --offline</code> and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass <code>zizmor --offline</code>, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode or this scanner's own <code>offline</code> option is true.</td>
 </tr>
 <tr>
 <td><a id="scanners.zizmor.options.honor_inline_ignores"></a><code>honor_inline_ignores</code></td>
@@ -4920,7 +4920,7 @@ SOFTWARE.
 <td><a id="scanners.ferret-scan.options.exclude_patterns"></a><code>exclude_patterns</code></td>
 <td>list of string</td>
 <td><code>[]</code></td>
-<td>File patterns to exclude from scanning (glob patterns)</td>
+<td>File patterns to exclude from scanning (glob patterns). Passed to ferret-scan as one comma-separated --exclude value, so a pattern cannot hold a comma (a brace alternation such as {a,b} is refused: ferret-scan would read it as two patterns) and cannot be empty (ferret-scan 2.4.x matches an empty pattern against every path).</td>
 </tr>
 <tr>
 <td><a id="scanners.ferret-scan.options.show_match"></a><code>show_match</code></td>

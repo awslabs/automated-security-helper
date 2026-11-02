@@ -3324,7 +3324,7 @@ SOFTWARE.
 
 <h1 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h1>
 <p>The exit code of every <code>ash</code> command, with the conditions that produce it. For how to change the scan verdict, see <a href="../../how-to/set-the-gate/">Set the gate</a>.</p>
-<p>On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as <code>--mode</code> or <code>--min-severity</code>) or a number that is not one; a missing required option; or a <code>--cli-json-input</code> document that ASH cannot read or use. <code>ash scan</code>, <code>ash build-image</code>, and <code>ash</code> with no subcommand reject an option or argument they do not define. An option given to <code>ash</code> before a subcommand is passed to the command named right after <code>ash</code>, and is a usage error when that command does not take it: <code>ash --source-dir . config get</code> exits 5, because <code>ash config</code> has no <code>--source-dir</code>, while <code>ash config get --source-dir .</code> works. Some names and paths that ASH cannot use are usage errors too, such as a <code>--scanners</code> list that names no scanner, a <code>--source-dir</code> that does not exist, or an <code>--output-dir</code> that ASH cannot create, while <code>ash report</code> exits 1 when it finds no results to report on. The tables below list both. Two <code>ash dependencies install</code> selections exit 2 instead: a <code>--tool</code> name that it has no plugin for, or whose plugin type <code>--plugin-type</code> leaves out, and a <code>--plugin-type</code> other than <code>converter</code>, <code>scanner</code>, or <code>reporter</code>. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.</p>
+<p>On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as <code>--mode</code> or <code>--min-severity</code>) or a number that is not one; a missing required option; or a <code>--cli-json-input</code> document that ASH cannot read or use. <code>ash scan</code>, <code>ash build-image</code>, and <code>ash</code> with no subcommand reject an option or argument they do not define. An option given to <code>ash</code> before a subcommand is passed to the command named right after <code>ash</code>, and is a usage error when that command does not take it: <code>ash --source-dir . config get</code> exits 5, because <code>ash config</code> has no <code>--source-dir</code>, while <code>ash config get --source-dir .</code> works. Some names and paths that ASH cannot use are usage errors too, such as a <code>--scanners</code> list that names no scanner, a <code>--source-dir</code> that does not exist, or an <code>--output-dir</code> that ASH cannot create, while <code>ash report</code>, and a scan with <code>--use-existing</code>, exit 1 when they find no results to use. The tables below list both. Two <code>ash dependencies install</code> selections exit 2 instead: a <code>--tool</code> name that it has no plugin for, or whose plugin type <code>--plugin-type</code> leaves out, and a <code>--plugin-type</code> other than <code>converter</code>, <code>scanner</code>, or <code>reporter</code>. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.</p>
 <h2 id="scan"><code>ash scan</code><a class="headerlink" href="#scan" title="Permanent link">&para;</a></h2>
 <p><code>ash</code> with no subcommand runs a scan and exits the same way.</p>
 <table>
@@ -3345,7 +3345,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td>1</td>
-<td>A rule could not be evaluated</td>
+<td>A rule could not be evaluated, or a scanner tool ASH could not stop (also with <code>fail_on_incomplete_scanners</code> off)</td>
 </tr>
 <tr>
 <td>1</td>
@@ -3354,6 +3354,10 @@ SOFTWARE.
 <tr>
 <td>1</td>
 <td>A report file a reporter is about to write, such as <code>reports/ash.sarif</code>, is a link (<a href="../output-files/#links">Output files</a>)</td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>--use-existing</code> finds no <code>ash_aggregated_results.json</code> in the output directory. The command is well formed, but what it asks to use is not on disk, so this is the code <code>ash report</code> gives for missing results and not a usage error</td>
 </tr>
 <tr>
 <td>1</td>
@@ -3377,7 +3381,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td>5</td>
-<td>A usage error. For a scan that includes: the source directory (<code>--source-dir</code> or <code>ASH_SOURCE_DIR</code>) does not exist, is not a directory, cannot be entered, or is not a valid path because it holds a NUL character; the output directory is not a directory, cannot be created, cannot be entered, or cannot be written, or it is not a valid path because it holds a NUL character, which a <code>--cli-json-input</code> document can carry and a command line cannot; <code>--use-existing</code> finds no results; with <code>--changed-files-only</code>, a <code>--base-ref</code> that git would read as something other than a revision, such as one that starts with <code>-</code>; <code>--changed-files-only</code>, or <code>ASH_CHANGED_FILES_ONLY</code>, with <code>--mode container</code>, which is refused before anything is built or run; the shard options are invalid or combined with <code>--workspace</code>; an <code>--output-formats</code> value is not a format name ASH accepts; no name in <code>--scanners</code> (or <code>ASH_SCANNERS</code>) matches a scanner; every scanner <code>--scanners</code> names is also excluded. ASH checks the <code>--scanners</code> names when the scan phase starts, after the converters have run and the output directory has been written.</td>
+<td>A usage error. For a scan that includes: the source directory (<code>--source-dir</code> or <code>ASH_SOURCE_DIR</code>) does not exist, is not a directory, cannot be entered, or is not a valid path because it holds a NUL character; the output directory is not a directory, cannot be created, cannot be entered, or cannot be written, or it is not a valid path because it holds a NUL character, which a <code>--cli-json-input</code> document can carry and a command line cannot; with <code>--changed-files-only</code>, a <code>--base-ref</code> that git would read as something other than a revision, such as one that starts with <code>-</code>; <code>--changed-files-only</code>, or <code>ASH_CHANGED_FILES_ONLY</code>, with <code>--mode container</code>, which is refused before anything is built or run; the shard options are invalid or combined with <code>--workspace</code>; an <code>--output-formats</code> value is not a format name ASH accepts; no name in <code>--scanners</code> (or <code>ASH_SCANNERS</code>) matches a scanner; every scanner <code>--scanners</code> names is also excluded; every scanner <code>--scanners</code> names is left out of a <code>--python-only</code> run. ASH checks the <code>--scanners</code> names when the scan phase starts, after the converters have run and the output directory has been written.</td>
 </tr>
 <tr>
 <td>130</td>
@@ -3408,11 +3412,11 @@ SOFTWARE.
 <!-- doctest: run expect-exit=0 -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress<span class="w"> </span>--no-fail-on-findings
 </span></code></pre></div>
-<p><code>--use-existing</code> with an output directory that holds no results is a usage error, 5:</p>
-<!-- doctest: run expect-exit=5 -->
+<p><code>--use-existing</code> with an output directory that holds no results exits 1, the same answer <code>ash report</code> gives for missing results. The command is well formed; what it asks to use is not on disk yet, so it is not a usage error:</p>
+<!-- doctest: run expect-exit=1 -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>.<span class="w"> </span>--use-existing<span class="w"> </span>--output-dir<span class="w"> </span>no-scan-here
 </span></code></pre></div>
-<p>So is a <code>--source-dir</code> that does not exist:</p>
+<p>A <code>--source-dir</code> that does not exist is a usage error, 5:</p>
 <!-- doctest: run expect-exit=5 -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ash<span class="w"> </span>--source-dir<span class="w"> </span>no-such-dir<span class="w"> </span>--scanners<span class="w"> </span>detect-secrets<span class="w"> </span>--offline<span class="w"> </span>--no-progress
 </span></code></pre></div>
@@ -3440,9 +3444,9 @@ SOFTWARE.
 <p>ASH stops at the first of these that applies:</p>
 <ol>
 <li>A usage error in the command line itself, such as an unknown option, an invalid value, or a missing required option: 5.</li>
-<li>A check before scanning: the shard and workspace options, workspace resolution, the source directory, an output directory that is a link or is reached through one, then an output directory that is not a directory, cannot be entered or written, or has a file on the way to it, <code>--use-existing</code>, <code>--output-formats</code>, an output directory that cannot be created for another reason, such as a parent directory that cannot be written, the config, then the scanner selection, which ASH checks when the scan phase starts. Each exits as the table above says (3, 4, or 5).</li>
+<li>A check before scanning: the shard and workspace options, workspace resolution, the source directory, an output directory that is a link or is reached through one, then an output directory that is not a directory, cannot be entered or written, or has a file on the way to it, <code>--use-existing</code>, <code>--output-formats</code>, an output directory that cannot be created for another reason, such as a parent directory that cannot be written, the config, then the scanner selection, which ASH checks when the scan phase starts. Each exits as the table above says: 3, 4 or 5, except <code>--use-existing</code> with no results to use, which exits 1 as the table says, and which is checked before <code>--output-formats</code> and the config, so a command that also carries one of those mistakes reports the missing results first.</li>
 <li>With <code>fail_on_incomplete_scanners</code> on: a selected scanner ERROR, MISSING, or with lost targets; then no scanner ran; then a failed converter: 1.</li>
-<li>A rule could not be evaluated: 1.</li>
+<li>A rule could not be evaluated, or a scanner tool ASH could not stop: 1.</li>
 <li>A stale content database under <code>content_db_staleness: fail</code>: 1.</li>
 <li><code>fail_on_findings</code> off: 0.</li>
 <li>Actionable findings, counted against each scanner's own threshold, and at least one unsuppressed finding at or above <code>--min-severity</code>: 2.</li>
@@ -3500,7 +3504,7 @@ SOFTWARE.
 <h3 id="shards">Sharded scans<a class="headerlink" href="#shards" title="Permanent link">&para;</a></h3>
 <p>Each shard computes the verdict for its own scanners, so a shard with findings exits 2 and a shard with a MISSING scanner exits 1. The one difference is that a shard that ran no scanner does not fail for that reason. Gate the pipeline on <a href="#merge"><code>ash merge</code></a>, not on the shards.</p>
 <h3 id="workspace">Workspace mode<a class="headerlink" href="#workspace" title="Permanent link">&para;</a></h3>
-<p>With <code>--workspace</code>, ASH scans each project and combines their verdicts. The highest of these wins: 3 (a project's config is invalid), then 2 (a project has actionable findings at or above its threshold), then 1 (a project failed, is incomplete, or has a stale database), then 0. Codes 4 and 5 are not part of that ranking: ASH gives them when it refuses the workspace before any project runs.</p>
+<p>With <code>--workspace</code>, ASH scans each project and combines their verdicts. The first of these that applies wins: 3 (a project's config is invalid), then 1 (a project failed, is incomplete, or has a stale database), then 2 (a project has actionable findings at or above its threshold), then 0. Codes 4 and 5 are not part of that ranking: ASH gives them when it refuses the workspace before any project runs.</p>
 <table>
 <thead>
 <tr>
@@ -3523,11 +3527,11 @@ SOFTWARE.
 </tr>
 <tr>
 <td>0</td>
-<td><code>--dry-run</code>; or nothing was scanned because every project was skipped as unchanged</td>
+<td><code>--dry-run</code>; or nothing was scanned because every project was skipped as unchanged, counting a missing project that <code>--allow-missing-projects</code> tolerated as neither scanned nor failed (it is listed in the results, not in the exit code)</td>
 </tr>
 </tbody>
 </table>
-<p>Because the combination puts 2 above 1, a project with findings and a MISSING scanner makes the workspace exit 2, where the same project scanned alone exits 1. Workspace mode does not check for rules that could not be evaluated.</p>
+<p>A project that is incomplete exits 1 even when it also has findings, as the same project scanned alone does. Workspace mode checks the same unconditional causes as a single scan: a rule a scanner could not evaluate, a scanner tool ASH could not stop, and a stale content database under a <code>fail</code> policy each fail the project whatever <code>fail_on_incomplete_scanners</code> says. One exception, and only in workspace mode: a stale database of a scanner that the workspace policy alone added (<code>additional_scanners</code>) with <code>policy_scanners_gate</code> off is listed in the project's <code>stale_content_databases</code> and does not fail it, as that scanner's missing tool and findings decide nothing either. The other two unconditional causes have no such exception: a rule that such a scanner could not evaluate, or its tool that ASH could not stop, still fails the project, whichever config asked for the scanner, because a rule that raised says nothing about compliance with it and a tool still running may write into the project's output after the verdict read it.</p>
 <h2 id="merge"><code>ash merge</code><a class="headerlink" href="#merge" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3588,7 +3592,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td>1</td>
-<td>Results that cannot be read; the reporter failed; an AWS reporter's pre-flight check refused, for a missing setting or for credentials it cannot find (<a href="../../plugins/aws/#ash-report">AWS reporters</a>)</td>
+<td>No results to report on (no <code>ash_aggregated_results.json</code> in any of the places an output directory is searched, and an output directory under a directory ASH cannot search counts as one with none; nothing is created, and the same code <code>--use-existing</code> gives a scan for the same reason); results that cannot be read; the reporter failed; an AWS reporter's pre-flight check refused, for a missing setting or for credentials it cannot find (<a href="../../plugins/aws/#ash-report">AWS reporters</a>)</td>
 </tr>
 <tr>
 <td>3</td>
@@ -3600,7 +3604,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td>5</td>
-<td>No results to report on, or a results file in more than one of the places an output directory is searched (nothing is created, and an output directory under a directory ASH cannot search counts as one with no results); an output directory that is a file (<code>Output directory is not a directory:</code>), or a path the system cannot look up, such as one holding a NUL character (<code>Output directory is not a valid path:</code>), each with the path as given; an unknown <code>--format</code>, also when there are no results; an output directory that exists but cannot be entered (<code>Output directory cannot be entered:</code> and the path as given); any other usage error</td>
+<td>A results file in more than one of the places an output directory is searched (nothing is created); an output directory that is a file (<code>Output directory is not a directory:</code>), or a path the system cannot look up, such as one holding a NUL character (<code>Output directory is not a valid path:</code>), each with the path as given; an unknown <code>--format</code>, also when there are no results; an output directory that exists but cannot be entered (<code>Output directory cannot be entered:</code> and the path as given); any other usage error</td>
 </tr>
 </tbody>
 </table>
@@ -3627,7 +3631,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td>3</td>
-<td>A <code>--profile</code> that cannot be registered: no <code>=</code>, a file that does not exist or does not load, an unknown top-level key, or a name given twice. An <code>ASH_CONFIG</code> that names a path that is not a file, a file the server cannot read, or a config that does not load or validate, on every transport; an empty <code>ASH_CONFIG</code> counts as unset. Also when an HTTP server fails to start, for example because it cannot bind its port: the HTTP server exits 3 for that.</td>
+<td>A <code>--profile</code> that cannot be registered: no <code>=</code>, a file that does not exist or does not load, an unknown top-level key, a name given twice, or a file kept where a client can write it: inside the MCP workspace root, other than a config the server wrote there itself, or inside a git checkout under a scan root <code>ASH_MCP_ALLOWED_ROOTS</code> grants. An <code>ASH_CONFIG</code> that names a path that is not a file, a file the server cannot read, or a config that does not load or validate, on every transport; an empty <code>ASH_CONFIG</code> counts as unset. Also when an HTTP server fails to start, for example because it cannot bind its port: the HTTP server exits 3 for that.</td>
 </tr>
 <tr>
 <td>5</td>
@@ -3841,7 +3845,7 @@ SOFTWARE.
 <tr>
 <td></td>
 <td>3</td>
-<td>The config cannot be used or is invalid, as for a scan, or an override does not validate; or there is no usable home directory, so nowhere to keep install receipts, whatever <code>--bin-path</code> says: <code>HOME</code> is empty or relative, or unset with no absolute home in the passwd entry. Nothing is installed</td>
+<td>The config cannot be used or is invalid, as for a scan, or an override does not validate; or there is no usable home directory, so nowhere to keep install receipts, whatever <code>--bin-path</code> says: <code>HOME</code> is empty or relative, or unset with no absolute home in the passwd entry. Nothing is installed. The same code for a <code>--bin-path</code> (or <code>ASH_BIN_PATH</code>) directory that cannot be made, because a file is in the way or a directory it needs cannot be written to; an existing bin directory is accepted whether or not you can write to it. A <code>--tool</code> name that matches no plugin is refused first, with code 2</td>
 </tr>
 <tr>
 <td><code>ash plugin list</code></td>

@@ -3624,7 +3624,7 @@ SOFTWARE.
 <td><code>.ocsf.json</code></td>
 <td>yes</td>
 <td>Security data lakes, SIEM ingestion</td>
-<td><a href="https://schema.ocsf.io/">OCSF 1.0</a></td>
+<td><a href="https://schema.ocsf.io/">OCSF 1.1.0</a></td>
 </tr>
 <tr>
 <td><a href="#sarif">SARIF</a> (<code>sarif</code>)</td>
@@ -3791,6 +3791,12 @@ SOFTWARE.
 <td>boolean</td>
 <td><code>true</code></td>
 <td>When true (default), suppressed findings are excluded from the GHAS report. GitHub has its own dismissal workflow so suppressed findings are typically not needed.</td>
+</tr>
+<tr>
+<td><a id="reporters.github-ghas.options.emit_automation_details"></a><code>emit_automation_details</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td>When true, a workspace project's own report carries runAutomationDetails.id ash/&lt;project key&gt;/, the category GitHub files the upload under, so the per-project reports of one repository are kept apart. Off by default: an id in the file takes precedence over the category the upload-sarif action is given, so an upload that already names its category would be moved to a new one, leaving the old analysis's alerts open.</td>
 </tr>
 </tbody>
 </table>
@@ -4121,7 +4127,7 @@ SOFTWARE.
 <tr>
 <td><a id="reporters.aws-security-hub.options.aws_region"></a><code>aws_region</code></td>
 <td>string or null</td>
-<td>from <code>AWS_REGION</code>, else from <code>AWS_DEFAULT_REGION</code>, else <code>null</code></td>
+<td>from <code>AWS_REGION</code>, else <code>null</code></td>
 <td>AWS Region for Security Hub integration</td>
 </tr>
 <tr>
@@ -4191,7 +4197,7 @@ SOFTWARE.
 <tbody>
 <tr>
 <td><a id="reporters.bedrock-summary-reporter.options.aws_region"></a><code>aws_region</code></td>
-<td>string or null, matches <code>(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}</code></td>
+<td>string or null, matches <code>^(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1,2}$</code></td>
 <td>from <code>AWS_REGION</code>, else from <code>AWS_DEFAULT_REGION</code>, else <code>us-east-1</code></td>
 <td>AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests.</td>
 </tr>
@@ -4209,33 +4215,33 @@ SOFTWARE.
 </tr>
 <tr>
 <td><a id="reporters.bedrock-summary-reporter.options.temperature"></a><code>temperature</code></td>
-<td>number</td>
+<td>number, at least 0, at most 1</td>
 <td>from <code>ASH_BEDROCK_TEMPERATURE</code>, else <code>0.5</code></td>
-<td>Temperature parameter for the Bedrock model. Higher values make output more random.</td>
+<td>Temperature parameter for the Bedrock model, 0 to 1 (Converse's range). Higher values make output more random.</td>
 </tr>
 <tr>
 <td><a id="reporters.bedrock-summary-reporter.options.max_tokens"></a><code>max_tokens</code></td>
-<td>integer</td>
+<td>integer, at least 1</td>
 <td>from <code>ASH_BEDROCK_MAX_TOKENS</code>, else <code>4000</code></td>
-<td>Maximum number of tokens to generate in the response.</td>
+<td>Maximum number of tokens to generate in the response, at least 1 (Converse's range).</td>
 </tr>
 <tr>
 <td><a id="reporters.bedrock-summary-reporter.options.top_p"></a><code>top_p</code></td>
-<td>number</td>
+<td>number, at least 0, at most 1</td>
 <td><code>0.9</code></td>
 <td>Top-p parameter for the Bedrock model. Controls diversity of generated text.</td>
 </tr>
 <tr>
 <td><a id="reporters.bedrock-summary-reporter.options.max_findings_to_analyze"></a><code>max_findings_to_analyze</code></td>
-<td>integer</td>
+<td>integer, at least 1</td>
 <td><code>10</code></td>
-<td>Maximum number of findings to include in the analysis.</td>
+<td>Maximum number of findings to include in the analysis. At least 1; a smaller value is refused as a configuration error.</td>
 </tr>
 <tr>
 <td><a id="reporters.bedrock-summary-reporter.options.max_findings_per_severity"></a><code>max_findings_per_severity</code></td>
-<td>integer</td>
+<td>integer, at least 1</td>
 <td><code>5</code></td>
-<td>Maximum number of findings to include per severity level when grouping by severity.</td>
+<td>Maximum number of findings to include per severity level when grouping by severity. At least 1; a smaller value is refused as a configuration error.</td>
 </tr>
 <tr>
 <td><a id="reporters.bedrock-summary-reporter.options.group_by_severity"></a><code>group_by_severity</code></td>
@@ -4406,8 +4412,8 @@ SOFTWARE.
 <tbody>
 <tr>
 <td><a id="reporters.cloudwatch-logs.options.aws_region"></a><code>aws_region</code></td>
-<td>string or null, matches <code>(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}</code></td>
-<td>from <code>AWS_REGION</code>, else from <code>AWS_DEFAULT_REGION</code>, else <code>null</code></td>
+<td>string or null, matches <code>^(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1,2}$</code></td>
+<td>from <code>AWS_REGION</code>, else <code>null</code></td>
 <td>AWS region for CloudWatch Logs</td>
 </tr>
 <tr>
@@ -4465,8 +4471,8 @@ SOFTWARE.
 <tbody>
 <tr>
 <td><a id="reporters.s3.options.aws_region"></a><code>aws_region</code></td>
-<td>string or null, matches <code>(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}</code></td>
-<td>from <code>AWS_REGION</code>, else from <code>AWS_DEFAULT_REGION</code>, else <code>null</code></td>
+<td>string or null, matches <code>^(af|il|ap|ca|eu|me|sa|us|cn|mx|eusc|us-gov|us-iso|us-isob|us-isof|eu-isoe)(-[a-z]{2})?-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1,2}$</code></td>
+<td>from <code>AWS_REGION</code>, else <code>null</code></td>
 <td>AWS region to use for S3 operations</td>
 </tr>
 <tr>
@@ -4485,7 +4491,7 @@ SOFTWARE.
 <td><a id="reporters.s3.options.key_prefix"></a><code>key_prefix</code></td>
 <td>string</td>
 <td><code>ash-reports/</code></td>
-<td>Prefix for S3 object keys</td>
+<td>Prefix for S3 object keys, used as written: the object name follows it directly, so end it with '/' to place the report in a directory. A prefix that does not end in '/' is warned about once per run</td>
 </tr>
 <tr>
 <td><a id="reporters.s3.options.file_format"></a><code>file_format</code></td>

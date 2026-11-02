@@ -4205,7 +4205,7 @@ prints the configuration a scan would use. <code>ash config lint</code> also lis
 suppressions and ignore paths.</p>
 <h3 id="a-setting-in-the-repositorys-config-file-is-ignored">A setting in the repository's config file is ignored<a class="headerlink" href="#a-setting-in-the-repositorys-config-file-is-ignored" title="Permanent link">&para;</a></h3>
 <p>Symptom: a warning such as:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client. ...
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. ...
 </span></code></pre></div>
 <p>Cause: some settings decide what ASH may run, read, or send, or whether a stale database
 fails the scan: sandbox grants, plugin modules, reporter destinations and credentials,

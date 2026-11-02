@@ -3574,7 +3574,7 @@ characters out. ASH's own messages, such as a refusal that quotes a path, have t
 command lines changed the same way even when they go to a file; only the report itself
 is written to a file as is.</p>
 <p>A missing results file prints <code>No scan results found:</code> with the paths it checked, and
-exits 5. With <code>--output-dir</code> or <code>ASH_OUTPUT_DIR</code> the message names the three paths ASH
+exits 1. With <code>--output-dir</code> or <code>ASH_OUTPUT_DIR</code> the message names the three paths ASH
 looked in (<code>none of … exists</code>); otherwise it names
 <code>.ash/ash_output/ash_aggregated_results.json</code> under the current directory, in full
 (<code>… does not exist</code>). <code>ash report</code> creates nothing then, and an output directory under a

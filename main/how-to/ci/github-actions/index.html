@@ -3315,19 +3315,19 @@ write the steps yourself. For a first setup, follow
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">contents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="nt">jobs</span><span class="p">:</span>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">ash</span><span class="p">:</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.7.0</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@main</span>
 </span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">    </span><span class="nt">permissions</span><span class="p">:</span>
 </span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">      </span><span class="nt">contents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read</span>
 </span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">      </span><span class="nt">checks</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">write</span>
 </span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">      </span><span class="nt">pull-requests</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">write</span>
 </span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">    </span><span class="nt">with</span><span class="p">:</span>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">      </span><span class="nt">ash-version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v3.7.0</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">      </span><span class="nt">ash-version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
 </span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">      </span><span class="nt">ash-args</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--fail-on-incomplete-scanners --no-allow-stale-content-db</span>
 </span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">      </span><span class="nt">collect-sarif-report</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
 </span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">  </span><span class="nt">sarif</span><span class="p">:</span>
 </span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">    </span><span class="nt">needs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash</span>
 </span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">    </span><span class="nt">if</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ !cancelled() &amp;&amp; needs.ash.outputs.artifact-id != &#39;&#39; }}</span>
-</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.7.0</span>
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@main</span>
 </span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">    </span><span class="nt">permissions</span><span class="p">:</span>
 </span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">      </span><span class="nt">contents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read</span>
 </span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">      </span><span class="nt">security-events</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">write</span>
@@ -3348,10 +3348,10 @@ repository has files it scans, and the incomplete-scan gate fails the job with e
 code 1.</p>
 <p>ASH's zizmor scanner reports each <code>uses:</code> line that names a tag as <code>zizmor/unpinned-uses</code> at
 HIGH, so a scan of a repository that holds this file fails until you pin both lines to a
-commit. <code>git ls-remote https://github.com/awslabs/automated-security-helper refs/tags/v3.7.0</code>
-prints the commit that <code>v3.7.0</code> names. Replace the <code>v3.7.0</code> after each <code>@</code>, and the
+commit. <code>git ls-remote https://github.com/awslabs/automated-security-helper refs/heads/main</code>
+prints the commit that <code>main</code> names. Replace the <code>main</code> after each <code>@</code>, and the
 <code>ash-version</code> value, with that SHA, and end each <code>uses:</code> line with the comment
-<code># v3.7.0</code>.</p>
+<code># main</code>.</p>
 <p>A pull request scan reads the configuration in the branch it scans, so the branch can change
 the gate. The workflow passes the <code>fail-on-findings</code> choice on the command line, and the
 <code>ash-args</code> line above does the same for incomplete scans and stale content databases, so the
@@ -3520,7 +3520,7 @@ earlier do not have, so with <code>ash-version</code> set to one of those releas
 to <code>false</code>.</p>
 <p>The binary tools come from <code>ash dependencies install</code>, which downloads the versions that
 the installed ASH pins and checks each download against its pinned SHA256 before
-installing it. bandit, checkov, and semgrep need no input: ASH installs
+installing it. bandit, checkov, semgrep, cfn-lint, and zizmor need no input: ASH installs
 them from PyPI with <code>uv tool install</code> during the scan. detect-secrets is part of ASH, and
 cdk-nag and npm-audit use the Node.js and npm that GitHub's Ubuntu runners include.</p>
 <p>Each install runs on every run, apart from what the workflow caches (see
@@ -3740,7 +3740,7 @@ job summary:</p>
 </span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">      </span><span class="nt">security-events</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">write</span>
 </span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">      </span><span class="nt">actions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read</span><span class="w"> </span><span class="c1"># private repositories only</span>
 </span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">    </span><span class="nt">env</span><span class="p">:</span>
-</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">      </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@v3.7.0&quot;</span>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">      </span><span class="nt">INSTALL_SPEC</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;automated-security-helper[cdk]</span><span class="nv"> </span><span class="s">@</span><span class="nv"> </span><span class="s">git+https://github.com/awslabs/automated-security-helper.git@main&quot;</span>
 </span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
 </span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1</span><span class="w"> </span><span class="c1"># v7.0.1</span>
 </span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">        </span><span class="nt">with</span><span class="p">:</span>
@@ -3825,8 +3825,8 @@ job summary:</p>
   <a href="../../../docs/advanced-usage/#tools-inside-the-scanned-directory">Tools inside the scanned directory</a>.</li>
 <li>Run <code>ash dependencies install</code> outside the checkout too, as <code>working-directory</code> does
   here, so a config in the repository cannot change what it installs.</li>
-<li>ASH installs bandit, checkov, and semgrep during the scan with the <code>uv</code>
-  installed with it, or with a <code>uv</code> on <code>PATH</code>.</li>
+<li>ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor during the scan with the
+  <code>uv</code> installed with it, or with a <code>uv</code> on <code>PATH</code>.</li>
 <li><code>ruby/setup-ruby</code> is there for cfn-nag, which <code>ash dependencies install</code> installs with
   <code>gem</code> and which builds native extensions.</li>
 <li>The three gate flags keep a pull request's own config from turning off the gate for
@@ -3869,7 +3869,7 @@ the install and scan steps of the job above:</p>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9</span><span class="w"> </span><span class="c1"># v6.1.0</span>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">with</span><span class="p">:</span>
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.ash/bin</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-tools-${{ runner.os }}-${{ runner.arch }}-v3.7.0</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-tools-${{ runner.os }}-${{ runner.arch }}-main</span>
 </span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install scanner tools</span>
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">working-directory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ runner.temp }}</span>
 </span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>

@@ -3468,10 +3468,15 @@ tagged, creating it if it does not exist yet. A reference to <code>@v3</code> th
 every 3.x release, including the minor releases that carry breaking changes under the
 release line above.</p>
 <p>The tag workflow only tags <code>main</code>. A patch release for an older version is built on a
-branch from that version's tag, outside the workflow: 3.7.1, for example, is built on
-3.7.0, is not in <code>main</code>'s history, and has no entry in <code>main</code>'s <code>CHANGELOG.md</code>. When such a
-release is the newest one, <code>v3</code> points at it, so <code>v3</code> can name a commit that is not on
-<code>main</code>, and the version that <code>main</code> reports can be lower than the newest tag.</p>
+branch from that version's tag, outside the workflow: 3.7.1, for example, was built on
+3.7.0, and its tag is not in <code>main</code>'s history. When such a release is the newest one, <code>v3</code>
+points at it, so <code>v3</code> can name a commit that is not on <code>main</code>. Until its bump is brought
+back to <code>main</code>, the version that <code>main</code> reports is lower than the newest tag and <code>main</code>'s
+<code>CHANGELOG.md</code> has no entry for it; 3.7.1's bump, changelog entry and install pins were
+brought back after the fact, so that an install of <code>main</code> reports the newest release.
+Do that for any later patch release too: bump <code>main</code> to the patch version with
+<code>cz bump &lt;version&gt; --version-files-only --check-consistency</code> (the tag already exists),
+copy the tag's <code>CHANGELOG.md</code> entry, rerun <code>generate</code> below, and commit.</p>
 <h2 id="the-documentation-site">The documentation site<a class="headerlink" href="#the-documentation-site" title="Permanent link">&para;</a></h2>
 <p>The site is versioned. Each push to <code>main</code> publishes the version <code>main</code>. A release
 tag does not publish anything by itself. The docs workflow, run by hand on a release
@@ -3551,8 +3556,9 @@ rewrites the template of every file in <code>target_files</code> from its render
 every version reference it finds into the placeholder, including deliberately older
 ones.</p>
 <p><code>scripts/version_bump.py</code> and <code>scripts/build_integration.py</code> are not part of the release
-process. <code>version_bump.py</code> changes only the first <code>version =</code> line of <code>pyproject.toml</code>, so
-using it leaves <code>[tool.commitizen] version</code> behind; bump with commitizen instead.</p>
+process. <code>version_bump.py set</code> writes the same version into both <code>version =</code> lines of
+<code>pyproject.toml</code>, <code>[project]</code> and <code>[tool.commitizen]</code>, and regenerates the templated pages;
+it is a local helper, and the release process bumps with commitizen instead.</p>
 
 
 

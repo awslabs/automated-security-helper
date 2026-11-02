@@ -3383,13 +3383,17 @@ with another command, such as <code>sudo</code>, set <code>OCI_RUNNER_WRAPPER=su
 <code>OCI_RUNNER_WRAPPER</code> that applies to the first word. A <code>$</code> in the document's value is
 not expanded, so <code>$HOME/bin/docker</code> there is a relative path. With no usable home
 directory (<code>HOME</code> empty or relative, or unset with no absolute home in the passwd entry),
-a value that starts with <code>~/</code> is not used: ASH logs a warning about <code>HOME</code> and picks a
-runtime as if none were named, or, for the wrapper, starts the runtime without one. A
-relative path with a directory part, such as <code>bin/docker</code>, is read against the directory
-you run ASH in when you pass it to <code>--oci-runner</code> or give it in the document. In
-<code>OCI_RUNNER</code> it is not run: ASH logs a warning and picks a runtime as if none were named.
-As the first word of <code>OCI_RUNNER_WRAPPER</code> it is not used either, and the runtime starts
-without a wrapper, with a warning.</p>
+a value that starts with <code>~/</code> is refused: ASH exits with code 3 and a message that names
+the variable, and it neither picks another runtime nor starts the runtime without the
+wrapper. A relative path with a directory part, such as <code>bin/docker</code>, is read against the
+directory you run ASH in when you pass it to <code>--oci-runner</code> or give it in the document. In
+<code>OCI_RUNNER</code> it is refused the same way, and so it is as the first word of
+<code>OCI_RUNNER_WRAPPER</code>: it names a file under the directory you run ASH from, usually the
+repository being scanned, so ASH does not run it. <code>./ash</code> refuses a relative <code>OCI_RUNNER</code>
+and <code>OCI_RUNNER_WRAPPER</code> the same way, and <code>Invoke-ASH</code> a relative <code>OCI_RUNNER_WRAPPER</code>.
+Neither script expands a leading <code>~</code>, so there a value that starts with <code>~/</code> is refused
+as a relative path: your shell expands it when you write <code>export OCI_RUNNER=~/bin/docker</code>,
+or you can spell the path out. A scan in local mode reads neither variable.</p>
 <h2 id="build-target">Root and non-root images<a class="headerlink" href="#build-target" title="Permanent link">&para;</a></h2>
 <p>The Dockerfile has two final stages:</p>
 <ul>
@@ -3423,7 +3427,7 @@ Set <code>ASH_IMAGE_NAME</code> to build and run an image under another name.</p
 </thead>
 <tbody>
 <tr>
-<td>From a git URL with a tag, such as <code>@v3.7.0</code></td>
+<td>From a git URL with a tag, such as <code>@v3.7.1</code></td>
 <td>That tag, cloned from GitHub when the image builds.</td>
 </tr>
 <tr>
@@ -3440,7 +3444,7 @@ Set <code>ASH_IMAGE_NAME</code> to build and run an image under another name.</p
 </tr>
 <tr>
 <td>Any other install, such as Homebrew, a wheel or sdist file, or an archive URL</td>
-<td>The commit the package was built from, fetched by its commit ID. A package built outside a git checkout of ASH, such as from a source tarball, records no commit: the image then installs the release tag of the installed version, such as <code>v3.7.0</code>, and ASH logs a warning that this is a guess. A development or pre-release version has no release tag, so the build stops before it starts and asks for <code>--ash-revision-to-install</code>.</td>
+<td>The commit the package was built from, fetched by its commit ID. A package built outside a git checkout of ASH, such as from a source tarball, records no commit: the image then installs the release tag of the installed version, such as <code>v3.7.1</code>, and ASH logs a warning that this is a guess. A development or pre-release version has no release tag, so the build stops before it starts and asks for <code>--ash-revision-to-install</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -3625,8 +3629,8 @@ with <code>--no-run</code>, it logs no warning. <code>./ash</code> and <code>Inv
 image in CI instead of building per run. With <code>ASH_IMAGE_NAME</code> set, <code>ash build-image</code> tags
 the image with your registry's name:</p>
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ASH_IMAGE_NAME</span><span class="o">=</span>registry.example.com/security/ash:3.7.0
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--no-run<span class="w"> </span>--oci-runner<span class="w"> </span>docker<span class="w"> </span>--ash-revision-to-install<span class="w"> </span>v3.7.0<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ASH_IMAGE_NAME</span><span class="o">=</span>registry.example.com/security/ash:main
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--no-run<span class="w"> </span>--oci-runner<span class="w"> </span>docker<span class="w"> </span>--ash-revision-to-install<span class="w"> </span>main<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--container-uid<span class="w"> </span><span class="m">1001</span><span class="w"> </span>--container-gid<span class="w"> </span><span class="m">1001</span>
 </span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>docker<span class="w"> </span>push<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ASH_IMAGE_NAME</span><span class="s2">&quot;</span>
 </span></code></pre></div>
@@ -3636,10 +3640,10 @@ when it is not present.</p>
 <p>To build without ASH installed, build the Dockerfile from a clone. The clone is the build
 context, so the image contains exactly the ref it cloned:</p>
 <!-- doctest: illustrative reason="needs a container runtime and network access" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>git<span class="w"> </span>clone<span class="w"> </span>--depth<span class="w"> </span><span class="m">1</span><span class="w"> </span>--branch<span class="w"> </span>v3.7.0<span class="w"> </span>https://github.com/awslabs/automated-security-helper.git
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>git<span class="w"> </span>clone<span class="w"> </span>--depth<span class="w"> </span><span class="m">1</span><span class="w"> </span>--branch<span class="w"> </span>main<span class="w"> </span>https://github.com/awslabs/automated-security-helper.git
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">cd</span><span class="w"> </span>automated-security-helper
 </span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>docker<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>non-root<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">UID</span><span class="o">=</span><span class="m">1001</span><span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">GID</span><span class="o">=</span><span class="m">1001</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span>--tag<span class="w"> </span>registry.example.com/security/ash:3.7.0<span class="w"> </span>.
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span>--tag<span class="w"> </span>registry.example.com/security/ash:main<span class="w"> </span>.
 </span></code></pre></div>
 <p>Build arguments:</p>
 <!-- doctest: options of=dockerfile -->

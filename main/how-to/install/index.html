@@ -3469,10 +3469,10 @@ scan exits 1. See <a href="#extras">Extras</a>.</p>
 <p>Open a new terminal so that uv's directory is on your <code>PATH</code>, then install ASH. The
 command is the same in a POSIX shell and in PowerShell:</p>
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>ash<span class="w"> </span>--version
 </span></code></pre></div>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>awslabs/automated-security-helper v3.7.0
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>awslabs/automated-security-helper v3.7.1
 </span></code></pre></div>
 <p>The install provides three names for the same program: <code>ash</code>, <code>ashv3</code>, and
 <code>automated-security-helper</code>. On Windows, Git Bash and MSYS2 ship an unrelated shell
@@ -3480,21 +3480,21 @@ named <code>ash</code> that can come first on your <code>PATH</code>. Use <code>
 <p>To move to another version, run the same command with the new tag and add <code>--force</code>.</p>
 <h2 id="run-without-installing-uvx">Run without installing: uvx<a class="headerlink" href="#run-without-installing-uvx" title="Permanent link">&para;</a></h2>
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uvx<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span>--from<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0&#39;</span><span class="w"> </span>ash<span class="w"> </span>--version
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uvx<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span>--from<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span><span class="w"> </span>ash<span class="w"> </span>--version
 </span></code></pre></div>
 <p>uvx builds the environment once and reuses it, so later runs start quickly. Every
 command needs the full <code>uvx --from</code> specification, so you may want a shell alias:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">alias</span><span class="w"> </span><span class="nv">ash</span><span class="o">=</span><span class="s2">&quot;uvx --python 3.12 --from &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0&#39; ash&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">alias</span><span class="w"> </span><span class="nv">ash</span><span class="o">=</span><span class="s2">&quot;uvx --python 3.12 --from &#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39; ash&quot;</span>
 </span></code></pre></div>
 <h2 id="install-with-pipx">Install with pipx<a class="headerlink" href="#install-with-pipx" title="Permanent link">&para;</a></h2>
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pipx<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span>python3.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pipx<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span>python3.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
 </span></code></pre></div>
 <p>Install pipx itself from your package manager, for example <code>apt install pipx</code> on
 Ubuntu, or with <code>uv tool install pipx</code>. On systems whose Python is marked as
 externally managed, such as Ubuntu 24.04, pip refuses to install pipx outside a
 virtual environment. pipx needs the named Python on your <code>PATH</code>.</p>
-<p>ASH installs bandit, checkov, and semgrep with uv. It uses the <code>uv</code>
+<p>ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor with uv. It uses the <code>uv</code>
 that pipx installs into ASH's environment, so a pipx install needs no separate uv.</p>
 <h2 id="install-with-pip">Install with pip<a class="headerlink" href="#install-with-pip" title="Permanent link">&para;</a></h2>
 <p>Create a virtual environment outside the projects you will scan, activate it, and
@@ -3507,7 +3507,7 @@ virtual environment.</p>
 <p><!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>python3.12<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>~/.venvs/ash
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>.<span class="w"> </span>~/.venvs/ash/bin/activate
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0&#39;</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
 </span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>ash<span class="w"> </span>--version
 </span></code></pre></div></p>
 </div>
@@ -3516,15 +3516,15 @@ virtual environment.</p>
 <p><!-- doctest: illustrative reason="Windows only; installs ASH from GitHub over the network" -->
 <div class="language-powershell highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">py</span> <span class="p">-</span><span class="n">3</span><span class="p">.</span><span class="n">12</span> <span class="n">-m</span> <span class="n">venv</span> <span class="nv">$HOME</span><span class="p">\.</span><span class="n">venvs</span><span class="p">\</span><span class="n">ash</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="p">&amp;</span> <span class="nv">$HOME</span><span class="p">\.</span><span class="n">venvs</span><span class="p">\</span><span class="n">ash</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">Activate</span><span class="p">.</span><span class="n">ps1</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">pip</span> <span class="n">install</span> <span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0&#39;</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">pip</span> <span class="n">install</span> <span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">ash</span> <span class="p">-</span><span class="n">-version</span>
 </span></code></pre></div></p>
 </div>
 </div>
 </div>
 <p>Activate the environment in each new shell before you run <code>ash</code>, or run the
-environment's <code>ash</code> by its path. Either way, ASH installs bandit, checkov, and
-semgrep with the environment's own <code>uv</code>.</p>
+environment's <code>ash</code> by its path. Either way, ASH installs bandit, checkov, semgrep,
+cfn-lint, and zizmor with the environment's own <code>uv</code>.</p>
 <p>Keep the environment outside the scanned directory. During a scan ASH does not run
 tools that it finds inside the directory it is scanning, so scanners installed into a
 virtual environment inside the project show as MISSING. See
@@ -3571,7 +3571,7 @@ the install needs a C compiler.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>@v3.7.0</code></td>
+<td><code>@v3.7.1</code></td>
 <td>That release. The release process creates each version tag once and moves only the <code>v3</code> tag.</td>
 </tr>
 <tr>
@@ -3682,9 +3682,7 @@ with <code>brew untap awslabs/automated-security-helper</code>.</p>
   are in <code>share/cfn-guard-rules</code> next to it.</li>
 <li>The scanners installed as uv tools. Name the ones <code>uv tool list</code> shows, because
   <code>uv tool uninstall</code> fails for a name that is not installed:
-  <code>uv tool uninstall bandit checkov semgrep nbconvert</code>. Earlier ASH releases also
-  installed <code>cfn-lint</code> and <code>zizmor</code> as uv tools, so add whichever of them
-  <code>uv tool list</code> still shows.</li>
+  <code>uv tool uninstall bandit checkov semgrep cfn-lint zizmor nbconvert</code>.</li>
 <li>The cfn-nag gem: <code>gem uninstall cfn-nag</code>. The gems it depends on stay installed.</li>
 <li>The scanners' own caches, such as <code>~/.cache/grype</code> and <code>~/.cache/trivy</code>.</li>
 <li>The <code>.ash/ash_output/</code> directory that each scan writes in the project it scanned.</li>

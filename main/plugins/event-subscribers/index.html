@@ -3281,13 +3281,13 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>SCAN_START</code></td>
-<td>before each scanner, when scanners run one at a time: with <code>--strategy sequential</code>, or when only one scanner runs</td>
+<td>when each scanner starts, after the scan's cancel checks, so a scanner a cancel kept from starting never announces; under the default parallel strategy it is sent from the worker thread that runs the scanner</td>
 <td><code>scanner</code>, <code>scanner_class</code>, <code>scan_targets</code>, <code>message</code></td>
 </tr>
 <tr>
 <td><code>SCAN_COMPLETE</code></td>
-<td>after each scanner, including one that failed</td>
-<td><code>scanner</code>, <code>completed_count</code>, <code>total_count</code>, <code>remaining_count</code>, <code>remaining_scanners</code>, <code>message</code></td>
+<td>after each scanner's turn, including one that failed: <code>succeeded</code> is <code>False</code> when the scanner's results were not recorded (its <code>scan()</code> raised, or its results could not be merged), and such a scanner is not in <code>completed_scanners</code></td>
+<td><code>scanner</code>, <code>completed_count</code>, <code>total_count</code>, <code>remaining_count</code>, <code>remaining_scanners</code>, <code>succeeded</code>, <code>message</code></td>
 </tr>
 <tr>
 <td><code>REPORT_START</code></td>
@@ -3316,7 +3316,7 @@ SOFTWARE.
 </tr>
 </tbody>
 </table>
-<p><code>AshEventType</code> also has <code>EXECUTION_PROGRESS</code>, <code>CONVERT_PHASE_PROGRESS</code>, <code>SCAN_PHASE_PROGRESS</code>, <code>REPORT_PHASE_PROGRESS</code>, <code>INSPECT_PHASE_PROGRESS</code>, <code>INSPECT_START</code>, and <code>INSPECT_COMPLETE</code>. ASH never emits them. When two or more scanners run under the default parallel strategy, <code>SCAN_START</code> is not emitted either; use <code>SCAN_PHASE_START</code> to learn which scanners will run.</p>
+<p><code>AshEventType</code> also has <code>EXECUTION_PROGRESS</code>, <code>CONVERT_PHASE_PROGRESS</code>, <code>SCAN_PHASE_PROGRESS</code>, <code>REPORT_PHASE_PROGRESS</code>, <code>INSPECT_PHASE_PROGRESS</code>, <code>INSPECT_START</code>, and <code>INSPECT_COMPLETE</code>. ASH never emits them. <code>SCAN_PHASE_START</code> names every scanner that will run; <code>SCAN_START</code> follows for each one as it starts.</p>
 <h2 id="when-a-subscriber-fails">When a subscriber fails<a class="headerlink" href="#when-a-subscriber-fails" title="Permanent link">&para;</a></h2>
 <p>A subscriber runs in ASH's own process, in the thread that emitted the event, and ASH waits for it before it continues. Keep subscribers fast: one that calls a network service delays the scan by that call.</p>
 <p>If a subscriber raises an exception, the subscribers after it for that event do not run. What else happens depends on the event:</p>

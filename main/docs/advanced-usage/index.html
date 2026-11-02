@@ -790,10 +790,54 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#how-ash-gets-each-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How ASH gets each tool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-ash-looks-for-a-tool" class="md-nav__link">
     <span class="md-ellipsis">
       
         Where ASH looks for a tool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install-tools-with-ash-dependencies-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install tools with ash dependencies install
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installs-during-a-scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installs during a scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#uv-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        uv settings
       
     </span>
   </a>
@@ -3510,10 +3554,54 @@ SOFTWARE.
 </li>
       
         <li class="md-nav__item">
+  <a href="#how-ash-gets-each-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How ASH gets each tool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-ash-looks-for-a-tool" class="md-nav__link">
     <span class="md-ellipsis">
       
         Where ASH looks for a tool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install-tools-with-ash-dependencies-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install tools with ash dependencies install
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installs-during-a-scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installs during a scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#uv-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        uv settings
       
     </span>
   </a>
@@ -4013,6 +4101,7 @@ for the message and the fixes.</p>
 <li>Ideal for git hooks and quick CI checks</li>
 </ul>
 <h3 id="nix-mode">Nix Mode<a class="headerlink" href="#nix-mode" title="Permanent link">&para;</a></h3>
+<!-- doctest: illustrative reason="needs Nix" -->
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ash<span class="w"> </span>--mode<span class="w"> </span>nix
 </span></code></pre></div>
 <ul>
@@ -4022,6 +4111,64 @@ for the message and the fixes.</p>
 <li>Linux and macOS; on Windows, run it in WSL2</li>
 <li>See <a href="../../how-to/install/#nix-mode">Nix mode</a></li>
 </ul>
+<h2 id="how-ash-gets-each-tool">How ASH gets each tool<a class="headerlink" href="#how-ash-gets-each-tool" title="Permanent link">&para;</a></h2>
+<p>In local mode, ASH runs the scanner tools installed on your machine. This table says
+where each one comes from:</p>
+<table>
+<thead>
+<tr>
+<th>Scanner</th>
+<th>Tool</th>
+<th>How you get it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>actionlint</td>
+<td><code>actionlint</code></td>
+<td><code>ash dependencies install</code> downloads a pinned release</td>
+</tr>
+<tr>
+<td>bandit, checkov, semgrep, cfn-lint, zizmor</td>
+<td>same name</td>
+<td>ASH installs them with <code>uv tool</code> during a scan, or <code>ash dependencies install</code> does it ahead of time</td>
+</tr>
+<tr>
+<td>cdk-nag</td>
+<td>Python packages and Node.js</td>
+<td>the <code>cdk</code> extra (see <a href="../../how-to/install/#extras">Install ASH</a>), plus Node.js</td>
+</tr>
+<tr>
+<td>cfn-guard</td>
+<td><code>cfn-guard</code> and the Guard Rules Registry rules</td>
+<td><code>ash dependencies install</code> downloads both</td>
+</tr>
+<tr>
+<td>cfn-nag</td>
+<td><code>cfn_nag_scan</code></td>
+<td><code>ash dependencies install</code> runs <code>gem install cfn-nag</code>, which needs Ruby and a C compiler</td>
+</tr>
+<tr>
+<td>detect-secrets</td>
+<td>Python library</td>
+<td>part of ASH</td>
+</tr>
+<tr>
+<td>gitleaks, grype, opengrep, syft, trivy</td>
+<td>same name</td>
+<td><code>ash dependencies install</code> downloads a pinned release</td>
+</tr>
+<tr>
+<td>npm-audit</td>
+<td><code>npm</code></td>
+<td>install Node.js; a <code>yarn.lock</code> or <code>pnpm-lock.yaml</code> also needs yarn or pnpm</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>jupyter</code> converter, which converts notebooks for the scanners, uses <code>nbconvert</code>,
+installed with <code>uv tool</code> like bandit. The opt-in community scanners (ferret-scan,
+snyk-code, and trivy-repo) are covered in
+<a href="../plugins/community/">Community plugins</a>.</p>
 <h2 id="where-ash-looks-for-a-tool">Where ASH looks for a tool<a class="headerlink" href="#where-ash-looks-for-a-tool" title="Permanent link">&para;</a></h2>
 <p>ASH looks up each program it starts, scanners and <code>uv</code> included, in this order:</p>
 <ol>
@@ -4038,10 +4185,72 @@ for the message and the fixes.</p>
 without the execute bit, or a directory of that name, is skipped and the search goes on;
 on Windows, the name's suffix decides instead. ASH remembers a path it finds, for the
 current <code>PATH</code> and <code>ASH_BIN_PATH</code>, and looks again when either changes, or when that
-file has been removed or has lost its execute bit.</p>
+file has been removed or has lost its execute bit. A tool it does not find is looked for
+again on every lookup, so one installed after a lookup missed it is found by the next.</p>
+<p>For a tool ASH runs with <code>uv tool run</code>, such as bandit, the file found first, <code>uv</code> or
+the tool's own program, stays the one used: when it is removed, ASH logs an error naming
+it and counts the tool as missing, and looks for another copy only when <code>PATH</code> or
+<code>ASH_BIN_PATH</code> changes.</p>
+<p>For <code>uv</code>, ASH first takes the copy installed with it. ASH depends on the <code>uv</code> package,
+so its environment holds a <code>uv</code> beside the Python interpreter, in the interpreter's
+scripts directory, or where <code>pip install --prefix</code>, <code>pip install --user</code>, or
+<code>pip install --target</code> put the package. Only when there is none does ASH look for
+<code>uv</code> in the order above.</p>
 <p>During a scan, a copy found inside the scanned directory is skipped, and the lookup
 goes on to the next one: see
 <a href="#tools-inside-the-scanned-directory">Tools inside the scanned directory</a>.</p>
+<h2 id="install-tools-with-ash-dependencies-install">Install tools with <code>ash dependencies install</code><a class="headerlink" href="#install-tools-with-ash-dependencies-install" title="Permanent link">&para;</a></h2>
+<!-- doctest: illustrative reason="downloads scanner tools from GitHub releases and PyPI" -->
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ash<span class="w"> </span>dependencies<span class="w"> </span>install
+</span></code></pre></div>
+<p>For each scanner, converter, and reporter that has an install step, it:</p>
+<ul>
+<li>downloads the pinned release of actionlint, cfn-guard (with the rules it evaluates),
+  gitleaks, grype, opengrep, syft, and trivy, and checks each program's download against
+  the SHA256 that ASH pins.</li>
+<li>installs bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert with
+  <code>uv tool install</code>, within each scanner's accepted version range. These come from the
+  package index uv is configured with, PyPI by default, and ASH checks no digest for
+  them. See <a href="#uv-settings">uv settings</a> for the uv configuration they read.</li>
+<li>runs <code>gem install cfn-nag</code>, which needs Ruby and a C compiler (on Windows, a Ruby
+  DevKit). The gem is the version ASH pins, from the gem sources Ruby is configured
+  with, and ASH checks no digest for it either.</li>
+<li>for cdk-nag, installs the <code>cdk</code> extra's packages (aws-cdk-lib, cdk-nag, and
+  constructs) into ASH's own environment.</li>
+</ul>
+<p>See <a href="../../reference/cli/#dependencies-install"><code>ash dependencies install</code></a> for every
+option, and <a href="../../reference/scanners/">Scanners reference</a> for the per-scanner options
+that change a tool's version (<code>tool_version</code>) or how long an install may take
+(<code>install_timeout</code>).</p>
+<h2 id="installs-during-a-scan">Installs during a scan<a class="headerlink" href="#installs-during-a-scan" title="Permanent link">&para;</a></h2>
+<p>When bandit, checkov, semgrep, cfn-lint, zizmor, or nbconvert is not available, ASH
+installs it with <code>uv tool install</code> during the scan, and the scan takes longer. ASH
+runs the uv installed with it, or else a <code>uv</code> it finds as described in
+<a href="#where-ash-looks-for-a-tool">Where ASH looks for a tool</a>, so <code>uv</code> does not have to be
+on your <code>PATH</code>. Without either, these scanners show as MISSING. Online, ASH runs these
+tools through uv with their version range, so uv can contact PyPI during a scan even
+when the tool is already installed.</p>
+<p>ASH does not install scanners during a scan when:</p>
+<ul>
+<li>the scan is offline (<code>--offline</code> or <code>ASH_OFFLINE</code>). uv then runs offline, so a tool
+  that is installed or in uv's cache still runs, and any other shows as MISSING.</li>
+<li>the scan runs in a sandbox, which is <code>--sandbox</code> with any mode but <code>off</code>. Run
+  <code>ash dependencies install</code> first.</li>
+</ul>
+<h2 id="uv-settings">uv settings<a class="headerlink" href="#uv-settings" title="Permanent link">&para;</a></h2>
+<p>Every uv subcommand but <code>uv tool</code> reads a <code>uv.toml</code>, or the <code>[tool.uv]</code> table of a
+<code>pyproject.toml</code>, from the working directory and its parents, and ASH's working
+directory is usually the repository you scan. So ASH runs
+<code>uv pip install --no-config</code>, and an install command that a plugin declares gets
+<code>UV_NO_CONFIG=1</code> when it runs a uv subcommand other than <code>uv tool</code>. Those commands then
+read no <code>uv.toml</code>, neither the repository's nor your own nor the system one.
+<code>uv cache dir</code>, which names the cache the <code>uv tool</code> commands use, runs from the
+filesystem root instead, where only an administrator can put a <code>uv.toml</code>.</p>
+<p>The <code>uv tool install</code>, <code>uv tool run</code>, and <code>uv tool list</code> commands that ASH runs for
+bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert get no such flag. uv does
+not read project files for <code>uv tool</code> commands, so the scanned repository cannot
+configure them, and they read your user <code>uv.toml</code> and the system one, where an operator
+usually points uv at an index mirror.</p>
 <h2 id="when-a-scanner-shows-missing">When a scanner shows MISSING<a class="headerlink" href="#when-a-scanner-shows-missing" title="Permanent link">&para;</a></h2>
 <p>MISSING means the scanner did not run: ASH did not find its tool, found the tool only
 inside the scanned directory (see
@@ -4088,66 +4297,66 @@ fail for lacking semgrep and opengrep, as long as another selected scanner runs.
 <li>Create a Python module with your plugins:</li>
 </ol>
 <!-- doctest: illustrative reason="a fragment of Python code that names objects defined elsewhere" -->
-<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># my_ash_plugins/scanners.py</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.plugins.decorators</span><span class="w"> </span><span class="kn">import</span> <span class="n">ash_scanner_plugin</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.base.scanner_plugin</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">ScannerPluginBase</span><span class="p">,</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">ScannerPluginConfigBase</span><span class="p">,</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="p">)</span>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pydantic</span><span class="w"> </span><span class="kn">import</span> <span class="n">Field</span>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Literal</span>
-</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
-</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>
-</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyCustomScannerConfig</span><span class="p">(</span><span class="n">ScannerPluginConfigBase</span><span class="p">):</span>
-</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Configuration for MyCustomScanner&quot;&quot;&quot;</span>
-</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>
-</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>    <span class="k">class</span><span class="w"> </span><span class="nc">Options</span><span class="p">:</span>
-</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>        <span class="n">custom_option</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="s2">&quot;default&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Custom option&quot;</span><span class="p">)</span>
-</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>
-</span><span id="__span-4-18"><a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>
-</span><span id="__span-4-19"><a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="nd">@ash_scanner_plugin</span>
-</span><span id="__span-4-20"><a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyCustomScanner</span><span class="p">(</span><span class="n">ScannerPluginBase</span><span class="p">):</span>
-</span><span id="__span-4-21"><a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Custom scanner implementation&quot;&quot;&quot;</span>
-</span><span id="__span-4-22"><a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>
-</span><span id="__span-4-23"><a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;my-custom-scanner&quot;</span>
-</span><span id="__span-4-24"><a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>    <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;My custom security scanner&quot;</span>
-</span><span id="__span-4-25"><a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>    <span class="n">version</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
-</span><span id="__span-4-26"><a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>
-</span><span id="__span-4-27"><a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">scan</span><span class="p">(</span>
-</span><span id="__span-4-28"><a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a>        <span class="bp">self</span><span class="p">,</span>
-</span><span id="__span-4-29"><a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a>        <span class="n">target</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
-</span><span id="__span-4-30"><a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a>        <span class="n">target_type</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">,</span> <span class="s2">&quot;converted&quot;</span><span class="p">],</span>
-</span><span id="__span-4-31"><a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a>        <span class="n">global_ignore_paths</span><span class="p">:</span> <span class="n">List</span> <span class="o">=</span> <span class="p">[],</span>
-</span><span id="__span-4-32"><a id="__codelineno-4-32" name="__codelineno-4-32" href="#__codelineno-4-32"></a>        <span class="n">config</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-4-33"><a id="__codelineno-4-33" name="__codelineno-4-33" href="#__codelineno-4-33"></a>    <span class="p">):</span>
-</span><span id="__span-4-34"><a id="__codelineno-4-34" name="__codelineno-4-34" href="#__codelineno-4-34"></a>        <span class="c1"># Implement your scanning logic here</span>
-</span><span id="__span-4-35"><a id="__codelineno-4-35" name="__codelineno-4-35" href="#__codelineno-4-35"></a>        <span class="n">results</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_subprocess</span><span class="p">([</span><span class="s2">&quot;my-scanner&quot;</span><span class="p">,</span> <span class="s2">&quot;--target&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">target</span><span class="p">)])</span>
-</span><span id="__span-4-36"><a id="__codelineno-4-36" name="__codelineno-4-36" href="#__codelineno-4-36"></a>        <span class="k">return</span> <span class="n">results</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># my_ash_plugins/scanners.py</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.plugins.decorators</span><span class="w"> </span><span class="kn">import</span> <span class="n">ash_scanner_plugin</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.base.scanner_plugin</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">ScannerPluginBase</span><span class="p">,</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">ScannerPluginConfigBase</span><span class="p">,</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">)</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pydantic</span><span class="w"> </span><span class="kn">import</span> <span class="n">Field</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Literal</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyCustomScannerConfig</span><span class="p">(</span><span class="n">ScannerPluginConfigBase</span><span class="p">):</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Configuration for MyCustomScanner&quot;&quot;&quot;</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>    <span class="k">class</span><span class="w"> </span><span class="nc">Options</span><span class="p">:</span>
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>        <span class="n">custom_option</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="s2">&quot;default&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Custom option&quot;</span><span class="p">)</span>
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>
+</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="nd">@ash_scanner_plugin</span>
+</span><span id="__span-5-20"><a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyCustomScanner</span><span class="p">(</span><span class="n">ScannerPluginBase</span><span class="p">):</span>
+</span><span id="__span-5-21"><a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Custom scanner implementation&quot;&quot;&quot;</span>
+</span><span id="__span-5-22"><a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>
+</span><span id="__span-5-23"><a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;my-custom-scanner&quot;</span>
+</span><span id="__span-5-24"><a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>    <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;My custom security scanner&quot;</span>
+</span><span id="__span-5-25"><a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>    <span class="n">version</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+</span><span id="__span-5-26"><a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>
+</span><span id="__span-5-27"><a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">scan</span><span class="p">(</span>
+</span><span id="__span-5-28"><a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a>        <span class="bp">self</span><span class="p">,</span>
+</span><span id="__span-5-29"><a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a>        <span class="n">target</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
+</span><span id="__span-5-30"><a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a>        <span class="n">target_type</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">,</span> <span class="s2">&quot;converted&quot;</span><span class="p">],</span>
+</span><span id="__span-5-31"><a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a>        <span class="n">global_ignore_paths</span><span class="p">:</span> <span class="n">List</span> <span class="o">=</span> <span class="p">[],</span>
+</span><span id="__span-5-32"><a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a>        <span class="n">config</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-5-33"><a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a>    <span class="p">):</span>
+</span><span id="__span-5-34"><a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a>        <span class="c1"># Implement your scanning logic here</span>
+</span><span id="__span-5-35"><a id="__codelineno-5-35" name="__codelineno-5-35" href="#__codelineno-5-35"></a>        <span class="n">results</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_subprocess</span><span class="p">([</span><span class="s2">&quot;my-scanner&quot;</span><span class="p">,</span> <span class="s2">&quot;--target&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">target</span><span class="p">)])</span>
+</span><span id="__span-5-36"><a id="__codelineno-5-36" name="__codelineno-5-36" href="#__codelineno-5-36"></a>        <span class="k">return</span> <span class="n">results</span>
 </span></code></pre></div>
 <ol>
 <li>Add your module to ASH configuration:</li>
 </ol>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">ash_plugin_modules</span><span class="p">:</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my_ash_plugins</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">ash_plugin_modules</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my_ash_plugins</span>
 </span></code></pre></div>
 <ol>
 <li>Use your custom scanner:</li>
 </ol>
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>ash<span class="w"> </span>--ash-plugin-modules<span class="w"> </span>my_ash_plugins
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ash<span class="w"> </span>--ash-plugin-modules<span class="w"> </span>my_ash_plugins
 </span></code></pre></div>
 <h2 id="offline-mode">Offline Mode<a class="headerlink" href="#offline-mode" title="Permanent link">&para;</a></h2>
 <p>For air-gapped environments:</p>
 <!-- doctest: illustrative reason="needs a container runtime" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Build an offline image</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--offline<span class="w"> </span>--offline-semgrep-rulesets<span class="w"> </span>p/ci
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># Run in offline mode</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--offline
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># On a host without network access, run the image without rebuilding it</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--offline<span class="w"> </span>--no-build
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Build an offline image</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--offline<span class="w"> </span>--offline-semgrep-rulesets<span class="w"> </span>p/ci
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Run in offline mode</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--offline
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># On a host without network access, run the image without rebuilding it</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--offline<span class="w"> </span>--no-build
 </span></code></pre></div>
 <p>Container mode builds the image before every scan unless given <code>--no-build</code>.
 Without <code>--force</code>, a build upgrades the OS packages and, offline, downloads the
@@ -4240,24 +4449,24 @@ fall back to downloading the rules.</p>
 in <code>--offline-semgrep-rulesets</code> (space-separated, default <code>p/ci</code>) into
 <code>/deps/.semgrep</code> and <code>/deps/.opengrep</code> and sets both variables:</p>
 <!-- doctest: illustrative reason="needs a container runtime" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--offline<span class="w"> </span>--offline-semgrep-rulesets<span class="w"> </span><span class="s2">&quot;p/ci p/python&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--offline<span class="w"> </span>--offline-semgrep-rulesets<span class="w"> </span><span class="s2">&quot;p/ci p/python&quot;</span>
 </span></code></pre></div>
 <p>For a local scan, download the rulesets yourself while online, using the same URL the
 image build uses, and record the download time in <code>.ash-rules-fetched-at</code> next to
 them. ASH reads that file to hold the rules to their 30-day bound; without it, it
 falls back to the oldest rule file's modification time, which a copy resets.</p>
 <!-- doctest: illustrative reason="needs the network to download rulesets" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SEMGREP_RULES_CACHE_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$HOME</span><span class="s2">/.cache/ash/semgrep&quot;</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OPENGREP_RULES_CACHE_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$HOME</span><span class="s2">/.cache/ash/opengrep&quot;</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SEMGREP_RULES_CACHE_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$OPENGREP_RULES_CACHE_DIR</span><span class="s2">&quot;</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="k">for</span><span class="w"> </span>ruleset<span class="w"> </span><span class="k">in</span><span class="w"> </span>p/ci<span class="p">;</span><span class="w"> </span><span class="k">do</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span>curl<span class="w"> </span>-sSf<span class="w"> </span><span class="s2">&quot;https://semgrep.dev/c/</span><span class="si">${</span><span class="nv">ruleset</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SEMGREP_RULES_CACHE_DIR</span><span class="s2">/</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ruleset</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">.yml&quot;</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">done</span>
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>cp<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SEMGREP_RULES_CACHE_DIR</span><span class="s2">&quot;</span>/*.yml<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$OPENGREP_RULES_CACHE_DIR</span><span class="s2">/&quot;</span>
-</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>date<span class="w"> </span>-u<span class="w"> </span>+%Y-%m-%dT%H:%M:%SZ<span class="w"> </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SEMGREP_RULES_CACHE_DIR</span><span class="s2">/.ash-rules-fetched-at&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">  </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$OPENGREP_RULES_CACHE_DIR</span><span class="s2">/.ash-rules-fetched-at&quot;</span>
-</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>
-</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>ash<span class="w"> </span>--mode<span class="w"> </span><span class="nb">local</span><span class="w"> </span>--offline
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SEMGREP_RULES_CACHE_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$HOME</span><span class="s2">/.cache/ash/semgrep&quot;</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OPENGREP_RULES_CACHE_DIR</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$HOME</span><span class="s2">/.cache/ash/opengrep&quot;</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SEMGREP_RULES_CACHE_DIR</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$OPENGREP_RULES_CACHE_DIR</span><span class="s2">&quot;</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="k">for</span><span class="w"> </span>ruleset<span class="w"> </span><span class="k">in</span><span class="w"> </span>p/ci<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span>curl<span class="w"> </span>-sSf<span class="w"> </span><span class="s2">&quot;https://semgrep.dev/c/</span><span class="si">${</span><span class="nv">ruleset</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SEMGREP_RULES_CACHE_DIR</span><span class="s2">/</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ruleset</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">.yml&quot;</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="k">done</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>cp<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SEMGREP_RULES_CACHE_DIR</span><span class="s2">&quot;</span>/*.yml<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$OPENGREP_RULES_CACHE_DIR</span><span class="s2">/&quot;</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>date<span class="w"> </span>-u<span class="w"> </span>+%Y-%m-%dT%H:%M:%SZ<span class="w"> </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SEMGREP_RULES_CACHE_DIR</span><span class="s2">/.ash-rules-fetched-at&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">  </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$OPENGREP_RULES_CACHE_DIR</span><span class="s2">/.ash-rules-fetched-at&quot;</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>ash<span class="w"> </span>--mode<span class="w"> </span><span class="nb">local</span><span class="w"> </span>--offline
 </span></code></pre></div>
 <p>Copy the cache directories to the air-gapped host and export the same two variables
 there. Repeat the download at least every 30 days, or the scan fails as stale.</p>
@@ -4272,29 +4481,29 @@ rules directory itself. If semgrep or opengrep still cannot read its rules, it e
 <h2 id="customizing-scan-phases">Customizing Scan Phases<a class="headerlink" href="#customizing-scan-phases" title="Permanent link">&para;</a></h2>
 <p>ASH v3 executes scans in phases:</p>
 <!-- doctest: illustrative reason="runs full scans of the current directory with every enabled scanner, which need their tools and network access" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Run only specific phases (give --phases once for each phase)</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>ash<span class="w"> </span>--phases<span class="w"> </span>convert<span class="w"> </span>--phases<span class="w"> </span>scan
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Skip report generation</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>ash<span class="w"> </span>--phases<span class="w"> </span>convert<span class="w"> </span>--phases<span class="w"> </span>scan
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
-</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># Include inspection phase</span>
-</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>ash<span class="w"> </span>--phases<span class="w"> </span>convert<span class="w"> </span>--phases<span class="w"> </span>scan<span class="w"> </span>--phases<span class="w"> </span>report<span class="w"> </span>--phases<span class="w"> </span>inspect
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Run only specific phases (give --phases once for each phase)</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>ash<span class="w"> </span>--phases<span class="w"> </span>convert<span class="w"> </span>--phases<span class="w"> </span>scan
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Skip report generation</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>ash<span class="w"> </span>--phases<span class="w"> </span>convert<span class="w"> </span>--phases<span class="w"> </span>scan
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c1"># Include inspection phase</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>ash<span class="w"> </span>--phases<span class="w"> </span>convert<span class="w"> </span>--phases<span class="w"> </span>scan<span class="w"> </span>--phases<span class="w"> </span>report<span class="w"> </span>--phases<span class="w"> </span>inspect
 </span></code></pre></div>
 <h2 id="using-existing-results">Using Existing Results<a class="headerlink" href="#using-existing-results" title="Permanent link">&para;</a></h2>
 <p>You can generate reports from existing scan results:</p>
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Use existing results file</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>ash<span class="w"> </span>--use-existing<span class="w"> </span>--output-dir<span class="w"> </span>/path/to/results
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Generate a specific report format</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>ash<span class="w"> </span>report<span class="w"> </span>--format<span class="w"> </span>html<span class="w"> </span>--output-dir<span class="w"> </span>/path/to/results
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Use existing results file</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>ash<span class="w"> </span>--use-existing<span class="w"> </span>--output-dir<span class="w"> </span>/path/to/results
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># Generate a specific report format</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>ash<span class="w"> </span>report<span class="w"> </span>--format<span class="w"> </span>html<span class="w"> </span>--output-dir<span class="w"> </span>/path/to/results
 </span></code></pre></div>
 <h2 id="interactive-findings-explorer">Interactive Findings Explorer<a class="headerlink" href="#interactive-findings-explorer" title="Permanent link">&para;</a></h2>
 <p>ASH v3 includes an interactive TUI for exploring findings:</p>
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Launch the findings explorer</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>ash<span class="w"> </span>inspect<span class="w"> </span>findings<span class="w"> </span>--output-dir<span class="w"> </span>/path/to/results
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Launch the findings explorer</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>ash<span class="w"> </span>inspect<span class="w"> </span>findings<span class="w"> </span>--output-dir<span class="w"> </span>/path/to/results
 </span></code></pre></div>
 <p>A finding's detail view shows the code snippet its results hold. For a finding with
 none, it shows the lines around the finding from its file, but only when the results
@@ -4306,11 +4515,11 @@ directory, a symlink that leads out of it, or results in any other directory sho
 <h2 id="container-customization">Container Customization<a class="headerlink" href="#container-customization" title="Permanent link">&para;</a></h2>
 <h3 id="using-alternative-container-runtimes">Using Alternative Container Runtimes<a class="headerlink" href="#using-alternative-container-runtimes" title="Permanent link">&para;</a></h3>
 <!-- doctest: illustrative reason="needs a container runtime" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Use Podman instead of Docker</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--oci-runner<span class="w"> </span>podman
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># Use Finch</span>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--oci-runner<span class="w"> </span>finch
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Use Podman instead of Docker</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--oci-runner<span class="w"> </span>podman
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="c1"># Use Finch</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container<span class="w"> </span>--oci-runner<span class="w"> </span>finch
 </span></code></pre></div>
 <h3 id="custom-container-images">Custom Container Images<a class="headerlink" href="#custom-container-images" title="Permanent link">&para;</a></h3>
 <p>ASH does not publish a container image to a public registry. Building it yourself and
@@ -4319,29 +4528,29 @@ patching cadence of the image that reads your source code belong to you. See
 <a href="../../how-to/run-in-a-container/#own-image">Build and host your own image</a> for the reasoning, the
 rebuild cadence it commits you to, and offline builds.</p>
 <!-- doctest: illustrative reason="needs a container runtime" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Specify a custom container image</span>
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ASH_IMAGE_NAME</span><span class="o">=</span><span class="s2">&quot;my-registry/ash:custom&quot;</span>
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Specify a custom container image</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ASH_IMAGE_NAME</span><span class="o">=</span><span class="s2">&quot;my-registry/ash:custom&quot;</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>ash<span class="w"> </span>--mode<span class="w"> </span>container
 </span></code></pre></div>
 <h3 id="building-custom-images">Building Custom Images<a class="headerlink" href="#building-custom-images" title="Permanent link">&para;</a></h3>
 <!-- doctest: illustrative reason="needs a container runtime" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Build a custom image</span>
-</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--build-target<span class="w"> </span>ci<span class="w"> </span>--custom-containerfile<span class="w"> </span>./my-dockerfile
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Build a custom image</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--build-target<span class="w"> </span>ci<span class="w"> </span>--custom-containerfile<span class="w"> </span>./my-dockerfile
 </span></code></pre></div>
 <h2 id="advanced-configuration-overrides">Advanced Configuration Overrides<a class="headerlink" href="#advanced-configuration-overrides" title="Permanent link">&para;</a></h2>
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Complex configuration overrides</span>
-</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>ash<span class="w"> </span>--config-overrides<span class="w"> </span><span class="s1">&#39;scanners.semgrep.options.config=p/owasp-top-ten&#39;</span>
-</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>ash<span class="w"> </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.ignore_paths+=[{&quot;path&quot;: &quot;build/&quot;, &quot;reason&quot;: &quot;Generated files&quot;}]&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Complex configuration overrides</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>ash<span class="w"> </span>--config-overrides<span class="w"> </span><span class="s1">&#39;scanners.semgrep.options.config=p/owasp-top-ten&#39;</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>ash<span class="w"> </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.ignore_paths+=[{&quot;path&quot;: &quot;build/&quot;, &quot;reason&quot;: &quot;Generated files&quot;}]&#39;</span>
 </span></code></pre></div>
 <h2 id="working-with-suppressions">Working with Suppressions<a class="headerlink" href="#working-with-suppressions" title="Permanent link">&para;</a></h2>
 <h3 id="adding-suppressions-via-config-overrides">Adding Suppressions via Config Overrides<a class="headerlink" href="#adding-suppressions-via-config-overrides" title="Permanent link">&para;</a></h3>
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Add a suppression rule</span>
-</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>ash<span class="w"> </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;rule_id&quot;: &quot;RULE-123&quot;, &quot;path&quot;: &quot;src/example.py&quot;, &quot;reason&quot;: &quot;False positive&quot;}]&#39;</span>
-</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
-</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="c1"># Add a suppression with line range and expiration</span>
-</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>ash<span class="w"> </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;rule_id&quot;: &quot;RULE-456&quot;, &quot;path&quot;: &quot;src/*.js&quot;, &quot;line_start&quot;: 10, &quot;line_end&quot;: 15, &quot;reason&quot;: &quot;Known issue&quot;, &quot;expiration&quot;: &quot;2025-12-31&quot;}]&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Add a suppression rule</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>ash<span class="w"> </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;rule_id&quot;: &quot;RULE-123&quot;, &quot;path&quot;: &quot;src/example.py&quot;, &quot;reason&quot;: &quot;False positive&quot;}]&#39;</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="c1"># Add a suppression with line range and expiration</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>ash<span class="w"> </span>--config-overrides<span class="w"> </span><span class="s1">&#39;global_settings.suppressions+=[{&quot;rule_id&quot;: &quot;RULE-456&quot;, &quot;path&quot;: &quot;src/*.js&quot;, &quot;line_start&quot;: 10, &quot;line_end&quot;: 15, &quot;reason&quot;: &quot;Known issue&quot;, &quot;expiration&quot;: &quot;2025-12-31&quot;}]&#39;</span>
 </span></code></pre></div>
 <h3 id="inline-code-suppressions">Inline code suppressions<a class="headerlink" href="#inline-code-suppressions" title="Permanent link">&para;</a></h3>
 <p>You can suppress individual findings directly in your source code using
@@ -4369,21 +4578,21 @@ single line and you want the context to live next to the code.</p>
 <p>The directives are case-insensitive. The reason text is optional but
 recommended.</p>
 <!-- doctest: illustrative reason="a fragment of Python code that names objects defined elsewhere" -->
-<div class="language-python highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Suppress a specific rule on the same line:</span>
-</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">password</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span>
-</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>    <span class="s2">&quot;DB_PASS&quot;</span>
-</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="p">]</span>  <span class="c1"># ash-ignore: CKV-SEC-001 loaded from env, not hardcoded</span>
-</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>
-</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="c1"># Suppress a specific rule on the next line:</span>
-</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="c1"># ash-ignore-next-line: BANDIT-B105 password variable is a placeholder</span>
-</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="n">password</span> <span class="o">=</span> <span class="s2">&quot;changeme&quot;</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># Suppress a specific rule on the same line:</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">password</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>    <span class="s2">&quot;DB_PASS&quot;</span>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="p">]</span>  <span class="c1"># ash-ignore: CKV-SEC-001 loaded from env, not hardcoded</span>
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="c1"># Suppress a specific rule on the next line:</span>
+</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="c1"># ash-ignore-next-line: BANDIT-B105 password variable is a placeholder</span>
+</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="n">password</span> <span class="o">=</span> <span class="s2">&quot;changeme&quot;</span>
 </span></code></pre></div>
-<div class="language-javascript highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1">// Languages that use // comments (JS, TS, Java, C#, Go):</span>
-</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="kd">const</span><span class="w"> </span><span class="nx">key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">process</span><span class="p">.</span><span class="nx">env</span><span class="p">.</span><span class="nx">KEY</span><span class="p">;</span><span class="w"> </span><span class="c1">// ash-ignore: SEC-KEY env var is safe</span>
-</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
-</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1">// Or suppress the next line:</span>
-</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="c1">// ash-ignore-next-line: SEC-KEY env var is safe</span>
-</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="kd">const</span><span class="w"> </span><span class="nx">key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">process</span><span class="p">.</span><span class="nx">env</span><span class="p">.</span><span class="nx">KEY</span><span class="p">;</span>
+<div class="language-javascript highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1">// Languages that use // comments (JS, TS, Java, C#, Go):</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="kd">const</span><span class="w"> </span><span class="nx">key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">process</span><span class="p">.</span><span class="nx">env</span><span class="p">.</span><span class="nx">KEY</span><span class="p">;</span><span class="w"> </span><span class="c1">// ash-ignore: SEC-KEY env var is safe</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="c1">// Or suppress the next line:</span>
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="c1">// ash-ignore-next-line: SEC-KEY env var is safe</span>
+</span><span id="__span-20-6"><a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="kd">const</span><span class="w"> </span><span class="nx">key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">process</span><span class="p">.</span><span class="nx">env</span><span class="p">.</span><span class="nx">KEY</span><span class="p">;</span>
 </span></code></pre></div>
 <p>Both inline and config-file suppressions use <code>Kind1.inSource</code> in the SARIF
 output. They are distinguishable by their justification prefix: config
@@ -4391,33 +4600,33 @@ suppressions start with <code>"(ASH)"</code> while inline suppressions start wit
 <code>"(ASH inline)"</code>.</p>
 <h3 id="temporarily-ignoring-suppressions">Temporarily Ignoring Suppressions<a class="headerlink" href="#temporarily-ignoring-suppressions" title="Permanent link">&para;</a></h3>
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># Run a scan ignoring all suppression rules, ignore_paths included</span>
-</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>ash<span class="w"> </span>--ignore-suppressions
-</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>
-</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="c1"># Useful for verifying if suppressed issues have been fixed</span>
-</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>ash<span class="w"> </span>--ignore-suppressions<span class="w"> </span>--output-dir<span class="w"> </span>./verification-scan
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># Run a scan ignoring all suppression rules, ignore_paths included</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>ash<span class="w"> </span>--ignore-suppressions
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="c1"># Useful for verifying if suppressed issues have been fixed</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>ash<span class="w"> </span>--ignore-suppressions<span class="w"> </span>--output-dir<span class="w"> </span>./verification-scan
 </span></code></pre></div>
 <h2 id="programmatic-usage">Programmatic Usage<a class="headerlink" href="#programmatic-usage" title="Permanent link">&para;</a></h2>
 <p>ASH v3 can be used programmatically in Python:</p>
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
-<div class="language-python highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.interactions.run_ash_scan</span><span class="w"> </span><span class="kn">import</span> <span class="n">run_ash_scan</span>
-</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.core.enums</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExecutionStrategy</span><span class="p">,</span> <span class="n">RunMode</span>
-</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>
-</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="c1"># Run a scan</span>
-</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="n">results</span> <span class="o">=</span> <span class="n">run_ash_scan</span><span class="p">(</span>
-</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>    <span class="n">source_dir</span><span class="o">=</span><span class="s2">&quot;/path/to/code&quot;</span><span class="p">,</span>
-</span><span id="__span-21-7"><a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>    <span class="n">output_dir</span><span class="o">=</span><span class="s2">&quot;/path/to/output&quot;</span><span class="p">,</span>
-</span><span id="__span-21-8"><a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>    <span class="n">mode</span><span class="o">=</span><span class="n">RunMode</span><span class="o">.</span><span class="n">local</span><span class="p">,</span>
-</span><span id="__span-21-9"><a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>    <span class="n">strategy</span><span class="o">=</span><span class="n">ExecutionStrategy</span><span class="o">.</span><span class="n">PARALLEL</span><span class="p">,</span>
-</span><span id="__span-21-10"><a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>    <span class="n">scanners</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;bandit&quot;</span><span class="p">,</span> <span class="s2">&quot;semgrep&quot;</span><span class="p">],</span>
-</span><span id="__span-21-11"><a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a>    <span class="n">config_overrides</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;scanners.bandit.enabled=true&quot;</span><span class="p">],</span>
-</span><span id="__span-21-12"><a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a>    <span class="c1"># Return the results even when there are actionable findings</span>
-</span><span id="__span-21-13"><a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a>    <span class="n">fail_on_findings</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-21-14"><a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a><span class="p">)</span>
-</span><span id="__span-21-15"><a id="__codelineno-21-15" name="__codelineno-21-15" href="#__codelineno-21-15"></a>
-</span><span id="__span-21-16"><a id="__codelineno-21-16" name="__codelineno-21-16" href="#__codelineno-21-16"></a><span class="c1"># Access scan results</span>
-</span><span id="__span-21-17"><a id="__codelineno-21-17" name="__codelineno-21-17" href="#__codelineno-21-17"></a><span class="n">stats</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">summary_stats</span>
-</span><span id="__span-21-18"><a id="__codelineno-21-18" name="__codelineno-21-18" href="#__codelineno-21-18"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="n">stats</span><span class="o">.</span><span class="n">total</span><span class="si">}</span><span class="s2"> findings, </span><span class="si">{</span><span class="n">stats</span><span class="o">.</span><span class="n">actionable</span><span class="si">}</span><span class="s2"> actionable&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.interactions.run_ash_scan</span><span class="w"> </span><span class="kn">import</span> <span class="n">run_ash_scan</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.core.enums</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExecutionStrategy</span><span class="p">,</span> <span class="n">RunMode</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="c1"># Run a scan</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="n">results</span> <span class="o">=</span> <span class="n">run_ash_scan</span><span class="p">(</span>
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>    <span class="n">source_dir</span><span class="o">=</span><span class="s2">&quot;/path/to/code&quot;</span><span class="p">,</span>
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>    <span class="n">output_dir</span><span class="o">=</span><span class="s2">&quot;/path/to/output&quot;</span><span class="p">,</span>
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>    <span class="n">mode</span><span class="o">=</span><span class="n">RunMode</span><span class="o">.</span><span class="n">local</span><span class="p">,</span>
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>    <span class="n">strategy</span><span class="o">=</span><span class="n">ExecutionStrategy</span><span class="o">.</span><span class="n">PARALLEL</span><span class="p">,</span>
+</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>    <span class="n">scanners</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;bandit&quot;</span><span class="p">,</span> <span class="s2">&quot;semgrep&quot;</span><span class="p">],</span>
+</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>    <span class="n">config_overrides</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;scanners.bandit.enabled=true&quot;</span><span class="p">],</span>
+</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>    <span class="c1"># Return the results even when there are actionable findings</span>
+</span><span id="__span-22-13"><a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a>    <span class="n">fail_on_findings</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-22-14"><a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="p">)</span>
+</span><span id="__span-22-15"><a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a>
+</span><span id="__span-22-16"><a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a><span class="c1"># Access scan results</span>
+</span><span id="__span-22-17"><a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a><span class="n">stats</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">summary_stats</span>
+</span><span id="__span-22-18"><a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="n">stats</span><span class="o">.</span><span class="n">total</span><span class="si">}</span><span class="s2"> findings, </span><span class="si">{</span><span class="n">stats</span><span class="o">.</span><span class="n">actionable</span><span class="si">}</span><span class="s2"> actionable&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <p><code>run_ash_scan</code> takes keyword arguments from its signature only. An unknown one, such
 as a misspelled <code>fail_on_finding</code>, raises <code>TypeError</code> naming it; earlier versions
@@ -4442,13 +4651,13 @@ a line that starts with <code>::</code> or holds <code>##vso[</code>, which a CI
 command. To have your handler write them as ASH's own console and log file do,
 with control characters as escapes and CI command lines broken, give it
 <code>CommandSafeFormatter</code>:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
-</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>
-</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.utils.log</span><span class="w"> </span><span class="kn">import</span> <span class="n">CommandSafeFormatter</span>
-</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>
-</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="n">handler</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">StreamHandler</span><span class="p">()</span>
-</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="n">handler</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">CommandSafeFormatter</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%(levelname)s</span><span class="s2"> </span><span class="si">%(message)s</span><span class="s2">&quot;</span><span class="p">))</span>
-</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">&quot;ash&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">handler</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">automated_security_helper.utils.log</span><span class="w"> </span><span class="kn">import</span> <span class="n">CommandSafeFormatter</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="n">handler</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">StreamHandler</span><span class="p">()</span>
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="n">handler</span><span class="o">.</span><span class="n">setFormatter</span><span class="p">(</span><span class="n">CommandSafeFormatter</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">%(levelname)s</span><span class="s2"> </span><span class="si">%(message)s</span><span class="s2">&quot;</span><span class="p">))</span>
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">&quot;ash&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">addHandler</span><span class="p">(</span><span class="n">handler</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="cicd-integration">CI/CD Integration<a class="headerlink" href="#cicd-integration" title="Permanent link">&para;</a></h2>
 <blockquote>
@@ -4456,72 +4665,72 @@ with control characters as escapes and CI command lines broken, give it
 </blockquote>
 <h3 id="github-actions">GitHub Actions<a class="headerlink" href="#github-actions" title="Permanent link">&para;</a></h3>
 <!-- doctest: config kind=github-actions runner=none reason="a workflow for the reader's own repository, which installs ASH from GitHub" -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ASH Security Scan</span>
-</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
-</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="nt">on</span><span class="p">:</span>
-</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="w">  </span><span class="nt">push</span><span class="p">:</span>
-</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="w">    </span><span class="nt">branches</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">main</span><span class="w"> </span><span class="p p-Indicator">]</span>
-</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="w">  </span><span class="nt">pull_request</span><span class="p">:</span>
-</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="w">    </span><span class="nt">branches</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">main</span><span class="w"> </span><span class="p p-Indicator">]</span>
-</span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>
-</span><span id="__span-23-9"><a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="nt">jobs</span><span class="p">:</span>
-</span><span id="__span-23-10"><a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="w">  </span><span class="nt">scan</span><span class="p">:</span>
-</span><span id="__span-23-11"><a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a><span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
-</span><span id="__span-23-12"><a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
-</span><span id="__span-23-13"><a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@v3</span>
-</span><span id="__span-23-14"><a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Set up Python</span>
-</span><span id="__span-23-15"><a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a><span class="w">        </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/setup-python@v4</span>
-</span><span id="__span-23-16"><a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a><span class="w">        </span><span class="nt">with</span><span class="p">:</span>
-</span><span id="__span-23-17"><a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a><span class="w">          </span><span class="nt">python-version</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;3.10&#39;</span>
-</span><span id="__span-23-18"><a id="__codelineno-23-18" name="__codelineno-23-18" href="#__codelineno-23-18"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install ASH</span>
-</span><span id="__span-23-19"><a id="__codelineno-23-19" name="__codelineno-23-19" href="#__codelineno-23-19"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pip install git+https://github.com/awslabs/automated-security-helper.git@main</span>
-</span><span id="__span-23-20"><a id="__codelineno-23-20" name="__codelineno-23-20" href="#__codelineno-23-20"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Run ASH scan</span>
-</span><span id="__span-23-21"><a id="__codelineno-23-21" name="__codelineno-23-21" href="#__codelineno-23-21"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash --mode local</span>
-</span><span id="__span-23-22"><a id="__codelineno-23-22" name="__codelineno-23-22" href="#__codelineno-23-22"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Upload scan results</span>
-</span><span id="__span-23-23"><a id="__codelineno-23-23" name="__codelineno-23-23" href="#__codelineno-23-23"></a><span class="w">        </span><span class="c1"># Also when ASH exits non-zero on findings: without a status function</span>
-</span><span id="__span-23-24"><a id="__codelineno-23-24" name="__codelineno-23-24" href="#__codelineno-23-24"></a><span class="w">        </span><span class="c1"># GitHub skips this step after any failed step.</span>
-</span><span id="__span-23-25"><a id="__codelineno-23-25" name="__codelineno-23-25" href="#__codelineno-23-25"></a><span class="w">        </span><span class="nt">if</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ !cancelled() }}</span>
-</span><span id="__span-23-26"><a id="__codelineno-23-26" name="__codelineno-23-26" href="#__codelineno-23-26"></a><span class="w">        </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/upload-artifact@v3</span>
-</span><span id="__span-23-27"><a id="__codelineno-23-27" name="__codelineno-23-27" href="#__codelineno-23-27"></a><span class="w">        </span><span class="nt">with</span><span class="p">:</span>
-</span><span id="__span-23-28"><a id="__codelineno-23-28" name="__codelineno-23-28" href="#__codelineno-23-28"></a><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-results</span>
-</span><span id="__span-23-29"><a id="__codelineno-23-29" name="__codelineno-23-29" href="#__codelineno-23-29"></a><span class="w">          </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
-</span><span id="__span-23-30"><a id="__codelineno-23-30" name="__codelineno-23-30" href="#__codelineno-23-30"></a><span class="w">            </span><span class="no">.ash/ash_output/reports</span>
-</span><span id="__span-23-31"><a id="__codelineno-23-31" name="__codelineno-23-31" href="#__codelineno-23-31"></a><span class="w">            </span><span class="no">.ash/ash_output/ash_aggregated_results.json</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ASH Security Scan</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="nt">on</span><span class="p">:</span>
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="w">  </span><span class="nt">push</span><span class="p">:</span>
+</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="w">    </span><span class="nt">branches</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">main</span><span class="w"> </span><span class="p p-Indicator">]</span>
+</span><span id="__span-24-6"><a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="w">  </span><span class="nt">pull_request</span><span class="p">:</span>
+</span><span id="__span-24-7"><a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="w">    </span><span class="nt">branches</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">main</span><span class="w"> </span><span class="p p-Indicator">]</span>
+</span><span id="__span-24-8"><a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>
+</span><span id="__span-24-9"><a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="nt">jobs</span><span class="p">:</span>
+</span><span id="__span-24-10"><a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a><span class="w">  </span><span class="nt">scan</span><span class="p">:</span>
+</span><span id="__span-24-11"><a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a><span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+</span><span id="__span-24-12"><a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+</span><span id="__span-24-13"><a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@v3</span>
+</span><span id="__span-24-14"><a id="__codelineno-24-14" name="__codelineno-24-14" href="#__codelineno-24-14"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Set up Python</span>
+</span><span id="__span-24-15"><a id="__codelineno-24-15" name="__codelineno-24-15" href="#__codelineno-24-15"></a><span class="w">        </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/setup-python@v4</span>
+</span><span id="__span-24-16"><a id="__codelineno-24-16" name="__codelineno-24-16" href="#__codelineno-24-16"></a><span class="w">        </span><span class="nt">with</span><span class="p">:</span>
+</span><span id="__span-24-17"><a id="__codelineno-24-17" name="__codelineno-24-17" href="#__codelineno-24-17"></a><span class="w">          </span><span class="nt">python-version</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;3.10&#39;</span>
+</span><span id="__span-24-18"><a id="__codelineno-24-18" name="__codelineno-24-18" href="#__codelineno-24-18"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install ASH</span>
+</span><span id="__span-24-19"><a id="__codelineno-24-19" name="__codelineno-24-19" href="#__codelineno-24-19"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pip install git+https://github.com/awslabs/automated-security-helper.git@main</span>
+</span><span id="__span-24-20"><a id="__codelineno-24-20" name="__codelineno-24-20" href="#__codelineno-24-20"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Run ASH scan</span>
+</span><span id="__span-24-21"><a id="__codelineno-24-21" name="__codelineno-24-21" href="#__codelineno-24-21"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash --mode local</span>
+</span><span id="__span-24-22"><a id="__codelineno-24-22" name="__codelineno-24-22" href="#__codelineno-24-22"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Upload scan results</span>
+</span><span id="__span-24-23"><a id="__codelineno-24-23" name="__codelineno-24-23" href="#__codelineno-24-23"></a><span class="w">        </span><span class="c1"># Also when ASH exits non-zero on findings: without a status function</span>
+</span><span id="__span-24-24"><a id="__codelineno-24-24" name="__codelineno-24-24" href="#__codelineno-24-24"></a><span class="w">        </span><span class="c1"># GitHub skips this step after any failed step.</span>
+</span><span id="__span-24-25"><a id="__codelineno-24-25" name="__codelineno-24-25" href="#__codelineno-24-25"></a><span class="w">        </span><span class="nt">if</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ !cancelled() }}</span>
+</span><span id="__span-24-26"><a id="__codelineno-24-26" name="__codelineno-24-26" href="#__codelineno-24-26"></a><span class="w">        </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a</span><span class="w"> </span><span class="c1"># v7.0.1</span>
+</span><span id="__span-24-27"><a id="__codelineno-24-27" name="__codelineno-24-27" href="#__codelineno-24-27"></a><span class="w">        </span><span class="nt">with</span><span class="p">:</span>
+</span><span id="__span-24-28"><a id="__codelineno-24-28" name="__codelineno-24-28" href="#__codelineno-24-28"></a><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash-results</span>
+</span><span id="__span-24-29"><a id="__codelineno-24-29" name="__codelineno-24-29" href="#__codelineno-24-29"></a><span class="w">          </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+</span><span id="__span-24-30"><a id="__codelineno-24-30" name="__codelineno-24-30" href="#__codelineno-24-30"></a><span class="w">            </span><span class="no">.ash/ash_output/reports</span>
+</span><span id="__span-24-31"><a id="__codelineno-24-31" name="__codelineno-24-31" href="#__codelineno-24-31"></a><span class="w">            </span><span class="no">.ash/ash_output/ash_aggregated_results.json</span>
 </span></code></pre></div>
 <h3 id="gitlab-ci">GitLab CI<a class="headerlink" href="#gitlab-ci" title="Permanent link">&para;</a></h3>
 <!-- doctest: config kind=gitlab-ci runner=none reason="a pipeline for the reader's own project, which installs ASH from GitHub" -->
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="nt">ash-scan</span><span class="p">:</span>
-</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python:3.10</span>
-</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span><span class="nt">script</span><span class="p">:</span>
-</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pip install git+https://github.com/awslabs/automated-security-helper.git@main</span>
-</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash --mode local</span>
-</span><span id="__span-24-6"><a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="w">  </span><span class="nt">artifacts</span><span class="p">:</span>
-</span><span id="__span-24-7"><a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="w">    </span><span class="nt">paths</span><span class="p">:</span>
-</span><span id="__span-24-8"><a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/reports</span>
-</span><span id="__span-24-9"><a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/ash_aggregated_results.json</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="nt">ash-scan</span><span class="p">:</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python:3.10</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="w">  </span><span class="nt">script</span><span class="p">:</span>
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pip install git+https://github.com/awslabs/automated-security-helper.git@main</span>
+</span><span id="__span-25-5"><a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash --mode local</span>
+</span><span id="__span-25-6"><a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="w">  </span><span class="nt">artifacts</span><span class="p">:</span>
+</span><span id="__span-25-7"><a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="w">    </span><span class="nt">paths</span><span class="p">:</span>
+</span><span id="__span-25-8"><a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/reports</span>
+</span><span id="__span-25-9"><a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.ash/ash_output/ash_aggregated_results.json</span>
 </span></code></pre></div>
 <p>Both examples keep <code>scanners/</code> and <code>converted/</code> out of the artifact: those hold each tool's raw output, which is not masked.</p>
 <h2 id="performance-optimization">Performance Optimization<a class="headerlink" href="#performance-optimization" title="Permanent link">&para;</a></h2>
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="c1"># Run scanners in parallel (default)</span>
-</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>ash<span class="w"> </span>--strategy<span class="w"> </span>parallel
-</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>
-</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="c1"># Run scanners sequentially</span>
-</span><span id="__span-25-5"><a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>ash<span class="w"> </span>--strategy<span class="w"> </span>sequential
-</span><span id="__span-25-6"><a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>
-</span><span id="__span-25-7"><a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="c1"># Clean up temporary files after scan</span>
-</span><span id="__span-25-8"><a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a>ash<span class="w"> </span>--cleanup
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># Run scanners in parallel (default)</span>
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>ash<span class="w"> </span>--strategy<span class="w"> </span>parallel
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>
+</span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="c1"># Run scanners sequentially</span>
+</span><span id="__span-26-5"><a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>ash<span class="w"> </span>--strategy<span class="w"> </span>sequential
+</span><span id="__span-26-6"><a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a>
+</span><span id="__span-26-7"><a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="c1"># Clean up temporary files after scan</span>
+</span><span id="__span-26-8"><a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a>ash<span class="w"> </span>--cleanup
 </span></code></pre></div>
 <h2 id="debugging">Debugging<a class="headerlink" href="#debugging" title="Permanent link">&para;</a></h2>
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># Enable debug logging</span>
-</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>ash<span class="w"> </span>--debug
-</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>
-</span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="c1"># Enable verbose logging</span>
-</span><span id="__span-26-5"><a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>ash<span class="w"> </span>--verbose
-</span><span id="__span-26-6"><a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a>
-</span><span id="__span-26-7"><a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="c1"># Disable progress display</span>
-</span><span id="__span-26-8"><a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a>ash<span class="w"> </span>--no-progress
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="c1"># Enable debug logging</span>
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>ash<span class="w"> </span>--debug
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>
+</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="c1"># Enable verbose logging</span>
+</span><span id="__span-27-5"><a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>ash<span class="w"> </span>--verbose
+</span><span id="__span-27-6"><a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>
+</span><span id="__span-27-7"><a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="c1"># Disable progress display</span>
+</span><span id="__span-27-8"><a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a>ash<span class="w"> </span>--no-progress
 </span></code></pre></div>
 <h3 id="scanner-validation">Scanner Validation<a class="headerlink" href="#scanner-validation" title="Permanent link">&para;</a></h3>
 <p>ASH v3 includes comprehensive scanner validation that monitors scanner registration, enablement, and execution throughout the scan process. When debugging scanner issues:</p>

@@ -3198,7 +3198,7 @@ SOFTWARE.
 <tbody>
 <tr>
 <td>Scanner installs</td>
-<td>A missing Python tool (bandit, checkov, semgrep, and nbconvert for the notebook converter) is installed at scan time with <code>uv tool install</code>, from PyPI unless uv is configured otherwise. Online, uv may also ask the package index about a tool's version range when it runs one that is installed. <code>ash dependencies install</code> checks the SHA-256 digest of each binary tool it downloads from a GitHub release. The Python tools come from the package index uv is configured with, PyPI by default, within each tool's version range, and cfn-nag's gem is the version ASH pins, from the gem sources Ruby is configured with; ASH checks no digest for either.</td>
+<td>A missing Python tool (bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert for the notebook converter) is installed at scan time with <code>uv tool install</code>, from PyPI unless uv is configured otherwise. Online, uv may also ask the package index about a tool's version range when it runs one that is installed. <code>ash dependencies install</code> checks the SHA-256 digest of each binary tool it downloads from a GitHub release. The Python tools come from the package index uv is configured with, PyPI by default, within each tool's version range, and cfn-nag's gem is the version ASH pins, from the gem sources Ruby is configured with; ASH checks no digest for either.</td>
 <td>Install the tools before the scan with <code>ash dependencies install</code>, which also installs nbconvert. Offline scans install nothing.</td>
 </tr>
 <tr>

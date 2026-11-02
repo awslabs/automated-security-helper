@@ -3225,14 +3225,14 @@ SOFTWARE.
 <h1 id="add-ash-to-a-github-actions-pipeline">Add ASH to a GitHub Actions pipeline<a class="headerlink" href="#add-ash-to-a-github-actions-pipeline" title="Permanent link">&para;</a></h1>
 <p>In this tutorial you add a workflow that scans every pull request with ASH, fails the check
 when ASH finds something, and shows the findings on the pull request and in GitHub code
-scanning. It uses the reusable workflows that ASH ships, pinned to <code>v3.7.0</code>.</p>
+scanning. It uses the reusable workflows that ASH ships, pinned to <code>main</code>.</p>
 <h2 id="before-you-start">Before you start<a class="headerlink" href="#before-you-start" title="Permanent link">&para;</a></h2>
 <ul>
 <li>A GitHub repository with Actions enabled, where you can push a branch and open a pull
   request.</li>
 <li>For step 4, code scanning: any public repository, or a private one with a GitHub Code
   Security license. Without it, skip step 4; the other steps work the same.</li>
-<li>git, to look up the commit of <code>v3.7.0</code> in step 1.</li>
+<li>git, to look up the commit of <code>main</code> in step 1.</li>
 </ul>
 <p>Nothing else has to be installed on your machine. Using another CI service? See
 <a href="../../how-to/ci/gitlab-ci/">Run ASH in GitLab CI</a> or
@@ -3250,18 +3250,18 @@ whose <a href="../../how-to/ci/other-ci/#circleci">CircleCI section</a> has a <c
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">contents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="nt">jobs</span><span class="p">:</span>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">ash</span><span class="p">:</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.7.0</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@main</span>
 </span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">    </span><span class="nt">permissions</span><span class="p">:</span>
 </span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">      </span><span class="nt">contents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read</span>
 </span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">      </span><span class="nt">checks</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">write</span>
 </span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">      </span><span class="nt">pull-requests</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">write</span>
 </span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">    </span><span class="nt">with</span><span class="p">:</span>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">      </span><span class="nt">ash-version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v3.7.0</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">      </span><span class="nt">ash-version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">main</span>
 </span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">      </span><span class="nt">collect-sarif-report</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
 </span></code></pre></div>
 <p>What the parts do:</p>
 <ul>
-<li><code>uses: ...@v3.7.0</code> selects the workflow file, and <code>ash-version: v3.7.0</code> selects the ASH
+<li><code>uses: ...@main</code> selects the workflow file, and <code>ash-version: main</code> selects the ASH
   it installs. Without <code>ash-version</code>, the workflow installs ASH from <code>main</code>, so give both
   the same release to run the ASH that the workflow's steps were written for.</li>
 <li>The three permissions let the job read the code, publish a check run, and comment on the
@@ -3280,14 +3280,14 @@ whose <a href="../../how-to/ci/other-ci/#circleci">CircleCI section</a> has a <c
 <p>Now pin the <code>uses:</code> line to a commit. ASH's zizmor scanner reports a <code>uses:</code> line that names
 a tag as <code>zizmor/unpinned-uses</code> at HIGH, because a tag can be moved and a commit cannot, so
 until you pin it every scan of this repository fails on this file. Look up the commit that
-<code>v3.7.0</code> points to:</p>
+<code>main</code> points to:</p>
 <!-- doctest: illustrative reason="queries GitHub over the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>git<span class="w"> </span>ls-remote<span class="w"> </span>https://github.com/awslabs/automated-security-helper<span class="w"> </span>refs/tags/v3.7.0
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>git<span class="w"> </span>ls-remote<span class="w"> </span>https://github.com/awslabs/automated-security-helper<span class="w"> </span>refs/heads/main
 </span></code></pre></div>
-<p>In the <code>uses:</code> line, replace the <code>v3.7.0</code> after the <code>@</code> with the 40-character SHA that
-the command prints, and add the comment <code># v3.7.0</code> at the end of the line. Set
+<p>In the <code>uses:</code> line, replace the <code>main</code> after the <code>@</code> with the 40-character SHA that
+the command prints, and add the comment <code># main</code> at the end of the line. Set
 <code>ash-version</code> to the same SHA, so the workflow file and the ASH it installs both come from
-the commit of the <code>v3.7.0</code> release.</p>
+the commit of the <code>main</code> release.</p>
 <h2 id="2-open-a-pull-request-and-watch-the-scan">2. Open a pull request and watch the scan<a class="headerlink" href="#2-open-a-pull-request-and-watch-the-scan" title="Permanent link">&para;</a></h2>
 <p>Commit the file, push the branch, and open a pull request. Under <strong>Checks</strong>, the job
 <strong>ash / SAST, SCA, and IaC Scan</strong> starts. It downloads the scanner tools and the
@@ -3350,12 +3350,12 @@ repositories to a gate that their own pull requests cannot change, see
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="w">  </span><span class="nt">sarif</span><span class="p">:</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="nt">needs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ash</span>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">if</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ !cancelled() &amp;&amp; needs.ash.outputs.artifact-id != &#39;&#39; }}</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@v3.7.0</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">awslabs/automated-security-helper/.github/workflows/upload-ash-sarif.yml@main</span>
 </span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">permissions</span><span class="p">:</span>
 </span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">      </span><span class="nt">contents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">read</span>
 </span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">      </span><span class="nt">security-events</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">write</span>
 </span></code></pre></div>
-<p>Pin its <code>uses:</code> line to the same commit as the first one, with the same <code># v3.7.0</code>
+<p>Pin its <code>uses:</code> line to the same commit as the first one, with the same <code># main</code>
 comment.</p>
 <p>This job downloads the <code>ash_output</code> artifact and uploads <code>ash.ghas.sarif</code> to code scanning.
 It needs <code>security-events: write</code>, which the scan job cannot hold: a called workflow can

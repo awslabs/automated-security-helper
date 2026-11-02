@@ -3375,9 +3375,9 @@ official installer:</p>
 prints a version number.</p>
 <h2 id="2-install-ash">2. Install ASH<a class="headerlink" href="#2-install-ash" title="Permanent link">&para;</a></h2>
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@v3.7.0&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12<span class="w"> </span><span class="s1">&#39;automated-security-helper[cdk] @ git+https://github.com/awslabs/automated-security-helper.git@main&#39;</span>
 </span></code></pre></div>
-<p>This installs ASH <code>v3.7.0</code> from GitHub, with the <code>cdk</code> extra that the
+<p>This installs ASH <code>main</code> from GitHub, with the <code>cdk</code> extra that the
 cdk-nag scanner needs, into its own environment. <code>--python 3.12</code> keeps uv from
 choosing a Python newer than ASH's dependencies support; uv downloads 3.12 if you do
 not have it. ASH is not published on PyPI: the PyPI project named
@@ -3388,7 +3388,7 @@ pins.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ash<span class="w"> </span>--version
 </span></code></pre></div>
 <!-- doctest: output -->
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>awslabs/automated-security-helper v3.7.0
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>awslabs/automated-security-helper v3.7.1
 </span></code></pre></div>
 <h2 id="3-install-the-scanner-tools">3. Install the scanner tools<a class="headerlink" href="#3-install-the-scanner-tools" title="Permanent link">&para;</a></h2>
 <p>ASH runs other projects' scanners. Install the ones it can install for you:</p>
@@ -3555,14 +3555,13 @@ per actionable finding:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>...
 </span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>### Finding 1: B324
 </span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
-</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>- **Severity**: HIGH
-</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>- **Scanner**: bandit
-</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>- **Rule ID**: B324
-</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>- **Location**: app.py:7
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>- Severity: HIGH
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>- Scanner: bandit
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>- Rule ID: B324
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>- Location: app.py:7
 </span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>
-</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>**Description**:
-</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>Use of weak MD5 hash for security. Consider usedforsecurity=False
-</span><span id="__span-16-11"><a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a>...
+</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>Use of weak MD5 hash for security. Consider usedforsecurity=False
+</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>...
 </span></code></pre></div>
 <p>Finding 2 is B602, <code>subprocess call with shell=True</code>, at <code>app.py:11</code>. The Rule ID is
 what a suppression names in the next step. To browse the findings interactively, run

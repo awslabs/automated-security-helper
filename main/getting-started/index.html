@@ -3111,9 +3111,10 @@ The agent starts <code>ash mcp</code> on your machine as a local server and runs
 <p>You need git and ASH on the same machine as the agent, and an agent that can start a local
 MCP server over stdio. Installing the scanner tools first with <code>ash dependencies install</code>
 is optional. Without them, an online scan with the sandbox off installs bandit,
-checkov, and semgrep itself, with the <code>uv</code> installed with ASH. A scanner with
-nothing to scan, for example cfn-nag in a project without CloudFormation templates, shows
-as SKIPPED, and every other scanner whose tool is missing shows as MISSING.</p>
+checkov, semgrep, cfn-lint, and zizmor itself, with the <code>uv</code> installed with ASH. A
+scanner with nothing to scan, for example cfn-nag in a project without CloudFormation
+templates, shows as SKIPPED, and every other scanner whose tool is missing shows as
+MISSING.</p>
 <p>The first result is the agent's answer: it starts a scan, follows it until it finishes,
 and tells you what the scanners found. The reports are also written to <code>.ash/ash_output/</code>
 in the project. The tutorial then has the agent explain a finding, draft a suppression, and

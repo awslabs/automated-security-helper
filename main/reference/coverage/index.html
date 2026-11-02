@@ -3701,10 +3701,13 @@ output in <code>converted/</code> as a second target:</p>
   replaced, and ends in <code>-converted.py</code>, or in <code>-converted</code> plus the notebook's plain
   extension, such as <code>-converted.r</code>, for a notebook in another language.</li>
 </ul>
-<p>semgrep and opengrep exclude <code>*-converted.py</code> by default (their <code>exclude</code> option), so they
-do not scan notebooks converted to Python. A notebook converted to another language, such
-as one ending in <code>-converted.r</code>, is not excluded. Findings in converted files point into
-the output directory, not into the original archive or notebook.</p>
+<p>semgrep and opengrep scan the converted files. Their default <code>exclude</code> option lists
+<code>*-converted.py</code>, but that entry applies only to the scan of the source tree, where it
+keeps a converted copy inside the tree from being scanned twice; on the scan of the
+converted files it is left out, and both scanners read files the repository's <code>.gitignore</code>
+matches there, because the output directory that holds them is ignored by git. An
+<code>exclude</code> pattern you add yourself applies to both scans. Findings in converted files
+point into the output directory, not into the original archive or notebook.</p>
 
 
 

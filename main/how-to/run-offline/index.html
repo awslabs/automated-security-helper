@@ -3216,7 +3216,8 @@ the bounds; this page is about preparing for them.</p>
 </span></code></pre></div>
 <p>This scan runs offline as usual; in a repository with a hardcoded password it exits 2.
 The log also shows a warning for each scanner whose offline cache is not set up, such as
-<code>Grype offline mode: GRYPE_DB_CACHE_DIR not set</code>.</p>
+<code>Grype offline mode: the database directory &lt;path&gt; does not exist</code>, naming the cache
+grype would read (<code>GRYPE_DB_CACHE_DIR</code>, else grype's default cache directory).</p>
 <p>The other ways to turn it on:</p>
 <table>
 <thead>
@@ -3260,7 +3261,7 @@ The log also shows a warning for each scanner whose offline cache is not set up,
 </tr>
 <tr>
 <td>trivy, trivy-repo</td>
-<td>Read the cached trivy database with its updates off. ASH fails the scan when the database is past its age bound, except in the offline image, where it warns (<a href="#refresh">Refresh cadence</a>). With no database, <code>trivy</code> is MISSING. Every trivy scan gets <code>trivy --offline-scan</code> and <code>trivy --skip-version-check</code>, so trivy contacts no package registry and does not check for a newer release.</td>
+<td>Read the cached trivy database with its updates off. ASH fails the scan when the database is past its age bound, except in the offline image, where it warns (<a href="#refresh">Refresh cadence</a>). With no database, <code>trivy</code> is MISSING. Every trivy scan gets <code>trivy --offline-scan</code>, so trivy contacts no package registry. trivy does not check for a newer release either: an online scan gets <code>trivy --skip-version-check</code>, and an offline one gets <code>TRIVY_SKIP_VERSION_CHECK=true</code> in trivy's environment instead, since a trivy too old to know the flag refuses the command over it.</td>
 </tr>
 <tr>
 <td>semgrep, opengrep</td>

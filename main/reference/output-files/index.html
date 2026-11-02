@@ -3819,10 +3819,18 @@ for a reporter that declares no extension. The table lists the reporters ASH shi
 whether each is enabled by default; <a href="../reporters/">Reporters</a> gives each one's format
 and options.</p>
 <p>A reporter's <code>extension</code> must be a file name suffix. A configured <code>extension</code> that
-contains <code>/</code>, <code>\</code>, <code>..</code>, or a NUL character is ignored with a warning, and the reporter's
-default is used. If a reporter's report file name is still not a single file name, one
-that is not empty, <code>.</code>, or <code>..</code> and contains no <code>/</code>, <code>\</code>, or NUL, the run stops with
-exit 1 before any reporter writes.</p>
+contains <code>/</code>, <code>\</code>, <code>:</code>, <code>..</code>, or a NUL character is ignored with a warning, and the
+reporter's default is used. If a reporter's report file name is still not a single file
+name, one that is not empty, <code>.</code>, or <code>..</code>, contains no <code>/</code>, <code>\</code>, <code>:</code>, or NUL, and does
+not name a Windows device (<code>nul.json</code>, <code>con</code>, <code>com1.txt</code>), the run stops with exit 1
+before any reporter writes. The colon is refused on every platform because on NTFS
+<code>ash.json:stream</code> names an alternate data stream of <code>ash.json</code>, another reporter's file.
+A file a reporter writes beside its report through <code>write_report_file</code> follows the same
+rule, and a symbolic link at that name, or a <code>reports/</code> directory that has become a
+symbolic link or a directory junction by the time of the write, is refused and the
+refusal raised (<code>OutputLinkRefused</code> for a symbolic link, <code>OutputDirLinkRefused</code> for a
+junction), as for any other output file (<a href="#links">Links are refused</a>), instead of being
+skipped with a warning.</p>
 <table>
 <thead>
 <tr>

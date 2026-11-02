@@ -4053,7 +4053,7 @@ SOFTWARE.
 <h2 id="run-mode">Run mode<a class="headerlink" href="#run-mode" title="Permanent link">&para;</a></h2>
 <p>Where a scan runs: <code>local</code> (the default), <code>container</code>, <code>nix</code>, or <code>precommit</code>, chosen with <code>--mode</code>. See <a href="../how-ash-works/#phases">How ASH works</a>.</p>
 <h2 id="sandbox-grant">Sandbox grant<a class="headerlink" href="#sandbox-grant" title="Permanent link">&para;</a></h2>
-<p>A setting that gives sandboxed scanners more than the default policy: <code>sandbox.network_scanners</code>, <code>sandbox.extra_read_paths</code>, <code>sandbox.read_path_scanners</code>, or <code>sandbox.env_scanners</code>. Only the operator may grant. See <a href="../sandbox/#grants">Scanner sandbox</a>.</p>
+<p>A setting that gives sandboxed scanners more than the default policy: <code>sandbox.network_scanners</code>, <code>sandbox.extra_read_paths</code>, <code>sandbox.read_path_scanners</code>, <code>sandbox.env_scanners</code>, or <code>sandbox.environment</code>. Only the operator may grant. See <a href="../sandbox/#grants">Scanner sandbox</a>.</p>
 <h2 id="scanned-directory">Scanned directory<a class="headerlink" href="#scanned-directory" title="Permanent link">&para;</a></h2>
 <p>The directory a scan runs over: <code>--source-dir</code>, the working directory, or a workspace's root. A config file inside it is a <a href="#repository-config">repository config</a>, and for the tool files you name ASH also looks at the <a href="#scanned-tree">scanned tree</a> around it.</p>
 <h2 id="scanned-tree">Scanned tree<a class="headerlink" href="#scanned-tree" title="Permanent link">&para;</a></h2>

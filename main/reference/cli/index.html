@@ -3724,7 +3724,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td><a href="#plugin-list"><code>ash plugin list</code></a></td>
-<td>The <code>plugin list</code> command lists all available plugins.</td>
+<td>The <code>plugin list</code> command lists what a scan with this configuration loads, on or off.</td>
 </tr>
 <tr>
 <td><a href="#report"><code>ash report</code></a></td>
@@ -3940,7 +3940,7 @@ SOFTWARE.
 <td>flag</td>
 <td>off</td>
 <td></td>
-<td>Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit.</td>
+<td>Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit.</td>
 </tr>
 </tbody>
 </table>
@@ -3995,7 +3995,7 @@ file does not exist, cannot be read or is not a valid configuration.</p>
 <td>text</td>
 <td>not set</td>
 <td><code>ASH_CONFIG</code></td>
-<td>The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.</td>
+<td>The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.</td>
 </tr>
 <tr>
 <td><a id="config-get--config-overrides"></a><code>--config-overrides</code></td>
@@ -4150,14 +4150,14 @@ config with "blocks the scan".</p>
 <td>text</td>
 <td>not set</td>
 <td><code>ASH_CONFIG</code></td>
-<td>The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.</td>
+<td>The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.</td>
 </tr>
 <tr>
 <td><a id="config-lint--output-dir"></a><code>--output-dir</code>, <code>-o</code></td>
 <td>text</td>
 <td>not set</td>
 <td></td>
-<td>Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output</td>
+<td>Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output under --source-dir when that is given, else to the one beside the config file (its project's .ash/ash_output, then ash_output)</td>
 </tr>
 <tr>
 <td><a id="config-lint--fix"></a><code>--fix</code></td>
@@ -4214,9 +4214,10 @@ config with "blocks the scan".</p>
 <p>Update an existing configuration file with the specified modifications.</p>
 <p>This command applies changes to an ASH configuration file using the same syntax as --config-overrides.</p>
 <p>Nothing is written, and the command exits 3, when the file is not a valid
-configuration or a --set cannot be applied. A file that uses extends or
-patch, or reads the environment (${VAR} or !ENV references), or a TOML
-file, is refused with exit 1: rewriting it would lose what those express.</p>
+configuration, a --set cannot be applied, or the file changed while the
+command read it. A file that uses extends or patch, or reads the environment
+(${VAR} or !ENV references), or a TOML file, is refused with exit 1:
+rewriting it would lose what those express.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ash config update [OPTIONS] [config_path]
 </span></code></pre></div>
 <!-- doctest: options of=cli.config.update -->
@@ -4257,7 +4258,7 @@ file, is refused with exit 1: rewriting it would lose what those express.</p>
 <td>text</td>
 <td>not set</td>
 <td><code>ASH_CONFIG</code></td>
-<td>The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.</td>
+<td>The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.</td>
 </tr>
 <tr>
 <td><a id="config-update--set"></a><code>--set</code></td>
@@ -4265,6 +4266,13 @@ file, is refused with exit 1: rewriting it would lose what those express.</p>
 <td>not set</td>
 <td></td>
 <td>Configuration modifications specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW'). Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax.</td>
+</tr>
+<tr>
+<td><a id="config-update--source-dir"></a><code>--source-dir</code></td>
+<td>text</td>
+<td>not set</td>
+<td><code>ASH_SOURCE_DIR</code></td>
+<td>The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.</td>
 </tr>
 <tr>
 <td><a id="config-update--verbose"></a><code>--verbose</code>, <code>-v</code> / <code>--no-verbose</code></td>
@@ -4349,7 +4357,7 @@ the environment names a module the scan's plugin loader refuses.</p>
 <td>text</td>
 <td>not set</td>
 <td><code>ASH_CONFIG</code></td>
-<td>The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.</td>
+<td>The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.</td>
 </tr>
 <tr>
 <td><a id="config-validate--config-overrides"></a><code>--config-overrides</code></td>
@@ -4433,7 +4441,7 @@ read or is not a valid configuration.</p>
 <td>text</td>
 <td>not set</td>
 <td><code>ASH_CONFIG</code></td>
-<td>The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.</td>
+<td>The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.</td>
 </tr>
 <tr>
 <td><a id="config-validate-plugin-dependencies--config-overrides"></a><code>--config-overrides</code></td>
@@ -4474,10 +4482,10 @@ read or is not a valid configuration.</p>
 </table>
 <h3 id="ash-config-wizard"><a id="config-wizard"></a><code>ash config wizard</code><a class="headerlink" href="#ash-config-wizard" title="Permanent link">&para;</a></h3>
 <p>Interactive configuration wizard.</p>
-<p>Reads the existing config (the one a scan of the current directory would
-use, or --config), walks through scanner, reporter, offline-mode, and
-community-plugin settings interactively, then writes the result back.
-With no config yet, it creates .ashrc.yaml.</p>
+<p>Reads the existing config (the one a scan of --source-dir, or the current
+directory, would use, or --config), walks through scanner, reporter,
+offline-mode, and community-plugin settings interactively, then writes the
+result back. With no config yet, it creates .ashrc.yaml there.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>ash config wizard [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.config.wizard -->
@@ -4497,7 +4505,14 @@ With no config yet, it creates .ashrc.yaml.</p>
 <td>text</td>
 <td>not set</td>
 <td><code>ASH_CONFIG</code></td>
-<td>Path to read/write the configuration file. By default, the config a scan of the current directory would use, or a new .ashrc.yaml when there is none.</td>
+<td>Path to read/write the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given), or a new .ashrc.yaml in that directory when there is none.</td>
+</tr>
+<tr>
+<td><a id="config-wizard--source-dir"></a><code>--source-dir</code></td>
+<td>text</td>
+<td>not set</td>
+<td><code>ASH_SOURCE_DIR</code></td>
+<td>The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.</td>
 </tr>
 <tr>
 <td><a id="config-wizard--verbose"></a><code>--verbose</code>, <code>-v</code></td>
@@ -4700,7 +4715,7 @@ otherwise the detail view says "(source not shown)".</p>
 <td>path</td>
 <td>not set</td>
 <td><code>ASH_CONFIG</code></td>
-<td>Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. With none found, suppressions go to a new .ashrc.yaml in the current directory.</td>
+<td>Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used in the scanned directory (the one holding the results' .ash/ash_output), or in the current directory when the results sit elsewhere. With none found, suppressions go to a new .ashrc.yaml there.</td>
 </tr>
 </tbody>
 </table>
@@ -4974,7 +4989,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <td>flag</td>
 <td>not set</td>
 <td></td>
-<td>Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is ERROR or MISSING, or when every one is SKIPPED, such as when no selected scanner had a file to scan. On by default: under --no-fail-on-incomplete-scanners, a shard whose scanners never ran contributes no findings and the merged report reads as a complete, clean scan. Defaults to the scan configuration's value, then to true; pass --no-fail-on-incomplete-scanners to merge a partial union anyway.</td>
+<td>Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is ERROR or MISSING, or when every one is SKIPPED, such as when no selected scanner had a file to scan. Under --no-fail-on-incomplete-scanners, a shard whose scanners never ran contributes no findings and the merged report reads as a complete, clean scan. On by default: when the option is not given, the scan configuration's value is used, and when that sets none either, the check is on. Pass --no-fail-on-incomplete-scanners to merge a partial union anyway.</td>
 </tr>
 <tr>
 <td><a id="merge--log-level"></a><code>--log-level</code></td>
@@ -5016,7 +5031,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <td>flag</td>
 <td>off</td>
 <td></td>
-<td>Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit.</td>
+<td>Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit.</td>
 </tr>
 </tbody>
 </table>
@@ -5027,7 +5042,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <p>This command takes no options.</p>
 <p>Subcommands: <a href="#plugin-list"><code>ash plugin list</code></a>.</p>
 <h3 id="ash-plugin-list"><a id="plugin-list"></a><code>ash plugin list</code><a class="headerlink" href="#ash-plugin-list" title="Permanent link">&para;</a></h3>
-<p>The <code>plugin list</code> command lists all available plugins.</p>
+<p>The <code>plugin list</code> command lists what a scan with this configuration loads, on or off.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>ash plugin list [OPTIONS]
 </span></code></pre></div>
 <!-- doctest: options of=cli.plugin.list -->
@@ -5089,7 +5104,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <td>flag</td>
 <td>off</td>
 <td></td>
-<td>For scanners, add Version and Reachable columns reporting each scanner's detected tool version and whether its dependencies are satisfied (Yes/No/Unknown). Off by default, so the fast listing is unchanged; enabling it instantiates each scanner and runs its dependency check, which takes longer.</td>
+<td>For scanners, add Version and Reachable columns reporting each scanner's detected tool version and whether its dependencies are satisfied (Yes/No/Unknown). Off by default; enabling it checks each scanner's dependencies and probes its version, which takes longer.</td>
 </tr>
 <tr>
 <td><a id="plugin-list--color"></a><code>--color</code> / <code>--no-color</code></td>
@@ -5184,7 +5199,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <td>flag</td>
 <td>off</td>
 <td></td>
-<td>Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit.</td>
+<td>Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit.</td>
 </tr>
 </tbody>
 </table>
@@ -5261,7 +5276,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <td>one of <code>off</code>, <code>auto</code>, <code>bwrap</code>, <code>firejail</code>, <code>landlock</code>, <code>sandbox-exec</code></td>
 <td>not set</td>
 <td></td>
-<td>Run every scanner subprocess in an OS-level sandbox: read-only source, writable results directory only, private home and temporary directory, no network unless the scanner needs one (never under --offline). 'auto' picks the best available (Linux: bwrap, firejail, landlock; macOS: sandbox-exec). A scanner that cannot be sandboxed as requested is reported MISSING. Overrides the config file's sandbox.mode; default off. Refused with --mode container (exit 5), which runs the scanners unsandboxed inside the container. See docs/content/docs/scanner-sandbox.md</td>
+<td>Run every scanner subprocess in an OS-level sandbox: read-only source, writable results directory only, private home and temporary directory, no network unless the scanner needs one (never under --offline). 'auto' picks the best available (Linux: bwrap, firejail, landlock; macOS: sandbox-exec). A scanner whose sandbox cannot be set up is graded by the refusal: under 'auto' no working backend is a missing dependency and the scanner is reported MISSING; a named backend that is unavailable, or any other refusal (such as a results path that is a symlink), is reported ERROR. Overrides the config file's sandbox.mode; default off. Refused with --mode container (exit 5), which runs the scanners unsandboxed inside the container. See docs/content/docs/scanner-sandbox.md</td>
 </tr>
 <tr>
 <td><a id="scan--offline-semgrep-rulesets"></a><code>--offline-semgrep-rulesets</code></td>
@@ -5618,7 +5633,7 @@ across different scanners and ensure fields are preserved during aggregation.</p
 <td>flag</td>
 <td>off</td>
 <td></td>
-<td>Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit.</td>
+<td>Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit.</td>
 </tr>
 </tbody>
 </table>

@@ -3232,15 +3232,15 @@ results going where your team reads them.</p>
 runtime, and a registry you can push to. Steps 2 and 3 run on any machine with ASH, and
 step 3 creates a small repository to test the gate on.</p>
 <h2 id="1-build-the-image-and-push-it-to-your-registry">1. Build the image and push it to your registry<a class="headerlink" href="#1-build-the-image-and-push-it-to-your-registry" title="Permanent link">&para;</a></h2>
-<p>ASH publishes no prebuilt image. Build one from <code>v3.7.0</code>, name it for your registry,
+<p>ASH publishes no prebuilt image. Build one from <code>main</code>, name it for your registry,
 and push it:</p>
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ASH_IMAGE_NAME</span><span class="o">=</span>registry.example.com/security/ash:3.7.0
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--no-run<span class="w"> </span>--oci-runner<span class="w"> </span>docker<span class="w"> </span>--ash-revision-to-install<span class="w"> </span>v3.7.0<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ASH_IMAGE_NAME</span><span class="o">=</span>registry.example.com/security/ash:main
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--no-run<span class="w"> </span>--oci-runner<span class="w"> </span>docker<span class="w"> </span>--ash-revision-to-install<span class="w"> </span>main<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--container-uid<span class="w"> </span><span class="m">1001</span><span class="w"> </span>--container-gid<span class="w"> </span><span class="m">1001</span>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>docker<span class="w"> </span>push<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ASH_IMAGE_NAME</span><span class="s2">&quot;</span>
 </span></code></pre></div>
-<p>You should see <code>Building image registry.example.com/security/ash:3.7.0</code>, a few minutes
+<p>You should see <code>Building image registry.example.com/security/ash:main</code>, a few minutes
 of build output, and then the push. <code>--oci-runner docker</code> builds with the runtime you push
 with; without it, ASH uses finch when finch is installed. The image holds every scanner
 tool and runs as a non-root user with the UID and GID you passed; use the ones your CI
@@ -3366,7 +3366,7 @@ in <a href="../../how-to/choose-scanners/#operator-only">Options only the operat
 </span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span>--mount<span class="w"> </span><span class="nv">type</span><span class="o">=</span>bind,source<span class="o">=</span><span class="s2">&quot;</span><span class="nv">$PWD</span><span class="s2">/../ash-results&quot;</span>,destination<span class="o">=</span>/out<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span>--mount<span class="w"> </span><span class="nv">type</span><span class="o">=</span>bind,source<span class="o">=</span>/etc/ash/ash.yaml,destination<span class="o">=</span>/etc/ash/ash.yaml,readonly<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">  </span>--env<span class="w"> </span><span class="nv">ASH_CONFIG</span><span class="o">=</span>/etc/ash/ash.yaml<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">  </span>registry.example.com/security/ash:3.7.0<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">  </span>registry.example.com/security/ash:main<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">  </span>ash<span class="w"> </span>scan<span class="w"> </span>--source-dir<span class="w"> </span>/src<span class="w"> </span>--output-dir<span class="w"> </span>/out
 </span></code></pre></div>
 <p>The <code>test -f</code> line stops the job before <code>docker run</code> when the operator config is missing.
@@ -3398,7 +3398,7 @@ command for those projects, or scan them with an online image.</p>
 only <code>--force</code> keeps the build from reusing the cached layers that hold the old tools, so
 rebuild the image on a schedule with it:</p>
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--no-run<span class="w"> </span>--force<span class="w"> </span>--oci-runner<span class="w"> </span>docker<span class="w"> </span>--ash-revision-to-install<span class="w"> </span>v3.7.0<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ash<span class="w"> </span>build-image<span class="w"> </span>--no-run<span class="w"> </span>--force<span class="w"> </span>--oci-runner<span class="w"> </span>docker<span class="w"> </span>--ash-revision-to-install<span class="w"> </span>main<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span>--container-uid<span class="w"> </span><span class="m">1001</span><span class="w"> </span>--container-gid<span class="w"> </span><span class="m">1001</span>
 </span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>docker<span class="w"> </span>push<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ASH_IMAGE_NAME</span><span class="s2">&quot;</span>
 </span></code></pre></div>
@@ -3428,9 +3428,11 @@ place your team works:</p>
 </span></code></pre></div></p>
 </li>
 <li>
-<p>AWS services: ASH's AWS reporters are loaded by the operator only. The S3 and CloudWatch
-  Logs reporters send the scan summary and configuration, not individual findings; read
-  <a href="../../plugins/aws/">AWS reporters</a> for what each one sends before you turn it on.</p>
+<p>AWS services: ASH's AWS reporters are loaded by the operator only. The CloudWatch Logs
+  reporter sends the scan summary and configuration, not individual findings. The S3
+  reporter sends the same two, and it sends the findings as the SARIF report inside its
+  object. Read <a href="../../plugins/aws/">AWS reporters</a> for what each one sends before you turn
+  it on.</p>
 </li>
 </ul>
 <p>Next, set the threshold and failure rules for your organization in

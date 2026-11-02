@@ -3295,12 +3295,12 @@ they use.</p>
 <tr>
 <td><code>s3</code></td>
 <td>An S3 bucket</td>
-<td>The scan summary and the resolved ASH configuration</td>
+<td>The scan summary, the resolved ASH configuration, and the SARIF report with the findings</td>
 </tr>
 <tr>
 <td><code>cloudwatch-logs</code></td>
 <td>A CloudWatch Logs log group</td>
-<td>The same summary and configuration</td>
+<td>The scan summary and the resolved ASH configuration</td>
 </tr>
 <tr>
 <td><code>bedrock-summary-reporter</code></td>
@@ -3310,13 +3310,15 @@ they use.</p>
 <tr>
 <td><code>aws-security-hub</code></td>
 <td>AWS Security Hub</td>
-<td>Nothing yet: the reporter checks its connection and writes a placeholder file (<a href="#aws-security-hub">details</a>)</td>
+<td>Every finding in the scan results, one record each: the rule, scanner, file and line, severity, the finding message with ASH's secret masking applied and code blocks removed, and the justification of a suppressed finding (<a href="#aws-security-hub">details</a>)</td>
 </tr>
 </tbody>
 </table>
-<p>The S3 and CloudWatch Logs reporters do not send individual findings. To collect findings
-centrally, copy a findings file such as <code>reports/ash.ocsf.json</code> or <code>reports/ash.sarif</code> to
-your storage yourself (<a href="../../how-to/export-reports/">Export reports</a>).</p>
+<p>The CloudWatch Logs reporter does not send individual findings. The S3 reporter sends them
+only as the SARIF report inside its object. The Security Hub reporter sends each finding as
+its own record. To collect findings centrally in another form,
+copy a findings file such as <code>reports/ash.ocsf.json</code> or <code>reports/ash.sarif</code> to your storage
+yourself (<a href="../../how-to/export-reports/">Export reports</a>).</p>
 <h2 id="enable">Load the package<a class="headerlink" href="#enable" title="Permanent link">&para;</a></h2>
 <p>Loading the package turns none of the reporters on: each one runs only when the operator
 sets <code>enabled: true</code> in its section. A section that sets a reporter's options but leaves
@@ -3513,9 +3515,19 @@ and <code>ash merge</code> take them from the defaults and <code>--config-overri
 <td><code>account_id</code></td>
 <td><code>null</code></td>
 </tr>
+<tr>
+<td><code>findings_scope</code></td>
+<td><code>null</code></td>
+</tr>
+<tr>
+<td><code>archive_resolved_findings</code></td>
+<td><code>false</code></td>
+</tr>
 </tbody>
 </table>
 <p>With no <code>account_id</code>, the Security Hub reporter uses the account of its credentials.
+<code>findings_scope</code> is required: the reporter refuses to import until the operator sets it
+(<a href="#aws-security-hub">what it names</a>).
 Turning a reporter on, <code>enabled</code>, is the operator's too (<a href="#enable">above</a>).</p>
 <p>When a config file inside any git checkout or the scanned directory sets one of these
 options, under any spelling of the reporter's section, ASH ignores it, logs a warning that
@@ -3537,16 +3549,20 @@ use <code>--offline</code>, or a network that blocks the metadata service, if th
 <h2 id="what-is-sent">What each reporter sends<a class="headerlink" href="#what-is-sent" title="Permanent link">&para;</a></h2>
 <p>The S3, CloudWatch Logs, and Bedrock reporters first call <code>sts:GetCallerIdentity</code>, which
 needs no IAM permission. The Security Hub reporter calls it in its pre-flight check when
-<code>account_id</code> is not set.</p>
+<code>account_id</code> is not set, and always before it imports.</p>
 <h3 id="s3"><code>s3</code><a class="headerlink" href="#s3" title="Permanent link">&para;</a></h3>
 <p>Uploads one object per scan to <code>&lt;key_prefix&gt;ash-report-&lt;generated_at&gt;.json</code> (in workspace
 mode <code>&lt;key_prefix&gt;&lt;project&gt;/ash-report-&lt;generated_at&gt;.json</code>), or <code>.yaml</code> with
-<code>file_format: yaml</code>. The object holds the scan summary: the report metadata and summary
+<code>file_format: yaml</code>. <code>key_prefix</code> is used as written: the object name follows it directly,
+so <code>scans/repo/</code> places the object under <code>scans/repo/</code> and <code>scans/repo-</code> writes
+<code>scans/repo-ash-report-&lt;generated_at&gt;.json</code>. End the prefix with <code>/</code> to use it as a
+directory; ASH warns once per run about a prefix that does not. The object holds the scan summary: the report metadata and summary
 counts, each scanner's and converter's status and finding counts, and the resolved ASH
 configuration, which includes your suppressions and ignore paths. In the configuration and
 the metadata, a value or key a config file read from the environment is the reference the
-file wrote (<a href="../../how-to/configure/#environment">Read values from the environment</a>). It holds no
-individual findings.</p>
+file wrote (<a href="../../how-to/configure/#environment">Read values from the environment</a>). When the
+scan produced a SARIF report, the object also holds it under the <code>sarif</code> key, and that report
+carries the individual findings.</p>
 <p>Before the upload it calls <code>HeadBucket</code>. Locally it writes the uploaded content to
 <code>reports/s3-report.json</code> and a receipt with the object URL to <code>reports/ash.s3.json</code>. When
 ASH cannot write the local copy, the receipt's <code>local_copy</code> is <code>null</code>, ASH logs a warning,
@@ -3554,8 +3570,8 @@ and the upload still counts.</p>
 <p>IAM: <code>s3:PutObject</code> on <code>arn:aws:s3:::&lt;bucket&gt;/&lt;key_prefix&gt;*</code>, and <code>s3:ListBucket</code> on the
 bucket, which <code>HeadBucket</code> requires.</p>
 <h3 id="cloudwatch-logs"><code>cloudwatch-logs</code><a class="headerlink" href="#cloudwatch-logs" title="Permanent link">&para;</a></h3>
-<p>Sends one log event per scan with the same summary and configuration as the S3 object,
-to the stream <code>log_stream_name</code> in <code>log_group_name</code>. It creates the stream if needed;
+<p>Sends one log event per scan with the scan summary and the resolved ASH configuration the S3
+object holds, without the SARIF report, to the stream <code>log_stream_name</code> in <code>log_group_name</code>. It creates the stream if needed;
 the log group must already exist. Locally it writes the event and the API response to
 <code>reports/ash.cwlog.json</code>.</p>
 <p>IAM: <code>logs:CreateLogStream</code> and <code>logs:PutLogEvents</code> on the log group.</p>
@@ -3565,7 +3581,13 @@ assessment, recommendations, and a technical analysis, and writes them to
 <code>reports/ash.bedrock.summary.md</code>, <code>reports/bedrock-executive.md</code>, and
 <code>reports/bedrock-technical.md</code>. <code>output_file</code>, <code>output_executive_file</code>, and
 <code>output_technical_file</code> change those names, and must be plain file names in <code>reports/</code>:
-ASH does not write a file whose name leads anywhere else, and logs a warning. A test scan of a small project with one finding made six
+ASH does not write a file whose name leads anywhere else, and logs a warning. Two reports
+cannot share a file: when two of the three options name one file, the later option takes
+its default and ASH logs one warning, or refuses the configuration when that default is
+taken too. Names that differ only in letter case count as one file, since the file systems
+of macOS and Windows treat them so. Only reports that are written are compared, so a name
+for a section in <code>exclude_sections</code>, or any name with <code>output_markdown: false</code>, is left
+alone. A test scan of a small project with one finding made six
 Converse calls; more severity levels in the results mean more calls.</p>
 <p>The prompts contain the names of every scanner in the results, severity counts, and, for
 each finding sent, its level, its message text, and its file paths. Line numbers are sent
@@ -3603,15 +3625,37 @@ account and Region you name. In the operator's config file:</p>
 </span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="nt">options</span><span class="p">:</span>
 </span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">      </span><span class="nt">aws_region</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">us-east-1</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">      </span><span class="nt">findings_scope</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-repository</span>
 </span></code></pre></div>
-<p>This version of the reporter does not import findings yet. Its pre-flight check needs
-the Region, calls <code>DescribeHub</code>, and calls <code>sts:GetCallerIdentity</code> when <code>account_id</code> is not
-set; when one fails, ASH logs an error and the reporter does not run. When the checks pass,
-<code>report()</code> logs a warning that the Security Hub import is not implemented, sends nothing to
-Security Hub, and writes a placeholder file, <code>reports/ash.aws-security-hub.asff.json</code>,
-that holds a message and the number of findings in the results. In a workspace scan the
-reporter runs once per project.</p>
-<p>IAM: <code>securityhub:DescribeHub</code>.</p>
+<p>The reporter imports every finding in the scan results into Security Hub with
+<code>BatchImportFindings</code>, in requests of at most 100 findings, under the account's default
+product ARN. A finding carries the rule, the scanner, the file and line, ASH's severity,
+and the result message with ASH's secret masking applied and its code blocks removed. No
+code snippet is sent. A suppressed finding is sent too, with the record state <code>ARCHIVED</code>
+and its suppression justification, so a finding imported before it was suppressed is
+archived by the next scan.</p>
+<p>Security Hub keys a finding on its <code>Id</code>. ASH derives the <code>Id</code> from <code>findings_scope</code> and the
+finding's identity, so a re-scan updates a finding and does not add a second one.
+<code>findings_scope</code> names the findings this scan owns, and it must be unique among the
+repositories that import into the same account and Region. It is required: without it the
+reporter refuses to import, before it calls AWS. Like the Region and the account, it is the
+operator's to set.</p>
+<p>With <code>archive_resolved_findings: true</code>, a finding that an earlier scan of the same scope
+imported and this scan no longer reports is imported again as <code>ARCHIVED</code>, for the scanners
+that lost no target in this run. The option is off by default, because a finding a scan did
+not report is not always fixed.</p>
+<p>The pre-flight check of a scan needs the Region, calls <code>DescribeHub</code>, and calls
+<code>sts:GetCallerIdentity</code> when <code>account_id</code> is not set; when one fails, ASH logs an error and
+the reporter does not run. A refusal of <code>DescribeHub</code> for lack of permission only logs a
+warning, and the import reports its own refusal. Before it imports, the reporter calls
+<code>sts:GetCallerIdentity</code> whether or not <code>account_id</code> is set, and refuses to import when
+<code>account_id</code> names any other account than the credentials'. If Security Hub does not import every finding, the reporter fails
+with the counts and the reason, and <code>ash report</code> exits non-zero. The file the reporter
+writes, <code>reports/ash.aws-security-hub.asff.json</code>, is a receipt with the number of findings
+imported and archived, plus the findings as they were sent. In a workspace scan the reporter
+runs once per project.</p>
+<p>IAM: <code>securityhub:BatchImportFindings</code>, <code>securityhub:DescribeHub</code> for the pre-flight check,
+and <code>securityhub:GetFindings</code> when <code>archive_resolved_findings</code> is on.</p>
 <h2 id="ash-report">Rendering a reporter from saved results<a class="headerlink" href="#ash-report" title="Permanent link">&para;</a></h2>
 <p><code>ash report --format s3</code>, or the name of any of the other three, runs that reporter
 against the results of a previous scan, which sends the data again. Stored results do not

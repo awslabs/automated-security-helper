@@ -3165,7 +3165,7 @@ SOFTWARE.
 
 <h1 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h1>
 <p>This page is generated from the code that reads each variable by <code>scripts/generate_env_var_reference.py</code>. Edits made to this file by hand are overwritten the next time it is generated.</p>
-<p>ASH reads 141 environment variables: 58 of its own (<code>ASH_</code> prefix) and 83 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
+<p>ASH reads 156 environment variables: 58 of its own (<code>ASH_</code> prefix) and 98 set by other tools or the platform. The tables list every place each one is read. A variable that sets a CLI option links to that option; the option on the command line takes precedence over the variable.</p>
 <p>Columns:</p>
 <ul>
 <li>Default: the value the code uses when the variable is unset, as written in the code, at each read that supplies one. Where none does, or the only one is an empty string, it is the default of the CLI option the variable sets, or of the configuration key it is the default of. Blank means none of these supplies one (the code checks whether the variable is set, or treats unset as empty).</li>
@@ -3280,8 +3280,8 @@ SOFTWARE.
 <td><code>ASH_CONFIG</code></td>
 <td>not set</td>
 <td></td>
-<td><code>ash</code> (top level)<br><code>automated_security_helper/cli/config.py</code> (<code>_refused_file_label</code>, <code>get</code>, <code>init</code>, <code>lint</code>, <code>update</code>, <code>validate</code>, <code>validate_plugin_dependencies</code>, <code>wizard</code>)<br><code>automated_security_helper/cli/dependencies.py</code> (<code>install_dependencies</code>)<br><code>automated_security_helper/cli/image.py</code> (<code>build_ash_image_cli_command</code>)<br><code>automated_security_helper/cli/inspect/inspect_findings_app.py</code> (<code>findings_command</code>)<br><code>automated_security_helper/cli/mcp/__init__.py</code> (<code>_ash_config_refusal</code>)<br><code>automated_security_helper/cli/merge.py</code> (<code>merge_command</code>)<br><code>automated_security_helper/cli/plugin.py</code> (<code>list_plugins</code>)<br><code>automated_security_helper/cli/report.py</code> (<code>report_command</code>)<br><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/config/config_validator.py</code> (<code>ConfigValidator._ash_config_check</code>)<br><code>automated_security_helper/config/default_config.py</code> (<code>_ash_config_file</code>, <code>default_config_document</code>, <code>default_config_document_for_tree</code>, <code>get_default_config</code>)<br><code>automated_security_helper/config/named_config.py</code> (<code>refuse_a_named_config_that_does_not_exist</code>)<br><code>automated_security_helper/config/resolve_config.py</code> (<code>_resolve_config</code>, <code>resolve_config</code>)<br><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_host_ash_config</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_ash_config_fallback</code>, <code>_gate_has_a_schema_to_judge</code>, <code>_outer_mode_config_load</code>, <code>_refuse_a_named_config_that_is_not_a_file</code>, <code>run_ash_scan</code>)<br><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
-<td>Sets <a href="../cli/#build-image--config"><code>ash build-image --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#config-get--config"><code>ash config get --config</code></a>. The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-init--config"><code>ash config init --config</code></a>. Where to write the new config file. By default .ashrc.yaml in the current directory, a name a scan of that directory reads. Discovery reads these names: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Can also be set with the ASH_CONFIG environment variable.<br>Sets <a href="../cli/#config-lint--config"><code>ash config lint --config</code></a>. The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-update--config"><code>ash config update --config</code></a>. The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-validate--config"><code>ash config validate --config</code></a>. The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-validate-plugin-dependencies--config"><code>ash config validate-plugin-dependencies --config</code></a>. The path to the configuration file. By default, the config a scan of the current directory would use: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-wizard--config"><code>ash config wizard --config</code></a>. Path to read/write the configuration file. By default, the config a scan of the current directory would use, or a new .ashrc.yaml when there is none.<br>Sets <a href="../cli/#dependencies-install--config"><code>ash dependencies install --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#inspect-findings--config"><code>ash inspect findings --config</code></a>. Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. With none found, suppressions go to a new .ashrc.yaml in the current directory.<br>Sets <a href="../cli/#merge--config"><code>ash merge --config</code></a>. The operator's config file. Its values replace the shards' for the settings a shard's recorded config cannot choose, such as where reporters send findings and which off-host reporters run. Its ash_plugin_modules are the plugin modules the merge loads, with any --config-overrides adds; a module only the shards recorded is not loaded. It adds no reporter section the shards did not record; use --config-overrides for that.<br>Sets <a href="../cli/#plugin-list--config"><code>ash plugin list --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#report--config"><code>ash report --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#scan--config"><code>ash scan --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.</td>
+<td><code>ash</code> (top level)<br><code>automated_security_helper/cli/config.py</code> (<code>_refused_file_label</code>, <code>get</code>, <code>init</code>, <code>lint</code>, <code>update</code>, <code>validate</code>, <code>validate_plugin_dependencies</code>, <code>wizard</code>)<br><code>automated_security_helper/cli/dependencies.py</code> (<code>install_dependencies</code>)<br><code>automated_security_helper/cli/image.py</code> (<code>build_ash_image_cli_command</code>)<br><code>automated_security_helper/cli/inspect/inspect_findings_app.py</code> (<code>findings_command</code>)<br><code>automated_security_helper/cli/mcp/__init__.py</code> (<code>_ash_config_refusal</code>)<br><code>automated_security_helper/cli/merge.py</code> (<code>merge_command</code>)<br><code>automated_security_helper/cli/plugin.py</code> (<code>list_plugins</code>)<br><code>automated_security_helper/cli/report.py</code> (<code>_named_config_files</code>, <code>_refused_config_name</code>, <code>report_command</code>)<br><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)<br><code>automated_security_helper/config/config_validator.py</code> (<code>ConfigValidator._ash_config_check</code>)<br><code>automated_security_helper/config/default_config.py</code> (<code>_ash_config_file</code>, <code>default_config_document</code>, <code>default_config_document_for_tree</code>, <code>get_default_config</code>)<br><code>automated_security_helper/config/named_config.py</code> (<code>refuse_a_named_config_that_does_not_exist</code>)<br><code>automated_security_helper/config/resolve_config.py</code> (<code>_resolve_config</code>, <code>resolve_config</code>)<br><code>automated_security_helper/interactions/run_ash_container.py</code> (<code>_host_ash_config</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_ash_config_fallback</code>, <code>_gate_has_a_schema_to_judge</code>, <code>_nix_inner_argv</code>, <code>_outer_mode_config_load</code>, <code>_refuse_a_named_config_that_is_not_a_file</code>, <code>run_ash_scan</code>)<br><code>utils/ash_helpers.ps1</code> (<code>Invoke-ASH</code>)</td>
+<td>Sets <a href="../cli/#build-image--config"><code>ash build-image --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#config-get--config"><code>ash config get --config</code></a>. The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-init--config"><code>ash config init --config</code></a>. Where to write the new config file. By default .ashrc.yaml in the current directory, a name a scan of that directory reads. Discovery reads these names: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Can also be set with the ASH_CONFIG environment variable.<br>Sets <a href="../cli/#config-lint--config"><code>ash config lint --config</code></a>. The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-update--config"><code>ash config update --config</code></a>. The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-validate--config"><code>ash config validate --config</code></a>. The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-validate-plugin-dependencies--config"><code>ash config validate-plugin-dependencies --config</code></a>. The path to the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given): ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used.<br>Sets <a href="../cli/#config-wizard--config"><code>ash config wizard --config</code></a>. Path to read/write the configuration file. By default, the config a scan of --source-dir would use (the current directory when --source-dir is not given), or a new .ashrc.yaml in that directory when there is none.<br>Sets <a href="../cli/#dependencies-install--config"><code>ash dependencies install --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#inspect-findings--config"><code>ash inspect findings --config</code></a>. Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used in the scanned directory (the one holding the results' .ash/ash_output), or in the current directory when the results sit elsewhere. With none found, suppressions go to a new .ashrc.yaml there.<br>Sets <a href="../cli/#merge--config"><code>ash merge --config</code></a>. The operator's config file. Its values replace the shards' for the settings a shard's recorded config cannot choose, such as where reporters send findings and which off-host reporters run. Its ash_plugin_modules are the plugin modules the merge loads, with any --config-overrides adds; a module only the shards recorded is not loaded. It adds no reporter section the shards did not record; use --config-overrides for that.<br>Sets <a href="../cli/#plugin-list--config"><code>ash plugin list --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#report--config"><code>ash report --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.<br>Sets <a href="../cli/#scan--config"><code>ash scan --config</code></a>. The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json'] (each at the root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml', '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table of pyproject.toml at the root; the first found is used. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.</td>
 </tr>
 <tr>
 <td><code>ASH_DEBUG</code></td>
@@ -3330,7 +3330,7 @@ SOFTWARE.
 <td></td>
 <td></td>
 <td><code>automated_security_helper/utils/download_utils.py</code> (<code>_download_retry_policy</code>)</td>
-<td>Purpose not documented in code.</td>
+<td>The exponent is bounded as well as the result: <code>2 ** (attempt - 1)</code> as an int converted to float raises OverflowError past 2 ** 1023, so with <code>ASH_DOWNLOAD_MAX_ATTEMPTS</code> above that the backoff replaced the download error with its own. (<code>automated_security_helper/utils/download_utils.py</code>, <code>_retry_delay</code>)</td>
 </tr>
 <tr>
 <td><code>ASH_DOWNLOAD_RETRY_DELAY</code></td>
@@ -3371,7 +3371,7 @@ SOFTWARE.
 <td><code>ASH_IN_NIX</code></td>
 <td><code>NO</code></td>
 <td></td>
-<td><code>automated_security_helper/interactions/run_ash_nix.py</code> (<code>run_ash_nix</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_log_files_the_nix_host_opened</code>)</td>
+<td><code>automated_security_helper/interactions/run_ash_nix.py</code> (<code>nix_executable_for_this_run</code>)<br><code>automated_security_helper/interactions/run_ash_scan.py</code> (<code>_log_files_the_nix_host_opened</code>)</td>
 <td>Recursion guard, following the existing ASH_IN_CONTAINER precedent. The inner invocation is rewritten to --mode local, so this should never be observed as already set; it is checked anyway because the alternative to a loud failure is a fork bomb. (<code>automated_security_helper/interactions/run_ash_nix.py</code>)</td>
 </tr>
 <tr>
@@ -3539,8 +3539,8 @@ SOFTWARE.
 <td><code>ASH_SOURCE_DIR</code></td>
 <td>not set</td>
 <td></td>
-<td><code>automated_security_helper/cli/config.py</code> (<code>get</code>, <code>lint</code>, <code>validate</code>, <code>validate_plugin_dependencies</code>)<br><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
-<td>Sets <a href="../cli/#config-get--source-dir"><code>ash config get --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#config-lint--source-dir"><code>ash config lint --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#config-validate--source-dir"><code>ash config validate --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#config-validate-plugin-dependencies--source-dir"><code>ash config validate-plugin-dependencies --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#scan--source-dir"><code>ash scan --source-dir</code></a>. The source directory to scan</td>
+<td><code>automated_security_helper/cli/config.py</code> (<code>get</code>, <code>lint</code>, <code>update</code>, <code>validate</code>, <code>validate_plugin_dependencies</code>, <code>wizard</code>)<br><code>automated_security_helper/cli/scan.py</code> (<code>run_ash_scan_cli_command</code>)</td>
+<td>Sets <a href="../cli/#config-get--source-dir"><code>ash config get --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#config-lint--source-dir"><code>ash config lint --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#config-update--source-dir"><code>ash config update --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#config-validate--source-dir"><code>ash config validate --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#config-validate-plugin-dependencies--source-dir"><code>ash config validate-plugin-dependencies --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#config-wizard--source-dir"><code>ash config wizard --source-dir</code></a>. The directory a scan would scan, as <code>ash scan --source-dir</code>: the config is discovered there unless --config names one, and a config inside it may only extend files inside it. Defaults to the current directory.<br>Sets <a href="../cli/#scan--source-dir"><code>ash scan --source-dir</code></a>. The source directory to scan</td>
 </tr>
 <tr>
 <td><code>ASH_STATE_DIR</code></td>
@@ -3638,7 +3638,7 @@ SOFTWARE.
 <td><code>us-east-1</code></td>
 <td></td>
 <td><code>automated_security_helper/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py</code> (<code>BedrockSummaryReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/cloudwatch_logs_reporter.py</code> (<code>CloudWatchLogsReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/s3_reporter.py</code> (<code>S3ReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/security_hub_reporter.py</code> (<code>SecurityHubReporterConfigOptions</code>)</td>
-<td>Sets the default of <a href="../reporters/#reporters.aws-security-hub.options.aws_region"><code>reporters.aws-security-hub.options.aws_region</code></a>, <a href="../reporters/#reporters.bedrock-summary-reporter.options.aws_region"><code>reporters.bedrock-summary-reporter.options.aws_region</code></a>, <a href="../reporters/#reporters.cloudwatch-logs.options.aws_region"><code>reporters.cloudwatch-logs.options.aws_region</code></a>, <a href="../reporters/#reporters.s3.options.aws_region"><code>reporters.s3.options.aws_region</code></a>.</td>
+<td>Sets the default of <a href="../reporters/#reporters.bedrock-summary-reporter.options.aws_region"><code>reporters.bedrock-summary-reporter.options.aws_region</code></a>.</td>
 </tr>
 <tr>
 <td><code>AWS_PROFILE</code></td>
@@ -3649,7 +3649,7 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>AWS_REGION</code></td>
-<td><code>os.environ.get("AWS_DEFAULT_REGION", "us-east-1")</code><br><code>os.environ.get("AWS_DEFAULT_REGION", None)</code></td>
+<td><code>os.environ.get("AWS_DEFAULT_REGION", "us-east-1")</code></td>
 <td></td>
 <td><code>automated_security_helper/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py</code> (<code>BedrockSummaryReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/cloudwatch_logs_reporter.py</code> (<code>CloudWatchLogsReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/s3_reporter.py</code> (<code>S3ReporterConfigOptions</code>)<br><code>automated_security_helper/plugin_modules/ash_aws_plugins/security_hub_reporter.py</code> (<code>SecurityHubReporterConfigOptions</code>)</td>
 <td>Sets the default of <a href="../reporters/#reporters.aws-security-hub.options.aws_region"><code>reporters.aws-security-hub.options.aws_region</code></a>, <a href="../reporters/#reporters.bedrock-summary-reporter.options.aws_region"><code>reporters.bedrock-summary-reporter.options.aws_region</code></a>, <a href="../reporters/#reporters.cloudwatch-logs.options.aws_region"><code>reporters.cloudwatch-logs.options.aws_region</code></a>, <a href="../reporters/#reporters.s3.options.aws_region"><code>reporters.s3.options.aws_region</code></a>.</td>
@@ -3704,6 +3704,27 @@ SOFTWARE.
 <td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
 </tr>
 <tr>
+<td><code>CONTAINERD_ADDRESS</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_daemon_environment</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>CONTAINERD_NAMESPACE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_daemon_environment</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>CONTAINER_CONNECTION</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_daemon_environment</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
 <td><code>CONTAINER_HOST</code></td>
 <td></td>
 <td></td>
@@ -3711,11 +3732,25 @@ SOFTWARE.
 <td>Purpose not documented in code.</td>
 </tr>
 <tr>
+<td><code>DEVELOPER_DIR</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/cfn_nag_scanner.py</code> (<code>_macos_developer_tools_present</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>DOCKER_CONFIG</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_daemon_environment</code>, <code>_docker_current_context</code>)</td>
+<td>Without DOCKER_HOST or DOCKER_CONTEXT the client reads <code>currentContext</code> from <code>config.json</code> under <code>DOCKER_CONFIG</code> (<code>~/.docker</code> by default), so a run under another context talks to another daemon with no variable changed. (<code>automated_security_helper/interactions/container_leftovers.py</code>, <code>_docker_current_context</code>)</td>
+</tr>
+<tr>
 <td><code>DOCKER_CONTEXT</code></td>
 <td></td>
 <td></td>
 <td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_daemon_environment</code>)</td>
-<td>Purpose not documented in code.</td>
+<td>Without DOCKER_HOST or DOCKER_CONTEXT the client reads <code>currentContext</code> from <code>config.json</code> under <code>DOCKER_CONFIG</code> (<code>~/.docker</code> by default), so a run under another context talks to another daemon with no variable changed. (<code>automated_security_helper/interactions/container_leftovers.py</code>, <code>_docker_current_context</code>)</td>
 </tr>
 <tr>
 <td><code>DOCKER_EXTRA_ARGS</code></td>
@@ -3729,6 +3764,13 @@ SOFTWARE.
 <td></td>
 <td></td>
 <td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_daemon_environment</code>)</td>
+<td>Without DOCKER_HOST or DOCKER_CONTEXT the client reads <code>currentContext</code> from <code>config.json</code> under <code>DOCKER_CONFIG</code> (<code>~/.docker</code> by default), so a run under another context talks to another daemon with no variable changed. (<code>automated_security_helper/interactions/container_leftovers.py</code>, <code>_docker_current_context</code>)</td>
+</tr>
+<tr>
+<td><code>EXTRA_BUILD_ARGS</code></td>
+<td></td>
+<td></td>
+<td><code>ash</code> (top level)</td>
 <td>Purpose not documented in code.</td>
 </tr>
 <tr>
@@ -3756,15 +3798,15 @@ SOFTWARE.
 <td><code>GITLEAKS_CONFIG</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code> (<code>GitleaksScanner._rescan_env</code>, <code>GitleaksScanner._resolve_config_file</code>)</td>
-<td>Environment variables gitleaks reads a config from. When either is set, outside the scanner sandbox, ASH does not pass <code>gitleaks --config</code> and gitleaks resolves it. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code>)</td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code> (<code>GitleaksScanner._config_env_value</code>, <code>GitleaksScanner._resolve_config_file</code>)</td>
+<td>Environment variables gitleaks reads a config from. When either is set, outside the scanner sandbox, ASH passes no <code>gitleaks --config</code> and gitleaks reads the variable; a non-absolute <code>GITLEAKS_CONFIG</code> is anchored to the directory ASH runs in and passed as <code>gitleaks --config</code>, so the scanned tree cannot supply it. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code>)</td>
 </tr>
 <tr>
 <td><code>GITLEAKS_CONFIG_TOML</code></td>
 <td></td>
 <td></td>
 <td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code> (<code>GitleaksScanner._resolve_config_file</code>)</td>
-<td>Environment variables gitleaks reads a config from. When either is set, outside the scanner sandbox, ASH does not pass <code>gitleaks --config</code> and gitleaks resolves it. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code>)</td>
+<td>Environment variables gitleaks reads a config from. When either is set, outside the scanner sandbox, ASH passes no <code>gitleaks --config</code> and gitleaks reads the variable; a non-absolute <code>GITLEAKS_CONFIG</code> is anchored to the directory ASH runs in and passed as <code>gitleaks --config</code>, so the scanned tree cannot supply it. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/gitleaks_scanner.py</code>)</td>
 </tr>
 <tr>
 <td><code>GIT_CEILING_DIRECTORIES</code></td>
@@ -3774,31 +3816,45 @@ SOFTWARE.
 <td><code>GIT_CEILING_DIRECTORIES</code> is honored as git honors it: *directory* itself is always looked at, listed or not, and the search stops before it would move up into a listed directory. (<code>automated_security_helper/utils/scan_output_dirs.py</code>, <code>_repository_root_of</code>)</td>
 </tr>
 <tr>
+<td><code>GIT_COMMON_DIR</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/get_scan_set.py</code> (<code>_layout_environ</code>)</td>
+<td>Variables that point git at a repository whatever its working directory is. (<code>automated_security_helper/utils/get_scan_set.py</code>)</td>
+</tr>
+<tr>
 <td><code>GIT_DIR</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/scan_source.py</code> (<code>_a_git_entry_may_exist</code>)</td>
-<td>True with a <code>.git</code> entry (of any kind: directory, file, symlink) in the directory or one of its parents, with GIT_DIR or GIT_WORK_TREE in *environ*, which point git at a repository wherever it runs, or whenever the walk cannot be sure: a directory that cannot be resolved, or a parent whose <code>.git</code> entry cannot be ... (<code>automated_security_helper/utils/scan_source.py</code>, <code>_a_git_entry_may_exist</code>)</td>
+<td><code>automated_security_helper/utils/get_scan_set.py</code> (<code>_layout_environ</code>)<br><code>automated_security_helper/utils/scan_source.py</code> (<code>_a_git_entry_may_exist</code>)</td>
+<td>Variables that point git at a repository whatever its working directory is. (<code>automated_security_helper/utils/get_scan_set.py</code>)</td>
+</tr>
+<tr>
+<td><code>GIT_INDEX_FILE</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/get_scan_set.py</code> (<code>_layout_environ</code>)</td>
+<td>A kept copy never carries GIT_INDEX_FILE: the diff compares two commits and reads no index, so the variable is left out as defense in depth, and no git started here reads an index exported for another purpose (a pre-commit hook's temporary index names the files being committed, not the tree). (<code>automated_security_helper/utils/get_scan_set.py</code>, <code>_layout_environ</code>)</td>
 </tr>
 <tr>
 <td><code>GIT_WORK_TREE</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/scan_source.py</code> (<code>_a_git_entry_may_exist</code>)</td>
-<td>True with a <code>.git</code> entry (of any kind: directory, file, symlink) in the directory or one of its parents, with GIT_DIR or GIT_WORK_TREE in *environ*, which point git at a repository wherever it runs, or whenever the walk cannot be sure: a directory that cannot be resolved, or a parent whose <code>.git</code> entry cannot be ... (<code>automated_security_helper/utils/scan_source.py</code>, <code>_a_git_entry_may_exist</code>)</td>
+<td><code>automated_security_helper/utils/get_scan_set.py</code> (<code>_layout_environ</code>)</td>
+<td>Variables that point git at a repository whatever its working directory is. (<code>automated_security_helper/utils/get_scan_set.py</code>)</td>
 </tr>
 <tr>
 <td><code>GRYPE_DB_CACHE_DIR</code></td>
 <td></td>
 <td><code>/deps/.grype</code> (core)</td>
-<td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>validate_grype_offline_mode</code>)<br><code>utils/grype-docker-execute.sh</code> (top level)</td>
-<td>Check for GRYPE_DB_CACHE_DIR environment variable (<code>automated_security_helper/utils/offline_mode_validator.py</code>, <code>validate_grype_offline_mode</code>)</td>
+<td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>_cache_directory</code>)<br><code>utils/grype-docker-execute.sh</code> (top level)</td>
+<td>Purpose not documented in code.</td>
 </tr>
 <tr>
 <td><code>HOME</code></td>
-<td><code>""</code></td>
+<td></td>
 <td><code>${ASHUSER_HOME}</code> (non-root)</td>
-<td><code>automated_security_helper/core/constants.py</code> (<code>usable_home</code>, <code>warn_if_home_unusable</code>)</td>
+<td><code>automated_security_helper/core/constants.py</code> (<code>usable_home</code>)<br><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_policy_home</code>)</td>
 <td>On POSIX it is HOME when HOME is set, not empty, and absolute. (<code>automated_security_helper/core/constants.py</code>, <code>usable_home</code>)</td>
 </tr>
 <tr>
@@ -3812,8 +3868,8 @@ SOFTWARE.
 <td><code>JSII_NODE</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/cdk_nag_wrapper.py</code> (<code>run_cdk_nag_against_cfn_template</code>)</td>
-<td>jsii starts JSII_NODE, or "node" by name, which on Windows is looked for in the working directory first; this process runs in ASH's, usually the repository being scanned. So it is given the node ASH resolved, as an absolute path. (<code>automated_security_helper/utils/cdk_nag_wrapper.py</code>, <code>run_cdk_nag_against_cfn_template</code>)</td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner.py</code> (<code>_jsii_node_value</code>)<br><code>automated_security_helper/utils/cdk_nag_wrapper.py</code> (<code>run_cdk_nag_against_cfn_template</code>)</td>
+<td>The value of <code>JSII_NODE</code>, or "" when it is unset or empty. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner.py</code>, <code>_jsii_node_value</code>)</td>
 </tr>
 <tr>
 <td><code>LC_ALL</code></td>
@@ -3833,14 +3889,14 @@ SOFTWARE.
 <td><code>MKDIR_REASON</code></td>
 <td><code>mkdir did not make it</code></td>
 <td></td>
-<td><code>ash</code> (top level)</td>
+<td><code>ash</code> (<code>create_output_dir</code>)</td>
 <td>Purpose not documented in code.</td>
 </tr>
 <tr>
 <td><code>NO_COLOR</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/cli/report.py</code> (<code>report_command</code>)</td>
+<td><code>automated_security_helper/cli/report.py</code> (<code>report_command</code>)<br><code>automated_security_helper/core/metrics_table.py</code> (<code>display_metrics_table</code>)</td>
 <td><code>pretty</code> is color being on (no <code>--no-color</code>, no NO_COLOR); it takes effect only when *stream* is an interactive terminal. (<code>automated_security_helper/cli/report.py</code>, <code>_write_report</code>)</td>
 </tr>
 <tr>
@@ -3848,7 +3904,7 @@ SOFTWARE.
 <td></td>
 <td></td>
 <td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>validate_npm_audit_offline_mode</code>)</td>
-<td>Purpose not documented in code.</td>
+<td>Check for npm cache directory. npm reads its configuration variables in the lowercase spelling (<code>npm_config_cache</code>) as well as the uppercase one; on POSIX the two are different variables, and only the uppercase one was read here. (<code>automated_security_helper/utils/offline_mode_validator.py</code>, <code>validate_npm_audit_offline_mode</code>)</td>
 </tr>
 <tr>
 <td><code>OCI_RUNNER</code></td>
@@ -3875,7 +3931,7 @@ SOFTWARE.
 <td><code>PATH</code></td>
 <td><code>""</code><br><code>os.defpath</code></td>
 <td><code>/root/.local/bin:$PATH</code> (uv-reqs)<br><code>/root/.local/bin:$PATH</code> (core)<br><code>/usr/local/bin:$PATH</code> (core)<br><code>${ASH_BIN_PATH}:$PATH</code> (core)<br><code>${ASHUSER_HOME}/.local/bin:$PATH</code> (non-root)</td>
-<td><code>automated_security_helper/assets/install-pinned-tool.py</code> (<code>_absolute_entries</code>)<br><code>automated_security_helper/utils/sandbox/backends.py</code> (<code>_probe_env</code>)<br><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_path_directories</code>)<br><code>automated_security_helper/utils/subprocess_utils.py</code> (<code>_absolute_path_entries</code>, <code>_lookup</code>, <code>started_from_working_directory</code>)<br><code>automated_security_helper/utils/uv_tool_runner.py</code> (<code>_lookup_key</code>)</td>
+<td><code>automated_security_helper/assets/install-pinned-tool.py</code> (<code>_absolute_entries</code>)<br><code>automated_security_helper/utils/sandbox/backends.py</code> (<code>_probe_env</code>)<br><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_path_directories</code>)<br><code>automated_security_helper/utils/subprocess_utils.py</code> (<code>_absolute_path_entries</code>, <code>_found_on_the_childs_path</code>, <code>_lookup</code>, <code>started_from_working_directory</code>)<br><code>automated_security_helper/utils/uv_tool_runner.py</code> (<code>_lookup_key</code>)</td>
 <td>The absolute entries of <code>search_path</code>, or of PATH. (<code>automated_security_helper/assets/install-pinned-tool.py</code>, <code>_absolute_entries</code>)</td>
 </tr>
 <tr>
@@ -3887,10 +3943,17 @@ SOFTWARE.
 </tr>
 <tr>
 <td><code>PYTHONIOENCODING</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/cli/entrypoint.py</code> (<code>_stream_codec</code>)<br><code>automated_security_helper/utils/process_env.py</code> (<code>setdefault_environ</code>)</td>
+<td>As the interpreter chooses them for the streams it makes at start: <code>PYTHONIOENCODING</code> (<code>encoding[:errors]</code>, unless <code>python -E</code> ignores the environment), UTF-8 under UTF-8 mode (<code>-X utf8</code>, <code>PYTHONUTF8=1</code>), else the locale's codec, <code>None</code> here. (<code>automated_security_helper/cli/entrypoint.py</code>, <code>_stream_codec</code>)</td>
+</tr>
+<tr>
+<td><code>PYTHONPATH</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/process_env.py</code> (<code>setdefault_environ</code>)</td>
-<td>Purpose not documented in code.</td>
+<td><code>automated_security_helper/interactions/run_ash_nix.py</code> (<code>run_ash_nix</code>)</td>
+<td>The operator's own PYTHONPATH, for the inner command to put back on sys.path once the shell's hook has unset PYTHONPATH (OUTER_PYTHONPATH_ENV_VAR). Read from this process's environment: it is what made this ASH importable. (<code>automated_security_helper/interactions/run_ash_nix.py</code>, <code>run_ash_nix</code>)</td>
 </tr>
 <tr>
 <td><code>PY_COLORS</code></td>
@@ -3928,6 +3991,13 @@ SOFTWARE.
 <td>Windows equivalents, read from the shell's own directory variables so the policy follows a system installed on a drive other than C:. (<code>automated_security_helper/cli/mcp/scan_target.py</code>)</td>
 </tr>
 <tr>
+<td><code>RESOLVED_DIR</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>ash</code> (<code>below_the_source</code>)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
 <td><code>RI_DEVKIT</code></td>
 <td></td>
 <td></td>
@@ -3939,13 +4009,13 @@ SOFTWARE.
 <td></td>
 <td></td>
 <td><code>automated_security_helper/utils/process_env.py</code> (<code>hold_environ</code>, <code>release_environ</code>)</td>
-<td>semgrep's own switch for its version check: the variable its <code>semgrep --enable-version-check</code> / <code>semgrep --disable-version-check</code> option reads. "0" is off. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/semgrep_scanner.py</code>)</td>
+<td>The variable is set before the hold is recorded: a set that raises (a value that is not a str) leaves no hold behind that no caller would release. (<code>automated_security_helper/utils/process_env.py</code>, <code>hold_environ</code>)</td>
 </tr>
 <tr>
 <td><code>SEMGREP_RULES_CACHE_DIR</code></td>
 <td><code>""</code></td>
 <td><code>/deps/.semgrep</code> (core)</td>
-<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_grep_scanner_base.py</code> (<code>GrepScannerBase._configure_offline_mode</code>, <code>GrepScannerBase.content_database_probe_context</code>)<br><code>automated_security_helper/plugin_modules/ash_builtin/scanners/semgrep_scanner.py</code> (<code>SemgrepScanner.extra_subprocess_env</code>)<br><code>utils/grype-docker-execute.sh</code> (top level)</td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_grep_scanner_base.py</code> (<code>GrepScannerBase._configure_offline_mode</code>, <code>GrepScannerBase.content_database_probe_context</code>)<br><code>utils/grype-docker-execute.sh</code> (top level)</td>
 <td>Env var pointing at the offline rule cache (e.g. SEMGREP_RULES_CACHE_DIR). (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/_grep_scanner_base.py</code>, <code>GrepScannerBase.cache_dir_env_var</code>)</td>
 </tr>
 <tr>
@@ -3998,6 +4068,13 @@ SOFTWARE.
 <td>The variable each runner that reads workflow commands from a job's output sets in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode and ./ash pass each one that is set into the container, so the scan there checks a terminal's lines too. (<code>automated_security_helper/utils/command_safe_stream.py</code>)</td>
 </tr>
 <tr>
+<td><code>TEMP</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_env_dir_parents</code>)</td>
+<td>The variables <code>tempfile.gettempdir</code> reads, in the order it reads them. (<code>automated_security_helper/interactions/container_leftovers.py</code>)</td>
+</tr>
+<tr>
 <td><code>TERMINAL_WIDTH</code></td>
 <td><code>""</code></td>
 <td></td>
@@ -4012,11 +4089,18 @@ SOFTWARE.
 <td>The variable each runner that reads workflow commands from a job's output sets in every job: GitHub Actions, Azure Pipelines, TeamCity. Container mode and ./ash pass each one that is set into the container, so the scan there checks a terminal's lines too. (<code>automated_security_helper/utils/command_safe_stream.py</code>)</td>
 </tr>
 <tr>
+<td><code>TMP</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_env_dir_parents</code>)</td>
+<td>The variables <code>tempfile.gettempdir</code> reads, in the order it reads them. (<code>automated_security_helper/interactions/container_leftovers.py</code>)</td>
+</tr>
+<tr>
 <td><code>TMPDIR</code></td>
 <td></td>
 <td></td>
 <td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_env_dir_parents</code>)</td>
-<td>Where such a directory can be, after <code>$TMPDIR</code>. Each prefix is looked for under every one. (<code>automated_security_helper/interactions/container_leftovers.py</code>)</td>
+<td>The variables <code>tempfile.gettempdir</code> reads, in the order it reads them. (<code>automated_security_helper/interactions/container_leftovers.py</code>)</td>
 </tr>
 <tr>
 <td><code>TRAVIS</code></td>
@@ -4029,7 +4113,7 @@ SOFTWARE.
 <td><code>TRIVY_CACHE_DIR</code></td>
 <td></td>
 <td><code>/deps/.trivy</code> (core)</td>
-<td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>validate_trivy_offline_mode</code>)</td>
+<td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>_cache_directory</code>)</td>
 <td>Purpose not documented in code.</td>
 </tr>
 <tr>
@@ -4043,64 +4127,50 @@ SOFTWARE.
 <td><code>TRIVY_IGNOREFILE</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code> (<code>TrivyScannerBase._trivy_input_file</code>)<br><code>automated_security_helper/plugin_modules/ash_trivy_plugins/trivy_repo_scanner.py</code> (<code>TrivyRepoScanner._environment_values</code>)</td>
-<td>The variable is the operator's, set where ASH runs, so a relative path in it names a file there, as written, not one at the root of the scanned tree. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code>, <code>TrivyScannerBase._trivy_input_file</code>)</td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code> (<code>TrivyScannerBase._environment_values</code>, <code>TrivyScannerBase._trivy_input_file</code>)</td>
+<td><code>TRIVY_IGNOREFILE</code> and <code>TRIVY_SECRET_CONFIG</code>. <code>TRIVY_CONFIG</code> is left out on purpose: its value is the operator's config path and is shown, escaped, in the refusal that names it (<code>_existing_file</code>), as its tests pin. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code>, <code>TrivyScannerBase._environment_values</code>)</td>
 </tr>
 <tr>
 <td><code>TRIVY_SECRET_CONFIG</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code> (<code>TrivyScannerBase._trivy_input_file</code>)<br><code>automated_security_helper/plugin_modules/ash_trivy_plugins/trivy_repo_scanner.py</code> (<code>TrivyRepoScanner._environment_values</code>)</td>
-<td>The variable is the operator's, set where ASH runs, so a relative path in it names a file there, as written, not one at the root of the scanned tree. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code>, <code>TrivyScannerBase._trivy_input_file</code>)</td>
+<td><code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code> (<code>TrivyScannerBase._environment_values</code>, <code>TrivyScannerBase._trivy_input_file</code>)</td>
+<td><code>TRIVY_IGNOREFILE</code> and <code>TRIVY_SECRET_CONFIG</code>. <code>TRIVY_CONFIG</code> is left out on purpose: its value is the operator's config path and is shown, escaped, in the refusal that names it (<code>_existing_file</code>), as its tests pin. (<code>automated_security_helper/plugin_modules/ash_builtin/scanners/_trivy_scanner_base.py</code>, <code>TrivyScannerBase._environment_values</code>)</td>
 </tr>
 <tr>
 <td><code>TYPER_STANDARD_TRACEBACK</code></td>
 <td><code>os.getenv("_TYPER_STANDARD_TRACEBACK")</code></td>
 <td></td>
-<td><code>automated_security_helper/cli/entrypoint.py</code> (<code>_ash_traceback</code>)</td>
-<td>With TYPER_STANDARD_TRACEBACK set, or no pretty traceback asked for, the plain traceback is printed, shown the same way. (<code>automated_security_helper/cli/entrypoint.py</code>, <code>_ash_traceback</code>)</td>
+<td><code>automated_security_helper/cli/entrypoint.py</code> (<code>_standard_traceback</code>)</td>
+<td>Whether typer's hook would print the plain traceback for *exc*, as typer.main.except_hook decides: <code>TYPER_STANDARD_TRACEBACK</code> set, or no pretty-traceback tag on the exception. (<code>automated_security_helper/cli/entrypoint.py</code>, <code>_standard_traceback</code>)</td>
 </tr>
 <tr>
 <td><code>UV_CACHE_DIR</code></td>
 <td></td>
 <td></td>
 <td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>build_scanner_policy</code>, <code>uv_cache_directory</code>)</td>
-<td>Purpose not documented in code.</td>
+<td>uv finds its tools, its managed interpreters and its cache from UV_TOOL_DIR, UV_PYTHON_INSTALL_DIR and UV_CACHE_DIR, else from the XDG data and cache homes, else under $HOME. (<code>automated_security_helper/utils/sandbox/policy.py</code>, <code>_uv_environment</code>)</td>
 </tr>
 <tr>
 <td><code>UV_OFFLINE</code></td>
 <td></td>
 <td></td>
 <td><code>automated_security_helper/utils/uv_tool_runner.py</code> (<code>UVToolRunner.install_tool_with_version</code>)</td>
-<td>Add offline flag if UV_OFFLINE environment variable is set (<code>automated_security_helper/utils/uv_tool_runner.py</code>, <code>UVToolRunner.install_tool_with_version</code>)</td>
-</tr>
-<tr>
-<td><code>UV_PYTHON</code></td>
-<td></td>
-<td></td>
-<td><code>automated_security_helper/utils/python_child.py</code> (<code>uv_child_overrides</code>)</td>
-<td>- <code>UV_NO_PROJECT=1</code>, unless it names a <code>uv --project</code> itself; - <code>UV_PYTHON</code> set to ASH's interpreter, unless it names one (<code>uv --python</code>, <code>uv -p</code>, <code>uv --system</code>) or the operator set <code>UV_PYTHON</code> or <code>UV_SYSTEM_PYTHON</code>. (<code>automated_security_helper/utils/python_child.py</code>, <code>uv_child_overrides</code>)</td>
+<td>UV_OFFLINE set by hand in the environment while _offline_for read online (the offline mode itself returned above): uv's own flag is passed along. Named apart from the <code>offline</code> parameter, which the return above has already consumed. (<code>automated_security_helper/utils/uv_tool_runner.py</code>, <code>UVToolRunner.install_tool_with_version</code>)</td>
 </tr>
 <tr>
 <td><code>UV_PYTHON_INSTALL_DIR</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_uv_directories</code>)</td>
-<td>A directory UV_TOOL_DIR or UV_PYTHON_INSTALL_DIR names is screened first (_screened_uv_directory). (<code>automated_security_helper/utils/sandbox/policy.py</code>, <code>_uv_directories</code>)</td>
-</tr>
-<tr>
-<td><code>UV_SYSTEM_PYTHON</code></td>
-<td></td>
-<td></td>
-<td><code>automated_security_helper/utils/python_child.py</code> (<code>uv_child_overrides</code>)</td>
-<td>- <code>UV_NO_PROJECT=1</code>, unless it names a <code>uv --project</code> itself; - <code>UV_PYTHON</code> set to ASH's interpreter, unless it names one (<code>uv --python</code>, <code>uv -p</code>, <code>uv --system</code>) or the operator set <code>UV_PYTHON</code> or <code>UV_SYSTEM_PYTHON</code>. (<code>automated_security_helper/utils/python_child.py</code>, <code>uv_child_overrides</code>)</td>
+<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_uv_data_directories</code>)</td>
+<td>UV_TOOL_DIR and UV_PYTHON_INSTALL_DIR where set, each screened (_screened_uv_directory), else <code>uv/tools</code> and <code>uv/python</code> under the XDG data home. (<code>automated_security_helper/utils/sandbox/policy.py</code>, <code>_uv_data_directories</code>)</td>
 </tr>
 <tr>
 <td><code>UV_TOOL_DIR</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_uv_directories</code>, <code>_uv_tool_locks</code>)</td>
-<td>A directory UV_TOOL_DIR or UV_PYTHON_INSTALL_DIR names is screened first (_screened_uv_directory). (<code>automated_security_helper/utils/sandbox/policy.py</code>, <code>_uv_directories</code>)</td>
+<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_uv_data_directories</code>)</td>
+<td>UV_TOOL_DIR and UV_PYTHON_INSTALL_DIR where set, each screened (_screened_uv_directory), else <code>uv/tools</code> and <code>uv/python</code> under the XDG data home. (<code>automated_security_helper/utils/sandbox/policy.py</code>, <code>_uv_data_directories</code>)</td>
 </tr>
 <tr>
 <td><code>WITH_RETRY_DELAY</code></td>
@@ -4117,39 +4187,67 @@ SOFTWARE.
 <td>Overridable so the retry behaviour can be exercised without waiting out the real backoff. Defaults are what every Dockerfile caller gets. Five attempts, not three. (<code>automated_security_helper/assets/with-retry.sh</code>)</td>
 </tr>
 <tr>
-<td><code>WRITE_CHECK</code></td>
+<td><code>WITH_RETRY_NO_RETRY_EXITS</code></td>
+<td><code>2 3</code></td>
+<td></td>
+<td><code>automated_security_helper/assets/with-retry.sh</code> (top level)</td>
+<td>Exit statuses that are never retried, and are passed through as the script's own status. A retry is for a failure the next attempt can cure: a reset connection, a host that did not resolve. (<code>automated_security_helper/assets/with-retry.sh</code>)</td>
+</tr>
+<tr>
+<td><code>WRAPPER_WORDS</code></td>
 <td></td>
 <td></td>
 <td><code>ash</code> (top level)</td>
+<td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>WRITE_CHECK</code></td>
+<td></td>
+<td></td>
+<td><code>ash</code> (<code>create_output_dir</code>)</td>
 <td>Purpose not documented in code.</td>
 </tr>
 <tr>
 <td><code>WRITE_ERROR</code></td>
 <td></td>
 <td></td>
-<td><code>ash</code> (top level)</td>
+<td><code>ash</code> (<code>create_output_dir</code>)</td>
 <td>Purpose not documented in code.</td>
 </tr>
 <tr>
 <td><code>WRITE_REASON</code></td>
 <td><code>a file could not be made there</code></td>
 <td></td>
-<td><code>ash</code> (top level)</td>
+<td><code>ash</code> (<code>create_output_dir</code>)</td>
 <td>Purpose not documented in code.</td>
 </tr>
 <tr>
 <td><code>XDG_CACHE_HOME</code></td>
+<td><code>""</code></td>
 <td></td>
-<td></td>
-<td><code>automated_security_helper/cli/mcp/source_delivery.py</code> (<code>resolve_workspace_root</code>)<br><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>uv_cache_directory</code>)</td>
+<td><code>automated_security_helper/cli/mcp/source_delivery.py</code> (<code>resolve_workspace_root</code>)<br><code>automated_security_helper/utils/package_manager_child.py</code> (<code>_operator_cache_dir</code>)<br><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_xdg_directory</code>)</td>
 <td>1. <code>$ASH_MCP_WORKSPACE_ROOT</code> 2. <code>$XDG_CACHE_HOME/ash-mcp/</code> 3. <code>~/.cache/ash-mcp/</code> (<code>automated_security_helper/cli/mcp/source_delivery.py</code>, <code>resolve_workspace_root</code>)</td>
 </tr>
 <tr>
-<td><code>XDG_DATA_HOME</code></td>
+<td><code>XDG_CONFIG_HOME</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_uv_directories</code>, <code>_uv_tool_locks</code>)</td>
+<td><code>automated_security_helper/interactions/container_leftovers.py</code> (<code>_podman_default_connection</code>)</td>
 <td>Purpose not documented in code.</td>
+</tr>
+<tr>
+<td><code>XDG_DATA_HOME</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/utils/sandbox/policy.py</code> (<code>_xdg_directory</code>)</td>
+<td>Read as given, a relative XDG_DATA_HOME or XDG_CACHE_HOME named uv's directories under ASH's working directory, usually the scanned repository, which <code>_existing</code> then made absolute and the policy mounted, as executable where uv's tools would be. (<code>automated_security_helper/utils/sandbox/policy.py</code>, <code>_xdg_directory</code>)</td>
+</tr>
+<tr>
+<td><code>XDG_RUNTIME_DIR</code></td>
+<td><code>""</code></td>
+<td></td>
+<td><code>automated_security_helper/utils/package_manager_child.py</code> (<code>_runtime_dir</code>)</td>
+<td><code>$XDG_RUNTIME_DIR/ash</code>, or None when the variable is unset or relative. (<code>automated_security_helper/utils/package_manager_child.py</code>, <code>_runtime_dir</code>)</td>
 </tr>
 <tr>
 <td><code>YARN_CACHE_FOLDER</code></td>
@@ -4176,7 +4274,7 @@ SOFTWARE.
 <td><code>_TYPER_STANDARD_TRACEBACK</code></td>
 <td></td>
 <td></td>
-<td><code>automated_security_helper/cli/entrypoint.py</code> (<code>_ash_traceback</code>)</td>
+<td><code>automated_security_helper/cli/entrypoint.py</code> (<code>_standard_traceback</code>)</td>
 <td>Purpose not documented in code.</td>
 </tr>
 <tr>
@@ -4186,30 +4284,37 @@ SOFTWARE.
 <td><code>automated_security_helper/utils/log.py</code> (<code>_on_a_ci_runner</code>)</td>
 <td>Variables a CI runner sets, any value counting: GitHub Actions, Azure Pipelines, TeamCity, Jenkins, CodeBuild, GitLab CI, Buildkite, CircleCI, Travis CI, AppVeyor, Bitbucket Pipelines and Bamboo, which can set one of these alone. (<code>automated_security_helper/utils/log.py</code>)</td>
 </tr>
+<tr>
+<td><code>npm_config_cache</code></td>
+<td></td>
+<td></td>
+<td><code>automated_security_helper/utils/offline_mode_validator.py</code> (<code>validate_npm_audit_offline_mode</code>)</td>
+<td>Check for npm cache directory. npm reads its configuration variables in the lowercase spelling (<code>npm_config_cache</code>) as well as the uppercase one; on POSIX the two are different variables, and only the uppercase one was read here. (<code>automated_security_helper/utils/offline_mode_validator.py</code>, <code>validate_npm_audit_offline_mode</code>)</td>
+</tr>
 </tbody>
 </table>
 <h2 id="variables-a-configuration-file-can-read">Variables a configuration file can read<a class="headerlink" href="#variables-a-configuration-file-can-read" title="Permanent link">&para;</a></h2>
 <p>A value in a configuration file that begins with <code>${NAME}</code> or <code>${NAME:default}</code> has the reference replaced by that environment variable. Only names that start with <code>ASH_</code> and these names are substituted: <code>AWS_DEFAULT_REGION</code>, <code>AWS_PROFILE</code>, <code>AWS_REGION</code>. Any other reference is left as written, with a warning. The prefix and the list are defined in <code>automated_security_helper/core/constants.py</code>.</p>
 <h2 id="lookups-that-could-not-be-resolved">Lookups that could not be resolved<a class="headerlink" href="#lookups-that-could-not-be-resolved" title="Permanent link">&para;</a></h2>
 <p>These reads take the variable name from a value the generator cannot resolve without running ASH: a name read from a configuration file, built at run time, or passed in from somewhere it cannot follow. A variable read only through one of these sites is not in the tables above.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>automated_security_helper/config/ash_config.py (resolve_env_references) [environ.get] resolved_var = os.environ.get(var_name, None)
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>automated_security_helper/config/ash_config.py (env_reference_value) [environ.get] resolved = os.environ.get(reference.var_name, None)
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>automated_security_helper/config/config_sources.py (_empty_key_reference_names.walk) [environ.get] if resolved is None and os.environ.get(name) is not None:
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>automated_security_helper/config/config_validator.py (_reference_variable_is_set) [environ.get] return reference is None or os.environ.get(reference.group(1)) is not None
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>automated_security_helper/config/config_validator.py (_reference_variable_is_set) [environ.get] value = os.environ.get(reference.group(1))
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>automated_security_helper/config/environment_record.py (_value_read) [environ.get] value = os.environ.get(name)
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>automated_security_helper/core/constants.py (xdg_directory) [environ.get] value = os.environ.get(variable, &quot;&quot;)
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = os.environ.get(name, &quot;&quot;)
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>automated_security_helper/interactions/run_ash_container.py (_runner_marker_args) [environ.get] value = environ.get(name)
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [environ.get] if any(char in environ.get(name, &quot;&quot;) for char in &quot;\n\r\0&quot;):
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [presence check] if name in environ:
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [subscript] handle.write(f&quot;{name}={environ[name]}\n&quot;)
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>automated_security_helper/interactions/run_ash_container.py (run_ash_container) [environ.get] for value in (os.environ.get(name, &quot;&quot;),)
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py (_declared_grype_db_bound) [presence check] if name not in environ and config_key_for_env.get(name) not in user_config_keys
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>automated_security_helper/utils/log.py (_detect_encoding_issues) [presence check] is_ci = any(name in os.environ for name in (&quot;CI&quot;, *_CI_RUNNER_MARKERS))
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>automated_security_helper/utils/log.py (configure_windows_safe_logging) [presence check] is_ci = any(name in os.environ for name in (&quot;CI&quot;, *_CI_RUNNER_MARKERS))
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.get] previous = {key: os.environ.get(key) for key in overrides}
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.pop] os.environ.pop(key, None)
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>automated_security_helper/utils/process_env.py (restore_environ) [environ.pop] os.environ.pop(key, None)
-</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>automated_security_helper/utils/sandbox/policy.py (_env_named_read_paths) [environ.get] value = os.environ.get(name, &quot;&quot;)
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>automated_security_helper/core/constants.py (warn_if_home_unusable) [environ.get] value = os.environ.get(variable)
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>automated_security_helper/core/constants.py (xdg_directory) [environ.get] value = os.environ.get(variable, &quot;&quot;)
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>automated_security_helper/interactions/run_ash_container.py (_carried_values_by_band) [environ.get] value = os.environ.get(name, &quot;&quot;)
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>automated_security_helper/interactions/run_ash_container.py (_runner_marker_args) [environ.get] value = environ.get(name)
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [environ.get] if any(char in environ.get(name, &quot;&quot;) for char in &quot;\n\r\0&quot;):
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [presence check] if name in environ:
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>automated_security_helper/interactions/run_ash_container.py (_write_env_file) [subscript] handle.write(f&quot;{name}={environ[name]}\n&quot;)
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>automated_security_helper/interactions/run_ash_container.py (run_ash_container) [environ.get] for value in (os.environ.get(name, &quot;&quot;),)
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py (_declared_grype_db_bound) [presence check] if name not in environ and config_key_for_env.get(name) not in user_config_keys
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.get] previous = {key: os.environ.get(key) for key in overrides}
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.pop] os.environ.pop(key, None)
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>automated_security_helper/utils/process_env.py (restore_environ) [environ.pop] os.environ.pop(key, None)
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>automated_security_helper/utils/sandbox/policy.py (_env_named_read_paths) [environ.get] value = os.environ.get(name, &quot;&quot;)
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>automated_security_helper/utils/sandbox/policy.py (_uv_environment) [environ.get] if path is None or os.environ.get(name):
 </span></code></pre></div>
 
 
