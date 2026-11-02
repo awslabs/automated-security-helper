@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -118,36 +119,6 @@ FILES = {
 }
 
 
-def _the_systems_answer(directory: Path) -> tuple[str, bool]:
-    """Why this system cannot make *directory*, and whether stat is what says so.
-
-    The refusal quotes the strerror of an error (utils/directory_refusals.py), and
-    the server asks the system two questions in order. It asks stat. Where stat
-    gives a reason of its own, ``Not a directory`` for a file on the way on a POSIX
-    system, the call is refused at once, before any project is registered. Where
-    stat only says that the path is not there, the server registers the projects
-    and makes the directories (``Path.mkdir(parents=True, exist_ok=True)``), and
-    refuses with the error that fails with, giving the claims back.
-
-    This asks the same two questions in the same order, so a cell compares the
-    refusal with the words of this system and with the stage that refuses, not with
-    those of one platform. Returns the reason and True when stat gave it.
-    """
-    try:
-        os.stat(directory)
-    except FileNotFoundError:
-        pass
-    except OSError as error:
-        return error.strerror or type(error).__name__, True
-    else:
-        raise AssertionError(f"{directory} is there, so no file is on the way to it")
-    try:
-        directory.mkdir(parents=True, exist_ok=True)
-    except OSError as error:
-        return error.strerror or type(error).__name__, False
-    raise AssertionError(f"{directory} could be made, so no file is on the way to it")
-
-
 @pytest.mark.parametrize("where", sorted(FILES))
 def test_a_file_on_the_way_is_refused_before_any_project_is_registered(
     tmp_path, executions, isolated_mcp_state, where
@@ -158,25 +129,19 @@ def test_a_file_on_the_way_is_refused_before_any_project_is_registered(
     blocker.parent.mkdir(parents=True, exist_ok=True)
     blocker.write_text(CONTENT, encoding="utf-8")
     refused = root / FILES[where]
-    reason, told_by_stat = _the_systems_answer(refused)
 
     response = _scan(workspace_file)
 
     _assert_refused(
-        response, f"Output directory cannot be created: {refused} ({reason})"
+        response, f"Output directory cannot be created: {refused} (Not a directory)"
     )
     assert executions == [], "the workspace scan ran"
-    # Told by stat, the call is refused before any project is registered and
-    # nothing is listed. Told only by making the directories, the projects are
-    # registered, refused and given back, so none is left running.
-    assert isolated_mcp_state.list_scans(active_only=not told_by_stat) == [], (
-        "a project was registered"
-    )
+    assert isolated_mcp_state.list_scans() == [], "a project was registered"
     assert blocker.read_text(encoding="utf-8") == CONTENT
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or os.geteuid() == 0,
+    sys.platform == "win32" or os.geteuid() == 0,
     reason="root, and Windows, create a directory in one without write permission",
 )
 def test_one_that_fails_when_it_is_made_is_refused_and_given_back(
@@ -200,7 +165,9 @@ def test_one_that_fails_when_it_is_made_is_refused_and_given_back(
     assert list(projects.iterdir()) == []
 
 
-@pytest.mark.skipif(os.name == "nt", reason="a symbolic link needs a privilege there")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="a symbolic link needs a privilege there"
+)
 def test_an_output_dir_that_is_a_link_to_nothing_is_refused(
     tmp_path, executions, isolated_mcp_state
 ):
@@ -221,7 +188,9 @@ def test_an_output_dir_that_is_a_link_to_nothing_is_refused(
     assert output.is_symlink() and not output.exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="a symbolic link needs a privilege there")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="a symbolic link needs a privilege there"
+)
 def test_a_link_to_nothing_on_the_way_to_the_output_dir_is_refused(
     tmp_path, executions, isolated_mcp_state
 ):
@@ -243,7 +212,7 @@ def test_a_link_to_nothing_on_the_way_to_the_output_dir_is_refused(
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or os.geteuid() == 0,
+    sys.platform == "win32" or os.geteuid() == 0,
     reason="root, and Windows, enter a directory without search permission",
 )
 def test_an_output_dir_that_cannot_be_entered_is_refused(
@@ -266,7 +235,7 @@ def test_an_output_dir_that_cannot_be_entered_is_refused(
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or os.geteuid() == 0,
+    sys.platform == "win32" or os.geteuid() == 0,
     reason="root, and Windows, write into a directory without write permission",
 )
 def test_one_that_is_there_but_cannot_be_written_is_refused(

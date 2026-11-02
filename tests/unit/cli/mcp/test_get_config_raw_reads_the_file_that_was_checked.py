@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -43,6 +42,7 @@ import pytest
 from automated_security_helper.cli.mcp import sandbox
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 from automated_security_helper.config import config_sources, resolve_config
+from tests.utils.held_file_swaps import skip_if_refused, swap_or_record
 
 pytestmark = pytest.mark.unit
 
@@ -70,29 +70,14 @@ def _environment(monkeypatch: pytest.MonkeyPatch) -> None:
 def _swap_in_a_new_file(path: Path, text: str, refused: List[BaseException]) -> None:
     """Replace ``path`` by a different file (a new inode).
 
-    On Windows the server's own open handle on ``path`` refuses it with a
-    ``PermissionError`` (see the module doc). That is recorded in ``refused`` for
-    ``_skip_where_the_server_holds_the_file``, not raised, because this runs inside
-    the server's call, which could turn an exception from it into an answer.
-    Anywhere else the error is a real one and is raised.
+    On Windows the server's own open handle on ``path`` refuses it (see the module
+    doc). ``swap_or_record`` records that in ``refused`` for ``skip_if_refused``,
+    not raised, because this runs inside the server's call, which could turn an
+    exception from it into an answer. Any other error is a real one and is raised.
     """
     replacement = path.with_name(path.name + ".new")
     replacement.write_text(text, encoding="utf-8")
-    try:
-        os.replace(replacement, path)
-    except PermissionError as error:
-        if sys.platform != "win32":
-            raise
-        refused.append(error)
-
-
-def _skip_where_the_server_holds_the_file(refused: List[BaseException]) -> None:
-    """Skip the cell when the operating system refused its replacement."""
-    if refused:
-        pytest.skip(
-            "Windows does not let a file the server holds open be replaced, so "
-            f"the replacement this cell pins cannot be made ({refused[0]})"
-        )
+    swap_or_record(lambda: os.replace(replacement, path), refused)
 
 
 def _swap_after_the_check(
@@ -101,7 +86,7 @@ def _swap_after_the_check(
     """Make the session's check of ``target`` the last thing before it is replaced.
 
     Returns the list that records a replacement the operating system refused; a cell
-    hands it to ``_skip_where_the_server_holds_the_file`` after the call.
+    hands it to ``skip_if_refused`` after the call.
     """
     real = sandbox.validate_config_input
     refused: List[BaseException] = []
@@ -132,7 +117,7 @@ def test_a_named_file_replaced_after_the_check_is_refused(tmp_path, monkeypatch,
 
     result = mcp_get_config(config_path=str(target), raw=True)
 
-    _skip_where_the_server_holds_the_file(refused)
+    skip_if_refused(refused)
     _refused_as_changed(result)
 
 
@@ -154,7 +139,7 @@ def test_a_discovered_file_replaced_after_the_check_is_refused(tmp_path, monkeyp
 
     result = mcp_get_config(search_dir=str(tmp_path), raw=True)
 
-    _skip_where_the_server_holds_the_file(refused)
+    skip_if_refused(refused)
     _refused_as_changed(result)
 
 

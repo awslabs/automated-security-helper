@@ -13,12 +13,14 @@ leads out of the roots as a link: it is refused before anything in it is looked
 at, and the answer is the same whether or not the outside directory holds the
 name.
 
-A junction cannot be made here, so each cell builds the one thing that is the
-same on every platform, a ``.ash`` that leads to an outside directory, and then
-reports it as Windows reports a junction: ``os.lstat`` gives a directory with the
-reparse-point attribute and the mount-point reparse tag, not a link, and
-``os.path.realpath`` resolves it to where it leads. Each cell asks twice, with
-the outside directory holding the name and without it.
+On Windows each cell makes a real junction (``_winapi.CreateJunction``, which
+needs no privilege). Elsewhere a junction cannot be made, so each cell builds the
+one thing that is the same on every platform, a ``.ash`` that leads to an
+outside directory, and then reports it as Windows reports a junction:
+``os.lstat`` gives a directory with the reparse-point attribute and the
+mount-point reparse tag, not a link, and ``os.path.realpath`` resolves it to
+where it leads. Each cell asks twice, with the outside directory holding the
+name and without it.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import asyncio
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -164,13 +167,15 @@ def _junction_out(
     if held:
         (outside / name).write_text(text, encoding="utf-8")
     junction = directory / ".ash"
+    if sys.platform == "win32":
+        # A junction is the one link Windows lets any account make, with no
+        # privilege, and the reparse point it is needs no stand-in.
+        import _winapi
+
+        _winapi.CreateJunction(str(outside), str(junction))
+        return
     # Something has to lead there on this platform; lstat then says it is no link.
-    try:
-        junction.symlink_to(outside, target_is_directory=True)
-    except (OSError, NotImplementedError) as error:
-        # Windows makes a symbolic link only for an account that holds the
-        # privilege; without it nothing leads there to be reported as a junction.
-        pytest.skip(f"cannot make a symbolic link here: {error}")
+    junction.symlink_to(outside, target_is_directory=True)
     _as_a_junction(monkeypatch, junction, outside)
 
 

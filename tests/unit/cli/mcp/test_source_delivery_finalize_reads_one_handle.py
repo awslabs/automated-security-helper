@@ -26,6 +26,7 @@ import base64
 import hashlib
 import io
 import os
+import sys
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -42,7 +43,8 @@ UPLOAD = "upload"
 
 #: The cells that swap a zip onto the path while the finalize holds it open.
 swaps_over_an_open_file = pytest.mark.skipif(
-    os.name == "nt", reason="Windows does not rename over a file that is open"
+    sys.platform == "win32",
+    reason="Windows does not rename over a file that is open",
 )
 
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -99,36 +100,6 @@ def _assert_refused(response: Dict[str, Any], text: str) -> None:
     assert response["exit_code"] == 5, response
 
 
-def _the_systems_answer(directory: Path) -> tuple[str, bool]:
-    """Why this system cannot make *directory*, and whether stat is what says so.
-
-    The refusal quotes the strerror of an error (utils/directory_refusals.py), and
-    the server asks the system two questions in order. It asks stat. Where stat
-    gives a reason of its own, ``Not a directory`` for a file on the way on a POSIX
-    system, the scan is refused at once, before it is registered. Where stat only
-    says that the path is not there, the server makes the directory
-    (``Path.mkdir(parents=True, exist_ok=True)``) once the scan is registered, and
-    refuses with the error that fails with, giving the claim back.
-
-    This asks the same two questions in the same order, so a cell compares the
-    refusal with the words of this system and with the stage that refuses, not with
-    those of one platform. Returns the reason and True when stat gave it.
-    """
-    try:
-        os.stat(directory)
-    except FileNotFoundError:
-        pass
-    except OSError as error:
-        return error.strerror or type(error).__name__, True
-    else:
-        raise AssertionError(f"{directory} is there, so no file is on the way to it")
-    try:
-        directory.mkdir(parents=True, exist_ok=True)
-    except OSError as error:
-        return error.strerror or type(error).__name__, False
-    raise AssertionError(f"{directory} could be made, so no file is on the way to it")
-
-
 @TOOLS
 def test_a_file_on_the_way_is_refused_before_the_scan_is_registered(
     target: Path, registry, tool: Any
@@ -136,22 +107,18 @@ def test_a_file_on_the_way_is_refused_before_the_scan_is_registered(
     blocker = target / ".ash"
     blocker.write_text(CONTENT, encoding="utf-8")
     output = blocker / "ash_output"
-    reason, told_by_stat = _the_systems_answer(output)
 
     response = tool(target)
 
     _assert_refused(
-        response, f"Output directory cannot be created: {output} ({reason})"
+        response, f"Output directory cannot be created: {output} (Not a directory)"
     )
     assert blocker.read_text(encoding="utf-8") == CONTENT
-    # Told by stat, the scan is refused before it is registered and nothing is
-    # listed. Told only by making the directory, it is registered, refused and
-    # given back, so none is left running.
-    assert registry.list_scans(active_only=not told_by_stat) == []
+    assert registry.list_scans() == []
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or os.geteuid() == 0,
+    sys.platform == "win32" or os.geteuid() == 0,
     reason="root, and Windows, create a directory in one without write permission",
 )
 @TOOLS
@@ -177,7 +144,7 @@ def test_one_that_fails_when_it_is_made_is_refused_and_given_back(
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or os.geteuid() == 0,
+    sys.platform == "win32" or os.geteuid() == 0,
     reason="root, and Windows, write into a directory without write permission",
 )
 @TOOLS

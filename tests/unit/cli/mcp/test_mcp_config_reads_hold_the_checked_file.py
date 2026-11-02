@@ -22,7 +22,6 @@ see.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import List
 
@@ -35,6 +34,7 @@ from automated_security_helper.cli.mcp_tools import (
 from automated_security_helper.config import config_sources, operator_only_options
 from automated_security_helper.config import resolve_config as resolve_config_module
 from automated_security_helper.config.config_validator import ConfigValidator
+from tests.utils.held_file_swaps import skip_if_refused, swap_or_record
 
 pytestmark = pytest.mark.unit
 
@@ -67,32 +67,18 @@ def _swap_in_a_new_file(
     """Replace `path` by a different file (a new inode), as a racing writer would.
 
     True when it was replaced. A swap made from inside the call under test passes
-    `refused`: on Windows the server's own open handle on `path` refuses it with a
-    ``PermissionError`` (see the module doc), and that is recorded there for
-    ``_skip_where_the_server_holds_the_file``, not raised, because it would be
-    raised inside the server's call, which could turn it into an answer. Anywhere
-    else the error is a real one and is raised, as it is for a swap made without
-    `refused`.
+    `refused`: on Windows the server's own open handle on `path` refuses it (see
+    the module doc), and ``swap_or_record`` records that there for
+    ``skip_if_refused`` instead of raising it, because it would be raised inside
+    the server's call, which could turn it into an answer. Any other error is a
+    real one and is raised, as every error is for a swap made without `refused`.
     """
     replacement = path.with_name(path.name + ".new")
     replacement.write_text(text, encoding="utf-8")
-    try:
+    if refused is None:
         os.replace(replacement, path)
-    except PermissionError as error:
-        if refused is None or sys.platform != "win32":
-            raise
-        refused.append(error)
-        return False
-    return True
-
-
-def _skip_where_the_server_holds_the_file(refused: List[BaseException]) -> None:
-    """Skip the cell when the operating system refused its swap (see the module doc)."""
-    if refused:
-        pytest.skip(
-            "Windows does not let a file the server holds open be replaced, so "
-            f"the swap this cell pins cannot be made ({refused[0]})"
-        )
+        return True
+    return swap_or_record(lambda: os.replace(replacement, path), refused)
 
 
 def _swap_after_the_check(monkeypatch, path: Path, swap: bool) -> _Calls:
@@ -225,7 +211,7 @@ class TestGetConfigReadsTheFileItChecked:
 
         result = mcp_get_config(config_path=str(config))
 
-        _skip_where_the_server_holds_the_file(taken.refused)
+        skip_if_refused(taken.refused)
         assert taken, "premise: the tool took an identity at its check"
         assert result.get("success") is False, result
         assert SWAP_MARKER not in str(result), result
@@ -255,7 +241,7 @@ class TestGetConfigReadsTheFileItChecked:
 
         result = mcp_get_config(search_dir=str(tmp_path))
 
-        _skip_where_the_server_holds_the_file(swapped.refused)
+        skip_if_refused(swapped.refused)
         assert swapped, "premise: the file was swapped between the check and the read"
         assert result.get("success") is False, result
         assert SWAP_MARKER not in str(result), result
@@ -280,7 +266,7 @@ class TestGetConfigReadsTheFileItChecked:
 
         result = mcp_get_config(config_path=str(config), raw=True)
 
-        _skip_where_the_server_holds_the_file(taken.refused)
+        skip_if_refused(taken.refused)
         assert taken, "premise: the tool took an identity at its check"
         assert result.get("success") is False, result
         assert SWAP_MARKER not in str(result), result
@@ -307,7 +293,7 @@ class TestValidateConfigChecksTheFileItChecked:
 
         result = mcp_validate_config(config_path=str(config))
 
-        _skip_where_the_server_holds_the_file(taken.refused)
+        skip_if_refused(taken.refused)
         assert taken, "premise: the tool took an identity at its check"
         assert result["valid"] is False, result
         assert SWAP_MARKER not in str(result), result

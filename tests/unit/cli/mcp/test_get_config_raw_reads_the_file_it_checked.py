@@ -44,9 +44,8 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Dict, List
 
 import pytest
 import yaml
@@ -55,6 +54,7 @@ from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp import sandbox
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 from automated_security_helper.config import config_sources, resolve_config
+from tests.utils.held_file_swaps import skip_if_refused, swap_or_record
 
 pytestmark = pytest.mark.unit
 
@@ -92,35 +92,6 @@ def _local_caller(monkeypatch) -> None:
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
 
 
-def _swap(action: Callable[[], None], refused: List[BaseException]) -> bool:
-    """Run ``action``, a replacement or a removal of the checked file.
-
-    True when it ran. On Windows the server's own open handle on the file refuses
-    it with a ``PermissionError``; that is recorded in ``refused`` for
-    ``_skip_where_the_server_holds_the_file`` and the result is False. The error is
-    recorded and not raised because the action runs inside the server's call, which
-    could turn an exception from it into an answer. Anywhere else the error is a
-    real one and is raised.
-    """
-    try:
-        action()
-    except PermissionError as error:
-        if sys.platform != "win32":
-            raise
-        refused.append(error)
-        return False
-    return True
-
-
-def _skip_where_the_server_holds_the_file(refused: List[BaseException]) -> None:
-    """Skip the cell when the operating system refused its swap (see the module doc)."""
-    if refused:
-        pytest.skip(
-            "Windows does not let a file the server holds open be replaced or "
-            f"removed, so the swap this cell pins cannot be made ({refused[0]})"
-        )
-
-
 def _arrange(
     tmp_path: Path,
     monkeypatch,
@@ -143,7 +114,7 @@ def _arrange(
         # The check a grant makes; the swap lands right after it, once, and only
         # for the config file (a check of the search directory leaves it alone).
         if swap and not swapped and not refused and Path(target) == config:
-            if _swap(lambda: os.replace(other, config), refused):
+            if swap_or_record(lambda: os.replace(other, config), refused):
                 swapped.append(True)
         return None
 
@@ -155,7 +126,7 @@ def _arrange(
         response = mcp_get_config(raw=raw)
     else:
         response = mcp_get_config(config_path=str(config), raw=raw)
-    _skip_where_the_server_holds_the_file(refused)
+    skip_if_refused(refused)
     assert bool(swapped) is swap, "the swap did not happen where the cell expects it"
     return response
 
@@ -266,7 +237,7 @@ def _arrange_swap_and_back(
     refused: List[BaseException] = []
 
     def check_between_the_swaps(target: Any, *args: Any, **kwargs: Any) -> Any:
-        if Path(target) != config or not _swap(config.unlink, refused):
+        if Path(target) != config or not swap_or_record(config.unlink, refused):
             return real_check(target, *args, **kwargs)
         os.link(y_file, config)
         try:
@@ -284,7 +255,7 @@ def _arrange_swap_and_back(
         response = mcp_get_config(raw=True)
     else:
         response = mcp_get_config(config_path=str(config), raw=True)
-    _skip_where_the_server_holds_the_file(refused)
+    skip_if_refused(refused)
     assert swapped == [True], "the name did not lead to Y during the check"
     assert os.stat(config).st_ino == os.stat(x_file).st_ino, "the name is X again"
     return response
@@ -324,7 +295,7 @@ def test_a_link_swapped_in_after_the_name_was_resolved_is_refused(
             Path(config_path) == config
             and not swapped
             and not refused
-            and _swap(config.unlink, refused)
+            and swap_or_record(config.unlink, refused)
         ):
             try:
                 config.symlink_to(outside)
@@ -342,7 +313,7 @@ def test_a_link_swapped_in_after_the_name_was_resolved_is_refused(
     else:
         response = mcp_get_config(config_path=str(config), raw=True)
 
-    _skip_where_the_server_holds_the_file(refused)
+    skip_if_refused(refused)
     assert swapped == [True], "the link was not put where the cell expects it"
     assert response.get("success") is False, response
     text = json.dumps(response, default=str)

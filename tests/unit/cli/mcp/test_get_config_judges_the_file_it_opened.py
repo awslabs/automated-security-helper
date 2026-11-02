@@ -37,7 +37,12 @@ import pytest
 
 from automated_security_helper.cli.mcp import sandbox
 from automated_security_helper.cli.mcp_tools import mcp_get_config
-from automated_security_helper.config import resolve_config
+from automated_security_helper.config import config_sources, resolve_config
+from tests.utils.held_file_swaps import (
+    HELD_FILE_WINERRORS,
+    skip_if_refused,
+    swap_or_record,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -70,19 +75,16 @@ class _Layout:
         """``os.replace(source, self.name)``.
 
         A change made from inside the call under test passes `refused`: on Windows
-        the server's own open handle on the name can refuse it with a
-        ``PermissionError`` (see the module doc), and that is recorded there for
-        ``_skip_where_the_server_holds_the_file``, not raised, because it would be
-        raised inside the server's call, which could turn it into an answer.
-        Anywhere else the error is a real one and is raised, as it is for a change
-        made without `refused`.
+        the server's own open handle on the name can refuse it (see the module
+        doc), and ``swap_or_record`` records that there for ``skip_if_refused``
+        instead of raising it, because it would be raised inside the server's call,
+        which could turn it into an answer. Any other error is a real one and is
+        raised, as every error is for a change made without `refused`.
         """
-        try:
+        if refused is None:
             os.replace(source, self.name)
-        except PermissionError as error:
-            if refused is None or sys.platform != "win32":
-                raise
-            refused.append(error)
+        else:
+            swap_or_record(lambda: os.replace(source, self.name), refused)
 
     def lead_to_the_outside_file(
         self, refused: Optional[List[BaseException]] = None
@@ -100,15 +102,6 @@ class _Layout:
         replacement = self.granted / ".granted-file"
         replacement.write_text("project_name: granted\n", encoding="utf-8")
         self._put_at_the_name(replacement, refused)
-
-
-def _skip_where_the_server_holds_the_file(refused: List[BaseException]) -> None:
-    """Skip the cell when the operating system refused a change (the module doc)."""
-    if refused:
-        pytest.skip(
-            "Windows does not let a file the server holds open be replaced, so "
-            f"the change this cell pins cannot be made ({refused[0]})"
-        )
 
 
 def _grant_everything_but_the_outside(monkeypatch, layout: _Layout, after=None) -> None:
@@ -202,7 +195,7 @@ def test_a_name_that_led_elsewhere_while_the_check_resolved_it_is_refused(
 
     response = _get_config(monkeypatch, layout, discovered)
 
-    _skip_where_the_server_holds_the_file(refused)
+    skip_if_refused(refused)
     _refused_with_nothing_from_the_outside_file(response)
 
 
@@ -241,7 +234,7 @@ def test_the_resolved_read_shows_nothing_of_a_name_that_led_elsewhere_either(
     else:
         response = mcp_get_config(config_path=str(layout.name))
 
-    _skip_where_the_server_holds_the_file(refused)
+    skip_if_refused(refused)
     _refused_with_nothing_from_the_outside_file(response)
 
 
@@ -261,14 +254,8 @@ def _arrange_asked_with_an_environment_config(
     def untrusted_after_the_file_changed(*_args: Any, **_kwargs: Any) -> bool:
         # Called once the check has returned and before the file is loaded.
         if swap and not changed and not refused:
-            try:
-                os.replace(other, config)
-            except PermissionError as error:
-                # The server holds the file it checked (see the module doc).
-                if sys.platform != "win32":
-                    raise
-                refused.append(error)
-            else:
+            # The server holds the file it checked (see the module doc).
+            if swap_or_record(lambda: os.replace(other, config), refused):
                 changed.append(True)
         return False
 
@@ -276,7 +263,7 @@ def _arrange_asked_with_an_environment_config(
         sandbox, "client_named_config_is_untrusted", untrusted_after_the_file_changed
     )
     response = mcp_get_config(config_path=str(config))
-    _skip_where_the_server_holds_the_file(refused)
+    skip_if_refused(refused)
     assert bool(changed) is swap, "the file did not change where the cell expects it"
     return response
 
@@ -301,3 +288,30 @@ def test_control_the_environment_config_unchanged_is_shown(
 
     assert response.get("success") is not False, response
     assert response.get("project_name") == "checked", response
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="only Windows refuses to replace a file that is held open",
+)
+def test_control_a_swap_over_a_file_the_server_holds_open_is_refused(tmp_path) -> None:
+    """The swap tests skip when Windows refuses their swap, and that skip is only
+    justified if it does: the file the server opens to judge a config
+    (``open_config_for_judgment``) cannot be replaced while it is open, with a
+    sharing violation or an access denial, and is left as it was."""
+    config = tmp_path / "ash-config.yaml"
+    config.write_text("project_name: checked\n", encoding="utf-8")
+    other = tmp_path / "other.yaml"
+    other.write_text(f"project_name: {CANARY}\n", encoding="utf-8")
+    opened = config_sources.open_config_for_judgment(config)
+    assert opened is not None, "the file was not opened"
+    refused: List[BaseException] = []
+    try:
+        ran = swap_or_record(lambda: os.replace(other, config), refused)
+    finally:
+        os.close(opened.fd)
+
+    assert ran is False, "the swap over a held file was not refused"
+    assert len(refused) == 1, refused
+    assert getattr(refused[0], "winerror", None) in HELD_FILE_WINERRORS, refused
+    assert config.read_text(encoding="utf-8") == "project_name: checked\n"
