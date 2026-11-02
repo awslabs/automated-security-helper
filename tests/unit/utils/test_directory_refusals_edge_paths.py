@@ -14,7 +14,10 @@ directory the link leads to, the one mkdir reaches.
 
 from __future__ import annotations
 
+import errno
 import os
+import stat
+import sys
 
 import pytest
 
@@ -98,3 +101,63 @@ def test_a_file_on_the_way_is_not_a_directory_where_stat_only_says_not_found(
     assert refusal == f"Output directory cannot be created: {output} (Not a directory)"
     # The control: a missing directory under a directory is still made, not refused.
     assert output_dir_refusal(fresh) is None
+
+
+class _ReparsePoint:
+    """The lstat of a Windows junction: the directory's own answer, with the
+    reparse-point attribute that ``os.path.islink`` does not look at."""
+
+    def __init__(self, real: os.stat_result) -> None:
+        self._real = real
+        self.st_file_attributes = stat.FILE_ATTRIBUTE_REPARSE_POINT
+
+    def __getattr__(self, name: str):
+        return getattr(self._real, name)
+
+
+def test_a_junction_to_nothing_on_the_way_is_a_link_to_nothing(tmp_path, monkeypatch):
+    """The stand-in for a junction whose target was removed: lexists, no symbolic
+    link, not a directory that resolves, a reparse point. It is refused as a link
+    to nothing is (``File exists``, EEXIST), not as a file on the way."""
+    junction = tmp_path / "junction"
+    junction.mkdir()
+    real_lstat = os.lstat
+    real_exists = os.path.exists
+
+    def lstat(path, *args, **kwargs):
+        result = real_lstat(path, *args, **kwargs)
+        return _ReparsePoint(result) if os.fspath(path) == str(junction) else result
+
+    def exists(path):
+        return False if os.fspath(path) == str(junction) else real_exists(path)
+
+    monkeypatch.setattr(os, "lstat", lstat)
+    monkeypatch.setattr(os.path, "exists", exists)
+    output = junction / "ash_output"
+
+    refusal = output_dir_refusal(output)
+
+    assert refusal == (
+        f"Output directory cannot be created: {output} ({os.strerror(errno.EEXIST)})"
+    )
+    assert refusal.error_number == errno.EEXIST
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="a junction is made on Windows only"
+)
+def test_a_real_junction_to_a_removed_directory_is_a_link_to_nothing(tmp_path):
+    import _winapi
+
+    target = tmp_path / "target"
+    target.mkdir()
+    junction = tmp_path / "junction"
+    _winapi.CreateJunction(str(target), str(junction))
+    target.rmdir()
+
+    refusal = output_dir_refusal(junction)
+
+    assert refusal == (
+        f"Output directory cannot be created: {junction} ({os.strerror(errno.EEXIST)})"
+    )
+    assert refusal.error_number == errno.EEXIST

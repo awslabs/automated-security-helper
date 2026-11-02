@@ -164,8 +164,9 @@ def _obstacle_on_the_way(path: str) -> Optional[str]:
     is already on the way to it: the nearest part of it that is there. None when
     that is a directory, so the path can be made.
 
-    - A link to nothing: mkdir cannot make a directory where a link is, and fails
-      with EEXIST, as mkdir -p does in ./ash.
+    - A link to nothing, a Windows junction to a removed directory included:
+      mkdir cannot make a directory where a link is, and fails with EEXIST, as
+      mkdir -p does in ./ash.
     - Something that is not a directory, such as a file: ``Not a directory``
       (ENOTDIR). POSIX stat says this itself for ``<file>/x``, before this runs.
       Windows stat only says that ``<file>\\x`` is not found, and mkdir then
@@ -185,11 +186,28 @@ def _obstacle_on_the_way(path: str) -> Optional[str]:
         if parent == current:
             return None
         current = parent
-    if os.path.islink(current) and not os.path.exists(current):
+    if not os.path.exists(current) and _is_a_link(current):
         return output_dir_unmakeable(path, os.strerror(errno.EEXIST), errno.EEXIST)
     if not os.path.isdir(current):
         return output_dir_unmakeable(path, os.strerror(errno.ENOTDIR), errno.ENOTDIR)
     return None
+
+
+def _is_a_link(path: str) -> bool:
+    """Whether *path* is a link, a Windows directory junction included.
+
+    ``os.path.islink`` is False for a junction, a reparse point that is no symbolic
+    link, so one that leads to a removed directory would read as a plain
+    non-directory. ``os.path.isjunction`` is Python 3.12 and later, so the
+    reparse-point attribute of ``lstat`` is read instead (``st_file_attributes``
+    exists on Windows only, and is 0 here elsewhere)."""
+    if os.path.islink(path):
+        return True
+    try:
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    except (OSError, ValueError):
+        return False
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 #: The start of the name of the file :func:`_write_refused` makes and removes. It is
