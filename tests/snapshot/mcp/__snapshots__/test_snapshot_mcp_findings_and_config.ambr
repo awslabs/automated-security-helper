@@ -201,6 +201,8 @@
           'properties': '{"tags": ["bandit"], "scanner_name": "bandit", "issue_severity": "MEDIUM"}',
           'raw_data': '{"ruleId":"B105","ruleIndex":-1,"kind":"fail","level":"warning","message":{"text":"Possible hardcoded password: \'h******\'","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"src/settings.py","index":-1},"region":{"startLine":7,"endLine":7,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["bandit"],"scanner_name":"bandit","issue_severity":"MEDIUM"}}',
           'references': None,
+          'resource_id': None,
+          'resource_type': None,
           'rule_id': 'B105',
           'scanner': 'bandit',
           'scanner_type': 'UNKNOWN',
@@ -231,6 +233,8 @@
           'properties': '{"tags": ["bandit"], "scanner_name": "bandit", "issue_severity": "LOW"}',
           'raw_data': '{"ruleId":"B101","ruleIndex":-1,"kind":"fail","level":"note","message":{"text":"Use of assert detected.","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"tests/test_app.py","index":-1},"region":{"startLine":4,"endLine":4,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"suppressions":[{"kind":"external","justification":"Asserts are expected in tests."}],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["bandit"],"scanner_name":"bandit","issue_severity":"LOW"}}',
           'references': None,
+          'resource_id': None,
+          'resource_type': None,
           'rule_id': 'B101',
           'scanner': 'bandit',
           'scanner_type': 'UNKNOWN',
@@ -259,6 +263,8 @@
           'properties': '{"tags": ["detect-secrets"], "scanner_name": "detect-secrets", "issue_severity": "CRITICAL"}',
           'raw_data': '{"ruleId":"SECRET-AWS-ACCESS-KEY","ruleIndex":-1,"kind":"fail","level":"error","message":{"text":"AWS Access Key detected in configuration file.","arguments":[]},"locations":[{"id":-1,"physicalLocation":{"artifactLocation":{"uri":"config/settings.ini","index":-1},"region":{"startLine":3,"endLine":3,"charOffset":-1,"byteOffset":-1}},"logicalLocations":[],"annotations":[],"relationships":[]}],"stacks":[],"codeFlows":[],"graphs":[],"graphTraversals":[],"relatedLocations":[],"rank":-1.0,"attachments":[],"fixes":[],"taxa":[],"properties":{"tags":["detect-secrets"],"scanner_name":"detect-secrets","issue_severity":"CRITICAL"}}',
           'references': None,
+          'resource_id': None,
+          'resource_type': None,
           'rule_id': 'SECRET-AWS-ACCESS-KEY',
           'scanner': 'detect-secrets',
           'scanner_type': 'UNKNOWN',
@@ -661,6 +667,7 @@
       ]),
       'fail_on_findings': False,
       'fail_on_incomplete_scanners': True,
+      'fail_on_unknown_keys': False,
       'global_settings': dict({
         'ignore_paths': list([
         ]),
@@ -1250,6 +1257,7 @@
       ]),
       'fail_on_findings': True,
       'fail_on_incomplete_scanners': True,
+      'fail_on_unknown_keys': False,
       'global_settings': dict({
         'ignore_paths': list([
         ]),

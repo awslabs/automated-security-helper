@@ -153,6 +153,7 @@ ash_config:
   external_reports_to_include: []
   fail_on_findings: true
   fail_on_incomplete_scanners: true
+  fail_on_unknown_keys: false
   global_settings:
     ignore_paths: []
     mcp:
@@ -275,7 +276,9 @@ ash_config:
       package_version: null
       path: app/app.py
       reason: Fixture placeholder credential, not a real secret
+      resource_id: null
       rule_id: SECRET-SECRET-KEYWORD
+      scope: null
       symbol: null
     - client_supplied: false
       expiration: '2099-12-31'
@@ -286,7 +289,9 @@ ash_config:
       package_version: null
       path: infra/main.tf
       reason: Stale suppression for a check that no longer exists
+      resource_id: null
       rule_id: CKV_AWS_999
+      scope: null
       symbol: null
   honor_ignore_files: true
   mcp-resource-management:
