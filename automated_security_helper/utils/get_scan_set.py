@@ -2921,16 +2921,45 @@ def _git_listing(
     return [field for field in fields if field]
 
 
+def _one_character_class(char: str) -> str:
+    """A glob class matching *char* alone. ``[`` and a leading ``]`` name
+    themselves in a class (wildmatch.c reads the first member before looking
+    for the closing bracket); a backslash is spelled escaped, and only a POSIX
+    file name holds one, so no backslash is ever sent on Windows."""
+    return "[\\\\]" if char == "\\" else f"[{char}]"
+
+
 def _pathspec_for_exactly(path: str) -> str:
     """A pathspec that matches *path* and nothing below it.
 
     A plain pathspec, literal or not, also matches every path below the one it
     names. A ``:(glob)`` pathspec with a wildcard in it is matched against the
-    whole path instead, and a backslash-escaped character counts as one, so the
-    last character is escaped (every glob character before it is too).
+    whole path instead, so every glob character is spelled as a one-character
+    class, and a path without one gets a class around its last character that
+    can carry one. A backslash escape would count as a wildcard too, and did
+    here, but git normalizes every pathspec's match string (pathspec.c builds
+    it with ``prefix_path_gently``, glob magic included, which runs
+    ``normalize_path_copy_len``), and on Windows a backslash is a directory
+    separator there and is rewritten to ``/``: ``:(glob)supe\\r`` asked git for
+    ``supe/r``, so no path in *exactly* was ever listed, and a repository that
+    held the scan root through a path between them read as not holding it. A
+    class has no separator in it, so it survives both platforms. ``!`` and
+    ``^`` open a negated class and a class never matches ``/``, so none of the
+    three is wrapped; a path of nothing else (no real checkout's) falls back to
+    a class that also admits ``.``, which no listed component ends in, and the
+    callers' exact-membership checks drop any extra row that could list.
     """
-    escaped = "".join("\\" + char if char in "*?[\\" else char for char in path[:-1])
-    return f":(glob){escaped}\\{path[-1]}"
+    pieces = [
+        _one_character_class(char) if char in "*?[]\\" else char for char in path
+    ]
+    if pieces == list(path):
+        for index in range(len(pieces) - 1, -1, -1):
+            if pieces[index] not in "/!^":
+                pieces[index] = f"[{pieces[index]}]"
+                break
+        else:
+            pieces[-1] = f"[.{pieces[-1]}]"
+    return ":(glob)" + "".join(pieces)
 
 
 def _pathspecs_below_and_exactly(
