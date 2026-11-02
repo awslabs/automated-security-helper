@@ -270,7 +270,12 @@ def _tool_scanner(kind: str, context):
             "bandit.sarif"
         )
     if kind in ("semgrep", "opengrep"):
-        return patterns._grep_scanner(kind, context), "results_sarif.sarif"
+        scanner = patterns._grep_scanner(kind, context)
+        # Both are off by default on Windows, where the executor leaves a disabled
+        # scanner unscanned and keeps no raw results. The tool is stubbed below, so
+        # the platform's default is not what this test measures.
+        scanner.config.enabled = True
+        return scanner, "results_sarif.sarif"
     if kind == "grype":
         from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
             GrypeScanner,
