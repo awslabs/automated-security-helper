@@ -127,9 +127,7 @@ def test_per_scanner_pass_matches_through_the_callers_scanner_name(tmp_path, con
     assert _suppression_count(out) == 1, out.runs[0].results[0]
 
 
-def test_merged_pass_matches_through_the_attached_result_scanner_name(
-    tmp_path, config
-):
+def test_merged_pass_matches_through_the_attached_result_scanner_name(tmp_path, config):
     """The merged pass: each result's identity is what attach_scanner_details
     wrote on it, not the aggregator's driver name.
 
