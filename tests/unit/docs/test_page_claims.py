@@ -17120,13 +17120,23 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
     )
     runner = runner.replace("ABSOLUTE", absolute).replace("USER", user)
     wrapper = wrapper.replace("ABSOLUTE", absolute).replace("USER", user)
-    expected = json.loads(
-        json.dumps(expected)
-        .replace("CWD", str(cwd))
-        .replace("ABSOLUTE", absolute)
-        .replace("USERHOME", user_home)
-        .replace("HOME", str(home))
-    )
+    def _substituted(value: Any) -> Any:
+        # Substitute on the object's string leaves, never on JSON text: a
+        # Windows path's backslashes would be invalid escapes inside it.
+        if isinstance(value, str):
+            return (
+                value.replace("CWD", str(cwd))
+                .replace("ABSOLUTE", absolute)
+                .replace("USERHOME", user_home)
+                .replace("HOME", str(home))
+            )
+        if isinstance(value, list):
+            return [_substituted(item) for item in value]
+        if isinstance(value, dict):
+            return {key: _substituted(item) for key, item in value.items()}
+        return value
+
+    expected = _substituted(expected)
 
     answer, stderr = _child_answer(
         _RESOLVE_THE_RUNTIME,
