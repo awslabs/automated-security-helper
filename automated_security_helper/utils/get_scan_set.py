@@ -2949,9 +2949,7 @@ def _pathspec_for_exactly(path: str) -> str:
     a class that also admits ``.``, which no listed component ends in, and the
     callers' exact-membership checks drop any extra row that could list.
     """
-    pieces = [
-        _one_character_class(char) if char in "*?[]\\" else char for char in path
-    ]
+    pieces = [_one_character_class(char) if char in "*?[]\\" else char for char in path]
     if pieces == list(path):
         for index in range(len(pieces) - 1, -1, -1):
             if pieces[index] not in "/!^":
