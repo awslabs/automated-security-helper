@@ -203,6 +203,35 @@ def closest_key(key: str, known: Iterable[str]) -> Optional[str]:
     return None
 
 
+#: Tier-0 placement map, consulted before edit-distance for suppression and
+#: ignore-path entry kinds: a known misplacement gets a shaped suggestion
+#: naming where the key belongs, not merely the nearest spelling. Core seeds
+#: the spellings it owns; a scanner plugin registers its own keys at load
+#: (register_placement_hint), so an engine-specific key typed at the wrong
+#: level points at that engine's block. Hints cover only engines whose plugin
+#: module has loaded.
+_PLACEMENT_HINTS: Dict[str, str] = {
+    "resource": "did you mean 'resource_id'?",
+}
+
+
+def register_placement_hint(key: str, suggestion: str) -> None:
+    """Register what to suggest for ``key`` typed where an entry refuses it."""
+    _PLACEMENT_HINTS[key] = suggestion
+
+
+def _placement_hint(key: str, where: str) -> Optional[str]:
+    """The placement suggestion for ``key``, for entry kinds only.
+
+    The map's spellings are suppression vocabulary; a plugin option of the
+    same name must keep its ordinary did-you-mean, so the hint fires only
+    where the entry kind says suppression or ignore path.
+    """
+    if "suppression" not in where and "ignore path" not in where:
+        return None
+    return _PLACEMENT_HINTS.get(key)
+
+
 def unknown_keys_message(
     unknown: Iterable[str], known: Iterable[str], where: str
 ) -> str:
@@ -210,10 +239,11 @@ def unknown_keys_message(
     known = sorted(known)
     named = []
     for key in unknown:
-        suggestion = closest_key(key, known)
-        named.append(
-            f"'{key}'" + (f" (did you mean '{suggestion}'?)" if suggestion else "")
-        )
+        suggestion = _placement_hint(key, where)
+        if suggestion is None:
+            match = closest_key(key, known)
+            suggestion = f"did you mean '{match}'?" if match else None
+        named.append(f"'{key}'" + (f" ({suggestion})" if suggestion else ""))
     noun = "key" if len(named) == 1 else "keys"
     # Only a plugin's options can declare nothing: every entry kind has keys.
     accepted = (
