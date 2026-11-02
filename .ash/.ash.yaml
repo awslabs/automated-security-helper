@@ -3635,6 +3635,121 @@ global_settings:
     - rule_id: B604
       path: tests/unit/utils/test_subprocess_utils_stops_resolution_and_records_edges.py
       reason: "Test code. A call that takes a shell argument with a command string the test wrote, to check that the tool guard and the harness refuse or confine it."
+    # === The #865 chain's test files: detect-secrets ===
+    # Per-file entries with the established reasons, as above. Each flagged line
+    # was read: every value is a made-up fixture, a planted probe, or a name the
+    # keyword heuristic fires on; none is a credential.
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/assets/test_install_pinned_tool_redirects_and_races.py
+      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/config/test_sandbox_environment_setting.py
+      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/interactions/test_run_ash_nix.py
+      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/utils/sandbox/test_backends_low_hardening.py
+      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
+    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
+      path: tests/unit/utils/test_ash_install_records_and_markers.py
+      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
+    - rule_id: SECRET-PRIVATE-KEY
+      path: tests/unit/converters/test_archive_member_admission.py
+      reason: >-
+        False positive. A PEM header line whose body says it is not a key,
+        planted as a fixture archive member so the converter's admission rules
+        have a secret-shaped file to handle. No key material exists.
+    - rule_id: SECRET-PRIVATE-KEY
+      path: tests/unit/interactions/test_run_ash_container_input_and_run_edges.py
+      reason: >-
+        False positive. A PEM header string the test plants and then asserts is
+        ABSENT from the container run's output lines; redaction is the
+        assertion. No key material exists.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/base/test_a_plugin_whose_check_raised_is_excluded_with_a_warning.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/base/test_uv_tool_mixin_guards_and_decisions.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_a_refusal_before_the_runner_shows_no_value_the_config_read.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/mcp/test_mcp_server_get_scan_progress_keeps_the_producers_view.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/cli/test_plugin_list_shows_what_a_scan_selects.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/core/resource_management/test_error_handling_categories_and_paths.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/core/resource_management/test_scan_registry_lookups_and_claims.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/core/resource_management/test_scanner_status_summary.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/core/test_engine_phase_scope_handlers_and_check_failures.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/core/test_orchestrator_project_name_holding_an_environment_value.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/interactions/test_run_ash_container_input_and_run_edges.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/models/test_asharp_model_low4_a_failed_failure_report_does_not_block_the_save.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugin_modules/ash_aws_plugins/test_s3_reporter_upload_holds_no_secret_value.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugin_modules/ash_builtin/converters/test_jupyter_converter_edge_inputs.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugin_modules/ash_builtin/scanners/test_semgrep_scanner_direct_binary_verified.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugin_modules/ash_builtin/test_detect_secrets_baseline_entries_are_known.py
+      reason: "False positive. The flagged value is a detect-secrets TYPE NAME in a baseline fixture, the label of a detector, not a value."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/plugins/test_discovery_failure_line_redacts_env_values.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/reporters/test_gitlab_sast_scan_section.py
+      reason: "False positive. Synthesized B105 finding texts fed to the reporter under test; the quoted sample assignments are the findings' own message bodies."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/scripts/test_validate_ferret_plugin.py
+      reason: "False positive. The flagged line asserts the validator's own keyword PATTERN matches a sample string; the sample exists to prove detection."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/sandbox/test_fs_guard_a_refused_pre_check_is_redacted_from_the_executor.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_ash_install_failures_are_logged_redacted.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_detect_secrets_worker_caches_lines_per_key.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_detect_secrets_worker_output_records.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_secret_masking_keys_urls_and_edges.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_secret_masking_reported_ranges.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/utils/test_severity_ladder.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/workspace/test_a_failed_outcome_is_returned_when_the_exposed_values_cannot_be_read.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: tests/unit/workspace/test_a_reduction_that_raises_keeps_the_values_the_scan_exposed.py
+      reason: "False positive. Test names chosen after what they hold, with made-up values that the test checks ASH hides or refuses. The heuristic reads the name."
     # No GitHub Actions entries. `yaml.github-actions.security.*` was suppressed
     # over every workflow on the claim that interpolations were author-defined;
     # removing it surfaced shell injection through `${{ inputs.* }}` in
