@@ -136,7 +136,10 @@ def test_a_file_on_the_way_is_refused_before_any_project_is_registered(
         response, f"Output directory cannot be created: {refused} (Not a directory)"
     )
     assert executions == [], "the workspace scan ran"
-    assert isolated_mcp_state.list_scans() == [], "a project was registered"
+    # Finished ones too: refused before registering, not registered and given back.
+    assert isolated_mcp_state.list_scans(active_only=False) == [], (
+        "a project was registered"
+    )
     assert blocker.read_text(encoding="utf-8") == CONTENT
 
 

@@ -114,7 +114,8 @@ def test_a_file_on_the_way_is_refused_before_the_scan_is_registered(
         response, f"Output directory cannot be created: {output} (Not a directory)"
     )
     assert blocker.read_text(encoding="utf-8") == CONTENT
-    assert registry.list_scans() == []
+    # Finished ones too: refused before registering, not registered and given back.
+    assert registry.list_scans(active_only=False) == []
 
 
 @pytest.mark.skipif(

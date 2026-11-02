@@ -1,14 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The one place the swap tests tell a held file from any other refusal.
+"""The one place the swap tests record a refusal that looks like a held file.
 
 The MCP config tests change what a name leads to from inside a call the server is
 making. On Windows the server's own open handle on the checked file refuses that
-change, and the test then has nothing to pin and skips. A ``PermissionError`` has
-other causes there (a read-only attribute, an ACL, an indexer or antivirus
-handle), and a skip for those would hide a server that stopped holding the file.
-So only the two codes a held file gives are recorded; any other error is raised.
+change, and the test then has nothing to pin and skips. A held file gives
+``ERROR_SHARING_VIOLATION`` (32) or ``ERROR_ACCESS_DENIED`` (5), so those two codes
+are recorded and any other error is raised.
+
+The filter does not tell a held file from every other cause. A read-only file or
+an ACL denial also gives ``ERROR_ACCESS_DENIED``, and an indexer or antivirus
+handle usually gives ``ERROR_SHARING_VIOLATION``, so such a refusal is recorded and
+skipped too. What the filter keeps out is a ``PermissionError`` with any other
+code. That the server's own handle does refuse the swap is shown by a separate
+Windows-only test (test_get_config_judges_the_file_it_opened.py).
 """
 
 from __future__ import annotations
