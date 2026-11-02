@@ -18,6 +18,7 @@ from automated_security_helper.models.core import (
     scope_value_matches,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.utils import suppression_scope_registry
 
 pytestmark = pytest.mark.unit
 
@@ -96,7 +97,13 @@ class TestEnginesEnumerate:
         entry = _entry(engines={"cdk-nag": {"resource_path": CONSTRUCT_PATH}})
         assert not entry.matches(_finding(scanner="checkov"))
 
-    def test_a_listed_engine_with_no_registered_plugin_fails_closed(self):
+    def test_a_listed_engine_with_no_registered_plugin_fails_closed(self, monkeypatch):
+        # The cdk-nag plugin registers itself at module import, so a prior
+        # test importing it leaves the process-global registry populated;
+        # the unregistered state this test pins must be explicit.
+        monkeypatch.delitem(
+            suppression_scope_registry._ENGINE_HOOKS, "cdk-nag", raising=False
+        )
         entry = _entry(engines={"cdk-nag": {"resource_path": CONSTRUCT_PATH}})
         assert not entry.matches(_finding())
 
