@@ -82,8 +82,7 @@ class TestDefaults:
 
     def test_default_match_never_matches(self):
         assert (
-            ScannerPluginBase.suppression_scope_matches({"any": 1}, _finding())
-            is False
+            ScannerPluginBase.suppression_scope_matches({"any": 1}, _finding()) is False
         )
 
     def test_default_split_is_no_split(self):
@@ -106,9 +105,7 @@ class TestDispatch:
             assert not entry.matches(_finding(scanner="ghost-engine"))
             assert not entry.matches(_finding(scanner="ghost-engine"))
         warnings = [
-            record
-            for record in caplog.records
-            if "ghost-engine" in record.getMessage()
+            record for record in caplog.records if "ghost-engine" in record.getMessage()
         ]
         assert len(warnings) == 1
         assert "fail closed" in warnings[0].getMessage()
@@ -137,9 +134,7 @@ class TestWarnOnceResets:
             registry.reset_unmatched_engine_warnings()
             entry.matches(_finding(scanner="reset-engine"))
         warnings = [
-            record
-            for record in caplog.records
-            if "reset-engine" in record.getMessage()
+            record for record in caplog.records if "reset-engine" in record.getMessage()
         ]
         assert len(warnings) == 2
 
