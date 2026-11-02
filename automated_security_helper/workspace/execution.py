@@ -270,6 +270,12 @@ paths regardless of the directory it runs in, so joining them onto the project
 directory is wrong whenever a project sits below a larger repository -- and it
 silently produces paths that match nothing, which reads as "no changes".
 
+A submodule whose commit changed is named by its own path and by no file inside
+it, so a project inside one that git reads as part of the repository had an empty
+changed set and was skipped as unchanged. The set then holds the project itself
+(``get_scan_set.changed_paths_within``), and the engine's filter counts every file
+below a directory in the set as changed.
+
 ``--mode precommit`` does not arm this gate. It selects a fast scanner set and
 nothing else, which is what it means for a single project, and a workspace that
 read it as "diff-scoped" gave one flag two meanings. The diff it would have used
@@ -361,6 +367,7 @@ from automated_security_helper.models.workspace import (
     workspace_exit_code,
 )
 from automated_security_helper.utils.get_scan_set import (
+    changed_paths_within,
     get_changed_files,
     git_repository_root,
     git_repository_root_problem,
@@ -1088,7 +1095,10 @@ def changed_file_set(
         git could not answer and the documented fallback is to report every
         finding. An empty set when the project is a repository with nothing
         changed inside it, which is the skip signal. Otherwise the absolute paths
-        of the changed files that lie within the project.
+        of the changed files that lie within the project, or the project itself
+        when the diff names a submodule it is inside: git names a submodule whose
+        commit changed by its own path and nothing inside it, so the project is
+        changed throughout (``changed_paths_within``).
     """
     if not settings.changed_files_only:
         return None
@@ -1115,12 +1125,11 @@ def changed_file_set(
         # already warned; its documented fallback is to report every finding.
         return None
 
-    resolved_project = project_path.resolve()
-    inside: Set[Path] = set()
+    resolved: List[Path] = []
     for relative in changed:
         # Repository-relative, not project-relative. See the module docstring.
         try:
-            candidate = (repository_root / relative).resolve()
+            resolved.append((repository_root / relative).resolve())
         except (ValueError, OSError, RuntimeError):
             # A name that cannot be resolved is no file inside the project. A
             # committed symlink loop (`loop -> loop`) raises RuntimeError on
@@ -1128,9 +1137,9 @@ def changed_file_set(
             # (check_eloop); 3.13 stopped doing that. The entry does not join the
             # changed set rather than the gate raising out of _scan_one_project.
             continue
-        if candidate == resolved_project or candidate.is_relative_to(resolved_project):
-            inside.add(candidate)
-    return inside
+    # A submodule the diff names above the project holds all of it, so the project
+    # is changed throughout and not skipped as unchanged (changed_paths_within).
+    return changed_paths_within(resolved, project_path)
 
 
 def _scanner_threshold_resolver(

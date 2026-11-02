@@ -6008,6 +6008,7 @@ def _changed_file_set_for(
     if not opts.changed_files_only:
         return None
     from automated_security_helper.utils.get_scan_set import (
+        changed_paths_within,
         get_changed_files,
         git_repository_root,
         git_repository_root_problem,
@@ -6062,14 +6063,22 @@ def _changed_file_set_for(
     # CPython 3.10-3.12 (check_eloop; 3.13 stopped that). Workspace mode's
     # changed_file_set reads such a name the same way: the entry does not join
     # the set, and the other entries still scope the report.
-    resolved_source = opts.source_dir.resolve()
-    return {
-        candidate
-        for candidate in (
-            resolve_uri_reading(str(p), base=repository_root) for p in changed_paths
-        )
-        if candidate is not None and candidate.is_relative_to(resolved_source)
-    }
+    #
+    # A submodule whose commit changed is named by its own path and nothing
+    # inside it, so a path at or below source_dir is kept and one above it, a
+    # submodule source_dir is inside, holds all of source_dir: the set then holds
+    # source_dir itself (changed_paths_within).
+    return changed_paths_within(
+        (
+            candidate
+            for candidate in (
+                resolve_uri_reading(str(p), base=repository_root)
+                for p in changed_paths
+            )
+            if candidate is not None
+        ),
+        opts.source_dir,
+    )
 
 
 def _refuse_an_unknown_severity_restriction(restriction: Optional[str]) -> None:

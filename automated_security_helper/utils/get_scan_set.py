@@ -3231,6 +3231,36 @@ def get_changed_files(
     return [Path(_git_text(name)) for name in result.stdout.split(b"\0") if name]
 
 
+def changed_paths_within(candidates: Iterable[Path], scope: Path) -> Set[Path]:
+    """The paths in *candidates* that hold something inside *scope*.
+
+    *candidates* are the resolved paths of the names :func:`get_changed_files`
+    returned. git names a submodule whose recorded commit changed once, by its own
+    path (a gitlink, mode 160000), and lists nothing inside it, whether or not that
+    commit is in this repository. So a name can stand for every file below it:
+
+    - a path at or below *scope* is kept;
+    - a path above *scope*, a submodule *scope* is inside, holds all of *scope*, so
+      *scope* itself is kept (resolved, as the scan resolves a finding's file);
+    - any other path is outside *scope* and is left out.
+
+    A finding is in the changed set when its file, or a directory above it, is in
+    what this returns (``utils.changed_files.filter_results_to_changed_files``).
+    Without that, a scan of a repository whose submodule moved dropped every
+    finding in the submodule, and a source directory or workspace project inside
+    it got an empty set: its findings were all dropped, or the project was
+    recorded as unchanged and not scanned.
+    """
+    resolved_scope = scope.resolve()
+    kept: Set[Path] = set()
+    for candidate in candidates:
+        if candidate.is_relative_to(resolved_scope):
+            kept.add(candidate)
+        elif resolved_scope.is_relative_to(candidate):
+            kept.add(resolved_scope)
+    return kept
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments.
 

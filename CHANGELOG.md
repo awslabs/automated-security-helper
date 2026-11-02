@@ -7028,6 +7028,17 @@
   raw outputs under `scanners/` still contain every finding. Results record
   `metadata.changed_files_only: true`, and a report over saved results keeps it.
 
+- **`--changed-files-only` keeps every finding in a submodule whose commit
+  changed.** `git diff` names such a submodule by its own path and lists no file
+  inside it, whether or not the new commit is in the local repository, so no
+  finding's file was equal to the one entry and every finding in the submodule was
+  dropped from the report. A finding is now changed when its file, or a directory
+  above it, is in the changed set, so the submodule's path stands for every file
+  below it. A `--source-dir` or a workspace project inside a submodule that git
+  reads as part of the repository is changed throughout too: its changed set was
+  empty, so a scan kept no finding and a workspace project was recorded as
+  unchanged and not scanned.
+
 - **bandit `excluded_paths` entries naming a file, or a glob, now take effect, and
   no entry reaches above the scanned directory.** Each entry became
   `**/<path>/**`, which bandit matches only inside a directory of that name, so

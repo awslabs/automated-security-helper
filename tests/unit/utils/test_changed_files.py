@@ -14,7 +14,10 @@ import pytest
 
 
 from automated_security_helper.utils import get_scan_set
-from automated_security_helper.utils.get_scan_set import get_changed_files
+from automated_security_helper.utils.get_scan_set import (
+    changed_paths_within,
+    get_changed_files,
+)
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.changed_files import (
     filter_results_to_changed_files,
@@ -453,6 +456,93 @@ class TestFilterResultsToChangedFiles:
     def test_none_results_returns_none(self):
         out = filter_results_to_changed_files(None, set(), Path("/tmp"))  # nosec B108
         assert out is None
+
+
+def _uris(results: AshAggregatedResults) -> list[str]:
+    """The location uri of each result left in the first run, in order."""
+    return [
+        result.locations[0].physicalLocation.root.artifactLocation.uri
+        for result in results.sarif.runs[0].results
+    ]
+
+
+@pytest.mark.unit
+class TestADirectoryInTheSetStandsForTheFilesBelowIt:
+    """git names a submodule whose commit changed by its own path, a gitlink, and
+    lists no file inside it, whether or not that commit is in the repository. The
+    path stands for every file below it: a finding is changed when its file, or a
+    directory above it, is in the set."""
+
+    def test_a_finding_below_a_changed_directory_is_kept(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        (source_dir / "sub").mkdir(parents=True)
+        changed = {(source_dir / "sub").resolve()}
+        results = _make_results_with_sarif(
+            [
+                _make_result("sub/lib.py"),
+                _make_result("sub/deep/more/lib.py"),
+                _make_result("app.py"),
+                _make_result("subtle/lib.py"),
+            ]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        # "subtle" starts with the directory's name and is not below it.
+        assert _uris(filtered) == ["sub/lib.py", "sub/deep/more/lib.py"]
+
+    def test_the_source_directory_in_the_set_keeps_every_finding(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {source_dir.resolve()}
+        results = _make_results_with_sarif(
+            [_make_result("a.py"), _make_result("src/b.py")]
+        )
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert _uris(filtered) == ["a.py", "src/b.py"]
+
+    def test_a_directory_that_is_not_in_the_set_keeps_nothing_below_it(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        (source_dir / "sub").mkdir(parents=True)
+        changed = {(source_dir / "other").resolve()}
+        results = _make_results_with_sarif([_make_result("sub/lib.py")])
+
+        filtered = filter_results_to_changed_files(results, changed, source_dir)
+
+        assert _uris(filtered) == []
+
+
+@pytest.mark.unit
+class TestChangedPathsWithin:
+    """The resolved changed paths that hold something inside a scan's scope."""
+
+    def test_paths_at_or_below_the_scope_are_kept(self, tmp_path):
+        scope = tmp_path.resolve() / "repo" / "pkg"
+        inside = scope / "mod.py"
+        deeper = scope / "a" / "b.py"
+
+        kept = changed_paths_within([inside, deeper, scope], scope)
+
+        assert kept == {inside, deeper, scope}
+
+    def test_a_path_above_the_scope_stands_for_all_of_it(self, tmp_path):
+        root = tmp_path.resolve() / "repo"
+        scope = root / "sub" / "pkg"
+
+        assert changed_paths_within([root / "sub"], scope) == {scope}
+
+    def test_other_paths_are_left_out(self, tmp_path):
+        root = tmp_path.resolve() / "repo"
+        scope = root / "sub" / "pkg"
+        sibling = root / "sub" / "pkg2" / "x.py"
+        elsewhere = root / "other.py"
+
+        assert changed_paths_within([sibling, elsewhere], scope) == set()
+
+    def test_no_changed_path_is_an_empty_set(self, tmp_path):
+        assert changed_paths_within([], tmp_path) == set()
 
 
 def _converted_result(uri: str, converted_path: str) -> Result:

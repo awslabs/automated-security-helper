@@ -204,7 +204,10 @@ def filter_results_to_changed_files(
     """Remove SARIF results whose primary location is not in *changed_files*.
 
     *changed_files* holds resolved absolute paths; a result's location is
-    resolved against *source_dir* to compare. A result with no location is kept,
+    resolved against *source_dir* to compare. A location is in it when its file, or
+    a directory above it, is in it: git names a submodule whose commit changed by
+    its own path and lists nothing inside it, so that path stands for every file
+    below it (``get_scan_set.changed_paths_within``). A result with no location is kept,
     since it cannot be placed outside the changed files; so is one whose location
     names no file (an empty URI) and one whose location cannot be resolved to a
     path at all (:func:`resolve_uri_reading`), rather than that one location
@@ -281,7 +284,11 @@ def filter_results_to_changed_files(
                 )
                 if resolved is not None
             ]
-            if not placed or any(path in recorded_changed for path in placed):
+            if not placed or any(
+                path in recorded_changed
+                or not recorded_changed.isdisjoint(path.parents)
+                for path in placed
+            ):
                 filtered.append(result)
         discarded += len(run.results) - len(filtered)
         run.results = filtered
