@@ -22,6 +22,8 @@ starts the container and carries the inner refusal's exit 3.
 
 The runners are stand-ins first on PATH (``docker``, ``podman``, ``finch``,
 ``nerdctl``, ``nix``) that record each call and exit 97, so nothing real starts.
+On Windows each stand-in is a Python script behind a ``.bat`` launcher
+(``tests/utils/stand_ins.py``), because ``CreateProcess`` starts no shell script.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from typer.testing import CliRunner
 
 from automated_security_helper.utils import subprocess_utils
 from tests.utils.fifo_calls import returns_promptly
+from tests.utils.stand_ins import on_windows, write_stand_in
 
 RUNNERS = ("docker", "podman", "finch", "nerdctl", "nix")
 MODES = ["container", "nix"]
@@ -46,6 +49,46 @@ needs_permissions = pytest.mark.skipif(
     os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
     reason="needs POSIX permissions that root ignores",
 )
+
+
+def _recording_program(name: str, runner_log: Path, code: int) -> str:
+    """The Python program a Windows stand-in runs: what the shell stub does.
+
+    It appends ``<name> <arguments>`` to *runner_log* and exits with *code*.
+    """
+    return (
+        "import sys\n"
+        f"with open({str(runner_log)!r}, 'a', encoding='utf-8') as log:\n"
+        f"    log.write({name!r} + ' ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+        f"sys.exit({code})\n"
+    )
+
+
+def _write_runners(bin_dir: Path, runner_log: Path, code: int) -> None:
+    """Put a stand-in for each runner in *bin_dir*, replacing any already there.
+
+    Each appends ``<name> <arguments>`` to *runner_log* and exits with *code*. On
+    POSIX it is a shell script. On Windows a script cannot be started
+    (``CreateProcess`` runs executable images), and ASH looks for ``<name>.exe``,
+    ``<name>.bat`` and ``<name>.cmd`` before the bare name, so with a script the
+    stand-in never ran: container mode resolved the host's own ``docker.exe``, nix
+    mode found no ``nix``, and every test that waits for a runner's call failed.
+    There the stand-in is a Python script behind a ``.bat`` launcher
+    (``tests.utils.stand_ins.write_stand_in``), the form a package manager leaves
+    on PATH. ASH tries ``finch`` before ``docker``, so the stand-in for ``finch`` is
+    found ahead of any ``docker.exe`` on PATH.
+    """
+    windows = on_windows()
+    for name in RUNNERS:
+        if windows:
+            write_stand_in(bin_dir, name, _recording_program(name, runner_log, code))
+            continue
+        stub = bin_dir / name
+        stub.write_text(
+            f'#!/bin/sh\necho "{name} $*" >> "{runner_log}"\nexit {code}\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
 
 
 class Stage:
@@ -67,12 +110,7 @@ class Stage:
         """Make the stand-in runners exit as the scan inside does when it refuses
         its config: 3, ASH's invalid-config status, instead of the 97 that marks a
         runner that should never have been reached."""
-        for name in RUNNERS:
-            stub = self.root / "bin" / name
-            stub.write_text(
-                f'#!/bin/sh\necho "{name} $*" >> "{self.runner_log}"\nexit {code}\n',
-                encoding="utf-8",
-            )
+        _write_runners(self.root / "bin", self.runner_log, code)
 
     def output_snapshot(self) -> Dict[str, bytes]:
         return {
@@ -101,13 +139,7 @@ def stage(tmp_path, monkeypatch) -> Stage:
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in RUNNERS:
-        stub = bin_dir / name
-        stub.write_text(
-            f'#!/bin/sh\necho "{name} $*" >> "{stage.runner_log}"\nexit 97\n',
-            encoding="utf-8",
-        )
-        stub.chmod(0o755)
+    _write_runners(bin_dir, stage.runner_log, 97)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
     for name in (
         "ASH_CONFIG",
