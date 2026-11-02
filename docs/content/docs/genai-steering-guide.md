@@ -958,7 +958,24 @@ Array of suppression rules to mark findings as false positives or accepted risks
 - `line_start`: Optional - specific line number
 - `line_end`: Optional - end line for multi-line suppressions
 - `reason`: Required - explanation for suppression
-- `expiration`: Optional - ISO date when suppression expires
+- `expiration`: Optional - ISO date when suppression expires (`expires` is accepted as an alias when a config is read)
+- `resource_id`: Optional - only suppress findings about this resource identity (for cdk-nag, the CDK construct path); sugar for `scope.resource_id`
+- `scope`: Optional - narrow the entry to a resource identity, a resource type, or named engines' findings:
+
+```yaml
+suppressions:
+  - rule_id: AwsSolutions-IAM5
+    path: 'cdk.out/*.template.json'
+    reason: 'Wildcard is scoped to the collector log group prefix'
+    scope:
+      resource_id: 'Stack/CollectorTaskRole/DefaultPolicy/Resource'
+      resource_type: 'AWS::IAM::Policy'
+      engines:
+        cdk-nag:
+          applies_to: 'Action::logs:*'
+```
+
+An unknown key in a suppression warns and disables the entry (it suppresses nothing until fixed); `fail_on_unknown_keys: true` makes it an error at config load, which becomes the default at ASH v4.
 
 #### scanners
 Configuration for each scanner. Common options:
