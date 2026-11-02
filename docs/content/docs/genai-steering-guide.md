@@ -962,6 +962,7 @@ Array of suppression rules to mark findings as false positives or accepted risks
 - `resource_id`: Optional - only suppress findings about this resource identity (for cdk-nag, the CDK construct path); sugar for `scope.resource_id`
 - `scope`: Optional - narrow the entry to a resource identity, a resource type, or named engines' findings:
 
+<!-- doctest: config kind=ash-fragment at=global_settings -->
 ```yaml
 suppressions:
   - rule_id: AwsSolutions-IAM5

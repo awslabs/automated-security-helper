@@ -42,6 +42,7 @@ global_settings:
 
 A scope may also carry per-engine blocks, keyed by scanner name and owned by that scanner's plugin:
 
+<!-- doctest: config kind=other reason="the scope key of one suppression entry, indented as it sits in the entry, not a whole ASH config" -->
 ```yaml
       scope:
         engines:
