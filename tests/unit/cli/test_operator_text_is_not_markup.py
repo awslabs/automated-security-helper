@@ -258,8 +258,11 @@ def test_an_exception_holding_markup_is_logged_and_printed_as_given(
 _ANSI_STYLE = re.compile(r"\x1b\[[0-9;]*m")
 
 #: A workspace folder whose name is a Rich link tag, and a project key holding a
-#: closing tag.
-_LINK_FOLDER = "[link=http://e.example]L[/link]"
+#: closing tag. The link target carries no scheme: a colon is not allowed in a
+#: Windows file name, so the folder named `[link=http://e.example]L[/link]` could
+#: not be made there and the test failed in its own setup. Rich renders the tag
+#: as a hyperlink whatever the target spells, so the OSC 8 check keeps its point.
+_LINK_FOLDER = "[link=e.example]L[/link]"
 _TAG_FOLDER = "api[/x]"
 
 
@@ -778,7 +781,14 @@ def test_plugin_list_shows_a_plugins_config_and_error_as_text(in_tmp, monkeypatc
 
     def get_plugin_config(self, plugin_type, plugin_name):
         if plugin_name == "bandit":
-            return {"name": "bandit", "enabled": True, "note": text}
+            # A declared option that takes free text: the declared config model
+            # validates as a config file does, so an undeclared key would be
+            # refused as unknown and the column would show that refusal instead.
+            return {
+                "name": "bandit",
+                "enabled": True,
+                "options": {"additional_formats": [text]},
+            }
         if plugin_name == "semgrep":
             raise ValueError(f"cannot build: {text}")
         return real(self, plugin_type=plugin_type, plugin_name=plugin_name)
@@ -790,6 +800,10 @@ def test_plugin_list_shows_a_plugins_config_and_error_as_text(in_tmp, monkeypatc
     result = CliRunner().invoke(app, ["plugin", "list", "--include-plugin-config"])
 
     assert result.exit_code == 0, result.output
-    # Once in bandit's config, once in semgrep's error.
-    assert result.output.count(text) == 2, result.output
+    # Each place the text is shown holds it whole: bandit's config column (the
+    # JSON-quoted value), semgrep's error column, and the warning bandit's config
+    # validation logs about the additional_formats value. A count would move with
+    # every new line that shows the value.
+    assert f'"{text}"' in result.output, result.output
+    assert f"cannot build: {text}" in result.output, result.output
     assert "\\[" not in result.output, result.output

@@ -73,10 +73,27 @@ _ALLOWED_HELPER_CALLS = {
         "read_log_bounded",
     ): "the sanctioned log pipeline itself: bound+1, edge trim, marker",
     (
+        "base/scanner_plugin.py",
+        "_error_notifications",
+    ): "bounded+1 read of the tool's SARIF results file for its error-level "
+    "notification texts, dropped whole over the cap; what is shown of them is "
+    "redacted with the run's values before the excerpt cut",
+    (
+        "base/scanner_plugin.py",
+        "ScannerPluginBase._read_results_file",
+    ): "bounded+1 read of the tool's results file for grading, refused over "
+    "the cap and parsed as JSON; structured results, no text shown",
+    (
         "plugin_modules/ash_builtin/scanners/detect_secrets_scanner.py",
         "DetectSecretsScanner._scan_in_worker",
     ): "bounded+1 read of the worker's findings JSON, refused over the cap; "
     "structured results, not log text",
+    (
+        "plugin_modules/ash_builtin/scanners/zizmor_scanner.py",
+        "_declares_a_github_action",
+    ): "the head of an action metadata file at _ACTION_PROBE_LIMIT + 1, parsed "
+    "for an action declaration; operator input, not tool output (listed under "
+    "both shapes so the sized-read and guarded-read spellings are each reviewed)",
 }
 
 # Reviewed sized .read(n) sites. Each reads bytes that are hashed, copied,
@@ -89,6 +106,12 @@ _ALLOWED_SIZED_READS = {
     ): "chunked download into a hash and a file; network bytes, never shown",
     ("assets/install-pinned-tool.py", "_sha256_file"): "whole-file hash in chunks",
     ("assets/install-pinned-tool.py", "_sha256_of"): "whole-file hash in chunks",
+    (
+        "assets/install-pinned-tool.py",
+        "install_bundle",
+    ): "chunked copy of each bundle member into staging while hashing, under "
+    "the member and total byte caps; archive bytes written and digested, "
+    "never shown",
     (
         "base/plugin_base.py",
         "log_says",
@@ -104,19 +127,138 @@ _ALLOWED_SIZED_READS = {
     "under the source-read budget; only each line's head is kept, cut at "
     "SNIPPET_LINE_CHARS + 1 characters",
     (
+        "cli/inspect/inspect_findings_app.py",
+        "_read_chunk",
+    ): "the chunk reader behind _offset_of_line and _read_lines, under the "
+    "caller's byte budget; bytes counted or cut per line, not shown",
+    (
+        "cli/mcp/__init__.py",
+        "_read_bounded",
+    ): "the --auth-header-value-file descriptor read in a loop capped at "
+    "_AUTH_VALUE_MAX_BYTES + 1, refused over the cap by its caller; a "
+    "credential value, never shown",
+    (
+        "cli/mcp/progress_monitor.py",
+        "_read_scanner_severity",
+    ): "ASH's own scan-results JSON on a regular-file descriptor opened without "
+    "following links, _MAX_SCANNER_RESULTS_BYTES + 1, refused over the cap; "
+    "parsed, not shown",
+    (
         "cli/mcp/source_delivery.py",
-        "set_source_zip_finalize",
+        "_finalize_zip_upload",
     ): "sha chunks over the operator's own uploaded archive, and the name "
-    "of a refused symlink target from it; not tool output",
+    "of a refused symlink target from it; not tool output (the work behind "
+    "set_source_zip_finalize, whose own body holds no read)",
+    (
+        "cli/scan.py",
+        "_marker_head",
+    ): "a 64 KiB head of an output-directory file compared with the ASH marker "
+    "shapes; bytes compared, not shown",
+    (
+        "config/client_scanner_exclusions.py",
+        "_trivy_ignore_exclusions",
+    ): "the project's trivy ignore file at _MAX_IGNORE_FILE_BYTES + 1, refused "
+    "over the cap; operator config, not tool output",
+    (
+        "config/config_sources.py",
+        "read_opened_config_bytes",
+    ): "the operator's config file in 1 MiB chunks, the total bounded by "
+    "ASH_CONFIG_MAX_FILE_BYTES + 1 and refused over it",
+    (
+        "config/config_sources.py",
+        "read_config_bytes",
+    ): "the operator's config file in 1 MiB chunks, the total bounded by "
+    "ASH_CONFIG_MAX_FILE_BYTES + 1 and refused over it",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "_zip_directory_start",
+    ): "4-byte zip signature reads at computed offsets; bytes compared, not shown",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "_zip_has_more_entries_than",
+    ): "46-byte central-directory headers, the walk bounded by the declared "
+    "directory size; entries counted, not shown",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "_BoundedTarStream.block_at",
+    ): "one 512-byte tar block at an offset; parsed as a header, not shown",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "_BoundedTarStream.read",
+    ): "the bounded tar stream's own read: the size is capped by _TAR_READ_CAP "
+    "and charged to the header allowance",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "_GzipMembersStream.seek",
+    ): "a forward seek that reads at most _COPY_CHUNK at a time through the "
+    "stream's own bounded read; bytes discarded, not shown",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "_GzipMembersStream._fill",
+    ): "64 KiB compressed chunks fed to the decompressor",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "_tar_stream",
+    ): "one 512-byte block to recognize a tar header",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "_gzip_holds_a_tar",
+    ): "one 512-byte block of the decompressed head, compared with the tar "
+    "header shape",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "_holds_a_tar",
+    ): "one 512-byte block of the decompressed head, compared with the tar "
+    "header shape",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "_copy_at_most",
+    ): "chunked copy bounded by the extraction limit it is given",
+    (
+        "plugin_modules/ash_builtin/converters/archive_converter.py",
+        "ArchiveConverter.convert",
+    ): "an _LFS_POINTER_MAX_BYTES head of a member to recognize a git-lfs "
+    "pointer; bytes compared, not shown",
+    (
+        "plugin_modules/ash_builtin/converters/jupyter_converter.py",
+        "JupyterConverter._would_hand_to_nbconvert",
+    ): "the notebook at _NOTEBOOK_MAX_BYTES + 1, refused over the cap and parsed "
+    "to decide the hand-off; source input, not tool output",
+    (
+        "plugin_modules/ash_builtin/converters/jupyter_converter.py",
+        "JupyterConverter.convert",
+    ): "the same notebook read before conversion, refused over the cap",
+    (
+        "plugin_modules/ash_builtin/scanners/cfn_guard_scanner.py",
+        "CfnGuardScanner._read_rule",
+    ): "one operator rules file through open_in_scanned_tree, bound+1, "
+    "RulesBundleUnavailable over the cap; operator input, not tool output",
+    (
+        "plugin_modules/ash_builtin/scanners/gitleaks_scanner.py",
+        "GitleaksScanner._read_tree_ignore_file",
+    ): "the tree's .gitleaksignore at MAX_IGNORE_FILE_BYTES + 1, raised over the "
+    "cap; operator input, not tool output",
+    (
+        "plugin_modules/ash_builtin/scanners/zizmor_scanner.py",
+        "_declares_a_github_action",
+    ): "the head of an action metadata file at _ACTION_PROBE_LIMIT, parsed for "
+    "an action declaration; operator input, not tool output",
     (
         "plugin_modules/ash_snyk_plugins/snyk_code_scanner.py",
         "_copy_stream",
     ): "chunked copy of source files into the staging tree",
     (
+        "plugin_modules/ash_snyk_plugins/snyk_code_scanner.py",
+        "_excludes",
+    ): "a tree exclusion file through open_in_scanned_tree at "
+    "_MAX_EXCLUSION_FILE_BYTES + 1; over the cap counts as an exclusion; "
+    "operator input, not tool output",
+    (
         "utils/cdk_nag_worker.py",
-        "_read_answers",
-    ): "bounded+1 read of the worker's structured response, dropped whole "
-    "over the cap, parsed as JSON lines",
+        "_read_response",
+    ): "bounded+1 read of the worker's structured response in chunks; the "
+    "complete lines inside the cap are kept and parsed as JSON lines, the "
+    "line that crosses it and everything after are dropped",
     ("utils/download_utils.py", "sha256_file"): "whole-file hash in chunks",
     (
         "utils/download_utils.py",
@@ -127,6 +269,25 @@ _ALLOWED_SIZED_READS = {
         "_extract_single_member._stage",
     ): "chunked copy-and-hash of one archive member",
     (
+        "utils/download_utils.py",
+        "_copy_whole_body",
+    ): "chunked copy of a download's body into a hash and a file; network "
+    "bytes, never shown",
+    (
+        "utils/download_utils.py",
+        "_sha256_of_open_file",
+    ): "whole-file hash in chunks over an open descriptor",
+    (
+        "utils/download_utils.py",
+        "_restore_cached_asset",
+    ): "chunked copy-and-hash of a cache entry back into place",
+    (
+        "utils/inner_run_outcome.py",
+        "read_refusal_outcome",
+    ): "ASH's own inner-run outcome JSON on a regular-file descriptor opened "
+    "without following links, _MAX_OUTCOME_BYTES + 1, refused over the cap; "
+    "parsed, not tool text",
+    (
         "utils/pre_installed_tool.py",
         "_read_head",
     ): "bounded head of a wrapper script for interpreter detection; what is "
@@ -136,6 +297,11 @@ _ALLOWED_SIZED_READS = {
         "find_tool_interpreter",
     ): "shebang line of the probed copy, parsed for an interpreter name; "
     "not tool output",
+    (
+        "utils/rules_bundles.py",
+        "extract_bundle",
+    ): "chunked copy of each bundle member into place; archive bytes written, "
+    "never shown",
     (
         "utils/sandbox/policy.py",
         "_shebang_interpreter",
@@ -152,6 +318,18 @@ _ALLOWED_SIZED_READS = {
         "utils/scan_source.py",
         "_read_gitdir_record",
     ): "bounded+1 read of a gitdir record, refused over the cap",
+    (
+        "workspace/aggregation.py",
+        "stamp_run_record",
+    ): "ASH's own aggregated-results header line, read back in bounded pieces "
+    "from the file ASH wrote one write() earlier, to copy it into the atomic "
+    "rewrite; never a tool log",
+    (
+        "workspace/aggregation.py",
+        "rewrite_workspace_block",
+    ): "ASH's own aggregated-results file, read in bounded pieces to find and "
+    "drop the old workspace block before the replacement is written; never a "
+    "tool log",
 }
 
 

@@ -281,17 +281,20 @@ class TestAllScannersMissing:
 
 
 class TestMissingIsTolerated:
-    def test_some_missing_others_passed_with_findings_is_clean(self):
-        """MISSING means the tool is not installed; that must not fail the gate."""
+    def test_unselected_scanners_missing_with_both_selected_ones_run_is_clean(self):
+        """MISSING on a scanner the gate did not select must not fail the gate.
+
+        Both selected scanners run and leave their own rules; every other scanner
+        is not installed, which is the normal state of a runner.
+        """
         results = _results(
             scanners={
                 "bandit": _scanner("PASSED", findings=4, actionable=0),
-                "checkov": _scanner("MISSING"),
+                "checkov": _scanner("FAILED", findings=7, actionable=7),
                 "cdk-nag": _scanner("MISSING"),
                 "grype": _scanner("MISSING"),
                 "syft": _scanner("MISSING"),
             },
-            rule_ids=["B307", "B324"],
         )
         assert gate.evaluate_results(results).violations == []
 
@@ -308,15 +311,46 @@ class TestMissingIsTolerated:
         evidence = gate.collect_sarif_evidence(results)
         assert gate.check_expected_rules_present(states, evidence) == []
 
-    def test_skipped_is_treated_like_missing(self):
+    @pytest.mark.parametrize("status", ["MISSING", "SKIPPED"])
+    def test_a_selected_scanner_that_did_not_run_fails_the_gate(self, status):
+        """The gate reads checkov's result too: one scanner is not both."""
         results = _results(
             scanners={
                 "bandit": _scanner("PASSED", findings=4),
-                "checkov": _scanner("SKIPPED"),
+                "checkov": _scanner(status),
             },
             rule_ids=["B307"],
         )
-        assert gate.evaluate_results(results).violations == []
+        violations = gate.evaluate_results(results).violations
+        assert any(
+            "scanner 'checkov'" in v and f"did not run ({status})" in v
+            for v in violations
+        ), violations
+
+    def test_skipped_is_treated_like_missing_by_the_rule_check(self):
+        """No CKV rule is required of either; the gate still fails on both."""
+        for status in ("MISSING", "SKIPPED"):
+            results = _results(
+                scanners={
+                    "bandit": _scanner("PASSED", findings=4),
+                    "checkov": _scanner(status),
+                },
+                rule_ids=["B307"],
+            )
+            states = gate.parse_scanner_states(results)
+            evidence = gate.collect_sarif_evidence(results)
+            assert gate.check_expected_rules_present(states, evidence) == [], status
+
+    def test_a_selected_scanner_absent_from_the_results_fails_the_gate(self):
+        results = _results(
+            scanners={"bandit": _scanner("PASSED", findings=4)},
+            rule_ids=["B307"],
+        )
+        violations = gate.evaluate_results(results).violations
+        assert any(
+            "scanner 'checkov'" in v and "absent from scanner_results" in v
+            for v in violations
+        ), violations
 
     def test_missing_scanner_is_not_counted_as_having_run(self):
         states = {
@@ -348,13 +382,31 @@ class TestZeroFindings:
         violations = gate.evaluate_results(results).violations
         assert any("zero findings" in v for v in violations), violations
 
-    def test_findings_from_a_single_scanner_are_enough(self):
+    def test_a_selected_scanner_at_zero_beside_a_finder_is_a_violation(self):
+        """The sum used to hide it: bandit at zero while checkov found seven.
+
+        The fixture gives each selected scanner a file of its own to trip, so a
+        selected scanner at zero is that scanner broken, whatever the other found.
+        """
         results = _results(
             scanners={
                 "bandit": _scanner("PASSED", findings=0),
                 "checkov": _scanner("FAILED", findings=7, actionable=7),
             },
             rule_ids=["CKV_AWS_18"],
+        )
+        violations = gate.check_findings_present(gate.parse_scanner_states(results))
+        assert len(violations) == 1, violations
+        assert "scanner 'bandit'" in violations[0]
+        assert "while the other selected scanner found some" in violations[0]
+
+    def test_both_selected_scanners_finding_something_is_clean(self):
+        results = _results(
+            scanners={
+                "bandit": _scanner("FAILED", findings=3, actionable=3),
+                "checkov": _scanner("FAILED", findings=7, actionable=7),
+            },
+            rule_ids=["B307", "CKV_AWS_18"],
         )
         assert gate.check_findings_present(gate.parse_scanner_states(results)) == []
 
@@ -464,8 +516,14 @@ class TestRuleAttribution:
         assert sorted(evidence.rules_for("bandit")) == ["B307", "B324", "B602"]
         assert "B307" not in evidence.rules_for("checkov")
 
-    def test_no_attribution_anywhere_falls_back_to_the_union(self):
-        """An older or future results file without the property must still work."""
+    def test_no_attribution_anywhere_is_reported_not_pooled(self):
+        """The union stays in rules_for for diagnostics; the check refuses to read it.
+
+        A results file in which no result carries properties.scanner_name is a
+        complete attribution regression. Matching every producer's pattern against
+        the pooled rules let exactly that pass, so the per-scanner check reports
+        it, naming every rule id present, instead of running on the pool.
+        """
         results = _results(rule_ids=[])
         results["sarif"] = _sarif(
             [
@@ -477,7 +535,10 @@ class TestRuleAttribution:
         assert evidence.has_attribution is False
         assert sorted(evidence.rules_for("bandit")) == ["B307", "CKV_AWS_18"]
         states = gate.parse_scanner_states(results)
-        assert gate.check_expected_rules_present(states, evidence) == []
+        violations = gate.check_expected_rules_present(states, evidence)
+        assert len(violations) == 1, violations
+        assert "no SARIF result carries properties.scanner_name" in violations[0]
+        assert "B307" in violations[0] and "CKV_AWS_18" in violations[0]
 
     def test_partial_attribution_does_not_fall_back(self):
         """One named result means the buckets are authoritative for everyone."""
@@ -619,15 +680,23 @@ class TestFindingsComeFromTheFixture:
         violations = gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT)
         assert any("/elsewhere/other_module.py" in v for v in violations), violations
 
-    def test_a_result_without_a_location_neither_passes_nor_fails(self):
-        """It cannot confirm or deny the target, so it must not decide either way."""
+    def test_a_located_finding_beside_an_unlocated_one_is_reported(self):
+        """A mix used to pass under a summary that said every finding was located.
+
+        Every fixture finding has a file, so a finding with no location URI is
+        either a moved location shape or a dropped location, and the gate says how
+        many of the findings it could not place rather than passing on the rest.
+        """
         results = _results(rule_ids=[])
         results["sarif"] = _sarif(
             [("B307", "bandit", None), ("B324", "bandit", BANDIT_FIXTURE)]
         )
         evidence = gate.collect_sarif_evidence(results)
         assert evidence.results_without_location == 1
-        assert gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT) == []
+        violations = gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT)
+        assert any(
+            "1 of 2 finding(s) carry no location URI" in v for v in violations
+        ), violations
 
     def test_no_uris_at_all_is_reported(self):
         """Silence here means the location shape moved; do not pass quietly."""
@@ -662,13 +731,24 @@ class TestFindingsComeFromTheFixture:
 
 class TestTimeoutBudget:
     def test_the_default_timeout_fits_inside_the_job_budget(self):
-        """The job sets timeout-minutes: 25 (1500s).
+        """The job sets timeout-minutes: 30 (1800s).
 
         If the script's default exceeded that, GitHub would cancel the job first and
-        the operator would get no summary table, no rule evidence and no log tail.
+        the operator would get no summary table, no rule evidence and no log tail. The
+        600 s between the two is spent by the setup before the scan (checkout, the ASH
+        install, the tool downloads, the fixture build) and, after a timed-out scan,
+        by the stop and drain of the child (2 * (SHUTDOWN_GRACE_SECONDS +
+        DRAIN_SECONDS), 60 s), so the setup's share is 540 s; at the old 25-minute
+        budget it was 240 s, which a cold Windows runner used up. The 600 s floor is
+        asserted as the sum, and the script's own bound (MAX_SCAN_TIMEOUT_SECONDS)
+        keeps --timeout from eating into either part.
         """
-        assert gate.JOB_TIMEOUT_BUDGET_SECONDS == 25 * 60
+        assert gate.JOB_TIMEOUT_BUDGET_SECONDS == 30 * 60
         assert gate.DEFAULT_SCAN_TIMEOUT_SECONDS < gate.JOB_TIMEOUT_BUDGET_SECONDS
+        assert (
+            gate.DEFAULT_SCAN_TIMEOUT_SECONDS + 600 <= gate.JOB_TIMEOUT_BUDGET_SECONDS
+        )
+        assert gate.DEFAULT_SCAN_TIMEOUT_SECONDS <= gate.MAX_SCAN_TIMEOUT_SECONDS
 
     def test_the_workflow_timeout_matches_the_documented_budget(self):
         """Ties the two numbers together so they cannot drift apart silently."""

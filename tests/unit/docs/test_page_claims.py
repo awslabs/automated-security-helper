@@ -328,6 +328,23 @@ def _tree_with_config(parent: Path, config: Dict[str, Any] | str) -> Path:
     return tree
 
 
+def _mark_git_checkout(root: Path) -> None:
+    """Make ``root`` a git checkout the way git's own discovery sees one: a ``.git``
+    directory that holds ``HEAD``.
+
+    ASH counts a ``.git`` entry as a checkout boundary only when it is git-shaped (a
+    gitfile, a link, or a directory with ``HEAD``). A bare empty ``.git`` directory,
+    which is what a stray ``mkdir`` or a transient mount point leaves in a shared
+    parent, bounds nothing, so a fixture that planted one made no checkout and every
+    cell below that rests on one tested a tree without it. A directory holding
+    ``HEAD`` is a checkout in code that counts any ``.git`` directory as well, so
+    the marker also serves a run against another tree's code.
+    """
+    git_dir = root / ".git"
+    git_dir.mkdir(parents=True, exist_ok=True)
+    (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+
 def _document_setting(pointer: str, value: Any) -> Dict[str, Any]:
     """A config document that sets only the field at JSON ``pointer`` to ``value``."""
     document: Any = value
@@ -411,13 +428,26 @@ def _ash_environment(cwd: Path, **env: str) -> Dict[str, str]:
 
 
 def _ash(args: List[str], cwd: Path, **env: str) -> subprocess.CompletedProcess:
-    """Run this interpreter's ``ash`` with a private home directory and no network installs."""
+    """Run this interpreter's ``ash`` with a private home directory and no network installs.
+
+    The output is decoded as UTF-8 with ``errors="replace"``, named here and not left to
+    the host code page. Under CI on Windows ASH writes UTF-8
+    (``configure_windows_safe_logging``), and a capture decoded as cp1252 ends at the
+    first byte that code page does not map. On Windows ``subprocess.run`` then hands
+    back ``stdout=None`` and raises nothing, so the test's first
+    ``result.stdout + result.stderr`` is a ``TypeError`` that hides what the run
+    printed (tests/unit/utils/test_windows_console_encoding.py pins the mechanism).
+    Every child this file captures as text names the same two arguments, and
+    ``test_every_child_this_file_captures_as_text_names_its_decode`` holds it to that.
+    """
     return subprocess.run(
         [sys.executable, "-m", "automated_security_helper.cli.main", *args],
         cwd=cwd,
         env=_ash_environment(cwd, **env),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
 
@@ -544,6 +574,74 @@ def _plugin_path(tmp_path: Path, module: str, text: str) -> str:
     (package / "__init__.py").write_text(text, encoding="utf-8")
     return os.pathsep.join(
         p for p in (str(package.parent), os.environ.get("PYTHONPATH")) if p
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The children this file captures as text
+# --------------------------------------------------------------------------- #
+
+#: The ``subprocess`` entry points that start a child and can hand its output back as
+#: text.
+_CHILD_LAUNCHERS = frozenset({"run", "Popen", "check_output"})
+
+
+def _text_captures_without_a_decode(source: str) -> List[int]:
+    """The line of each ``subprocess`` call in ``source`` that asks for text and does
+    not name both ``encoding`` and ``errors``."""
+    found: List[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _CHILD_LAUNCHERS
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+        ):
+            continue
+        named = {keyword.arg: keyword.value for keyword in node.keywords}
+        as_text = False
+        for name in ("text", "universal_newlines"):
+            value = named.get(name)
+            if isinstance(value, ast.Constant) and value.value is True:
+                as_text = True
+        if as_text and not {"encoding", "errors"} <= set(named):
+            found.append(node.lineno)
+    return found
+
+
+@pytest.mark.unit
+def test_every_child_this_file_captures_as_text_names_its_decode() -> None:
+    """tests/unit/utils/test_windows_console_encoding.py (the capture hazard), held to
+    this file's own source.
+
+    A call that asks ``subprocess`` for text and names no ``encoding`` decodes the
+    child's output with the host code page. On a Windows runner that is cp1252, while
+    ASH writes UTF-8 under CI, and the first byte cp1252 does not map ends the
+    capture: ``stdout`` comes back None and nothing is raised, so the test's first
+    line that joins the two streams is a ``TypeError`` and what the run printed is
+    lost. Every call here that asks for text names ``encoding="utf-8"`` and
+    ``errors="replace"``, which no byte can make fail. The scan is run on a snippet it
+    must flag and one it must not before it reads this file, so a scan that reads
+    nothing fails here.
+    """
+    flagged = (
+        "import subprocess\nsubprocess.run(['x'], capture_output=True, text=True)\n"
+    )
+    clean = (
+        "import subprocess\n"
+        "subprocess.run(['x'], capture_output=True, text=True, "
+        "encoding='utf-8', errors='replace')\n"
+        "subprocess.run(['x'], capture_output=True)\n"
+    )
+    assert _text_captures_without_a_decode(flagged) == [2]
+    assert _text_captures_without_a_decode(clean) == []
+
+    source = Path(__file__).read_text(encoding="utf-8")
+    lines = _text_captures_without_a_decode(source)
+    assert lines == [], (
+        f"the calls at lines {lines} of this file ask for text and name no "
+        'encoding="utf-8", errors="replace"'
     )
 
 
@@ -1017,9 +1115,9 @@ def _home_with_a_project(tmp_path: Path, home_is_a_checkout: bool) -> Tuple[Path
     """(the home directory, a project under it that is a checkout of its own)."""
     home = tmp_path / "home"
     project = home / "work" / "app"
-    (project / ".git").mkdir(parents=True)
+    _mark_git_checkout(project)
     if home_is_a_checkout:
-        (home / ".git").mkdir()
+        _mark_git_checkout(home)
     return home, project
 
 
@@ -1224,7 +1322,7 @@ def test_who_names_a_tool_config_path_decides_where_it_may_be(
 
     key = "scanners.checkov.options.config_file"
     tool_file = tmp_path / "ops" / "checkov.yaml"
-    (tool_file.parent / ".git").mkdir(parents=True)
+    _mark_git_checkout(tool_file.parent)
     tool_file.write_text("framework: [terraform]\n", encoding="utf-8")
     naming = {
         "project_name": "app",
@@ -1246,7 +1344,7 @@ def test_who_names_a_tool_config_path_decides_where_it_may_be(
         overrides = [f"{key}={tool_file}"]
     if config_path is not None:
         config_path.write_text(yaml.safe_dump(naming), encoding="utf-8")
-    (project / ".git").mkdir()
+    _mark_git_checkout(project)
 
     resolved = resolve_config(
         config_path=config_path, source_dir=project, config_overrides=overrides
@@ -1316,11 +1414,11 @@ def test_a_config_in_an_ops_checkout_cannot_set_the_aws_reporters(
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     project = tmp_path / "project"
-    (project / ".git").mkdir(parents=True)
+    _mark_git_checkout(project)
     directory = tmp_path / ("ops" if in_a_checkout else "etc")
     directory.mkdir()
     if in_a_checkout:
-        (directory / ".git").mkdir()
+        _mark_git_checkout(directory)
     section: Dict[str, Any] = (
         {"options": {"bucket_name": "page-claims-bucket"}}
         if setting == "bucket_name"
@@ -1422,6 +1520,8 @@ def _ash_with_no_aws_credentials(
         env=_no_aws_credentials_environment(cwd, **env),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
 
@@ -1589,6 +1689,8 @@ def test_ash_report_runs_an_aws_reporter_that_config_overrides_turn_on(
                 env=_moto_child_environment(work, endpoint),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=600,
             )
             uploaded = client.list_objects_v2(Bucket=bucket).get("Contents", [])
@@ -1951,6 +2053,8 @@ def test_each_run_in_one_process_gives_the_error_for_a_missing_setting(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     tail = result.stdout[-4000:]
@@ -2592,6 +2696,8 @@ def test_resolve_ash_workspace_does_not_check_plugin_names(tmp_path: Path) -> No
         env=environment,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     assert child.returncode == 0, _output_tail(child)
@@ -3069,6 +3175,8 @@ def test_a_scan_uses_only_the_plugin_modules_it_names(
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     assert f"runs: {runs}" in result.stdout, _output_tail(result)
@@ -3430,7 +3538,7 @@ def _container_scan(
             *args,
         ],
         cwd=tmp_path,
-        OCI_RUNNER_WRAPPER=shlex.join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
     )
     if not record.is_file():
         return result, None
@@ -3716,7 +3824,7 @@ def test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is(
                 "--no-progress",
             ],
             cwd=tmp_path,
-            OCI_RUNNER_WRAPPER=shlex.join([sys.executable, str(runtime)]),
+            OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
         )
 
     # A refusal must come before the image build, so only an allowed config skips it.
@@ -3969,7 +4077,7 @@ def test_an_unusable_ash_config_file_beside_a_valid_config_is_refused_on_the_hos
         runtime.write_text(
             _RECORDING_RUNTIME.format(record=str(record)), encoding="utf-8"
         )
-        env["OCI_RUNNER_WRAPPER"] = shlex.join([sys.executable, str(runtime)])
+        env["OCI_RUNNER_WRAPPER"] = " ".join([sys.executable, str(runtime)])
         mode_args = ["--mode", "container", "--oci-runner", sys.executable]
     else:
         mode_args = ["--mode", "nix"]
@@ -4193,7 +4301,7 @@ def test_container_mode_mounts_the_ash_config_file_and_marks_each_file_by_where_
         ],
         cwd=tmp_path,
         ASH_CONFIG=str(env_config),
-        OCI_RUNNER_WRAPPER=shlex.join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
     )
     scans = [call for call in _runtime_calls(record) if "ash" in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
@@ -4379,7 +4487,7 @@ def test_a_container_scan_marks_each_file_of_the_config_chain_on_its_own(
             "--no-progress",
         ],
         cwd=tmp_path,
-        OCI_RUNNER_WRAPPER=shlex.join([sys.executable, str(runtime)]),
+        OCI_RUNNER_WRAPPER=" ".join([sys.executable, str(runtime)]),
     )
     scans = [call for call in _runtime_calls(record) if "ash" in call]
     assert len(scans) == 1, f"expected one scan command, the runtime got {scans}"
@@ -4503,7 +4611,7 @@ def test_the_operators_workspace_config_is_final_over_a_projects_own(
     directory = tmp_path / ("ops" if in_a_checkout else "etc")
     directory.mkdir()
     if in_a_checkout:
-        (directory / ".git").mkdir()
+        _mark_git_checkout(directory)
     operator = directory / "ash.yaml"
     operator.write_text(
         yaml.safe_dump(
@@ -6861,6 +6969,8 @@ def test_ash_log_names_the_config_file_once_the_scan_has_loaded_it(
         env=_ash_environment(tmp_path, PWD=str(linked_tree)),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     assert result.returncode == verdict, (
@@ -6928,7 +7038,26 @@ def test_ash_offline_turns_offline_mode_on_for_yes_true_and_1(
     assert is_offline_mode() is offline
 
 
-_OFFLINE_GRYPE_WARNING = "Grype offline mode: GRYPE_DB_CACHE_DIR not set"
+#: Grype's offline warning when the cache it would read is missing, with the
+#: directory it names in between (plugin_modules/ash_builtin/scanners/grype_scanner.py,
+#: ``_check_offline_cache``). The whole shape, so a warning about a directory that
+#: exists but holds no database cannot stand in for it.
+_OFFLINE_GRYPE_WARNING = re.compile(
+    r"Grype offline mode: the database directory (.+?) does not exist"
+)
+
+
+def _default_grype_cache(home: Path) -> str:
+    """Where grype reads its database with no ``GRYPE_DB_CACHE_DIR`` and no
+    ``XDG_CACHE_HOME``, written out per platform rather than asked of the code
+    that names it: the XDG cache directory on Linux, ``Library/Caches`` on macOS,
+    ``%LOCALAPPDATA%\\cache`` on Windows (the test points ``LOCALAPPDATA`` under
+    the run's home)."""
+    if sys.platform == "win32":
+        return (home / "AppData" / "Local" / "cache" / "grype" / "db").as_posix()
+    if sys.platform == "darwin":
+        return (home / "Library" / "Caches" / "grype" / "db").as_posix()
+    return (home / ".cache" / "grype" / "db").as_posix()
 
 
 @pytest.mark.parametrize(
@@ -6952,29 +7081,113 @@ def test_an_offline_scan_logs_a_warning_for_a_scanner_whose_cache_is_not_set_up(
 
     A repository with a hardcoded password is scanned with the page's ``ash scan
     --offline --scanners detect-secrets``, and with ``ASH_OFFLINE`` set to ``TRUE`` or
-    ``1`` instead of the flag, with no grype cache configured. Each must exit 2 and log
-    grype's offline warning in ash.log. The control is an online scan, which exits 2
-    and logs no such warning.
+    ``1`` instead of the flag, with no grype cache configured: ``GRYPE_DB_CACHE_DIR``
+    is unset and the run's private home (``_ash_environment``; ``LOCALAPPDATA`` is
+    pointed under it too, the Windows default) holds no grype database, so the cache
+    grype would read does not exist. Each must exit 2 and log grype's offline warning
+    in ash.log. The control is an online scan, which exits 2 and logs no such warning.
     """
     assert_on_page(
         _OFFLINE_PAGE,
         "This scan runs offline as usual; in a repository with a hardcoded password it "
         "exits 2. The log also shows a warning for each scanner whose offline cache is not "
-        "set up, such as `Grype offline mode: GRYPE_DB_CACHE_DIR not set`.",
+        "set up, such as `Grype offline mode: the database directory <path> does not "
+        "exist`, naming the cache grype would read (`GRYPE_DB_CACHE_DIR`, else grype's "
+        "default cache directory).",
     )
     assert_on_page(_OFFLINE_PAGE, "ash scan --offline --scanners detect-secrets")
     monkeypatch.delenv("GRYPE_DB_CACHE_DIR", raising=False)
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     tree = _config_scan_tree(tmp_path, {"app.py": _CONFIG_SECRET})
     args = [*_CONFIG_SCAN, "--source-dir", str(tree), *(["--offline"] if flag else [])]
+    env = {"LOCALAPPDATA": str(tmp_path / "home" / "AppData" / "Local")}
+    if value:
+        env["ASH_OFFLINE"] = value
 
-    result = _ash(args, cwd=tmp_path, **({"ASH_OFFLINE": value} if value else {}))
+    result = _ash(args, cwd=tmp_path, **env)
     assert result.returncode == 2, (
         f"exit {result.returncode}, expected 2:\n{_output_tail(result)}"
     )
-    assert (_OFFLINE_GRYPE_WARNING in _config_scan_log(tree)) is warned, (
+    named = _OFFLINE_GRYPE_WARNING.search(_config_scan_log(tree))
+    assert (named is not None) is warned, (
         f"the grype warning is {'missing from' if warned else 'in'} ash.log"
     )
+    if named is not None:
+        # The directory is the default cache under this run's own home, not the
+        # operator's real one: a warning that names another directory would still
+        # match the shape above.
+        expected = _default_grype_cache(tmp_path / "home")
+        assert named.group(1) == expected, named.group(0)
+
+
+@pytest.mark.integration
+def test_an_offline_scan_names_the_missing_cache_grype_variable_points_at(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run-offline.md (Turn on offline mode).
+
+    The page's sentence names the cache grype would read, ``GRYPE_DB_CACHE_DIR`` first.
+    With the variable set to a directory that does not exist, the offline scan
+    exits 2 and its log warns about that directory, not the default one. The wording
+    is the validator's (``Cache directory does not exist: <path>``), not the
+    default-cache sentence the page quotes as an example, so the path is what is held.
+    """
+    assert_on_page(
+        _OFFLINE_PAGE, "naming the cache grype would read (`GRYPE_DB_CACHE_DIR`"
+    )
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    tree = _config_scan_tree(tmp_path, {"app.py": _CONFIG_SECRET})
+    missing = tmp_path / "cache-that-does-not-exist"
+    assert not missing.exists()
+    args = [*_CONFIG_SCAN, "--source-dir", str(tree), "--offline"]
+
+    result = _ash(
+        args,
+        cwd=tmp_path,
+        GRYPE_DB_CACHE_DIR=str(missing),
+        LOCALAPPDATA=str(tmp_path / "home" / "AppData" / "Local"),
+    )
+
+    assert result.returncode == 2, (
+        f"exit {result.returncode}, expected 2:\n{_output_tail(result)}"
+    )
+    log = _config_scan_log(tree)
+    assert f"Cache directory does not exist: {missing}" in log
+    assert _default_grype_cache(tmp_path / "home") not in log
+
+
+@pytest.mark.unit
+def test_the_offline_trivy_row_says_how_the_version_check_is_turned_off() -> None:
+    """run-offline.md (What each scanner does offline).
+
+    An earlier wording of the row said every trivy scan gets
+    ``--skip-version-check``. An offline command never carries it (a trivy too old
+    to know the flag refuses the command over it), and the check is turned off by
+    ``TRIVY_SKIP_VERSION_CHECK`` in the child's environment instead. The row names
+    both, and the code is read for each: the flag is the online set's, and the
+    variable is in the offline environment.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
+        ONLINE_FLAGS,
+        SCAN_FLAGS,
+    )
+    from automated_security_helper.utils.offline_tool_env import (
+        offline_tool_environment,
+    )
+
+    assert_on_page(
+        _OFFLINE_PAGE,
+        "Every trivy scan gets `trivy --offline-scan`, so trivy contacts no package "
+        "registry. trivy does not check for a newer release either: an online scan "
+        "gets `trivy --skip-version-check`, and an offline one gets "
+        "`TRIVY_SKIP_VERSION_CHECK=true` in trivy's environment instead, since a "
+        "trivy too old to know the flag refuses the command over it.",
+    )
+    assert "--offline-scan" in SCAN_FLAGS
+    assert "--skip-version-check" in ONLINE_FLAGS
+    assert "--skip-version-check" not in SCAN_FLAGS
+    assert offline_tool_environment(True)["TRIVY_SKIP_VERSION_CHECK"] == "true"
+    assert "TRIVY_SKIP_VERSION_CHECK" not in offline_tool_environment(False)
 
 
 # --------------------------------------------------------------------------- #
@@ -7145,15 +7358,44 @@ def test_the_content_database_table_names_the_scanners_that_read_each_database(
     read its row's database offline, and online too unless the row says offline only;
     and the scanners the column names must be all the scanners ASH declares for that
     database. The online reading is the control for "offline only".
+
+    A scanner that reads a rule cache from a directory the environment names (the
+    grep family's ``cache_dir_env_var``) declares the database only when the offline
+    scan read that cache: with none it declines and reads nothing, and a scan of
+    the operator's own rules or of bare patterns reads no cache either. So the
+    build of such a scanner is given a cache the way the offline image ships one,
+    a directory outside the scanned tree holding one rules file, in both modes, and
+    the question is asked of that build: the online reading and the offline one
+    differ in ``ASH_OFFLINE`` alone.
     """
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.utils.content_databases import get
+    from automated_security_helper.utils.content_databases import (
+        RULESET_FETCHED_AT_FILE,
+        get,
+    )
 
     rows = _offline_table(_OFFLINE_CDB_PAGE, "| Database | Read by | Age bound |")
     shipped = _offline_shipped_scanner_classes()
     config = AshConfig(project_name="readers")
     (tmp_path / "source").mkdir()
+
+    def _rule_cache(reader: str) -> Path:
+        cache = tmp_path / "rule-cache" / reader
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / "rules.yaml").write_text(
+            "rules:\n  - id: placeholder\n    languages: [python]\n"
+            "    message: m\n    severity: INFO\n    pattern: $X == $X\n",
+            encoding="utf-8",
+        )
+        # Stamped now: the table has an age bound, and a fixed date would cross it
+        # one day with no code change.
+        (cache / RULESET_FETCHED_AT_FILE).write_text(
+            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ\n"),
+            encoding="utf-8",
+        )
+        return cache
+
     for row in rows:
         name, cell = _offline_database(row[0]), row[1]
         offline_only = cell.endswith(", offline only")
@@ -7166,23 +7408,39 @@ def test_the_content_database_table_names_the_scanners_that_read_each_database(
         for reader in readers:
             assert reader in shipped, f"{reader} is not a scanner ASH ships"
             for offline in (False, True):
-                if offline:
-                    monkeypatch.setenv("ASH_OFFLINE", "YES")
-                else:
-                    monkeypatch.delenv("ASH_OFFLINE", raising=False)
-                context = PluginContext(
-                    source_dir=tmp_path / "source",
-                    output_dir=tmp_path / "output",
-                    work_dir=tmp_path / "output" / "converted",
-                    config=config,
-                )
-                scanner = shipped[reader](
-                    config=config.get_plugin_config(
-                        plugin_type="scanner", plugin_name=reader
-                    ),
-                    context=context,
-                )
-                reads = [e.name for e in scanner.content_databases_in_use()]
+                # One environment per pass: the rule cache an offline pass points
+                # a reader at must not reach the next pass, whose online build is
+                # the control that the online reader declares no such database.
+                with monkeypatch.context() as pass_env:
+                    if offline:
+                        pass_env.setenv("ASH_OFFLINE", "YES")
+                    else:
+                        pass_env.delenv("ASH_OFFLINE", raising=False)
+
+                    def _build():
+                        context = PluginContext(
+                            source_dir=tmp_path / "source",
+                            output_dir=tmp_path / "output",
+                            work_dir=tmp_path / "output" / "converted",
+                            config=config,
+                        )
+                        return shipped[reader](
+                            config=config.get_plugin_config(
+                                plugin_type="scanner", plugin_name=reader
+                            ),
+                            context=context,
+                        )
+
+                    scanner = _build()
+                    cache_env = getattr(scanner, "cache_dir_env_var", None)
+                    if callable(cache_env):
+                        # Set for the online build too, so the control varies only
+                        # ASH_OFFLINE: a scanner that declared the database whenever
+                        # its cache variable was set, online as well, would otherwise
+                        # pass the online control.
+                        pass_env.setenv(cache_env(), str(_rule_cache(reader)))
+                        scanner = _build()
+                    reads = [e.name for e in scanner.content_databases_in_use()]
                 expected = offline or not offline_only
                 assert (name in reads) is expected, (
                     f"{reader} {'offline' if offline else 'online'} reads {reads}"
@@ -7450,7 +7708,7 @@ def _interrupt_scan(
     if mode == "container":
         script, log = _interrupt_stand_in(tmp_path, "run", behavior, console)
         args += ["--mode", "container", "--no-build", "--oci-runner", sys.executable]
-        wrapper = shlex.join([sys.executable, str(script)])
+        wrapper = " ".join([sys.executable, str(script)])
         return args, (log, "started"), {"OCI_RUNNER_WRAPPER": wrapper}, log
     script, log = _interrupt_stand_in(tmp_path, "develop", behavior)
     bin_dir = tmp_path / "bin"
@@ -7510,6 +7768,8 @@ def _run_interrupted(
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
 
@@ -7744,7 +8004,7 @@ def test_ctrl_c_ends_ash_build_image_with_exit_code_130(
     args = ["build-image", "--oci-runner", sys.executable, "--offline"]
     if no_run:
         args.append("--no-run")
-    wrapper = shlex.join([sys.executable, str(script)])
+    wrapper = " ".join([sys.executable, str(script)])
     result = _run_interrupted(
         tmp_path,
         args,
@@ -7781,8 +8041,10 @@ def test_ctrl_c_ends_ash_build_image_with_exit_code_130(
 _MCP_EXITS_FOR_REFUSED_OPTIONS = (
     "`ash mcp` exits with code 5 for an unknown option, a value of the wrong type, options "
     "that cannot be combined, or an `ASH_MCP_TRANSPORT` that names no transport, and with "
-    "code 3 when a `--profile` file does not load or an HTTP transport cannot listen on its "
-    "address."
+    "code 3 when a `--profile` file does not load, is kept inside the MCP workspace root "
+    "where a client could have supplied it (a config the server wrote there itself is "
+    "fine), or sits inside a git checkout under a scan root `ASH_MCP_ALLOWED_ROOTS` grants, "
+    "or when an HTTP transport cannot listen on its address."
 )
 _MCP_EXITS_WHEN_THE_SERVER_FAILS = (
     "It exits with code 1 when the MCP package is missing or the server fails, and prints "
@@ -7922,6 +8184,8 @@ def _mcp_run(argv: List[str], cwd: Path) -> subprocess.CompletedProcess:
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=300,
     )
 
@@ -7930,24 +8194,47 @@ _ASH_MODULE = [sys.executable, "-m", "automated_security_helper.cli.main"]
 
 
 @pytest.mark.parametrize(
-    "options, expected",
+    "options, expected, env",
     [
-        pytest.param(["--no-such-option"], 5, id="unknown-option"),
-        pytest.param(["--port", "not-a-number"], 5, id="value-of-the-wrong-type"),
+        pytest.param(["--no-such-option"], 5, {}, id="unknown-option"),
+        pytest.param(["--port", "not-a-number"], 5, {}, id="value-of-the-wrong-type"),
         pytest.param(
-            ["--transport", "sse", "--stateless-http"], 5, id="stateless-http-on-sse"
+            ["--transport", "sse", "--stateless-http"],
+            5,
+            {},
+            id="stateless-http-on-sse",
         ),
         pytest.param(
-            ["--auth-header-name", "X-ASH-Token"], 5, id="auth-header-name-alone"
+            ["--auth-header-name", "X-ASH-Token"], 5, {}, id="auth-header-name-alone"
         ),
-        pytest.param(["--quiet", "--verbose"], 5, id="quiet-with-verbose"),
-        pytest.param(["--profile", "strict"], 3, id="profile-spec-without-equals"),
-        pytest.param(["--profile", "strict={missing}"], 3, id="profile-file-missing"),
+        pytest.param(["--quiet", "--verbose"], 5, {}, id="quiet-with-verbose"),
+        pytest.param(["--profile", "strict"], 3, {}, id="profile-spec-without-equals"),
         pytest.param(
-            ["--profile", "strict={unknown_key}"], 3, id="profile-with-unknown-key"
+            ["--profile", "strict={missing}"], 3, {}, id="profile-file-missing"
         ),
         pytest.param(
-            ["--profile", "strict={good}"], 0, id="control-a-profile-that-loads"
+            ["--profile", "strict={unknown_key}"], 3, {}, id="profile-with-unknown-key"
+        ),
+        pytest.param(
+            ["--profile", "strict={in_workspace}"],
+            3,
+            {"ASH_MCP_WORKSPACE_ROOT": "{workspace_root}"},
+            id="profile-inside-the-mcp-workspace-root",
+        ),
+        pytest.param(
+            ["--profile", "strict={in_checkout}"],
+            3,
+            {"ASH_MCP_ALLOWED_ROOTS": "{scan_root}"},
+            id="profile-in-a-checkout-under-a-scan-root",
+        ),
+        pytest.param(
+            ["--profile", "strict={server_written}"],
+            0,
+            {"ASH_MCP_WORKSPACE_ROOT": "{workspace_root}"},
+            id="control-a-config-the-server-wrote-in-the-workspace-root",
+        ),
+        pytest.param(
+            ["--profile", "strict={good}"], 0, {}, id="control-a-profile-that-loads"
         ),
         pytest.param(
             [
@@ -7960,36 +8247,126 @@ _ASH_MODULE = [sys.executable, "-m", "automated_security_helper.cli.main"]
                 "value",
             ],
             0,
+            {},
             id="control-options-that-combine",
         ),
     ],
 )
 @pytest.mark.unit
 def test_ash_mcp_refuses_options_with_the_exit_code_the_mcp_page_gives(
-    _mcp_cli: Callable[..., Any], tmp_path: Path, options: List[str], expected: int
+    _mcp_cli: Callable[..., Any],
+    tmp_path: Path,
+    options: List[str],
+    expected: int,
+    env: Dict[str, str],
 ) -> None:
     """mcp-server.md (How the server runs scans).
 
     Each command line runs through the ``ash`` app with serving replaced, and must exit
     with the code the paragraph gives without starting a server. The controls are a
-    profile that loads and options that combine, which start one.
+    profile that loads, a profile the server itself wrote in a session's ``config/``
+    directory under the workspace root, and options that combine, which start one.
+    The two placements the paragraph refuses are built as named: a profile under a
+    session's ``source/`` below the MCP workspace root, and one inside a directory
+    holding a ``.git`` entry under a root ``ASH_MCP_ALLOWED_ROOTS`` grants; ``env``
+    names the variable each placement is judged against.
     """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        SESSION_CONFIG_FILENAME,
+    )
+    from automated_security_helper.cli.mcp.sandbox import CONFIG_DIR_NAME
+
     assert_on_page(MCP_SERVER, _MCP_EXITS_FOR_REFUSED_OPTIONS)
+    workspace_root = tmp_path / "mcp-workspaces"
+    session_dir = workspace_root / "a-session"
+    (session_dir / "source").mkdir(parents=True)
+    (session_dir / CONFIG_DIR_NAME).mkdir()
+    scan_root = tmp_path / "scan-root"
+    checkout = scan_root / "repo"
+    (checkout / ".git").mkdir(parents=True)
     files = {
         "missing": tmp_path / "absent.yaml",
         "unknown_key": tmp_path / "unknown-key.yaml",
         "good": tmp_path / "good.yaml",
+        "in_workspace": session_dir / "source" / "strict.yaml",
+        "in_checkout": checkout / "strict.yaml",
+        "server_written": session_dir / CONFIG_DIR_NAME / SESSION_CONFIG_FILENAME,
     }
     files["unknown_key"].write_text(
         "project_name: p\nno_such_top_level_key: 1\n", encoding="utf-8"
     )
-    files["good"].write_text("project_name: p\n", encoding="utf-8")
+    for name in ("good", "in_workspace", "in_checkout", "server_written"):
+        files[name].write_text("project_name: p\n", encoding="utf-8")
+    places = {"workspace_root": workspace_root, "scan_root": scan_root}
     args = [option.format(**files) for option in options]
 
-    result, served = _mcp_cli(*args)
+    result, served = _mcp_cli(
+        *args, **{name: value.format(**places) for name, value in env.items()}
+    )
     assert result.exit_code == expected, (
         f"ash mcp {shlex.join(args)} exited {result.exit_code}, expected {expected}:\n"
         f"{result.output[-1500:]}"
+    )
+    assert bool(served) == (expected == 0), served
+
+
+@pytest.mark.parametrize(
+    "kept_in, expected",
+    [
+        pytest.param("workspace-delivery", 3, id="inside-the-mcp-workspace-root"),
+        pytest.param("checkout", 3, id="in-a-git-checkout-under-an-allowed-root"),
+        pytest.param("server-config", 0, id="control-a-config-the-server-wrote"),
+    ],
+)
+@pytest.mark.unit
+def test_ash_mcp_refuses_a_profile_kept_where_a_scan_may_rewrite_it(
+    _mcp_cli: Callable[..., Any], tmp_path: Path, kept_in: str, expected: int
+) -> None:
+    """mcp-server.md (How the server runs scans).
+
+    The page's second and third cases for exit code 3, next to the profile file that
+    does not load. The profile is the same valid file in each; only where it sits
+    differs, so the exit code can come from the place and not from the file. It sits
+    in a session workspace under ``ASH_MCP_WORKSPACE_ROOT``, where a client could
+    have delivered it, or in a directory holding a ``.git`` entry under
+    ``ASH_MCP_ALLOWED_ROOTS``. The control is the file the server itself writes
+    in a session's ``config/`` directory, which the page says is fine.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        SESSION_CONFIG_FILENAME,
+    )
+    from automated_security_helper.cli.mcp.sandbox import CONFIG_DIR_NAME
+
+    assert_on_page(MCP_SERVER, _MCP_EXITS_FOR_REFUSED_OPTIONS)
+    workspace = tmp_path / "workspaces"
+    allowed = tmp_path / "allowed"
+    session = workspace / "session-one"
+    checkout = allowed / "repo"
+    places = {
+        "workspace-delivery": session / "delivered",
+        "checkout": checkout,
+        "server-config": session / CONFIG_DIR_NAME,
+    }
+    for directory in (workspace, allowed, session, checkout / ".git"):
+        directory.mkdir(parents=True, exist_ok=True)
+    workspace.chmod(0o700)
+    profile = places[kept_in] / (
+        SESSION_CONFIG_FILENAME if kept_in == "server-config" else "profile.yaml"
+    )
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    profile.write_text("project_name: p\n", encoding="utf-8")
+    assert profile.is_file()
+
+    result, served = _mcp_cli(
+        "--profile",
+        f"strict={profile}",
+        ASH_MCP_WORKSPACE_ROOT=str(workspace),
+        ASH_MCP_ALLOWED_ROOTS=str(allowed),
+    )
+
+    assert result.exit_code == expected, (
+        f"ash mcp --profile strict={profile.name} (kept in {kept_in}) exited "
+        f"{result.exit_code}, expected {expected}:\n{result.output[-1500:]}"
     )
     assert bool(served) == (expected == 0), served
 
@@ -8829,6 +9206,8 @@ def test_no_mcp_server_outlives_the_cell_that_started_it(
             env=_ash_environment(tmp_path),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=900,
         )
         assert pids.is_file(), _output_tail(result)
@@ -9007,9 +9386,9 @@ _CANCEL_PUTS_BACK = (
 )
 _CANCEL_LEAVES = (
     "With no previous results, what the scan wrote before it stopped stays, except "
-    "that a cancel during the report phase removes the reports that phase wrote. "
-    "`reports/ash.unused-suppressions.md`, which its reporter writes on its own, stays "
-    "even then."
+    "that a cancel during the report phase removes the reports that phase wrote and "
+    "every other file a reporter wrote beside them, `reports/ash.unused-suppressions.md` "
+    "included."
 )
 MCP_TOOLS = "reference/mcp-tools.md"
 
@@ -9585,11 +9964,11 @@ def test_a_cancelled_mcp_scan_leaves_its_output_directory_as_the_pages_say(
     every result the scan wrote, and the scan's own ``ash.log`` must stay, not the
     previous scan's; with none, ``partial.txt`` must stay. In the report phase
     the cancel lands while the plugin reporter, which runs after ASH's own, waits: the
-    reports that phase wrote must be gone, except ``reports/ash.unused-suppressions.md``,
-    which must stay. In every case the scan's ``ash.log`` must stay, and an
-    ``ash.log.jsonl`` that was there before the scan must be left as it was. The
-    control in each case is the scan under way when the cancel is sent, and for the
-    report phase that ASH's reports were written by then.
+    reports that phase wrote must be gone, ``reports/ash.unused-suppressions.md``
+    (which its reporter writes beside them) included. In every case the scan's
+    ``ash.log`` must stay, and an ``ash.log.jsonl`` that was there before the scan
+    must be left as it was. The control in each case is the scan under way when the
+    cancel is sent, and for the report phase that ASH's reports were written by then.
     """
     assert_on_page(MCP_TOOLS, _CANCEL_PUTS_BACK)
     assert_on_page(MCP_TOOLS, _CANCEL_LEAVES)
@@ -9637,9 +10016,7 @@ def test_a_cancelled_mcp_scan_leaves_its_output_directory_as_the_pages_say(
         assert partial, "what the scan wrote before it stopped did not stay"
     else:
         left = sorted(p.name for p in reports.iterdir()) if reports.is_dir() else []
-        assert left == ["ash.unused-suppressions.md"], (
-            f"after a report-phase cancel, reports/ holds {left}"
-        )
+        assert left == [], f"after a report-phase cancel, reports/ holds {left}"
 
 
 #: mcp-server.md's paragraph on how an HTTP server stops (Run over streamable HTTP).
@@ -9676,19 +10053,28 @@ class _McpHttpClient:
     of this client's requests is left open for the server's stop to wait on. ``tool``
     calls a tool and returns its result. The server answers with a JSON body or with an
     event stream, whose ``data`` lines are read for the answer.
+
+    A stateful server issues the session's id on ``initialize``. A stateless server
+    started with ``--trust-upstream-session-id`` issues none and takes the
+    ``Mcp-Session-Id`` the client sends as the session, the way a platform in front
+    of ASH would set it; ``session_id`` is that header, sent on every request from
+    ``initialize`` on.
     """
 
-    def __init__(self, port: int) -> None:
+    def __init__(self, port: int, session_id: Optional[str] = None) -> None:
         self.port = port
         self.headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
         }
+        if session_id is not None:
+            self.headers["mcp-session-id"] = session_id
         answer, response = self._post(_MCP_INITIALIZE)
         assert "result" in answer, answer
-        session = response.getheader("mcp-session-id")
-        assert session, "the server gave the session no id"
-        self.headers["mcp-session-id"] = session
+        if session_id is None:
+            session = response.getheader("mcp-session-id")
+            assert session, "the server gave the session no id"
+            self.headers["mcp-session-id"] = session
         self.headers["mcp-protocol-version"] = answer["result"]["protocolVersion"]
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
         self._id = _MCP_INITIALIZE["id"]
@@ -10122,10 +10508,12 @@ def test_a_sessions_profile_copy_holds_the_reference_and_its_scan_the_value(
 #: other servers.
 _BUSY_WHILE_THE_SWEEP_REMOVES = (
     "`set_source_zip_chunk` and `select_profile` are refused with `error_type` "
-    "`session_workspace_busy` while an HTTP server removes the session's workspace for "
-    "being unused longer than `--session-workspace-ttl`. The upload and the bound "
-    "profile go with the workspace, so the client selects the profile again and sends "
-    "the upload again from chunk 0."
+    "`session_workspace_busy` while an HTTP server removes the workspace of a session for "
+    "being unused longer than `--session-workspace-ttl`, a stateless one or a stateful one "
+    "the MCP SDK dropped without telling the server. The upload and the bound profile are "
+    "removed with the workspace, so the client selects the profile again and sends the "
+    "upload again from chunk 0. A session whose SSE event stream is still open is kept "
+    "whatever its age; see [Clean up](#clean-up)."
 )
 _SWEEP_LOCK_WAIT_IS_BOUNDED = (
     "Servers that share one workspace root take a lock under the root before a sweep "
@@ -10133,9 +10521,34 @@ _SWEEP_LOCK_WAIT_IS_BOUNDED = (
     "because another server holds it, removes nothing more and leaves the remaining "
     "sessions to its next sweep, so another server cannot hold up a stop signal."
 )
+_SWEEP_COVERS_THE_ENDS_IT_CANNOT_SEE = (
+    "It also removes a workspace nobody used for `--session-workspace-ttl` seconds, 86400 "
+    "(24 hours) by default, which covers sessions whose end it cannot see, such as every "
+    "stateless one."
+)
+_AN_IDLE_STATEFUL_SESSION_IS_SWEPT = (
+    "A stateful session nobody has used for that long is removed like any other, whether "
+    "or not the server has seen it end: the MCP SDK drops an idle stateful session without "
+    "telling the server, so the server cannot keep it on that account. Only a session whose "
+    "SSE event stream is still open is kept whatever its age, and the sweep marks that "
+    "workspace used so another server sharing the root keeps it too. On a stateful server "
+    "that stream is the session's standalone `GET` stream."
+)
+_AN_EXPIRED_STATEFUL_SESSION_IS_REFUSED = (
+    "A stateful session the sweep removes is ended: its next request names no session the "
+    "server holds, so the tools that need a session refuse it with `error_type` "
+    "`session_identity_required` and say that the session expired, and the client opens a "
+    "new session with `initialize`."
+)
 #: The sweep's "about a second", and the TTL the sweep tests give the server.
 _SWEEP_LOCK_WAIT_SECONDS = 1
 _SWEEP_TTL_SECONDS = 1
+#: The sessions the sweep tests name on a stateless server, where the client's
+#: ``Mcp-Session-Id`` is the session (``--trust-upstream-session-id``). A stateless
+#: server holds no session as issued, so the sweep is what ends them, which is the
+#: page's reason for the sweep. The ids are path components (``validated_path_component``).
+_STALE_SESSION = "page-claims-stale"
+_SWEEPING_SESSION = "page-claims-sweeper"
 
 #: Another server sharing the workspace root, as far as the sweep can tell: a process
 #: that holds the lock the servers share until the file it watches appears, or a
@@ -10174,6 +10587,8 @@ def _another_servers_lock(root: Path, tmp_path: Path) -> Iterator[None]:
         [sys.executable, "-c", _ANOTHER_SERVERS_LOCK, str(lock), str(release)],
         stdout=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     try:
         assert holder.stdout is not None
@@ -10187,11 +10602,21 @@ def _another_servers_lock(root: Path, tmp_path: Path) -> Iterator[None]:
 
 
 def _sweep_server(
-    tmp_path: Path, command: Optional[List[str]] = None
+    tmp_path: Path, command: Optional[List[str]] = None, *, stateless: bool = False
 ) -> Tuple[subprocess.Popen, int, _Lines, Path, Path]:
     """A streamable-HTTP server whose session workspaces go stale after
     ``_SWEEP_TTL_SECONDS``, with a profile registered: the process, its port, the
-    reader of its standard error, the workspace root, and the profile."""
+    reader of its standard error, the workspace root, and the profile.
+
+    ``stateless`` starts it with ``--stateless-http --trust-upstream-session-id``: it
+    issues no session and holds none, and the client's ``Mcp-Session-Id`` names the
+    session, so a session unused past the TTL is the sweep's to remove. A stateful
+    server (the default) holds the sessions it has issued and not seen end, and
+    keeps none of them on that account: an idle one is swept like any other, and
+    the server ends it (the idle stateful test below).
+
+    Two servers started from one ``tmp_path`` share the workspace root.
+    """
     root = tmp_path / "workspaces"
     profile = tmp_path / "profile.yaml"
     profile.write_text("project_name: page-claims-sweep\n", encoding="utf-8")
@@ -10202,16 +10627,21 @@ def _sweep_server(
         "--profile",
         f"page-claims={profile}",
     ]
+    if stateless:
+        options += ["--stateless-http", "--trust-upstream-session-id"]
     process, port, lines = _mcp_http_server(
         tmp_path, command or list(_ASH_MODULE), env=env, options=options
     )
     return process, port, lines, root, profile
 
 
-def _session_with_a_workspace(port: int, upload_id: str) -> _McpHttpClient:
+def _session_with_a_workspace(
+    port: int, upload_id: str, session_id: Optional[str] = None
+) -> _McpHttpClient:
     """A session that has bound the profile and sent the first chunk of an upload, so
-    its workspace holds both."""
-    client = _McpHttpClient(port)
+    its workspace holds both. ``session_id`` is the client's own id on a stateless
+    server; a stateful server issues one."""
+    client = _McpHttpClient(port, session_id)
     chunk = base64.b64encode(_delivery_zip({"app.py": b"x = 1\n"})).decode("ascii")
     sent = client.tool(
         "set_source_zip_chunk",
@@ -10230,15 +10660,18 @@ def _workspace(root: Path, client: _McpHttpClient) -> Path:
     return root / client.headers["mcp-session-id"]
 
 
-def _start_a_session_in_the_background(port: int) -> Tuple[threading.Thread, Dict]:
+def _start_a_session_in_the_background(
+    port: int, session_id: Optional[str] = None
+) -> Tuple[threading.Thread, Dict]:
     """A new session's ``initialize``, on a thread: the request that sets off a sweep
-    that is due. The result holds the seconds it took, or the error it raised."""
+    that is due. The result holds the seconds it took, or the error it raised.
+    ``session_id`` is the new session's own id on a stateless server."""
     result: Dict[str, Any] = {}
 
     def run() -> None:
         started = time.monotonic()
         try:
-            _McpHttpClient(port)
+            _McpHttpClient(port, session_id)
         except BaseException as error:  # reported by the test
             result["error"] = error
         result["seconds"] = time.monotonic() - started
@@ -10256,32 +10689,51 @@ def _stop_server(process: subprocess.Popen) -> None:
 
 @pytest.mark.parametrize("tool", ["set_source_zip_chunk", "select_profile"])
 @pytest.mark.e2e
-def test_a_session_write_is_refused_as_busy_while_the_sweep_holds_the_session(
+def test_a_session_write_during_the_sweeps_wait_for_the_lock_is_accepted(
     tmp_path: Path, tool: str
 ) -> None:
-    """mcp-server.md (Deliver source to the server).
+    """mcp-server.md (Clean up).
 
-    A streamable-HTTP server with a one-second ``--session-workspace-ttl`` has a
-    session that bound a profile and sent an upload's first chunk; the session then
-    goes unused past the TTL. Another server holds the lock a sweep takes before it
-    removes a session, so the sweep that a new session's first request sets off holds
-    the stale session while it waits for the lock. A ``set_source_zip_chunk`` or a
-    ``select_profile`` the stale session sends during that wait must be refused with
-    ``success`` false and ``error_type`` ``session_workspace_busy``. The control is
-    that the same calls succeeded before the session went stale.
+    A stateless streamable-HTTP server with a one-second ``--session-workspace-ttl``
+    has a session that bound a profile and sent an upload's first chunk; the session
+    then goes unused past the TTL. Stateless, because the server holds no session as
+    issued, so the sweep is what ends an unused one; a stateful server's idle session
+    is swept the same way (the idle stateful test below). Another server holds the lock a
+    sweep takes before it removes a session. The sweep that a new session's first
+    request sets off waits for that lock holding no session: the lock is taken
+    before any session is, so a ``set_source_zip_chunk`` or a ``select_profile`` the
+    stale session sends during the wait must be accepted, and answered while the
+    sweep is still waiting, which the sweep's request still being open when the
+    write returns shows. The sweep then gives the lock up within about a second and
+    removes nothing, so the stale session's workspace is still there once the sweep
+    has returned.
+
+    Two tells say the write landed during the wait and not around it: the request
+    that set off the sweep is still open when the write returns (the sweep did not
+    give up before the write, and the wait did not block the server's loop until
+    the sweep returned), and that request took about the page's second (the sweep
+    waited for the lock at all).
+
+    The page's ``session_workspace_busy`` refusal is the removal window, which opens
+    only once the lock is held; no deterministic probe of it from outside the
+    server exists, so the in-process test below holds the remover open and pins it.
     """
+    assert_on_page(MCP_SERVER, _SWEEP_LOCK_WAIT_IS_BOUNDED)
     assert_on_page(MCP_SERVER, _BUSY_WHILE_THE_SWEEP_REMOVES)
-    process, port, lines, root, _profile = _sweep_server(tmp_path)
+    process, port, lines, root, _profile = _sweep_server(tmp_path, stateless=True)
     try:
-        stale = _session_with_a_workspace(port, "page-claims-upload")
-        assert _workspace(root, stale).is_dir()
+        stale = _session_with_a_workspace(port, "page-claims-upload", _STALE_SESSION)
+        workspace = _workspace(root, stale)
+        assert workspace.is_dir()
         with _another_servers_lock(root, tmp_path):
             time.sleep(_SWEEP_TTL_SECONDS + 1.5)
-            sweeping, _ = _start_a_session_in_the_background(port)
+            sweeping, result = _start_a_session_in_the_background(
+                port, _SWEEPING_SESSION
+            )
             time.sleep(0.3)
             if tool == "set_source_zip_chunk":
                 chunk = base64.b64encode(b"more").decode("ascii")
-                refused = stale.tool(
+                accepted = stale.tool(
                     tool,
                     upload_id="page-claims-upload",
                     sequence=1,
@@ -10289,39 +10741,147 @@ def test_a_session_write_is_refused_as_busy_while_the_sweep_holds_the_session(
                     last=True,
                 )
             else:
-                refused = stale.tool(tool, profile_name="page-claims")
-            sweeping.join(timeout=90)
+                accepted = stale.tool(tool, profile_name="page-claims")
+            assert sweeping.is_alive(), (
+                "the request that set off the sweep was answered before the stale "
+                "session's write returned, so the write did not land during the wait"
+            )
+            sweeping.join(timeout=_SWEEP_LOCK_WAIT_SECONDS + 3)
+            assert not sweeping.is_alive(), (
+                "the request that set off the sweep was not answered within "
+                f"{_SWEEP_LOCK_WAIT_SECONDS + 3} s while another server held the lock"
+            )
+            assert "error" not in result, result
+            assert result["seconds"] >= _SWEEP_LOCK_WAIT_SECONDS * 0.8, (
+                f"the request that set off the sweep took {result['seconds']:.2f} s, "
+                "so the sweep did not wait for the lock"
+            )
+            assert workspace.is_dir(), f"the sweep removed {workspace} without the lock"
     finally:
         _stop_server(process)
 
-    assert refused.get("success") is False, refused
-    assert refused.get("error_type") == "session_workspace_busy", refused
+    assert accepted.get("success") is True, accepted
+
+
+@pytest.mark.unit
+def test_a_session_write_while_the_sweep_removes_its_workspace_is_refused_as_busy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mcp-server.md (Deliver source to the server).
+
+    The page's ``session_workspace_busy`` refusal, in process: a session workspace
+    nobody has used for longer than the TTL is the sweep's to remove, the sweep
+    takes the session and starts the removal, and a ``set_source_zip_chunk`` for
+    that session sent while the removal runs is refused with that ``error_type``
+    (``sessions.writing_session_state``, the hold ``set_source_zip_chunk`` and
+    ``select_profile`` take). The remover is held open on an event, so the window
+    the server tests above cannot time is open when the write comes. The control
+    is the same chunk once the sweep has returned: accepted, the upload starting
+    again from chunk 0 in a new workspace, as the page says.
+    """
+    assert_on_page(MCP_SERVER, _BUSY_WHILE_THE_SWEEP_REMOVES)
+    from automated_security_helper.cli.mcp import sessions, source_delivery
+    from automated_security_helper.cli.mcp.session_paths import mark_session_workspace
+
+    root = tmp_path / "workspaces"
+    root.mkdir()
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
+    monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
+    sessions.reset_default_registry_for_tests()
+    sessions._ended_while_scanning.clear()
+    try:
+        sandbox = mark_session_workspace(root / _STALE_SESSION)
+        (sandbox / "source").mkdir()
+        (sandbox / "source" / "app.py").write_text("x = 1\n", encoding="utf-8")
+        then = time.time() - 3600
+        for path in (sandbox, *sandbox.iterdir()):
+            os.utime(path, (then, then))
+
+        removing = threading.Event()
+        release = threading.Event()
+        # The delete of the tree the sweep renamed aside. The sweep holds the
+        # session (try_begin_sweep) from its last look at the age until that
+        # delete is done, so a write meets the hold while this is open; the
+        # stale session has a workspace, so the sweep does not take the
+        # removal that has no guard (_remove_session_state).
+        real_remove = sessions._remove_set_aside_tree
+
+        def held_remove(doomed: Optional[Path]) -> None:
+            removing.set()
+            assert release.wait(timeout=30), "the test never released the remover"
+            real_remove(doomed)
+
+        monkeypatch.setattr(sessions, "_remove_set_aside_tree", held_remove)
+        removed: List[str] = []
+        sweep = threading.Thread(
+            target=lambda: removed.extend(
+                sessions.sweep_stale_workspaces(_SWEEP_TTL_SECONDS)
+            ),
+            daemon=True,
+        )
+        sweep.start()
+        assert removing.wait(timeout=30), "the sweep never reached the removal"
+        chunk = base64.b64encode(b"more").decode("ascii")
+        try:
+            with pytest.raises(sessions.SessionWorkspaceBusyError) as refused:
+                source_delivery.set_source_zip_chunk(
+                    "page-claims-upload",
+                    0,
+                    chunk,
+                    True,
+                    workspace_root=root,
+                    session_id=_STALE_SESSION,
+                )
+        finally:
+            release.set()
+            sweep.join(timeout=30)
+        assert not sweep.is_alive(), "the sweep did not return once released"
+        assert refused.value.error_type == "session_workspace_busy"
+        assert removed == [_STALE_SESSION], removed
+        assert not sandbox.exists(), f"the sweep left {sandbox}"
+
+        accepted = source_delivery.set_source_zip_chunk(
+            "page-claims-upload",
+            0,
+            chunk,
+            True,
+            workspace_root=root,
+            session_id=_STALE_SESSION,
+        )
+        assert accepted["received"] == len(b"more"), accepted
+    finally:
+        sessions.reset_default_registry_for_tests()
+        sessions._ended_while_scanning.clear()
 
 
 @pytest.mark.e2e
 def test_a_removed_workspace_takes_the_upload_and_the_bound_profile_with_it(
     tmp_path: Path,
 ) -> None:
-    """mcp-server.md (Deliver source to the server).
+    """mcp-server.md (Deliver source to the server; Clean up).
 
-    A session binds a profile and sends an upload's first chunk, then goes unused
-    past the one-second TTL, and a new session's first request sets off the sweep,
-    with no other server holding its lock. The stale session's workspace, with the
-    profile's copy, must be gone. The upload must be gone with it: its next chunk is
-    refused, and the upload sent again from chunk 0 is accepted. Selecting the
-    profile again must succeed and write its copy again. The control is the
-    workspace, the copy and the upload's first chunk all there before the sweep.
+    On a stateless streamable-HTTP server, whose sessions it does not hold, a session
+    binds a profile and sends an upload's first chunk, then goes unused past the
+    one-second TTL, and a new session's first request sets off the sweep, with no
+    other server holding its lock. The stale session's workspace, with the profile's
+    copy, must be gone. The upload must be gone with it: its next chunk is refused,
+    and the upload sent again from chunk 0 is accepted. Selecting the profile again
+    must succeed and write its copy again. The control is the workspace, the copy and
+    the upload's first chunk all there before the sweep. A session a stateful server
+    still holds as issued but that went idle is swept too (the idle stateful test
+    below).
     """
     assert_on_page(MCP_SERVER, _BUSY_WHILE_THE_SWEEP_REMOVES)
-    process, port, lines, root, _profile = _sweep_server(tmp_path)
+    assert_on_page(MCP_SERVER, _SWEEP_COVERS_THE_ENDS_IT_CANNOT_SEE)
+    process, port, lines, root, _profile = _sweep_server(tmp_path, stateless=True)
     chunk = base64.b64encode(_delivery_zip({"app.py": b"x = 1\n"})).decode("ascii")
     try:
-        stale = _session_with_a_workspace(port, "page-claims-upload")
+        stale = _session_with_a_workspace(port, "page-claims-upload", _STALE_SESSION)
         workspace = _workspace(root, stale)
         copies = list(workspace.rglob("ash.yaml"))
         assert copies, f"no copy of the profile in {workspace}"
         time.sleep(_SWEEP_TTL_SECONDS + 1.5)
-        _McpHttpClient(port)
+        _McpHttpClient(port, _SWEEPING_SESSION)
         assert not workspace.exists(), f"the sweep left {workspace}"
         next_chunk = stale.tool(
             "set_source_zip_chunk",
@@ -10356,10 +10916,11 @@ def test_a_sweep_waits_about_a_second_for_the_lock_another_server_holds(
 ) -> None:
     """mcp-server.md (Clean up).
 
-    Two sessions of a streamable-HTTP server with a one-second
+    Two sessions of a stateless streamable-HTTP server with a one-second
     ``--session-workspace-ttl`` go unused past the TTL while another process holds
     the lock the sweep takes before it removes a session. A new session's first
-    request sets off the sweep.
+    request sets off the sweep. Stateless, so the server holds neither session and
+    the sweep is what removes them once the lock is free.
 
     Removes nothing more: that request must be answered within the page's second plus
     three, and both stale workspaces must stay. Once the lock is free, the next sweep,
@@ -10374,13 +10935,20 @@ def test_a_sweep_waits_about_a_second_for_the_lock_another_server_holds(
     assert_on_page(MCP_SERVER, _SWEEP_LOCK_WAIT_IS_BOUNDED)
     go = tmp_path / "interrupt-now.txt"
     command = _interrupter([(go, "now")]) if check == "ctrl-c-is-not-held-up" else None
-    process, port, lines, root, _profile = _sweep_server(tmp_path, command)
+    process, port, lines, root, _profile = _sweep_server(
+        tmp_path, command, stateless=True
+    )
     try:
-        stale = [_session_with_a_workspace(port, f"upload-{n}") for n in (1, 2)]
+        stale = [
+            _session_with_a_workspace(port, f"upload-{n}", f"{_STALE_SESSION}-{n}")
+            for n in (1, 2)
+        ]
         workspaces = [_workspace(root, client) for client in stale]
         with _another_servers_lock(root, tmp_path):
             time.sleep(_SWEEP_TTL_SECONDS + 1.5)
-            sweeping, result = _start_a_session_in_the_background(port)
+            sweeping, result = _start_a_session_in_the_background(
+                port, f"{_SWEEPING_SESSION}-1"
+            )
             if check == "ctrl-c-is-not-held-up":
                 time.sleep(0.3)
                 go.write_text("now", encoding="utf-8")
@@ -10409,11 +10977,97 @@ def test_a_sweep_waits_about_a_second_for_the_lock_another_server_holds(
             for workspace in workspaces:
                 assert workspace.is_dir(), f"the sweep removed {workspace}"
         time.sleep(_SWEEP_TTL_SECONDS + 1.5)
-        _McpHttpClient(port)
+        _McpHttpClient(port, f"{_SWEEPING_SESSION}-2")
         for workspace in workspaces:
             assert not workspace.exists(), f"the next sweep left {workspace}"
     finally:
         _stop_server(process)
+
+
+@pytest.mark.e2e
+def test_an_idle_stateful_session_is_swept_past_the_ttl(tmp_path: Path) -> None:
+    """mcp-server.md (Clean up).
+
+    A stateful streamable-HTTP server with a one-second ``--session-workspace-ttl``
+    issues a session that binds the profile and sends an upload's first chunk, then
+    goes unused past the TTL; a new session's first request sets off the sweep. The
+    server still holds the first session as issued (it never saw a ``DELETE``), and
+    that keeps nothing: the SDK drops an idle stateful session without telling the
+    server, so a session kept for being issued stayed until shutdown. The workspace
+    and the profile's copy are gone, and the server has ended the session with them:
+    the upload's next chunk and a ``select_profile`` on that session are refused with
+    ``session_identity_required`` and an error that says the session expired, instead
+    of running unbound. A new session's first chunk and its ``select_profile`` are
+    accepted, so the client starts again from chunk 0 under the new session. Together
+    with the stateless case above, the idle session is swept whichever mode issued it.
+    """
+    assert_on_page(MCP_SERVER, _AN_IDLE_STATEFUL_SESSION_IS_SWEPT)
+    assert_on_page(MCP_SERVER, _AN_EXPIRED_STATEFUL_SESSION_IS_REFUSED)
+    process, port, lines, root, _profile = _sweep_server(tmp_path)
+    chunk = base64.b64encode(_delivery_zip({"app.py": b"x = 1\n"})).decode("ascii")
+    try:
+        held = _session_with_a_workspace(port, "page-claims-upload")
+        workspace = _workspace(root, held)
+        copies = list(workspace.rglob("ash.yaml"))
+        assert copies, f"no copy of the profile in {workspace}"
+        time.sleep(_SWEEP_TTL_SECONDS + 1.5)
+        _McpHttpClient(port)
+        assert not workspace.exists(), f"the sweep kept the idle session's {workspace}"
+        assert not any(copy.exists() for copy in copies), (
+            f"a copy stayed in {workspace}"
+        )
+        next_chunk = held.tool(
+            "set_source_zip_chunk",
+            upload_id="page-claims-upload",
+            sequence=1,
+            data_b64=chunk,
+            last=True,
+        )
+        reselected = held.tool("select_profile", profile_name="page-claims")
+        # The control: the same two calls under a session opened now.
+        fresh = _session_with_a_workspace(port, "page-claims-upload")
+        fresh_workspace = _workspace(root, fresh)
+    finally:
+        _stop_server(process)
+
+    assert next_chunk.get("success") is False, next_chunk
+    assert next_chunk.get("error_type") == "session_identity_required", next_chunk
+    assert "expired" in next_chunk.get("error", ""), next_chunk
+    assert reselected.get("error_type") == "session_identity_required", reselected
+    assert fresh_workspace != workspace
+    assert fresh_workspace.is_dir(), f"the new session has no {fresh_workspace}"
+
+
+@pytest.mark.e2e
+def test_a_previous_servers_workspace_is_swept_once_nobody_holds_it(
+    tmp_path: Path,
+) -> None:
+    """mcp-server.md (Clean up).
+
+    A stateful server issues a session that binds the profile and sends an upload's
+    first chunk, and is then killed without ending the session, so its workspace stays
+    under the root. A second server on the same root, with a one-second
+    ``--session-workspace-ttl``, holds no such session, so a new session's first
+    request past the TTL must sweep the workspace: the end the first server could not
+    see is the sweep's to cover. The control is the workspace there before the second
+    server's sweep.
+    """
+    assert_on_page(MCP_SERVER, _SWEEP_COVERS_THE_ENDS_IT_CANNOT_SEE)
+    first, port, lines, root, _profile = _sweep_server(tmp_path)
+    try:
+        orphaned = _session_with_a_workspace(port, "page-claims-upload")
+        workspace = _workspace(root, orphaned)
+        assert workspace.is_dir()
+    finally:
+        _stop_server(first)
+    assert workspace.is_dir(), f"killing the server removed {workspace}"
+    second, port, lines, root, _profile = _sweep_server(tmp_path)
+    try:
+        time.sleep(_SWEEP_TTL_SECONDS + 1.5)
+        _McpHttpClient(port)
+        assert not workspace.exists(), f"the second server's sweep left {workspace}"
+    finally:
+        _stop_server(second)
 
 
 @pytest.mark.parametrize(
@@ -11258,14 +11912,15 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
     """
     assert_on_page(
         _SANDBOX_HOW_TO,
-        "A root config file inside the scanned tree, by the file's own path, its resolved "
-        "path, or any symbolic link it passes through, cannot grant.",
+        "A config file the scanned repository could have written can't grant any of "
+        "them. That means a config file inside any git checkout, where a directory at or "
+        "above the file, by its own path or its resolved path, holds a `.git` entry (a "
+        "directory, or the file a submodule or linked worktree has).",
     )
     assert_on_page(
         _SANDBOX_HOW_TO,
-        "Nor can a root config file in any other git checkout, meaning a directory at or "
-        "above it holds a `.git` directory or file, such as an ops or dotfiles repository "
-        "you name with `--config`",
+        "This applies to a trusted config kept in a checkout of its own as well, such as "
+        "an ops or dotfiles repository: its grants are dropped with the same warning.",
     )
     assert_on_page(
         SANDBOX,
@@ -11275,8 +11930,13 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
     )
     assert_on_page(
         _SANDBOX_HOW_TO,
-        "A base cannot grant when it is inside any git checkout, the scanned one or a "
-        "separate one, or inside the scanned tree, and ASH names that base in a warning.",
+        "A file that can grant itself but extends a base that can't keeps the settings "
+        "its own `sandbox` section writes, `mode` included.",
+    )
+    assert_on_page(
+        _SANDBOX_HOW_TO,
+        "ASH logs a warning that names the files that can't grant and the settings it "
+        "dropped.",
     )
     assert_on_page(
         _CONFIG_PLATFORM_PAGE,
@@ -11298,10 +11958,10 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
         return resolved.sandbox, warnings
 
     repository = _tree_with_config(tmp_path / "repository", _SANDBOX_GRANTS)
-    (repository / ".git").mkdir()
+    _mark_git_checkout(repository)
     in_repository = repository / ".ash" / ".ash.yaml"
     ops = tmp_path / "ops" / "ash.yaml"
-    (ops.parent / ".git").mkdir(parents=True)
+    _mark_git_checkout(ops.parent)
     ops.write_text(yaml.safe_dump(_SANDBOX_GRANTS), encoding="utf-8")
     for config_path, source_dir, named in (
         (None, repository, in_repository),
@@ -11326,7 +11986,7 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
     # A base has to sit in the root file's own directory, so the checkout it is in is
     # one inside that directory.
     base = outside.parent / "ops" / "base.yaml"
-    (base.parent / ".git").mkdir(parents=True)
+    _mark_git_checkout(base.parent)
     base.write_text(
         yaml.safe_dump({"sandbox": {"extra_read_paths": ["/srv/ash/semgrep-rules"]}}),
         encoding="utf-8",
@@ -11348,11 +12008,16 @@ def test_a_config_in_any_checkout_cannot_grant_and_the_warning_names_it(
 
 
 #: trust-model.md's quote of the warning for a repository config at
-#: /work/repo/.ash/.ash.yaml that grants grype a network and a read path.
+#: /work/repo/.ash/.ash.yaml that grants grype a network and a read path. The sandbox
+#: step says where the file sits (``sandbox_grants.confinement_membership``): the
+#: scanned repository's own config is inside the scanned tree, so the repository being
+#: scanned wrote it. The reporter and scanner-config steps give the generic reason
+#: instead (``untrusted_source.IN_TREE_OR_DELIVERED``), which the AWS reporter quote
+#: below keeps.
 _DROPPED_GRANTS_WARNING = (
     "Ignoring sandbox.network_scanners, sandbox.extra_read_paths from "
-    "/work/repo/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, "
-    "or was delivered by an MCP client. A network_scanners list there still removes "
+    "/work/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository "
+    "being scanned wrote it. A network_scanners list there still removes "
     "network from scanners it does not name, and a sandbox mode there still applies when "
     "nothing else turns the sandbox on. To keep a setting, move the file outside every "
     "git checkout, or pass the setting with --config-overrides. A file inside the scanned "
@@ -11406,8 +12071,8 @@ def test_the_dropped_grants_warning_reads_as_the_pages_quote(
         + _DROPPED_GRANTS_WARNING.replace("/work/repo/", "/home/me/src/app/"),
     )
     troubleshoot = (
-        "Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: that config "
-        "is inside a git checkout or the scanned tree, or was delivered by an MCP client."
+        "Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: the file "
+        "is inside the scanned tree, so the repository being scanned wrote it."
     )
     assert_on_page("how-to/troubleshoot.md", f"{troubleshoot} ...")
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -11953,7 +12618,7 @@ def test_the_ci_variables_do_not_choose_the_image_stage(
             _CI_ENV_RECORDING_RUNTIME.format(record=str(record)), encoding="utf-8"
         )
         monkeypatch.setenv(
-            "OCI_RUNNER_WRAPPER", shlex.join([sys.executable, str(runtime)])
+            "OCI_RUNNER_WRAPPER", " ".join([sys.executable, str(runtime)])
         )
         result = container.run_ash_container(
             source_dir=str(source),
@@ -11996,36 +12661,36 @@ def test_the_ci_variables_do_not_choose_the_image_stage(
 _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
     (
         "how-to/install.md",
-        "ASH installs bandit, checkov, and semgrep with uv.",
+        "ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor with uv.",
     ),
     (
         "how-to/install.md",
         (
-            "Either way, ASH installs bandit, checkov, and semgrep with "
-            "the environment's own `uv`."
+            "Either way, ASH installs bandit, checkov, semgrep, cfn-lint, and "
+            "zizmor with the environment's own `uv`."
         ),
     ),
     (
         "getting-started/index.md",
         (
             "Without them, an online scan with the sandbox off installs bandit, "
-            "checkov, and semgrep itself, with the `uv` installed with "
-            "ASH."
+            "checkov, semgrep, cfn-lint, and zizmor itself, with the `uv` installed "
+            "with ASH."
         ),
     ),
     (
         "docs/advanced-usage.md",
         (
-            "| bandit, checkov, semgrep | same name | ASH installs them "
-            "with `uv tool` during a scan, or `ash dependencies install` does it ahead "
-            "of time |"
+            "| bandit, checkov, semgrep, cfn-lint, zizmor | same name | ASH installs "
+            "them with `uv tool` during a scan, or `ash dependencies install` does it "
+            "ahead of time |"
         ),
     ),
     (
         "how-to/ci/github-actions.md",
         (
-            "bandit, checkov, and semgrep need no input: ASH installs "
-            "them from PyPI with `uv tool install` during the scan."
+            "bandit, checkov, semgrep, cfn-lint, and zizmor need no input: ASH "
+            "installs them from PyPI with `uv tool install` during the scan."
         ),
     ),
 ]
@@ -12034,19 +12699,19 @@ _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
 _UV_TOOL_SENTENCES: List[Tuple[str, str]] = [
     (
         "how-to/install.md",
-        "`uv tool uninstall bandit checkov semgrep nbconvert`.",
+        "`uv tool uninstall bandit checkov semgrep cfn-lint zizmor nbconvert`.",
     ),
     (
         "docs/advanced-usage.md",
         (
-            "installs bandit, checkov, semgrep, and nbconvert with "
+            "installs bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert with "
             "`uv tool install`, within each scanner's accepted version range."
         ),
     ),
     (
         "docs/advanced-usage.md",
         (
-            "When bandit, checkov, semgrep, or nbconvert is not "
+            "When bandit, checkov, semgrep, cfn-lint, zizmor, or nbconvert is not "
             "available, ASH installs it with `uv tool install` during the scan, and the "
             "scan takes longer."
         ),
@@ -12055,14 +12720,14 @@ _UV_TOOL_SENTENCES: List[Tuple[str, str]] = [
         "docs/advanced-usage.md",
         (
             "The `uv tool install`, `uv tool run`, and `uv tool list` commands that ASH "
-            "runs for bandit, checkov, semgrep, and nbconvert get no "
+            "runs for bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert get no "
             "such flag."
         ),
     ),
     (
         "concepts/scanning-untrusted-code.md",
         (
-            "A missing Python tool (bandit, checkov, semgrep, and "
+            "A missing Python tool (bandit, checkov, semgrep, cfn-lint, zizmor, and "
             "nbconvert for the notebook converter) is installed at scan time with "
             "`uv tool install`"
         ),
@@ -13621,6 +14286,8 @@ def test_a_linked_output_directory_is_refused_in_every_mode_before_the_write_che
             env=environment,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
     else:
@@ -13961,6 +14628,8 @@ def test_container_mode_and_dot_ash_refuse_a_directory_a_local_scan_refuses(
             env=environment,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
         expected = f"ERROR: {lines[0]}"
@@ -14343,6 +15012,8 @@ def test_the_s3_reporter_sends_a_value_read_from_the_environment_as_its_referenc
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
         assert result.returncode == 0, _output_tail(result)
@@ -15585,6 +16256,8 @@ def _git(cwd: Path, *args: str) -> str:
         env=environment,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
     assert result.returncode == 0, (args, result.stdout, result.stderr)
@@ -15839,16 +16512,24 @@ _HOW_THE_RUNTIME_VALUE_IS_READ = [
     ),
     (
         "With no usable home directory (`HOME` empty or relative, or unset with no "
-        "absolute home in the passwd entry), a value that starts with `~/` is not used: "
-        "ASH logs a warning about `HOME` and picks a runtime as if none were named, or, "
-        "for the wrapper, starts the runtime without one."
+        "absolute home in the passwd entry), a value that starts with `~/` is refused: "
+        "ASH exits with code 3 and a message that names the variable, and it neither "
+        "picks another runtime nor starts the runtime without the wrapper."
     ),
     (
         "A relative path with a directory part, such as `bin/docker`, is read against "
         "the directory you run ASH in when you pass it to `--oci-runner` or give it in "
-        "the document. In `OCI_RUNNER` it is not run: ASH logs a warning and picks a "
-        "runtime as if none were named. As the first word of `OCI_RUNNER_WRAPPER` it is "
-        "not used either, and the runtime starts without a wrapper, with a warning."
+        "the document. In `OCI_RUNNER` it is refused the same way, and so it is as the "
+        "first word of `OCI_RUNNER_WRAPPER`: it names a file under the directory you "
+        "run ASH from, usually the repository being scanned, so ASH does not run it."
+    ),
+    (
+        "`./ash` refuses a relative `OCI_RUNNER` and `OCI_RUNNER_WRAPPER` the same "
+        "way, and `Invoke-ASH` a relative `OCI_RUNNER_WRAPPER`. Neither script "
+        "expands a leading `~`, so there a value that starts with `~/` is refused as "
+        "a relative path: your shell expands it when you write `export "
+        "OCI_RUNNER=~/bin/docker`, or you can spell the path out. A scan in local "
+        "mode reads neither variable."
     ),
 ]
 
@@ -15885,18 +16566,34 @@ print(json.dumps({name: find_executable(name) for name in sys.argv[1:]}))
 """
 
 #: Asks for the runtime and the wrapper as a container scan does, with the runtime
-#: from OCI_RUNNER and as typed on the command line, and prints them as JSON.
+#: from OCI_RUNNER and as typed on the command line, and prints what each gave as
+#: JSON: {"value": ...}, or {"refused": <the refusal's message>}.
 _RESOLVE_THE_RUNTIME = """\
 import json, os
 
 from automated_security_helper.interactions import run_ash_container as container
 
+
+def asked(call):
+    try:
+        return {"value": call()}
+    except container.OciValueRefused as refusal:
+        return {"refused": str(refusal)}
+
+
 print(json.dumps({
-    "environment": container.oci_runner_for_this_run(os.environ["OCI_RUNNER"], True),
-    "typed": container.oci_runner_for_this_run(os.environ["OCI_RUNNER"], False),
-    "wrapper": container._get_oci_wrapper_prefix(),
+    "environment": asked(
+        lambda: container.oci_runner_for_this_run(os.environ["OCI_RUNNER"], True)
+    ),
+    "typed": asked(
+        lambda: container.oci_runner_for_this_run(os.environ["OCI_RUNNER"], False)
+    ),
+    "wrapper": asked(container._get_oci_wrapper_prefix),
 }))
 """
+
+#: What ``expected`` holds for an answer the child refused.
+_REFUSED = "REFUSED"
 
 
 def _child_answer(
@@ -15933,6 +16630,8 @@ def _child_answer(
         env=environment,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
     assert result.returncode == 0, _output_tail(result)
@@ -16226,6 +16925,8 @@ def test_ash_dependencies_install_starts_no_program_for_a_tool_it_cannot_select(
         env=_ash_environment(cwd),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
 
@@ -16295,6 +16996,8 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
         env=_ash_environment(cwd),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     assert started.returncode == 0, _output_tail(started)
@@ -16310,7 +17013,11 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
             "bin/docker",
             "bin/sudo -n",
             "absolute",
-            {"environment": None, "typed": "CWD/bin/docker", "wrapper": []},
+            {
+                "environment": _REFUSED,
+                "typed": "CWD/bin/docker",
+                "wrapper": _REFUSED,
+            },
             id="relative-paths",
         ),
         pytest.param(
@@ -16350,14 +17057,14 @@ def test_ash_dependencies_install_names_an_unknown_tool_and_lists_the_ones_it_kn
             "~/bin/docker",
             "~/bin/sudo -n",
             "empty",
-            {"environment": None, "typed": None, "wrapper": []},
+            {"environment": _REFUSED, "typed": _REFUSED, "wrapper": _REFUSED},
             id="a-leading-tilde-an-empty-home",
         ),
         pytest.param(
             "~/bin/docker",
             "~/bin/sudo -n",
             "relative",
-            {"environment": None, "typed": None, "wrapper": []},
+            {"environment": _REFUSED, "typed": _REFUSED, "wrapper": _REFUSED},
             id="a-leading-tilde-a-relative-home",
         ),
         pytest.param(
@@ -16389,14 +17096,13 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
     A process asks for the container runtime as a container scan does, from
     ``OCI_RUNNER`` and as typed after ``--oci-runner``, and for the wrapper from
     ``OCI_RUNNER_WRAPPER``. A relative path with a directory part must be read
-    against the working directory when typed, and from ``OCI_RUNNER`` must not be
-    used, so a runtime is picked as if none were named; as the wrapper's first word
-    it must not be used either, so there is no wrapper. Each relative value gets a
-    warning that names it. A leading ``~`` must name the home directory, ``HOME``'s or,
-    with ``HOME`` unset, the passwd entry's, and a leading ``~user`` that user's. With
-    ``HOME`` empty or relative a ``~/`` value must not be used, with a warning about
-    ``HOME`` and none about a relative path. A command name and an absolute path are
-    used as given, with no warning.
+    against the working directory when typed, and from ``OCI_RUNNER`` must be
+    refused; as the wrapper's first word it must be refused too. Each refusal's
+    message names the variable and the value. A leading ``~`` must name the home
+    directory, ``HOME``'s or, with ``HOME`` unset, the passwd entry's, and a leading
+    ``~user`` that user's. With ``HOME`` empty or relative a ``~/`` value must be
+    refused, with a message that says ``HOME`` is the problem. A command name and an
+    absolute path are used as given.
     """
     for sentence in _HOW_THE_RUNTIME_VALUE_IS_READ:
         assert_on_page(RUN_IN_A_CONTAINER, sentence)
@@ -16405,22 +17111,42 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
     home = tmp_path / "home"
     absolute = str(tmp_path / "absolute" / "docker")
     user = getpass.getuser()
-    # The passwd entry's home directory, which ``~user`` names, and ``~`` too when
-    # HOME is unset.
+    # What ``~user`` names in the child: on POSIX the passwd entry's home (and
+    # ``~`` too when HOME is unset); on Windows the child's profile itself, since
+    # the profile points at the fixture home and ``~<the current user>`` resolves
+    # to the profile directory.
     user_home = (
-        os.path.expanduser(f"~{user}")
+        str(home)
         if os.name == "nt"
         else importlib.import_module("pwd").getpwnam(user).pw_dir
     )
     runner = runner.replace("ABSOLUTE", absolute).replace("USER", user)
     wrapper = wrapper.replace("ABSOLUTE", absolute).replace("USER", user)
-    expected = json.loads(
-        json.dumps(expected)
-        .replace("CWD", str(cwd))
-        .replace("ABSOLUTE", absolute)
-        .replace("USERHOME", user_home)
-        .replace("HOME", str(home))
-    )
+
+    def _substituted(value: Any) -> Any:
+        # Substitute on the object's string leaves, never on JSON text: a
+        # Windows path's backslashes would be invalid escapes inside it.
+        if isinstance(value, str):
+            return (
+                # A typed relative path is read against the working directory
+                # and comes back OS-normalized, so the expected value is built
+                # with the same resolution.
+                value.replace(
+                    "CWD/bin/docker",
+                    os.path.abspath(os.path.join(str(cwd), "bin", "docker")),
+                )
+                .replace("CWD", str(cwd))
+                .replace("ABSOLUTE", absolute)
+                .replace("USERHOME", user_home)
+                .replace("HOME", str(home))
+            )
+        if isinstance(value, list):
+            return [_substituted(item) for item in value]
+        if isinstance(value, dict):
+            return {key: _substituted(item) for key, item in value.items()}
+        return value
+
+    expected = _substituted(expected)
 
     answer, stderr = _child_answer(
         _RESOLVE_THE_RUNTIME,
@@ -16431,12 +17157,30 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
         OCI_RUNNER_WRAPPER=wrapper,
     )
 
-    assert answer == expected, answer
-    relative = runner.startswith("bin/")
+    refusals = {
+        which: reply["refused"] for which, reply in answer.items() if "refused" in reply
+    }
+    read = {
+        which: _REFUSED if "refused" in reply else reply["value"]
+        for which, reply in answer.items()
+    }
+    assert read == expected, answer
+    # What each refusal is about: the wrapper's first word, or the runner as given,
+    # named with its variable (the option, for the value typed).
     first_word = shlex.split(wrapper)[0]
-    assert _warns_naming(stderr, "OCI_RUNNER", runner) is relative, stderr
-    assert _warns_naming(stderr, "OCI_RUNNER_WRAPPER", first_word) is relative, stderr
-    assert _warns_about_home(stderr) is (home_kind in ("empty", "relative")), stderr
+    names = {
+        "environment": ("OCI_RUNNER", runner),
+        "typed": ("--oci-runner", runner),
+        "wrapper": ("OCI_RUNNER_WRAPPER", first_word),
+    }
+    for which, message in refusals.items():
+        variable, value = names[which]
+        assert _warns_naming(message, variable, value), (which, message)
+        # Refused, not warned about and carried on: nothing is logged in its place.
+        assert not _warns_naming(stderr, variable, value), stderr
+    home_is_named = home_kind in ("empty", "relative") and bool(refusals)
+    assert _warns_about_home("".join(refusals.values())) is home_is_named, refusals
+    assert not _warns_about_home(stderr), stderr
 
 
 #: A container runtime that records the path it was run as, then fails.
@@ -16459,15 +17203,15 @@ _RECORDING_RUNTIME_SCRIPT = (
         pytest.param(
             {"oci_runner": "~/bin/docker"},
             "empty",
-            "path",
-            id="tilde-with-an-empty-home",
+            None,
+            id="tilde-with-an-empty-home-is-refused",
         ),
         pytest.param({}, "absolute", "path", id="control-no-runner-named"),
     ],
 )
 @pytest.mark.integration
 def test_a_documents_oci_runner_is_read_as_typed(
-    tmp_path: Path, document: Dict[str, str], home_kind: str, runs: str
+    tmp_path: Path, document: Dict[str, str], home_kind: str, runs: Optional[str]
 ) -> None:
     """run-in-a-container.md (Choose the container runtime).
 
@@ -16478,9 +17222,10 @@ def test_a_documents_oci_runner_is_read_as_typed(
     literally, and finch on ``PATH``, which a scan picks when no runtime is named. A
     relative value must run the working directory's, ``~/`` the home directory's, and
     ``$HOME/...`` the literal one under the working directory. With ``HOME`` empty, a
-    ``~/`` value must not be used: the scan runs finch from ``PATH``, as with no
-    runtime named (the control), and logs a warning about ``HOME``. Windows has no
-    shell for the recording runtime, so there only the pages are checked.
+    ``~/`` value must be refused: the command exits 3 with a message that names the
+    option and says ``HOME`` is the problem, and no runtime runs, finch on ``PATH``
+    included. Windows has no shell for the recording runtime, so there only the
+    pages are checked.
     """
     for sentence in _HOW_THE_RUNTIME_VALUE_IS_READ:
         assert_on_page(RUN_IN_A_CONTAINER, sentence)
@@ -16524,7 +17269,14 @@ def test_a_documents_oci_runner_is_read_as_typed(
     )
 
     ran = set(record.read_text(encoding="utf-8").split()) if record.exists() else set()
-    assert ran == {str(places[runs])}, (ran, _output_tail(result))
+    if runs is None:
+        assert ran == set(), (ran, _output_tail(result))
+        assert result.returncode == 3, _output_tail(result)
+        assert _warns_naming(
+            result.stdout + result.stderr, "--oci-runner", "~/bin/docker"
+        ), _output_tail(result)
+    else:
+        assert ran == {str(places[runs])}, (ran, _output_tail(result))
     assert _warns_about_home(result.stdout + result.stderr) is (home_kind == "empty"), (
         _output_tail(result)
     )
@@ -16683,7 +17435,7 @@ def test_ci_installs_ash_on_the_pythons_and_runners_the_page_names() -> None:
     The install-methods workflow's matrix, with its excludes applied, must run pip and
     pipx on every Python requires-python allows and uvx on the one version the sentence
     names, each on Ubuntu x86-64 and arm64, Windows and a macOS runner, and on no Intel
-    macOS runner. macos-14 and macos-latest are GitHub's Apple silicon labels. The
+    macOS runner. macos-15 and macos-latest are GitHub's Apple silicon labels. The
     control is that the matrix holds all three methods.
     """
     sentence = (
@@ -16711,7 +17463,7 @@ def test_ci_installs_ash_on_the_pythons_and_runners_the_page_names() -> None:
     for method, method_rows in by_method.items():
         oses = {r["os"] for r in method_rows}
         assert {"ubuntu-latest", "ubuntu-24.04-arm", "windows-latest"} <= oses, oses
-        assert oses & {"macos-latest", "macos-14"}, (method, oses)
+        assert oses & {"macos-latest", "macos-15"}, (method, oses)
         assert not {o for o in oses if re.search(r"intel|large|macos-1[0-3]$", o)}, oses
 
 
@@ -17396,6 +18148,8 @@ def test_the_pages_ash_steps_stop_workflow_commands_as_the_scan_workflow_does(
             },
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=60,
         )
         assert result.stderr == "", (result.stdout, result.stderr)
@@ -17540,6 +18294,8 @@ def test_the_scan_job_shows_what_a_tool_prints_as_text(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         start_new_session=True,
     )
     try:
@@ -17686,6 +18442,8 @@ def test_the_scan_workflow_at_v3_7_0_and_v3_7_1_has_the_inputs_the_page_names(
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
     if has_tag.returncode != 0:
@@ -17698,6 +18456,8 @@ def test_the_scan_workflow_at_v3_7_0_and_v3_7_1_has_the_inputs_the_page_names(
         ["git", "-C", str(REPO_ROOT), "show", f"{tag}:{path}"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
     assert shown.returncode == 0, shown.stderr
@@ -17809,7 +18569,7 @@ _REPORT_LOOKS_IN = (
 #: read-results.md on ``ash report`` with no results file to read.
 _REPORT_NO_RESULTS = (
     "A missing results file prints `No scan results found:` with the paths it checked, "
-    "and exits 5."
+    "and exits 1."
 )
 
 #: read-results.md on which paths that message names.
@@ -17959,11 +18719,18 @@ _REPORT_REFUSES_A_FILE_OR_A_NUL = (
     "and a path the system cannot look up, such as one holding a NUL character, "
     "`Output directory is not a valid path:`. None of these refusals creates anything."
 )
+#: exit-codes.md (ash report), the code 1 row: no results is a state problem, the
+#: code ``--use-existing`` gives a scan for the same reason, not a usage error.
+_REPORT_NO_RESULTS_CODE_1_ROW = (
+    "| 1 | No results to report on (no `ash_aggregated_results.json` in any of the "
+    "places an output directory is searched, and an output directory under a "
+    "directory ASH cannot search counts as one with none; nothing is created, and "
+    "the same code `--use-existing` gives a scan for the same reason);"
+)
 _REPORT_NO_RESULTS_ROWS = [
     (
-        "| 5 | No results to report on, or a results file in more than one of the places "
-        "an output directory is searched (nothing is created, and an output directory "
-        "under a directory ASH cannot search counts as one with no results);"
+        "| 5 | A results file in more than one of the places "
+        "an output directory is searched (nothing is created);"
     ),
     (
         "an output directory that exists but cannot be entered (`Output directory "
@@ -18014,7 +18781,7 @@ def _without_search_permission(directory: Path) -> Iterator[None]:
     ],
 )
 @pytest.mark.integration
-def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_5(
+def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_1(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
 ) -> None:
     """read-results.md (Print a report in the terminal with ``ash report``), and
@@ -18024,7 +18791,10 @@ def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_5(
     output directory named, with ``--output-dir`` naming an empty directory, one that
     does not exist, or (where the search bit holds) one under a directory without
     search permission, and with ``ASH_OUTPUT_DIR`` naming one that does not exist.
-    Each exits 5. With no output directory named it prints ``No scan results found:``,
+    Each exits 1, the code the page gives for no results to report on (a state
+    problem, the same code ``--use-existing`` gives a scan), not the usage error 5
+    the page gives a results file found in more than one place. With no output
+    directory named it prints ``No scan results found:``,
     ``.ash/ash_output/ash_aggregated_results.json`` under the working directory in
     full, and ``does not exist``, and names neither of the other two files an output
     directory is searched for. Otherwise it prints ``none of`` the three files the
@@ -18035,7 +18805,7 @@ def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_5(
     assert_on_page(READ_RESULTS, _REPORT_NO_RESULTS_NAMES)
     assert_on_page(READ_RESULTS, _REPORT_LOOKS_IN)
     assert_on_page(READ_RESULTS, _REPORT_CREATES_NOTHING)
-    assert_on_page(EXIT_CODES, _REPORT_NO_RESULTS_ROWS[0])
+    assert_on_page(EXIT_CODES, _REPORT_NO_RESULTS_CODE_1_ROW)
     monkeypatch.delenv("ASH_OUTPUT_DIR", raising=False)
     cwd = tmp_path / "work"
     cwd.mkdir()
@@ -18067,7 +18837,7 @@ def test_ash_report_with_no_results_file_names_the_paths_it_checked_and_exits_5(
 
     shown = result.stdout + result.stderr
     after = _tree_entries(tmp_path)
-    assert result.returncode == 5, _output_tail(result)
+    assert result.returncode == 1, _output_tail(result)
     assert set(after) == set(before), set(after) ^ set(before)
     searched = _results_files_looked_for(output_dir)
     if where == "working-directory":
@@ -18099,7 +18869,7 @@ def test_ash_report_refuses_an_output_directory_it_cannot_enter_with_exit_5(
     permission, given relative to the working directory or as an absolute path, where
     the search bit holds. It must exit 5 and print ``Output directory cannot be
     entered:`` with the path as given, and create nothing. The control is the same
-    directory with search permission: it is no refusal, and the run exits 5 for its
+    directory with search permission: it is no refusal, and the run exits 1 for its
     missing results, saying so.
     """
     assert_on_page(READ_RESULTS, _REPORT_REFUSES_AN_UNENTERABLE_DIR)
@@ -18121,8 +18891,11 @@ def test_ash_report_refuses_an_output_directory_it_cannot_enter_with_exit_5(
     shown = result.stdout + result.stderr
     after = _tree_entries(tmp_path)
     assert set(after) == set(before), set(after) ^ set(before)
-    assert result.returncode == 5, _output_tail(result)
-    if given == "control-an-enterable-directory":
+    control = given == "control-an-enterable-directory"
+    # The control is no refusal: its missing results exit 1, the code the page gives
+    # for no results to report on.
+    assert result.returncode == (1 if control else 5), _output_tail(result)
+    if control:
         assert "No scan results found: none of " in shown, _output_tail(result)
         assert "cannot be entered" not in shown, _output_tail(result)
         return
@@ -18145,7 +18918,7 @@ def test_ash_report_refuses_a_file_or_a_nul_as_output_directory_with_exit_5(
     since no command line can carry one. Each must exit 5, print its refusal with the
     path as given (the NUL shown as ``\\x00``, never written raw), print no
     ``No scan results found``, and create nothing. The control names a directory: it is
-    no refusal, and the run exits 5 for its missing results, saying so.
+    no refusal, and the run exits 1 for its missing results, saying so.
     """
     assert_on_page(READ_RESULTS, _REPORT_REFUSES_A_FILE_OR_A_NUL)
     assert_on_page(EXIT_CODES, _REPORT_NO_RESULTS_ROWS[2])
@@ -18163,6 +18936,8 @@ def test_ash_report_refuses_a_file_or_a_nul_as_output_directory_with_exit_5(
             env=_ash_environment(cwd, **_UNWRAPPED),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
         refusal = "Output directory is not a valid path: out\\x00dir"
@@ -18174,9 +18949,12 @@ def test_ash_report_refuses_a_file_or_a_nul_as_output_directory_with_exit_5(
     shown = result.stdout + result.stderr
     after = _tree_entries(tmp_path)
     assert set(after) == set(before), set(after) ^ set(before)
-    assert result.returncode == 5, _output_tail(result)
+    control = given == "control-a-directory"
+    # The control is no refusal: its missing results exit 1, the code the page gives
+    # for no results to report on.
+    assert result.returncode == (1 if control else 5), _output_tail(result)
     assert "\x00" not in shown, _output_tail(result)
-    if given == "control-a-directory":
+    if control:
         assert "No scan results found: none of " in shown, _output_tail(result)
         assert "Output directory is not" not in shown, _output_tail(result)
         return
@@ -19645,6 +20423,8 @@ def _backend_unavailable(class_name: str) -> Optional[str]:
         env={**os.environ, **_child_containment(scratch)},
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
     if result.returncode != 0:
@@ -20125,8 +20905,8 @@ def test_a_signal_on_one_target_makes_the_row_an_error(
 #: A uv that answers the runner's probes and, for a real ``tool run``, dies by the
 #: signal ASH_PAGE_CLAIMS_SIGNAL names (or exits 0 without it), the way a tool
 #: killed under ``uv tool run`` reaches ASH. ASH prefers the uv installed with it
-#: (``bundled_uv_executable``) over any PATH entry, by design, so the cell points
-#: the runner at this stand-in with ``for_probed_uv`` rather than through PATH;
+#: (``bundled_uv_executable``) over any PATH entry, by design, so the cell builds
+#: the runner for this stand-in's path rather than finding it through PATH;
 #: everything after the lookup, the uv branch, the flag carry-through and the
 #: recorders, runs real code on a real subprocess.
 _UV_STAND_IN = """\
@@ -20183,9 +20963,9 @@ def test_a_uv_tool_scanners_tool_ended_by_a_signal_is_the_same_error(
     through to the same record as a directly started tool: the row is ``ERROR``
     with 128 plus the signal's number, and the error names the signal. The uv here
     is a stand-in executable that really dies by the named signal; only the uv
-    lookup is pinned (``for_probed_uv``), because ASH prefers its own bundled uv
-    over PATH. The sandbox mode is explicitly ``off``. The control, the same uv
-    exiting 0, is not ``ERROR``.
+    lookup is pinned (the runner is built for the stand-in's path), because ASH
+    prefers its own bundled uv over PATH. The sandbox mode is explicitly ``off``.
+    The control, the same uv exiting 0, is not ``ERROR``.
     """
     assert_on_page(READ_RESULTS, _A_SIGNAL_ENDED_TOOL_IS_AN_ERROR)
     from unittest.mock import MagicMock
@@ -20210,11 +20990,14 @@ def test_a_uv_tool_scanners_tool_ended_by_a_signal_is_the_same_error(
     script = tmp_path / "uv-stand-in.py"
     script.write_text(_UV_STAND_IN, encoding="utf-8")
     stand_in = _interpreter_launcher(tmp_path, "uv-stand-in", script)
-    monkeypatch.setattr(
-        uv_tool_runner,
-        "get_uv_tool_runner",
-        lambda: UVToolRunner.for_probed_uv(str(stand_in)),
-    )
+    # The runner is built for the stand-in executable and handed to every uv gate
+    # of the scan, so none of them resolves the uv installed with ASH. A build with
+    # a probed-uv constructor takes the stand-in through it; this one builds the
+    # runner from the executable itself, which probes it on first use and keeps
+    # the answer for the stand-in it was probed from.
+    make_runner = getattr(UVToolRunner, "for_probed_uv", UVToolRunner)
+    runner = make_runner(str(stand_in))
+    monkeypatch.setattr(uv_tool_runner, "get_uv_tool_runner", lambda: runner)
     if signal_name:
         monkeypatch.setenv("ASH_PAGE_CLAIMS_SIGNAL", signal_name)
     else:
@@ -20862,3 +21645,33 @@ def test_a_scanners_dependency_probe_runs_only_inside_the_sandbox(
         assert left == [], (left, _output_tail(result))
     else:
         assert left, _output_tail(result)
+
+
+_PLUGIN_MODULE_RULE_SENTENCE = (
+    "From a config file inside the scanned tree or any git checkout, only ASH's own "
+    "plugin modules and installed modules outside the tree and outside every git "
+    "checkout are imported (see What each tier may set)"
+)
+
+
+@pytest.mark.unit
+def test_the_sandbox_page_states_the_plugin_module_rule_as_the_code_keeps_it() -> None:
+    """scanner-sandbox.md (Plugin modules), trust-model.md (What each tier may set).
+
+    The rule the code keeps is in the docstring of ``config/plugin_module_trust.py``:
+    an entry a repository-written config adds is kept only if its module is installed
+    outside the scanned tree and outside every git checkout. The sandbox page named
+    only the tree, which reads as if a module installed inside some other checkout
+    were allowed. The page now carries both halves and the exception for ASH's own
+    plugin modules, as the trust page does, and the trust page's row is pinned
+    beside it so the two cannot drift apart.
+
+    That the code drops a module installed inside a checkout is held by
+    test_a_home_directory_checkout_makes_every_config_under_it_repository_tier.
+    """
+    assert_on_page(_SANDBOX_HOW_TO, _PLUGIN_MODULE_RULE_SENTENCE)
+    assert_on_page(
+        TRUST_MODEL,
+        "Only ASH's own plugin modules and modules installed outside every git "
+        "checkout and the scanned directory.",
+    )

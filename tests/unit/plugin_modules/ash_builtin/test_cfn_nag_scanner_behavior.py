@@ -25,7 +25,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from pydantic import ValidationError
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -245,23 +244,25 @@ def test_custom_rule_exceptions_are_isolated(scanner):
     )
 
 
-@pytest.mark.parametrize(
-    "level, verbose_expected",
-    [(logging.DEBUG, True), (logging.INFO, False), (logging.WARNING, False)],
-)
-def test_verbose_flag_is_added_only_at_debug_level(
-    plugin_context, monkeypatch, level, verbose_expected
-):
-    """``--verbose`` is passed to cfn_nag only when ASH itself is at DEBUG."""
+@pytest.mark.parametrize("level", [logging.DEBUG, logging.INFO, logging.WARNING])
+def test_no_log_level_flag_is_passed_to_cfn_nag(plugin_context, monkeypatch, level):
+    """No ``--verbose`` (or ``--debug``) at any ASH log level, DEBUG included.
+
+    cfn_nag_scan defines no ``--verbose`` option, so passing it at DEBUG made
+    every invocation exit 255 with no stdout and the whole scan fail as "no
+    output". Its ``--debug`` writes to stdout, which is parsed as SARIF, so it
+    is not passed either.
+    """
     monkeypatch.setattr(ASH_LOGGER, "level", level)
 
     scanner = CfnNagScanner(context=plugin_context, config=CfnNagScannerConfig())
     keys = [arg.key for arg in scanner.args.extra_args]
 
-    assert ("--verbose" in keys) is verbose_expected, (
-        f"at level {logging.getLevelName(level)} expected verbose="
-        f"{verbose_expected}; extra_args keys were {keys}"
+    assert "--verbose" not in keys, (
+        f"at level {logging.getLevelName(level)} cfn_nag_scan would be given "
+        f"--verbose, which it does not define; extra_args keys were {keys}"
     )
+    assert "--debug" not in keys, keys
 
 
 def test_config_defaults_are_applied_when_config_is_none(plugin_context):
@@ -288,26 +289,16 @@ def test_execute_scan_stub_raises_not_implemented(scanner):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ValidationError,
-    reason=(
-        "get_shortest_name() returns its input unchanged when the path does not "
-        "exist, so a Path argument comes back as a Path rather than the str the "
-        "final 'return Path(input).as_posix()' would produce. ArtifactLocation.uri "
-        "requires a str, so scan() raises ValidationError at the report-skeleton "
-        "step and never reaches its own 'target is empty or doesn't exist' branch. "
-        "Remove this xfail once get_shortest_name normalizes its early return."
-    ),
-)
 def test_missing_target_directory_returns_an_empty_report(
     scanner, deps_available, subprocess_double, tmp_path
 ):
-    """A target that does not exist should yield a report, not an exception.
+    """A target that does not exist yields an empty report, not an exception.
 
-    The scan body has an explicit branch for a missing target, but it is
-    unreachable today: the report skeleton is built first and passes the target
-    through get_shortest_name, which returns a Path for a non-existent input.
+    The report skeleton is built first and passes the target through
+    get_shortest_name; a missing path now comes back as text, so
+    ArtifactLocation.uri validates and scan() reaches its own "target is empty
+    or doesn't exist" branch. This was an expected failure while
+    get_shortest_name handed a missing Path back unchanged.
     """
     report = scanner.scan(target=tmp_path / "does-not-exist", target_type="converted")
 
@@ -315,13 +306,12 @@ def test_missing_target_directory_returns_an_empty_report(
     subprocess_double.assert_not_called()
 
 
-def test_get_shortest_name_early_return_does_not_normalize_to_str():
-    """Pin the root cause of the xfail above at its own source.
+def test_get_shortest_name_answers_in_text_for_a_missing_path():
+    """The early return for a missing path is text, like the resolved return.
 
-    The final ``return Path(input).as_posix()`` yields a str, but the
-    not-exists early return hands back whatever it was given. Callers that feed
-    the result into a pydantic str field therefore work for existing paths and
-    fail for missing ones.
+    Callers feed the result into pydantic str fields (ArtifactLocation.uri), so
+    a missing path that came back as a Path failed validation where an existing
+    one passed; both are str now.
     """
     from automated_security_helper.utils.get_shortest_name import get_shortest_name
 
@@ -329,10 +319,7 @@ def test_get_shortest_name_early_return_does_not_normalize_to_str():
     assert isinstance(existing, str)
 
     missing = get_shortest_name(input=Path.cwd() / "no-such-file-exists-here")
-    assert isinstance(missing, Path), (
-        "if this now returns str, get_shortest_name was fixed -- drop the "
-        "xfail on test_missing_target_directory_returns_an_empty_report"
-    )
+    assert isinstance(missing, str)
 
 
 def test_empty_target_directory_returns_an_empty_report(
@@ -628,7 +615,7 @@ def test_invocation_replaces_the_placeholder_and_records_the_exit_code(
         (1, True),
         (2, True),
         (137, True),
-        (127, False),
+        (127, True),
         pytest.param(
             -9,
             False,
@@ -649,10 +636,14 @@ def test_execution_successful_treats_zero_and_one_as_success(
     {0, 1} set; both runs here rendered results and evaluated their target,
     so the count is findings, not failure -- 137 included, because through
     ``_run_subprocess`` a signal death arrives as a NEGATIVE code, never as
-    128+N. ASH's spawn-failure marker 127 and a negative code are no counts: the
-    plugin keeps a signal death as the run's cause, which is read before any
-    count, and records its code as the shell reports it (``exit_status``,
-    128+N), so the recorded 137 of a SIGKILL is never a count either.
+    128+N, and 127 included, because cfn_nag returns that number for 127
+    (mod 256) failing violations: whether the tool ran at all is read from the
+    recorded spawn failure, not from the code (see
+    ``test_a_clean_run_whose_code_counts_violations_is_successful``). A negative
+    code is no count: the plugin keeps a signal death as the run's cause, which
+    is read before any count, and records its code as the shell reports it
+    (``exit_status``, 128+N), so the recorded 137 of a SIGKILL is never a count
+    either.
 
     The code arrives the way the real ``_run_subprocess`` delivers it, through
     ``_process_command_response``: scan() starts each target with no exit code, so
@@ -857,6 +848,37 @@ def test_a_template_the_model_rejects_is_counted_as_a_failed_target(
     assert _status_for(scanner)[0] == ScannerStatus.ERROR
 
 
+@pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links")
+def test_a_hard_linked_template_is_scanned(
+    scanner, deps_available, subprocess_double, tmp_path
+):
+    """A template whose other name is outside the tree is still the tree's bytes.
+
+    The scanned-tree rule refused a file with a second hard link, and this scanner
+    took the refusal as the not-CloudFormation skip: no finding, no error, no
+    failed target, so a repository that hard-links its templates was reported
+    clean. The template read now admits a hard-linked regular file (a symlink
+    stays refused), and the template is checked and scanned like any other.
+    """
+    elsewhere = tmp_path / "elsewhere" / "role.yaml"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text(CFN_TEMPLATE)
+    try:
+        os.link(elsewhere, scanner.context.work_dir / "role.yaml")
+    except OSError as exc:  # pragma: no cover - filesystem without hard links
+        pytest.skip(f"cannot create a hard link here: {exc}")
+    subprocess_double.side_effect = stdout_sequence(
+        cfn_nag_sarif(rule_id="F38", uri="role.yaml")
+    )
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert subprocess_double.call_count == 1, "the hard-linked template was skipped"
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 0)
+    assert not any("Skipped" in err for err in scanner.errors), scanner.errors
+
+
 def test_a_non_zero_exit_with_no_results_is_a_failed_target(
     scanner, deps_available, subprocess_double, caplog
 ):
@@ -1038,8 +1060,11 @@ def test_a_clean_run_whose_code_counts_violations_is_successful(scanner):
     (_evaluated_no_rule's rule), so a run that evaluated every attempted
     target and found two is a successful execution -- the count is findings,
     not failure (the base accepted set {0, 1} graded it False).
-    ASH's spawn-failure marker and a signal death still are not: neither is
-    a count cfn_nag returned."""
+    A recorded spawn failure and a signal death still are not: neither is
+    a count cfn_nag returned. The spawn-failure marker's VALUE alone is a
+    count, though: cfn_nag returns the same number for 127 (mod 256) failing
+    violations, so whether the tool ran is read from the recorded spawn
+    failure, never from the code."""
     from automated_security_helper.utils.subprocess_utils import (
         SPAWN_FAILURE_RETURNCODE,
     )
@@ -1049,7 +1074,10 @@ def test_a_clean_run_whose_code_counts_violations_is_successful(scanner):
     scanner.exit_code = 2
     assert scanner._sarif_execution_successful() is True
     scanner.exit_code = SPAWN_FAILURE_RETURNCODE
+    assert scanner._sarif_execution_successful() is True
+    scanner._scan_spawn_failure = "the command never ran"
     assert scanner._sarif_execution_successful() is False
+    scanner._scan_spawn_failure = None
     scanner.exit_code = -11
     assert scanner._sarif_execution_successful() is False
     # A failed target outranks any accepted count.

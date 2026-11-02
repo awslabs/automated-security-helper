@@ -89,37 +89,6 @@ def _sigterm_to_myself() -> None:
         pass
 
 
-class _NoOutput:
-    def readline(self):
-        return ""
-
-
-class _Runtime:
-    """A runtime that runs until stopped; its second poll calls ``on_poll``. Bounded.
-
-    Its pid is this process's own, so the die-now record these cells never
-    trigger could not reach a process the test does not own.
-    """
-
-    def __init__(self, on_poll=None):
-        self.stdout = _NoOutput()
-        self.stderr = _NoOutput()
-        self.returncode = None
-        self.pid = os.getpid()
-        self.polls = 0
-        self.on_poll = on_poll
-
-    def poll(self):
-        self.polls += 1
-        if self.polls > 300:
-            raise RuntimeError(
-                "polled past the bound: the planted signal never took effect"
-            )
-        if self.polls == 2 and self.on_poll is not None:
-            self.on_poll()
-        return self.returncode
-
-
 def _stop_recorder(monkeypatch):
     stops = []
 
@@ -139,9 +108,9 @@ def _stop_recorder(monkeypatch):
     ],
 )
 def test_a_sigterm_while_the_runtime_runs_stops_it_through_the_cancel(
-    monkeypatch, default_sigint, real_sigterm, run_step, tmp_path
+    monkeypatch, default_sigint, real_sigterm, run_step, tmp_path, runtime_stand_in
 ):
-    runtime = _Runtime(on_poll=_sigterm_to_myself)
+    runtime = runtime_stand_in(on_poll=_sigterm_to_myself)
     monkeypatch.setattr(
         subprocess_utils, "create_process_with_pipes", lambda **kw: runtime
     )

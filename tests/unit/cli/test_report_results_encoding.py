@@ -40,6 +40,7 @@ apply to plugin loading, rich and pydantic for the duration of the call.
 """
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -103,13 +104,26 @@ def _write_results_file(output_dir):
 
 @pytest.fixture
 def reporter_plugin():
-    """A text reporter, mocked. This test is about the read, not about rendering."""
+    """A text reporter, mocked. This test is about the read, not about rendering.
+
+    The class declares the name the command looks ``--format`` up by, the way
+    test_report.py's ``_declares_name`` does: ``plugin_config_key`` reads the
+    ``name`` default of the class the ``config`` field is typed with, without
+    building the reporter. A bare MagicMock declares none, so it answered to
+    ``mocktextreporter`` and the command refused ``text`` as an unknown format
+    (exit 5) before it opened the results file. The reporter declares no
+    companion files: a MagicMock is ``os.PathLike`` and would be read as one.
+    """
     plugin = MagicMock()
     plugin.config.name = "text"
     plugin.report.return_value = "rendered"
+    plugin.companion_file_names.return_value = ()
     plugin_class = MagicMock()
     plugin_class.__name__ = "MockTextReporter"
     plugin_class.return_value = plugin
+    config_class = MagicMock()
+    config_class.model_fields = {"name": SimpleNamespace(default="text")}
+    plugin_class.model_fields = {"config": SimpleNamespace(annotation=config_class)}
     return plugin_class, plugin
 
 

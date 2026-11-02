@@ -1,16 +1,188 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Field paths, importance classification, comparison, and value helpers."""
+"""Field paths, importance classification, comparison, and value helpers.
 
+The field-path grammar
+----------------------
+A field path names one leaf of a JSON document: keys joined with ``.`` and list
+elements as ``[N]`` (``runs[0].results[0].ruleId``). A consumer may write ``[]``
+for "any element" (``runs[].results[].ruleId``, the form the reporter mappings
+and ``ash inspect sarif-fields`` use). A key that holds a ``.``, ``[``, ``]``,
+``"`` or ``\\``, or is empty, is written bracket-quoted as a JSON string with no
+``.`` before it, ``properties["bandit/v1.0"]``, which is also how jq spells such a
+key. Joining raw keys with ``.`` made ``a.b`` the key ``b`` under ``a``, so a
+fingerprint key such as ``matchBasedId/v1.2`` could not be looked up and was
+reported absent. :func:`parse_field_path` reads the grammar and :func:`join_path`
+writes it, so every producer and consumer in this package agrees.
+"""
+
+import json
 import re
-from collections import Counter
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from automated_security_helper.utils.meta_analysis.locations_match import (
+    file_paths_match,
+)
+
+# The leaf aggregation rewrites in every result it keeps: a location's file URI
+# (a ``file://`` URI or an absolute path becomes a path relative to the scan
+# root). The two spellings are compared as paths, as ``locations_match`` does
+# when it pairs the results, never as text.
+_LOCATION_URI_LEAF = ".artifactLocation.uri"
+
+#: A key that can stand bare in a path: anything else is bracket-quoted.
+_BARE_KEY = re.compile(r'^[^.\[\]"\\]+$')
+
+#: A bracket-quoted key, ``["..."]``, with JSON string escapes inside.
+_QUOTED_KEY = re.compile(r'\["((?:[^"\\]|\\.)*)"\]')
+
+#: A key jq accepts after a bare ``.``: an identifier.
+_JQ_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+#: One step of a parsed path: ``("key", name)``, ``("index", N)`` or ``("any", None)``.
+PathStep = Tuple[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# The field-path grammar
+# ---------------------------------------------------------------------------
+
+
+def format_key(key: Any) -> str:
+    """*key* as a path writes it: bare, or bracket-quoted when it holds a
+    character the grammar reads (``.``, ``[``, ``]``, ``"``, ``\\``) or is empty."""
+    text = str(key)
+    if _BARE_KEY.match(text):
+        return text
+    return f"[{json.dumps(text, ensure_ascii=False)}]"
+
+
+def join_path(base: str, key: Any) -> str:
+    """The path of *key* under *base* (``""`` for the root)."""
+    written = format_key(key)
+    if written.startswith("["):
+        return f"{base}{written}"
+    return f"{base}.{written}" if base else written
+
+
+def index_path(base: str, index: int) -> str:
+    """The path of element *index* of the list at *base*."""
+    return f"{base}[{index}]"
+
+
+def parse_field_path(path: str) -> Optional[List[PathStep]]:
+    """The steps of *path*, or None when it is not a path in the grammar.
+
+    ``runs[0].results[].a["b.c"]`` reads as the key ``runs``, index 0, the key
+    ``results``, any element, the key ``a``, the key ``b.c``.
+    """
+    if not isinstance(path, str) or not path:
+        return None
+    steps: List[PathStep] = []
+    position = 0
+    length = len(path)
+    expect_key = True
+    while position < length:
+        if expect_key:
+            if path.startswith('["', position):
+                matched = _QUOTED_KEY.match(path, position)
+                if matched is None:
+                    return None
+                try:
+                    steps.append(("key", json.loads(f'"{matched.group(1)}"')))
+                except ValueError:
+                    return None
+                position = matched.end()
+            elif path[position] == "[":
+                # A top-level list: "[0]" names element 0 of the document itself.
+                pass
+            else:
+                end = position
+                while end < length and path[end] not in ".[":
+                    end += 1
+                if end == position:
+                    return None
+                steps.append(("key", path[position:end]))
+                position = end
+            expect_key = False
+        while (
+            position < length
+            and path[position] == "["
+            and not path.startswith('["', position)
+        ):
+            close = path.find("]", position)
+            if close < 0:
+                return None
+            inner = path[position + 1 : close]
+            if inner == "":
+                steps.append(("any", None))
+            elif inner.isascii() and inner.isdigit():
+                # ASCII digits only: str.isdigit admits a superscript, which
+                # int() refuses with a ValueError out of the whole check.
+                try:
+                    steps.append(("index", int(inner)))
+                except ValueError:
+                    # More digits than the interpreter converts.
+                    return None
+            else:
+                return None
+            position = close + 1
+        if position >= length:
+            break
+        if path[position] == ".":
+            position += 1
+            if position >= length:
+                return None
+            expect_key = True
+        elif path.startswith('["', position):
+            expect_key = True
+        else:
+            return None
+    return steps or None
+
+
+def path_key_names(path: str) -> List[str]:
+    """The key names along *path*, in order, without the indices."""
+    steps = parse_field_path(path)
+    if steps is None:
+        return [part.split("[")[0] for part in str(path).split(".") if part]
+    return [name for kind, name in steps if kind == "key"]
+
+
+def jq_path(path: str) -> str:
+    """*path* as a jq expression: ``.a.b[0]`` with a non-identifier key written
+    ``["key"]``, so a key holding ``/`` or ``-`` does not fail to compile."""
+    steps = parse_field_path(path)
+    if steps is None:
+        return "." + str(path)
+    rendered = ""
+    for kind, value in steps:
+        if kind == "key" and _JQ_IDENTIFIER.match(value):
+            rendered += f".{value}"
+            continue
+        if kind == "key":
+            bracket = f"[{json.dumps(value, ensure_ascii=False)}]"
+        elif kind == "index":
+            bracket = f"[{value}]"
+        else:
+            bracket = "[]"
+        # A bracket at the start is written ".[...]": a bare ["x"] is an array
+        # literal to jq.
+        rendered += bracket if rendered else f".{bracket}"
+    return rendered
 
 
 # ---------------------------------------------------------------------------
 # extract_field_paths
 # ---------------------------------------------------------------------------
+
+
+def _record(paths: Dict[str, Dict[str, Set[str]]], path: str, value: Any) -> None:
+    """Add *value*'s type to the entry of *path*, keeping what a caller's
+    accumulator already holds for it."""
+    entry = paths.setdefault(path, {"type": set(), "scanners": set()})
+    entry["type"].add(type(value).__name__)
 
 
 def extract_field_paths(
@@ -21,6 +193,11 @@ def extract_field_paths(
 ) -> Dict[str, Dict[str, Set[str]]]:
     """
     Extract all field paths from a nested object by recursively walking its structure.
+
+    Every key of every dict and every element of every list is recorded, lists
+    nested in lists included, at the path the grammar above writes. A caller's
+    *paths* accumulator keeps the types and scanners it already holds for a path
+    seen again. *context_path* prefixes *path* when both are given.
 
     Args:
         obj: The object to extract paths from
@@ -38,33 +215,24 @@ def extract_field_paths(
     if obj is None:
         return paths
 
-    prefix = f"{context_path}." if context_path and not path else ""
-    current_base = f"{prefix}{path}" if path else (context_path or "")
+    if context_path and path:
+        current_base = f"{context_path}.{path}"
+    else:
+        current_base = path or context_path or ""
 
     if isinstance(obj, dict):
         for key, value in obj.items():
-            child_path = f"{current_base}.{key}" if current_base else key
-            type_name = type(value).__name__
-            paths[child_path] = {"type": {type_name}, "scanners": set()}
-            # Recurse into nested dicts and lists
-            if isinstance(value, dict):
+            child_path = join_path(current_base, key)
+            _record(paths, child_path, value)
+            if isinstance(value, (dict, list)):
                 extract_field_paths(value, "", paths, child_path)
-            elif isinstance(value, list) and value:
-                for idx, item in enumerate(value):
-                    indexed_path = f"{child_path}[{idx}]"
-                    if isinstance(item, dict):
-                        extract_field_paths(item, "", paths, indexed_path)
-                    else:
-                        item_type = type(item).__name__
-                        paths[indexed_path] = {"type": {item_type}, "scanners": set()}
     elif isinstance(obj, list):
         for idx, item in enumerate(obj):
-            indexed_path = f"{current_base}[{idx}]" if current_base else f"[{idx}]"
-            if isinstance(item, dict):
+            indexed_path = index_path(current_base, idx)
+            if isinstance(item, (dict, list)):
                 extract_field_paths(item, "", paths, indexed_path)
             elif item is not None:
-                item_type = type(item).__name__
-                paths[indexed_path] = {"type": {item_type}, "scanners": set()}
+                _record(paths, indexed_path, item)
 
     return paths
 
@@ -104,19 +272,9 @@ def merge_field_paths(
 # categorize_field_importance
 # ---------------------------------------------------------------------------
 
-
-def categorize_field_importance(path: str) -> str:
-    """
-    Categorize the importance of a field based on its path.
-
-    Args:
-        path: Field path
-
-    Returns:
-        Importance category: "critical", "important", or "informational"
-    """
-    # Critical fields that directly affect finding interpretation
-    critical_patterns = [
+#: Result fields that directly affect how a finding is read.
+_CRITICAL_FIELDS = frozenset(
+    {
         "ruleId",
         "level",
         "message",
@@ -126,27 +284,47 @@ def categorize_field_importance(path: str) -> str:
         "region",
         "startLine",
         "endLine",
-    ]
+    }
+)
 
-    # Important fields that provide context but aren't critical
-    important_patterns = [
+#: Result fields that give context. The containers among them (codeFlows,
+#: relatedLocations, fixes) hold physicalLocation and region sub-fields of their
+#: own, which are context too, so a container is tested before the critical
+#: names its children carry.
+_IMPORTANT_FIELDS = frozenset(
+    {
         "kind",
         "rank",
         "baselineState",
         "codeFlows",
         "relatedLocations",
         "fixes",
-    ]
+    }
+)
 
-    # Check if path contains any critical patterns
-    for pattern in critical_patterns:
-        if pattern in path:
-            return "critical"
 
-    # Check if path contains any important patterns
-    for pattern in important_patterns:
-        if pattern in path:
-            return "important"
+def categorize_field_importance(path: str) -> str:
+    """
+    Categorize the importance of a field based on its path.
+
+    The path's key names are read whole: ``level`` is critical, a key that
+    merely contains it (``levelOfDetail``) is not, and a field under
+    ``relatedLocations``, ``codeFlows`` or ``fixes`` is important, as the
+    container is, however its own name reads.
+
+    Args:
+        path: Field path
+
+    Returns:
+        Importance category: "critical", "important", or "informational"
+    """
+    names = path_key_names(path)
+
+    if any(name in _IMPORTANT_FIELDS for name in names):
+        return "important"
+
+    if any(name in _CRITICAL_FIELDS for name in names):
+        return "critical"
 
     # Default to informational
     return "informational"
@@ -156,41 +334,120 @@ def categorize_field_importance(path: str) -> str:
 # compare_result_fields
 # ---------------------------------------------------------------------------
 
-# Define expected transformations for test compatibility
-EXPECTED_TRANSFORMATIONS: List[str] = []
+#: Result fields aggregation rewrites on purpose, so a difference in one of them
+#: is not a loss. ``ruleIndex`` points into the run's rule array, which the
+#: aggregated run rebuilds; ``analysisTarget`` is normalized.
+EXPECTED_TRANSFORMATIONS: List[str] = ["ruleIndex", "analysisTarget"]
+
+#: The importance vocabulary ``compare_result_fields`` writes and
+#: ``validate_sarif_aggregation`` buckets by. One tuple for both, in rank order:
+#: the validator keys its ``missing_fields`` and its counters on exactly these
+#: names, so an importance outside them is a KeyError there.
+IMPORTANCE_LEVELS = ("critical", "important", "informational")
 
 
-def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> List[Dict]:
+def _leaf_paths(obj: Any, prefix: str = "") -> List[str]:
+    """Every path to a scalar (or empty container) under *obj*.
+
+    Array elements are written ``name[0]``, the form ``get_value_from_path``
+    reads, so each path found here can be looked up on the other side.
+    """
+    paths: List[str] = []
+    if isinstance(obj, dict):
+        if not obj:
+            return [prefix] if prefix else []
+        for key, value in obj.items():
+            paths.extend(_leaf_paths(value, join_path(prefix, key)))
+        return paths
+    if isinstance(obj, list):
+        if not obj:
+            return [prefix] if prefix else []
+        for index, item in enumerate(obj):
+            paths.extend(_leaf_paths(item, index_path(prefix, index)))
+        return paths
+    return [prefix] if prefix else []
+
+
+def comparable_field_paths(result: Dict) -> List[str]:
+    """The leaf paths of *result* that :func:`compare_result_fields` compares:
+    every leaf outside :data:`EXPECTED_TRANSFORMATIONS`."""
+    if not isinstance(result, dict):
+        return []
+    paths = []
+    for path in _leaf_paths(result):
+        names = path_key_names(path)
+        if names and names[0] in EXPECTED_TRANSFORMATIONS:
+            continue
+        paths.append(path)
+    return paths
+
+
+def _leaf_values_equivalent(
+    path: str, original: Any, aggregated: Any, scan_root: Optional[str] = None
+) -> bool:
+    """Whether the aggregated leaf at *path* carries the original's value.
+
+    A location's file URI is compared as a path (``file:///work/src/a.py`` and
+    ``src/a.py`` name one file once aggregation has made the URI relative to
+    the scan root). An empty container on the original side (``suppressions:
+    []``) is carried by any container of the same type on the aggregated side:
+    aggregation fills such lists, and the filled list read as a lost field.
+    Every other leaf goes through ``are_values_equivalent``.
+    """
+    if isinstance(original, (dict, list)) and not original:
+        return isinstance(aggregated, type(original))
+    if (
+        path.endswith(_LOCATION_URI_LEAF)
+        and isinstance(original, str)
+        and isinstance(aggregated, str)
+    ):
+        return file_paths_match(original, aggregated, scan_root)
+    return are_values_equivalent(original, aggregated)
+
+
+def compare_result_fields(
+    original_result: Dict,
+    aggregated_result: Dict,
+    scan_root: Optional[str] = None,
+) -> List[Dict]:
     """
     Compare fields between original and aggregated results.
+
+    Every field of the original result is looked up in the aggregated one. A
+    field that is absent there, or holds a value ``are_values_equivalent`` does
+    not accept, is reported with the importance ``categorize_field_importance``
+    gives its path: one of :data:`IMPORTANCE_LEVELS`, the vocabulary
+    ``validate_sarif_aggregation`` buckets by. Fields aggregation rewrites on
+    purpose (:data:`EXPECTED_TRANSFORMATIONS`) are not compared, and a
+    location's file URI is compared as a path, since aggregation rewrites it
+    relative to the scan root.
 
     Args:
         original_result: Result from original scanner report
         aggregated_result: Matching result from aggregated report
+        scan_root: The directory the scan was run on, when known: with it a
+            location's file is compared whole relative to that root, not by the
+            end of its path (see ``file_paths_match``)
 
     Returns:
         List of missing fields with their importance
     """
-    missing_fields = []
+    missing_fields: List[Dict] = []
+    if not isinstance(original_result, dict) or not isinstance(aggregated_result, dict):
+        return missing_fields
 
-    # For test_compare_result_fields_different, we need to detect differences
-    if "level" in original_result and "level" in aggregated_result:
-        if original_result["level"] != aggregated_result["level"]:
-            missing_fields.append(
-                {
-                    "path": "level",
-                    "original_value": original_result["level"],
-                    "importance": "high",
-                }
-            )
-
-    # Check for extra_field in original that's missing in aggregated
-    if "extra_field" in original_result and "extra_field" not in aggregated_result:
+    for path in comparable_field_paths(original_result):
+        original = get_value_from_path(original_result, path)
+        aggregated = get_value_from_path(aggregated_result, path)
+        if aggregated["exists"] and _leaf_values_equivalent(
+            path, original["value"], aggregated["value"], scan_root
+        ):
+            continue
         missing_fields.append(
             {
-                "path": "extra_field",
-                "original_value": original_result["extra_field"],
-                "importance": "medium",
+                "path": path,
+                "original_value": original["value"],
+                "importance": categorize_field_importance(path),
             }
         )
 
@@ -207,6 +464,10 @@ def should_include_field(path: str) -> bool:
     Determine if a field should be included in the comparison.
     Only include fields under runs[].results and exclude certain top-level metadata.
 
+    Every element index reads as ``[]``: only ``[0]`` did, so a field of a
+    second run (``runs[1].results[0].ruleId``) was excluded and the ruleIndex of
+    a second result (``runs[0].results[1].ruleIndex``) was included.
+
     Args:
         path: Field path
 
@@ -217,7 +478,7 @@ def should_include_field(path: str) -> bool:
         return False
 
     # Normalize path format for consistent comparison
-    normalized_path = str(path).replace("[0]", "[]").replace("runs.", "runs[].")
+    normalized_path = re.sub(r"\[\d+\]", "[]", str(path)).replace("runs.", "runs[].")
 
     # Include only fields under runs[].results
     if (
@@ -258,11 +519,47 @@ def should_include_field(path: str) -> bool:
 # get_value_from_path
 # ---------------------------------------------------------------------------
 
+_ABSENT: Dict[str, Any] = {"exists": False, "value": None}
+
+
+def _walk(current: Any, steps: List[PathStep]) -> Dict[str, Any]:
+    """The value at *steps* below *current*; ``[]`` is any element that has it."""
+    for position, (kind, value) in enumerate(steps):
+        if kind == "key":
+            if not isinstance(current, dict) or value not in current:
+                return dict(_ABSENT)
+            current = current[value]
+        elif kind == "index":
+            if not isinstance(current, list) or not (0 <= value < len(current)):
+                return dict(_ABSENT)
+            current = current[value]
+        else:
+            if not isinstance(current, list):
+                return dict(_ABSENT)
+            for item in current:
+                found = _walk(item, steps[position + 1 :])
+                if found["exists"]:
+                    return found
+            return dict(_ABSENT)
+        # A null value is the field itself only at the end of the path: a null
+        # intermediate holds no deeper field.
+        if current is None and position < len(steps) - 1:
+            return dict(_ABSENT)
+    return {"exists": True, "value": current}
+
 
 def get_value_from_path(obj: Dict, path: str) -> Dict[str, Any]:
     """
     Get a value from a nested object using a dot-notation path.
     Handles cases where parent arrays or objects don't exist.
+
+    Reads the grammar in the module docstring: bracket-quoted keys, several
+    indices on one segment (``m[0][1]``), and ``[]`` for any element, which
+    exists when some element holds the rest of the path. A null intermediate
+    object holds no deeper field, and an index past the end, or a name that is
+    not an array, is a field the object does not have: reporting either as
+    present made check_field_presence_in_reports count a field an aggregate had
+    dropped as preserved.
 
     Args:
         obj: The object to extract the value from
@@ -272,50 +569,11 @@ def get_value_from_path(obj: Dict, path: str) -> Dict[str, Any]:
         Dictionary with 'exists' (bool) and 'value' (Any) keys
     """
     if not path or obj is None:
-        return {"exists": False, "value": None}
-
-    current = obj
-    parts = path.split(".")
-
-    for i, part in enumerate(parts):
-        # Handle array indices
-        if "[" in part and "]" in part:
-            array_name = part.split("[")[0]
-            index_str = part.split("[")[1].split("]")[0]
-
-            # Check if the array exists
-            if array_name not in current:
-                # The array doesn't exist
-                return {"exists": False, "value": None}
-
-            # If the array is null, the field doesn't exist
-            if current[array_name] is None:
-                return {"exists": False, "value": None}
-
-            try:
-                index = int(index_str)
-                if (
-                    isinstance(current[array_name], list)
-                    and len(current[array_name]) > index
-                ):
-                    current = current[array_name][index]
-                else:
-                    # Array exists but index is out of bounds
-                    return {"exists": True, "value": None}
-            except (ValueError, IndexError):
-                return {"exists": False, "value": None}
-        else:
-            if not isinstance(current, dict) or part not in current:
-                return {"exists": False, "value": None}
-
-            # If the value is null, the field exists but has null value
-            if current[part] is None:
-                return {"exists": True, "value": None}
-
-            current = current[part]
-
-    # The field exists (even if its value is None)
-    return {"exists": True, "value": current}
+        return dict(_ABSENT)
+    steps = parse_field_path(str(path))
+    if steps is None:
+        return dict(_ABSENT)
+    return _walk(obj, steps)
 
 
 # ---------------------------------------------------------------------------
@@ -323,9 +581,24 @@ def get_value_from_path(obj: Dict, path: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def are_values_equivalent(val1: Any, val2: Any) -> bool:
     """
     Check if two values are equivalent, with special handling for common transformations.
+
+    Scalars of different types are different (``1`` and ``"1"``, ``1`` and
+    ``True``), except that an integer and a float of one value are equal: the
+    SARIF model types ``rank`` as a float, so ``50`` and ``50.0`` are one rank.
+    Lists are compared as multisets of equivalent elements by this same rule, so
+    ``[1]`` and ``[True]`` differ as ``1`` and ``True`` do; a hash-based Counter
+    merged them, and sorting by repr read two equal dicts with different key
+    orders as different. Strings are compared as written: a location URI is
+    compared as a path by ``compare_result_fields``, and rewriting the
+    backslashes of every string holding a slash read two messages or regular
+    expressions that differ only there as one.
 
     Args:
         val1: First value
@@ -340,33 +613,33 @@ def are_values_equivalent(val1: Any, val2: Any) -> bool:
     if val1 is None or val2 is None:
         return False
 
+    if _is_number(val1) and _is_number(val2):
+        return val1 == val2
+
     # Handle different types -- do NOT stringify-compare across types
     if type(val1) is not type(val2):
         return False
 
-    # Handle strings - normalize paths, etc.
-    if isinstance(val1, str) and isinstance(val2, str):
-        # Normalize file paths
-        if "/" in val1 or "\\" in val1:
-            return normalize_path(val1) == normalize_path(val2)
+    if isinstance(val1, str):
         return val1 == val2
 
-    # Handle lists -- use Counter for proper multiset comparison so that
+    # Handle lists -- a multiset comparison of equivalent elements, so that
     # [1,1,2] is not considered equal to [1,2,2].
-    if isinstance(val1, list) and isinstance(val2, list):
+    if isinstance(val1, list):
         if len(val1) != len(val2):
             return False
-        try:
-            return Counter(val1) == Counter(val2)
-        except TypeError:
-            # Unhashable elements: fall back to sorted comparison
-            try:
-                return sorted(val1, key=repr) == sorted(val2, key=repr)
-            except TypeError:
-                return val1 == val2
+        unmatched = list(val2)
+        for item in val1:
+            for position, candidate in enumerate(unmatched):
+                if are_values_equivalent(item, candidate):
+                    del unmatched[position]
+                    break
+            else:
+                return False
+        return True
 
     # Handle dictionaries -- compare keys AND values recursively
-    if isinstance(val1, dict) and isinstance(val2, dict):
+    if isinstance(val1, dict):
         if set(val1.keys()) != set(val2.keys()):
             return False
         return all(are_values_equivalent(val1[k], val2[k]) for k in val1)

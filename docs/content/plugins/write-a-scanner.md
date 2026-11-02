@@ -182,9 +182,9 @@ If the read paths or environment variables come from the scanner's own options, 
 
 ## Declare whether the scanner is Python-only
 
-`ash scan --python-only` runs only the scanners that need nothing but Python, and records every other scanner SKIPPED without looking for its tool. A scanner says which it is with the `python_only` class variable. `True` puts it in a `--python-only` run, `False` keeps it out, and a scanner that declares nothing (`None`) counts as Python-only only when it runs its tool through uv (`use_uv_tool`). `ruff-security` runs the `ruff` program from `PATH` and declares nothing, so a `--python-only` run leaves it out. With no other scanner selected, that scan ran no scanner, and it exits with code 1:
+`ash scan --python-only` runs only the scanners that need nothing but Python, and records every other scanner SKIPPED without looking for its tool. A scanner says which it is with the `python_only` class variable. `True` puts it in a `--python-only` run, `False` keeps it out, and a scanner that declares nothing (`None`) counts as Python-only only when it runs its tool through uv (`use_uv_tool`). `ruff-security` runs the `ruff` program from `PATH` and declares nothing, so a `--python-only` run leaves it out. With no other scanner selected, that scan would run no scanner and report itself clean, so ASH refuses it with exit code 5 and names the scanner it left out:
 
-<!-- doctest: run expect-exit=1 -->
+<!-- doctest: run expect-exit=5 -->
 ```bash
 ash scan --ash-plugin-modules acme_ash_plugins --scanners ruff-security --python-only
 ```

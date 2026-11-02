@@ -607,6 +607,19 @@ class TestListScanners:
                 f"{loader}.load_additional_plugin_modules",
                 return_value={"scanners": []},
             ) as load_extra,
+            # Both names, because discovery prefers the importlib_metadata
+            # backport (a declared dependency; the standard library stands in
+            # only where the backport is absent -- scanner_inventory.
+            # _discover_external_scanner_plugin_packages). Patching only the
+            # standard-library name left discovery reading the venue's real
+            # installed metadata, so the acme entry never reached the loader.
+            patch(
+                "importlib_metadata.packages_distributions",
+                return_value={
+                    "acme_scan": ["ash_acme_plugins"],
+                    "requests": ["requests"],
+                },
+            ),
             patch(
                 "importlib.metadata.packages_distributions",
                 return_value={

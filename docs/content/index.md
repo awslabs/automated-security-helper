@@ -2,7 +2,7 @@
 template: home.html
 title: Overview
 description: Security scanning for code, infrastructure, secrets, and dependencies.
-ash_version: "3.7.0"
+ash_version: "3.7.1"
 hide:
   - navigation
   - toc
@@ -25,7 +25,7 @@ Install ASH with Python 3.10+ and pipx:
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
 ```
 
 From your project directory, choose an execution mode:
@@ -34,25 +34,25 @@ From your project directory, choose an execution mode:
 ```bash
 # Linux/macOS
 curl -LsSf https://astral.sh/uv/install.sh | sh
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.1"
 
 # Windows PowerShell
 irm https://astral.sh/uv/install.ps1 | iex
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.1 $args }
 ```
 
 #### Using `pip`
 
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network" -->
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.1
 ```
 
 #### Clone the Repository
 
 <!-- doctest: illustrative reason="clones the ASH repository and installs it over the network" -->
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.7.0
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.7.1
 cd automated-security-helper
 pip install .
 ```
@@ -113,7 +113,7 @@ Run [locally](getting-started/local.md), integrate with [CI/CD](getting-started/
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.7.1
     hooks:
       - id: ash
 ```

@@ -85,9 +85,9 @@ def test_get_value_from_path_with_lists():
     assert result["exists"] is True
     assert result["value"] == "Item 2"
 
-    # Test with out-of-bounds index
+    # Test with out-of-bounds index: no such element, so no such field
     result = get_value_from_path(data, "items[10]")
-    assert result["exists"] is True  # Array exists but index is out of bounds
+    assert result["exists"] is False
     assert result["value"] is None
 
     # Test with invalid index

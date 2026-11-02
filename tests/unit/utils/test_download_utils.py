@@ -2,9 +2,10 @@
 
 import io
 import pytest
+import stat
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
 
 from automated_security_helper.utils.download_utils import (
@@ -57,7 +58,14 @@ def test_download_file(mock_urlopen, tmp_path):
     dest = tmp_path / "destination"
     result = download_file("https://example.com/file.txt", dest)
 
-    mock_urlopen.assert_called_once_with("https://example.com/file.txt")
+    # The fetch is bounded: the URL is the one positional argument and a positive
+    # socket timeout rides with it (its exact value is pinned in
+    # test_download_utils_transfer_and_receipt_edges.py). A stalled connection
+    # must end the attempt, so a call without the bound is the defect here.
+    assert mock_urlopen.call_count == 1
+    (called_url,), kwargs = mock_urlopen.call_args
+    assert called_url == "https://example.com/file.txt"
+    assert kwargs.get("timeout", 0) > 0
     assert result == dest.joinpath("file.txt")
     assert result.read_bytes() == payload
     # No staging file is left behind on the happy path.
@@ -74,49 +82,53 @@ def test_download_file_invalid_url(mock_mkdir, mock_urlopen):
 
 
 @pytest.mark.unit
-@patch("pathlib.Path.chmod")
-@patch("pathlib.Path.stat")
-def test_make_executable_unix(mock_stat, mock_chmod):
-    """Test make_executable on Unix-like systems."""
-    # Mock platform.system to return non-Windows
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_make_executable_unix(tmp_path):
+    """make_executable adds the execute bits to the file's own mode.
+
+    Driven against a real file: the mode is read and set on one open descriptor
+    (``os.fstat`` / ``os.fchmod``), so a test pinned to ``Path.chmod`` and
+    ``Path.stat`` measured an implementation, not the property.
+    """
+    target = tmp_path / "file"
+    target.write_bytes(b"x")
+    target.chmod(0o644)
     with patch("platform.system", return_value="Linux"):
-        # Mock stat to return a mode
-        mock_stat_result = MagicMock()
-        mock_stat_result.st_mode = 0o644
-        mock_stat.return_value = mock_stat_result
-
-        # Call function
-        make_executable(Path("/test/file"))
-
-        # Verify chmod was called with correct permissions
-        mock_chmod.assert_called_once_with(0o755)  # 0o644 | 0o111
+        make_executable(target)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o755  # 0o644 | 0o111
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(
-    sys.platform.lower() != "windows",
-    reason="Windows specific test",
-)
-@patch("pathlib.Path.chmod")
-def test_make_executable_windows(mock_chmod):
-    """Test make_executable on Windows."""
-    # Mock platform.system to return Windows
-    with patch("platform.system", return_value="Windows"):
-        # Call function
-        make_executable(Path("/test/file"))
+def test_make_executable_on_windows_leaves_the_mode_alone(tmp_path):
+    """On Windows make_executable sets nothing, so a real file's mode is unchanged.
 
-        # Verify chmod was not called
-        mock_chmod.assert_not_called()
+    The test this replaces skipped on every platform (``sys.platform`` reads
+    ``win32`` on Windows, never ``windows``) and patched ``Path.chmod``, which the
+    implementation no longer calls, so it measured nothing anywhere. The Windows
+    branch is the subject here, so the platform is faked and the test runs
+    everywhere.
+    """
+    target = tmp_path / "file"
+    target.write_bytes(b"x")
+    before = stat.S_IMODE(target.stat().st_mode)
+    with patch("platform.system", return_value="Windows"):
+        make_executable(target)
+    assert stat.S_IMODE(target.stat().st_mode) == before
 
 
 @pytest.mark.unit
 @pytest.mark.skipif(
     sys.platform.lower() != "darwin",
-    reason="Windows specific test",
+    reason="macOS specific test",
 )
 @patch("automated_security_helper.utils.download_utils.run_command")
 def test_unquarantine_macos_binary(mock_run_command):
-    """Test unquarantine_macos_binary on macOS."""
+    """Test unquarantine_macos_binary on macOS.
+
+    The attribute is removed from the file itself: ``xattr -d`` names the one
+    installed binary, never ``-r`` over a path that could have become a directory.
+    """
+    mock_run_command.return_value.returncode = 0
     # Mock platform.system to return Darwin (macOS)
     with patch("platform.system", return_value="Darwin"):
         # Call function
@@ -124,7 +136,7 @@ def test_unquarantine_macos_binary(mock_run_command):
 
         # Verify run_command was called with correct arguments
         mock_run_command.assert_called_once_with(
-            ["xattr", "-r", "-d", "com.apple.quarantine", "/test/file"]
+            ["xattr", "-d", "com.apple.quarantine", "/test/file"]
         )
 
 
@@ -142,20 +154,30 @@ def test_unquarantine_macos_binary_non_macos(mock_run_command):
 
 
 @pytest.mark.unit
+@patch("automated_security_helper.utils.download_utils.write_receipt")
 @patch("automated_security_helper.utils.download_utils._download_verified")
 @patch("automated_security_helper.utils.download_utils.make_executable")
 @patch("automated_security_helper.utils.download_utils.unquarantine_macos_binary")
 def test_install_binary_from_url(
-    mock_unquarantine, mock_make_executable, mock_download_verified
+    mock_unquarantine, mock_make_executable, mock_download_verified, mock_write_receipt
 ):
     """Test install_binary_from_url function.
 
     Driven through ``_download_verified`` rather than ``download_file``, because the
     receipt has to record the digest that was verified as the bytes landed. Re-hashing
-    the installed file here instead would read it back after ``make_executable`` and,
-    on macOS, after ``unquarantine_macos_binary`` has spawned ``xattr`` -- see
-    ``_finalize_staged``. ``download_file`` still returns a plain path for callers
-    outside this module.
+    the installed file here instead would read it back after ``unquarantine_macos_binary``
+    has spawned ``xattr`` on macOS -- see ``_finalize_staged``. ``download_file`` still
+    returns a plain path for callers outside this module.
+
+    The binary's mode is the download's business: the install names ``mode=0o755`` on
+    the call, and the staged file gets it on its own descriptor before the rename, so
+    no ``make_executable`` reopens the landed path by name afterwards.
+
+    ``write_receipt`` is mocked, not run: the whole call runs under a faked
+    ``platform.system() == "Darwin"``, and the real receipt writer reads that answer
+    too, so on a Windows host it took its POSIX branch (``os.O_DIRECTORY``, absent
+    there). What this test checks of the receipt is what the install hands it: the
+    digest verified as the bytes landed, not a fresh hash.
     """
     # Setup mocks
     mock_download_verified.return_value = (Path("/test/destination/file"), "d" * 64)
@@ -170,15 +192,22 @@ def test_install_binary_from_url(
             expected_sha256="e" * 64,
         )
 
-        # expected_sha256 is threaded through to the download that verifies it.
+        # expected_sha256 is threaded through to the download that verifies it, and
+        # the executable mode is named on the same call.
         mock_download_verified.assert_called_once_with(
             "https://example.com/file",
             Path("/test/destination"),
             "renamed_file",
             expected_sha256="e" * 64,
+            mode=0o755,
         )
-        mock_make_executable.assert_called_once_with(Path("/test/destination/file"))
+        mock_make_executable.assert_not_called()
         mock_unquarantine.assert_called_once_with(Path("/test/destination/file"))
+        mock_write_receipt.assert_called_once()
+        receipt_dir, _installed_as, receipt = mock_write_receipt.call_args.args
+        assert receipt_dir == Path("/test/destination")
+        assert receipt["sha256"] == "e" * 64
+        assert receipt["installed_sha256"] == "d" * 64
 
         # Verify result
         assert result == Path("/test/destination/file")
@@ -243,6 +272,8 @@ def test_building_the_download_command_creates_no_directory(tmp_path, monkeypatc
     assert sorted(p.name for p in work.iterdir()) == []
 
 
+# integration although urlopen is patched: on macOS install_binary_from_url ends by
+# unquarantining the file with a child xattr process, a path this test takes there.
 @pytest.mark.integration
 def test_the_install_creates_its_directory_when_it_runs(tmp_path):
     """What the builder leaves undone, the run does."""

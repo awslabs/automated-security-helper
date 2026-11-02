@@ -16,7 +16,7 @@ Prerequisites:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.7.1
     hooks:
       - id: ash
 ```
@@ -69,7 +69,7 @@ on every commit. To run without Node.js there, exclude the two scanners:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.7.1
     hooks:
       - id: ash
         args: [--exclude-scanners, cdk-nag, --exclude-scanners, npm-audit]
@@ -96,7 +96,7 @@ The hook has no `stages` setting, so it runs on every commit. To run it less oft
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.7.1
     hooks:
       - id: ash
         stages: [pre-push]
@@ -168,7 +168,7 @@ Or point the hook at a newer Python that is on your `PATH`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.7.1
     hooks:
       - id: ash
         language_version: python3.12
@@ -209,7 +209,7 @@ in that order. The first run builds the image and takes several minutes, so give
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
+    rev: v3.7.1
     hooks:
       - id: ash-full-scan
         stages: [manual]

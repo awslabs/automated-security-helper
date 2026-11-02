@@ -463,8 +463,9 @@ class TestDelegatingToolWrappers:
         assert result["error_type"] == "OSError"
 
     def test_list_scanners_returns_the_inner_list(self):
+        # The tool runs the inventory off the event loop, so it is awaited.
         with patch(f"{_SERVER}.mcp_list_scanners", return_value=[{"name": "bandit"}]):
-            assert list_scanners() == [{"name": "bandit"}]
+            assert asyncio.run(list_scanners()) == [{"name": "bandit"}]
 
     def test_list_scanners_wraps_a_raise_in_a_single_element_list(self):
         """The tool's return type is a list, so the error has to be one too."""
@@ -474,7 +475,7 @@ class TestDelegatingToolWrappers:
             ),
             patch(f"{_SERVER}.logger", MagicMock()),
         ):
-            result = list_scanners()
+            result = asyncio.run(list_scanners())
 
         assert isinstance(result, list)
         assert len(result) == 1
@@ -654,14 +655,19 @@ class TestResources:
 
 
 class TestPrompts:
-    def test_the_analysis_prompt_defaults_to_the_working_directory(
+    def test_the_analysis_prompt_defaults_to_the_sessions_source_directory(
         self, tmp_path, monkeypatch
     ):
+        """With no source_dir the prompt names the session's own directory (the
+        delivered tree, or the working directory for the local client) instead
+        of spelling the server's working directory out: a network client's
+        agent has no reason to be shown the server's path."""
         monkeypatch.chdir(tmp_path)
 
         prompt = analyze_security_findings(None)
 
-        assert str(tmp_path.absolute()) in prompt
+        assert "this session's source directory" in prompt
+        assert str(tmp_path.absolute()) not in prompt
         assert "Risk Assessment" in prompt
 
     def test_the_analysis_prompt_uses_an_explicit_source_dir(self, tmp_path):

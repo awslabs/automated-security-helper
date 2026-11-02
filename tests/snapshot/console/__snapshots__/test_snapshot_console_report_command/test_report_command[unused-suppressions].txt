@@ -6,5 +6,11 @@ $ ash report --format unused-suppressions --log-level ERROR
     "used_suppressions": 0,
     "unused_suppressions": 0
   },
-  "unused_suppressions": []
+  "unused_suppressions": [],
+  "scanners_not_run": [
+    "grype",
+    "npm-audit",
+    "syft"
+  ],
+  "scope_caveat": "These scanners did not run on this scan: grype, npm-audit, syft. A suppression for a finding one of them would report could not be matched and may be listed as unused although it is in force; keep such entries until a scan with the scanner enabled evaluates them."
 }

@@ -17,6 +17,11 @@ Each variable is the operator's, set where ASH runs (``config/operator_paths.py`
   (``path_trust.operator_reason``), so a file in an unrelated checkout, such as an
   operator's ops repository, is used. The refusal gives the operator's advice.
 * A warning or error that shows the value writes its control characters as escapes.
+
+The file comes back spelled with forward slashes on every platform (``_posix``), as
+the scanner hands it to trivy. Two cases cannot be made on Windows and are skipped
+there: a file name holding a colon (``u://v``), and a ``..`` that goes up from where
+a link points, which Windows folds away by name before the file system sees it.
 """
 
 from __future__ import annotations
@@ -53,6 +58,21 @@ OPERATOR_ADVICE = (
     "to the tool; name one outside it."
 )
 
+#: A colon is not a character a file name may hold on Windows, where ``u://v`` is a
+#: path on drive ``u``: the fixture cannot be made there.
+NO_COLON_IN_A_NAME = pytest.mark.skipif(
+    os.name == "nt",
+    reason="a colon cannot be part of a file name on Windows",
+)
+
+#: Windows folds ``..`` away by name before the file system sees the path (Win32 path
+#: normalization, which ``ntpath.realpath`` also applies first), so none goes up from
+#: where a link points.
+NO_DOT_DOT_PAST_A_LINK = pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows folds .. away by name, before a link is followed",
+)
+
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
@@ -73,6 +93,11 @@ def _scanner(source: Path, tmp_path: Path) -> TrivyRepoScanner:
     )
 
 
+def _posix(path: Path) -> str:
+    """The resolved file as ASH names it: with forward slashes on every platform."""
+    return Path(os.path.realpath(path)).as_posix()
+
+
 def _write(path: Path, text: str = "{}\n") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -85,7 +110,9 @@ def _checkout(path: Path) -> Path:
 
 
 @pytest.mark.parametrize("variable", VARIABLES)
-@pytest.mark.parametrize("name", ["d$x", "d${HOME}", "u://v"])
+@pytest.mark.parametrize(
+    "name", ["d$x", "d${HOME}", pytest.param("u://v", marks=NO_COLON_IN_A_NAME)]
+)
 def test_a_relative_value_is_taken_from_the_working_directory_as_written(
     tmp_path, monkeypatch, variable, name
 ):
@@ -99,9 +126,10 @@ def test_a_relative_value_is_taken_from_the_working_directory_as_written(
     monkeypatch.chdir(cwd)
     monkeypatch.setenv(variable, f"../{name}/trivy.yaml")
 
-    assert CHOSEN[variable](_scanner(source, tmp_path)) == os.path.realpath(meant)
+    assert CHOSEN[variable](_scanner(source, tmp_path)) == _posix(meant)
 
 
+@NO_DOT_DOT_PAST_A_LINK
 @pytest.mark.parametrize("variable", VARIABLES)
 def test_dot_dot_after_a_link_goes_up_from_where_the_link_points(
     tmp_path, monkeypatch, variable
@@ -118,7 +146,7 @@ def test_dot_dot_after_a_link_goes_up_from_where_the_link_points(
     monkeypatch.chdir(cwd)
     monkeypatch.setenv(variable, "link/../trivy.yaml")
 
-    assert CHOSEN[variable](_scanner(source, tmp_path)) == os.path.realpath(meant)
+    assert CHOSEN[variable](_scanner(source, tmp_path)) == _posix(meant)
 
 
 @pytest.mark.parametrize("variable", VARIABLES)
@@ -132,7 +160,7 @@ def test_an_absolute_value_in_an_unrelated_checkout_is_used(
     monkeypatch.chdir(repo)
     monkeypatch.setenv(variable, str(named))
 
-    assert CHOSEN[variable](_scanner(repo, tmp_path)) == os.path.realpath(named)
+    assert CHOSEN[variable](_scanner(repo, tmp_path)) == _posix(named)
 
 
 @pytest.mark.parametrize("variable", VARIABLES)
@@ -164,7 +192,7 @@ def test_a_link_outside_the_tree_to_a_file_outside_it_is_used(
     link.symlink_to(target)
     monkeypatch.setenv(variable, str(link))
 
-    assert CHOSEN[variable](_scanner(repo, tmp_path)) == os.path.realpath(target)
+    assert CHOSEN[variable](_scanner(repo, tmp_path)) == _posix(target)
 
 
 def test_the_refusal_gives_the_operators_advice(tmp_path, monkeypatch, caplog):

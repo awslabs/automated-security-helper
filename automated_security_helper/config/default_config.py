@@ -301,13 +301,28 @@ def default_config_document():
     ``resolve_config.read_config_document``, so a file that cannot be read or
     parsed is refused as that file (``ASHConfigSourceError``), and one an MCP
     client delivered without quoting it.
+
+    The variable is classified as ``get_default_config`` classifies it
+    (``_ash_config_file``): a value that names no file is refused with the same
+    ``ASHConfigValidationError``, never answered with None. Classified with
+    ``Path.exists`` instead, a path under an unsearchable directory raised the
+    stat's PermissionError on Python 3.10 to 3.13, a symlink loop or a
+    whitespace value answered None, and a file absent at this read answered
+    None while ``get_default_config``, called next by ``trusted_default_config``,
+    loaded the file that had appeared in between as the trusted config with no
+    client-delivered check of its chain.
     """
     from automated_security_helper.config.resolve_config import read_config_document
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
 
-    config_env_var = os.environ.get("ASH_CONFIG", None)
-    if not (config_env_var and Path(config_env_var).exists()):
+    try:
+        named = _ash_config_file()
+    except ASHConfigValidationError as e:
+        e.ash_config_file = Path(os.environ["ASH_CONFIG"])
+        raise
+    if named is None:
         return None
-    return read_config_document(Path(config_env_var))
+    return read_config_document(named)
 
 
 def default_config_names() -> List[Path]:
@@ -384,6 +399,9 @@ def default_config_document_for_tree(scan_root: Optional[Path] = None) -> Any:
     from automated_security_helper.config.operator_only_options import (
         repository_settings_for_root,
     )
+    from automated_security_helper.config.operator_paths import (
+        not_delivered_by_a_client,
+    )
     from automated_security_helper.config.resolve_config import resolve_config_source
     from automated_security_helper.config.sandbox_grants import working_directory
     from automated_security_helper.core.exceptions import ASHConfigValidationError
@@ -405,5 +423,8 @@ def default_config_document_for_tree(scan_root: Optional[Path] = None) -> Any:
             named,
             confine=settings.confine,
             repository_file=settings.is_repository_file,
+            # As get_default_config reads the file: the operator's relative
+            # paths are taken from its directory.
+            anchor_relative_paths=not_delivered_by_a_client,
         ),
     )

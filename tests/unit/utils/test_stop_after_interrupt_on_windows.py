@@ -44,6 +44,10 @@ _SLICES = round(INTERRUPT_GRACE_SECONDS / INTERRUPT_WAIT_SLICE_SECONDS)
 #: One slice's wait.
 _SLICE = ("wait", INTERRUPT_WAIT_SLICE_SECONDS)
 
+#: The reap after a kill: bounded (_REAP_SECONDS), never an unbounded wait, so
+#: a child SIGKILL does not end (uninterruptible sleep) cannot hang ASH.
+_REAP = ("wait", subprocess_utils._REAP_SECONDS)
+
 
 class _Child:
     """The members stop_after_interrupt uses, recorded. Anything else raises.
@@ -137,7 +141,7 @@ class TestWithAConsole:
 
         stop_after_interrupt(child)
 
-        assert child.calls == [_SLICE] * _SLICES + [("kill",), ("wait", None)]
+        assert child.calls == [_SLICE] * _SLICES + [("kill",), _REAP]
 
     def test_a_second_ctrl_c_while_waiting_kills_at_once(self):
         """It lands between two slices, not after the whole grace."""
@@ -146,7 +150,7 @@ class TestWithAConsole:
         with pytest.raises(KeyboardInterrupt):
             stop_after_interrupt(child)
 
-        assert child.calls == [_SLICE, _SLICE, ("kill",), ("wait", None)]
+        assert child.calls == [_SLICE, _SLICE, ("kill",), _REAP]
 
 
 @pytest.mark.unit
@@ -172,9 +176,7 @@ class TestWithoutAConsole:
 
         stop_after_interrupt(child)
 
-        assert child.calls == (
-            [("terminate",)] + [_SLICE] * _SLICES + [("kill",), ("wait", None)]
-        )
+        assert child.calls == [("terminate",)] + [_SLICE] * _SLICES + [("kill",), _REAP]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the POSIX wait")

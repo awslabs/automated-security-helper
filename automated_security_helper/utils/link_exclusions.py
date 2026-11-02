@@ -26,11 +26,13 @@ them out.
 from __future__ import annotations
 
 import os
+from bisect import bisect_left
 from pathlib import Path
-from typing import Callable, Iterable, List, Sequence
+from typing import Callable, Collection, Dict, Iterable, List, Mapping, Sequence
 
 from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanned_tree import resolves_inside
 from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 
 #: The characters doublestar (the glob library syft, grype and trivy match with)
@@ -72,7 +74,20 @@ def syft_excludes(
         return []
     files, links = walked_files(target)
     values = [f"./{doublestar_literal(relative)}" for relative in links]
-    for entry in _ignore_entries(target, source_dir, ignore_paths, files):
+    # syft follows a link to a directory inside the tree, which the walk does not
+    # enter. A directory holding a link to scanned files is never written as
+    # ``./<dir>/**``, which would hide what syft reaches through the link; a link
+    # to a directory whose every file is ignored is written as ``./<link>/**``
+    # itself, since syft would otherwise catalog the ignored files under the
+    # link's name (``ignored_entries``).
+    directory_links = (
+        inside_tree_directory_links(target)
+        if source_dir is not None and ignore_paths
+        else {}
+    )
+    for entry in _ignore_entries(
+        target, source_dir, ignore_paths, files, directory_links=directory_links
+    ):
         if entry.endswith("/"):
             values.append(f"./{doublestar_literal(entry[:-1])}/**")
         else:
@@ -154,12 +169,51 @@ def walked_files(target: str | Path) -> tuple[List[str], List[str]]:
     return sorted(files), links
 
 
+def inside_tree_directory_links(target: str | Path) -> Dict[str, str]:
+    """Every link to a directory below ``target`` whose target stays inside it, and
+    where each leads, sorted by the link.
+
+    The same walk as ``walked_files`` makes (links to directories are not entered,
+    ignore files are not read), listing what that walk steps over: the links a
+    tool that follows inside-tree directory links (syft) reads files behind. Each
+    key is the link and its value the directory it leads to, with every link
+    resolved; both relative to ``target`` and ``/``-joined.
+    """
+    real_target = os.path.realpath(target)
+    found: Dict[str, str] = {}
+    pending = [(os.fspath(target), "")]
+    while pending:
+        directory, prefix = pending.pop()
+        try:
+            with os.scandir(directory) as entries:
+                listed = list(entries)
+        except OSError:
+            continue
+        for entry in listed:
+            relative = f"{prefix}{entry.name}"
+            try:
+                if entry.is_symlink():
+                    if os.path.isdir(entry.path) and resolves_inside(
+                        entry.path, target
+                    ):
+                        leads_to = os.path.relpath(
+                            os.path.realpath(entry.path), real_target
+                        )
+                        found[relative] = leads_to.replace(os.sep, "/")
+                elif entry.is_dir(follow_symlinks=False):
+                    pending.append((entry.path, f"{relative}/"))
+            except OSError:
+                continue
+    return dict(sorted(found.items()))
+
+
 def ignored_entries(
     target: str | Path,
     source_dir: str | Path,
     ignore_paths: Iterable[object],
     files: Sequence[str],
     matches: Callable[[str, str], bool] = ignore_path_matches,
+    directory_links: Mapping[str, str] | None = None,
 ) -> List[str]:
     """The paths below ``target`` that ``ignore_paths`` ignore, as few as possible.
 
@@ -168,6 +222,26 @@ def ignored_entries(
     ``source_dir``. A directory whose every walked file is ignored is returned once,
     with a trailing ``/``, and the files below it are not; any other ignored file is
     returned itself. Paths are relative to ``target`` and ``/``-joined.
+
+    ``directory_links`` are the links to directories the walk did not enter, each
+    with the directory it leads to (``inside_tree_directory_links``), relative to
+    ``target``; none when omitted. The files behind such a link are not among
+    ``files`` under the link's name, and a tool that follows the link (syft) reads
+    them there. A link
+    leading to a directory that holds a walked file the patterns do not ignore
+    keeps every directory holding the link, at any depth, from being returned
+    whole, since ``./<dir>/**`` would tell the tool to skip those files with the
+    rest; the ignored files there are returned one by one instead. So does a link
+    leading to a directory the walk found no file in: nothing behind it is proven
+    ignored, and such a directory can hold a further link to scanned files, which
+    the walk does not enter. A link leading to a directory whose walked files are
+    all ignored (a pnpm ``node_modules/foo`` leading into ``node_modules/.pnpm``)
+    is itself returned with a trailing ``/``, unless a directory holding it is, so
+    the tool skips the ignored files under the link's name as well as under their
+    own. A link that is not returned whole still leads to the ignored files and
+    directories in its destination, which the tool reads under the link's name
+    too; each is returned under that name as well (``_names_behind_links``), so
+    the link is not hidden and its ignored entries are.
 
     Empty when ``target`` is not ``source_dir`` or a directory below it (ASH's work
     directory for converted files): the patterns name paths below the source
@@ -216,14 +290,101 @@ def ignored_entries(
     whole = {
         directory for directory, count in total.items() if hit.get(directory) == count
     }
+    # A link whose destination is not whole (it holds a walked file that is not
+    # ignored, or no walked file at all: nothing proven ignored, and a nested link
+    # to scanned files may sit there, unentered) unmakes every directory holding
+    # the link. That can unmake another link's destination, so the discard runs
+    # to a fixpoint: a chain of links (src/vendored -> third_party/lib, which holds
+    # bridge -> third_party/hub, which holds a link on to scanned files) is
+    # followed back link by link, where one pass judged each link by its
+    # destination's own counts and left the first link's name hiding files
+    # reached three hops down. The links are indexed by destination once, so a
+    # directory that stops being whole queues the links that lead to it and no
+    # others: a scan of every link per discarded link was P x L steps.
+    links = dict(directory_links or {})
+    by_destination: dict[str, list[str]] = {}
+    for link, leads_to in links.items():
+        by_destination.setdefault(leads_to, []).append(link)
+    pending = [link for link, leads_to in links.items() if leads_to not in whole]
+    queued = set(pending)
+    while pending:
+        link = pending.pop()
+        parts = link.split("/")
+        for depth in range(1, len(parts)):
+            discarded = "/".join(parts[:depth])
+            if discarded not in whole:
+                continue
+            whole.discard(discarded)
+            for other in by_destination.get(discarded, ()):
+                if other not in queued:
+                    queued.add(other)
+                    pending.append(other)
 
     def _under_whole(relative: str) -> bool:
         parts = relative.split("/")
         return any("/".join(parts[:depth]) in whole for depth in range(1, len(parts)))
 
+    # A link whose destination is still whole is skipped under its own name.
+    links_to_ignored = [link for link, leads_to in links.items() if leads_to in whole]
     entries = [f"{directory}/" for directory in whole if not _under_whole(directory)]
+    entries += [f"{link}/" for link in links_to_ignored if not _under_whole(link)]
     entries += [relative for relative in ignored if not _under_whole(relative)]
+    # A link that is not returned whole still leads to the ignored entries behind
+    # it, and a tool that follows it reads them under the link's name.
+    entries += [
+        alias
+        for alias in _names_behind_links(entries, links, whole)
+        if not _under_whole(alias.rstrip("/"))
+    ]
     return sorted(entries)
+
+
+#: How many links deep ``_names_behind_links`` follows an ignored entry, which
+#: also ends a chain of links that leads back to itself.
+_LINK_HOPS = 4
+
+#: The most names ``_names_behind_links`` adds. Past it the rest are left out:
+#: the tool then reads them, and ASH drops their findings, as before.
+_MAX_NAMES_BEHIND_LINKS = 10000
+
+
+def _names_behind_links(
+    entries: Sequence[str], links: Mapping[str, str], whole: Collection[str]
+) -> List[str]:
+    """The names, under links, of *entries* that sit in a link's destination.
+
+    A link to a directory inside the tree is followed by syft, so an ignored file
+    under the link's destination is also read as ``<link>/<rest>``. A link whose
+    destination is hidden whole is returned itself and needs none. For the rest
+    (*links* whose destination is not in *whole*, because it holds a link to
+    scanned files and so cannot be hidden whole) each entry under the destination
+    is repeated under the link's name, directories keeping their trailing ``/``.
+    A name is itself repeated under any link whose destination holds it (a link
+    to a directory holding a link), up to ``_LINK_HOPS`` links deep.
+    """
+    open_links = {
+        link: leads_to for link, leads_to in links.items() if leads_to not in whole
+    }
+    known = set(entries)
+    frontier = sorted(known)
+    found: List[str] = []
+    for _ in range(_LINK_HOPS):
+        added: List[str] = []
+        for link, leads_to in open_links.items():
+            low = bisect_left(frontier, f"{leads_to}/")
+            high = bisect_left(frontier, f"{leads_to}0")
+            for entry in frontier[low:high]:
+                alias = f"{link}/{entry[len(leads_to) + 1 :]}"
+                if alias not in known:
+                    known.add(alias)
+                    added.append(alias)
+                    if len(found) + len(added) >= _MAX_NAMES_BEHIND_LINKS:
+                        return found + added
+        if not added:
+            break
+        found += added
+        frontier = sorted(known)
+    return found
 
 
 def _ignore_entries(
@@ -231,11 +392,14 @@ def _ignore_entries(
     source_dir: str | Path | None,
     ignore_paths: Iterable[object] | None,
     files: Sequence[str],
+    directory_links: Mapping[str, str] | None = None,
 ) -> List[str]:
     """``ignored_entries``, or none when no source directory or ignore path is given."""
     if source_dir is None or not ignore_paths:
         return []
-    return ignored_entries(target, source_dir, ignore_paths, files)
+    return ignored_entries(
+        target, source_dir, ignore_paths, files, directory_links=directory_links
+    )
 
 
 #: Characters a semgrep or opengrep ``--exclude`` reads as pattern syntax.
@@ -254,9 +418,10 @@ def grep_ignore_names(
     name leaves out every file or directory of that name at any depth. So the name
     of an ignored file, or of a directory whose every file is ignored, is passed
     only when nothing else could match it: no path below ``target`` that is not
-    ignored has a part of that name, ``target``'s own absolute path has none (a
-    part above it could be below the work tree's root, and then the name would
-    leave out the whole target), and it holds no pattern character. Any other
+    ignored has a part of that name, ``target``'s own path has none in either
+    spelling, as given or with its links resolved (a part above it could be below
+    the work tree's root, and then the name would leave out the whole target), and
+    it holds no pattern character. Any other
     ignored path is still read, and ASH drops its findings. None on Windows.
     """
     if os.sep != "/":
@@ -279,7 +444,12 @@ def grep_ignore_names(
         if not _ignored(relative)
         for part in relative.split("/")
     }
+    # Both spellings of the target's own path: a bare --exclude name is matched at
+    # every depth of the path the tool sees, and semgrep's is the real one below the
+    # git work tree's root, so a component of either spelling leaves out the
+    # whole target.
     taken.update(Path(os.path.abspath(target)).parts)
+    taken.update(Path(os.path.realpath(target)).parts)
     names = []
     for entry in entries:
         name = entry.rstrip("/").rsplit("/", 1)[-1]
@@ -306,6 +476,13 @@ def ignoring_patterns(
     Each path is matched as ASH matches it when it drops findings: its path below
     ``source_dir`` against each pattern. A path not below ``source_dir`` is not
     ignored.
+
+    ``source_dir`` is tried as spelled first and with its links resolved second,
+    in that order: a path below both (the source directory spelled through a
+    link to its own parent, say) is matched below the spelling the scan set
+    uses. The two roots were a set, iterated in hash order, so which relative
+    path such a path was matched by, and so whether it was ignored, varied from
+    one process to the next.
     """
     patterns = [
         str(getattr(entry, "path", "") or "")
@@ -314,10 +491,11 @@ def ignoring_patterns(
     ]
     if not patterns:
         return {}
-    roots = {
-        Path(os.path.abspath(source_dir)),
-        Path(os.path.realpath(source_dir)),
-    }
+    roots = list(
+        dict.fromkeys(
+            (Path(os.path.abspath(source_dir)), Path(os.path.realpath(source_dir)))
+        )
+    )
 
     def _below(path: str) -> str | None:
         for root in roots:

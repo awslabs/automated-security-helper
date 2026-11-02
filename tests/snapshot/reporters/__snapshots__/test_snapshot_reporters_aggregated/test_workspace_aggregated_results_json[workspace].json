@@ -19,9 +19,12 @@
         "display_label": "snapshot-api",
         "status": "completed",
         "severity_threshold": "MEDIUM",
+        "scanner_thresholds": {},
+        "withheld_scanner_thresholds": [],
         "finding_count": 1,
         "actionable_finding_count": 1,
         "policy_origin_finding_count": 0,
+        "policy_scanners_gate": false,
         "exceeds_threshold": true,
         "duration_seconds": 0.0,
         "output_path": "projects/api",
@@ -38,9 +41,12 @@
         },
         "partial_coverage_scanners": [],
         "stale_content_databases": [],
+        "unevaluated_rules": [],
+        "unstoppable_tools": {},
         "inputs_not_scanned": [],
         "no_scanner_ran": false,
         "incomplete_converters": {},
+        "converter_refusals": [],
         "scan_incomplete": true,
         "ceiling_unreachable_findings": {},
         "ignore_file_exclusions": null,
@@ -55,9 +61,12 @@
         "display_label": "snapshot-web",
         "status": "completed",
         "severity_threshold": "HIGH",
+        "scanner_thresholds": {},
+        "withheld_scanner_thresholds": [],
         "finding_count": 2,
         "actionable_finding_count": 1,
         "policy_origin_finding_count": 0,
+        "policy_scanners_gate": false,
         "exceeds_threshold": true,
         "duration_seconds": 0.0,
         "output_path": "projects/web",
@@ -70,9 +79,12 @@
         "incomplete_scanner_details": {},
         "partial_coverage_scanners": [],
         "stale_content_databases": [],
+        "unevaluated_rules": [],
+        "unstoppable_tools": {},
         "inputs_not_scanned": [],
         "no_scanner_ran": false,
         "incomplete_converters": {},
+        "converter_refusals": [],
         "scan_incomplete": false,
         "ceiling_unreachable_findings": {},
         "ignore_file_exclusions": null,
@@ -184,10 +196,10 @@
                   "tool_name": "bandit",
                   "tool_version": "1.8.6",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 1.0,
                     "start_time": "2026-01-15T12:00:00+00:00",
-                    "end_time": "2026-01-15T12:00:01+00:00"
+                    "end_time": "2026-01-15T12:00:01+00:00",
+                    "exit_code": 0,
+                    "duration": 1.0
                   }
                 }
               }
@@ -251,10 +263,10 @@
                 "tool_name": "bandit",
                 "tool_version": "1.8.6",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 1.0,
                   "start_time": "2026-01-15T12:00:00+00:00",
-                  "end_time": "2026-01-15T12:00:01+00:00"
+                  "end_time": "2026-01-15T12:00:01+00:00",
+                  "exit_code": 0,
+                  "duration": 1.0
                 }
               },
               "workspace_project": "api",
@@ -340,10 +352,10 @@
                   "tool_name": "checkov",
                   "tool_version": "3.2.469",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 2.0,
                     "start_time": "2026-01-15T12:00:00+00:00",
-                    "end_time": "2026-01-15T12:00:02+00:00"
+                    "end_time": "2026-01-15T12:00:02+00:00",
+                    "exit_code": 0,
+                    "duration": 2.0
                   }
                 }
               }
@@ -380,10 +392,10 @@
                   "tool_name": "semgrep",
                   "tool_version": "1.140.0",
                   "tool_invocation": {
-                    "exit_code": 0,
-                    "duration": 1.5,
                     "start_time": "2026-01-15T12:00:02+00:00",
-                    "end_time": "2026-01-15T12:00:03.500000+00:00"
+                    "end_time": "2026-01-15T12:00:03.500000+00:00",
+                    "exit_code": 0,
+                    "duration": 1.5
                   }
                 }
               }
@@ -446,10 +458,10 @@
                 "tool_name": "checkov",
                 "tool_version": "3.2.469",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 2.0,
                   "start_time": "2026-01-15T12:00:00+00:00",
-                  "end_time": "2026-01-15T12:00:02+00:00"
+                  "end_time": "2026-01-15T12:00:02+00:00",
+                  "exit_code": 0,
+                  "duration": 2.0
                 }
               },
               "workspace_project": "web",
@@ -506,10 +518,10 @@
                 "tool_name": "semgrep",
                 "tool_version": "1.140.0",
                 "tool_invocation": {
-                  "exit_code": 0,
-                  "duration": 1.5,
                   "start_time": "2026-01-15T12:00:02+00:00",
-                  "end_time": "2026-01-15T12:00:03.500000+00:00"
+                  "end_time": "2026-01-15T12:00:03.500000+00:00",
+                  "exit_code": 0,
+                  "duration": 1.5
                 }
               },
               "workspace_project": "web",

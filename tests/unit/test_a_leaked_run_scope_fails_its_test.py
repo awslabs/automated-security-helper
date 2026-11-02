@@ -10,12 +10,92 @@ server process -- never surfaced. The leaking test runs in a child pytest, so
 this suite itself stays green while the failure is measured.
 """
 
+import ast
 from pathlib import Path
 from typing import Dict, Optional, Sequence, Tuple
 
 import pytest
 
 from tests.utils.helpers import run_a_child_pytest_under_this_suite
+
+# The child pytest runs under the suite's own conftest, whose collection hook
+# refuses any test without exactly one tier marker. The probes measure scope
+# leaks, not tiers, so the marker is appended here once instead of being written
+# into each probe's source; a probe that marks itself is left as written, and a
+# probe whose own pytestmark names no tier (usefixtures, filterwarnings, skipif)
+# keeps those marks: the tier is added to them, never written over them.
+_A_TIER_FOR_THE_PROBE = """
+
+import pytest
+
+pytestmark = pytest.mark.unit
+"""
+
+_A_TIER_ADDED_TO_THE_PROBES_MARKS = """
+
+import pytest
+
+pytestmark = [
+    *(pytestmark if isinstance(pytestmark, (list, tuple)) else [pytestmark]),
+    pytest.mark.unit,
+]
+"""
+
+
+_TIERS = {"unit", "integration", "e2e"}
+
+
+def _pytestmark_assignments(source: str) -> list | None:
+    """The module-level ``pytestmark = ...`` statements of *source*, or ``None``
+    when *source* does not parse: the child's own collection then reports the
+    syntax error, which a probe may exist to measure."""
+    try:
+        module = ast.parse(source)
+    except SyntaxError:
+        return None
+    return [
+        statement
+        for statement in module.body
+        if isinstance(statement, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "pytestmark"
+            for target in statement.targets
+        )
+    ]
+
+
+def _names_a_tier(assignments: list) -> bool:
+    """Whether one of the ``pytestmark`` *assignments* carries a tier mark.
+
+    Read with ``ast``: a ``pytestmark = pytest.mark.usefixtures(...)`` line, or
+    the word in a comment or docstring, is not a tier.
+    """
+    for statement in assignments:
+        for node in ast.walk(statement.value):
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr in _TIERS
+                and isinstance(node.value, ast.Attribute)
+                and node.value.attr == "mark"
+            ):
+                return True
+    return False
+
+
+def _with_a_tier(source: str) -> str:
+    """*source* with the collection hook's one-tier requirement satisfied.
+
+    A source with no ``pytestmark`` gets ``pytestmark = pytest.mark.unit``; one
+    whose ``pytestmark`` names no tier gets the tier added to its own marks (a
+    second plain assignment would replace them silently); one that names a tier,
+    or does not parse, is left as written.
+    """
+    assignments = _pytestmark_assignments(source)
+    if assignments is None or _names_a_tier(assignments):
+        return source
+    if assignments:
+        return source + _A_TIER_ADDED_TO_THE_PROBES_MARKS
+    return source + _A_TIER_FOR_THE_PROBE
 
 
 def _run_probe(
@@ -33,8 +113,13 @@ def _run_probe(
     paths to contents) build a probe of more than one module, such as a real
     package; the child then collects them in name order before *source*'s
     ``test_zz`` module."""
+    if extra_files is not None:
+        extra_files = {
+            path: _with_a_tier(text) if Path(path).name.startswith("test_") else text
+            for path, text in extra_files.items()
+        }
     completed = run_a_child_pytest_under_this_suite(
-        source,
+        _with_a_tier(source),
         tmp_path,
         prefix=f"{kind}check-",
         # Definition order is the measurement where a probe's later test
@@ -45,18 +130,85 @@ def _run_probe(
     return completed.returncode, completed.stdout + completed.stderr
 
 
+@pytest.mark.unit
+def test_a_probe_without_a_tier_is_given_one():
+    source = "def test_zz():\n    pass\n"
+
+    tiered = _with_a_tier(source)
+
+    assert tiered.startswith(source)
+    assert tiered.count("pytestmark = pytest.mark.unit") == 1
+
+
+def _marks_in_effect(source: str) -> list:
+    """The names of the marks the module-level ``pytestmark`` of *source* holds
+    once Python has run it, in the order pytest reads them."""
+    namespace: dict = {}
+    exec(compile(source, "<probe>", "exec"), namespace)  # noqa: S102 - the probe's own text
+    marks = namespace["pytestmark"]
+    if not isinstance(marks, (list, tuple)):
+        marks = [marks]
+    return [mark.name for mark in marks]
+
+
+@pytest.mark.unit
+def test_a_probe_whose_pytestmark_is_not_a_tier_keeps_its_marks_and_gains_one():
+    """``pytestmark = pytest.mark.usefixtures(...)`` names no tier, so the child
+    would refuse to collect the probe. The tier is added to the probe's own
+    marks: a second plain ``pytestmark =`` would replace them and the
+    ``usefixtures`` would be gone without any error."""
+    source = (
+        "import pytest\n\n"
+        'pytestmark = pytest.mark.usefixtures("tmp_path")\n\n\n'
+        "def test_zz():\n    pass\n"
+    )
+
+    tiered = _with_a_tier(source)
+
+    assert tiered.startswith(source)
+    assert _marks_in_effect(tiered) == ["usefixtures", "unit"]
+
+
+@pytest.mark.unit
+def test_a_probe_whose_pytestmark_is_a_list_keeps_every_mark_and_gains_one():
+    source = (
+        "import pytest\n\n"
+        "pytestmark = [\n"
+        '    pytest.mark.usefixtures("tmp_path"),\n'
+        '    pytest.mark.filterwarnings("ignore"),\n'
+        "]\n\n\n"
+        "def test_zz():\n    pass\n"
+    )
+
+    tiered = _with_a_tier(source)
+
+    assert tiered.startswith(source)
+    assert _marks_in_effect(tiered) == ["usefixtures", "filterwarnings", "unit"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tier", ["unit", "integration", "e2e"])
+def test_a_probe_that_marks_its_own_tier_is_left_as_written(tier):
+    source = f"import pytest\n\npytestmark = pytest.mark.{tier}\n\n\ndef test_zz():\n    pass\n"
+
+    assert _with_a_tier(source) == source
+
+
+@pytest.mark.unit
+def test_a_probe_that_does_not_parse_is_left_for_the_child_to_report():
+    """A probe written to fail at collection keeps its syntax error for the
+    child; the helper neither raises nor marks it."""
+    source = "def test_zz(:\n    pass\n"
+
+    assert _with_a_tier(source) == source
+
+
 _LEAKING_TEST = """\
 from automated_security_helper.utils.log import open_run_log_scope
 
 
 def test_that_leaks_a_scope():
     open_run_log_scope()
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -94,12 +246,6 @@ def test_aa_closes_its_own_scope_by_value():
 
 def test_zz_the_following_test_runs_in_no_scope():
     assert current_run_log_scope() is None
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -141,10 +287,6 @@ def test_aa_uses_the_module_fixture(_a_scope_for_the_module):
 
 def test_zz_uses_nothing():
     pass
-
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -198,12 +340,6 @@ def test_zz_only_the_scope_whose_close_raised_is_left():
     for scope in left:
         _real_close(scope)
     assert left == set(_raised_for)
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -246,10 +382,6 @@ def test_aa_uses_the_wide_fixture(_a_scope_for_the_run):
 
 def test_zz_uses_nothing():
     pass
-
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -292,10 +424,6 @@ def test_aa_fails(_a_scope_for_the_run):
 
 def test_zz_would_run_next():
     pass
-
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -368,10 +496,6 @@ def test_aa_interrupts_the_run(_a_scope_for_the_run):
 
 def test_zz_would_run_next():
     pass
-
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -407,12 +531,6 @@ def test_aa_runs_after_the_module_opened_a_scope():
 
 def test_zz_uses_nothing():
     pass
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -453,12 +571,6 @@ def test_aa_renames_the_open_scopes():
 
 def test_zz_uses_nothing():
     pass
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -538,12 +650,6 @@ def test_aa_leaks_an_unclosable_scope():
 
 def test_zz_runs_after_the_leak():
     log.close_run_log_scope = _real_close
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -654,10 +760,6 @@ def test_aa_uses_the_wide_fixture(_a_scope_for_the_run):
 
 def test_zz_uses_nothing():
     pass
-
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -709,12 +811,6 @@ def _a_scope_for_the_package():
 _PACKAGE_TEST = """\
 def test_aa_inside_the_package():
     pass
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 _TEST_AFTER_THE_PACKAGE = """\
@@ -730,12 +826,6 @@ def test_zz_runs_after_the_package_ended():
     # the session would tear down after this test, with no marker yet.
     assert pathlib.Path(os.environ["TMPDIR"], "package-torn-down").exists()
     assert current_run_log_scope() is None
-
-
-import pytest
-
-# The collection hook of the suite requires one tier per test.
-pytestmark = pytest.mark.unit
 """
 
 
@@ -747,12 +837,7 @@ def test_a_scope_a_package_fixture_leaks_fails_the_run(tmp_path: Path) -> None:
     returncode, output = _run_probe(
         tmp_path,
         "pkg",
-        (
-            "def test_zz_outside_the_package():\n    pass\n"
-            "\n\nimport pytest\n\n"
-            "# The collection hook of the suite requires one tier per test.\n"
-            "pytestmark = pytest.mark.unit\n"
-        ),
+        "def test_zz_outside_the_package():\n    pass\n",
         extra_files={
             "aa_pkg/__init__.py": "",
             "aa_pkg/conftest.py": _PACKAGE_CONFTEST_THAT_LEAKS,

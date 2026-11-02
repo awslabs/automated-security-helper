@@ -1,11 +1,11 @@
 # ASH security scan analysis
 
-> [!WARNING]
+> [!CAUTION]
 > **Scan incomplete**
 >
-> 3 actionable findings. Some inputs or scanners were not evaluated.
+> 2 actionable findings. Some inputs or scanners were not evaluated.
 >
-> **3 actionable** · 0 below threshold · 0 suppressed · 3/4 scanners completed
+> **2 actionable** · 1 below threshold · 0 suppressed · 3/4 scanners completed
 >
 > Next action: Review findings, resolve coverage gaps, and scan again.
 
@@ -17,6 +17,6 @@ Project: workspace
 
 Generated with Amazon Bedrock. Verify suggestions against the source findings.
 
-[stubbed model response 6]
+[stubbed model response 1]
 
 Build with <3 at Amazon Web Services

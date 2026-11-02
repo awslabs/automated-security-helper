@@ -1748,15 +1748,11 @@ if os.supports_bytes_environ:
     def test_a_set_of_an_imported_environb():
         assert b"ASH_TEST_UNSET_VARIABLE" in set(imported_environb)
 
-import warnings
-
 import pytest
 
-# The suite collection hook requires one tier per test. Under its own rootdir
-# this child does not know the mark and would warn, so the warning is dropped.
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
-    pytestmark = pytest.mark.unit
+# The suite collection hook requires one tier per test (tests/NAMING_CONVENTIONS.md);
+# under its own rootdir the child's conftest registers the mark.
+pytestmark = pytest.mark.unit
 """
 
 #: The child's first cell, which passes: the ASH the child imported is this
@@ -1845,6 +1841,12 @@ from tests.utils.env_assertions import (
 )
 
 hide_environ_values()
+
+
+def pytest_configure(config):
+    # The child carries the suite's tier marker (tests/NAMING_CONVENTIONS.md); under
+    # this rootdir the suite's pytest.ini is not read, so the mark is registered here.
+    config.addinivalue_line("markers", "unit: the unit tier, as the suite marks it")
 """
 
 
@@ -1988,6 +1990,17 @@ def test_under_the_suites_conftest_no_failure_prints_the_value(
     assert printed == [], "these failures printed the value under the backstop"
     unmarked = [name for name in CONTROLS if "<value>" not in failures[name]]
     assert unmarked == [], "these controls show no marker, so the run may be blind"
+
+
+@pytest.mark.unit
+def test_the_child_carries_its_tier_and_its_conftest_registers_the_mark():
+    """The child runs both ways: under the suite's conftest, whose collection hook
+    refuses a test with no tier marker, and under its own rootdir, where the suite's
+    pytest.ini is not read. So it carries the marker and CHILD_CONFTEST registers it,
+    and no warning filter hides an unknown mark."""
+    assert "pytestmark = pytest.mark.unit" in CHILD
+    assert "catch_warnings" not in CHILD and "simplefilter" not in CHILD
+    assert 'config.addinivalue_line("markers", "unit:' in CHILD_CONFTEST
 
 
 COMPARISONS_CHILD = f"""\

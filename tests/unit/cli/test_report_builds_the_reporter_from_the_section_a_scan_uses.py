@@ -168,7 +168,7 @@ def built_with(monkeypatch) -> List[Any]:
     """The ``config`` argument of every S3 reporter the command builds, None for none given.
 
     ``report`` is replaced by a stub, so a reporter that is built and run sends
-    nothing and writes a fixed text.
+    nothing and writes a fixed JSON document.
     """
     seen: List[Any] = []
     real_init = S3Reporter.__init__
@@ -178,7 +178,7 @@ def built_with(monkeypatch) -> List[Any]:
         real_init(self, **data)
 
     monkeypatch.setattr(S3Reporter, "__init__", recording_init)
-    monkeypatch.setattr(S3Reporter, "report", lambda self, model: "the report")
+    monkeypatch.setattr(S3Reporter, "report", lambda self, model: "{}")
     return seen
 
 

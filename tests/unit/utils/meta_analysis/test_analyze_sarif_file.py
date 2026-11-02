@@ -65,3 +65,36 @@ def test_analyze_sarif_file(sample_sarif_file):
     finally:
         # Clean up the temporary file
         sample_sarif_file.unlink()
+
+
+def test_a_real_report_yields_its_field_paths_whatever_its_file_name(tmp_path):
+    """The paths come from the parsed report. A file whose name did not start with
+    "tmp" got an empty dict (only "tmp" names got hard-coded test data)."""
+    report = tmp_path / "bandit.sarif"
+    report.write_text(
+        json.dumps(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "Bandit"}},
+                        "results": [
+                            {
+                                "ruleId": "B101",
+                                "level": "warning",
+                                "message": {"text": "assert used"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    field_paths, scanner_name = analyze_sarif_file(str(report))
+
+    assert scanner_name == "bandit"  # mapped through SCANNER_NAME_MAP
+    assert "runs[0].results[0].ruleId" in field_paths
+    assert "runs[0].results[0].message.text" in field_paths
+    assert field_paths["version"]["scanners"] == {"bandit"}

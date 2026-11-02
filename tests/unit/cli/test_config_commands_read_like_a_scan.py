@@ -25,7 +25,7 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.config import config_app
-from tests.unit.config.test_config_file_reads import _returns_promptly
+from tests.utils.fifo_calls import returns_promptly
 
 pytestmark = pytest.mark.unit
 
@@ -55,7 +55,7 @@ class TestAFifoAtTheConfigNameDoesNotBlock:
         def run():
             outcome["result"] = _invoke(command, "--config", str(fifo))
 
-        assert _returns_promptly(run, fifo) is None
+        assert returns_promptly(run, fifo) is None
         result = outcome["result"]
         assert result.exit_code == 3, result.output
         assert "not a regular file" in result.output
@@ -69,7 +69,7 @@ class TestAFifoAtTheConfigNameDoesNotBlock:
         def run():
             outcome["result"] = _invoke("update", str(fifo), "--set", "project_name=x")
 
-        assert _returns_promptly(run, fifo) is None
+        assert returns_promptly(run, fifo) is None
         assert outcome["result"].exit_code != 0
 
     @needs_fifo
@@ -83,7 +83,7 @@ class TestAFifoAtTheConfigNameDoesNotBlock:
         def run():
             outcome["result"] = ConfigValidator.validate_config_file(fifo)
 
-        assert _returns_promptly(run, fifo) is None
+        assert returns_promptly(run, fifo) is None
         valid, errors = outcome["result"]
         assert valid is False
         assert "not a regular file" in " ".join(errors)
@@ -99,7 +99,7 @@ class TestAFifoAtTheConfigNameDoesNotBlock:
         def run():
             outcome["result"] = ConfigLinter.lint(config_path=fifo)
 
-        assert _returns_promptly(run, fifo) is None
+        assert returns_promptly(run, fifo) is None
         assert "not a regular file" in " ".join(
             str(issue) for issue in outcome["result"].issues
         )

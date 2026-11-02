@@ -4,8 +4,10 @@
 """A workspace scan's spool is refused when committed and never written through.
 
 A workspace scan spools each project's SARIF run to
-``<output>/.workspace-spool/<key>.run.json`` and removes the directory when it
-writes the unified results. A committed entry under ``.workspace-spool`` stops
+``<output>/.workspace-spool/<ordinal>-<key>.run.json`` (the ordinal is a four-digit
+count of the runs already spooled, so ``0000-api.run.json`` for the first) and
+removes the directory when it writes the unified results. A committed entry under
+``.workspace-spool`` stops
 the scan before anything is written or removed, and the spool is written without
 following links: a link at a spool name or at the directory's name is replaced,
 never written through.
@@ -52,6 +54,10 @@ pytestmark = pytest.mark.skipif(
 )
 
 SPOOL = ".workspace-spool"
+# The spool file of the workspace's first project, ``api``: the aggregator
+# prefixes the key with the count of runs already spooled
+# (WorkspaceAggregator.add), so two keys that differ only in case stay apart.
+SPOOLED = "0000-api.run.json"
 
 
 def _outside(tmp_path: Path) -> Path:
@@ -80,8 +86,8 @@ def _committed_spool(
     if layout == "inside":
         (output / SPOOL).mkdir()
         (output / SPOOL / "notes.txt").write_text("committed notes\n", encoding="utf-8")
-        (output / SPOOL / "api.run.json").symlink_to(outside / "target.json")
-        committed = [f"{SPOOL}/notes.txt", f"{SPOOL}/api.run.json"]
+        (output / SPOOL / SPOOLED).symlink_to(outside / "target.json")
+        committed = [f"{SPOOL}/notes.txt", f"{SPOOL}/{SPOOLED}"]
     else:
         (output / SPOOL).symlink_to(outside, target_is_directory=True)
         committed = [SPOOL]
@@ -200,7 +206,7 @@ def test_a_link_at_the_spool_directory_is_replaced_not_written_through(tmp_path)
 
     assert _entries(outside) == outside_before, "the run was spooled outside"
     assert not (output / SPOOL).is_symlink()
-    assert sorted(p.name for p in (output / SPOOL).iterdir()) == ["api.run.json"]
+    assert sorted(p.name for p in (output / SPOOL).iterdir()) == [SPOOLED]
 
     results = aggregator.write(exit_code=2, wall_clock_seconds=1.0)
 
@@ -265,7 +271,7 @@ def test_a_junction_at_the_spool_name_is_replaced_not_written_through(
     assert calls[:2] == ["unlink", "mkdir"], calls
     assert _entries(outside) == outside_before, "the run was spooled outside"
     assert not os.path.islink(spool)
-    assert sorted(p.name for p in spool.iterdir()) == ["api.run.json"]
+    assert sorted(p.name for p in spool.iterdir()) == [SPOOLED]
 
 
 @pytest.mark.unit
@@ -280,13 +286,13 @@ def test_a_link_at_a_spool_file_is_replaced_not_written_through(tmp_path):
     outside = _outside(tmp_path)
     aggregator, output = _aggregator(tmp_path)
     (output / SPOOL).mkdir()
-    (output / SPOOL / "api.run.json").symlink_to(outside / "target.json")
+    (output / SPOOL / SPOOLED).symlink_to(outside / "target.json")
     outside_before = _entries(outside)
 
     with pytest.raises(OutputLinkRefused, match="symlink"):
         _spool_one_project(aggregator)
 
     assert _entries(outside) == outside_before, "the run was written into the target"
-    spooled = output / SPOOL / "api.run.json"
+    spooled = output / SPOOL / SPOOLED
     assert spooled.is_symlink()
-    assert sorted(p.name for p in (output / SPOOL).iterdir()) == ["api.run.json"]
+    assert sorted(p.name for p in (output / SPOOL).iterdir()) == [SPOOLED]

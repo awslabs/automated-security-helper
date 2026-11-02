@@ -9,7 +9,7 @@ module "ash_image" {
   source = "../../../ash-image-pipeline"
 
   name_prefix         = "ash-agentcore"
-  ash_version         = "v3.7.0"
+  ash_version         = "v3.7.1"
   target_architecture = "arm64"
   rebuild_schedule    = "rate(1 day)"
 

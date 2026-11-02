@@ -434,8 +434,11 @@ def test_the_jupyter_converter_does_not_start_jupyter_from_a_relative_entry(
     )
     converter.use_uv_tool = False
     # A notebook to convert, so the check looks for nbconvert: with none it is
-    # ready without a lookup (JupyterConverter._validate_dependencies).
+    # ready without a lookup (JupyterConverter._validate_dependencies). The check
+    # asks the yes-or-no read (_has_candidate_input), not the count, so the test
+    # answers that one; the count says the same.
     monkeypatch.setattr(converter, "candidate_input_count", lambda: 1)
+    monkeypatch.setattr(converter, "_has_candidate_input", lambda: True)
     assert converter.validate_plugin_dependencies() is False
     assert not tree.marker.exists(), tree.marker.read_text()
 

@@ -400,7 +400,7 @@ suppressions and ignore paths.
 Symptom: a warning such as:
 
 ```text
-Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: that config is inside a git checkout or the scanned tree, or was delivered by an MCP client. ...
+Ignoring sandbox.network_scanners from /home/me/repo/.ash/.ash.yaml: the file is inside the scanned tree, so the repository being scanned wrote it. ...
 ```
 
 Cause: some settings decide what ASH may run, read, or send, or whether a stale database

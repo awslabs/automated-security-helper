@@ -13,12 +13,14 @@ leads out of the roots as a link: it is refused before anything in it is looked
 at, and the answer is the same whether or not the outside directory holds the
 name.
 
-A junction cannot be made here, so each cell builds the one thing that is the
-same on every platform, a ``.ash`` that leads to an outside directory, and then
-reports it as Windows reports a junction: ``os.lstat`` gives a directory with the
-reparse-point attribute and the mount-point reparse tag, not a link, and
-``os.path.realpath`` resolves it to where it leads. Each cell asks twice, with
-the outside directory holding the name and without it.
+On Windows each cell makes a real junction (``_winapi.CreateJunction``, which
+needs no privilege). Elsewhere a junction cannot be made, so each cell builds the
+one thing that is the same on every platform, a ``.ash`` that leads to an
+outside directory, and then reports it as Windows reports a junction:
+``os.lstat`` gives a directory with the reparse-point attribute and the
+mount-point reparse tag, not a link, and ``os.path.realpath`` resolves it to
+where it leads. Each cell asks twice, with the outside directory holding the
+name and without it.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import asyncio
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -164,15 +167,32 @@ def _junction_out(
     if held:
         (outside / name).write_text(text, encoding="utf-8")
     junction = directory / ".ash"
+    if sys.platform == "win32":
+        # A junction is the one link Windows lets any account make, with no
+        # privilege, and the reparse point it is needs no stand-in.
+        import _winapi
+
+        _winapi.CreateJunction(str(outside), str(junction))
+        return
     # Something has to lead there on this platform; lstat then says it is no link.
     junction.symlink_to(outside, target_is_directory=True)
     _as_a_junction(monkeypatch, junction, outside)
 
 
 def _without(response: Any, *paths: Path) -> str:
+    """The response as text, with the tree paths that differ between runs out.
+
+    A path is taken out as the text writes it, which depends on the platform: as
+    ``str(path)``, as ``path.as_posix()`` (a refusal names a source as found with
+    it, forward slashes on Windows too), and either of those as json.dumps writes
+    it (a Windows path with its backslashes doubled). On POSIX all four are one
+    spelling.
+    """
     text = json.dumps(response, default=str, sort_keys=True)
     for path in paths:
-        text = text.replace(str(path), "<tree>")
+        for spelling in (str(path), path.as_posix()):
+            for written in (spelling, json.dumps(spelling)[1:-1]):
+                text = text.replace(written, "<tree>")
     return text
 
 

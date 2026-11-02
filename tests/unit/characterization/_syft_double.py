@@ -65,6 +65,8 @@ class SyftDouble(ToolDouble):
         outputs = []
         for value in parsed.flags.get("--output", []):
             fmt, sep, path = (value or "").partition("=")
+            # ``FORMAT@VERSION`` names a version of the format; the fixture is the same.
+            fmt = fmt.partition("@")[0]
             if not sep or fmt not in self.FORMAT_FIXTURES:
                 raise call.reject(f"--output {value}")
             if not call.confined(path).parent.is_dir():

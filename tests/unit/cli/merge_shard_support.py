@@ -265,6 +265,13 @@ def build_shards(shard_count: int = 3, suppressions=None) -> List[AshAggregatedR
     ]
 
 
+def as_loaded(
+    models: Sequence[AshAggregatedResults],
+) -> List[Tuple[Path, AshAggregatedResults]]:
+    """Pair models with placeholder paths, for tests that skip disk entirely."""
+    return [(Path(f"shard-{index}.json"), model) for index, model in enumerate(models)]
+
+
 def write_shards(
     tmp_path: Path, models: Sequence[AshAggregatedResults], as_dirs: bool = True
 ) -> List[str]:

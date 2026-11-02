@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import sys
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -82,9 +83,12 @@ def _option_tokens(given: Any, target: Any, value: Any) -> list[str] | None:
     """Spell *value*, parsed by the root's option *given*, as tokens for *target*.
 
     None when *target* cannot take it the same way: it is not an option, it counts,
-    takes several values per use, or differs from *given* in being a flag or in being
-    repeatable. The target's own first long spelling is used, so a short alias that
-    means something else on the subcommand (``-f`` is ``--output-formats`` on scan and
+    takes several values per use, or differs from *given* in being a flag. A
+    repeatable root option whose one value goes to a target that takes one value
+    is spelled as that one value (``ash --format text report``: the root's
+    ``--format`` collects, report's takes one); with several values it is None.
+    The target's own first long spelling is used, so a short alias that means
+    something else on the subcommand (``-f`` is ``--output-formats`` on scan and
     ``--force`` on build-image) never decides what the token means.
     """
     if (
@@ -92,9 +96,12 @@ def _option_tokens(given: Any, target: Any, value: Any) -> list[str] | None:
         or target.count
         or target.nargs != 1
         or target.is_flag != given.is_flag
-        or target.multiple != given.multiple
     ):
         return None
+    if target.multiple != given.multiple:
+        if target.multiple or not given.multiple or len(value) != 1:
+            return None
+        value = value[0]
     spelling = next((opt for opt in target.opts if opt.startswith("--")), None)
     if spelling is None:
         return None
@@ -113,23 +120,79 @@ def _option_tokens(given: Any, target: Any, value: Any) -> list[str] | None:
     return tokens
 
 
-def _typed_spelling(param: Any, tokens: list[str]) -> str:
-    """The spelling of *param* the operator typed among *tokens*, else its first one."""
-    long_names = [
-        opt for opt in (*param.opts, *param.secondary_opts) if opt[:2] == "--"
-    ]
-    short_names = [
-        opt for opt in (*param.opts, *param.secondary_opts) if opt[:2] != "--"
-    ]
+def _spellings(param: Any) -> set[str]:
+    """Every spelling *param* is given by, the negative half of a flag included."""
+    return {*param.opts, *param.secondary_opts}
+
+
+def _option_words(tokens: list[str], params: list[Any]):
+    """The option tokens among *tokens*, read as click reads them.
+
+    Yields ``(spelling, token)`` for each option the operator typed: a long
+    option (with or without ``=value``) and each short flag in a cluster. A
+    token that is the VALUE of the option before it (the next token after a
+    long option that takes one, or after a short option that takes one and
+    ended its cluster; the rest of the cluster otherwise) is not an option,
+    and nothing after a bare ``--`` is. *params* says which options take a
+    value; an unknown short option ends its cluster, since click would refuse
+    the token there.
+    """
+    owners = {opt: param for param in params for opt in _spellings(param)}
+    expecting_value = False
     for token in tokens:
-        if token.split("=", 1)[0] in long_names:
-            return token.split("=", 1)[0]
-        if token[:2] != "--":
-            # click lets a short option's value, or further short flags, follow it.
-            for name in short_names:
-                if token.startswith(name):
-                    return name
+        if expecting_value:
+            expecting_value = False
+            continue
+        if token == "--":
+            return
+        if token.startswith("--"):
+            name, equals, _ = token.partition("=")
+            yield name, token
+            owner = owners.get(name)
+            expecting_value = owner is not None and not owner.is_flag and not equals
+            continue
+        if not token.startswith("-") or len(token) < 2:
+            continue
+        rest = token[1:]
+        while rest:
+            name, rest = "-" + rest[0], rest[1:]
+            yield name, token
+            owner = owners.get(name)
+            if owner is None:
+                break
+            if not owner.is_flag:
+                # Its value is the rest of the cluster, or the next token.
+                expecting_value = not rest
+                break
+
+
+def _typed_spelling(param: Any, tokens: list[str], params: list[Any]) -> str:
+    """The spelling of *param* the operator typed among *tokens*, else its first one.
+
+    Read as click read the tokens (``_option_words``): a token that is another
+    option's value is never a spelling, and a short flag typed inside a cluster
+    (``-vf sarif``) is found where it stands. Matching any token that merely
+    started with a short name named a value, or the cluster's first flag, as
+    the spelling.
+    """
+    wanted = _spellings(param)
+    for name, _token in _option_words(tokens, params):
+        if name in wanted:
+            return name
     return param.opts[0]
+
+
+def _asks_for_help(command: Any, ctx: Any, args: list[str]) -> bool:
+    """Whether *args*, the subcommand's own tokens, ask for its help.
+
+    A help option token where click reads an option: a token that is another
+    option's value, or follows a bare ``--``, is not help. Matching any token
+    equal to a help spelling dropped the root's options for ``ash --output-dir
+    out report --config --help`` and for a path spelled ``--help``.
+    """
+    help_names = set(command.get_help_option_names(ctx))
+    params = list(command.get_params(ctx))
+    return any(name in help_names for name, _ in _option_words(args, params))
 
 
 class AshTyperGroup(TyperGroup):
@@ -155,7 +218,57 @@ class AshTyperGroup(TyperGroup):
         # Kept so a refusal below can name the spelling the operator typed: once
         # parsed, `-f` and `--format` are both just output_formats.
         ctx.meta["ash.root_argv"] = list(args)
-        return super().parse_args(ctx, args)
+        if not self._names_a_subcommand(ctx, args):
+            return super().parse_args(ctx, args)
+        # With a subcommand, the root's options are the scan's, and the scan
+        # does not run: an environment variable of one (ASH_MODE, ASH_SHARD_INDEX)
+        # is not read here, or a value the subcommand does not take, and would
+        # not read, failed `ash report` and `ash config ...` with a usage error
+        # for an option they do not have. The subcommand reads its own
+        # variables itself; an option typed before it still reaches it
+        # (_options_for_subcommand).
+        params = [param for param in self.get_params(ctx) if param.envvar]
+        saved = [(param, param.envvar) for param in params]
+        for param in params:
+            param.envvar = None
+        try:
+            return super().parse_args(ctx, args)
+        finally:
+            for param, envvar in saved:
+                param.envvar = envvar
+
+    def _names_a_subcommand(self, ctx: Any, args: list[str]) -> bool:
+        """Whether *args* names one of this group's commands, read as click reads
+        them: the first token that is neither an option nor an option's value."""
+        params = list(self.get_params(ctx))
+        owners: dict[str, Any] = {
+            opt: param for param in params for opt in _spellings(param)
+        }
+        expecting_value = False
+        for token in args:
+            if expecting_value:
+                expecting_value = False
+                continue
+            if token == "--":
+                return False
+            if token.startswith("--"):
+                name, equals, _ = token.partition("=")
+                owner = owners.get(name)
+                expecting_value = owner is not None and not owner.is_flag and not equals
+                continue
+            if token.startswith("-") and len(token) > 1:
+                rest = token[1:]
+                while rest:
+                    name, rest = "-" + rest[0], rest[1:]
+                    owner = owners.get(name)
+                    if owner is None:
+                        break
+                    if not owner.is_flag:
+                        expecting_value = not rest
+                        break
+                continue
+            return self.get_command(ctx, token) is not None
+        return False
 
     def make_context(
         self,
@@ -211,39 +324,84 @@ class AshTyperGroup(TyperGroup):
         if command is None:
             # Not a command; super().invoke reports it as one.
             return []
-        if set(ctx.args) & set(command.get_help_option_names(ctx)):
+        if _asks_for_help(command, ctx, ctx.args):
             # The subcommand prints its help and exits; nothing given here is used.
             return []
-        declared = {
-            param.name: param
-            for param in command.get_params(ctx)
-            if param.name is not None
+        subcommand_params = [
+            param for param in command.get_params(ctx) if param.name is not None
+        ]
+        declared = {param.name: param for param in subcommand_params}
+        # A root option reaches the subcommand's option of the same NAME, or else
+        # the one that shares a long spelling with it: the root's --format is
+        # output_formats and report's is report_format, so by name alone `ash
+        # --format text report` was refused as an option report does not take.
+        by_spelling = {
+            opt: param
+            for param in subcommand_params
+            for opt in _spellings(param)
+            if opt.startswith("--")
         }
         tokens: list[str] = []
-        refused = []
+        not_taken = []
+        taken_differently = []
         for param in given:
             target = declared.get(param.name)
-            spelled = (
-                None
-                if target is None
-                else _option_tokens(param, target, ctx.params[param.name])
-            )
+            if target is None:
+                target = next(
+                    (
+                        by_spelling[opt]
+                        for opt in _spellings(param)
+                        if opt in by_spelling
+                    ),
+                    None,
+                )
+            if target is None:
+                # By a short spelling too: `-f` is --force on build-image, so
+                # the refusal says the subcommand takes it differently.
+                target = next(
+                    (
+                        candidate
+                        for candidate in subcommand_params
+                        if _spellings(candidate) & _spellings(param)
+                    ),
+                    None,
+                )
+                if target is None:
+                    not_taken.append(param)
+                    continue
+            spelled = _option_tokens(param, target, ctx.params[param.name])
             if spelled is None:
-                refused.append(param)
+                taken_differently.append((param, target))
             else:
                 tokens.extend(spelled)
-        if refused:
+        if not_taken or taken_differently:
             argv = ctx.meta.get("ash.root_argv", [])
             before = argv[: len(argv) - len(ctx._protected_args) - len(ctx.args)]
-            spellings = ", ".join(_typed_spelling(param, before) for param in refused)
-            them = "it" if len(refused) == 1 else "them"
-            ctx.fail(
-                f"'ash {name}' does not take {spellings}, given before it (see "
-                f"'ash {name} --help'). Options given before a subcommand are passed "
-                f"to it only when it takes them: drop {them}, give {them} after a "
-                f"subcommand that takes {them}, or leave out '{name}' to scan with "
-                f"{them}."
-            )
+            root_params = list(self.get_params(ctx))
+            clauses = []
+            if not_taken:
+                spellings = ", ".join(
+                    _typed_spelling(param, before, root_params) for param in not_taken
+                )
+                them = "it" if len(not_taken) == 1 else "them"
+                clauses.append(
+                    f"'ash {name}' does not take {spellings}, given before it (see "
+                    f"'ash {name} --help'). Options given before a subcommand are "
+                    f"passed to it only when it takes them: drop {them}, give {them} "
+                    f"after a subcommand that takes {them}, or leave out '{name}' to "
+                    f"scan with {them}."
+                )
+            for param, target in taken_differently:
+                typed = _typed_spelling(param, before, root_params)
+                own = next(
+                    (opt for opt in target.opts if opt.startswith("--")), target.opts[0]
+                )
+                clauses.append(
+                    f"'ash {name}' takes {typed} as {own}, which means something "
+                    f"else than it does before the subcommand: give it after "
+                    f"'{name}', as 'ash {name} {own} ...'."
+                )
+            ctx.fail(" ".join(clauses))
         return tokens
 
 
@@ -509,7 +667,24 @@ def get_genai_guide(
         source = "local"
 
     if guide_content is None:
-        github_url = f"https://raw.githubusercontent.com/awslabs/automated-security-helper/{branch}/docs/content/docs/genai-steering-guide.md"
+        # The ref name goes into the URL's path: quoted, so a '#', '%' or '?'
+        # in it fetches the path it names rather than another, and refused when
+        # it is not a ref name git takes ('..' and an empty segment), which
+        # would name a path outside the branch's tree.
+        from urllib.parse import quote
+
+        segments = branch.split("/")
+        if not branch or any(segment in ("", ".", "..") for segment in segments):
+            echo(
+                f"Error: --branch {branch!r} is not a git ref name (an empty "
+                "segment, '.' or '..'); pass a branch or tag name.",
+                err=True,
+            )
+            raise typer.Exit(ASH_EXIT_USAGE_ERROR)
+        github_url = (
+            "https://raw.githubusercontent.com/awslabs/automated-security-helper/"
+            f"{quote(branch, safe='/')}/docs/content/docs/genai-steering-guide.md"
+        )
 
         try:
             echo(f"Fetching GenAI Integration Guide from GitHub ({branch} branch)...")
@@ -531,6 +706,19 @@ def get_genai_guide(
     )
 
     output_file = Path(output_path)
+    # A destination whose directory is not there yet is made, as `ash scan
+    # --output-dir` and `ash config init` make theirs. Without this the guarded
+    # create below ran in a directory that did not exist and ended in an uncaught
+    # FileNotFoundError traceback. A file, or a link to nothing, in the directory's
+    # place is a refusal in the command's own words, not a traceback either.
+    try:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        echo(
+            f"Error: cannot create the directory for {output_file.absolute()}: {e}",
+            err=True,
+        )
+        raise typer.Exit(1)
     # Written as it was read: UTF-8, because the guide holds characters a C,
     # latin-1 or Windows ANSI locale's codec cannot encode.
     try:
@@ -539,18 +727,45 @@ def get_genai_guide(
         # The family's base, a symlink or a file another name refers to alike.
         echo(f"Error: {refused}", err=True)
         raise typer.Exit(1)
+    except OSError as e:
+        # An unwritable destination, a full disk, a directory that vanished:
+        # the command's own refusal, not a traceback.
+        echo(
+            f"Error: cannot write the guide to {output_file.absolute()}: {e}",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     # ASCII only: the file is already written, and a console that cannot encode a
-    # check mark or a bullet (latin-1, ASCII) must not turn that into exit 1.
-    echo(f"GenAI Integration Guide saved to: {output_file.absolute()}")
+    # check mark or a bullet (latin-1, ASCII) must not turn that into exit 1. The
+    # path is the one text here that is not ASCII by construction, so it is
+    # echoed through _echo_encodable, which falls back to its escaped spelling.
+    _echo_encodable(f"GenAI Integration Guide saved to: {output_file.absolute()}")
     if source:
         echo(f"  Source: {source}")
-    echo(f"  File size: {len(guide_content):,} bytes")
+    # The size of the file written: its UTF-8 bytes, which len() of the text is
+    # not once the guide holds a character outside ASCII.
+    echo(f"  File size: {len(guide_content.encode('utf-8')):,} bytes")
     echo("\nThis guide can be provided to AI assistants to help them:")
     echo("  - Use the correct ASH output formats (JSON, not HTML)")
     echo("  - Create suppressions correctly")
     echo("  - Analyze dependencies using CycloneDX SBOM")
     echo("  - Avoid common pitfalls and known issues")
+
+
+def _echo_encodable(text: str) -> None:
+    """``echo`` *text*; when the console's codec cannot encode it, echo it with
+    the characters it cannot encode written as escapes instead.
+
+    For a line that reports a path after the file is written: a console under
+    a latin-1 or ASCII locale raised UnicodeEncodeError on a non-ASCII path,
+    and the command exited 1 with the file already in place.
+    """
+    try:
+        echo(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        echo(text.encode(encoding, "backslashreplace").decode(encoding))
 
 
 app.add_typer(config_app, name="config")
@@ -586,9 +801,24 @@ def run_app():
     app()
 
 
-if __name__ == "__main__":
-    # Routed through the console scripts' entry point so running this file
-    # directly gets the same guaranteed-diagnosable failure path they do.
+def _run_as_main(module: Any) -> None:
+    """Run the CLI for ``python -m automated_security_helper.cli.main``.
+
+    Routed through the console scripts' entry point, so an exception escaping the
+    CLI is reported as theirs is. What that path cannot cover here: this module's
+    own imports (typer and every command module) have already run by the time
+    the entry point repairs the streams and installs the signal handlers, so a
+    failure in them on a console-less host is still silent, as the entry point's
+    docstring says of its own imports. *module* is this module as run, under the
+    name ``__main__``; it is registered under its import name first, so the entry
+    point's import of ``automated_security_helper.cli.main`` finds it rather than
+    executing this file a second time and building every Typer app twice.
+    """
+    sys.modules.setdefault("automated_security_helper.cli.main", module)
     from automated_security_helper.cli.entrypoint import main
 
     main()
+
+
+if __name__ == "__main__":
+    _run_as_main(sys.modules[__name__])

@@ -161,6 +161,14 @@ def test_the_check_s_header_names_the_file_on_one_line(
     _assert_one_line(result.output, "checked.yaml")
 
 
+#: TOML with a fix to make (a bare line_start): --fix refuses a TOML file only
+#: when it would rewrite it; one with nothing to fix passes `lint --fix`.
+REFUSED_TOML = (
+    'project_name = "t"\n\n[[global_settings.suppressions]]\n'
+    'rule_id = "B101"\npath = "app.py"\nreason = "r"\nline_start = 3\n'
+)
+
+
 @pytest.mark.parametrize(
     "name,flag", [("a\nrefused.toml", "--fix"), ("a\nrefused.json", "--fix-unused")]
 )
@@ -171,7 +179,7 @@ def test_lint_s_rewrite_refusals_name_the_file_on_one_line(
     monkeypatch.chdir(tmp_path)
     config = tmp_path / name
     config.write_text(
-        '{"project_name": "t"}\n' if name.endswith(".json") else 'project_name = "t"\n',
+        '{"project_name": "t"}\n' if name.endswith(".json") else REFUSED_TOML,
         encoding="utf-8",
     )
 
@@ -895,22 +903,16 @@ def test_the_committed_output_refusal_names_the_output_dir_on_one_line(
     _assert_one_line(printed, "out")
 
 
-def test_the_sandbox_refusal_names_the_output_dir_on_one_line(
-    tmp_path, monkeypatch, _wide, capsys
-):
-    """The sandbox's refusal of an output directory reached through a symlink
-    names that directory: one line. A config that does not resolve counts as
-    the sandbox on, as the check does."""
+def test_the_sandbox_refusal_names_the_output_dir_on_one_line(tmp_path, _wide, capsys):
+    """The refusal of an output directory reached through a symlink names that
+    directory, whose path is the caller's text: one line. The check refuses in
+    every run mode and reads no config (the sandbox-era check this test's name
+    keeps resolved one to learn whether the sandbox was on)."""
     from types import SimpleNamespace
 
-    from automated_security_helper.config import resolve_config as resolving
     from automated_security_helper.core.enums import RunMode
     from automated_security_helper.interactions import run_ash_scan as module
 
-    def unresolved(**kwargs):
-        raise ValueError("no config here")
-
-    monkeypatch.setattr(resolving, "resolve_config", unresolved)
     (tmp_path / "real").mkdir()
     link = tmp_path / "a\nout"
     link.symlink_to(tmp_path / "real")
@@ -918,17 +920,15 @@ def test_the_sandbox_refusal_names_the_output_dir_on_one_line(
         mode=RunMode.local,
         source_dir=tmp_path,
         output_dir=link,
-        config=str(tmp_path / "none.yaml"),
-        config_overrides=[],
-        config_base_gate=None,
         # A ScanOptions field the check reads (a workspace run's output tree is
         # checked with the rest); a local scan has none.
         workspace_plan=None,
     )
 
-    with pytest.raises(module.ScanRefusedExit):
+    with pytest.raises(module.OutputDirRefusedExit) as refused:
         module._refuse_symlinked_output_dir(opts)
 
+    assert refused.value.code == module.OUTPUT_DIR_REFUSED_EXIT_CODE
     printed = capsys.readouterr().out
     assert "is a symlink" in printed, printed
     _assert_one_line(printed, "out")

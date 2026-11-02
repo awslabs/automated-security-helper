@@ -764,7 +764,12 @@ def _merged_sandbox(tmp_path: Path, trusted: AshConfig, written, operations):
 
 
 def test_the_additive_lists_the_walk_classes_are_the_ones_these_tests_cover():
-    assert resolve_config_module._ADDITIVE_SANDBOX_SETTINGS == frozenset(ADDITIVE_LISTS)
+    """The three lists of paths and scanner names, which these tests build with path
+    entries, and the environment list, whose entries are variables and whose cases
+    are in ``test_sandbox_environment_setting``."""
+    assert resolve_config_module._ADDITIVE_SANDBOX_SETTINGS == frozenset(
+        ADDITIVE_LISTS
+    ) | {"environment"}
 
 
 @pytest.mark.parametrize("name", ADDITIVE_LISTS)

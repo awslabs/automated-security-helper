@@ -66,6 +66,14 @@ def write_options(path: Path, **options) -> None:
         ("converters.archive.options={}", True),
         ("converters.archive={}", True),
         ("converters={}", True),
+        # Spellings the apply folds onto the declared archive section: an
+        # override written this way raises the limit in the resolved config, so
+        # it is replayed onto the trusted base too, or the raise is capped back
+        # and the warning blames the in-tree file.
+        ("converters.Archive.options.max_members=5", True),
+        ("converters.ARCHIVE.options.max-member-bytes=5", True),
+        ("converters.arc_hive.options.max_total_bytes=5", True),
+        ("converters.Arc-Hive={}", True),
         ("converters.archive.options.something_else=5", False),
         ("converters.archive.enabled=false", False),
         ("converters.jupyter.options.install_timeout=5", False),

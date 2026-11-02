@@ -46,8 +46,9 @@
 
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --config                 -c                <str>  The path to the configuration file. By        │
-│                                                   default, the config a scan of the current     │
-│                                                   directory would use: ['.ash.yml',             │
+│                                                   default, the config a scan of --source-dir    │
+│                                                   would use (the current directory when         │
+│                                                   --source-dir is not given): ['.ash.yml',      │
 │                                                   '.ash.yaml', '.ash.json', 'ash.yml',          │
 │                                                   'ash.yaml', 'ash.json'] (each at the root,    │
 │                                                   then in .ash/), then ['.ashrc.toml',          │
@@ -59,7 +60,10 @@
 │                                                   [env var: ASH_CONFIG]                         │
 │ --output-dir             -o                <str>  Path to the ASH output directory (for unused  │
 │                                                   suppressions report). Defaults to             │
-│                                                   .ash/ash_output                               │
+│                                                   .ash/ash_output under --source-dir when that  │
+│                                                   is given, else to the one beside the config   │
+│                                                   file (its project's .ash/ash_output, then     │
+│                                                   ash_output)                                   │
 │ --fix                                             Auto-fix fixable issues (internal fields,     │
 │                                                   missing line_end, expired suppressions,       │
 │                                                   multi-line suppression reasons). A TOML file, │

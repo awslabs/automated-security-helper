@@ -1,10 +1,17 @@
 field,scanners
+runs[].results[].fingerprints,bandit
 runs[].results[].fingerprints.bandit/v1,bandit
 runs[].results[].level,"ash, bandit"
+runs[].results[].locations,"ash, bandit"
+runs[].results[].locations[].physicalLocation,"ash, bandit"
+runs[].results[].locations[].physicalLocation.artifactLocation,"ash, bandit"
 runs[].results[].locations[].physicalLocation.artifactLocation.uri,"ash, bandit"
+runs[].results[].locations[].physicalLocation.region,"ash, bandit"
 runs[].results[].locations[].physicalLocation.region.endLine,"ash, bandit"
+runs[].results[].locations[].physicalLocation.region.snippet,bandit
 runs[].results[].locations[].physicalLocation.region.snippet.text,bandit
 runs[].results[].locations[].physicalLocation.region.startLine,"ash, bandit"
+runs[].results[].message,"ash, bandit"
 runs[].results[].message.text,"ash, bandit"
 runs[].results[].properties,"ash, bandit"
 runs[].results[].ruleId,"ash, bandit"

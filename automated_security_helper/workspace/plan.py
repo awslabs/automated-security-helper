@@ -59,17 +59,20 @@ Failure modes and known limitations
   to avoid.
 * ``render()`` is for humans and its layout is not a contract. Consumers that
   need structure should read ``model_dump()``.
-* Nothing here validates. A plan is only ever built by
+* Almost nothing here validates. A plan is only ever built by
   :func:`automated_security_helper.workspace.resolver.resolve_workspace`, which
   has already refused anything unusable; a plan constructed by hand can hold
-  states resolution would never produce.
+  states resolution would never produce. The one state refused at construction
+  is a project skipped with no reason: it appeared in neither
+  ``skipped_projects`` nor ``active_projects``, so the payload and the dry-run
+  counts left it out while the body still labelled it skipped.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field, PrivateAttr, computed_field
+from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
 from automated_security_helper.models.core import (
     AshSuppression,
@@ -170,9 +173,17 @@ class ProjectPlan(BaseModel):
         Field(
             None,
             description=(
-                "Digest of the bytes of every file operator_config is built from, "
-                "when the plan was resolved. The scan refuses the project when "
-                "the file it would layer no longer matches."
+                "Digest of the bytes of every file the operator's config is built "
+                "from, when the plan was resolved. The operator's config is the "
+                "registered profile under the MCP server, otherwise the --config "
+                "file: the file layered over this project's own config "
+                "(operator_config), or the file this project resolves because it "
+                "declares none. For such a project it is config_source on the "
+                "CLI; under an MCP session whose client patched the profile, "
+                "config_source is the session's copy and the digest is still the "
+                "registered profile's. Recorded for every scanned project when "
+                "the operator named a config, null otherwise, so a rewrite of "
+                "that file between plan and scan can be told from the plan."
             ),
         ),
     ] = None
@@ -220,6 +231,22 @@ class ProjectPlan(BaseModel):
             ),
         ),
     ] = False
+    severity_ceiling: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "The workspace policy's max_severity_threshold as it applies to "
+                "this project; null when the workspace declares none. Carried so "
+                "the scan can bind a scanner's own options.severity_threshold to "
+                "the ceiling whenever one exists: effective_severity_threshold is "
+                "the project-wide answer only, and threshold_tightened_by_policy "
+                "says whether that value moved, not whether a ceiling is in force. "
+                "A ceiling MEDIUM over a project declaring MEDIUM tightened "
+                "nothing, and still caps a scanner whose own option says CRITICAL."
+            ),
+        ),
+    ] = None
     policy_suppressions: Annotated[
         List[AshSuppression],
         Field(
@@ -262,7 +289,13 @@ class ProjectPlan(BaseModel):
             description=(
                 "Whether findings from policy_scanners affect this project's exit "
                 "code. Carried per project so no consumer has to reach back into "
-                "the policy to interpret policy_scanners."
+                "the policy to interpret policy_scanners. With the gate off, a "
+                "policy scanner's MISSING tool and its stale content database do "
+                "not fail the project either, both being recorded per scanner; a "
+                "rule a scanner could not evaluate is recorded per run, not per "
+                "scanner, and a tool ASH could not stop may still write into the "
+                "project's output, so those two fail the project whichever config "
+                "asked for the scanner."
             ),
         ),
     ] = False
@@ -271,8 +304,12 @@ class ProjectPlan(BaseModel):
         Field(
             default_factory=dict,
             description=(
-                "Effective tool_version constraint per scanner, including those "
-                "inherited from a scanner's built-in default."
+                "Effective tool_version constraint per scanner the project "
+                "enables, including one inherited from a scanner's built-in "
+                "default. A disabled scanner's pin is here only when the "
+                "workspace policy switches that scanner on (policy_scanners), "
+                "because the scan then applies it; otherwise its tool does not "
+                "run and its pin cannot conflict with another project's."
             ),
         ),
     ]
@@ -327,6 +364,24 @@ class ProjectPlan(BaseModel):
     #: leave it out, the MCP resolve tool dumps every entry, and model_copy
     #: keeps it.
     _environment_values: Tuple[str, ...] = PrivateAttr(default=())
+
+    @model_validator(mode="after")
+    def _a_skipped_project_states_why(self) -> "ProjectPlan":
+        """A skipped project carries a reason, or it is not a plan entry.
+
+        ``skipped_projects`` is built from the reason and ``active_projects``
+        from the flag, so an entry with the flag and no reason was in neither:
+        absent from the payload and from the ``N to scan, M skipped`` count,
+        while the body still labelled it skipped. The resolver always sets both;
+        a plan built by hand has to as well.
+        """
+        if self.skipped and self.skip_reason is None:
+            raise ValueError(
+                f"project '{self.key}' is skipped with no skip_reason; a skipped "
+                "project states why, or it is absent from skipped_projects and "
+                "active_projects alike"
+            )
+        return self
 
     @property
     def gate_threshold(self) -> Optional[str]:

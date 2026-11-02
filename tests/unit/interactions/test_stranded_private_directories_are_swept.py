@@ -31,9 +31,13 @@ import pytest
 from automated_security_helper.interactions import container_leftovers
 from automated_security_helper.utils.log import ASH_LOGGER
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="records and directory descriptors are POSIX"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="records and directory descriptors are POSIX"
+    ),
+    pytest.mark.usefixtures("tempfile_reads_this_tests_tmpdir"),
+]
+
 
 _CANARY = "operator-value-canary-7731"
 _PREFIXES = ("ash-container-env-", "ash-container-docker-")
@@ -278,6 +282,7 @@ def test_the_directories_are_swept_before_the_clear_in_nix_mode(
 
     monkeypatch.setattr(run_ash_scan, "_discard_prior_run_artifacts", clear)
     monkeypatch.setattr(run_ash_scan, "run_ash_nix", shell)
+    monkeypatch.setattr(run_ash_scan, "nix_preflight", lambda: None)
     monkeypatch.setattr(run_ash_scan, "sweep_leftovers_before_run", lambda runner: [])
     opts = run_ash_scan.ScanOptions(
         source_dir=source, output_dir=tmp_path / "out", mode=RunMode.nix

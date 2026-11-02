@@ -7,6 +7,7 @@ from typing import Any
 
 from automated_security_helper.models.core import (
     IGNORE_PATH_LISTS,
+    IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS,
     expiration_has_passed,
     value_at,
 )
@@ -28,10 +29,16 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
     This ensures the check is performed only once per execution rather than
     multiple times during SARIF processing.
 
-    Ignore paths are checked even under ``--ignore-suppressions``: that flag
-    turns off suppressions only, and ignore paths still apply (when results are
-    processed, in the scanners that pre-filter their files and in the
-    converters), so their expiry still changes the scan.
+    Under ``--ignore-suppressions`` the suppressions and the global ignore paths
+    are not checked: the flag lifts every suppression and every global ignore path
+    for the run (``models.core.ignore_paths_that_skip_scanning`` returns none under
+    it, and the SARIF step applies none), so their expiry changes nothing about
+    the scan, and a warning about it would describe a scan that is not running.
+    Which lists the flag lifts is recorded beside ``IGNORE_PATH_LISTS``
+    (``IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS``).
+    The scanner option lists that take the same entries (bandit ``excluded_paths``,
+    checkov ``skip_path``, syft ``exclude``) are still checked: they are handed
+    to the tool as its own arguments, which the flag does not lift.
 
     Args:
         **kwargs: Event data including:
@@ -66,21 +73,30 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
     for (keys, _), (_, entries, _) in zip(IGNORE_PATH_LISTS, ignore_path_lists):
         recorded.update(recorded_ignore_paths(plugin_context.config, entries, keys))
 
-    _warn_about_expired_entries(
-        ignore_path_lists, [] if ignoring_suppressions else suppressions, recorded
-    )
+    if ignoring_suppressions:
+        # The flag lifts the suppressions and the global ignore paths. A scanner's
+        # own option list (bandit ``excluded_paths``, checkov ``skip_path``, syft
+        # ``exclude``) reaches the tool as its argument whether or not the flag is
+        # set, so an expired entry there still changes what the tool scans, and
+        # an expiring one is still worth the notice.
+        scanner_lists = [
+            entry
+            for entry, (keys, _) in zip(ignore_path_lists, IGNORE_PATH_LISTS)
+            if keys not in IGNORE_PATH_LISTS_LIFTED_BY_IGNORE_SUPPRESSIONS
+        ]
+        ASH_LOGGER.debug(
+            "Suppressions and global ignore paths are being ignored, so none of "
+            "them is checked for expiration"
+        )
+        _warn_about_expired_entries(scanner_lists, [], recorded)
+        _warn_about_expiring_ignore_paths(scanner_lists, recorded)
+        return True
+
+    _warn_about_expired_entries(ignore_path_lists, suppressions, recorded)
     _warn_about_expiring_ignore_paths(ignore_path_lists, recorded)
 
     if not suppressions:
         ASH_LOGGER.debug("No suppressions configured, skipping expiration check")
-        return True
-
-    # Check if ignore_suppressions flag is set
-    if (
-        hasattr(plugin_context, "ignore_suppressions")
-        and plugin_context.ignore_suppressions
-    ):
-        ASH_LOGGER.debug("Suppressions are being ignored, skipping expiration check")
         return True
 
     ASH_LOGGER.debug(f"Checking {len(suppressions)} suppressions for expiration")
@@ -98,7 +114,10 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
         ASH_LOGGER.warning("The following suppressions will expire within 30 days:")
         for suppression in expiring_suppressions:
             expiration_date = _shown(suppression, "expiration", recorded)
-            rule_id = _shown(suppression, "rule_id", recorded)
+            # A suppression with no rule covers every rule, spelled "*" as the
+            # expired-entries warning and the suppression's own id spell it;
+            # this line printed Rule 'None' for the same entry.
+            rule_id = _shown(suppression, "rule_id", recorded) or "*"
             file_path = _shown(suppression, "path", recorded)
             reason = _shown(suppression, "reason", recorded) or "No reason provided"
             ASH_LOGGER.warning(

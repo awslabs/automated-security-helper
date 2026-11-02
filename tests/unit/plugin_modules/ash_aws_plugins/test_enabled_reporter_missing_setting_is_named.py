@@ -48,10 +48,10 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_repor
 from automated_security_helper.utils.log import ASH_LOGGER
 from tests.utils.secret_bearing_scan import isolate_from_aws
 
-# The reporters' models refer to AshConfig, which must be defined before one is
-# built, as in the other reporter tests here.
 pytestmark = pytest.mark.unit
 
+# The reporters' models refer to AshConfig, which must be defined before one is
+# built, as in the other reporter tests here.
 AshConfig.model_rebuild()
 for _model in (
     S3ReporterConfig,

@@ -62,13 +62,17 @@ Each of these takes a command name or an absolute path, and so does the `oci_run
 `OCI_RUNNER_WRAPPER` that applies to the first word. A `$` in the document's value is
 not expanded, so `$HOME/bin/docker` there is a relative path. With no usable home
 directory (`HOME` empty or relative, or unset with no absolute home in the passwd entry),
-a value that starts with `~/` is not used: ASH logs a warning about `HOME` and picks a
-runtime as if none were named, or, for the wrapper, starts the runtime without one. A
-relative path with a directory part, such as `bin/docker`, is read against the directory
-you run ASH in when you pass it to `--oci-runner` or give it in the document. In
-`OCI_RUNNER` it is not run: ASH logs a warning and picks a runtime as if none were named.
-As the first word of `OCI_RUNNER_WRAPPER` it is not used either, and the runtime starts
-without a wrapper, with a warning.
+a value that starts with `~/` is refused: ASH exits with code 3 and a message that names
+the variable, and it neither picks another runtime nor starts the runtime without the
+wrapper. A relative path with a directory part, such as `bin/docker`, is read against the
+directory you run ASH in when you pass it to `--oci-runner` or give it in the document. In
+`OCI_RUNNER` it is refused the same way, and so it is as the first word of
+`OCI_RUNNER_WRAPPER`: it names a file under the directory you run ASH from, usually the
+repository being scanned, so ASH does not run it. `./ash` refuses a relative `OCI_RUNNER`
+and `OCI_RUNNER_WRAPPER` the same way, and `Invoke-ASH` a relative `OCI_RUNNER_WRAPPER`.
+Neither script expands a leading `~`, so there a value that starts with `~/` is refused
+as a relative path: your shell expands it when you write `export OCI_RUNNER=~/bin/docker`,
+or you can spell the path out. A scan in local mode reads neither variable.
 
 ## Root and non-root images {#build-target}
 
@@ -102,11 +106,11 @@ The image installs ASH from source, chosen from how ASH was installed on the hos
 
 | Host install | Source of the image |
 |---|---|
-| From a git URL with a tag, such as `@v3.7.0` | That tag, cloned from GitHub when the image builds. |
+| From a git URL with a tag, such as `@v3.7.1` | That tag, cloned from GitHub when the image builds. |
 | From a git URL with a branch, such as `@main` | The tip of that branch when the image builds, which can differ from the commit installed on the host. |
 | From a git URL with no ref | The installed commit, fetched from GitHub by its commit ID. |
 | A clone of the ASH repository, an editable install of one, or `pip install <directory>` | That source tree, built with its own `Dockerfile`, so the image holds the same ASH as the host. |
-| Any other install, such as Homebrew, a wheel or sdist file, or an archive URL | The commit the package was built from, fetched by its commit ID. A package built outside a git checkout of ASH, such as from a source tarball, records no commit: the image then installs the release tag of the installed version, such as `v3.7.0`, and ASH logs a warning that this is a guess. A development or pre-release version has no release tag, so the build stops before it starts and asks for `--ash-revision-to-install`. |
+| Any other install, such as Homebrew, a wheel or sdist file, or an archive URL | The commit the package was built from, fetched by its commit ID. A package built outside a git checkout of ASH, such as from a source tarball, records no commit: the image then installs the release tag of the installed version, such as `v3.7.1`, and ASH logs a warning that this is a guess. A development or pre-release version has no release tag, so the build stops before it starts and asks for `--ash-revision-to-install`. |
 
 `--ash-revision-to-install` overrides the table with a tag, a branch, or a full
 40-character commit ID. It accepts letters, digits, dots, hyphens, underscores, and
@@ -322,8 +326,8 @@ the image with your registry's name:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-export ASH_IMAGE_NAME=registry.example.com/security/ash:3.7.0
-ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.7.0 \
+export ASH_IMAGE_NAME=registry.example.com/security/ash:3.7.1
+ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.7.1 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
@@ -337,10 +341,10 @@ context, so the image contains exactly the ref it cloned:
 
 <!-- doctest: illustrative reason="needs a container runtime and network access" -->
 ```bash
-git clone --depth 1 --branch v3.7.0 https://github.com/awslabs/automated-security-helper.git
+git clone --depth 1 --branch v3.7.1 https://github.com/awslabs/automated-security-helper.git
 cd automated-security-helper
 docker build --target non-root --build-arg UID=1001 --build-arg GID=1001 \
-  --tag registry.example.com/security/ash:3.7.0 .
+  --tag registry.example.com/security/ash:3.7.1 .
 ```
 
 Build arguments:

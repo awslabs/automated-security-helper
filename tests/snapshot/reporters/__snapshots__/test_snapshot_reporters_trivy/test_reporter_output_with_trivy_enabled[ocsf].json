@@ -1,13 +1,13 @@
 [
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2021-23337\nSeverity: HIGH\nFixed Version: 4.17.21\nLink: [CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337)",
-      "title": "CVE-2021-23337 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2021-23337\nSeverity: ...",
+      "title": "CVE-2021-23337 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2021-23337\nSeverit...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -31,7 +31,7 @@
             "end_line": 17,
             "file": {
               "name": "package-lock.json",
-              "path": "package-lock.json",
+              "path": "file:///src/package-lock.json",
               "type_id": 1
             },
             "start_line": 13
@@ -49,13 +49,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-4800\nSeverity: HIGH\nFixed Version: 4.18.0\nLink: [CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800)",
-      "title": "CVE-2026-4800 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-4800\nSeverity: HI...",
+      "title": "CVE-2026-4800 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-4800\nSeverity:...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -79,7 +79,7 @@
             "end_line": 17,
             "file": {
               "name": "package-lock.json",
-              "path": "package-lock.json",
+              "path": "file:///src/package-lock.json",
               "type_id": 1
             },
             "start_line": 13
@@ -97,13 +97,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2020-28500\nSeverity: MEDIUM\nFixed Version: 4.17.21\nLink: [CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500)",
-      "title": "CVE-2020-28500 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2020-28500\nSeverity: ...",
+      "title": "CVE-2020-28500 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2020-28500\nSeverit...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -127,7 +127,7 @@
             "end_line": 17,
             "file": {
               "name": "package-lock.json",
-              "path": "package-lock.json",
+              "path": "file:///src/package-lock.json",
               "type_id": 1
             },
             "start_line": 13
@@ -145,13 +145,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2025-13465\nSeverity: MEDIUM\nFixed Version: 4.17.23\nLink: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)",
-      "title": "CVE-2025-13465 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2025-13465\nSeverity: ...",
+      "title": "CVE-2025-13465 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2025-13465\nSeverit...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -175,7 +175,7 @@
             "end_line": 17,
             "file": {
               "name": "package-lock.json",
-              "path": "package-lock.json",
+              "path": "file:///src/package-lock.json",
               "type_id": 1
             },
             "start_line": 13
@@ -193,13 +193,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-2950\nSeverity: MEDIUM\nFixed Version: 4.18.0\nLink: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)",
-      "title": "CVE-2026-2950 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-2950\nSeverity: ME...",
+      "title": "CVE-2026-2950 in package-lock.json - Package: lodash\nInstalled Version: 4.17.20\nVulnerability CVE-2026-2950\nSeverity:...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -223,7 +223,7 @@
             "end_line": 17,
             "file": {
               "name": "package-lock.json",
-              "path": "package-lock.json",
+              "path": "file:///src/package-lock.json",
               "type_id": 1
             },
             "start_line": 13
@@ -241,13 +241,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2018-18074\nSeverity: HIGH\nFixed Version: 2.20.0\nLink: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)",
-      "title": "CVE-2018-18074 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2018-18074\nSeverity: ...",
+      "title": "CVE-2018-18074 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2018-18074\nSeverit...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -271,7 +271,7 @@
             "end_line": 2,
             "file": {
               "name": "requirements.txt",
-              "path": "requirements.txt",
+              "path": "file:///src/requirements.txt",
               "type_id": 1
             },
             "start_line": 2
@@ -289,13 +289,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2023-32681\nSeverity: MEDIUM\nFixed Version: 2.31.0\nLink: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)",
-      "title": "CVE-2023-32681 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2023-32681\nSeverity: ...",
+      "title": "CVE-2023-32681 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2023-32681\nSeverit...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -319,7 +319,7 @@
             "end_line": 2,
             "file": {
               "name": "requirements.txt",
-              "path": "requirements.txt",
+              "path": "file:///src/requirements.txt",
               "type_id": 1
             },
             "start_line": 2
@@ -337,13 +337,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-35195\nSeverity: MEDIUM\nFixed Version: 2.32.0\nLink: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)",
-      "title": "CVE-2024-35195 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-35195\nSeverity: ...",
+      "title": "CVE-2024-35195 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-35195\nSeverit...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -367,7 +367,7 @@
             "end_line": 2,
             "file": {
               "name": "requirements.txt",
-              "path": "requirements.txt",
+              "path": "file:///src/requirements.txt",
               "type_id": 1
             },
             "start_line": 2
@@ -385,13 +385,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-47081\nSeverity: MEDIUM\nFixed Version: 2.32.4\nLink: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)",
-      "title": "CVE-2024-47081 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-47081\nSeverity: ...",
+      "title": "CVE-2024-47081 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2024-47081\nSeverit...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -415,7 +415,7 @@
             "end_line": 2,
             "file": {
               "name": "requirements.txt",
-              "path": "requirements.txt",
+              "path": "file:///src/requirements.txt",
               "type_id": 1
             },
             "start_line": 2
@@ -433,13 +433,13 @@
   },
   {
     "activity_id": 1,
-    "activity_name": "Scan",
+    "activity_name": "Create",
     "category_name": "Findings",
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
       "desc": "Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2026-25645\nSeverity: MEDIUM\nFixed Version: 2.33.0\nLink: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)",
-      "title": "CVE-2026-25645 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2026-25645\nSeverity: ...",
+      "title": "CVE-2026-25645 in requirements.txt - Package: requests\nInstalled Version: 2.19.1\nVulnerability CVE-2026-25645\nSeverit...",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -463,7 +463,7 @@
             "end_line": 2,
             "file": {
               "name": "requirements.txt",
-              "path": "requirements.txt",
+              "path": "file:///src/requirements.txt",
               "type_id": 1
             },
             "start_line": 2

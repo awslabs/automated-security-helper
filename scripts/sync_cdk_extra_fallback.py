@@ -54,6 +54,11 @@ Failure modes and limitations
   locate the block in.
 * The explanatory comment above the constant is left alone. Only the list
   elements between the anchor and its closing bracket are rewritten.
+* ``--check`` reads past comments inside the list, whole-line or trailing an
+  element. ``--fix`` replaces every line of the list with the rendered
+  requirements, so it refuses, writing nothing, when the list holds a comment:
+  move the comment above the assignment, where it is left alone. Blank lines
+  inside the list carry no content and are normalized away.
 * It does not validate that the requirements are installable, only that the two
   spellings agree. ``test_fallback_matches_installed_metadata`` is what checks
   the constant against reality; this only stops the two declarations diverging.
@@ -73,8 +78,12 @@ Failure modes and limitations
 from __future__ import annotations
 
 import argparse
+import ast
+import io
+import json
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 try:
@@ -219,23 +228,82 @@ def locate_block(lines: list[str]) -> tuple[int, int]:
     )
 
 
+def _split_comment(text: str) -> tuple[str, str | None]:
+    """``text`` without a trailing ``#`` comment, and that comment (or None).
+
+    Found with the tokenizer, so a ``#`` inside a string literal is not one.
+    """
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type == tokenize.COMMENT:
+                return text[: token.start[1]].rstrip(), token.string
+    except (tokenize.TokenError, SyntaxError):
+        pass  # not tokenizable; the caller's literal parse refuses it by name
+    return text, None
+
+
 def committed_requirements(lines: list[str]) -> list[str]:
+    """The constant's elements, read as the Python string literals they are.
+
+    Read with the parser rather than by stripping quote characters: stripping
+    took the closing ``'`` off a requirement whose environment marker ends in
+    one (``...; python_version < '3.11'``), so the committed value never
+    equaled the declared one and ``--fix`` rewrote the same list on every run.
+    A comment after an element is not part of the requirement.
+    """
     first, closer = locate_block(lines)
     found = []
     for line in lines[first:closer]:
-        stripped = line.strip().rstrip(",")
+        stripped = _split_comment(line.strip())[0].rstrip(",")
         if not stripped or stripped.startswith("#"):
             continue
-        found.append(stripped.strip('"').strip("'"))
+        try:
+            value = ast.literal_eval(stripped)
+        except (SyntaxError, ValueError) as exc:
+            raise SystemExit(
+                f"{SCANNER}: {stripped!r} inside _CDK_EXTRA_FALLBACK_REQUIREMENTS is "
+                f"not one string literal ({exc}); refusing to read a block this "
+                "script does not understand"
+            ) from exc
+        if not isinstance(value, str):
+            raise SystemExit(
+                f"{SCANNER}: {stripped!r} inside _CDK_EXTRA_FALLBACK_REQUIREMENTS is "
+                "not a string"
+            )
+        found.append(value)
     return found
 
 
 def render(requirements: list[str]) -> list[str]:
-    return [f'    "{requirement}",' for requirement in requirements]
+    """One double-quoted Python string literal per requirement.
+
+    Through json.dumps, whose escapes are Python's, so a requirement holding a
+    double quote or a backslash is written as a literal that reads back as
+    itself instead of as a syntax error in the scanner module.
+    """
+    return [
+        f"    {json.dumps(requirement, ensure_ascii=False)},"
+        for requirement in requirements
+    ]
+
+
+def commented_lines(lines: list[str], first: int, closer: int) -> list[int]:
+    """1-based numbers of the block's lines that hold a comment.
+
+    A whole-line comment or one after an element; ``render`` writes neither, so
+    a rewrite would delete them.
+    """
+    return [
+        index + 1
+        for index in range(first, closer)
+        if _split_comment(lines[index].strip())[1] is not None
+    ]
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # __doc__ is None under `python -OO`, which strips docstrings.
+    summary = __doc__.splitlines()[0] if __doc__ else None
+    parser = argparse.ArgumentParser(description=summary)
     parser.add_argument(
         "--fix",
         action="store_true",
@@ -268,6 +336,15 @@ def main() -> int:
         return 1
 
     first, closer = locate_block(lines)
+    with_comment = commented_lines(lines, first, closer)
+    if with_comment:
+        raise SystemExit(
+            f"{SCANNER}: line(s) {with_comment} inside "
+            "_CDK_EXTRA_FALLBACK_REQUIREMENTS hold a comment, and --fix replaces "
+            "every line of the list, which would delete it. Refusing to write. "
+            "Move the comment above the assignment, which --fix leaves alone, "
+            "then run --fix again."
+        )
     rewritten = lines[:first] + render(declared) + lines[closer:]
     SCANNER.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
     print(

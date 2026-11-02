@@ -172,8 +172,12 @@ def test_control_an_operator_baseline_outside_any_checkout_verifies(recorder, tm
 def test_the_reason_names_the_scanned_checkout(tmp_path):
     from automated_security_helper.config.path_trust import scanned_checkout_reason
 
+    # Each checkout carries a HEAD: the one checkout definition
+    # (sandbox_grants._git_shaped) counts a .git directory only when git would
+    # open it, so a bare empty .git marks no checkout here.
     checkout = tmp_path / "repo"
     (checkout / ".git").mkdir(parents=True)
+    (checkout / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     source = checkout / "service"
     source.mkdir()
     inside_checkout = checkout / "ops" / "v.baseline"
@@ -181,6 +185,7 @@ def test_the_reason_names_the_scanned_checkout(tmp_path):
     inside_checkout.write_text("{}")
     elsewhere = tmp_path / "shared" / "v.baseline"
     (tmp_path / "shared" / ".git").mkdir(parents=True)
+    (tmp_path / "shared" / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     elsewhere.write_text("{}")
 
     reason = scanned_checkout_reason(inside_checkout, source)

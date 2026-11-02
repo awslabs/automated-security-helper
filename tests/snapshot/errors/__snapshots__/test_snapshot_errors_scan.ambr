@@ -302,7 +302,7 @@
     'exit_code': 3,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Initializing ASH v<ASH_VERSION>
+      INFO     Initializing ASH v<ASH_VERSION>
       ERROR (3) Invalid configuration: bad.yaml could not be parsed (ParserError at line 3, column 1; started at line 2, column 11)
   
     ''',
@@ -313,8 +313,9 @@
     'exit_code': 3,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Initializing ASH v<ASH_VERSION>
-                   ERROR    Configuration validation failed: Invalid value at 'fail_on_findings': Input should be a valid boolean
+      INFO     Initializing ASH v<ASH_VERSION>
+      ERROR    Configuration validation failed: Invalid value at 'fail_on_findings': Input should be a
+               valid boolean
       ERROR (3) Invalid configuration: Configuration validation failed for 'bad.yaml': Invalid value at 'fail_on_findings': Input should be a valid boolean. Run: ash config lint --config bad.yaml
   
     ''',
@@ -325,9 +326,9 @@
     'exit_code': 5,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Initializing ASH v<ASH_VERSION>
-                   INFO     Initializing execution engine
-                   INFO     Excluding scanners: ['bandit']
+      INFO     Initializing ASH v<ASH_VERSION>
+      INFO     Initializing execution engine
+      INFO     Excluding scanners: ['bandit']
       ERROR (5) Every scanner named by --scanners is also named by --exclude-scanners, so the selection cancels itself: selected bandit; excluded bandit. Refused rather than guessed: an empty allowlist means 'every scanner' further down, so this would silently run the scanners you excluded and skip the ones you chose. Drop one of the two flags.
   
     ''',
@@ -338,9 +339,9 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] ERROR    simulated failure inside the scan
-                            <TRACEBACK>
-                            RuntimeError: simulated failure inside the scan
+      ERROR    simulated failure inside the scan
+               <TRACEBACK>
+               RuntimeError: simulated failure inside the scan
       ERROR (1) Exiting due to exception during ASH scan: simulated failure inside the scan
   
     ''',
@@ -351,8 +352,8 @@
     'exit_code': 5,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Initializing ASH v<ASH_VERSION>
-                   INFO     Initializing execution engine
+      INFO     Initializing ASH v<ASH_VERSION>
+      INFO     Initializing execution engine
       ERROR (5) None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
   
     ''',
@@ -484,7 +485,7 @@
   dict({
     'exit_code': 4,
     'stderr': '''
-      workspace file '<TMP>/broken.code-workspace' is not valid JSON: Expecting property name enclosed in double quotes: line 1 column 3 (char 2).
+      workspace file '<TMP>/broken.code-workspace' is not valid JSON (JSONDecodeError: Expecting property name enclosed in double quotes at line 1, column 3). VS Code accepts comments and trailing commas in this file; ASH reads strict JSON, so remove any '//' or '/* */' comments and trailing commas.
   
     ''',
     'stdout': '',

@@ -10,7 +10,7 @@ Run an ASH security scan on the current project and report what it finds, most s
 
 ## Steps
 
-1. **Verify installation** — call `check_installation`. If it fails or `installed` is false, surface the install command (`uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp`) and stop. If `ready` is false, tell the user which scanners in `missing_dependencies` will not run (their tools are not installed on the server's host; `ash dependencies install` installs the ones ASH can) and continue. Scanners in `installs_on_first_scan` do run: the first scan installs their tools, which needs network access and takes longer.
+1. **Verify installation** — call `check_installation`. If it fails or `installed` is false, surface the install command (`uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.1 ash mcp`) and stop. If `ready` is false, tell the user which scanners in `missing_dependencies` will not run (their tools are not installed on the server's host; `ash dependencies install` installs the ones ASH can) and continue. Scanners in `installs_on_first_scan` do run: the first scan installs their tools, which needs network access and takes longer.
 
 2. **Determine source directory** — use `pwd` to get the absolute path. If the user provides an argument, use that instead. For monorepos, confirm with the user whether they want the full repo or a subdirectory before scanning.
 
@@ -37,6 +37,6 @@ Run an ASH security scan on the current project and report what it finds, most s
 
 ## Notes
 
-- If there are no ASH tools, the MCP server is not running. The plugin starts it with `uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp`, which needs uv, and network access to GitHub the first time.
+- If there are no ASH tools, the MCP server is not running. The plugin starts it with `uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.1 ash mcp`, which needs uv, and network access to GitHub the first time.
 - The MCP server always scans in local mode. For a container scan, the user runs `ash scan --mode container`.
 - Do not repeat the value of a detected secret. Refer to its file and line.

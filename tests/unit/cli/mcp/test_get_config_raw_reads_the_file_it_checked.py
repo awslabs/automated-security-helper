@@ -29,6 +29,15 @@ in the answer. The control cell does not swap and expects the document as
 written, so a read that fails for another reason cannot pass the swap cell. The
 named and the discovered path each take the identity themselves, so each is a
 cell.
+
+Windows cannot make the swap. The server opens the file before it asks the grant
+about it and keeps that descriptor until the read is done
+(``config_sources.open_config_for_judgment``), and a file opened without
+``FILE_SHARE_DELETE`` can be neither replaced nor removed on Windows while it is
+open. The cells that replace or remove the checked file from inside the check
+therefore get a ``PermissionError`` there, from the server's own handle, and skip:
+the swap they pin is one the operating system does not allow on that platform.
+Anywhere else the same error is the cell's to see.
 """
 
 from __future__ import annotations
@@ -45,6 +54,7 @@ from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp import sandbox
 from automated_security_helper.cli.mcp_tools import mcp_get_config
 from automated_security_helper.config import config_sources, resolve_config
+from tests.utils.held_file_swaps import skip_if_refused, swap_or_record
 
 pytestmark = pytest.mark.unit
 
@@ -98,13 +108,14 @@ def _arrange(
     other = tmp_path / f"other.{fmt}"
     other.write_text(swapped_text, encoding="utf-8")
     swapped: List[bool] = []
+    refused: List[BaseException] = []
 
     def check_then_swap(target: Any, *_args: Any, **_kwargs: Any) -> None:
         # The check a grant makes; the swap lands right after it, once, and only
         # for the config file (a check of the search directory leaves it alone).
-        if swap and not swapped and Path(target) == config:
-            os.replace(other, config)
-            swapped.append(True)
+        if swap and not swapped and not refused and Path(target) == config:
+            if swap_or_record(lambda: os.replace(other, config), refused):
+                swapped.append(True)
         return None
 
     monkeypatch.setattr(sandbox, "validate_config_input", check_then_swap)
@@ -115,6 +126,7 @@ def _arrange(
         response = mcp_get_config(raw=raw)
     else:
         response = mcp_get_config(config_path=str(config), raw=raw)
+    skip_if_refused(refused)
     assert bool(swapped) is swap, "the swap did not happen where the cell expects it"
     return response
 
@@ -222,11 +234,11 @@ def _arrange_swap_and_back(
         pytest.skip(f"cannot make a hard link here: {error}")
     real_check = sandbox.validate_config_input
     swapped: List[bool] = []
+    refused: List[BaseException] = []
 
     def check_between_the_swaps(target: Any, *args: Any, **kwargs: Any) -> Any:
-        if Path(target) != config:
+        if Path(target) != config or not swap_or_record(config.unlink, refused):
             return real_check(target, *args, **kwargs)
-        config.unlink()
         os.link(y_file, config)
         try:
             return real_check(target, *args, **kwargs)
@@ -243,6 +255,7 @@ def _arrange_swap_and_back(
         response = mcp_get_config(raw=True)
     else:
         response = mcp_get_config(config_path=str(config), raw=True)
+    skip_if_refused(refused)
     assert swapped == [True], "the name did not lead to Y during the check"
     assert os.stat(config).st_ino == os.stat(x_file).st_ino, "the name is X again"
     return response
@@ -275,10 +288,15 @@ def test_a_link_swapped_in_after_the_name_was_resolved_is_refused(
     outside.write_text(f"x: {CANARY}\n", encoding="utf-8")
     real_refusal = sandbox._config_input_refusal
     swapped: List[bool] = []
+    refused: List[BaseException] = []
 
     def swap_then_judge(config_path: Any, resolved: Any, session_id: Any) -> Any:
-        if Path(config_path) == config and not swapped:
-            config.unlink()
+        if (
+            Path(config_path) == config
+            and not swapped
+            and not refused
+            and swap_or_record(config.unlink, refused)
+        ):
             try:
                 config.symlink_to(outside)
             except (OSError, NotImplementedError) as error:
@@ -295,6 +313,7 @@ def test_a_link_swapped_in_after_the_name_was_resolved_is_refused(
     else:
         response = mcp_get_config(config_path=str(config), raw=True)
 
+    skip_if_refused(refused)
     assert swapped == [True], "the link was not put where the cell expects it"
     assert response.get("success") is False, response
     text = json.dumps(response, default=str)

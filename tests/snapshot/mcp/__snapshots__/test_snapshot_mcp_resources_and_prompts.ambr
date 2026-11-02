@@ -220,8 +220,7 @@
       dict({
         'content': dict({
           'text': '''
-            Please analyze these ASH security scan results in the source_dir:
-            <TMP>/cwd and provide:
+            Please analyze these ASH security scan results in this session's source directory (the tree delivered with set_source_git or set_source_zip_finalize, or the server's working directory for the local client that started it over stdio) and provide:
             
             1. **Summary**: Brief overview of the security scan results
             2. **Key Findings**: Most important security issues discovered
@@ -251,9 +250,9 @@
       dict({
         'content': dict({
           'text': '''
-            Please run an ASH security scan of the following directory: <TMP>/cwd
+            Please run an ASH security scan of this session's source directory (the tree delivered with set_source_git or set_source_zip_finalize, or the server's working directory for the local client that started it over stdio)
             
-            The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server.
+            The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server, called with no source_dir: the tool resolves that directory itself and refuses to guess when nothing was delivered.
             
             Once the scan has started, an ID will be returned. Using that scan ID, call the
             `get_scan_progress` MCP tool with the scan ID to monitor until completion.
@@ -418,7 +417,8 @@
         
         ASH version <ASH_VERSION>
         
-        ASH is installed and ready to perform security scans in local mode.
+        ASH is installed and scans run in local mode. Whether each scanner's tool is
+        installed is not checked here.
         Built-in scanners:
         • actionlint
         • bandit

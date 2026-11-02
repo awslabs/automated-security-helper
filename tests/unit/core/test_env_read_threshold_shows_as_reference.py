@@ -70,7 +70,7 @@ def test_the_raw_section_holds_the_marker_premise(ext_config):
 def test_the_grading_read_stays_the_resolved_value(ext_config):
     """The must-not-change control: the gate judges by what the variable held."""
     threshold, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
-        SimpleNamespace(ash_config=ext_config), SCANNER
+        SimpleNamespace(ash_config=ext_config, additional_reports={}), SCANNER
     )
     assert type(threshold) is str and threshold == THRESHOLD_CANARY, (
         type(threshold),
@@ -217,7 +217,7 @@ def test_a_glued_reference_is_shown_whole(tmp_path, monkeypatch):
 
     # The grading control: the gate judges by the glued resolved text.
     threshold, _source = ScannerStatisticsCalculator.get_scanner_threshold_info(
-        SimpleNamespace(ash_config=config), SCANNER
+        SimpleNamespace(ash_config=config, additional_reports={}), SCANNER
     )
     assert threshold == glued_value + glued_tail, threshold
 
@@ -427,12 +427,12 @@ def test_the_reference_is_kept_while_the_source_is_the_scanners_own_config(
     monkeypatch.setattr(
         scanner_statistics_calculator,
         "resolve_scanner_threshold",
-        lambda scanner_threshold, ash_config: resolved,
+        lambda scanner_threshold, ash_config, scanner_name=None: resolved,
     )
 
     assert (
         ScannerStatisticsCalculator._threshold_resolution(
-            SimpleNamespace(ash_config=ext_config), SCANNER
+            SimpleNamespace(ash_config=ext_config, additional_reports={}), SCANNER
         )
         == expected
     )
@@ -458,11 +458,11 @@ def test_a_literal_threshold_the_resolver_normalized_shows_what_is_graded(
     monkeypatch.setattr(
         scanner_statistics_calculator,
         "resolve_scanner_threshold",
-        lambda scanner_threshold, ash_config: ("HIGH", "config"),
+        lambda scanner_threshold, ash_config, scanner_name=None: ("HIGH", "config"),
     )
 
     assert ScannerStatisticsCalculator._threshold_resolution(
-        SimpleNamespace(ash_config=config), SCANNER
+        SimpleNamespace(ash_config=config, additional_reports={}), SCANNER
     ) == ("HIGH", "HIGH", "config", False)
 
 
@@ -612,7 +612,7 @@ def test_a_defaulted_reference_whose_variable_is_set_shows_without_its_default(
     config = _config_writing(tmp_path, monkeypatch, "${" + DEFAULTED + ":MEDIUM}")
 
     threshold, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
-        SimpleNamespace(ash_config=config), SCANNER
+        SimpleNamespace(ash_config=config, additional_reports={}), SCANNER
     )
     assert (threshold, source) == ("CRITICAL", "config")
     rows = {
@@ -642,7 +642,7 @@ def test_a_defaulted_reference_that_used_its_default_shows_the_default_value(
     config = _config_writing(tmp_path, monkeypatch, "${" + DEFAULTED + ":HIGH}")
 
     threshold, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
-        SimpleNamespace(ash_config=config), SCANNER
+        SimpleNamespace(ash_config=config, additional_reports={}), SCANNER
     )
     assert (threshold, source) == ("HIGH", "config")
     row = _metrics_row(config)

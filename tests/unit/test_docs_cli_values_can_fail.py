@@ -279,12 +279,23 @@ def test_the_cli_model_records_click_choices():
 @pytest.mark.unit
 def test_the_registries_match_the_inventories_the_reference_checks_read():
     """Plugin names come from the plugin modules' ASH_* lists. The gate's scanner and
-    reporter checks read the same plugins another way, so the two must agree."""
+    reporter checks read the same plugins another way, so the two must agree.
+
+    The gate's reporter inventory is the doc generator's, which counts only the
+    reporters defined under the built-in package, so the reporter side is held to
+    the built-in package's own ASH_REPORTERS list; the plugin-module reporters the
+    CLI check accepts are a superset of it."""
+    from automated_security_helper.plugin_modules import ash_builtin
+
     gate = _load(
         "_ash_docs_gate_for_values", REPO_ROOT / "scripts" / "verify_docs_freshness.py"
     )
+    builtin_reporters = frozenset(
+        dc._declared_plugin_name(plugin) for plugin in ash_builtin.ASH_REPORTERS
+    )
     assert dc.plugin_names("scanner") == frozenset(gate.scanner_names())
-    assert dc.plugin_names("reporter") == frozenset(gate.reporter_names())
+    assert builtin_reporters == frozenset(gate.reporter_names())
+    assert builtin_reporters <= dc.plugin_names("reporter")
     assert dc.plugin_names("converter") == frozenset(
         dc.load_config_models().plugin_configs["converters"]
     )

@@ -119,7 +119,7 @@ def _argv(
     repo.dependencies_satisfied = True
     with (
         patch.object(repo, "_pre_scan", return_value=True),
-        patch.object(repo, "_run_subprocess", return_value={}) as run,
+        patch.object(repo, "_run_subprocess", return_value={"returncode": 0}) as run,
     ):
         repo.scan(target=source, target_type="source")
     return [str(a) for a in run.call_args.kwargs["command"]]

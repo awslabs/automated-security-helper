@@ -512,10 +512,10 @@ class TestTheRecordedRowsReachTheGate:
     ):
         results = _run(plugin_context, [_MissingToolConverter])
 
+        # The gate lists the reason the phase wrote into the row (here the
+        # message for a check that gave none), not a fixed line of its own.
         assert incomplete_converters(results) == [
-            IncompleteConverter(
-                "missing-tool-converter", "dependencies unavailable, so it never ran"
-            )
+            IncompleteConverter("missing-tool-converter", _UNNAMED_REASON)
         ]
 
     def test_a_crash_recorded_by_the_phase_is_listed_by_the_gate(self, plugin_context):

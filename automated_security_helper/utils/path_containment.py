@@ -77,20 +77,53 @@ Failure modes and known limitations
   ``must_exist=False`` usable, but it means containment for a nonexistent path
   is decided lexically after resolution rather than against real directories.
 * Errors are returned, not raised. Callers are expected to turn them into exit
-  code 2 and should not assume a raised exception on rejection.
+  code 2 and should not assume a raised exception on rejection. That includes a
+  path ``resolve()`` cannot follow: a symlink loop in an intermediate component
+  raises ``RuntimeError`` on CPython 3.10-3.12, which is returned as a
+  ``SYMLINK`` rejection rather than propagated. CPython 3.13 raises nothing
+  there: it resolves as far as it can and appends the rest unchecked, so the
+  loop stayed in the answer, ``is_relative_to`` read the text as inside, and
+  the path was accepted. The resolved path is therefore asked about once more
+  with ``os.stat`` (``_is_a_loop``), which the kernel answers with ``ELOOP``
+  for a loop on any version (Windows with its error 1921), and that is the same
+  ``SYMLINK`` rejection. A path
+  that does not exist answers ``ENOENT`` there, not ``ELOOP``, so
+  ``must_exist=False`` is unchanged. It also includes a candidate or
+  root holding a NUL character, which no file system path can: ``os.lstat`` and
+  ``resolve()`` raise ``ValueError`` for one, and it is returned as an
+  ``EMBEDDED_NUL`` rejection before either is asked.
+* On a file system that compares names without regard to case (macOS's default)
+  a candidate spelled in another case than the root is the same directory, but
+  ``is_relative_to`` compares the text. When the text says "outside", the
+  candidate's ancestors are compared with the root by identity
+  (device and inode, ``output_dir_links.same_by_identity``, which gives no
+  identity on a mount that reports inode 0), so such a spelling is accepted where
+  it names the same directory and still rejected on a case-sensitive volume,
+  where it does not.
+  The ``resolved`` field keeps the caller's spelling either way.
+* A rejection message names the candidate and the root as given, never the real
+  path the candidate resolves to: the workspace resolver echoes these messages to
+  an MCP client, which would otherwise learn where a server-side link leads.
 """
 
 from __future__ import annotations
 
+import errno
 import os
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Optional, Union
+
+from automated_security_helper.utils.output_dir_links import same_by_identity
 
 PathLike = Union[str, Path]
 
 _PARENT = ".."
+
+#: ``ERROR_CANT_RESOLVE_FILENAME``: what Windows answers ``os.stat`` with for a
+#: reparse-point loop, which it reports with no ``ELOOP`` (``_is_a_loop``).
+_WINERROR_CANT_RESOLVE_FILENAME = 1921
 
 
 class PathContainmentViolation(str, Enum):
@@ -103,6 +136,7 @@ class PathContainmentViolation(str, Enum):
     OUTSIDE_ROOT = "outside-root"
     SYMLINK = "symlink"
     MISSING = "missing"
+    EMBEDDED_NUL = "embedded-nul"
 
 
 @dataclass(frozen=True)
@@ -143,10 +177,39 @@ def _has_parent_component(value: PathLike) -> bool:
     """True when any whole path component of *value* is ``..``.
 
     Tokenises through PurePosixPath after normalising backslashes, so a
-    Windows-style separator is understood on POSIX as well. Whole components
-    only: ``a..b`` is a legal filename, not traversal.
+    Windows-style separator is understood on POSIX as well, and through
+    PureWindowsPath, which reads a drive-relative ``C:..\\b`` as the drive and
+    then ``..``: read as POSIX text that is one component, ``C:..``, and the
+    traversal passed. Whole components only: ``a..b`` is a legal filename, not
+    traversal.
     """
-    return _PARENT in PurePosixPath(str(value).replace("\\", "/")).parts
+    text = str(value)
+    return (
+        _PARENT in PurePosixPath(text.replace("\\", "/")).parts
+        or _PARENT in PureWindowsPath(text).parts
+    )
+
+
+def _is_within(resolved: Path, resolved_root: Path) -> bool:
+    """Whether *resolved* is at or below *resolved_root*.
+
+    By text first (``is_relative_to``), then, when the text says no, by identity:
+    *resolved* or one of its parents is the root's own directory
+    (``same_by_identity``: device and inode). On a case-insensitive file system a
+    candidate spelled in another case than the root names the same directory and
+    the text alone rejected it; on a case-sensitive one the two are different
+    directories and the identity check says so. A path that does not exist has no
+    identity and is skipped, so a nonexistent candidate is decided by the text, as
+    before. A mount that reports inode 0 for every file gives no identity either:
+    ``os.path.samefile`` read every directory on it as the root, and an outside
+    candidate was accepted.
+    """
+    if resolved.is_relative_to(resolved_root):
+        return True
+    return any(
+        same_by_identity(ancestor, resolved_root)
+        for ancestor in (resolved, *resolved.parents)
+    )
 
 
 def _reject(
@@ -163,6 +226,31 @@ def _reject(
             message=message,
         )
     )
+
+
+def _is_a_loop(resolved: Path) -> bool:
+    """Whether a component of *resolved* is a symlink loop ``resolve()`` left in.
+
+    CPython 3.13's non-strict ``resolve()`` raises nothing on a loop: it keeps
+    the looping component and appends what follows unchecked, so the text of
+    the answer looks like a path below the root. ``os.stat`` follows every
+    component, the last included, and the kernel answers ``ELOOP`` for a loop
+    among them on every version; a path that merely does not exist answers
+    ``ENOENT`` and is not a loop. The last component counts too: a root that is
+    itself the looping link, with the candidate ``.``, was accepted when only
+    the components before the last were followed. Windows has no ``ELOOP``: a
+    reparse-point loop fails ``os.stat`` with ``ERROR_CANT_RESOLVE_FILENAME``
+    (winerror 1921), the error CPython 3.10-3.12's own ``resolve()`` checks for,
+    so that counts as a loop as well. Any other error is left to the checks that
+    follow.
+    """
+    try:
+        os.stat(resolved)
+    except OSError as error:
+        return error.errno == errno.ELOOP or (
+            getattr(error, "winerror", None) == _WINERROR_CANT_RESOLVE_FILENAME
+        )
+    return False
 
 
 def validate_contained_path(
@@ -187,8 +275,18 @@ def validate_contained_path(
         canonical absolute path; on failure ``error`` names the offending entry
         and the rule it broke. Callers turn a failure into exit code 2.
     """
-    # Text-level check first: it does not touch the filesystem, and it is the
-    # one rule that must hold regardless of where the path would resolve to.
+    # Text-level checks first: they do not touch the filesystem. A NUL names no
+    # file, and os.lstat and resolve() raise ValueError for one, which the
+    # callers' except clauses (OSError, ValueError) do not all cover.
+    for text, what in ((candidate, "candidate"), (root, "root")):
+        if "\x00" in str(text):
+            return _reject(
+                PathContainmentViolation.EMBEDDED_NUL,
+                text,
+                root,
+                f"the {what} '{_display(text)}' holds a NUL character; no path does",
+            )
+    # The one rule that must hold regardless of where the path would resolve to.
     if _has_parent_component(candidate):
         return _reject(
             PathContainmentViolation.PARENT_TRAVERSAL,
@@ -206,7 +304,24 @@ def validate_contained_path(
             "the root must be expressed without traversing upward",
         )
 
-    resolved_root = Path(root).resolve()
+    # resolve() raises RuntimeError on CPython 3.10-3.12 when a component on the
+    # way is a symlink loop (and OSError for a few other unreadable shapes). The
+    # module promises a returned rejection, never a raised one: the workspace
+    # resolver catches only OSError and ValueError around this call. CPython
+    # 3.13 raises nothing and leaves the loop in the answer (_is_a_loop).
+    try:
+        resolved_root = Path(root).resolve()
+        unresolved = _is_a_loop(resolved_root)
+    except (RuntimeError, OSError):
+        unresolved = True
+    if unresolved:
+        return _reject(
+            PathContainmentViolation.SYMLINK,
+            root,
+            root,
+            f"root '{_display(root)}' cannot be resolved: a component on the way "
+            "to it is a symlink loop or cannot be read",
+        )
 
     # Joining handles relative and absolute candidates without a branch: an
     # absolute candidate discards the root and is then held to the same
@@ -226,6 +341,13 @@ def validate_contained_path(
         names_another_path = _is_link_stat(os.lstat(joined))
     except OSError:
         names_another_path = False
+    # The root itself is accepted, and so is naming it by the spelling the caller
+    # gave for it, link or not: an absolute candidate equal to a root reached
+    # through a link was refused as a symlink while "." was accepted.
+    if names_another_path and os.path.normcase(
+        os.path.normpath(joined)
+    ) == os.path.normcase(os.path.normpath(os.path.abspath(root))):
+        names_another_path = False
     if names_another_path:
         return _reject(
             PathContainmentViolation.SYMLINK,
@@ -235,15 +357,26 @@ def validate_contained_path(
             "project directories must be real directories",
         )
 
-    resolved = joined.resolve()
+    try:
+        resolved = joined.resolve()
+        unresolved = _is_a_loop(resolved)
+    except (RuntimeError, OSError):
+        unresolved = True
+    if unresolved:
+        return _reject(
+            PathContainmentViolation.SYMLINK,
+            candidate,
+            root,
+            f"'{_display(candidate)}' cannot be resolved: a component on the way "
+            "to it is a symlink loop or cannot be read",
+        )
 
-    if not resolved.is_relative_to(resolved_root):
+    if not _is_within(resolved, resolved_root):
         return _reject(
             PathContainmentViolation.OUTSIDE_ROOT,
             candidate,
             root,
-            f"'{_display(candidate)}' resolves to '{_display(resolved)}', "
-            f"which is outside '{_display(resolved_root)}'",
+            f"'{_display(candidate)}' resolves outside '{_display(root)}'",
         )
 
     if must_exist and not resolved.is_dir():
@@ -252,7 +385,7 @@ def validate_contained_path(
             candidate,
             root,
             f"'{_display(candidate)}' does not exist as a directory "
-            f"under '{_display(resolved_root)}'",
+            f"under '{_display(root)}'",
         )
 
     return PathContainmentResult(resolved=resolved)

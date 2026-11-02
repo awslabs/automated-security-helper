@@ -1,6 +1,6 @@
 # ASH security scan analysis
 
-> [!WARNING]
+> [!CAUTION]
 > **Scan incomplete**
 >
 > 6 actionable findings. Some inputs or scanners were not evaluated.
@@ -23,6 +23,6 @@ Targets left unevaluated:
 
 Generated with Amazon Bedrock. Verify suggestions against the source findings.
 
-[stubbed model response 7]
+[stubbed model response 1]
 
 Build with <3 at Amazon Web Services

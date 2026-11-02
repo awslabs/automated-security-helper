@@ -54,7 +54,7 @@ def test_windows_safe_filter_passthrough_on_ascii(monkeypatch):
 
 
 def test_windows_safe_filter_replaces_emoji_when_active():
-    f = WindowsSafeFilter()
+    f = WindowsSafeFilter(writes=None)
     f._active = True
     record = logging.LogRecord(
         name="ash",
@@ -71,7 +71,7 @@ def test_windows_safe_filter_replaces_emoji_when_active():
 
 
 def test_windows_safe_filter_handles_unicode_encode_error(monkeypatch):
-    f = WindowsSafeFilter()
+    f = WindowsSafeFilter(writes=None)
     f._active = True
     # Inject a character that survives emoji substitution but fails ascii encode
     record = logging.LogRecord(

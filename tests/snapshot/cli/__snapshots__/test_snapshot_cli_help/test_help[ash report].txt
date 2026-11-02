@@ -70,5 +70,7 @@
 │                                      overrides environment variables. Run with                   │
 │                                      --generate-cli-skeleton for a template.                     │
 │ --generate-cli-skeleton              Print a JSON template for --cli-json-input, listing every   │
-│                                      parameter of this command with its default, and exit.       │
+│                                      parameter of this command with its default, or null where   │
+│                                      it is required or an environment variable backs it, and     │
+│                                      exit.                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

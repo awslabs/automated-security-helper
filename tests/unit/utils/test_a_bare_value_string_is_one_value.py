@@ -506,15 +506,20 @@ def test_the_bedrock_client_takes_a_bare_value_as_one():
 
 
 def test_grype_s_path_spellings_take_a_bare_value_as_one():
+    import sys
+
     from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
         _with_path_spellings,
     )
 
     assert _with_path_spellings(CANARY) == [CANARY]
-    assert _with_path_spellings("cfg/./grype.yaml") == [
-        "cfg/./grype.yaml",
-        "cfg/grype.yaml",
-    ]
+    # Path() writes the collapsed spelling natively: the same string as the
+    # POSIX one off Windows, backslashes on it. Both are written out as literals,
+    # so the test pins the spelling and not the product's own expression.
+    expected = ["cfg/./grype.yaml", "cfg/grype.yaml"]
+    if sys.platform == "win32":
+        expected.append("cfg\\grype.yaml")
+    assert _with_path_spellings("cfg/./grype.yaml") == expected
 
 
 def test_a_shard_s_message_takes_a_bare_value_as_one():

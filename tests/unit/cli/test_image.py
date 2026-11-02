@@ -62,7 +62,7 @@ def test_build_ash_image_cli_command_basic(mock_run_ash_scan):
         ash_revision_to_install=None,
         custom_containerfile=None,
         custom_build_arg=[],
-        show_summary=False,
+        show_summary=True,
         config=None,
         config_overrides=[],
         offline=False,
