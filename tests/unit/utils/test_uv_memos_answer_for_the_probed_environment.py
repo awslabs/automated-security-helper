@@ -18,8 +18,14 @@ the availability memo forgets the other executable's answer wholesale,
 the version memo keeps one answer per environment under its tool::spec
 key, so invalidation by tool name still drops them all at once.
 
-Every executable here is a fake /bin/sh script under tmp_path; no cell
-starts a real uv.
+Every executable here is a stand-in program under tmp_path; no cell starts a real
+uv. The stand-ins are made by ``tests/utils/stand_ins.py`` so the host can start
+them: a Python script with this interpreter in its shebang line on POSIX, and on
+Windows, where ``CreateProcess`` never starts a shebang file, a ``.py`` script with
+a ``.bat`` launcher, which is the path a cell hands the runner. Written as
+``/bin/sh`` scripts they could not be started on Windows: the spawn raised
+``OSError``, so the availability probe answered False and the version probe
+answered ``None``.
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
     _reset_uv_tool_runner_caches,
 )
+from tests.utils.stand_ins import write_stand_in
 
 pytestmark = pytest.mark.integration
 
@@ -64,17 +71,21 @@ def probes(monkeypatch):
 
 
 def _answering_uv(tmp_path: Path, name: str, version: str = "0.0.0") -> str:
-    script = tmp_path / name
-    script.write_text(
-        "#!/bin/sh\n"
-        'if [ "$1" = "--version" ]; then echo "uv 0.13.0"; exit 0; fi\n'
-        'if [ "$1" = "tool" ] && [ "$2" = "run" ]; then '
-        f'echo "{version}"; exit 0; fi\n'
-        "exit 64\n",
-        encoding="utf-8",
+    """A uv stand-in that answers ``--version`` and ``tool run``, and exits 64 for
+    anything else. Returns the path a spawn starts: the script on POSIX, the ``.bat``
+    launcher on Windows (see the module docstring)."""
+    source = (
+        "import sys\n"
+        "args = sys.argv[1:]\n"
+        'if args[:1] == ["--version"]:\n'
+        '    print("uv 0.13.0")\n'
+        "    sys.exit(0)\n"
+        'if args[:2] == ["tool", "run"]:\n'
+        f"    print({version!r})\n"
+        "    sys.exit(0)\n"
+        "sys.exit(64)\n"
     )
-    script.chmod(0o755)
-    return str(script)
+    return str(write_stand_in(tmp_path, name, source).files[-1])
 
 
 def _quiet_patches():
