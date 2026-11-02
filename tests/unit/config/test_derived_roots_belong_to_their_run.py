@@ -246,12 +246,21 @@ def _storm(tmp_path, source, config, scoped):
             work = output / ASH_WORK_DIR_NAME
             work.mkdir(parents=True)
             directories[index].append((output, work))
-    start_together = threading.Barrier(STORM_THREADS)
+    # The barrier's action applies the switch-interval shrink in the last
+    # arriving thread, right before every thread is released: the interleaving
+    # the test measures happens in the build loops, while the race to REACH
+    # the barrier crawls under a 1 microsecond interval on a loaded runner.
+    # The wait bound matches the test's own 120 s join bound; a 30 s bound
+    # broke the barrier for all eight threads on loaded macOS runners (one
+    # timeout breaks it for every waiter), which never exercises the product.
+    start_together = threading.Barrier(
+        STORM_THREADS, action=lambda: sys.setswitchinterval(1e-6)
+    )
     failures = []
 
     def build(index):
         try:
-            start_together.wait(30)
+            start_together.wait(120)
             for output, work in directories[index]:
                 if scoped:
                     with path_trust.derived_roots_scope(f"run-{index}"):
@@ -275,7 +284,6 @@ def _storm(tmp_path, source, config, scoped):
         threading.Thread(target=build, args=(index,)) for index in range(STORM_THREADS)
     ]
     previous_interval = sys.getswitchinterval()
-    sys.setswitchinterval(1e-6)
     try:
         for thread in threads:
             thread.start()
