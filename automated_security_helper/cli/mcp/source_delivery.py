@@ -1881,6 +1881,7 @@ def _run_git_step(
     env: Dict[str, str],
     what: str,
     error_type: str,
+    grows_in: Optional[Path] = None,
 ) -> subprocess.CompletedProcess[str]:
     """``_run_git``, except that a git which cannot be run fails the delivery.
 
@@ -1905,7 +1906,7 @@ def _run_git_step(
     """
 
     try:
-        return _run_git(cmd, env=env)
+        return _run_git(cmd, env=env, grows_in=grows_in)
     except (OSError, ValueError) as e:
         raise GitCommandError(
             f"{what} failed: git could not be run ({e})", error_type
@@ -2067,7 +2068,9 @@ def _clone(
         str(target),
         program=program,
     )
-    result = _run_git_step(cmd, env=env, what="git clone", error_type=GIT_CLONE_FAILED)
+    result = _run_git_step(
+        cmd, env=env, what="git clone", error_type=GIT_CLONE_FAILED, grows_in=target
+    )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
         disk_full = _is_disk_full(detail)
@@ -2135,6 +2138,7 @@ def _clone(
         env=env,
         what=f"git fetch {ref!r}",
         error_type=GIT_CLONE_FAILED,
+        grows_in=target,
     )
     if fetch.returncode != 0:
         fetch_detail = fetch.stderr.strip() or fetch.stdout.strip()
@@ -2158,6 +2162,7 @@ def _clone(
         env=env,
         what=f"git checkout {ref!r}",
         error_type=GIT_CHECKOUT_FAILED,
+        grows_in=target,
     )
     if checkout.returncode != 0:
         detail = checkout.stderr.strip() or checkout.stdout.strip()
