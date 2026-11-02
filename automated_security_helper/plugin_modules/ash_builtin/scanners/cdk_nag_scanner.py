@@ -5,7 +5,13 @@ import re
 from typing import Annotated, Any, ClassVar, List, Literal, Optional
 from pathlib import Path
 
-from pydantic import ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from automated_security_helper.utils.redacted_model import RedactedSection
 from yaml import YAMLError
@@ -57,7 +63,10 @@ from automated_security_helper.utils.scanned_tree import (
     relative_display,
 )
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
-from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.core import (
+    EMPTY_SCOPE_RULE,
+    IgnorePathWithReason,
+)
 from automated_security_helper.utils.suppression_scope_registry import (
     register_suppression_scope_engine,
 )
@@ -736,6 +745,32 @@ class CdkNagScopeBlock(RedactedSection):
         from automated_security_helper.utils.unknown_keys import refuse_unknown_keys
 
         return refuse_unknown_keys(cls, data, info, cls.ENTRY_KIND)
+
+    @field_validator("applies_to", "resource_path")
+    @classmethod
+    def _refuse_an_empty_value(cls, v, info):
+        """Refuse ``""`` and ``[]``: they read as "any" but can never match.
+
+        ``applies_to`` is exact membership and ``resource_path`` needs a
+        non-blank pattern, so an empty value makes the entry silently inert,
+        the defect class the suppression-scope feature exists to surface
+        (EMPTY_SCOPE_RULE: match-all is the ABSENCE of the field). Both the
+        config checks (validate_suppression_scope) and the matcher
+        (suppression_scope_matches) validate the block through this model, so
+        validation and match time agree: the checks report the field by name
+        and the matcher fails closed.
+        """
+        if v is None:
+            return v
+        empty = (not v.strip()) if isinstance(v, str) else v == []
+        if empty:
+            raise ValueError(
+                EMPTY_SCOPE_RULE.format(
+                    what=f"{info.field_name} in a cdk-nag scope block",
+                    omit="the key",
+                )
+            )
+        return v
 
     @property
     def has_unknown_keys(self) -> bool:

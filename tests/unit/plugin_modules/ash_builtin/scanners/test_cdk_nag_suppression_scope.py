@@ -154,6 +154,42 @@ class TestBlockValidation:
         problems = CdkNagScanner.validate_suppression_scope({"applies_to": None})
         assert problems and "selects nothing" in problems[0]
 
+    def test_an_empty_applies_to_list_is_refused_naming_the_field(self):
+        # At 0a04458b only None-and-None was checked, so [] validated clean
+        # yet could never match: a silently inert entry.
+        problems = CdkNagScanner.validate_suppression_scope({"applies_to": []})
+        assert problems
+        assert "applies_to" in problems[0]
+        assert "selects nothing" in problems[0]
+
+    def test_an_empty_applies_to_string_is_refused_naming_the_field(self):
+        problems = CdkNagScanner.validate_suppression_scope({"applies_to": ""})
+        assert problems
+        assert "applies_to" in problems[0]
+        assert "selects nothing" in problems[0]
+
+    def test_an_empty_resource_path_is_refused_naming_the_field(self):
+        problems = CdkNagScanner.validate_suppression_scope({"resource_path": ""})
+        assert problems
+        assert "resource_path" in problems[0]
+        assert "selects nothing" in problems[0]
+
+    def test_an_empty_valued_block_matches_nothing(self):
+        # Match time agrees with validation: the same model refuses the block,
+        # so the matcher fails closed.
+        for block in ({"applies_to": []}, {"applies_to": ""}, {"resource_path": ""}):
+            assert not CdkNagScanner.suppression_scope_matches(block, _finding())
+
+    def test_a_valid_applies_to_list_still_validates_and_matches(self):
+        # The control the refusal must not narrow.
+        assert (
+            CdkNagScanner.validate_suppression_scope({"applies_to": ["Action::logs:*"]})
+            == []
+        )
+        assert CdkNagScanner.suppression_scope_matches(
+            {"applies_to": ["Action::logs:*"]}, _finding()
+        )
+
     def test_a_valid_block_reports_nothing(self):
         assert (
             CdkNagScanner.validate_suppression_scope(
