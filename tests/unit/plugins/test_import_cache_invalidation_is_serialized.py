@@ -129,7 +129,9 @@ def test_the_bare_stdlib_call_loses_the_planted_entry_race(racing_importer_cache
     errors = _run_in_two_threads(importlib.invalidate_caches)
     assert len(errors) == 1, f"expected exactly one losing thread, got {errors!r}"
     assert isinstance(errors[0], KeyError)
-    assert racing_importer_cache._planted_key in str(errors[0])
+    # str(KeyError(key)) is repr(key), which doubles Windows backslashes, so
+    # the key is compared to the exception's own argument, exact on every OS.
+    assert errors[0].args[0] == racing_importer_cache._planted_key
 
 
 def test_the_ash_helper_serializes_the_invalidation(racing_importer_cache):
