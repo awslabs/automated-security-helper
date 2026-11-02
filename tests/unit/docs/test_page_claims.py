@@ -17120,6 +17120,7 @@ def test_a_relative_container_runtime_path_is_read_only_where_it_was_typed(
     )
     runner = runner.replace("ABSOLUTE", absolute).replace("USER", user)
     wrapper = wrapper.replace("ABSOLUTE", absolute).replace("USER", user)
+
     def _substituted(value: Any) -> Any:
         # Substitute on the object's string leaves, never on JSON text: a
         # Windows path's backslashes would be invalid escapes inside it.
