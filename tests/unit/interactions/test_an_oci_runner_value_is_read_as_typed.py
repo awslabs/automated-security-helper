@@ -343,7 +343,7 @@ def test_the_leftover_sweep_raises_a_refused_wrapper_instead_of_warning(
 def test_the_leftover_sweep_with_no_record_starts_and_reads_nothing(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(rac, "leftover_records", lambda: [])
+    monkeypatch.setattr(rac, "leftover_records", list)
     monkeypatch.setenv("OCI_RUNNER_WRAPPER", "bin/sudo")
 
     assert rac.sweep_leftovers_before_run(None) == []
