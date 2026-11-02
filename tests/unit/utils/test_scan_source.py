@@ -1456,7 +1456,12 @@ def test_a_record_ending_in_crlf_is_read_as_git_reads_it(isolated_tmp):
 
 def _git_lists_it(checkout: Path, worktree: Path) -> bool:
     """Whether ``git worktree list`` lists *worktree* and does not call it
-    prunable: git read its admin dir's record as naming it."""
+    prunable: git read its admin dir's record as naming it.
+
+    The listed path is compared as a path, the way ``git_worktree_paths`` reads
+    it, and not as text: git for Windows prints forward slashes where
+    ``str(worktree)`` has backslashes, so a text comparison never matched there
+    and every ending read as "not listed"."""
     listing = subprocess.run(
         ["git", "worktree", "list", "--porcelain", "-z"],
         cwd=checkout,
@@ -1471,7 +1476,7 @@ def _git_lists_it(checkout: Path, worktree: Path) -> bool:
         elif field and entries:
             entries[-1][1].append(field)
     return any(
-        path == str(worktree)
+        Path(path) == worktree
         and not any(attribute.startswith(b"prunable") for attribute in attributes)
         for path, attributes in entries
     )
@@ -1639,7 +1644,9 @@ def test_a_record_replaced_by_a_fifo_after_the_entry_check_is_refused(
     from automated_security_helper.utils import scan_source
 
     regular = isolated_tmp / "regular"
-    regular.write_text("/somewhere/.git\n", encoding="utf-8")
+    # Bytes, not text: write_text turns the newline into CRLF on Windows, and
+    # the read below is compared with the exact text.
+    regular.write_bytes(b"/somewhere/.git\n")
     assert scan_source._read_gitdir_record(regular) == "/somewhere/.git\n"
     record = isolated_tmp / "gitdir"
     keep = _fifo_holding(record, "/somewhere/.git\n")
@@ -1879,8 +1886,9 @@ def _git_follows_side(checkout: Path, worktree: Path) -> bool:
     entry = None
     for field in listing.split(b"\0"):
         if field.startswith(b"worktree "):
-            entry = os.fsdecode(field[len(b"worktree ") :])
-        elif entry == str(worktree) and field == b"branch refs/heads/side":
+            # A path, not text: see _git_lists_it.
+            entry = Path(os.fsdecode(field[len(b"worktree ") :]))
+        elif entry == worktree and field == b"branch refs/heads/side":
             return True
     return False
 
@@ -1965,7 +1973,10 @@ def test_a_head_is_read_as_git_reads_it(isolated_tmp, kind, prefix, ending, unfo
         assert plain_after is unfollowed
 
 
-@pytest.mark.skipif(os.name == "nt", reason="file names are not bytes here")
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="only Linux filesystems take a name that is not UTF-8",
+)
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
 @pytest.mark.integration
 def test_a_branch_whose_name_is_not_utf8_is_followed_as_git_follows_it(
@@ -2586,7 +2597,9 @@ def _planted_in_ignored_build(superproject: Path, kind: str) -> Path:
         assert admin.is_dir()
         (planted / ".git").write_text(f"gitdir: {admin.as_posix()}\n", encoding="utf-8")
     else:
-        _symlink_or_skip(planted / ".git", "../../.git")
+        # Native separators, as the other links in this file are made: Windows
+        # resolves a relative link target only when it is spelled with backslashes.
+        _symlink_or_skip(planted / ".git", os.path.join("..", "..", ".git"))
     return planted
 
 
@@ -2972,7 +2985,15 @@ def test_an_entry_git_cannot_resolve_is_dropped_as_git_drops_it(
     monkeypatch.setenv(
         "GIT_CEILING_DIRECTORIES", os.pathsep.join([str(isolated_tmp.parent), entry])
     )
-    assert git_repository_root(home / "src") == home.resolve()
+    git_drops_it = git_repository_root(home / "src") == home.resolve()
+    if os.name == "nt" and not git_drops_it:
+        # Windows normalizes `..` before it looks a path up, so there the entry
+        # can name home, and git keeps it as a ceiling instead of dropping it.
+        # With no entry dropped, there is nothing for the check to agree with.
+        pytest.skip(
+            "this git does not drop home/missing/.. (no repository at home/src)"
+        )
+    assert git_drops_it
 
     assert recorded_scan_source(project, git_repository_root, {}) is None
 
@@ -3314,6 +3335,11 @@ class TestTheWalkAgreesWithRealGitDiscovery:
     def _stand_in_git(isolated_tmp, monkeypatch):
         """A git first on PATH that logs each start and answers as git does
         outside a repository. Returns the log it writes."""
+        if os.name == "nt":
+            # The control below is what shows it: Windows cannot start a shell
+            # script, and ASH looks for git.exe on the whole PATH before it tries
+            # git.bat or git.cmd, so the real git runs and nothing is logged.
+            pytest.skip("the git stand-in is a POSIX shell script")
         log = isolated_tmp / "git-starts.log"
         bin_dir = isolated_tmp / "stand-in-bin"
         bin_dir.mkdir()
