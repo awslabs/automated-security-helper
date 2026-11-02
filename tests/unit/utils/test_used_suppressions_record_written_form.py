@@ -769,3 +769,51 @@ def test_the_results_json_carries_no_environment_value(tmp_path, config):
     assert entries, dumped
     assert all("ENVCANARYG9" not in entry for entry in entries), entries
     assert f"{WRITTEN}|SECRET-AWS-ACCESS-KEY|*|*" in entries, entries
+
+
+def test_a_canonical_scopes_written_form_reaches_the_id(tmp_path, monkeypatch):
+    """A ``scope.resource_id`` read from the environment is recorded by its
+    reference in the id: the written id equals the raw YAML dict's id (the
+    config linter's keying) and never holds the resolved value. The entry-level
+    sugar is covered by the flat record; this pins the canonical spelling,
+    which has no flat field for the record to rewrite."""
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+    from automated_security_helper.models.core import suppression_id
+    from automated_security_helper.utils.suppression_matcher import (
+        recorded_suppressions,
+        written_suppression_id,
+    )
+
+    construct = "Stack/EnvCanaryRole/DefaultPolicy/Resource"
+    monkeypatch.setenv("ASH_G9_CONSTRUCT", construct)
+    profile = tmp_path / "suppressions.ash.yaml"
+    profile.write_text(
+        "project_name: canonical-scope\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - path: cdk.out/*.template.json\n"
+        "      rule_id: AwsSolutions-IAM5\n"
+        "      reason: r\n"
+        "      scope:\n"
+        "        resource_id: ${ASH_G9_CONSTRUCT}\n",
+        encoding="utf-8",
+    )
+    loaded = load_config_file_for_run(profile)[1]
+    entry = loaded.global_settings.suppressions[0]
+    # The controls: the value resolved, in the canonical spelling alone.
+    assert entry.scope is not None and entry.scope.resource_id == construct
+    assert entry.resource_id is None
+
+    written_id = written_suppression_id(entry, recorded_suppressions(loaded))
+
+    raw = {
+        "path": "cdk.out/*.template.json",
+        "rule_id": "AwsSolutions-IAM5",
+        "reason": "r",
+        "scope": {"resource_id": "${ASH_G9_CONSTRUCT}"},
+    }
+    assert written_id == suppression_id(raw), written_id
+    assert "${ASH_G9_CONSTRUCT}" in written_id, written_id
+    assert construct not in written_id, written_id
