@@ -104,7 +104,7 @@ def _git_that_fails_at(step: str):
     by the command word in its argv.
     """
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         name = next(
             part for part in cmd if part in ("clone", "fetch", "checkout", "rev-parse")
         )

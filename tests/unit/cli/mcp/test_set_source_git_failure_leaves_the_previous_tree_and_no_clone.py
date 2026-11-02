@@ -52,7 +52,9 @@ def _clone_that_writes(name: str) -> _Run:
     """A ``_run_git`` whose clone writes ``name`` into the target and whose other
     commands succeed."""
 
-    def run(cmd: Any, *, env: Any) -> "subprocess.CompletedProcess[str]":
+    def run(
+        cmd: Any, *, env: Any, grows_in: Any = None
+    ) -> "subprocess.CompletedProcess[str]":
         if "clone" in cmd:
             (Path(cmd[-1]) / name).write_text("x = 1\n", encoding="utf-8")
         return _completed(cmd)
@@ -121,7 +123,9 @@ def test_a_command_that_raises_leaves_the_previous_tree(
 def test_a_failure_after_the_clone_leaves_the_previous_tree(delivered) -> None:
     """The clone is of the default branch; the ref the caller asked for never arrived."""
 
-    def run(cmd: Any, *, env: Any) -> "subprocess.CompletedProcess[str]":
+    def run(
+        cmd: Any, *, env: Any, grows_in: Any = None
+    ) -> "subprocess.CompletedProcess[str]":
         if "clone" in cmd:
             (Path(cmd[-1]) / "default_branch.py").write_text(
                 "y = 2\n", encoding="utf-8"
@@ -154,7 +158,9 @@ def test_a_scan_with_no_source_dir_reads_the_previous_tree_after_a_failed_delive
 
 
 def test_control_a_git_that_exits_non_zero_leaves_the_previous_tree(delivered) -> None:
-    def run(cmd: Any, *, env: Any) -> "subprocess.CompletedProcess[str]":
+    def run(
+        cmd: Any, *, env: Any, grows_in: Any = None
+    ) -> "subprocess.CompletedProcess[str]":
         return _completed(cmd, returncode=128, stderr="fatal: repository not found")
 
     with (
@@ -220,7 +226,9 @@ def test_an_error_no_handler_names_after_the_clone_leaves_the_previous_tree(
 
     failure = RuntimeError("an error the delivery does not expect")
 
-    def run(cmd: Any, *, env: Any) -> "subprocess.CompletedProcess[str]":
+    def run(
+        cmd: Any, *, env: Any, grows_in: Any = None
+    ) -> "subprocess.CompletedProcess[str]":
         if "clone" in cmd:
             (Path(cmd[-1]) / "default_branch.py").write_text(
                 "y = 2\n", encoding="utf-8"

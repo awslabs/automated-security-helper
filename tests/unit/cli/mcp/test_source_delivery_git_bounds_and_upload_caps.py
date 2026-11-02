@@ -168,7 +168,7 @@ class TestAClonedRepositoryMustHaveACommit:
     def _steps(self, head_rc: int):
         calls: List[List[str]] = []
 
-        def fake_step(cmd, *, env, what, error_type):
+        def fake_step(cmd, *, env, what, error_type, grows_in=None):
             calls.append(list(cmd))
             rc = head_rc if "rev-parse" in cmd else 0
             return subprocess.CompletedProcess(cmd, rc, "", "")

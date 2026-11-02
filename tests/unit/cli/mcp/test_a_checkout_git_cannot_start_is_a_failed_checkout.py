@@ -132,7 +132,7 @@ def test_git_that_cannot_be_started_for_the_checkout_is_a_failed_checkout(
     real_run_git = sd._run_git
     clone_on_disk_at_the_checkout: List[bool] = []
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         if _subcommand(cmd) == "checkout":
             # The checkout runs in the staging directory: `git -C <dir> checkout`.
             staging = Path(cmd[cmd.index("-C") + 1])
@@ -171,7 +171,7 @@ def test_a_checkout_that_git_can_start_for_is_delivered(delivery, monkeypatch) -
     real_run_git = sd._run_git
     ran: List[str] = []
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         ran.append(_subcommand(cmd))
         return real_run_git(cmd, env=env)
 
@@ -190,7 +190,7 @@ def test_a_checkout_that_runs_past_its_time_is_still_a_timeout(
     """Catching the error of starting git does not take over the timeout's."""
     real_run_git = sd._run_git
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         if _subcommand(cmd) == "checkout":
             raise sd.GitTimeoutError("git checkout did not finish and was stopped")
         return real_run_git(cmd, env=env)

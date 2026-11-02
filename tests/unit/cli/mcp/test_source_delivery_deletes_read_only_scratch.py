@@ -255,7 +255,7 @@ def test_a_failed_clone_removes_the_directory_git_left_with_read_only_files(
     pack file: the delivery deletes it, read-only files included."""
     session = "failed-clone"
 
-    def clone_that_fails(cmd, *, env):
+    def clone_that_fails(cmd, *, env, grows_in=None):
         _clone_tree_with_a_read_only_pack(Path(cmd[-1]))
         return subprocess.CompletedProcess(cmd, 128, "", "fatal: early EOF")
 
@@ -285,7 +285,7 @@ def test_a_new_clone_replaces_a_previous_one_whose_pack_files_are_read_only(
     _clone_tree_with_a_read_only_pack(previous)
     sd._set_session_source_dir(session, previous)
 
-    def clone_that_works(cmd, *, env):
+    def clone_that_works(cmd, *, env, grows_in=None):
         target = Path(cmd[-1])
         target.mkdir(parents=True, exist_ok=True)
         (target / "cloned.txt").write_text("new delivery\n")
