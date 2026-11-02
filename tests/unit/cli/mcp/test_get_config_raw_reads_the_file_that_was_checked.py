@@ -20,14 +20,23 @@ named YAML file. Here every format the raw read parses (YAML, JSON, TOML) and th
 file discovery selects are covered. The size bound is pinned for YAML and JSON,
 which a plain ``open()`` read whole; the TOML read already went through
 ``read_config_bytes`` and is held by a control that passes on the base.
+
+Windows cannot make the replacement the "replaced after the check" cells put in
+the check. The server opens the file before it asks the grant about it and keeps
+that descriptor until the read is done (``config_sources.open_config_for_judgment``),
+and a file opened without ``FILE_SHARE_DELETE`` cannot be replaced while it is open
+on Windows. ``os.replace`` there raises ``PermissionError`` from the server's own
+handle, and those cells skip: the replacement they pin is one the operating system
+does not allow on that platform. Anywhere else the same error is the cell's to see.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import pytest
 
@@ -58,26 +67,53 @@ def _environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
 
 
-def _swap_in_a_new_file(path: Path, text: str) -> None:
-    """Replace ``path`` by a different file (a new inode)."""
+def _swap_in_a_new_file(path: Path, text: str, refused: List[BaseException]) -> None:
+    """Replace ``path`` by a different file (a new inode).
+
+    On Windows the server's own open handle on ``path`` refuses it with a
+    ``PermissionError`` (see the module doc). That is recorded in ``refused`` for
+    ``_skip_where_the_server_holds_the_file``, not raised, because this runs inside
+    the server's call, which could turn an exception from it into an answer.
+    Anywhere else the error is a real one and is raised.
+    """
     replacement = path.with_name(path.name + ".new")
     replacement.write_text(text, encoding="utf-8")
-    os.replace(replacement, path)
+    try:
+        os.replace(replacement, path)
+    except PermissionError as error:
+        if sys.platform != "win32":
+            raise
+        refused.append(error)
+
+
+def _skip_where_the_server_holds_the_file(refused: List[BaseException]) -> None:
+    """Skip the cell when the operating system refused its replacement."""
+    if refused:
+        pytest.skip(
+            "Windows does not let a file the server holds open be replaced, so "
+            f"the replacement this cell pins cannot be made ({refused[0]})"
+        )
 
 
 def _swap_after_the_check(
     monkeypatch: pytest.MonkeyPatch, target: Path, text: str
-) -> None:
-    """Make the session's check of ``target`` the last thing before it is replaced."""
+) -> List[BaseException]:
+    """Make the session's check of ``target`` the last thing before it is replaced.
+
+    Returns the list that records a replacement the operating system refused; a cell
+    hands it to ``_skip_where_the_server_holds_the_file`` after the call.
+    """
     real = sandbox.validate_config_input
+    refused: List[BaseException] = []
 
     def validate_then_swap(candidate: Any, *args: Any, **kwargs: Any) -> Any:
         refusal = real(candidate, *args, **kwargs)
         if Path(candidate).resolve() == target.resolve():
-            _swap_in_a_new_file(target, text)
+            _swap_in_a_new_file(target, text, refused)
         return refusal
 
     monkeypatch.setattr(sandbox, "validate_config_input", validate_then_swap)
+    return refused
 
 
 def _refused_as_changed(result: Dict[str, Any]) -> None:
@@ -92,10 +128,11 @@ def test_a_named_file_replaced_after_the_check_is_refused(tmp_path, monkeypatch,
     name, checked, swapped = fmt
     target = tmp_path / name
     target.write_text(checked, encoding="utf-8")
-    _swap_after_the_check(monkeypatch, target, swapped)
+    refused = _swap_after_the_check(monkeypatch, target, swapped)
 
     result = mcp_get_config(config_path=str(target), raw=True)
 
+    _skip_where_the_server_holds_the_file(refused)
     _refused_as_changed(result)
 
 
@@ -113,10 +150,11 @@ def test_control_the_checked_file_is_returned(tmp_path, fmt):
 def test_a_discovered_file_replaced_after_the_check_is_refused(tmp_path, monkeypatch):
     target = tmp_path / ".ash.yaml"
     target.write_text("project_name: checked\n", encoding="utf-8")
-    _swap_after_the_check(monkeypatch, target, "project_name: swapped\n")
+    refused = _swap_after_the_check(monkeypatch, target, "project_name: swapped\n")
 
     result = mcp_get_config(search_dir=str(tmp_path), raw=True)
 
+    _skip_where_the_server_holds_the_file(refused)
     _refused_as_changed(result)
 
 
