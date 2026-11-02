@@ -554,6 +554,22 @@ class ToolArgs(BaseModel):
 PACKAGE_SUPPRESSION_FIELDS = ("package_name", "package_version", "package_path")
 
 
+def scope_value_matches(value: str, pattern: str, *, case_sensitive: bool) -> bool:
+    """Whether a scope pattern covers a finding's value: literal first, then glob.
+
+    Literal equality is checked before any glob reading, and the glob escapes
+    ``[`` first, so a cdk-nag construct path or a granular rule qualifier that
+    contains brackets (``AwsSolutions-IAM5[Resource::...]``) is matched as
+    written rather than read as a character class that matches nothing.
+    """
+    if not case_sensitive:
+        value = value.lower()
+        pattern = pattern.lower()
+    if value == pattern:
+        return True
+    return fnmatch.fnmatchcase(value, pattern.replace("[", "[[]"))
+
+
 def suppression_id(suppression: Dict[str, Any]) -> str:
     """Identifier for a suppression given as a dict of its fields.
 
@@ -930,6 +946,9 @@ class AshSuppression(IgnorePathWithReason):
         if not self._package_matches(finding):
             return False
 
+        if not self._scope_matches(finding):
+            return False
+
         if self.symbol is not None:
             if symbol_resolver is None:
                 return False
@@ -938,6 +957,60 @@ class AshSuppression(IgnorePathWithReason):
             )
 
         return True
+
+    def _scope_matches(self, finding: "FlatVulnerability") -> bool:
+        """Whether this suppression's ``scope`` covers ``finding``.
+
+        No scope: today's behavior, unchanged. A scope fails closed on every
+        gap: a scope that selects nothing or kept unknown keys from a results
+        file matches nothing; a resource-scoped entry never matches a finding
+        that carries no resource identity (the same safe direction as "a
+        finding with no line never matches a line-scoped suppression"); and
+        ``engines`` ENUMERATES the engines the entry covers, so a finding from
+        a scanner not listed, or one whose listed plugin does not accept its
+        block, does not match. ``resource_id`` is case-sensitive,
+        ``resource_type`` case-insensitive; both are literal-first, then glob
+        with brackets escaped (``scope_value_matches``).
+        """
+        scope = self.scope
+        if scope is None:
+            return True
+        if scope.selects_nothing or scope.has_unknown_keys:
+            return False
+        if scope.resource_id is not None:
+            if finding.resource_id is None:
+                return False
+            if not scope_value_matches(
+                finding.resource_id, scope.resource_id, case_sensitive=True
+            ):
+                return False
+        if scope.resource_type is not None:
+            if finding.resource_type is None:
+                return False
+            if not scope_value_matches(
+                finding.resource_type, scope.resource_type, case_sensitive=False
+            ):
+                return False
+        if scope.engines is not None:
+            if finding.scanner is None or finding.scanner not in scope.engines:
+                return False
+            if not self._engine_block_matches(
+                finding.scanner, scope.engines[finding.scanner], finding
+            ):
+                return False
+        return True
+
+    def _engine_block_matches(
+        self, scanner_name: str, block: Dict[str, Any], finding: "FlatVulnerability"
+    ) -> bool:
+        """Whether the named scanner's plugin accepts ``block`` for ``finding``.
+
+        Fails closed: with no plugin registered for ``scanner_name`` (not
+        installed, not enabled, or one that does not support engine-scoped
+        suppressions), the block matches nothing. The dispatch arrives with the
+        plugin hooks; until a plugin registers, every block is unmatched.
+        """
+        return False
 
     def _package_matches(self, finding: "FlatVulnerability") -> bool:
         """Return True if every package field set here matches ``finding``."""
