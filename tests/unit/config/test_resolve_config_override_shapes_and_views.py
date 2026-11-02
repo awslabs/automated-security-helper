@@ -55,6 +55,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigValidationError,
 )
+from automated_security_helper.utils.unknown_keys import WARN_UNKNOWN_KEYS
 
 pytestmark = pytest.mark.unit
 
@@ -198,7 +199,14 @@ class TestValidateConfigDocument:
         monkeypatch.setattr(AshConfig, "model_validate", spy)
         document = SimpleNamespace(data={"project_name": "p"}, environment_values=[])
         validate_config_document(document, tmp_path / "ash.yaml")
-        assert seen.get("context") == {"strict_file_load": True}
+        # The context build_config composes (_entry_warn_context): the strict
+        # file-load marker, and the warn-then-refuse rollout's list for a
+        # document that does not set fail_on_unknown_keys. Asserted by key, not
+        # as an exact dict: the composition is the contract, not its key count.
+        context = seen.get("context")
+        assert context is not None, seen
+        assert context.get("strict_file_load") is True, context
+        assert isinstance(context.get(WARN_UNKNOWN_KEYS), list), context
         assert seen.get("strict") is True
 
 
