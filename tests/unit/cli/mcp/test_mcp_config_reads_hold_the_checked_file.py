@@ -8,12 +8,23 @@ identity ``file_identity`` gave the file at the check is handed to the read
 (``read_config_bytes(..., expect=...)``), so a file swapped in between is
 refused with ESTALE and not read. Each cell swaps the file after the identity is
 taken, with a same-file control where nothing is swapped.
+
+Windows cannot make the swap while ``get_config`` holds the file. The call keeps
+the descriptor it opened to judge the file until it has answered
+(``config_sources.open_config_for_judgment``), and a file opened without
+``FILE_SHARE_DELETE`` cannot be replaced on Windows while it is open. A swap made
+from inside such a call gets a ``PermissionError`` there, from the server's own
+handle, and its cell skips: the replacement it pins is one the operating system
+does not allow on that platform. Anywhere else the same error is the cell's to
+see.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+from typing import List
 
 import pytest
 
@@ -42,51 +53,93 @@ def _environment(monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
 
 
-def _swap_in_a_new_file(path: Path, text: str) -> None:
-    """Replace `path` by a different file (a new inode), as a racing writer would."""
+class _Calls(list):
+    """What a swap hook has seen, and the swaps the operating system refused."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.refused: List[BaseException] = []
+
+
+def _swap_in_a_new_file(
+    path: Path, text: str, refused: List[BaseException] | None = None
+) -> bool:
+    """Replace `path` by a different file (a new inode), as a racing writer would.
+
+    True when it was replaced. A swap made from inside the call under test passes
+    `refused`: on Windows the server's own open handle on `path` refuses it with a
+    ``PermissionError`` (see the module doc), and that is recorded there for
+    ``_skip_where_the_server_holds_the_file``, not raised, because it would be
+    raised inside the server's call, which could turn it into an answer. Anywhere
+    else the error is a real one and is raised, as it is for a swap made without
+    `refused`.
+    """
     replacement = path.with_name(path.name + ".new")
     replacement.write_text(text, encoding="utf-8")
-    os.replace(replacement, path)
+    try:
+        os.replace(replacement, path)
+    except PermissionError as error:
+        if refused is None or sys.platform != "win32":
+            raise
+        refused.append(error)
+        return False
+    return True
 
 
-def _swap_after_the_check(monkeypatch, path: Path, swap: bool) -> list:
+def _skip_where_the_server_holds_the_file(refused: List[BaseException]) -> None:
+    """Skip the cell when the operating system refused its swap (see the module doc)."""
+    if refused:
+        pytest.skip(
+            "Windows does not let a file the server holds open be replaced, so "
+            f"the swap this cell pins cannot be made ({refused[0]})"
+        )
+
+
+def _swap_after_the_check(monkeypatch, path: Path, swap: bool) -> _Calls:
     """Make the first ``file_identity`` call of the tool swap `path` after it.
 
     The tool takes the identity at its check; a swap right after is the race
     the identity is there to refuse. Returns the paths the identity was taken
-    for, so a cell can show the check ran.
+    for, so a cell can show the check ran; its ``refused`` lists a swap the
+    operating system refused.
     """
     real = config_sources.file_identity
-    taken: list = []
+    taken = _Calls()
 
     def identity_then_swap(candidate):
         identity = real(candidate)
         taken.append(Path(candidate))
         if swap and len(taken) == 1:
-            _swap_in_a_new_file(path, SWAPPED)
+            _swap_in_a_new_file(path, SWAPPED, taken.refused)
         return identity
 
     monkeypatch.setattr(config_sources, "file_identity", identity_then_swap)
     return taken
 
 
-def _swap_when_the_read_starts(monkeypatch, path: Path) -> list:
+def _swap_when_the_read_starts(monkeypatch, path: Path) -> _Calls:
     """Swap `path` the moment get_config calls ``resolve_config`` for it.
 
     That call is the read. Everything the tool checks, the grant check and the
     identity it holds the read to included, comes before it, so the swap lands
     after the check whatever number of identities the tool and the checks it runs
     took on the way (a discovered file is checked by discovery before the tool
-    checks it). Returns the files swapped, so a cell can show the swap happened.
+    checks it). Returns the files swapped, so a cell can show the swap happened;
+    its ``refused`` lists a swap the operating system refused.
     """
     real = resolve_config_module.resolve_config
-    swapped: list = []
+    swapped = _Calls()
 
     def swap_then_resolve(*args, **kwargs):
         named = kwargs.get("config_path", args[0] if args else None)
-        if not swapped and named is not None and Path(named) == path:
-            _swap_in_a_new_file(path, SWAPPED)
-            swapped.append(Path(named))
+        if (
+            not swapped
+            and not swapped.refused
+            and named is not None
+            and Path(named) == path
+        ):
+            if _swap_in_a_new_file(path, SWAPPED, swapped.refused):
+                swapped.append(Path(named))
         return real(*args, **kwargs)
 
     monkeypatch.setattr(resolve_config_module, "resolve_config", swap_then_resolve)
@@ -172,6 +225,7 @@ class TestGetConfigReadsTheFileItChecked:
 
         result = mcp_get_config(config_path=str(config))
 
+        _skip_where_the_server_holds_the_file(taken.refused)
         assert taken, "premise: the tool took an identity at its check"
         assert result.get("success") is False, result
         assert SWAP_MARKER not in str(result), result
@@ -201,6 +255,7 @@ class TestGetConfigReadsTheFileItChecked:
 
         result = mcp_get_config(search_dir=str(tmp_path))
 
+        _skip_where_the_server_holds_the_file(swapped.refused)
         assert swapped, "premise: the file was swapped between the check and the read"
         assert result.get("success") is False, result
         assert SWAP_MARKER not in str(result), result
@@ -225,6 +280,7 @@ class TestGetConfigReadsTheFileItChecked:
 
         result = mcp_get_config(config_path=str(config), raw=True)
 
+        _skip_where_the_server_holds_the_file(taken.refused)
         assert taken, "premise: the tool took an identity at its check"
         assert result.get("success") is False, result
         assert SWAP_MARKER not in str(result), result
@@ -251,6 +307,7 @@ class TestValidateConfigChecksTheFileItChecked:
 
         result = mcp_validate_config(config_path=str(config))
 
+        _skip_where_the_server_holds_the_file(taken.refused)
         assert taken, "premise: the tool took an identity at its check"
         assert result["valid"] is False, result
         assert SWAP_MARKER not in str(result), result

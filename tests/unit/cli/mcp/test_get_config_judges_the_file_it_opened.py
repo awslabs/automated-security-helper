@@ -14,14 +14,24 @@ for another reason cannot pass a changing-name cell.
 The grant is a stand-in policy in these cells (``_config_input_refusal``): a path
 under ``outside/`` is refused and any other is permitted, so the cells do not
 depend on the environment's roots.
+
+Windows cannot make the changes a cell makes from inside the check while the
+server holds the file. The call keeps the descriptor it opened to judge the file
+until it has answered (``config_sources.open_config_for_judgment``), and a file
+opened without ``FILE_SHARE_DELETE`` cannot be replaced on Windows while it is
+open. A replacement made from inside the call gets a ``PermissionError`` there,
+from the server's own handle, and its cell skips: the change it pins is one the
+operating system does not allow on that platform. Anywhere else the same error is
+the cell's to see.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 
@@ -54,7 +64,29 @@ class _Layout:
         self.far.write_text(f"project_name: {CANARY}\n", encoding="utf-8")
         self.name = self.granted / "ash-config.yaml"
 
-    def lead_to_the_outside_file(self) -> None:
+    def _put_at_the_name(
+        self, source: Path, refused: Optional[List[BaseException]]
+    ) -> None:
+        """``os.replace(source, self.name)``.
+
+        A change made from inside the call under test passes `refused`: on Windows
+        the server's own open handle on the name can refuse it with a
+        ``PermissionError`` (see the module doc), and that is recorded there for
+        ``_skip_where_the_server_holds_the_file``, not raised, because it would be
+        raised inside the server's call, which could turn it into an answer.
+        Anywhere else the error is a real one and is raised, as it is for a change
+        made without `refused`.
+        """
+        try:
+            os.replace(source, self.name)
+        except PermissionError as error:
+            if refused is None or sys.platform != "win32":
+                raise
+            refused.append(error)
+
+    def lead_to_the_outside_file(
+        self, refused: Optional[List[BaseException]] = None
+    ) -> None:
         link = self.granted / ".link-to-far"
         if os.path.lexists(link):
             link.unlink()
@@ -62,12 +94,21 @@ class _Layout:
             link.symlink_to(self.far)
         except (OSError, NotImplementedError) as error:
             pytest.skip(f"cannot make a symbolic link here: {error}")
-        os.replace(link, self.name)
+        self._put_at_the_name(link, refused)
 
-    def be_a_granted_file(self) -> None:
+    def be_a_granted_file(self, refused: Optional[List[BaseException]] = None) -> None:
         replacement = self.granted / ".granted-file"
         replacement.write_text("project_name: granted\n", encoding="utf-8")
-        os.replace(replacement, self.name)
+        self._put_at_the_name(replacement, refused)
+
+
+def _skip_where_the_server_holds_the_file(refused: List[BaseException]) -> None:
+    """Skip the cell when the operating system refused a change (the module doc)."""
+    if refused:
+        pytest.skip(
+            "Windows does not let a file the server holds open be replaced, so "
+            f"the change this cell pins cannot be made ({refused[0]})"
+        )
 
 
 def _grant_everything_but_the_outside(monkeypatch, layout: _Layout, after=None) -> None:
@@ -140,18 +181,19 @@ def test_a_name_that_led_elsewhere_while_the_check_resolved_it_is_refused(
     layout = _Layout(tmp_path)
     layout.lead_to_the_outside_file()
     state: List[str] = []
+    refused: List[BaseException] = []
     real_realpath = os.path.realpath
 
     def realpath_that_sees_a_granted_file(path: Any, *args: Any, **kwargs: Any) -> Any:
         if os.fspath(path) == str(layout.name) and not state:
             state.append("granted")
-            layout.be_a_granted_file()
+            layout.be_a_granted_file(refused)
         return real_realpath(path, *args, **kwargs)
 
     def lead_back_to_the_outside_file() -> None:
         if state == ["granted"]:
             state.append("outside")
-            layout.lead_to_the_outside_file()
+            layout.lead_to_the_outside_file(refused)
 
     monkeypatch.setattr(os.path, "realpath", realpath_that_sees_a_granted_file)
     _grant_everything_but_the_outside(
@@ -160,6 +202,7 @@ def test_a_name_that_led_elsewhere_while_the_check_resolved_it_is_refused(
 
     response = _get_config(monkeypatch, layout, discovered)
 
+    _skip_where_the_server_holds_the_file(refused)
     _refused_with_nothing_from_the_outside_file(response)
 
 
@@ -170,18 +213,19 @@ def test_the_resolved_read_shows_nothing_of_a_name_that_led_elsewhere_either(
     layout = _Layout(tmp_path)
     layout.lead_to_the_outside_file()
     state: List[str] = []
+    refused: List[BaseException] = []
     real_realpath = os.path.realpath
 
     def realpath_that_sees_a_granted_file(path: Any, *args: Any, **kwargs: Any) -> Any:
         if os.fspath(path) == str(layout.name) and not state:
             state.append("granted")
-            layout.be_a_granted_file()
+            layout.be_a_granted_file(refused)
         return real_realpath(path, *args, **kwargs)
 
     def lead_back_to_the_outside_file() -> None:
         if state == ["granted"]:
             state.append("outside")
-            layout.lead_to_the_outside_file()
+            layout.lead_to_the_outside_file(refused)
 
     monkeypatch.setattr(os.path, "realpath", realpath_that_sees_a_granted_file)
     _grant_everything_but_the_outside(
@@ -197,6 +241,7 @@ def test_the_resolved_read_shows_nothing_of_a_name_that_led_elsewhere_either(
     else:
         response = mcp_get_config(config_path=str(layout.name))
 
+    _skip_where_the_server_holds_the_file(refused)
     _refused_with_nothing_from_the_outside_file(response)
 
 
@@ -211,18 +256,27 @@ def _arrange_asked_with_an_environment_config(
     other.write_text(f"project_name: {CANARY}\n", encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(config))
     changed: List[bool] = []
+    refused: List[BaseException] = []
 
     def untrusted_after_the_file_changed(*_args: Any, **_kwargs: Any) -> bool:
         # Called once the check has returned and before the file is loaded.
-        if swap and not changed:
-            os.replace(other, config)
-            changed.append(True)
+        if swap and not changed and not refused:
+            try:
+                os.replace(other, config)
+            except PermissionError as error:
+                # The server holds the file it checked (see the module doc).
+                if sys.platform != "win32":
+                    raise
+                refused.append(error)
+            else:
+                changed.append(True)
         return False
 
     monkeypatch.setattr(
         sandbox, "client_named_config_is_untrusted", untrusted_after_the_file_changed
     )
     response = mcp_get_config(config_path=str(config))
+    _skip_where_the_server_holds_the_file(refused)
     assert bool(changed) is swap, "the file did not change where the cell expects it"
     return response
 
