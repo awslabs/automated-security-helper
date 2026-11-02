@@ -20,6 +20,7 @@ from pydantic import ValidationError
 from automated_security_helper.config.resolve_config import build_config
 from automated_security_helper.models.core import (
     AshSuppression,
+    EMPTY_SCOPE_NOTE,
     RESOURCE_ID_CONFLICT_NOTE,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
@@ -114,6 +115,75 @@ class TestSugarFolds:
         assert "resource_id and scope.resource_id disagree; keep one" in str(
             excinfo.value
         )
+
+    def test_an_empty_sugar_value_with_a_scope_block_is_refused(self):
+        # The fold wrote "" into an already-validated scope by plain attribute
+        # assignment, which skips SuppressionScope's validators
+        # (validate_assignment is not set), so the entry loaded silently inert.
+        with pytest.raises(ValidationError) as excinfo:
+            AshSuppression.model_validate(
+                {
+                    "path": "cdk.out/*.template.json",
+                    "reason": "r",
+                    "resource_id": "",
+                    "scope": {"resource_type": "AWS::IAM::Policy"},
+                }
+            )
+        # The refusal names the sugar field the author wrote.
+        assert "an empty resource_id selects nothing" in str(excinfo.value)
+
+    def test_an_empty_sugar_value_without_a_scope_is_still_refused(self):
+        # The control: this config-load refusal predates the fix.
+        with pytest.raises(ValidationError) as excinfo:
+            AshSuppression.model_validate({"path": "a", "reason": "r", "resource_id": ""})
+        assert "selects nothing" in str(excinfo.value)
+
+    def test_a_stored_empty_sugar_value_without_a_scope_still_loads(self):
+        # The fold built the scope with a bare constructor call, which carries
+        # no context, so the tolerance was lost and the whole stored results
+        # file was refused.
+        notes: list = []
+        entry = AshSuppression.model_validate(
+            {
+                "path": "cdk.out/*.template.json",
+                "rule_id": "AwsSolutions-IAM5",
+                "reason": "r",
+                "resource_id": "",
+            },
+            context={TOLERATE_STORED_CONFIG: notes},
+        )
+        assert EMPTY_SCOPE_NOTE in notes
+        assert entry.scope is not None and entry.scope.selects_nothing
+        assert not entry.matches(_finding())
+
+    def test_a_stored_empty_sugar_value_with_a_scope_block_is_noted_and_inert(self):
+        notes: list = []
+        entry = AshSuppression.model_validate(
+            {
+                "path": "cdk.out/*.template.json",
+                "rule_id": "AwsSolutions-IAM5",
+                "reason": "r",
+                "resource_id": "",
+                "scope": {"resource_type": "AWS::IAM::Policy"},
+            },
+            context={TOLERATE_STORED_CONFIG: notes},
+        )
+        assert EMPTY_SCOPE_NOTE in notes
+        assert entry.scope.selects_nothing
+        assert not entry.matches(_finding())
+
+    def test_a_valid_sugar_value_still_folds_and_matches(self):
+        # The control the fix must not narrow: the demo shape keeps working.
+        entry = AshSuppression.model_validate(
+            {
+                "path": "cdk.out/*.template.json",
+                "rule_id": "AwsSolutions-IAM5",
+                "reason": "r",
+                "resource_id": f"{STACK}/Construct3/DefaultPolicy/Resource",
+            }
+        )
+        assert entry.scope.resource_id == f"{STACK}/Construct3/DefaultPolicy/Resource"
+        assert entry.matches(_finding(3))
 
     def test_a_tolerated_disagreement_never_applies(self):
         notes: list = []

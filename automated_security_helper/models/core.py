@@ -994,12 +994,32 @@ class AshSuppression(IgnorePathWithReason):
         key to keep. Under TOLERATE_STORED_CONFIG a disagreement is recorded
         and the entry kept but never applied, as every other unreadable stored
         entry is.
+
+        The fold runs under the SAME context the outer validation carries: a
+        plain attribute write skips SuppressionScope's validators
+        (validate_assignment is not set), and a bare constructor call carries
+        no context, so a stored file's tolerance would be lost and the whole
+        file refused. An empty value is checked here first, so the refusal
+        names the sugar field the author wrote, not scope.resource_id.
         """
         if self.resource_id is None:
             return self
+        empty = not self.resource_id.strip()
+        if empty and tolerated_notes(info) is None:
+            raise ValueError(
+                EMPTY_SCOPE_RULE.format(what="resource_id", omit="the key")
+            )
         if self.scope is None:
-            self.scope = SuppressionScope(resource_id=self.resource_id)
+            self.scope = SuppressionScope.model_validate(
+                {"resource_id": self.resource_id}, context=info.context
+            )
         elif self.scope.resource_id is None:
+            if empty:
+                # The scope was validated before the fold wrote into it, so
+                # its own validator never sees the empty value: record the
+                # note it would have recorded. selects_nothing keeps the
+                # entry inert at match time.
+                tolerated_notes(info).append(EMPTY_SCOPE_NOTE)
             self.scope.resource_id = self.resource_id
         elif self.scope.resource_id != self.resource_id:
             notes = tolerated_notes(info)
