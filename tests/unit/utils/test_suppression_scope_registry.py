@@ -119,6 +119,59 @@ class TestDispatch:
         assert not entry.matches(_finding(rule_id="RULE-1[Resource::*]"))
 
 
+class TestWarnOnceResets:
+    def test_a_reset_makes_the_warning_fire_again(self, caplog):
+        registry._WARNED_ENGINES.discard("reset-engine")
+        entry = _entry({"reset-engine": {"marker": "RULE-1"}})
+        with caplog.at_level(logging.WARNING):
+            entry.matches(_finding(scanner="reset-engine"))
+            entry.matches(_finding(scanner="reset-engine"))
+            registry.reset_unmatched_engine_warnings()
+            entry.matches(_finding(scanner="reset-engine"))
+        warnings = [
+            record
+            for record in caplog.records
+            if "reset-engine" in record.getMessage()
+        ]
+        assert len(warnings) == 2
+
+
+class TestEngineCheckRefusal:
+    def test_the_refusal_is_a_config_validation_error(self):
+        from types import SimpleNamespace
+
+        from automated_security_helper.config.resolve_config import build_config
+        from automated_security_helper.core.exceptions import (
+            ASHConfigValidationError,
+        )
+        from automated_security_helper.core.execution_engine import (
+            ScanExecutionEngine,
+        )
+
+        config = build_config(
+            {
+                "project_name": "engine-check",
+                "fail_on_unknown_keys": True,
+                "global_settings": {
+                    "suppressions": [
+                        {
+                            "rule_id": "R",
+                            "path": "a.py",
+                            "reason": "r",
+                            "scope": {"engines": {"no-such-engine": {"x": 1}}},
+                        }
+                    ]
+                },
+            }
+        )
+        fake_engine = SimpleNamespace(
+            _context=SimpleNamespace(config=config), plugins={}
+        )
+        with pytest.raises(ASHConfigValidationError) as excinfo:
+            ScanExecutionEngine._check_suppression_scope_engines(fake_engine)
+        assert "no-such-engine" in str(excinfo.value)
+
+
 class TestLoadTimeProblems:
     def test_an_unknown_engine_name_gets_a_did_you_mean(self, fake_engine):
         entry = _entry({"fake-enginee": {"marker": "RULE-1"}})

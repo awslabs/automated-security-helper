@@ -56,6 +56,17 @@ def registered_engine_names() -> Set[str]:
     return set(_ENGINE_HOOKS)
 
 
+def reset_unmatched_engine_warnings() -> None:
+    """Forget which engines were warned about, so the next scan warns again.
+
+    The set is per process, and a long-lived process (the MCP server, a
+    workspace scan) runs many scans: without the reset only the first scan got
+    the receipt that a listed engine's blocks suppress nothing. The execution
+    engine calls this as it initializes.
+    """
+    _WARNED_ENGINES.clear()
+
+
 def warn_once_unmatched_engine(scanner_name: str) -> None:
     """Warn, once per name, that a listed engine's blocks suppress nothing.
 

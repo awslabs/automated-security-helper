@@ -613,14 +613,28 @@ class ScanExecutionEngine:
 
         Here rather than at config load, because a config loads before its
         plugin modules do, so the registered scanner names are only known once
-        the engine holds its plugins. The problems follow the same
-        warn-then-refuse policy as unknown keys: refused under
-        ``fail_on_unknown_keys``, otherwise warned, and the entry's listed
-        engine suppresses nothing either way (the matcher fails closed).
+        the engine holds its plugins. ``global_settings.suppressions`` is the
+        one list to read: a workspace's own suppressions are appended into each
+        project's copy of it before the project's engine is built
+        (workspace/execution._project_config_with_policy), so they pass through
+        here too. The problems follow the same warn-then-refuse policy as
+        unknown keys: refused under ``fail_on_unknown_keys`` as the config
+        validation error the loader's refusals carry, otherwise warned. The
+        entry's listed engine suppresses nothing either way (the matcher fails
+        closed).
         """
+        from automated_security_helper.core.exceptions import (
+            ASHConfigValidationError,
+        )
         from automated_security_helper.utils.suppression_scope_registry import (
+            reset_unmatched_engine_warnings,
             suppression_scope_problems,
         )
+
+        # A new engine is a new scan: the matcher's warn-once receipts for
+        # fail-closed engine blocks start over, so a long-lived process (the
+        # MCP server, a workspace scan) warns per scan, not once per process.
+        reset_unmatched_engine_warnings()
 
         config = self._context.config
         suppressions = getattr(config.global_settings, "suppressions", None)
@@ -636,9 +650,13 @@ class ScanExecutionEngine:
         if not problems:
             return
         if getattr(config, "fail_on_unknown_keys", False):
-            raise ValueError(
+            raise ASHConfigValidationError(
                 "Suppression scope validation failed: " + " ".join(problems)
             )
+        # Logged here, once: the orchestrator's warning pass over
+        # _resolution_warnings runs BEFORE the engine is built, and its later
+        # read records validation checkpoints without logging, so these lines
+        # have no other logger. Appended as well, for that checkpoint record.
         for problem in problems:
             ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {problem}", extra=NO_MARKUP)
         config._resolution_warnings.extend(problems)
