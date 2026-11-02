@@ -2064,11 +2064,13 @@ def test_a_failure_tail_is_bounded_by_characters(tmp_path):
 def test_an_ash_on_the_system_path_is_refused(tmp_path):
     check = _api("pipelines", "system_ash_problem")
     assert check(str(tmp_path)) is None
-    ash = tmp_path / "ash"
+    # Windows finds a program by its extension (PATHEXT), so a file named ash is no
+    # program there, and shutil.which names the one it finds in PATHEXT's case.
+    ash = tmp_path / ("ash.exe" if sys.platform == "win32" else "ash")
     ash.write_text("#!/bin/sh\n", encoding="utf-8")
     ash.chmod(0o755)
     problem = check(f"/nonexistent{os.pathsep}{tmp_path}")
-    assert problem and str(ash) in problem
+    assert problem and os.path.normcase(str(ash)) in os.path.normcase(problem)
 
 
 class _Config:
