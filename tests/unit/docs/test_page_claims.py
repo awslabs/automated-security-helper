@@ -12661,36 +12661,36 @@ def test_the_ci_variables_do_not_choose_the_image_stage(
 _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
     (
         "how-to/install.md",
-        "ASH installs bandit, checkov, and semgrep with uv.",
+        "ASH installs bandit, checkov, semgrep, cfn-lint, and zizmor with uv.",
     ),
     (
         "how-to/install.md",
         (
-            "Either way, ASH installs bandit, checkov, and semgrep with "
-            "the environment's own `uv`."
+            "Either way, ASH installs bandit, checkov, semgrep, cfn-lint, and "
+            "zizmor with the environment's own `uv`."
         ),
     ),
     (
         "getting-started/index.md",
         (
             "Without them, an online scan with the sandbox off installs bandit, "
-            "checkov, and semgrep itself, with the `uv` installed with "
-            "ASH."
+            "checkov, semgrep, cfn-lint, and zizmor itself, with the `uv` installed "
+            "with ASH."
         ),
     ),
     (
         "docs/advanced-usage.md",
         (
-            "| bandit, checkov, semgrep | same name | ASH installs them "
-            "with `uv tool` during a scan, or `ash dependencies install` does it ahead "
-            "of time |"
+            "| bandit, checkov, semgrep, cfn-lint, zizmor | same name | ASH installs "
+            "them with `uv tool` during a scan, or `ash dependencies install` does it "
+            "ahead of time |"
         ),
     ),
     (
         "how-to/ci/github-actions.md",
         (
-            "bandit, checkov, and semgrep need no input: ASH installs "
-            "them from PyPI with `uv tool install` during the scan."
+            "bandit, checkov, semgrep, cfn-lint, and zizmor need no input: ASH "
+            "installs them from PyPI with `uv tool install` during the scan."
         ),
     ),
 ]
@@ -12699,19 +12699,19 @@ _UV_SCANNER_SENTENCES: List[Tuple[str, str]] = [
 _UV_TOOL_SENTENCES: List[Tuple[str, str]] = [
     (
         "how-to/install.md",
-        "`uv tool uninstall bandit checkov semgrep nbconvert`.",
+        "`uv tool uninstall bandit checkov semgrep cfn-lint zizmor nbconvert`.",
     ),
     (
         "docs/advanced-usage.md",
         (
-            "installs bandit, checkov, semgrep, and nbconvert with "
+            "installs bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert with "
             "`uv tool install`, within each scanner's accepted version range."
         ),
     ),
     (
         "docs/advanced-usage.md",
         (
-            "When bandit, checkov, semgrep, or nbconvert is not "
+            "When bandit, checkov, semgrep, cfn-lint, zizmor, or nbconvert is not "
             "available, ASH installs it with `uv tool install` during the scan, and the "
             "scan takes longer."
         ),
@@ -12720,14 +12720,14 @@ _UV_TOOL_SENTENCES: List[Tuple[str, str]] = [
         "docs/advanced-usage.md",
         (
             "The `uv tool install`, `uv tool run`, and `uv tool list` commands that ASH "
-            "runs for bandit, checkov, semgrep, and nbconvert get no "
+            "runs for bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert get no "
             "such flag."
         ),
     ),
     (
         "concepts/scanning-untrusted-code.md",
         (
-            "A missing Python tool (bandit, checkov, semgrep, and "
+            "A missing Python tool (bandit, checkov, semgrep, cfn-lint, zizmor, and "
             "nbconvert for the notebook converter) is installed at scan time with "
             "`uv tool install`"
         ),

@@ -91,6 +91,27 @@ ash --mode nix
 - Linux and macOS; on Windows, run it in WSL2
 - See [Nix mode](../how-to/install.md#nix-mode)
 
+## How ASH gets each tool
+
+In local mode, ASH runs the scanner tools installed on your machine. This table says
+where each one comes from:
+
+| Scanner | Tool | How you get it |
+|---|---|---|
+| actionlint | `actionlint` | `ash dependencies install` downloads a pinned release |
+| bandit, checkov, semgrep, cfn-lint, zizmor | same name | ASH installs them with `uv tool` during a scan, or `ash dependencies install` does it ahead of time |
+| cdk-nag | Python packages and Node.js | the `cdk` extra (see [Install ASH](../how-to/install.md#extras)), plus Node.js |
+| cfn-guard | `cfn-guard` and the Guard Rules Registry rules | `ash dependencies install` downloads both |
+| cfn-nag | `cfn_nag_scan` | `ash dependencies install` runs `gem install cfn-nag`, which needs Ruby and a C compiler |
+| detect-secrets | Python library | part of ASH |
+| gitleaks, grype, opengrep, syft, trivy | same name | `ash dependencies install` downloads a pinned release |
+| npm-audit | `npm` | install Node.js; a `yarn.lock` or `pnpm-lock.yaml` also needs yarn or pnpm |
+
+The `jupyter` converter, which converts notebooks for the scanners, uses `nbconvert`,
+installed with `uv tool` like bandit. The opt-in community scanners (ferret-scan,
+snyk-code, and trivy-repo) are covered in
+[Community plugins](plugins/community/index.md).
+
 ## Where ASH looks for a tool
 
 ASH looks up each program it starts, scanners and `uv` included, in this order:
@@ -108,11 +129,84 @@ Only an executable file counts. In each of these directories, a file of the tool
 without the execute bit, or a directory of that name, is skipped and the search goes on;
 on Windows, the name's suffix decides instead. ASH remembers a path it finds, for the
 current `PATH` and `ASH_BIN_PATH`, and looks again when either changes, or when that
-file has been removed or has lost its execute bit.
+file has been removed or has lost its execute bit. A tool it does not find is looked for
+again on every lookup, so one installed after a lookup missed it is found by the next.
+
+For a tool ASH runs with `uv tool run`, such as bandit, the file found first, `uv` or
+the tool's own program, stays the one used: when it is removed, ASH logs an error naming
+it and counts the tool as missing, and looks for another copy only when `PATH` or
+`ASH_BIN_PATH` changes.
+
+For `uv`, ASH first takes the copy installed with it. ASH depends on the `uv` package,
+so its environment holds a `uv` beside the Python interpreter, in the interpreter's
+scripts directory, or where `pip install --prefix`, `pip install --user`, or
+`pip install --target` put the package. Only when there is none does ASH look for
+`uv` in the order above.
 
 During a scan, a copy found inside the scanned directory is skipped, and the lookup
 goes on to the next one: see
 [Tools inside the scanned directory](#tools-inside-the-scanned-directory).
+
+## Install tools with `ash dependencies install`
+
+<!-- doctest: illustrative reason="downloads scanner tools from GitHub releases and PyPI" -->
+```bash
+ash dependencies install
+```
+
+For each scanner, converter, and reporter that has an install step, it:
+
+- downloads the pinned release of actionlint, cfn-guard (with the rules it evaluates),
+  gitleaks, grype, opengrep, syft, and trivy, and checks each program's download against
+  the SHA256 that ASH pins.
+- installs bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert with
+  `uv tool install`, within each scanner's accepted version range. These come from the
+  package index uv is configured with, PyPI by default, and ASH checks no digest for
+  them. See [uv settings](#uv-settings) for the uv configuration they read.
+- runs `gem install cfn-nag`, which needs Ruby and a C compiler (on Windows, a Ruby
+  DevKit). The gem is the version ASH pins, from the gem sources Ruby is configured
+  with, and ASH checks no digest for it either.
+- for cdk-nag, installs the `cdk` extra's packages (aws-cdk-lib, cdk-nag, and
+  constructs) into ASH's own environment.
+
+See [`ash dependencies install`](../reference/cli.md#dependencies-install) for every
+option, and [Scanners reference](../reference/scanners.md) for the per-scanner options
+that change a tool's version (`tool_version`) or how long an install may take
+(`install_timeout`).
+
+## Installs during a scan
+
+When bandit, checkov, semgrep, cfn-lint, zizmor, or nbconvert is not available, ASH
+installs it with `uv tool install` during the scan, and the scan takes longer. ASH
+runs the uv installed with it, or else a `uv` it finds as described in
+[Where ASH looks for a tool](#where-ash-looks-for-a-tool), so `uv` does not have to be
+on your `PATH`. Without either, these scanners show as MISSING. Online, ASH runs these
+tools through uv with their version range, so uv can contact PyPI during a scan even
+when the tool is already installed.
+
+ASH does not install scanners during a scan when:
+
+- the scan is offline (`--offline` or `ASH_OFFLINE`). uv then runs offline, so a tool
+  that is installed or in uv's cache still runs, and any other shows as MISSING.
+- the scan runs in a sandbox, which is `--sandbox` with any mode but `off`. Run
+  `ash dependencies install` first.
+
+## uv settings
+
+Every uv subcommand but `uv tool` reads a `uv.toml`, or the `[tool.uv]` table of a
+`pyproject.toml`, from the working directory and its parents, and ASH's working
+directory is usually the repository you scan. So ASH runs `uv pip install` with uv's
+`--no-config` option, and an install command that a plugin declares gets
+`UV_NO_CONFIG=1` when it runs a uv subcommand other than `uv tool`. Those commands then
+read no `uv.toml`, neither the repository's nor your own nor the system one.
+`uv cache dir`, which names the cache the `uv tool` commands use, runs from the
+filesystem root instead, where only an administrator can put a `uv.toml`.
+
+The `uv tool install`, `uv tool run`, and `uv tool list` commands that ASH runs for
+bandit, checkov, semgrep, cfn-lint, zizmor, and nbconvert get no such flag. uv does
+not read project files for `uv tool` commands, so the scanned repository cannot
+configure them, and they read your user `uv.toml` and the system one, where an operator
+usually points uv at an index mirror.
 
 ## When a scanner shows MISSING
 
