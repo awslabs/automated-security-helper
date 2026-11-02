@@ -2758,6 +2758,10 @@ class TestSandboxExecProfile:
         assert allows[1][0] > deny_at
         assert _subpaths(allows[1][1]) == {_as_argv(venv_bin)}
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="no backend runs on Windows: the Landlock plan resolves a POSIX tool path",
+    )
     def test_a_path_entry_inside_the_scanned_tree_is_no_exec_grant(
         self, layout, monkeypatch, tmp_path
     ):
