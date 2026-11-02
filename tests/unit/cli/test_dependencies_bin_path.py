@@ -257,6 +257,8 @@ def test_a_blank_ash_bin_path_does_not_point_into_the_working_directory(
         cwd=project,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     expected = repr(str(home / ".ash" / "bin"))
@@ -275,6 +277,8 @@ def _install_in_a_new_process(tmp_path, blank, *args):
         cwd=project,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     return home, project, result, _flat(result.stdout + result.stderr)

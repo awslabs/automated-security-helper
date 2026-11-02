@@ -80,6 +80,8 @@ def _ash(root: Path, *args: str) -> subprocess.CompletedProcess:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
         cwd=root,
         env=env,

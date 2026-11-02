@@ -994,7 +994,11 @@ def test_a_uv_launch_that_raised_during_a_failed_wait_keeps_the_stderr_read(
         # the launch's own spawn.
         with subprocess_utils.watched_launch():
             return subprocess_utils.spawn_run(
-                list(_DIAGNOSES_THEN_SLEEPS), capture_output=True, text=True
+                list(_DIAGNOSES_THEN_SLEEPS),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
 
     launches = _Launches("none")

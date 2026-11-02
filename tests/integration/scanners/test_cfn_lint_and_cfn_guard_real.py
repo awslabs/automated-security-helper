@@ -180,6 +180,8 @@ def _scan(
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=900,
         env={**os.environ, **(env or {})},
     )
@@ -487,6 +489,8 @@ def _scan_with_tree_config(
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=900,
         env={**os.environ, "ASH_OFFLINE": "true"},
         cwd=cwd,
