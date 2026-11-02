@@ -1187,6 +1187,13 @@ def run_cdk_nag_against_cfn_template(
                         properties=PropertyBag(
                             cdk_nag_finding=line.as_dict(),
                             cfn_resource=cfn_resource_dict,
+                            # The universal resource-identity contract for
+                            # resource-scoped suppressions (utils/
+                            # package_identity.py): the construct path and the
+                            # CloudFormation type, as flat keys any reader can
+                            # take without knowing cdk-nag's own bag.
+                            ash_resource_id=line.resource_id,
+                            ash_resource_type=cfn_resource.Type,
                             tags=[
                                 "aws",
                                 "cdk",

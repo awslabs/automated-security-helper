@@ -40,6 +40,7 @@ from automated_security_helper.utils.suppression_matcher import (
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.package_identity import (
     extract_package_identity,
+    extract_resource_identity,
     extract_root_advisories,
 )
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
@@ -1339,6 +1340,9 @@ def apply_suppressions_to_sarif(
                         package_name, package_version, package_path = (
                             extract_package_identity(result.properties)
                         )
+                        resource_id, resource_type = extract_resource_identity(
+                            result.properties
+                        )
                         # package_path is compared in the form a suppression
                         # writes it: relative to the scan root. Converters emit
                         # it that way, but SARIF from an older ASH or another
@@ -1360,6 +1364,8 @@ def apply_suppressions_to_sarif(
                             package_name=package_name,
                             package_version=package_version,
                             package_path=package_path,
+                            resource_id=resource_id,
+                            resource_type=resource_type,
                             id=get_finding_id(result.ruleId, uri, line_start, line_end),
                             title=(
                                 result.message.root.text
