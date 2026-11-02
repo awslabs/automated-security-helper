@@ -1145,10 +1145,13 @@ def _turns_an_off_host_reporter_off(
     spelling the plugin lookup reads. It asks for nothing beyond the profile, so
     it is not refused under a ``denied_paths`` entry that covers it, as it is not
     in a delivered file (``client_config_policy._writes_a_tightening``). It does
-    not take effect either: the client's copy of the profile is resolved against
-    the registered profile, and ``reporter_trust`` takes ``enabled`` from that,
-    with a warning naming the client's value. Two
-    shapes: an ``add`` or ``replace`` of ``/reporters/<name>/enabled`` with
+    not take effect either: the caller drops the op with a warning that names it
+    (``_without_turn_offs``, and ``workspace._gate_client_overrides`` for a
+    workspace scan's ``config_overrides``), so the client's copy of the profile
+    holds no ``enabled: false`` and the reporter runs as the registered profile
+    has it. A delivered file that sets one is the other route: ``reporter_trust``
+    takes ``enabled`` from the trusted base, with a warning that names the file.
+    Two shapes: an ``add`` or ``replace`` of ``/reporters/<name>/enabled`` with
     ``false``, and an ``add`` of ``/reporters/<name>`` whose value holds only
     ``enabled: false`` where ``config`` has no section for that reporter, which
     is how ``json_patch_between`` writes a section the base lacks. Anything else

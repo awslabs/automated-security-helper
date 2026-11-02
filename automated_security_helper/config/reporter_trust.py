@@ -59,8 +59,10 @@ the default ``denied_paths`` also refuse a client's file that turns a built-in A
 and every other setting of its section. A client's ``enabled: false`` is not
 refused there, in a delivered file (``client_config_policy._writes_a_tightening``)
 or in its runtime overrides (``runtime_patch._turns_an_off_host_reporter_off``),
-but it takes no effect: the confinement above replaces it. The reporters' other
-options (formatting, model parameters) still apply from the tree.
+but it takes no effect: the confinement above replaces a file's, with a warning
+that names the file, and a runtime override is dropped before any config is
+written, with a warning that names it (``runtime_patch._without_turn_offs``). The
+reporters' other options (formatting, model parameters) still apply from the tree.
 
 ``ash report`` and ``ash merge`` read stored results, which do not record which tree
 was scanned, so for them every config file they are given is held to this rule
