@@ -158,3 +158,27 @@ class TestExpiresAlias:
             }
         )
         assert not entry.has_unknown_keys
+
+
+class TestExpiresInTheSchema:
+    """The published schema admits what the loader admits.
+
+    The entry models pin ``additionalProperties: false``, so without an
+    ``expires`` property a schema-validating editor, a CI check against the
+    published AshConfig.json, or an MCP client reading the served suppression
+    schema flags the documented alias as invalid while ASH loads it
+    (``_entry_schema_admits_expires`` in models/core.py).
+    """
+
+    @pytest.mark.parametrize("model", [AshSuppression, IgnorePathWithReason])
+    def test_the_schema_publishes_the_alias(self, model):
+        schema = model.model_json_schema()
+        properties = schema["properties"]
+        assert "expires" in properties
+        # The alias mirrors the field's value shape, so a config valid under
+        # one spelling is valid under the other.
+        assert properties["expires"]["anyOf"] == properties["expiration"]["anyOf"]
+        assert "alias of 'expiration'" in properties["expires"]["description"].lower()
+        # The entry schema stays closed: the alias is a declared property,
+        # not a loosened schema.
+        assert schema["additionalProperties"] is False

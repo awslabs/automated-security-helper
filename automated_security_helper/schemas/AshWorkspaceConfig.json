@@ -23,6 +23,19 @@
           "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read.",
           "title": "Expiration"
         },
+        "expires": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Alias of 'expiration', accepted when a config is read; the entry is written and stored as 'expiration'.",
+          "title": "Expires"
+        },
         "line_end": {
           "anyOf": [
             {
@@ -179,6 +192,19 @@
           "default": null,
           "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expires' is accepted as an alias when a config is read.",
           "title": "Expiration"
+        },
+        "expires": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Alias of 'expiration', accepted when a config is read; the entry is written and stored as 'expiration'.",
+          "title": "Expires"
         },
         "path": {
           "description": "Path or pattern to exclude",

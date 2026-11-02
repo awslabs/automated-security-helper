@@ -199,6 +199,19 @@
       "default": null,
       "description": "(Optional) Sugar for scope.resource_id: the entry-level spelling users reach for on their own. Folded into scope at validation; setting both to different values is an error.",
       "title": "Resource Id"
+    },
+    "expires": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "(Optional) Alias of 'expiration', accepted when a config is read; the entry is written and stored as 'expiration'.",
+      "title": "Expires"
     }
   },
   "required": [

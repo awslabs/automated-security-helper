@@ -176,6 +176,31 @@ def value_at(container: Any, keys: Tuple[str, ...]) -> Any:
     return value
 
 
+def _entry_schema_admits_expires(schema: Dict[str, Any]) -> None:
+    """The entry models' published schema: closed, and with the ``expires`` alias.
+
+    ``additionalProperties: false`` says what a config file may contain (the
+    results schema reopens it for the stored-config tolerance,
+    ``schemas/generate_schemas.py``). The loader also accepts ``expires`` as an
+    alias of ``expiration`` (``AliasChoices`` on the field), which pydantic
+    publishes nowhere in the schema, so a schema-validating surface (an editor
+    bound to the published schema, a CI check, an MCP client reading the served
+    copy) flagged the documented alias as an unknown property while ASH loaded
+    it. The alias is published here as its own property, mirroring
+    ``expiration``'s shape, with a description that names it an alias.
+    """
+    schema["additionalProperties"] = False
+    properties = schema.get("properties")
+    if isinstance(properties, dict) and "expiration" in properties:
+        expires = dict(properties["expiration"])
+        expires["title"] = "Expires"
+        expires["description"] = (
+            "(Optional) Alias of 'expiration', accepted when a config is read; "
+            "the entry is written and stored as 'expiration'."
+        )
+        properties["expires"] = expires
+
+
 # ``expiration`` means the same here and on ``AshSuppression``, which inherits
 # it: a YYYY-MM-DD date compared with ``current_date()``. The entry stops applying
 # at the start of that day, so on the expiration date itself it no longer applies.
@@ -188,11 +213,12 @@ class IgnorePathWithReason(RedactedSection):
     # be a secret, and an error's text goes wherever the error is shown.
     # Unknown keys are refused by _refuse_unknown_keys below. Extras are allowed
     # only so that a results file holding one (utils/unknown_keys.py) keeps it,
-    # and the schema says what a config file may contain.
+    # and the schema says what a config file may contain -- including the
+    # ``expires`` alias (_entry_schema_admits_expires).
     model_config = ConfigDict(
         extra="allow",
         hide_input_in_errors=True,
-        json_schema_extra={"additionalProperties": False},
+        json_schema_extra=_entry_schema_admits_expires,
     )
 
     # How errors and warnings name an entry of this kind.
