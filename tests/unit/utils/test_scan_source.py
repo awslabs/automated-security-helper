@@ -325,11 +325,20 @@ def test_the_image_without_the_launcher_ignores_a_label(tmp_path):
     assert _record(tmp_path, _repository_at(tmp_path), environ) == "."
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Path('/src') is drive-relative on Windows and resolves under the "
+    "current drive, which is not the container mount",
+)
 @pytest.mark.unit
 def test_a_scan_of_src_inside_the_image_counts_as_the_launchers(tmp_path):
     """The legacy wrapper mounts the source at /src and passes no label, so the
     scan records nothing, even where git there reports a repository root above
-    /src (here "/", which would label it "src")."""
+    /src (here "/", which would label it "src"). The scene is the inside of the
+    ASH image, a Linux container, so the mount is the POSIX /src: on Windows
+    ``Path("/src")`` resolves under the current drive, a directory that really
+    is not the mount, and the scan there rightly does not count as the
+    launcher's."""
     assert _record(Path("/src"), Path("/"), IMAGE_ONLY) is None
 
 
