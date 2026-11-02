@@ -631,13 +631,21 @@ def _scope_id_part(suppression: Dict[str, Any]) -> Optional[str]:
     resource_id = suppression.get("resource_id") or scope.get("resource_id")
     resource_type = scope.get("resource_type")
     engines = scope.get("engines")
-    engine_names = sorted(engines) if isinstance(engines, dict) and engines else []
+    # str() on every piece: the linter hands this RAW YAML, where resource_id
+    # can be an unquoted number and engine keys can be of mixed types; without
+    # the coercion "@".join raises and sorted() can refuse to compare, a
+    # traceback where the lint should report a finding.
+    engine_names = (
+        sorted(str(name) for name in engines)
+        if isinstance(engines, dict) and engines
+        else []
+    )
     if not (resource_id or resource_type or engine_names):
         return None
     return "scope=" + "@".join(
         [
-            resource_id or "*",
-            resource_type or "*",
+            str(resource_id) if resource_id else "*",
+            str(resource_type) if resource_type else "*",
             ",".join(engine_names) or "*",
         ]
     )
@@ -663,17 +671,21 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
         parts.append(
             "@".join(suppression.get(f) or "*" for f in PACKAGE_SUPPRESSION_FIELDS)
         )
-    # A symbol is a sixth part, and its presence always brings the fifth, so an
-    # id's part count says which fields it carries and a symbol can never be
-    # read as a package.
+    # A symbol is a sixth part, and its presence always brings the fifth, so a
+    # symbol can never be read as a package. With the scope part below, a part
+    # COUNT alone no longer says which fields an id carries (five parts is
+    # package-scoped OR scope-only; six is package+symbol OR package+scope): a
+    # reader telling them apart must check the "scope=" prefix on the LAST
+    # part, never split by position. No consumer in this repository parses an
+    # id by position; the linter and the reports compare ids whole.
     if symbol:
         parts.append(symbol)
     # A scoped entry gets a last part so two entries that differ only by scope
     # (the demo shape: one rule, one path, 26 resource_ids) do not share an id,
     # which collapsed them in the unused-suppressions report and the linter.
     # The part starts "scope=", which no symbol can ('=' is not a dotted name
-    # character) and no package part position can reach, so part counts stay
-    # readable. Entries without a scope keep the id they always had.
+    # character) and no package part can hold at that position. Entries
+    # without a scope keep the id they always had.
     scope_part = _scope_id_part(suppression)
     if scope_part is not None:
         parts.append(scope_part)

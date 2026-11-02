@@ -86,3 +86,15 @@ class TestScopedIds:
             {"rule_id": "R-1", "path": "a.py", "reason": "r"}
         )
         assert entry.id == "a.py|R-1|*|*"
+
+    def test_non_string_raw_values_are_coerced_not_a_traceback(self):
+        """The linter hands this raw YAML: an unquoted ``resource_id: 123`` or
+        mixed-type engine keys must produce an id (and so a lint finding),
+        never a TypeError out of ``"@".join`` or ``sorted()``."""
+        raw = {
+            "rule_id": "R",
+            "path": "a",
+            "reason": "r",
+            "scope": {"resource_id": 123, "engines": {1: {}, "cdk-nag": {}}},
+        }
+        assert suppression_id(raw).endswith("|scope=123@*@1,cdk-nag")
