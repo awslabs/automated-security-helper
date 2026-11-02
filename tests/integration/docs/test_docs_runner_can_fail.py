@@ -18,6 +18,13 @@ It also pins the session semantics the docs rely on (files, directory and variab
 carry between blocks; env= applies to one block; fixture= and fresh start over) and
 the isolation the job relies on (private HOME, the venv's ash, downloads refused at
 once).
+
+Skipped on Windows, which the docs runner does not support: it starts a shell block with
+bash, carries the session through env -0 and pwd, ends a timed-out block through its
+process group and builds its PATH from POSIX directories (see docs_runner.py). The docs
+job has no Windows runner, and these tests were written for the Linux integration job.
+The integration tier marker also selects them on the windows-latest leg, where they
+would measure that host and not the docs runner.
 """
 
 from __future__ import annotations
@@ -33,7 +40,13 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="POSIX shell and process groups; the docs job has no Windows runner",
+    ),
+]
 
 HERE = Path(__file__).resolve().parent
 

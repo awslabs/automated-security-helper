@@ -37,6 +37,14 @@ would close the first, but it maps the user to root inside the namespace, which
 changes what the commands under test do, starts with loopback down, and needs the
 AppArmor user-namespace restriction lifted on Ubuntu 24.04 runners. Run the examples
 where a doc's commands are trusted, as CI does.
+
+Where it runs: POSIX hosts, and the docs job runs it on Linux. A shell block is run by
+``bash`` (``sh`` for an ``sh`` block) and hands its session to the next block through
+``env -0`` and ``pwd``. A block that runs past its timeout is ended with ``os.killpg``,
+which Windows lacks, and a session's PATH ends in the POSIX directories of SYSTEM_PATH.
+The docs job has no Windows runner (scripts/docs_checks.py, WINDOWS_SHELLS), so the
+tests of this runner skip on Windows instead of running against a session built for
+POSIX.
 """
 
 from __future__ import annotations
