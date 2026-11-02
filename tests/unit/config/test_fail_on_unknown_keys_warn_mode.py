@@ -194,9 +194,7 @@ class TestOverrideAddedEntries:
 
     def test_a_file_entrys_warning_is_not_duplicated_by_the_rebuild(self):
         config = build_config(
-            _config_data(
-                {"path": "a.py", "reason": "r", "expiraton": "2099-01-01"}
-            ),
+            _config_data({"path": "a.py", "reason": "r", "expiraton": "2099-01-01"}),
             config_overrides=["fail_on_findings=false"],
         )
         warnings = [w for w in config._resolution_warnings if "expiraton" in w]

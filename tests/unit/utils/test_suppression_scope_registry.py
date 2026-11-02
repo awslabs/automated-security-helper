@@ -219,9 +219,7 @@ class TestLoadTimeProblems:
 
     def test_a_registered_scanner_without_hooks_is_named(self, fake_engine):
         entry = _entry({"bandit": {"x": 1}})
-        problems = registry.suppression_scope_problems(
-            [entry], {fake_engine, "bandit"}
-        )
+        problems = registry.suppression_scope_problems([entry], {fake_engine, "bandit"})
         assert len(problems) == 1
         assert "does not support engine-scoped suppressions" in problems[0]
 

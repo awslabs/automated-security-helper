@@ -969,9 +969,7 @@ class AshSuppression(IgnorePathWithReason):
                 notes.append(RESOURCE_ID_CONFLICT_NOTE)
                 self._scope_conflict = True
                 return self
-            raise ValueError(
-                "resource_id and scope.resource_id disagree; keep one"
-            )
+            raise ValueError("resource_id and scope.resource_id disagree; keep one")
         return self
 
     @field_validator("line_end")
